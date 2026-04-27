@@ -1,6 +1,6 @@
 # SchoolSync — User Guide
 
-**Version 2.5** · Meridian International School, Nairobi
+**Version 2.6** · Meridian International School, Nairobi
 
 ---
 
@@ -434,10 +434,40 @@ Student-level term reports are generated from **Academics → Report Cards**. Ea
 > **Admin / Superadmin only**
 
 ### School Profile
-Update school name, logo, address, and contact details.
+Update school name, short name, code, type, address, contact details, timezone, currency, and active curriculum tracks.
 
 ### Academic Year & Terms
 Configure academic year dates, term boundaries, and set the current active term.
+
+### Branding *(Super Admin only)*
+
+Personalise the look and feel of SchoolSync for your school.
+
+**App Identity**
+- **Logo** — upload PNG/SVG/JPG (max 2 MB). Displayed in the sidebar header. Transparent background recommended.
+- **Favicon** — upload a square image (max 512 KB). Shown in browser tabs and bookmarks.
+- **App Name** — rename "SchoolSync" to your school's system name. Appears in the sidebar and browser title bar.
+
+**Theme Colors**
+- Choose from 6 quick presets (Ocean Blue, Emerald, Violet, Rose, Amber, Cyan) or set custom colors.
+- **Primary Accent** — buttons, links, badges, active sidebar item.
+- **Sidebar Background** — the left navigation panel color.
+- A live mini-preview updates as you adjust colors.
+- Click **Save Branding** to apply. **Reset to Default** restores SchoolSync defaults.
+
+**Login Page Animation**
+- Choose a canvas background effect for the login screen: **None · Particles · Aurora · Water · Clouds · Fire**.
+- Set an **Effect Color** to tint the animation.
+- Click **Save Login Page** to persist.
+
+**Login Page Content**
+- Edit the welcome title and subtitle shown on the sign-in form.
+- Edit the tagline and footer text shown on the left panel.
+- Edit the titles and descriptions of the 4 feature highlight cards.
+
+**Social Media Links**
+- Add URLs for Facebook, X/Twitter, Instagram, LinkedIn, WhatsApp, and YouTube.
+- Links appear as circular icon buttons on the login page left panel. Leave blank to hide.
 
 ### Role Permissions
 Fine-grained control over what each role can see and do. Sub-module permissions available (e.g. allow Teachers to view Finance but not create invoices).

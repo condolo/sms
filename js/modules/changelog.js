@@ -8,6 +8,51 @@ const Changelog = (() => {
   /* ── Version data ─────────────────────────────────────── */
   const VERSIONS = [
     {
+      version: '2.6.0',
+      date: '2026-04-27',
+      tag: 'minor',
+      title: 'Dynamic Branding · Login Personalization · Immersive Layout',
+      sections: [
+        {
+          heading: 'New — Dynamic Branding',
+          type: 'new',
+          items: [
+            'Upload school logo (PNG/SVG/JPG, max 2 MB) — displayed in sidebar header, replaces the default graduation-cap icon',
+            'Upload favicon (max 512 KB) — updates the browser tab icon live on save',
+            'App Name — rename "SchoolSync" everywhere in the UI and browser title',
+            '6 quick preset themes: Ocean Blue, Emerald, Violet, Rose, Amber, Cyan',
+            'Custom primary accent + sidebar background color pickers with live mini-preview',
+            '<code>App.applyBranding()</code> — injects derived CSS variable overrides on every login; auto-derives <code>--primary-dark</code>, <code>--primary-light</code>, <code>--primary-glass</code>',
+            'Branding saved to <code>schools[0]</code>: <code>logo · favicon · appName · theme{primary, sidebarBg}</code>',
+          ]
+        },
+        {
+          heading: 'New — Login Page Personalization',
+          type: 'new',
+          items: [
+            '5 canvas animation effects for the login background: <strong>Particles · Aurora · Water · Clouds · Fire</strong>',
+            'Effect color picker — color applied to animation (waves, dots, aurora bands)',
+            'Editable login copy: welcome title, welcome subtitle, tagline, footer text, all 4 feature card titles &amp; descriptions',
+            'Social media links bar — Facebook, X/Twitter, Instagram, LinkedIn, WhatsApp, YouTube (blank = hidden)',
+            '<code>LoginFX</code> IIFE — canvas animation engine; <code>start(effect, color)</code> / <code>stop()</code> API; auto-resizes on window resize',
+            '<code>_applyLoginPage(school)</code> in <code>app.js</code> — called from <code>_showLogin()</code>; updates all DOM elements and starts canvas effect',
+            'Saved to <code>schools[0].loginPage</code>: <code>{ effect, effectColor, welcomeTitle, welcomeSub, tagline, footerText, features[], social{} }</code>',
+          ]
+        },
+        {
+          heading: 'Changed — Immersive Login Layout',
+          type: 'changed',
+          items: [
+            'Canvas animation now spans the <strong>full login screen</strong> — behind both left branding panel and right form card',
+            'Left panel is transparent — branding content overlays the canvas directly',
+            'Sign-in form is now a <strong>floating card</strong> — white card with 22px radius, deep drop shadow, and gentle 7-second float animation',
+            'Float animation deepens the card shadow as it rises (mimics real light physics)',
+            'Mobile (≤1024px): float animation disabled; card fills screen as normal',
+          ]
+        },
+      ]
+    },
+    {
       version: '2.5.0',
       date: '2026-04-27',
       tag: 'minor',

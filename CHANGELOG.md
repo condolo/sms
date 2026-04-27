@@ -6,6 +6,43 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.6.0] — 2026-04-27  Dynamic Branding · Login Page Personalization · Immersive Login Layout
+
+### New — Dynamic Branding (Settings → Branding, Super Admin only)
+- **Logo upload** — upload PNG/SVG/JPG (max 2 MB); logo replaces the graduation-cap icon in the sidebar header; stored as base64 in `localStorage`
+- **Favicon upload** — upload square image (max 512 KB); updates the browser tab icon live; stored as base64
+- **App Name** — rename "SchoolSync" everywhere: sidebar header, browser title, login page brand
+- **6 Quick Preset Themes** — Ocean Blue, Emerald, Violet, Rose, Amber, Cyan; one click applies primary + sidebar color pair
+- **Custom Color Pickers** — independent hex + native color-picker for Primary accent and Sidebar background; live mini-preview sidebar updates in real time
+- `App.applyBranding()` — called on every login; injects `<style id="ss-theme">` with derived CSS variable overrides (`--primary`, `--primary-dark`, `--primary-darker`, `--primary-light`, `--primary-glass`, `--sidebar-bg`, `--sidebar-active`)
+- Color derivation: `_shadeColor(hex, amt)`, `_mixWithWhite(hex, ratio)`, `_hexToRgb(hex)` helpers in `app.js`
+- Branding stored in `schools[0]`: `{ logo, favicon, appName, theme: { primary, sidebarBg } }`
+- `BRANDING_UPDATED` and `BRANDING_RESET` audit entries
+
+### New — Login Page Personalization (Settings → Branding, Super Admin only)
+- **5 Canvas Animation Effects** — `Particles`, `Aurora`, `Water`, `Clouds`, `Fire`; select via visual picker; effect + color saved and applied on login screen show
+- **Effect Color Picker** — custom color applied to particles / aurora waves / water layers
+- **Editable Login Content**:
+  - Welcome title and subtitle (right panel form header)
+  - Tagline under the logo (left panel)
+  - Footer copyright text (left panel)
+  - All 4 feature highlight cards — title and description editable
+- **Social Media Links** — Facebook, X/Twitter, Instagram, LinkedIn, WhatsApp, YouTube; blank = hidden; rendered as circular icon buttons on the left panel
+- `LoginFX` IIFE (`app.js`) — canvas animation engine with `start(effect, color)` / `stop()` API; 5 independent animation loops using `requestAnimationFrame`; auto-resizes canvas on window resize
+- `_applyLoginPage(school)` — called from `_showLogin()`; reads `schools[0].loginPage`; updates all DOM elements and starts `LoginFX`
+- `LoginFX.stop()` called from `_showApp()` to clean up animation on login
+- Stored in `schools[0].loginPage`: `{ effect, effectColor, welcomeTitle, welcomeSub, tagline, footerText, features[], social{} }`
+- `LOGIN_PAGE_UPDATED` and `LOGIN_PAGE_RESET` audit entries
+
+### Changed — Immersive Login Layout (Option B)
+- **Canvas is now full-screen** — animation covers the entire login screen (both left and right halves), not just the left panel
+- **Left panel is a transparent overlay** — branding content floats above the canvas; old decorative pseudo-element orbs removed
+- **Sign-in form is a floating card** — white `rgba(255,255,255,0.97)` card with 22px border-radius, deep shadow, and `loginCardFloat` keyframe animation (12px vertical travel, shadow deepens as card rises to simulate real light physics)
+- **Dot-grid texture** (`login-grid`) moved to full-screen direct child of `login-screen`
+- Mobile (≤1024px): float animation disabled, card fills screen normally
+
+---
+
 ## [2.5.0] — 2026-04-27  Data Integrity II · Events Bug Fix · Delete Guards · Permission Guards
 
 ### Fixed — Events Calendar

@@ -1,6 +1,6 @@
 # SchoolSync — Developer Guide
 
-**Version 2.5** · Technical Reference & Architecture
+**Version 2.6** · Technical Reference & Architecture
 
 ---
 
@@ -18,7 +18,11 @@
 10. [Adding a New Module](#10-adding-a-new-module)
 11. [Module Reference](#11-module-reference)
 12. [Behaviour Module Deep Dive](#12-behaviour-module-deep-dive)
-13. [Known Limitations](#13-known-limitations)
+13. [Test Layer](#13-test-layer)
+14. [Deployment (Render)](#14-deployment-render)
+15. [Help Centre Articles](#15-help-centre-articles)
+16. [Branding & Login Page System](#16-branding--login-page-system)
+17. [Known Limitations](#17-known-limitations)
 
 ---
 
@@ -598,7 +602,8 @@ set('library_books', [
 | Module | File | Key Public API |
 |---|---|---|
 | Auth | `auth.js` | `login()`, `logout()`, `isLoggedIn()`, `hasPermission()`, `currentUser` |
-| App | `app.js` | `navigate()`, `renderPage()`, `setBreadcrumb()`, `toggleSidebar()` |
+| App | `app.js` | `navigate()`, `renderPage()`, `setBreadcrumb()`, `toggleSidebar()`, `applyBranding()`, `applyLoginPage()` |
+| LoginFX | `app.js` (IIFE before App) | `start(effect, color)`, `stop()` |
 | Dashboard | `dashboard.js` | `render()` |
 | Students | `students.js` | `render()`, `renderNew()`, `save()`, `deleteStudent()` |
 | Classes | `classes.js` | `render()`, `saveClass()`, `deleteClass()` |
@@ -811,7 +816,96 @@ Then call your suite from `run()`.
 
 ---
 
-## 16. Known Limitations
+## 16. Branding & Login Page System
+
+### Data Shape
+All branding is stored on `schools[0]` in localStorage:
+
+```js
+{
+  logo:    '<base64 data URL>',   // or null
+  favicon: '<base64 data URL>',   // or null
+  appName: 'My School System',    // or null → falls back to 'SchoolSync'
+  theme: {
+    primary:   '#2563EB',
+    sidebarBg: '#0F172A',
+  },
+  loginPage: {
+    effect:       'particles',    // 'none'|'particles'|'aurora'|'water'|'clouds'|'fire'
+    effectColor:  '#2563EB',
+    welcomeTitle: 'Welcome back 👋',
+    welcomeSub:   'Sign in to your portal',
+    tagline:      'A complete school management platform…',
+    footerText:   '© 2025 SchoolSync · Nairobi',
+    features: [
+      { icon: 'fas fa-users', color: 'blue', title: '…', desc: '…' },
+      // × 4
+    ],
+    social: {
+      facebook: 'https://…', twitter: '', instagram: '',
+      linkedin: '', whatsapp: '', youtube: '',
+    },
+  },
+}
+```
+
+### `App.applyBranding()`
+Called from `_showApp()` on every login. Reads `schools[0]` and:
+1. Toggles sidebar logo between `<img>` and `<i class="fas fa-graduation-cap">`.
+2. Updates `#sidebar-app-name` text and `document.title`.
+3. Updates `<link rel="icon">` href for favicon.
+4. Injects `<style id="ss-theme">` into `<head>` with `:root` CSS variable overrides. Derived variables:
+   - `--primary-dark` → `_shadeColor(primary, -25)`
+   - `--primary-darker` → `_shadeColor(primary, -45)`
+   - `--primary-light` → `_mixWithWhite(primary, 0.88)`
+   - `--primary-glass` → `rgba(r,g,b, 0.12)`
+
+### `App.applyLoginPage(school)`
+Called from `_showLogin()` on every logout / initial page load. Reads `schools[0].loginPage` and:
+1. Updates `#login-brand-h1` innerHTML (splits name at last space for two-tone styling).
+2. Updates `#login-tagline`, `#login-welcome-title`, `#login-welcome-sub`, `#login-footer-text`.
+3. Re-renders `#login-features-list` if custom features are saved.
+4. Renders `#login-social-links` bar (filters out empty URLs).
+5. Calls `LoginFX.start(effect, effectColor)`.
+
+### `LoginFX` IIFE
+Defined in `app.js` before the `App` IIFE. Canvas animation engine:
+
+```js
+LoginFX.start('particles', '#2563EB');  // start animation
+LoginFX.stop();                          // stop + clear canvas
+```
+
+**Internals:**
+- `_canvas` / `_ctx` — refs to `#login-canvas` element and its 2D context.
+- `_raf` — `requestAnimationFrame` handle; cancelled by `stop()`.
+- `_resize()` — sets `canvas.width/height` from `offsetWidth/offsetHeight`; bound to `window resize`.
+- Five animation functions — each runs an `rAF` loop:
+  - `_fxParticles()` — 65 floating dots drifting upward
+  - `_fxAurora()` — 5 sine-wave bands with radial gradient fills
+  - `_fxWater()` — 6 layered wave fills using compound sine
+  - `_fxClouds()` — 7 multi-circle cloud shapes drifting right
+  - `_fxFire()` — 90 radial-gradient particles rising from bottom
+
+### Immersive Login Layout
+The login screen HTML structure (v2.6+):
+
+```html
+<div class="login-screen">           <!-- grid: 1fr 1fr, has the gradient bg -->
+  <canvas class="login-canvas">      <!-- position:absolute, fills login-screen -->
+  <div class="login-grid">           <!-- dot-grid texture, full-screen absolute -->
+  <div class="login-left">           <!-- transparent overlay, z-index:2 -->
+  <div class="login-right">          <!-- transparent flex container, z-index:2 -->
+    <div class="login-card">         <!-- white floating card, loginCardFloat anim -->
+      <div class="login-right-inner">
+      <div class="login-right-footer">
+```
+
+`loginCardFloat` keyframe: 12px vertical travel over 7s, shadow deepens at peak (`0 28px 80px rgba(0,0,0,.42)`) to simulate light physics of an object rising above a surface.
+
+---
+
+## 17. Known Limitations
 
 | Limitation | Impact | Workaround |
 |---|---|---|
