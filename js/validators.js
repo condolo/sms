@@ -159,17 +159,24 @@ const Validators = (() => {
         }
         return null;
       },
-      // Class double-booking: same class, same day, same period (only for new slots)
+      // Room conflict: same room booked at same day/period in any class
       () => {
-        const tt = DB.getById('timetable', ttId);
-        if (!tt) return null;
+        if (!slot.room || !slot.room.trim()) return null;
+        const roomKey = slot.room.trim().toLowerCase();
         const isEditSelf = (editDay !== undefined && slot.day === editDay && slot.period === editPeriod);
-        if (isEditSelf) return null;
-        const classClash = (tt.slots || []).find(s =>
-          s.day    === slot.day &&
-          s.period === slot.period
+        const clash = DB.get('timetable').find(t =>
+          t.id !== ttId &&
+          (t.slots || []).some(s =>
+            s.room && s.room.trim().toLowerCase() === roomKey &&
+            s.day    === slot.day &&
+            s.period === slot.period &&
+            !(isEditSelf && t.id === ttId)
+          )
         );
-        // This just means an existing slot will be replaced — that's allowed
+        if (clash) {
+          const clsName = DB.getById('classes', clash.classId)?.name || 'another class';
+          return `Room "${slot.room}" is already booked by ${clsName} at this time.`;
+        }
         return null;
       },
     );
@@ -261,6 +268,59 @@ const Validators = (() => {
     return null;
   }
 
+  /**
+   * Returns an error string if deleting this subject is blocked, or null.
+   * Blocks if the subject is referenced in timetable slots, class assignments,
+   * or grade records.
+   */
+  function canDeleteSubject(subjectId) {
+    // Active timetable slots
+    const inTimetable = DB.get('timetable').some(t =>
+      (t.slots || []).some(s => s.subjectId === subjectId)
+    );
+    if (inTimetable) {
+      return 'This subject is assigned in the timetable. Remove it from all timetable slots first.';
+    }
+    // Class–subject assignments
+    const inClassSubjects = DB.query('class_subjects', r => r.subjectId === subjectId);
+    if (inClassSubjects.length) {
+      return `This subject is assigned to ${inClassSubjects.length} class(es). Remove the assignments first.`;
+    }
+    // Grade records
+    const inGrades = DB.query('grades', g => g.subjectId === subjectId);
+    if (inGrades.length) {
+      return `This subject has ${inGrades.length} grade record(s). Grades must be removed before deleting the subject.`;
+    }
+    return null;
+  }
+
+  /**
+   * Returns an error string if deleting this user is blocked, or null.
+   * Blocks if the user is a homeroom teacher, has timetable slots,
+   * or has a linked student record.
+   */
+  function canDeleteUser(userId) {
+    // Homeroom teacher for a class
+    const homeroomCls = DB.query('classes', c => c.homeroomTeacherId === userId);
+    if (homeroomCls.length) {
+      const names = homeroomCls.map(c => c.name).join(', ');
+      return `This user is the homeroom teacher for: ${names}. Reassign the class first.`;
+    }
+    // Assigned to timetable slots
+    const inTimetable = DB.get('timetable').some(t =>
+      (t.slots || []).some(s => s.teacherId === userId)
+    );
+    if (inTimetable) {
+      return 'This user is assigned to timetable slots. Remove them from the timetable first.';
+    }
+    // Has a linked student record (delete the student record first)
+    const stuRecord = DB.query('students', s => s.userId === userId);
+    if (stuRecord.length) {
+      return 'This account is linked to a student record. Delete the student profile first.';
+    }
+    return null;
+  }
+
   return {
     student,
     user,
@@ -272,5 +332,7 @@ const Validators = (() => {
     canDeleteClass,
     canDeleteYear,
     canDeleteSection,
+    canDeleteSubject,
+    canDeleteUser,
   };
 })();

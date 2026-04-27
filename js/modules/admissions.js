@@ -547,8 +547,22 @@ const Admissions = (() => {
     const pass  = document.getElementById('enroll-pass')?.value.trim();
     if (!email || !pass) return showToast('Email and password required.','warning');
 
-    const cfg = _cfg();
+    // Pre-flight validation before any DB writes
+    const cfg   = _cfg();
     const admNo = a.assignedAdmissionNo || _nextAdmNo(cfg);
+
+    // 1. Class must still exist
+    if (!DB.getById('classes', a.assignedClass)) {
+      return showToast('The assigned class no longer exists. Re-approve the application with a valid class.', 'warning');
+    }
+    // 2. Email must be unique
+    const emailErr = Validators.user({ name: `${a.firstName} ${a.lastName}`, email, role: 'student' }, null);
+    if (emailErr) return showToast(emailErr, 'warning');
+    // 3. Admission number must be unique
+    const admNoConflict = DB.query('students', s => s.admissionNo === admNo);
+    if (admNoConflict.length) {
+      return showToast(`Admission number ${admNo} is already in use. Reset the sequence in Settings → Admissions.`, 'warning');
+    }
 
     // 1. Create user record for student
     const userId = 'u_' + Date.now().toString(36);
@@ -595,6 +609,16 @@ const Admissions = (() => {
       status:'enrolled', studentId:stuId,
       assignedAdmissionNo:admNo,
       reviewedAt:new Date().toISOString()
+    });
+
+    // 5. Audit
+    _audit('STUDENT_ENROLLED', {
+      applicationId: appId,
+      studentId: stuId,
+      userId,
+      admissionNo: admNo,
+      name: `${a.firstName} ${a.lastName}`,
+      classId: a.assignedClass,
     });
 
     showToast(`${a.firstName} ${a.lastName} enrolled as ${admNo}! Student profile active.`, 'success');

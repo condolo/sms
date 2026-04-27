@@ -362,20 +362,29 @@ const Classes = (() => {
 
   function save(e, id) {
     e.preventDefault();
+    if (!Auth.isAdmin()) return showToast('Permission denied.', 'error');
     const fd     = new FormData(e.target);
     const grade  = Number(fd.get('grade'));
     const stream = fd.get('stream');
+    if (!grade || !stream) return showToast('Grade and stream are required.', 'warning');
     const data   = {
       schoolId: 'sch1', grade, stream,
       name:     `Grade ${grade}${stream}`,
       level:    Number(grade) || grade,
       room:     fd.get('room'),
       capacity: Number(fd.get('capacity')),
-      homeroomTeacherId: fd.get('homeroomTeacherId'),
+      homeroomTeacherId: fd.get('homeroomTeacherId') || null,
       academicYearId: SchoolContext.currentAcYearId()
     };
-    if (id) { DB.update('classes', id, data); showToast('Class updated.', 'success'); }
-    else    { DB.insert('classes', data);     showToast(`${data.name} added.`,  'success'); }
+    if (id) {
+      DB.update('classes', id, data);
+      _audit('CLASS_UPDATED', { id, name: data.name, grade, stream });
+      showToast('Class updated.', 'success');
+    } else {
+      const rec = DB.insert('classes', data);
+      _audit('CLASS_CREATED', { id: rec.id, name: data.name, grade, stream });
+      showToast(`${data.name} added.`, 'success');
+    }
     _closeModal();
     _renderList();
   }

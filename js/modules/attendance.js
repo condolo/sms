@@ -157,7 +157,7 @@ const Attendance = (() => {
       showToast('Attendance updated.', 'success');
     } else {
       const _school = Auth.currentSchool;
-      DB.insert('attendance', { schoolId:'sch1', classId:_selectedClass, date:_selectedDate, termId:_school?.currentTermId||'term2', academicYearId:_school?.currentAcademicYearId||'ay2025', records, markedAt:new Date().toISOString(), markedBy:Auth.currentUser.id });
+      DB.insert('attendance', { schoolId:'sch1', classId:_selectedClass, date:_selectedDate, termId:SchoolContext.currentTermId(), academicYearId:SchoolContext.currentAcYearId(), records, markedAt:new Date().toISOString(), markedBy:Auth.currentUser.id });
       showToast('Attendance submitted successfully.', 'success');
     }
     _renderMarkPage();

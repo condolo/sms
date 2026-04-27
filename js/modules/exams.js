@@ -30,7 +30,7 @@ const Exams = (() => {
   /*  MAIN VIEW (staff)                                          */
   /* ─────────────────────────────────────────────────────────── */
   function _renderMain() {
-    const terms    = (DB.getById('academicYears','ay2025')?.terms || []);
+    const terms    = (DB.getById('academicYears', SchoolContext.currentAcYearId())?.terms || []);
     const classes  = Auth.myClasses();
     const subjects = DB.get('subjects');
     const exams    = _getFiltered();
@@ -403,7 +403,7 @@ const Exams = (() => {
     const existing = id ? DB.getById('exam_schedules', id) : null;
     const classes  = Auth.myClasses();
     const subjects = DB.get('subjects');
-    const terms    = DB.getById('academicYears','ay2025')?.terms || [];
+    const terms    = DB.getById('academicYears', SchoolContext.currentAcYearId())?.terms || [];
 
     openModal(`
     <div class="modal-header">
@@ -482,10 +482,11 @@ const Exams = (() => {
 
   function saveExam(e, id) {
     e.preventDefault();
+    if (!Auth.hasPermission('exams', 'create')) return showToast('Permission denied.', 'error');
     const fd = new FormData(e.target);
     const data = {
-      schoolId: 'sch1', academicYearId: 'ay2025',
-      title: fd.get('title'), termId: fd.get('termId'),
+      schoolId: 'sch1', academicYearId: SchoolContext.currentAcYearId(),
+      title: fd.get('title'), termId: fd.get('termId') || SchoolContext.currentTermId(),
       classId: fd.get('classId'), subjectId: fd.get('subjectId'),
       date: fd.get('date'), startTime: fd.get('startTime'), endTime: fd.get('endTime'),
       duration: Number(fd.get('duration')), maxMarks: Number(fd.get('maxMarks')),
@@ -493,8 +494,17 @@ const Exams = (() => {
       instructions: fd.get('instructions'), status: fd.get('status'),
       createdBy: Auth.currentUser.id
     };
-    if (id) { DB.update('exam_schedules', id, data); showToast('Exam updated.', 'success'); }
-    else    { DB.insert('exam_schedules', data); showToast('Exam scheduled.', 'success'); }
+    if (!data.title) return showToast('Exam title is required.', 'warning');
+    if (!data.classId) return showToast('Class is required.', 'warning');
+    if (id) {
+      DB.update('exam_schedules', id, data);
+      _audit('EXAM_UPDATED', { id, title: data.title, classId: data.classId, date: data.date });
+      showToast('Exam updated.', 'success');
+    } else {
+      const rec = DB.insert('exam_schedules', data);
+      _audit('EXAM_CREATED', { id: rec.id, title: data.title, classId: data.classId, date: data.date });
+      showToast('Exam scheduled.', 'success');
+    }
     _closeModal();
     _renderMain();
   }
@@ -506,10 +516,15 @@ const Exams = (() => {
   }
 
   function deleteExam(id) {
-    if (!confirm('Delete this exam record?')) return;
-    DB.remove('exam_schedules', id);
-    showToast('Exam deleted.', 'info');
-    _renderMain();
+    if (!Auth.hasPermission('exams', 'delete')) return showToast('Permission denied.', 'error');
+    const ex = DB.getById('exam_schedules', id);
+    if (!ex) return;
+    confirmAction(`Delete exam "${ex.title}"? This cannot be undone.`, () => {
+      _audit('EXAM_DELETED', { id, title: ex.title, classId: ex.classId, date: ex.date });
+      DB.delete('exam_schedules', id);
+      showToast('Exam deleted.', 'info');
+      _renderMain();
+    });
   }
 
   /* Enter results modal — opens grade entry for an exam */

@@ -2,7 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const PORT = 3005;
+const PORT = process.env.PORT || 3005;
 const MIME = {
   '.html': 'text/html',
   '.css':  'text/css',

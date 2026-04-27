@@ -77,7 +77,10 @@ const Subjects = (() => {
               <div style="font-size:13.5px;font-weight:700;color:var(--gray-800)">${s.name}</div>
               <div style="font-size:11px;color:var(--gray-400);margin-top:2px">${s.credits} credits · <span style="color:${s.isCore?'var(--primary)':'var(--gray-500)'}">${s.isCore?'Core':'Elective'}</span></div>
             </div>
-            ${Auth.isAdmin() ? `<button class="btn btn-sm btn-secondary btn-icon" onclick="Subjects.renderEdit('${s.id}')"><i class="fas fa-edit"></i></button>` : ''}
+            ${Auth.isAdmin() ? `
+              <button class="btn btn-sm btn-secondary btn-icon" onclick="Subjects.renderEdit('${s.id}')"><i class="fas fa-edit"></i></button>
+              <button class="btn btn-sm btn-danger btn-icon" onclick="Subjects.deleteSubject('${s.id}')"><i class="fas fa-trash"></i></button>
+            ` : ''}
           </div>`).join('')}
         </div>
       </div>`;
@@ -136,6 +139,20 @@ const Subjects = (() => {
     else    { DB.insert('subjects', data);     showToast(`${data.name} added.`, 'success'); }
     _closeModal();
     _renderCatalogue(document.getElementById('subj-panel'));
+  }
+
+  function deleteSubject(id) {
+    const s = DB.getById('subjects', id);
+    if (!s) return;
+    if (!Auth.isAdmin()) return showToast('Permission denied.', 'error');
+    const blockMsg = Validators.canDeleteSubject(id);
+    if (blockMsg) return showToast(blockMsg, 'warning');
+    confirmAction(`Delete subject "${s.name}"? This cannot be undone.`, () => {
+      _audit('SUBJECT_DELETED', { id, name: s.name, code: s.code, department: s.department });
+      DB.delete('subjects', id);
+      showToast(`"${s.name}" deleted.`, 'info');
+      _renderCatalogue(document.getElementById('subj-panel'));
+    });
   }
 
   /* ══════════════════════════════════════════════════════════════
@@ -248,7 +265,7 @@ const Subjects = (() => {
 
     // Update class_subjects table
     toAdd.forEach(subjectId => {
-      DB.insert('class_subjects', { schoolId:'sch1', classId, subjectId, academicYearId:'ay2025' });
+      DB.insert('class_subjects', { schoolId:'sch1', classId, subjectId, academicYearId: SchoolContext.currentAcYearId() });
     });
     toRemove.forEach(subjectId => {
       const row = DB.get('class_subjects').find(r => r.classId === classId && r.subjectId === subjectId);
@@ -275,6 +292,6 @@ const Subjects = (() => {
 
   return {
     render, switchTab, selectAssignClass, saveAssignments,
-    renderNew, renderEdit, save
+    renderNew, renderEdit, save, deleteSubject
   };
 })();

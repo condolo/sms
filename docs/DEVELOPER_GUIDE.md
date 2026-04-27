@@ -1,6 +1,6 @@
 # SchoolSync — Developer Guide
 
-**Version 2.4** · Technical Reference & Architecture
+**Version 2.5** · Technical Reference & Architecture
 
 ---
 
@@ -322,7 +322,11 @@ Validators.canDeleteStudent(id)               // open appeals or unpaid invoices
 Validators.canDeleteClass(classId)            // enrolled students or timetable entries
 Validators.canDeleteYear(id)                  // current year or linked classes
 Validators.canDeleteSection(sectionId)        // classes within section
+Validators.canDeleteSubject(id)               // in timetable, class assignments, or grade records
+Validators.canDeleteUser(id)                  // homeroom teacher, in timetable, or linked student record
 ```
+
+**Room conflict detection** — `Validators.timetableSlot()` also checks whether the specified room is already booked by another class at the same day and period. An empty room string bypasses this check.
 
 **Pattern — always use before DB writes:**
 ```js
@@ -505,7 +509,7 @@ confirmAction('Are you sure you want to delete this?', () => {
 `data.js` runs on every page load. It checks `localStorage.getItem('ss__version')` against the hardcoded `SEED_VERSION` constant at the top of the file.
 
 ```js
-const SEED_VERSION = '16';  // bump this whenever schema changes
+const SEED_VERSION = '17';  // bump this whenever schema changes
 
 if (!DB.isSeeded()) DB.seed();
 ```

@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: schoolsync
+    env: node
+    buildCommand: echo "No build step required"
+    startCommand: node server.js
+    plan: free

@@ -1,6 +1,6 @@
 # SchoolSync — User Guide
 
-**Version 2.4** · Meridian International School, Nairobi
+**Version 2.5** · Meridian International School, Nairobi
 
 ---
 
@@ -154,6 +154,8 @@ Navigate to **Subjects**. Each subject has:
 - **Name** and **code** (e.g. MATH, ENG)
 - **Curriculum** tag: Cambridge, IB, or Custom
 - **Key Stage** assignment (for filtering)
+
+Admins can **edit** or **delete** subjects directly from the catalogue. A subject cannot be deleted while it appears in the timetable, is assigned to a class, or has grade records.
 
 ### Timetable
 Navigate to **Timetable** to build the weekly schedule.

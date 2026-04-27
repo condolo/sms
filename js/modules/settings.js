@@ -160,7 +160,8 @@ const Settings = (() => {
             <td>
               <div class="tbl-actions">
                 <button class="btn btn-sm btn-secondary" onclick="Settings.editUserModal('${u.id}')"><i class="fas fa-edit"></i></button>
-                <button class="btn btn-sm btn-danger" onclick="Settings.toggleUserStatus('${u.id}','${!u.isActive}')"><i class="fas fa-${u.isActive?'ban':'check'}"></i></button>
+                <button class="btn btn-sm btn-secondary" title="${u.isActive?'Deactivate':'Activate'}" onclick="Settings.toggleUserStatus('${u.id}','${!u.isActive}')"><i class="fas fa-${u.isActive?'ban':'check'}"></i></button>
+                <button class="btn btn-sm btn-danger btn-icon" title="Delete user" onclick="Settings.deleteUser('${u.id}')"><i class="fas fa-trash"></i></button>
               </div>
             </td>
           </tr>`).join('')}
@@ -327,6 +328,23 @@ const Settings = (() => {
     DB.update('users', id, { isActive: active === 'true' });
     showToast(`User ${active==='true'?'activated':'deactivated'}.`, 'success');
     setTab('users');
+  }
+
+  function deleteUser(id) {
+    const u = DB.getById('users', id);
+    if (!u) return;
+    // Prevent self-deletion
+    if (Auth.currentUser && Auth.currentUser.id === id) {
+      return showToast('You cannot delete your own account.', 'warning');
+    }
+    const blockMsg = Validators.canDeleteUser(id);
+    if (blockMsg) return showToast(blockMsg, 'warning');
+    confirmAction(`Delete user "${u.name}" (${u.email})? This cannot be undone.`, () => {
+      _audit('USER_DELETED', { id, name: u.name, email: u.email, role: u.role });
+      DB.delete('users', id);
+      showToast(`User "${u.name}" deleted.`, 'info');
+      setTab('users');
+    });
   }
 
   function addYearModal() {
@@ -834,5 +852,5 @@ const Settings = (() => {
     });
   }
 
-  return { render, saveSchool, toggleCurriculum, setCurrentYear, addUserModal, editUserModal, saveUser, toggleUserStatus, addYearModal, saveYear, deleteYear, resetData, exportData, setTab, selectPermRole, togglePerm, addSectionModal, saveSection, addGradeModal, saveGradeClass, deleteSection, deleteClass };
+  return { render, saveSchool, toggleCurriculum, setCurrentYear, addUserModal, editUserModal, saveUser, toggleUserStatus, deleteUser, addYearModal, saveYear, deleteYear, resetData, exportData, setTab, selectPermRole, togglePerm, addSectionModal, saveSection, addGradeModal, saveGradeClass, deleteSection, deleteClass };
 })();

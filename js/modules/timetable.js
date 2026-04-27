@@ -1433,8 +1433,8 @@ const Timetable = (() => {
         DB.update('timetable', existingTT.id, { slots });
       } else {
         DB.insert('timetable', { schoolId: school?.id||'sch1', classId,
-          academicYearId: school?.currentAcademicYearId||'ay2025',
-          termId: school?.currentTermId||'term2', slots });
+          academicYearId: SchoolContext.currentAcYearId(),
+          termId: SchoolContext.currentTermId(), slots });
       }
 
       slotsCreated += slots.length;

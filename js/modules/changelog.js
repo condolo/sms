@@ -8,6 +8,57 @@ const Changelog = (() => {
   /* ── Version data ─────────────────────────────────────── */
   const VERSIONS = [
     {
+      version: '2.5.0',
+      date: '2026-04-27',
+      tag: 'minor',
+      title: 'Data Integrity II · Events Fix · Delete Guards',
+      sections: [
+        {
+          heading: 'Fixed — Events Calendar',
+          type: 'fix',
+          items: [
+            'Events now appear on the calendar immediately after saving or updating — calendar navigates to the event\'s month automatically',
+            'All 10 seed events shifted to 2026 to match the current academic year',
+            '"No events in [Month]" empty-state shown when a calendar month has no events',
+          ]
+        },
+        {
+          heading: 'New — Subject &amp; User Delete Guards',
+          type: 'new',
+          items: [
+            '<code>Validators.canDeleteSubject(id)</code> — blocks if subject is in timetable, class assignments, or grade records',
+            '<code>Validators.canDeleteUser(id)</code> — blocks if user is a homeroom teacher, in timetable, or linked to a student record; prevents self-deletion',
+            'Delete button added to Subject Catalogue (admin only)',
+            'Delete button added to Users table in Settings (admin only)',
+          ]
+        },
+        {
+          heading: 'New — Room Conflict Check',
+          type: 'new',
+          items: [
+            'Timetable slot validation now blocks room double-booking: same room, same day, same period across all classes',
+          ]
+        },
+        {
+          heading: 'Changed — Validate-First in Admissions',
+          type: 'changed',
+          items: [
+            'Enrollment pre-flight: class existence, email uniqueness, and admission number uniqueness checked before any DB write',
+            '<code>STUDENT_ENROLLED</code> audit entry added on successful enrollment',
+          ]
+        },
+        {
+          heading: 'Changed — Permission Guards',
+          type: 'changed',
+          items: [
+            'Exams save/delete: <code>exams.create</code> and <code>exams.delete</code> permissions enforced in logic; audited',
+            'Classes save: <code>isAdmin()</code> enforced in logic; audited',
+            'Subjects: hardcoded academic year removed — uses <code>SchoolContext</code>',
+          ]
+        },
+      ]
+    },
+    {
       version: '2.4.0',
       date: '2026-04-27',
       tag: 'minor',

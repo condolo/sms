@@ -551,6 +551,25 @@ const Help = (() => {
         <div class="help-tip"><i class="fas fa-lightbulb"></i> <strong>Important:</strong> SchoolSync stores all data in your browser. Clearing browser data or switching computers will remove all records — the exported JSON is your only backup.</div>
       `
     },
+    {
+      id: 'set-delete-guards',
+      module: 'settings',
+      title: 'Why can\'t I delete this record?',
+      roles: ['superadmin','admin'],
+      tags: 'delete blocked guard subject user class student timetable error',
+      content: `
+        <p>SchoolSync prevents you from deleting records that other data depends on. This protects data integrity across the system.</p>
+        <p><strong>Common blocks and how to resolve them:</strong></p>
+        <ul>
+          <li><strong>Cannot delete a subject</strong> — the subject is used in the timetable, assigned to a class, or has grade records. Remove timetable slots and class assignments first, then delete grade records if needed.</li>
+          <li><strong>Cannot delete a user account</strong> — the user is a homeroom teacher for a class, is assigned to timetable slots, or has a linked student profile. Reassign the class, clear timetable slots, or delete the student profile first.</li>
+          <li><strong>Cannot delete a student</strong> — the student has open behaviour appeals or unpaid invoices. Resolve all appeals and settle outstanding fees first.</li>
+          <li><strong>Cannot delete a class</strong> — students are still enrolled in it, or it has timetable entries. Move students to another class and clear the timetable first.</li>
+          <li><strong>Cannot delete an academic year</strong> — it is set as the current year, or classes are linked to it.</li>
+        </ul>
+        <div class="help-tip"><i class="fas fa-lightbulb"></i> <strong>Tip:</strong> If you only want to remove a user from the system temporarily, use <strong>Deactivate</strong> instead of Delete. Deactivated users cannot log in but their records and history are preserved.</div>
+      `
+    },
   ];
 
   /* ── Module metadata for badges ──────────────────────── */
