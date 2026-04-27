@@ -16,14 +16,15 @@
 
   <!-- LEFT PANEL — Brand & Features -->
   <div class="login-left">
+    <canvas id="login-canvas" class="login-canvas"></canvas>
     <div class="login-grid"></div>
 
     <div class="login-brand-wrap">
       <div class="login-logo-big"><i class="fas fa-graduation-cap"></i></div>
-      <h1>School<span>Sync</span></h1>
-      <p>A complete school management platform for modern international schools — from admissions to graduation.</p>
+      <h1 id="login-brand-h1">School<span>Sync</span></h1>
+      <p id="login-tagline">A complete school management platform for modern international schools — from admissions to graduation.</p>
 
-      <div class="login-features">
+      <div class="login-features" id="login-features-list">
         <div class="login-feature">
           <div class="login-feature-icon blue"><i class="fas fa-users"></i></div>
           <div>
@@ -55,7 +56,9 @@
       </div>
     </div>
 
-    <div class="login-left-footer">
+    <div id="login-social-links" class="login-social-links"></div>
+
+    <div class="login-left-footer" id="login-footer-text">
       © 2025 SchoolSync · Meridian International School, Nairobi
     </div>
   </div>
@@ -65,8 +68,8 @@
     <div class="login-right-inner">
 
       <div class="login-right-header">
-        <h2>Welcome back 👋</h2>
-        <p>Sign in to your SchoolSync portal</p>
+        <h2 id="login-welcome-title">Welcome back 👋</h2>
+        <p id="login-welcome-sub">Sign in to your SchoolSync portal</p>
       </div>
 
       <form id="login-form" onsubmit="if(typeof Auth!=='undefined'){Auth.login(event);}else{event.preventDefault();}return false;">
@@ -131,9 +134,12 @@
   <aside id="sidebar" class="sidebar">
     <div class="sidebar-header">
       <div class="sidebar-logo">
-        <div class="logo-icon"><i class="fas fa-graduation-cap"></i></div>
+        <div class="logo-icon">
+          <img id="sidebar-logo-img" src="" alt="Logo" style="display:none;width:34px;height:34px;object-fit:contain;border-radius:6px">
+          <i class="fas fa-graduation-cap" id="sidebar-logo-icon"></i>
+        </div>
         <div class="logo-text">
-          <span class="logo-name">SchoolSync</span>
+          <span class="logo-name" id="sidebar-app-name">SchoolSync</span>
           <span class="logo-school" id="sidebar-school-name">Loading…</span>
         </div>
       </div>

@@ -22,10 +22,11 @@ const Settings = (() => {
     </div>
 
     <div class="tabs" id="set-tabs">
-      <button class="tab-btn ${_tab==='school'?'active':''}"   onclick="Settings.setTab('school',this)">School Profile</button>
-      <button class="tab-btn ${_tab==='academic'?'active':''}" onclick="Settings.setTab('academic',this)">Academic Year</button>
+      <button class="tab-btn ${_tab==='school'?'active':''}"    onclick="Settings.setTab('school',this)">School Profile</button>
+      ${Auth.isSuperAdmin() ? `<button class="tab-btn ${_tab==='branding'?'active':''}" onclick="Settings.setTab('branding',this)"><i class="fas fa-palette"></i> Branding</button>` : ''}
+      <button class="tab-btn ${_tab==='academic'?'active':''}"  onclick="Settings.setTab('academic',this)">Academic Year</button>
       ${Auth.isAdmin() ? `<button class="tab-btn ${_tab==='users'?'active':''}" onclick="Settings.setTab('users',this)">User Management</button>` : ''}
-      <button class="tab-btn ${_tab==='system'?'active':''}"  onclick="Settings.setTab('system',this)">System</button>
+      <button class="tab-btn ${_tab==='system'?'active':''}"    onclick="Settings.setTab('system',this)">System</button>
       ${Auth.isSuperAdmin() ? `<button class="tab-btn ${_tab==='roles'?'active':''}" onclick="Settings.setTab('roles',this)"><i class="fas fa-shield-alt"></i> Roles & Permissions</button>` : ''}
       ${Auth.isSuperAdmin() ? `<button class="tab-btn ${_tab==='sections'?'active':''}" onclick="Settings.setTab('sections',this)">Sections & Grades</button>` : ''}
     </div>
@@ -35,12 +36,13 @@ const Settings = (() => {
   }
 
   function _tabContent(tab, school, ay, users) {
-    if (tab === 'school')   return _schoolTab(school);
-    if (tab === 'academic') return _academicTab(ay);
-    if (tab === 'users')    return _usersTab(users);
-    if (tab === 'system')   return _systemTab();
-    if (tab === 'roles')    return _rolesTab();
-    if (tab === 'sections') return _sectionsTab();
+    if (tab === 'school')    return _schoolTab(school);
+    if (tab === 'branding')  return _brandingTab(school);
+    if (tab === 'academic')  return _academicTab(ay);
+    if (tab === 'users')     return _usersTab(users);
+    if (tab === 'system')    return _systemTab();
+    if (tab === 'roles')     return _rolesTab();
+    if (tab === 'sections')  return _sectionsTab();
     return '';
   }
 
@@ -328,6 +330,475 @@ const Settings = (() => {
     DB.update('users', id, { isActive: active === 'true' });
     showToast(`User ${active==='true'?'activated':'deactivated'}.`, 'success');
     setTab('users');
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     BRANDING TAB
+  ══════════════════════════════════════════════════════════════ */
+
+  const BRAND_PRESETS = [
+    { name: 'Ocean Blue',  primary: '#2563EB', sidebar: '#0F172A' },
+    { name: 'Emerald',     primary: '#059669', sidebar: '#064E3B' },
+    { name: 'Violet',      primary: '#7C3AED', sidebar: '#1E1B4B' },
+    { name: 'Rose',        primary: '#E11D48', sidebar: '#1C0316' },
+    { name: 'Amber',       primary: '#D97706', sidebar: '#1C1200' },
+    { name: 'Cyan',        primary: '#0891B2', sidebar: '#0C1A27' },
+  ];
+
+  const _FX_LIST = [
+    { id:'none',      icon:'fas fa-ban',        label:'None' },
+    { id:'particles', icon:'fas fa-star',        label:'Particles' },
+    { id:'aurora',    icon:'fas fa-rainbow',     label:'Aurora' },
+    { id:'water',     icon:'fas fa-water',       label:'Water' },
+    { id:'clouds',    icon:'fas fa-cloud',       label:'Clouds' },
+    { id:'fire',      icon:'fas fa-fire',        label:'Fire' },
+  ];
+
+  function _brandingTab(school) {
+    const theme      = school?.theme || {};
+    const primary    = theme.primary   || '#2563EB';
+    const sidebarBg  = theme.sidebarBg || '#0F172A';
+    const appName    = school?.appName  || 'SchoolSync';
+    const lp         = school?.loginPage || {};
+
+    return `
+    <!-- ── Logo ── -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><i class="fas fa-image" style="color:var(--primary)"></i> App Logo</div>
+      </div>
+      <div class="brand-upload-row">
+        <div class="brand-asset-preview" id="brand-logo-preview">
+          ${school?.logo
+            ? `<img src="${school.logo}" alt="Logo" style="max-width:110px;max-height:72px;object-fit:contain">`
+            : `<i class="fas fa-graduation-cap" style="font-size:40px;color:var(--primary)"></i>`}
+        </div>
+        <div class="brand-upload-info">
+          <p>Shown in the sidebar header. PNG, SVG or JPG. <strong>Transparent background recommended.</strong> Max 2 MB.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+            <button class="btn btn-primary btn-sm" onclick="Settings.uploadLogo()">
+              <i class="fas fa-upload"></i> Upload Logo
+            </button>
+            ${school?.logo ? `<button class="btn btn-secondary btn-sm" onclick="Settings.removeLogo()"><i class="fas fa-times"></i> Remove</button>` : ''}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Favicon ── -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><i class="fas fa-star" style="color:var(--primary)"></i> Favicon</div>
+      </div>
+      <div class="brand-upload-row">
+        <div class="brand-asset-preview brand-favicon-box" id="brand-fav-preview">
+          ${school?.favicon
+            ? `<img src="${school.favicon}" alt="Favicon" style="width:48px;height:48px;object-fit:contain">`
+            : `<i class="fas fa-graduation-cap" style="font-size:28px;color:var(--primary)"></i>`}
+        </div>
+        <div class="brand-upload-info">
+          <p>Shown in browser tabs and bookmarks. Square image recommended (64×64 px or larger). Max 512 KB.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+            <button class="btn btn-primary btn-sm" onclick="Settings.uploadFavicon()">
+              <i class="fas fa-upload"></i> Upload Favicon
+            </button>
+            ${school?.favicon ? `<button class="btn btn-secondary btn-sm" onclick="Settings.removeFavicon()"><i class="fas fa-times"></i> Remove</button>` : ''}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── App Name ── -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><i class="fas fa-font" style="color:var(--primary)"></i> App Name</div>
+      </div>
+      <div style="max-width:380px">
+        <div class="form-field">
+          <label>Name shown in sidebar &amp; browser title</label>
+          <input id="brand-appname" value="${appName}" placeholder="SchoolSync"
+            oninput="Settings.previewTheme()">
+        </div>
+        <p style="font-size:12px;color:var(--gray-400);margin-top:4px">Replaces "SchoolSync" everywhere in the UI. Save with the button below.</p>
+      </div>
+    </div>
+
+    <!-- ── Theme Colors ── -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><i class="fas fa-palette" style="color:var(--primary)"></i> Theme Colors</div>
+      </div>
+
+      <!-- Presets -->
+      <div style="margin-bottom:24px">
+        <div class="brand-section-label">Quick Presets</div>
+        <div class="brand-presets">
+          ${BRAND_PRESETS.map(p => `
+          <button class="brand-preset-btn" title="${p.name}"
+            onclick="Settings.applyPreset('${p.primary}','${p.sidebar}')">
+            <span class="brand-preset-chip">
+              <span class="brand-chip-sidebar" style="background:${p.sidebar}">
+                <span class="brand-chip-dot" style="background:${p.primary}"></span>
+              </span>
+            </span>
+            <span class="brand-preset-label">${p.name}</span>
+          </button>`).join('')}
+        </div>
+      </div>
+
+      <!-- Custom pickers -->
+      <div class="form-row cols-2" style="max-width:600px">
+        <div class="form-field">
+          <label>Primary Accent Color</label>
+          <div class="brand-color-row">
+            <input type="color" id="brand-primary" value="${primary}"
+              oninput="Settings.syncHex('primary');Settings.previewTheme()">
+            <input type="text"  id="brand-primary-hex" value="${primary}" maxlength="7" placeholder="#2563EB"
+              oninput="Settings.syncPicker('primary')">
+          </div>
+          <small>Buttons, links, badges, active states</small>
+        </div>
+        <div class="form-field">
+          <label>Sidebar Background</label>
+          <div class="brand-color-row">
+            <input type="color" id="brand-sidebar" value="${sidebarBg}"
+              oninput="Settings.syncHex('sidebar');Settings.previewTheme()">
+            <input type="text"  id="brand-sidebar-hex" value="${sidebarBg}" maxlength="7" placeholder="#0F172A"
+              oninput="Settings.syncPicker('sidebar')">
+          </div>
+          <small>Left navigation panel background</small>
+        </div>
+      </div>
+
+      <!-- Live preview -->
+      <div style="margin-top:24px;margin-bottom:24px">
+        <div class="brand-section-label">Live Preview</div>
+        <div class="brand-preview-shell">
+          <div class="brand-preview-sidebar" id="bpv-sidebar" style="background:${sidebarBg}">
+            <div class="brand-preview-header">
+              <i class="fas fa-graduation-cap"></i>
+              <span id="bpv-appname">${appName}</span>
+            </div>
+            <div class="brand-preview-nav brand-preview-active" id="bpv-active" style="background:${primary}">
+              <i class="fas fa-th-large"></i> Dashboard
+            </div>
+            <div class="brand-preview-nav"><i class="fas fa-users"></i> Students</div>
+            <div class="brand-preview-nav"><i class="fas fa-book"></i> Academics</div>
+            <div class="brand-preview-nav"><i class="fas fa-coins"></i> Finance</div>
+          </div>
+          <div class="brand-preview-content">
+            <div class="brand-preview-topbar">
+              <span style="font-size:13px;font-weight:600;color:#1E293B">Dashboard</span>
+              <span class="brand-preview-avatar" id="bpv-avatar" style="background:${primary}">A</span>
+            </div>
+            <div style="padding:16px">
+              <button class="brand-preview-btn" id="bpv-btn" style="background:${primary}">
+                <i class="fas fa-plus"></i> Add Student
+              </button>
+              <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+                <span class="brand-preview-badge" id="bpv-badge" style="background:${primary}20;color:${primary}">Active</span>
+                <span class="brand-preview-badge" style="background:#f1f5f9;color:#64748b">Inactive</span>
+              </div>
+              <div class="brand-preview-link" id="bpv-link" style="color:${primary}">View all students →</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px">
+        <button class="btn btn-primary" onclick="Settings.saveBranding()">
+          <i class="fas fa-save"></i> Save Branding
+        </button>
+        <button class="btn btn-secondary" onclick="Settings.resetBranding()">
+          <i class="fas fa-undo"></i> Reset to Default
+        </button>
+      </div>
+    </div>
+
+    <!-- ── Login Animation ── -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><i class="fas fa-magic" style="color:var(--primary)"></i> Login Page Animation</div>
+      </div>
+      <div style="margin-bottom:20px">
+        <div class="brand-section-label">Background Effect</div>
+        <div class="login-fx-picker" id="login-fx-picker">
+          ${_FX_LIST.map(fx=>`
+          <button class="login-fx-btn ${(lp.effect||'none')===fx.id?'active':''}"
+            onclick="Settings.pickLoginFX('${fx.id}')" data-fx="${fx.id}">
+            <i class="${fx.icon}"></i>
+            <span>${fx.label}</span>
+          </button>`).join('')}
+        </div>
+        <input type="hidden" id="login-fx-value" value="${lp.effect||'none'}">
+      </div>
+      <div style="max-width:280px">
+        <div class="form-field">
+          <label>Effect Color</label>
+          <div class="brand-color-row">
+            <input type="color" id="login-fx-color" value="${lp.effectColor||primary}"
+              oninput="Settings.syncLoginFXColor('picker')">
+            <input type="text" id="login-fx-color-hex" value="${lp.effectColor||primary}" maxlength="7"
+              oninput="Settings.syncLoginFXColor('hex')">
+          </div>
+          <small>Color used for the animation effect</small>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Login Page Content ── -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><i class="fas fa-edit" style="color:var(--primary)"></i> Login Page Content</div>
+      </div>
+      <div class="form-row cols-2" style="max-width:720px">
+        <div class="form-field">
+          <label>Welcome Title <span style="font-size:11px;color:var(--gray-400)">(right panel)</span></label>
+          <input id="lp-welcome-title" value="${lp.welcomeTitle||'Welcome back 👋'}" placeholder="Welcome back 👋">
+        </div>
+        <div class="form-field">
+          <label>Welcome Subtitle <span style="font-size:11px;color:var(--gray-400)">(right panel)</span></label>
+          <input id="lp-welcome-sub" value="${lp.welcomeSub||'Sign in to your SchoolSync portal'}" placeholder="Sign in to your portal">
+        </div>
+      </div>
+      <div class="form-field mb-12" style="max-width:720px">
+        <label>Tagline <span style="font-size:11px;color:var(--gray-400)">(left panel, under logo)</span></label>
+        <textarea id="lp-tagline" rows="2" style="resize:vertical;width:100%">${lp.tagline||'A complete school management platform for modern international schools — from admissions to graduation.'}</textarea>
+      </div>
+      <div class="form-field mb-12" style="max-width:720px">
+        <label>Footer Text <span style="font-size:11px;color:var(--gray-400)">(bottom of left panel)</span></label>
+        <input id="lp-footer-text" value="${lp.footerText||'© 2025 SchoolSync · Meridian International School, Nairobi'}">
+      </div>
+
+      <div style="margin-top:16px">
+        <div class="brand-section-label">Feature Highlights <span style="font-weight:400;text-transform:none;letter-spacing:0">(left panel cards)</span></div>
+        ${(lp.features || App.LP_DEFAULT_FEATURES).map((f,i)=>`
+        <div style="display:flex;gap:12px;align-items:center;margin-bottom:10px">
+          <div class="login-feature-icon ${f.color}" style="width:36px;height:36px;min-width:36px;font-size:15px;flex-shrink:0">
+            <i class="${f.icon}"></i>
+          </div>
+          <div style="flex:1;display:flex;gap:10px">
+            <input style="flex:1;min-width:0" placeholder="Feature title"  id="lp-feat-t${i}" value="${f.title.replace(/"/g,'&quot;')}">
+            <input style="flex:2;min-width:0" placeholder="Description"    id="lp-feat-d${i}" value="${f.desc.replace(/"/g,'&quot;')}">
+          </div>
+        </div>`).join('')}
+      </div>
+    </div>
+
+    <!-- ── Social Media Links ── -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><i class="fas fa-share-alt" style="color:var(--primary)"></i> Social Media Links</div>
+      </div>
+      <p style="font-size:13px;color:var(--gray-400);margin-bottom:16px">Links shown on the login page. Leave blank to hide any icon.</p>
+      <div class="form-row cols-2" style="max-width:720px">
+        ${[
+          {key:'facebook',  icon:'fab fa-facebook-f',  label:'Facebook'},
+          {key:'twitter',   icon:'fab fa-x-twitter',   label:'X / Twitter'},
+          {key:'instagram', icon:'fab fa-instagram',   label:'Instagram'},
+          {key:'linkedin',  icon:'fab fa-linkedin-in', label:'LinkedIn'},
+          {key:'whatsapp',  icon:'fab fa-whatsapp',    label:'WhatsApp'},
+          {key:'youtube',   icon:'fab fa-youtube',     label:'YouTube'},
+        ].map(s=>`
+        <div class="form-field">
+          <label><i class="${s.icon}" style="margin-right:5px;width:14px"></i>${s.label}</label>
+          <input id="lp-social-${s.key}" value="${(lp.social||{})[s.key]||''}" placeholder="https://…">
+        </div>`).join('')}
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:20px">
+        <button class="btn btn-primary" onclick="Settings.saveLoginPage()">
+          <i class="fas fa-save"></i> Save Login Page
+        </button>
+        <button class="btn btn-secondary" onclick="Settings.resetLoginPage()">
+          <i class="fas fa-undo"></i> Reset to Default
+        </button>
+      </div>
+    </div>`;
+  }
+
+  function uploadLogo() {
+    if (!Auth.isSuperAdmin()) return showToast('Permission denied.', 'error');
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*';
+    inp.onchange = e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.size > 2 * 1024 * 1024) return showToast('Logo must be under 2 MB.', 'warning');
+      const reader = new FileReader();
+      reader.onload = ev => {
+        DB.update('schools', DB.get('schools')[0].id, { logo: ev.target.result });
+        App.applyBranding();
+        showToast('Logo updated.', 'success');
+        setTab('branding');
+      };
+      reader.readAsDataURL(file);
+    };
+    inp.click();
+  }
+
+  function removeLogo() {
+    confirmAction('Remove the custom logo?', () => {
+      DB.update('schools', DB.get('schools')[0].id, { logo: null });
+      App.applyBranding();
+      showToast('Logo removed.', 'info');
+      setTab('branding');
+    });
+  }
+
+  function uploadFavicon() {
+    if (!Auth.isSuperAdmin()) return showToast('Permission denied.', 'error');
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*';
+    inp.onchange = e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.size > 512 * 1024) return showToast('Favicon must be under 512 KB.', 'warning');
+      const reader = new FileReader();
+      reader.onload = ev => {
+        DB.update('schools', DB.get('schools')[0].id, { favicon: ev.target.result });
+        App.applyBranding();
+        showToast('Favicon updated.', 'success');
+        setTab('branding');
+      };
+      reader.readAsDataURL(file);
+    };
+    inp.click();
+  }
+
+  function removeFavicon() {
+    confirmAction('Remove the custom favicon?', () => {
+      DB.update('schools', DB.get('schools')[0].id, { favicon: null });
+      App.applyBranding();
+      showToast('Favicon removed.', 'info');
+      setTab('branding');
+    });
+  }
+
+  function applyPreset(primary, sidebar) {
+    const pp = document.getElementById('brand-primary');
+    const ph = document.getElementById('brand-primary-hex');
+    const sp = document.getElementById('brand-sidebar');
+    const sh = document.getElementById('brand-sidebar-hex');
+    if (pp) { pp.value = primary; ph.value = primary; }
+    if (sp) { sp.value = sidebar; sh.value = sidebar; }
+    previewTheme();
+  }
+
+  function syncHex(which) {
+    const picker = document.getElementById(`brand-${which}`);
+    const hex    = document.getElementById(`brand-${which}-hex`);
+    if (picker && hex) hex.value = picker.value;
+  }
+
+  function syncPicker(which) {
+    const hex    = document.getElementById(`brand-${which}-hex`).value.trim();
+    const picker = document.getElementById(`brand-${which}`);
+    if (/^#[0-9a-fA-F]{6}$/.test(hex) && picker) {
+      picker.value = hex;
+      previewTheme();
+    }
+  }
+
+  function previewTheme() {
+    const primary   = document.getElementById('brand-primary')?.value   || '#2563EB';
+    const sidebarBg = document.getElementById('brand-sidebar')?.value   || '#0F172A';
+    const appName   = document.getElementById('brand-appname')?.value   || 'SchoolSync';
+
+    const set = (id, prop, val) => { const el = document.getElementById(id); if (el) el.style[prop] = val; };
+    const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+
+    set('bpv-sidebar',  'background', sidebarBg);
+    set('bpv-active',   'background', primary);
+    set('bpv-btn',      'background', primary);
+    set('bpv-avatar',   'background', primary);
+    set('bpv-link',     'color',      primary);
+    set('bpv-badge',    'background', primary + '20');
+    set('bpv-badge',    'color',      primary);
+    setText('bpv-appname', appName);
+  }
+
+  function saveBranding() {
+    if (!Auth.isSuperAdmin()) return showToast('Permission denied.', 'error');
+    const primary   = document.getElementById('brand-primary')?.value   || '#2563EB';
+    const sidebarBg = document.getElementById('brand-sidebar')?.value   || '#0F172A';
+    const appName   = (document.getElementById('brand-appname')?.value || 'SchoolSync').trim();
+    const school    = DB.get('schools')[0];
+    DB.update('schools', school.id, { theme: { primary, sidebarBg }, appName });
+    App.applyBranding();
+    _audit('BRANDING_UPDATED', { primary, sidebarBg, appName });
+    showToast('Branding saved!', 'success');
+  }
+
+  function resetBranding() {
+    confirmAction('Reset all branding to SchoolSync defaults?', () => {
+      const school = DB.get('schools')[0];
+      DB.update('schools', school.id, { theme: null, logo: null, favicon: null, appName: null });
+      App.applyBranding();
+      _audit('BRANDING_RESET', {});
+      showToast('Branding reset to default.', 'info');
+      setTab('branding');
+    });
+  }
+
+  /* ── Login Page functions ── */
+
+  function pickLoginFX(fx) {
+    document.querySelectorAll('.login-fx-btn').forEach(b => b.classList.toggle('active', b.dataset.fx === fx));
+    const inp = document.getElementById('login-fx-value');
+    if (inp) inp.value = fx;
+  }
+
+  function syncLoginFXColor(source) {
+    const picker = document.getElementById('login-fx-color');
+    const hex    = document.getElementById('login-fx-color-hex');
+    if (!picker || !hex) return;
+    if (source === 'picker') {
+      hex.value = picker.value;
+    } else {
+      const val = hex.value.trim();
+      if (/^#[0-9a-fA-F]{6}$/.test(val)) picker.value = val;
+    }
+  }
+
+  function saveLoginPage() {
+    if (!Auth.isSuperAdmin()) return showToast('Permission denied.', 'error');
+    const school   = DB.get('schools')[0];
+    const features = App.LP_DEFAULT_FEATURES.map((f, i) => ({
+      ...f,
+      title: document.getElementById(`lp-feat-t${i}`)?.value || f.title,
+      desc:  document.getElementById(`lp-feat-d${i}`)?.value || f.desc,
+    }));
+    const lp = {
+      effect:       document.getElementById('login-fx-value')?.value       || 'none',
+      effectColor:  document.getElementById('login-fx-color')?.value       || '#2563EB',
+      welcomeTitle: document.getElementById('lp-welcome-title')?.value     || 'Welcome back 👋',
+      welcomeSub:   document.getElementById('lp-welcome-sub')?.value       || 'Sign in to your SchoolSync portal',
+      tagline:      document.getElementById('lp-tagline')?.value           || '',
+      footerText:   document.getElementById('lp-footer-text')?.value       || '',
+      features,
+      social: {
+        facebook:  (document.getElementById('lp-social-facebook')?.value  || '').trim(),
+        twitter:   (document.getElementById('lp-social-twitter')?.value   || '').trim(),
+        instagram: (document.getElementById('lp-social-instagram')?.value || '').trim(),
+        linkedin:  (document.getElementById('lp-social-linkedin')?.value  || '').trim(),
+        whatsapp:  (document.getElementById('lp-social-whatsapp')?.value  || '').trim(),
+        youtube:   (document.getElementById('lp-social-youtube')?.value   || '').trim(),
+      },
+    };
+    DB.update('schools', school.id, { loginPage: lp });
+    _audit('LOGIN_PAGE_UPDATED', { effect: lp.effect });
+    showToast('Login page settings saved!', 'success');
+  }
+
+  function resetLoginPage() {
+    confirmAction('Reset login page to default content?', () => {
+      const school = DB.get('schools')[0];
+      DB.update('schools', school.id, { loginPage: null });
+      _audit('LOGIN_PAGE_RESET', {});
+      showToast('Login page reset to default.', 'info');
+      setTab('branding');
+    });
   }
 
   function deleteUser(id) {
@@ -852,5 +1323,5 @@ const Settings = (() => {
     });
   }
 
-  return { render, saveSchool, toggleCurriculum, setCurrentYear, addUserModal, editUserModal, saveUser, toggleUserStatus, deleteUser, addYearModal, saveYear, deleteYear, resetData, exportData, setTab, selectPermRole, togglePerm, addSectionModal, saveSection, addGradeModal, saveGradeClass, deleteSection, deleteClass };
+  return { render, saveSchool, toggleCurriculum, setCurrentYear, addUserModal, editUserModal, saveUser, toggleUserStatus, deleteUser, addYearModal, saveYear, deleteYear, resetData, exportData, setTab, selectPermRole, togglePerm, addSectionModal, saveSection, addGradeModal, saveGradeClass, deleteSection, deleteClass, uploadLogo, removeLogo, uploadFavicon, removeFavicon, applyPreset, syncHex, syncPicker, previewTheme, saveBranding, resetBranding, pickLoginFX, syncLoginFXColor, saveLoginPage, resetLoginPage };
 })();
