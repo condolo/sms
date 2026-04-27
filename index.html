@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SchoolSync — School Management System</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<!-- ═══════════════ LOGIN SCREEN ═══════════════ -->
+<div id="login-screen" class="login-screen">
+
+  <!-- LEFT PANEL — Brand & Features -->
+  <div class="login-left">
+    <div class="login-grid"></div>
+
+    <div class="login-brand-wrap">
+      <div class="login-logo-big"><i class="fas fa-graduation-cap"></i></div>
+      <h1>School<span>Sync</span></h1>
+      <p>A complete school management platform for modern international schools — from admissions to graduation.</p>
+
+      <div class="login-features">
+        <div class="login-feature">
+          <div class="login-feature-icon blue"><i class="fas fa-users"></i></div>
+          <div>
+            <h4>Student Information System</h4>
+            <p>Full profiles, enrollment, and academic history</p>
+          </div>
+        </div>
+        <div class="login-feature">
+          <div class="login-feature-icon purple"><i class="fas fa-chart-line"></i></div>
+          <div>
+            <h4>Gradebook & Academics</h4>
+            <p>Cambridge, IB, and custom curriculum support</p>
+          </div>
+        </div>
+        <div class="login-feature">
+          <div class="login-feature-icon green"><i class="fas fa-coins"></i></div>
+          <div>
+            <h4>Financial Management</h4>
+            <p>Fee structures, invoicing, and payment tracking</p>
+          </div>
+        </div>
+        <div class="login-feature">
+          <div class="login-feature-icon amber"><i class="fas fa-comment-dots"></i></div>
+          <div>
+            <h4>Communication Hub</h4>
+            <p>Messaging between staff, parents, and students</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="login-left-footer">
+      © 2025 SchoolSync · Meridian International School, Nairobi
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL — Login Form -->
+  <div class="login-right">
+    <div class="login-right-inner">
+
+      <div class="login-right-header">
+        <h2>Welcome back 👋</h2>
+        <p>Sign in to your SchoolSync portal</p>
+      </div>
+
+      <form id="login-form" onsubmit="if(typeof Auth!=='undefined'){Auth.login(event);}else{event.preventDefault();}return false;">
+        <div class="form-group">
+          <label>Email Address</label>
+          <div class="input-icon">
+            <i class="fas fa-envelope"></i>
+            <input type="email" id="login-email" placeholder="your@email.com" required autocomplete="email">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <div class="input-icon">
+            <i class="fas fa-lock"></i>
+            <input type="password" id="login-password" placeholder="••••••••" required autocomplete="current-password">
+            <button type="button" class="toggle-pw" onclick="togglePassword()">
+              <i class="fas fa-eye" id="eye-icon"></i>
+            </button>
+          </div>
+        </div>
+        <div class="login-row">
+          <label class="check-label">
+            <input type="checkbox" id="remember-me">
+            <span>Remember me</span>
+          </label>
+          <a href="#" class="link-sm">Forgot password?</a>
+        </div>
+        <button type="submit" class="btn-login" id="login-btn" onclick="Auth.login(event)">
+          <i class="fas fa-arrow-right-to-bracket"></i>
+          <span>Sign In</span>
+        </button>
+      </form>
+
+      <div class="demo-section">
+        <p class="demo-label">Quick demo access</p>
+        <div class="demo-pills">
+          <button onclick="fillDemo('superadmin')" class="demo-pill pill-superadmin">Super Admin</button>
+          <button onclick="fillDemo('admin')"      class="demo-pill pill-admin">Admin</button>
+          <button onclick="fillDemo('teacher')"    class="demo-pill pill-teacher">Teacher</button>
+          <button onclick="fillDemo('parent')"     class="demo-pill pill-parent">Parent</button>
+          <button onclick="fillDemo('student')"    class="demo-pill pill-student">Student</button>
+          <button onclick="fillDemo('finance')"    class="demo-pill pill-finance">Finance</button>
+          <button onclick="fillDemo('deputy')"     class="demo-pill pill-deputy">Deputy Principal</button>
+          <button onclick="fillDemo('discipline')" class="demo-pill pill-discipline">Discipline</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="login-right-footer">
+      By signing in you agree to our <a href="#" style="color:var(--primary)">Terms</a> and <a href="#" style="color:var(--primary)">Privacy Policy</a>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ APP SHELL ═══════════════ -->
+<div id="app-shell" class="app-shell hidden">
+
+  <!-- Mobile sidebar overlay -->
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="App.toggleSidebar()"></div>
+
+  <!-- SIDEBAR -->
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-logo">
+        <div class="logo-icon"><i class="fas fa-graduation-cap"></i></div>
+        <div class="logo-text">
+          <span class="logo-name">SchoolSync</span>
+          <span class="logo-school" id="sidebar-school-name">Loading…</span>
+        </div>
+      </div>
+      <button class="sidebar-close" onclick="App.toggleSidebar()" title="Collapse">
+        <i class="fas fa-chevron-left"></i>
+      </button>
+    </div>
+
+    <div class="sidebar-user">
+      <div class="sidebar-avatar" id="sidebar-avatar">A</div>
+      <div class="sidebar-user-info">
+        <span class="sidebar-username" id="sidebar-user-name">User</span>
+        <span class="sidebar-role" id="sidebar-user-role">Role</span>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav" id="sidebar-nav"><!-- Built by JS --></nav>
+
+    <div class="sidebar-footer">
+      <a class="sf-btn" href="#settings"><i class="fas fa-cog"></i><span>Settings</span></a>
+      <button class="sf-btn sf-logout" onclick="Auth.logout()">
+        <i class="fas fa-sign-out-alt"></i><span>Log Out</span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main-content">
+
+    <!-- TOPBAR -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="topbar-icon-btn" onclick="App.toggleSidebar()" title="Toggle sidebar">
+          <i class="fas fa-bars"></i>
+        </button>
+        <nav class="breadcrumb" id="breadcrumb">Dashboard</nav>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-search">
+          <i class="fas fa-search"></i>
+          <input type="text" placeholder="Search students, teachers…"
+                 id="global-search" onkeyup="App.globalSearch(this.value)">
+        </div>
+        <button class="topbar-icon-btn" onclick="App.navigate('events')" title="Calendar">
+          <i class="fas fa-calendar-alt"></i>
+        </button>
+        <div class="notif-wrap">
+          <button class="topbar-icon-btn" onclick="toggleNotifications()" title="Notifications">
+            <i class="fas fa-bell"></i>
+            <span class="notif-badge" id="notif-badge">3</span>
+          </button>
+          <div class="notif-dropdown" id="notification-dropdown">
+            <div class="notif-hd">
+              <span><i class="fas fa-bell" style="color:var(--primary);margin-right:6px"></i>Notifications</span>
+              <button onclick="markAllRead()" class="link-sm" style="font-size:12px">Mark all read</button>
+            </div>
+            <div id="notifications-list"></div>
+          </div>
+        </div>
+        <div class="topbar-profile" onclick="toggleUserMenu()">
+          <div class="topbar-avatar" id="topbar-avatar">A</div>
+          <span class="topbar-name" id="topbar-name" style="max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+          <i class="fas fa-chevron-down" style="font-size:10px;color:var(--gray-400)"></i>
+          <div class="user-menu" id="user-menu">
+            <div class="um-header" id="um-header-name"></div>
+            <a href="#settings"><i class="fas fa-user-circle"></i> My Profile</a>
+            <a href="#settings"><i class="fas fa-cog"></i> Settings</a>
+            <hr>
+            <a href="#" onclick="Auth.logout()" style="color:var(--danger)"><i class="fas fa-sign-out-alt"></i> Log Out</a>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- PAGE CONTENT -->
+    <div class="page-content" id="page-content">
+      <div class="page-loading">
+        <div class="page-loading-spinner"></div>
+        <span style="font-size:14px;color:var(--gray-400)">Loading…</span>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ═══════════════ MODAL ═══════════════ -->
+<div id="modal-overlay" class="modal-overlay hidden" onclick="closeModal(event)">
+  <div class="modal-container" id="modal-container">
+    <div id="modal-content"></div>
+  </div>
+</div>
+
+<!-- ═══════════════ TOASTS ═══════════════ -->
+<div id="toast-container"></div>
+
+<!-- ═══════════════ SCRIPTS ═══════════════ -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="js/data.js"></script>
+<script src="js/validators.js"></script>
+<script src="js/modules/auth.js"></script>
+<script src="js/modules/dashboard.js"></script>
+<script src="js/modules/students.js"></script>
+<script src="js/modules/classes.js"></script>
+<script src="js/modules/subjects.js"></script>
+<script src="js/modules/timetable.js"></script>
+<script src="js/modules/attendance.js"></script>
+<script src="js/modules/academics.js"></script>
+<script src="js/modules/admissions.js"></script>
+<script src="js/modules/finance.js"></script>
+<script src="js/modules/communication.js"></script>
+<script src="js/modules/events.js"></script>
+<script src="js/modules/reports.js"></script>
+<script src="js/modules/exams.js"></script>
+<script src="js/modules/hr.js"></script>
+<script src="js/modules/behaviour.js"></script>
+<script src="js/modules/settings.js"></script>
+<script src="js/modules/changelog.js"></script>
+<script src="js/modules/help.js"></script>
+<script src="js/app.js"></script>
+<script src="js/tests.js"></script><!-- dev-mode test layer — auto-runs when ?tests=1 in URL -->
+</body>
+</html>

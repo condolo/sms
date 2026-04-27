@@ -1,0 +1,12 @@
+{
+  "name": "schoolsync",
+  "version": "1.0.0",
+  "description": "SchoolSync — International School Management System",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["school", "management", "education"],
+  "author": "SchoolSync",
+  "license": "MIT"
+}
