@@ -81,7 +81,8 @@ const Events = (() => {
     for (let d = 1; d <= daysInMonth; d++) {
       const dateStr = `${_year}-${String(_month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
       const dayEvents = events.filter(e => e.startDate === dateStr || (e.startDate <= dateStr && e.endDate >= dateStr));
-      cells.push({ day: d, dateStr, events: dayEvents, isToday: today.getDate()===d && today.getMonth()===_month && today.getFullYear()===_year });
+      const bdayPeople = typeof Birthday !== 'undefined' ? Birthday.birthdaysOnDate(_year, _month+1, d) : [];
+      cells.push({ day: d, dateStr, events: dayEvents, bdayPeople, isToday: today.getDate()===d && today.getMonth()===_month && today.getFullYear()===_year });
     }
 
     return `
@@ -96,7 +97,7 @@ const Events = (() => {
         ${cells.map(c => c.day === null
           ? `<div class="cal-day other-month"></div>`
           : `<div class="cal-day ${c.isToday?'today':''}">
-              <div class="cal-date">${c.day}</div>
+              <div class="cal-date">${c.day}${c.bdayPeople && c.bdayPeople.length ? `<span class="cal-bday-dot" onclick="event.stopPropagation();Events.viewBirthdays(${_year},${_month+1},${c.day})">🎂</span>` : ''}</div>
               <div class="cal-events">
                 ${c.events.slice(0,3).map(e=>`<div class="cal-event ${e.type}" title="${e.title}" onclick="Events.viewEvent('${e.id}')">${e.title}</div>`).join('')}
                 ${c.events.length > 3 ? `<div style="font-size:10px;color:var(--gray-400);font-weight:600">+${c.events.length-3} more</div>` : ''}
@@ -158,6 +159,48 @@ const Events = (() => {
         <div class="info-item"><div class="info-icon"><i class="fas fa-users"></i></div><div><div class="info-label">Audience</div><div class="info-value">${ev.targetAudience?.join(', ')||'All'}</div></div></div>
       </div>
       ${ev.description?`<div style="margin-top:16px;padding:14px;background:var(--gray-50);border-radius:8px;font-size:13px;color:var(--gray-700);line-height:1.7">${ev.description}</div>`:''}
+    </div>`, 'sm');
+  }
+
+  function viewBirthdays(year, month, day) {
+    const people = typeof Birthday !== 'undefined' ? Birthday.birthdaysOnDate(year, month, day) : [];
+    if (!people.length) return;
+    const dateLabel = new Date(year, month-1, day).toLocaleDateString('en-KE', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+
+    openModal(`
+    <div class="modal-header">
+      <h3>🎂 Birthdays — ${dateLabel}</h3>
+      <button class="modal-close" onclick="_closeModal()"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body" style="padding-top:8px">
+      ${people.map(p => {
+        const isToday = (() => { const t = new Date(); return t.getDate()===day && t.getMonth()+1===month; })();
+        const age = year - new Date(p.dob).getFullYear();
+        return `
+        <div style="display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid var(--gray-100)">
+          <div style="width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#EC4899,#8B5CF6);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;flex-shrink:0;box-shadow:0 3px 10px rgba(236,72,153,.25)">
+            ${p.initials}
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14px;font-weight:600;color:var(--gray-800)">${p.name}</div>
+            <div style="font-size:12px;color:var(--gray-400);margin-top:2px">
+              <i class="fas fa-${p.type==='staff'?'chalkboard-teacher':'graduation-cap'}" style="margin-right:4px"></i>
+              ${p.type==='staff' ? 'Staff · '+p.subtitle : p.subtitle}
+            </div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            ${isToday
+              ? `<span style="background:linear-gradient(135deg,#EC4899,#8B5CF6);color:#fff;font-size:11px;font-weight:700;border-radius:20px;padding:3px 10px">Turns ${age}! 🎉</span>`
+              : `<span style="font-size:13px;font-weight:700;color:var(--primary)">Age ${age}</span>`
+            }
+          </div>
+        </div>`;
+      }).join('')}
+      <div style="margin-top:16px;padding:12px 16px;background:linear-gradient(135deg,#fdf2f8,#ede9fe);border-radius:10px;text-align:center;font-size:13px;color:var(--gray-600)">
+        ${people.length === 1
+          ? `🎂 <strong>${people[0].name.split(' ')[0]}</strong> celebrates their birthday on this day`
+          : `🎂 <strong>${people.length} people</strong> share this birthday`}
+      </div>
     </div>`, 'sm');
   }
 
@@ -241,5 +284,5 @@ const Events = (() => {
   function nextMonth() { if (_month === 11) { _month=0; _year++; } else _month++; _renderPage(); }
   function setView(v) { _view = v; _renderPage(); }
 
-  return { render, viewEvent, addModal, editModal, save, delete: deleteEvent, prevMonth, nextMonth, setView };
+  return { render, viewEvent, viewBirthdays, addModal, editModal, save, delete: deleteEvent, prevMonth, nextMonth, setView };
 })();

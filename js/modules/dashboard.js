@@ -108,6 +108,8 @@ const Dashboard = (() => {
       </div>
     </div>
 
+    ${typeof Birthday !== 'undefined' ? Birthday.dashboardCard() : ''}
+
     <div class="grid-2">
       <div class="card mb-0">
         <div class="card-header">

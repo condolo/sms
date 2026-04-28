@@ -6,6 +6,42 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.7.1] — 2026-04-28  Birthday Calendar Popup
+
+### Improved — Clickable Birthday Dots on Calendar
+- **🎂 dot is now clickable** — clicking a birthday emoji on any calendar day opens a modal listing everyone who has a birthday on that date
+- Modal shows: date header, each person's avatar (initials), name, role/class, and age; "Turns N! 🎉" gradient badge for today's birthdays; "Age N" for other dates
+- Summary line at the bottom: "X celebrates their birthday on this day" (1 person) or "X people share this birthday" (multiple)
+- Dot animates on hover (scales up) to hint interactivity; uses `event.stopPropagation()` so the day cell click does not interfere
+- `Events.viewBirthdays(year, month, day)` — new public function; called inline from the calendar cell
+
+---
+
+## [2.7.0] — 2026-04-28  Birthday System
+
+### New — Birthday Detection & Greetings
+- **`js/modules/birthday.js`** — new `Birthday` IIFE module; automatically detects birthdays for all active students and staff
+- **Own birthday modal** — when the logged-in user's birthday is today, a celebratory full-screen modal appears ~1 second after login (name, turning age with ordinal, gradient button)
+- **Staff toast notifications** — admin, teacher, deputy, discipline, section_sec, and hr roles receive a toast for each other person whose birthday is today
+- **Notification bell injection** — today's birthdays are prepended to the notification dropdown with a pink left-border and 🎂 icon; badge count increments
+- **Dashboard birthday card** — a `Birthdays` card appears on the admin dashboard (between stats and charts) showing:
+  - Today's celebrants: pink gradient avatar, name, "Turns N!" badge, role/class
+  - Upcoming birthdays (next 7 days): grey avatar, countdown in days, formatted date
+  - Card is hidden entirely if no birthdays today or within 7 days
+- **Calendar birthday indicators** — every day cell in the Events calendar that has a birthday shows a 🎂 emoji next to the date number; hovering reveals all names
+
+### Technical
+- `Birthday.todaysBirthdays()` — returns all people whose MM-DD matches today
+- `Birthday.upcomingBirthdays(days=7)` — returns people with birthdays in the next N days, sorted ascending
+- `Birthday.birthdaysOnDate(year, month, day)` — used by the calendar for per-cell birthday lookup
+- `Birthday.dashboardCard()` — returns full HTML string or `''` if nothing to show
+- Birthday comparison uses `MM-DD` only (annual recurrence; birth year ignored)
+- `_daysUntil()` handles year rollover correctly
+- `Birthday.init()` called from `App._showApp()` after `_buildNotifications()`
+- `SEED_VERSION` bumped to `'18'`; demo DOBs updated: Emily Johnson + Grace Kamau → Apr 27 (today); Brian Omondi → Apr 29; James Ochieng → May 1
+
+---
+
 ## [2.6.0] — 2026-04-27  Dynamic Branding · Login Page Personalization · Immersive Login Layout
 
 ### New — Dynamic Branding (Settings → Branding, Super Admin only)

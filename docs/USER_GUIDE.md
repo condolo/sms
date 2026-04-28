@@ -289,6 +289,13 @@ Switch between **Month**, **Week**, and **List** views using the view toggle.
 - **Class event**: visible to students and parents in that class
 - **Staff only**: visible to teachers and above
 
+### Birthday Indicators
+The calendar automatically marks days that have student or staff birthdays with a 🎂 emoji next to the date number.
+
+- **Click the 🎂** to open a popup showing everyone celebrating on that day — their name, role/class, and the age they are turning.
+- Today's birthdays show a **"Turns N! 🎉"** badge; future birthdays show their age.
+- Multiple people sharing a birthday are all listed together.
+
 ---
 
 ## 13. Behaviour & Pastoral

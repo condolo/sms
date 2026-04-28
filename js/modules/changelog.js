@@ -8,6 +8,53 @@ const Changelog = (() => {
   /* ── Version data ─────────────────────────────────────── */
   const VERSIONS = [
     {
+      version: '2.7.1',
+      date: '2026-04-28',
+      tag: 'patch',
+      title: 'Birthday Calendar Popup',
+      sections: [
+        {
+          heading: 'Improved — Clickable Birthday Dots',
+          type: 'changed',
+          items: [
+            '🎂 calendar dot is now clickable — opens a modal with all people celebrating on that day',
+            'Modal shows avatar, name, role/class, and a "Turns N! 🎉" badge for today or "Age N" for future dates',
+            'Hover animation on the dot (scale-up) hints interactivity',
+            '<code>Events.viewBirthdays(year, month, day)</code> — new public function added to the Events module',
+          ]
+        },
+      ]
+    },
+    {
+      version: '2.7.0',
+      date: '2026-04-28',
+      tag: 'minor',
+      title: 'Birthday System',
+      sections: [
+        {
+          heading: 'New — Birthday Detection & Greetings',
+          type: 'new',
+          items: [
+            'New <code>Birthday</code> module (<code>js/modules/birthday.js</code>) — detects birthdays for all active students and staff using annual MM-DD matching',
+            'Own birthday modal — logged-in user whose birthday is today sees a celebratory modal ~1 s after login, showing their name and turning age',
+            'Staff toast notifications — admin, teacher, deputy, and pastoral staff receive a toast for every other person whose birthday is today',
+            'Notification bell — today\'s birthdays are injected at the top of the dropdown with a 🎂 icon and pink accent; badge count incremented',
+            'Dashboard birthday card — appears between the stats grid and charts on the admin dashboard; shows today\'s celebrants (pink avatar, age badge) and upcoming birthdays within 7 days (countdown + date)',
+            'Calendar birthday indicators — 🎂 emoji shown next to day numbers in the Events calendar for any day with a birthday; tooltip lists all names',
+          ]
+        },
+        {
+          heading: 'Technical',
+          type: 'changed',
+          items: [
+            '<code>Birthday.init()</code> called from <code>App._showApp()</code> after <code>_buildNotifications()</code>',
+            'Public API: <code>todaysBirthdays()</code>, <code>upcomingBirthdays(days)</code>, <code>birthdaysOnDate(y,m,d)</code>, <code>dashboardCard()</code>',
+            '<code>SEED_VERSION</code> bumped to <code>\'18\'</code>; demo DOBs updated near today for immediate demo visibility',
+          ]
+        },
+      ]
+    },
+    {
       version: '2.6.0',
       date: '2026-04-27',
       tag: 'minor',

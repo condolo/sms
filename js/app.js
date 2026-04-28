@@ -310,6 +310,7 @@ const App = (() => {
     _buildSidebar();
     _buildNotifications();
     _applyBranding();
+    if (typeof Birthday !== 'undefined') Birthday.init();
     const user = Auth.currentUser;
     document.getElementById('sidebar-user-name').textContent = user.name;
     document.getElementById('sidebar-user-role').textContent = Auth.primaryRoleLabel();
