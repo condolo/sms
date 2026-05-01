@@ -6,6 +6,55 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [3.4.0] — 2026-05-01  Password Rotation · User Invites · Role Notifications · Security Hardening
+
+### Security — Critical Fixes
+- `GET /api/collections/users` no longer returns password hashes or MFA fields — all bcrypt and OTP data is stripped from every response
+- Any authenticated user (teacher, parent, student) could previously write to the `users` collection — now only `admin` and `superadmin` roles can create, update, or delete users and role permissions
+- Non-superadmin users can no longer assign the `superadmin` role or modify their own role
+- Password field cannot be overwritten via the generic PUT endpoint — role updates never touch credentials
+- Added **`helmet`** HTTP security headers: X-Frame-Options, X-Content-Type-Options, Strict-Transport-Security, Referrer-Policy, and more
+- CORS now restricted to known origins in production (Render URL + localhost); unknown origins are blocked and logged
+- Server warns at startup if `JWT_SECRET` environment variable is not set
+- bcrypt cost factor raised from 10 → 12 for all new password hashing
+
+### New — 60-Day Password Rotation Policy
+- All user passwords expire after **60 days** — enforced server-side at login
+- If expired: server returns `passwordExpired: true` (no JWT issued) → frontend shows a "Password expired" force-change screen
+- If `mustChangePassword` flag set: shows "Set your password" screen for first-login users
+- Password change screen includes real-time hints (length ✓, match ✓) and blocks submission until both pass
+- After successful forced change: JWT is issued, session starts normally
+- Security email sent after every password change
+- **Dashboard banner** visible to all users when password expires in ≤ 7 days (blue → amber → red urgency)
+- Email reminders at 7 / 3 / 1 / 0 days before expiry (deduplicated — one per milestone per day)
+
+### New — User Invite System (Bulk & Individual)
+- `POST /api/users/invite` — admin/superadmin creates a single user with a system-generated temp password
+  - User is created in MongoDB immediately; `mustChangePassword: true` is set
+  - Welcome email sent with branded credentials and login link
+  - Returns `{ user, tempPassword }` — password shown once to the admin
+- `POST /api/users/bulk-invite` — accepts up to 200 users as a JSON array
+  - Processes each independently: per-user welcome email, skips existing emails, records errors
+  - Returns `{ created: [], skipped: [], errors: [] }` summary
+- Users who are invited must set their own password on first login — their temp password never persists
+
+### New — Email Notifications for All User Events
+- **Welcome email** — sent to every new user with their temporary credentials and role
+- **Password changed** — security confirmation email after any password update (forced or voluntary)
+- **Password expiry reminder** — urgency-coded email at 7, 3, 1 days before and on expiry day
+- **Role change notification** — automatic email to user whenever their role is updated via the dashboard; triggered by any PUT to the users collection that changes the `role` field
+- All emails use the branded InnoLearn HTML template with action CTAs
+
+### New API Endpoints
+| Method | Route | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/users/invite` | JWT (admin+) | Create user + send welcome email |
+| `POST` | `/api/users/bulk-invite` | JWT (admin+) | Bulk create users, individual emails |
+| `POST` | `/api/users/:id/role-change` | JWT (admin+) | Manual role-change notification |
+| `POST` | `/api/auth/force-change` | Rate limited | Change expired/temp password → issues JWT |
+
+---
+
 ## [3.3.0] — 2026-05-01  Security · Real-time Slug Check · 2FA · Trial Reminders
 
 ### New — Real-time URL Slug Availability Check

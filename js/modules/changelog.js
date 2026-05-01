@@ -8,6 +8,60 @@ const Changelog = (() => {
   /* ── Version data ─────────────────────────────────────── */
   const VERSIONS = [
     {
+      version: '3.4.0',
+      date: '2026-05-01',
+      tag: 'security',
+      title: 'Password Rotation · User Invites · Role Notifications · Security Hardening',
+      sections: [
+        {
+          heading: 'Security — Critical Fixes',
+          type: 'security',
+          items: [
+            'GET /api/collections/users no longer returns bcrypt password hashes or MFA fields to any client',
+            'Role-based write guards: only admin/superadmin can create, update, or delete users and permissions',
+            'Non-superadmin cannot assign superadmin role or modify their own role',
+            'Password field cannot be overwritten via the generic PUT endpoint',
+            'Added <code>helmet</code> HTTP security headers (X-Frame-Options, HSTS, Referrer-Policy, etc.)',
+            'CORS restricted to known origins in production; unknown origins blocked and logged',
+            'Server warns on startup if JWT_SECRET env var is not set',
+            'bcrypt cost factor raised from 10 → 12 for stronger password hashing',
+          ]
+        },
+        {
+          heading: 'New — 60-Day Password Rotation',
+          type: 'security',
+          items: [
+            'All passwords expire after 60 days — enforced at login; no JWT issued until changed',
+            'Force-change screen with real-time hints (length ✓, match ✓) replaces login form',
+            'First-login users (mustChangePassword) see a "Set your password" screen',
+            'Security confirmation email sent after every password change',
+            'Dashboard banner for all users when ≤ 7 days left (blue → amber → red)',
+            'Email reminders at 7 / 3 / 1 / 0 days before expiry (deduplicated per day)',
+          ]
+        },
+        {
+          heading: 'New — User Invite System',
+          type: 'new',
+          items: [
+            'POST /api/users/invite — create single user with temp password + send welcome email',
+            'POST /api/users/bulk-invite — up to 200 users from JSON array, individual emails per user',
+            'Invited users must set their own password on first login',
+            'Bulk invite returns { created, skipped, errors } summary for admin review',
+          ]
+        },
+        {
+          heading: 'New — User Event Email Notifications',
+          type: 'new',
+          items: [
+            'Welcome email with branded credentials sent to every new invited user',
+            'Password changed: security confirmation after any update (forced or voluntary)',
+            'Role change: automatic email when a user\'s role is updated via the dashboard',
+            'Password expiry reminder emails at 7 / 3 / 1 / 0 days (deduplicated)',
+          ]
+        },
+      ]
+    },
+    {
       version: '3.3.0',
       date: '2026-05-01',
       tag: 'security',
