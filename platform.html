@@ -1,0 +1,606 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InnoLearn — Platform Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="css/platform.css">
+</head>
+<body>
+
+<!-- ══ LOCK SCREEN ═════════════════════════════════════════ -->
+<div id="lock-screen" class="pa-lock-screen">
+  <div class="pa-lock-card">
+    <div class="pa-lock-icon"><i class="fas fa-shield-halved"></i></div>
+    <h2>Platform Admin</h2>
+    <p>This area is restricted to InnoLearn system administrators. Enter your platform key to continue.</p>
+
+    <div class="pa-lock-field">
+      <label>Platform Admin Key</label>
+      <div class="pa-key-wrap">
+        <input type="password" id="key-input" placeholder="Enter your platform key…"
+               onkeydown="if(event.key==='Enter') verifyKey()">
+        <button class="pa-key-toggle" onclick="toggleKeyVis(this)">
+          <i class="fas fa-eye"></i>
+        </button>
+      </div>
+    </div>
+
+    <button class="pa-lock-btn" id="key-btn" onclick="verifyKey()">
+      <i class="fas fa-arrow-right-to-bracket"></i> Access Platform
+    </button>
+
+    <div class="pa-lock-error" id="key-error">
+      Invalid platform key. Please try again.
+    </div>
+  </div>
+</div>
+
+<!-- ══ APP SHELL ════════════════════════════════════════════ -->
+<div id="app-shell" class="pa-shell" style="display:none">
+
+  <!-- Sidebar -->
+  <aside class="pa-sidebar">
+    <div class="pa-sidebar-brand">
+      <h1>
+        <div class="pa-brand-icon"><i class="fas fa-graduation-cap"></i></div>
+        InnoLearn
+      </h1>
+      <p>Platform Admin</p>
+    </div>
+
+    <nav class="pa-nav">
+      <button class="pa-nav-item active" onclick="showView('overview')" id="nav-overview">
+        <i class="fas fa-chart-pie"></i> Overview
+      </button>
+      <button class="pa-nav-item" onclick="showView('schools')" id="nav-schools">
+        <i class="fas fa-school"></i> Schools
+      </button>
+      <button class="pa-nav-item" onclick="showView('provision')" id="nav-provision">
+        <i class="fas fa-plus-circle"></i> Provision School
+      </button>
+    </nav>
+
+    <div class="pa-sidebar-footer">
+      <button class="pa-logout-btn" onclick="logout()">
+        <i class="fas fa-sign-out-alt"></i> Sign Out
+      </button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="pa-main">
+    <header class="pa-topbar">
+      <h2 id="view-title">Overview</h2>
+      <div class="pa-topbar-meta">
+        <i class="fas fa-circle" style="color:#22c55e;font-size:7px"></i>
+        Platform Admin · <span id="topbar-time"></span>
+      </div>
+    </header>
+
+    <div class="pa-content" id="pa-content">
+      <div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading…</div>
+    </div>
+  </main>
+</div>
+
+<!-- ══ TOAST ═══════════════════════════════════════════════ -->
+<div class="pa-toast-wrap" id="toast-wrap"></div>
+
+<script>
+/* ============================================================
+   InnoLearn Platform Admin Dashboard
+   ============================================================ */
+
+const SESSION_KEY = 'pa_key';
+let _key = '';
+let _currentView = 'overview';
+
+/* ── Auth ───────────────────────────────────────────────── */
+async function verifyKey() {
+  const input = document.getElementById('key-input');
+  const btn   = document.getElementById('key-btn');
+  const err   = document.getElementById('key-error');
+  const key   = input.value.trim();
+
+  if (!key) return;
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Verifying…';
+  err.style.display = 'none';
+
+  try {
+    // Test the key against the stats endpoint
+    const res = await fetch('/api/platform/stats', {
+      headers: { 'X-Platform-Key': key }
+    });
+
+    if (res.ok) {
+      _key = key;
+      sessionStorage.setItem(SESSION_KEY, key);
+      _showApp();
+    } else if (res.status === 403) {
+      err.style.display = 'block';
+      err.textContent = 'Invalid platform key. Please try again.';
+    } else {
+      // If server not running (offline/demo), check against a local fallback
+      _offlineMode(key);
+    }
+  } catch {
+    // Server not reachable — allow offline demo mode
+    _offlineMode(key);
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '<i class="fas fa-arrow-right-to-bracket"></i> Access Platform';
+}
+
+function _offlineMode(key) {
+  // In offline/demo mode, accept any non-empty key
+  if (key.length >= 8) {
+    _key = key;
+    sessionStorage.setItem(SESSION_KEY, key);
+    _showApp();
+    toast('Running in offline mode — connect MongoDB for live data', 'info');
+  } else {
+    const err = document.getElementById('key-error');
+    err.style.display = 'block';
+    err.textContent = 'Key must be at least 8 characters.';
+  }
+}
+
+function _showApp() {
+  document.getElementById('lock-screen').style.display = 'none';
+  document.getElementById('app-shell').style.display   = 'flex';
+  _updateClock();
+  setInterval(_updateClock, 60000);
+  showView('overview');
+}
+
+function _updateClock() {
+  document.getElementById('topbar-time').textContent =
+    new Date().toLocaleString('en-GB', { dateStyle:'medium', timeStyle:'short' });
+}
+
+function logout() {
+  sessionStorage.removeItem(SESSION_KEY);
+  _key = '';
+  document.getElementById('lock-screen').style.display = 'flex';
+  document.getElementById('app-shell').style.display   = 'none';
+  document.getElementById('key-input').value = '';
+}
+
+function toggleKeyVis(btn) {
+  const inp = document.getElementById('key-input');
+  const show = inp.type === 'text';
+  inp.type = show ? 'password' : 'text';
+  btn.querySelector('i').className = show ? 'fas fa-eye' : 'fas fa-eye-slash';
+}
+
+/* ── API helper ─────────────────────────────────────────── */
+async function api(method, path, body) {
+  const opts = {
+    method,
+    headers: { 'Content-Type':'application/json', 'X-Platform-Key': _key }
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch('/api/platform' + path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+/* ── Navigation ─────────────────────────────────────────── */
+function showView(view) {
+  _currentView = view;
+  document.querySelectorAll('.pa-nav-item').forEach(el => el.classList.remove('active'));
+  document.getElementById('nav-' + view)?.classList.add('active');
+
+  const titles = { overview:'Overview', schools:'Registered Schools', provision:'Provision New School' };
+  document.getElementById('view-title').textContent = titles[view] || view;
+
+  const views = { overview: renderOverview, schools: renderSchools, provision: renderProvision };
+  (views[view] || (() => {}))();
+}
+
+/* ── OVERVIEW ───────────────────────────────────────────── */
+async function renderOverview() {
+  const el = document.getElementById('pa-content');
+  el.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading stats…</div>';
+
+  try {
+    const stats = await api('GET', '/stats');
+    const PLAN_PRICE = { core:15000, standard:35000, premium:65000, enterprise:250000 };
+
+    el.innerHTML = `
+      <div class="pa-stats">
+        <div class="pa-stat-card">
+          <div class="pa-stat-label">Total Schools</div>
+          <div class="pa-stat-value">${stats.totalSchools}</div>
+          <div class="pa-stat-sub">${stats.activeSchools} active</div>
+        </div>
+        <div class="pa-stat-card">
+          <div class="pa-stat-label">Total Students</div>
+          <div class="pa-stat-value">${(stats.totalStudents||0).toLocaleString()}</div>
+          <div class="pa-stat-sub">across all schools</div>
+        </div>
+        <div class="pa-stat-card">
+          <div class="pa-stat-label">Monthly Revenue</div>
+          <div class="pa-stat-value">KES ${((stats.mrr||0)/1000).toFixed(0)}K</div>
+          <div class="pa-stat-sub">MRR (active schools)</div>
+        </div>
+        <div class="pa-stat-card">
+          <div class="pa-stat-label">Annual Run Rate</div>
+          <div class="pa-stat-value">KES ${(((stats.mrr||0)*12)/1000000).toFixed(1)}M</div>
+          <div class="pa-stat-sub">ARR projection</div>
+        </div>
+      </div>
+
+      <div class="pa-card">
+        <div class="pa-card-header"><h3>Plan Breakdown</h3></div>
+        <div class="mrr-grid">
+          ${['core','standard','premium','enterprise'].map(plan => {
+            const count = (stats.byPlan||{})[plan] || 0;
+            const rev   = count * (PLAN_PRICE[plan] || 0);
+            return `
+              <div class="mrr-item">
+                <div class="mrr-item-count">${count}</div>
+                <div class="mrr-item-plan">${plan}</div>
+                <div class="mrr-item-rev">${rev > 0 ? 'KES ' + rev.toLocaleString() + '/mo' : '—'}</div>
+              </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+
+  } catch (err) {
+    el.innerHTML = _offlineStatsHTML();
+    toast('Could not reach server — showing demo data', 'info');
+  }
+}
+
+function _offlineStatsHTML() {
+  return `
+    <div class="pa-stats">
+      <div class="pa-stat-card">
+        <div class="pa-stat-label">Total Schools</div>
+        <div class="pa-stat-value">1</div>
+        <div class="pa-stat-sub">1 active (offline mode)</div>
+      </div>
+      <div class="pa-stat-card">
+        <div class="pa-stat-label">Total Students</div>
+        <div class="pa-stat-value">20</div>
+        <div class="pa-stat-sub">InnoLearn demo school</div>
+      </div>
+      <div class="pa-stat-card">
+        <div class="pa-stat-label">Monthly Revenue</div>
+        <div class="pa-stat-value">KES 35K</div>
+        <div class="pa-stat-sub">1 × Standard plan</div>
+      </div>
+      <div class="pa-stat-card">
+        <div class="pa-stat-label">Annual Run Rate</div>
+        <div class="pa-stat-value">KES 0.4M</div>
+        <div class="pa-stat-sub">ARR projection</div>
+      </div>
+    </div>
+    <div class="pa-card">
+      <div class="pa-card-header"><h3>Server Status</h3></div>
+      <div style="padding:20px;font-size:13px;color:var(--gray-500)">
+        <i class="fas fa-triangle-exclamation" style="color:#f59e0b;margin-right:8px"></i>
+        Running in offline mode. Connect MongoDB and set PLATFORM_ADMIN_KEY in Render to see live data.
+        <br><br>
+        <a href="/api/health" target="_blank" style="color:var(--primary)">Check server health →</a>
+      </div>
+    </div>`;
+}
+
+/* ── SCHOOLS ────────────────────────────────────────────── */
+async function renderSchools() {
+  const el = document.getElementById('pa-content');
+  el.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading schools…</div>';
+
+  try {
+    const schools = await api('GET', '/schools');
+    if (!schools.length) {
+      el.innerHTML = `<div class="pa-card"><div class="pa-empty"><i class="fas fa-school"></i><p>No schools registered yet.</p></div></div>`;
+      return;
+    }
+    _renderSchoolsTable(el, schools);
+  } catch {
+    el.innerHTML = `
+      <div class="pa-card">
+        <div class="pa-card-header"><h3>Registered Schools</h3></div>
+        <div style="padding:20px;font-size:13px;color:var(--gray-500)">
+          <i class="fas fa-triangle-exclamation" style="color:#f59e0b;margin-right:8px"></i>
+          Cannot reach the server. Make sure the Express server is running and PLATFORM_ADMIN_KEY is set.
+        </div>
+      </div>`;
+  }
+}
+
+function _renderSchoolsTable(el, schools) {
+  el.innerHTML = `
+    <div class="pa-card">
+      <div class="pa-card-header">
+        <h3>Registered Schools (${schools.length})</h3>
+        <button class="pa-btn primary" onclick="showView('provision')">
+          <i class="fas fa-plus"></i> Add School
+        </button>
+      </div>
+      <div class="pa-table-wrap">
+        <table class="pa-table">
+          <thead>
+            <tr>
+              <th>School</th>
+              <th>Slug</th>
+              <th>Plan</th>
+              <th>Status</th>
+              <th>Students</th>
+              <th>Staff</th>
+              <th>Trial Ends</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${schools.map(s => _schoolRow(s)).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function _schoolRow(s) {
+  const trial = s.trialEnds ? new Date(s.trialEnds) : null;
+  const trialStr = trial
+    ? (trial < new Date() ? '<span style="color:#ef4444">Expired</span>' : trial.toLocaleDateString('en-GB'))
+    : '—';
+  const status = !s.isActive ? 'inactive' : (trial && trial > new Date() ? 'trial' : 'active');
+  const statusLabel = !s.isActive ? 'Suspended' : (status === 'trial' ? 'Trial' : 'Active');
+
+  return `
+    <tr>
+      <td>
+        <strong style="display:block;font-size:13px;color:var(--gray-900)">${s.name}</strong>
+        <span style="font-size:11px;color:var(--gray-400)">${s.email||''}</span>
+      </td>
+      <td><code style="font-size:12px;background:var(--gray-100);padding:2px 6px;border-radius:4px">${s.slug||'—'}</code></td>
+      <td><span class="plan-pill ${s.plan||'core'}">${s.plan||'core'}</span></td>
+      <td><span class="status-dot ${status}">${statusLabel}</span></td>
+      <td>${s._stats?.students ?? '—'}</td>
+      <td>${s._stats?.staff   ?? '—'}</td>
+      <td>${trialStr}</td>
+      <td>
+        <div class="pa-action-wrap">
+          <button class="pa-btn" title="Impersonate admin" onclick="confirmImpersonate('${s.id}','${s.name}')">
+            <i class="fas fa-user-secret"></i> Log in
+          </button>
+          <button class="pa-btn" title="Change plan" onclick="changePlan('${s.id}','${s.plan}','${s.name}')">
+            <i class="fas fa-layer-group"></i> Plan
+          </button>
+          ${s.isActive
+            ? `<button class="pa-btn danger" onclick="toggleActive('${s.id}',false,'${s.name}')"><i class="fas fa-ban"></i></button>`
+            : `<button class="pa-btn success" onclick="toggleActive('${s.id}',true,'${s.name}')"><i class="fas fa-check"></i></button>`
+          }
+        </div>
+      </td>
+    </tr>`;
+}
+
+/* ── Impersonate ────────────────────────────────────────── */
+function confirmImpersonate(schoolId, schoolName) {
+  showModal(
+    `Log in as ${schoolName}`,
+    `You are about to impersonate the Super Admin of <strong>${schoolName}</strong>. You will be redirected to their portal and signed in automatically.`,
+    [
+      { label:'Cancel', cls:'pa-btn', action:'closeModal()' },
+      { label:'Log In as Admin', cls:'pa-btn primary', action:`doImpersonate('${schoolId}')` }
+    ]
+  );
+}
+
+async function doImpersonate(schoolId) {
+  closeModal();
+  try {
+    const data = await api('POST', `/schools/${schoolId}/impersonate`);
+    // Store JWT and redirect to the school app
+    localStorage.setItem('ss_jwt', data.token);
+    sessionStorage.setItem('ss_jwt', data.token);
+    if (data.user) {
+      sessionStorage.setItem('ss_session', JSON.stringify({ user: data.user, school: {} }));
+    }
+    toast('Redirecting to school portal…', 'success');
+    setTimeout(() => { window.location.href = '/index.html'; }, 800);
+  } catch (err) {
+    toast('Impersonation failed: ' + err.message, 'error');
+  }
+}
+
+/* ── Change Plan ────────────────────────────────────────── */
+function changePlan(schoolId, currentPlan, schoolName) {
+  const opts = ['core','standard','premium','enterprise']
+    .map(p => `<option value="${p}" ${p===currentPlan?'selected':''}>${p.charAt(0).toUpperCase()+p.slice(1)}</option>`)
+    .join('');
+
+  showModal(
+    `Change Plan — ${schoolName}`,
+    `<label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Select New Plan</label>
+     <select id="plan-select" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:14px;font-family:inherit">
+       ${opts}
+     </select>`,
+    [
+      { label:'Cancel', cls:'pa-btn', action:'closeModal()' },
+      { label:'Update Plan', cls:'pa-btn primary', action:`doChangePlan('${schoolId}')` }
+    ]
+  );
+}
+
+async function doChangePlan(schoolId) {
+  const plan = document.getElementById('plan-select')?.value;
+  if (!plan) return;
+  closeModal();
+  try {
+    await api('PATCH', `/schools/${schoolId}`, { plan });
+    toast('Plan updated to ' + plan, 'success');
+    renderSchools();
+  } catch (err) {
+    toast('Failed: ' + err.message, 'error');
+  }
+}
+
+/* ── Toggle active ──────────────────────────────────────── */
+async function toggleActive(schoolId, active, schoolName) {
+  const action = active ? 'reinstate' : 'suspend';
+  if (!confirm(`${action.charAt(0).toUpperCase()+action.slice(1)} ${schoolName}?`)) return;
+  try {
+    await api('PATCH', `/schools/${schoolId}`, { isActive: active });
+    toast(`${schoolName} ${action}d`, 'success');
+    renderSchools();
+  } catch (err) {
+    toast('Failed: ' + err.message, 'error');
+  }
+}
+
+/* ── PROVISION ──────────────────────────────────────────── */
+function renderProvision() {
+  document.getElementById('pa-content').innerHTML = `
+    <div class="pa-card" style="max-width:640px">
+      <div class="pa-card-header"><h3>Provision a New School</h3></div>
+      <div class="pa-form">
+        <div class="pa-form-row">
+          <div class="pa-field">
+            <label>School Full Name *</label>
+            <input type="text" id="p-name" placeholder="e.g. Sunrise Academy">
+          </div>
+          <div class="pa-field">
+            <label>Short Name</label>
+            <input type="text" id="p-short" placeholder="e.g. SA" maxlength="10">
+          </div>
+        </div>
+        <div class="pa-form-row">
+          <div class="pa-field">
+            <label>URL Slug *</label>
+            <input type="text" id="p-slug" placeholder="e.g. sunrise-academy">
+          </div>
+          <div class="pa-field">
+            <label>Plan</label>
+            <select id="p-plan">
+              <option value="core">Core — KES 15,000/mo</option>
+              <option value="standard" selected>Standard — KES 35,000/mo</option>
+              <option value="premium">Premium — KES 65,000/mo</option>
+              <option value="enterprise">Enterprise — Custom</option>
+            </select>
+          </div>
+        </div>
+        <div class="pa-form-row">
+          <div class="pa-field">
+            <label>Admin Full Name *</label>
+            <input type="text" id="p-admin-name" placeholder="School administrator">
+          </div>
+          <div class="pa-field">
+            <label>Admin Email *</label>
+            <input type="email" id="p-admin-email" placeholder="admin@school.edu">
+          </div>
+        </div>
+        <div class="pa-form-row">
+          <div class="pa-field">
+            <label>Admin Password *</label>
+            <input type="password" id="p-admin-pw" placeholder="Min. 8 characters">
+          </div>
+          <div class="pa-field">
+            <label>Currency</label>
+            <select id="p-currency">
+              <option value="KES">KES — Kenyan Shilling</option>
+              <option value="UGX">UGX — Ugandan Shilling</option>
+              <option value="TZS">TZS — Tanzanian Shilling</option>
+              <option value="NGN">NGN — Nigerian Naira</option>
+              <option value="GHS">GHS — Ghanaian Cedi</option>
+              <option value="ZAR">ZAR — South African Rand</option>
+              <option value="GBP">GBP — British Pound</option>
+              <option value="USD">USD — US Dollar</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="provision-error" style="display:none;padding:10px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:13px;color:#b91c1c"></div>
+
+        <div style="display:flex;justify-content:flex-end;gap:10px">
+          <button class="pa-btn" onclick="showView('schools')">Cancel</button>
+          <button class="pa-btn primary" id="provision-btn" onclick="doProvision()">
+            <i class="fas fa-plus-circle"></i> Provision School
+          </button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function doProvision() {
+  const g = id => document.getElementById(id)?.value.trim();
+  const name = g('p-name'), slug = g('p-slug'), email = g('p-admin-email'), pw = g('p-admin-pw');
+  const errEl = document.getElementById('provision-error');
+  errEl.style.display = 'none';
+
+  if (!name || !slug || !email || !pw) {
+    errEl.textContent = 'Please fill in all required fields.'; errEl.style.display = 'block'; return;
+  }
+
+  const btn = document.getElementById('provision-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Provisioning…';
+
+  try {
+    await api('POST', '/schools', {
+      name, shortName: g('p-short'), slug,
+      plan: g('p-plan'), currency: g('p-currency'), timezone: 'Africa/Nairobi',
+      adminName: g('p-admin-name'), adminEmail: email, adminPassword: pw
+    });
+    toast(`${name} provisioned successfully!`, 'success');
+    showView('schools');
+  } catch (err) {
+    errEl.textContent = err.message; errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-plus-circle"></i> Provision School';
+  }
+}
+
+/* ── Modal ──────────────────────────────────────────────── */
+function showModal(title, body, actions) {
+  closeModal();
+  const bg = document.createElement('div');
+  bg.className = 'pa-modal-bg';
+  bg.id = 'pa-modal-bg';
+  bg.innerHTML = `
+    <div class="pa-modal">
+      <h3>${title}</h3>
+      <p>${body}</p>
+      <div class="pa-modal-actions">
+        ${actions.map(a => `<button class="${a.cls}" onclick="${a.action}">${a.label}</button>`).join('')}
+      </div>
+    </div>`;
+  document.body.appendChild(bg);
+}
+
+function closeModal() {
+  document.getElementById('pa-modal-bg')?.remove();
+}
+
+/* ── Toast ──────────────────────────────────────────────── */
+function toast(msg, type = 'info') {
+  const wrap = document.getElementById('toast-wrap');
+  const el = document.createElement('div');
+  el.className = `pa-toast ${type}`;
+  el.textContent = msg;
+  wrap.appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+/* ── Boot: check saved session ──────────────────────────── */
+window.addEventListener('DOMContentLoaded', () => {
+  const saved = sessionStorage.getItem(SESSION_KEY);
+  if (saved) { _key = saved; _showApp(); }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,983 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Get Started — InnoLearn</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="css/onboard.css">
+</head>
+<body>
+
+<div class="ob-wrap">
+
+  <!-- ══ LEFT PANEL ══════════════════════════════════════ -->
+  <div class="ob-left">
+    <div class="ob-brand">
+      <div class="ob-brand-icon"><i class="fas fa-graduation-cap"></i></div>
+      <div class="ob-brand-name">School<span>Sync</span></div>
+    </div>
+
+    <div class="ob-steps" id="ob-step-list">
+      <div class="ob-step-item active" id="sl-1">
+        <div class="ob-step-num" id="sl-num-1">1</div>
+        <div class="ob-step-label">
+          <strong>School Details</strong>
+          <small>Name, type &amp; location</small>
+        </div>
+      </div>
+      <div class="ob-step-item" id="sl-2">
+        <div class="ob-step-num" id="sl-num-2">2</div>
+        <div class="ob-step-label">
+          <strong>Admin Account</strong>
+          <small>Your login credentials</small>
+        </div>
+      </div>
+      <div class="ob-step-item" id="sl-3">
+        <div class="ob-step-num" id="sl-num-3">3</div>
+        <div class="ob-step-label">
+          <strong>Choose Plan</strong>
+          <small>Start with a 30-day free trial</small>
+        </div>
+      </div>
+      <div class="ob-step-item" id="sl-4">
+        <div class="ob-step-num" id="sl-num-4">4</div>
+        <div class="ob-step-label">
+          <strong>Review &amp; Launch</strong>
+          <small>Confirm and go live</small>
+        </div>
+      </div>
+    </div>
+
+    <div class="ob-left-footer">
+      Already have an account?<br>
+      <a href="index.html">Sign in to your portal →</a><br><br>
+      Want to explore first?<br>
+      <a href="index.html?demo=InnoLearn">Try the InnoLearn demo →</a><br><br>
+      © 2026 InnoLearn · <a href="#">Privacy</a> · <a href="#">Terms</a>
+    </div>
+  </div>
+
+  <!-- ══ RIGHT PANEL ═════════════════════════════════════ -->
+  <div class="ob-right">
+
+    <!-- Progress bar -->
+    <div class="ob-progress" id="ob-progress">
+      <div class="ob-progress-track">
+        <div class="ob-progress-fill" id="ob-progress-fill" style="width:25%"></div>
+      </div>
+      <div class="ob-progress-label" id="ob-progress-label">Step 1 of 4</div>
+    </div>
+
+    <!-- ── STEP 1 : School Details ──────────────────────── -->
+    <div class="ob-panel active" id="panel-1">
+      <div class="ob-panel-header">
+        <h2>Tell us about your school</h2>
+        <p>We'll set up your personalised InnoLearn portal in seconds.</p>
+      </div>
+
+      <div class="ob-form">
+        <div class="ob-field">
+          <label>School Full Name <span class="req">*</span></label>
+          <input type="text" id="school-name" placeholder="e.g. InnoLearn International School"
+                 oninput="onSchoolNameInput(this.value)" autocomplete="organization">
+          <span class="field-error">School name is required</span>
+        </div>
+
+        <div class="ob-row">
+          <div class="ob-field">
+            <label>Short Name / Abbreviation <span class="req">*</span></label>
+            <input type="text" id="school-short" placeholder="e.g. MIS" maxlength="12">
+            <span class="field-hint">Shown in the sidebar</span>
+          </div>
+          <div class="ob-field">
+            <label>School Type <span class="req">*</span></label>
+            <select id="school-type">
+              <option value="">Select type…</option>
+              <option value="international">International</option>
+              <option value="private">Private</option>
+              <option value="public">Public / Government</option>
+              <option value="tuition_centre">Tuition Centre</option>
+              <option value="religious">Religious / Faith-based</option>
+              <option value="special">Special Needs</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="ob-row">
+          <div class="ob-field">
+            <label>Country <span class="req">*</span></label>
+            <select id="school-country">
+              <option value="">Select country…</option>
+              <option value="KE">Kenya</option>
+              <option value="UG">Uganda</option>
+              <option value="TZ">Tanzania</option>
+              <option value="RW">Rwanda</option>
+              <option value="ET">Ethiopia</option>
+              <option value="NG">Nigeria</option>
+              <option value="GH">Ghana</option>
+              <option value="ZA">South Africa</option>
+              <option value="ZM">Zambia</option>
+              <option value="ZW">Zimbabwe</option>
+              <option value="GB">United Kingdom</option>
+              <option value="US">United States</option>
+              <option value="CA">Canada</option>
+              <option value="AU">Australia</option>
+              <option value="IN">India</option>
+              <option value="OTHER">Other</option>
+            </select>
+          </div>
+          <div class="ob-field">
+            <label>City / Town</label>
+            <input type="text" id="school-city" placeholder="e.g. Nairobi">
+          </div>
+        </div>
+
+        <div class="ob-field">
+          <label>Your School's URL Slug <span class="req">*</span></label>
+          <div class="slug-preview">
+            <span class="slug-prefix">InnoLearn.com/</span>
+            <input type="text" id="school-slug" placeholder="your-school"
+                   oninput="sanitiseSlug(this)" maxlength="40">
+          </div>
+          <span class="field-hint" id="slug-hint">Auto-filled from your school name. You can edit it.</span>
+        </div>
+
+        <!-- ── Curriculum ── -->
+        <div class="ob-field">
+          <label>Curriculum Offered <span class="req">*</span></label>
+          <div class="curriculum-grid" id="curriculum-grid">
+            <div class="curriculum-chip" data-curriculum="cambridge" onclick="toggleCurriculum('cambridge', this)">
+              <div class="chip-check"><i class="fas fa-check"></i></div> Cambridge
+            </div>
+            <div class="curriculum-chip" data-curriculum="ib" onclick="toggleCurriculum('ib', this)">
+              <div class="chip-check"><i class="fas fa-check"></i></div> IB
+            </div>
+            <div class="curriculum-chip" data-curriculum="cbc" onclick="toggleCurriculum('cbc', this)">
+              <div class="chip-check"><i class="fas fa-check"></i></div> CBC (Kenya)
+            </div>
+            <div class="curriculum-chip" data-curriculum="kcse" onclick="toggleCurriculum('kcse', this)">
+              <div class="chip-check"><i class="fas fa-check"></i></div> KCSE / KCPE
+            </div>
+            <div class="curriculum-chip" data-curriculum="caps" onclick="toggleCurriculum('caps', this)">
+              <div class="chip-check"><i class="fas fa-check"></i></div> CAPS (S. Africa)
+            </div>
+            <div class="curriculum-chip" data-curriculum="waec" onclick="toggleCurriculum('waec', this)">
+              <div class="chip-check"><i class="fas fa-check"></i></div> WAEC / NECO
+            </div>
+            <div class="curriculum-chip" data-curriculum="uganda" onclick="toggleCurriculum('uganda', this)">
+              <div class="chip-check"><i class="fas fa-check"></i></div> Uganda (UCE/UACE)
+            </div>
+            <div class="curriculum-chip" data-curriculum="montessori" onclick="toggleCurriculum('montessori', this)">
+              <div class="chip-check"><i class="fas fa-check"></i></div> Montessori
+            </div>
+            <div class="curriculum-chip" data-curriculum="custom" onclick="toggleCurriculum('custom', this)">
+              <div class="chip-check"><i class="fas fa-check"></i></div> Custom / Mixed
+            </div>
+          </div>
+          <div class="curriculum-links-wrap" id="curriculum-links"></div>
+          <span class="field-hint" style="margin-top:4px">Select all that apply. Quick links to official resources will appear below.</span>
+        </div>
+
+        <!-- ── School Sections ── -->
+        <div class="ob-field">
+          <label>School Sections Offered <span class="req">*</span></label>
+          <div class="section-grid" id="section-grid">
+            <div class="section-card" data-section="kg" onclick="toggleSection('kg', this)">
+              <div class="section-card-check"><i class="fas fa-check"></i></div>
+              <span class="section-card-emoji">🧒</span>
+              <div class="section-card-name">KG / Pre-Primary</div>
+              <div class="section-card-desc">Nursery, PP1, PP2, Reception, Pre-K</div>
+            </div>
+            <div class="section-card" data-section="primary" onclick="toggleSection('primary', this)">
+              <div class="section-card-check"><i class="fas fa-check"></i></div>
+              <span class="section-card-emoji">📚</span>
+              <div class="section-card-name">Primary</div>
+              <div class="section-card-desc">Grade 1–8 · Year 1–6 · Standard 1–8</div>
+            </div>
+            <div class="section-card" data-section="secondary" onclick="toggleSection('secondary', this)">
+              <div class="section-card-check"><i class="fas fa-check"></i></div>
+              <span class="section-card-emoji">🎒</span>
+              <div class="section-card-name">Secondary</div>
+              <div class="section-card-desc">Form 1–4 · Grade 7–12 · Year 7–11</div>
+            </div>
+            <div class="section-card" data-section="alevel" onclick="toggleSection('alevel', this)">
+              <div class="section-card-check"><i class="fas fa-check"></i></div>
+              <span class="section-card-emoji">🎓</span>
+              <div class="section-card-name">Sixth Form / A-Level</div>
+              <div class="section-card-desc">Form 5–6 · Year 12–13 · IB Diploma</div>
+            </div>
+          </div>
+          <div class="section-error-msg" id="section-error">Please select at least one section your school offers.</div>
+        </div>
+
+        <div class="ob-field">
+          <label>School Website</label>
+          <input type="url" id="school-website" placeholder="https://www.yourschool.edu">
+        </div>
+
+        <div class="ob-nav">
+          <div></div><!-- spacer -->
+          <button class="btn-ob-next" onclick="goTo(2)">
+            Continue <i class="fas fa-arrow-right"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── STEP 2 : Admin Account ───────────────────────── -->
+    <div class="ob-panel" id="panel-2">
+      <div class="ob-panel-header">
+        <h2>Create your admin account</h2>
+        <p>This will be the Super Admin account for your school portal.</p>
+      </div>
+
+      <!-- Honeypot: hidden field — bots fill it, humans leave it empty -->
+      <input type="text" id="ob-trap" name="ob-trap" tabindex="-1"
+             autocomplete="off" style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0"
+             aria-hidden="true">
+
+      <div class="ob-form">
+        <div class="ob-field">
+          <label>Full Name <span class="req">*</span></label>
+          <input type="text" id="admin-name" placeholder="Your full name" autocomplete="name">
+        </div>
+
+        <div class="ob-field">
+          <label>Email Address <span class="req">*</span></label>
+          <input type="email" id="admin-email" placeholder="you@school.edu" autocomplete="email"
+                 oninput="checkEmailDomain(this.value)">
+          <span class="field-hint" id="email-hint">This is your login email. Make sure it's correct.</span>
+          <div id="email-domain-warn" style="display:none;margin-top:6px;padding:8px 12px;background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;font-size:12px;color:#92400e">
+            <i class="fas fa-triangle-exclamation" style="margin-right:6px"></i>
+            Schools typically use an institutional email (e.g. <em>admin@yourschool.edu</em>).
+            Personal email addresses may limit future features.
+          </div>
+        </div>
+
+        <div class="ob-field">
+          <label>Password <span class="req">*</span></label>
+          <div class="pw-wrap">
+            <input type="password" id="admin-password" placeholder="Min. 8 characters"
+                   oninput="checkStrength(this.value)" autocomplete="new-password">
+            <button type="button" class="pw-toggle" onclick="togglePw('admin-password', this)">
+              <i class="fas fa-eye"></i>
+            </button>
+          </div>
+          <div class="pw-strength" id="pw-strength">
+            <div class="pw-strength-bar">
+              <div class="pw-strength-fill" id="pw-fill"></div>
+            </div>
+            <div class="pw-strength-text" id="pw-text"></div>
+          </div>
+        </div>
+
+        <div class="ob-field">
+          <label>Confirm Password <span class="req">*</span></label>
+          <div class="pw-wrap">
+            <input type="password" id="admin-password2" placeholder="Re-enter password"
+                   autocomplete="new-password">
+            <button type="button" class="pw-toggle" onclick="togglePw('admin-password2', this)">
+              <i class="fas fa-eye"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="ob-nav">
+          <button class="btn-ob-back" onclick="goTo(1)">
+            <i class="fas fa-arrow-left"></i> Back
+          </button>
+          <button class="btn-ob-next" onclick="goTo(3)">
+            Continue <i class="fas fa-arrow-right"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── STEP 3 : Choose Plan ─────────────────────────── -->
+    <div class="ob-panel" id="panel-3">
+      <div class="ob-panel-header">
+        <h2>Choose your plan</h2>
+        <p>All plans include a <strong>30-day free trial</strong>. No credit card required to start.</p>
+      </div>
+
+      <div class="plan-grid" id="plan-grid">
+
+        <div class="plan-card" data-plan="core" onclick="selectPlan('core')">
+          <div class="plan-card-check"><i class="fas fa-check"></i></div>
+          <div class="plan-name">Core</div>
+          <div class="plan-price"><strong>KES 15,000</strong> / month</div>
+          <ul class="plan-features">
+            <li><i class="fas fa-check-circle"></i> Student Information System</li>
+            <li><i class="fas fa-check-circle"></i> Admissions Management</li>
+            <li><i class="fas fa-check-circle"></i> Classes &amp; Subjects</li>
+            <li><i class="fas fa-check-circle"></i> Attendance Tracking</li>
+            <li><i class="fas fa-check-circle"></i> Exams &amp; Gradebook</li>
+            <li><i class="fas fa-check-circle"></i> Reports &amp; Analytics</li>
+            <li><i class="fas fa-check-circle"></i> Communication Hub</li>
+            <li><i class="fas fa-check-circle"></i> Events &amp; Calendar</li>
+          </ul>
+        </div>
+
+        <div class="plan-card plan-popular selected" data-plan="standard" onclick="selectPlan('standard')">
+          <div class="plan-popular-badge">Most Popular</div>
+          <div class="plan-card-check"><i class="fas fa-check"></i></div>
+          <div class="plan-name">Standard</div>
+          <div class="plan-price"><strong>KES 35,000</strong> / month</div>
+          <ul class="plan-features">
+            <li><i class="fas fa-check-circle"></i> Everything in Core</li>
+            <li><i class="fas fa-check-circle extra"></i> Timetable Builder</li>
+            <li><i class="fas fa-check-circle extra"></i> Behaviour &amp; Pastoral</li>
+            <li><i class="fas fa-check-circle extra"></i> Section Management</li>
+            <li><i class="fas fa-check-circle extra"></i> Advanced Reporting</li>
+          </ul>
+        </div>
+
+        <div class="plan-card" data-plan="premium" onclick="selectPlan('premium')">
+          <div class="plan-card-check"><i class="fas fa-check"></i></div>
+          <div class="plan-name">Premium</div>
+          <div class="plan-price"><strong>KES 65,000</strong> / month</div>
+          <ul class="plan-features">
+            <li><i class="fas fa-check-circle"></i> Everything in Standard</li>
+            <li><i class="fas fa-check-circle extra"></i> Finance &amp; Invoicing</li>
+            <li><i class="fas fa-check-circle extra"></i> HR &amp; Payroll</li>
+            <li><i class="fas fa-check-circle extra"></i> M-Pesa Integration</li>
+            <li><i class="fas fa-check-circle extra"></i> Leave Management</li>
+          </ul>
+        </div>
+
+        <div class="plan-card" data-plan="enterprise" onclick="selectPlan('enterprise')">
+          <div class="plan-card-check"><i class="fas fa-check"></i></div>
+          <div class="plan-name">Enterprise</div>
+          <div class="plan-price plan-custom">Custom Pricing</div>
+          <ul class="plan-features">
+            <li><i class="fas fa-check-circle"></i> Everything in Premium</li>
+            <li><i class="fas fa-check-circle extra"></i> LMS Integration</li>
+            <li><i class="fas fa-check-circle extra"></i> White-label Branding</li>
+            <li><i class="fas fa-check-circle extra"></i> Custom Domain (CNAME)</li>
+            <li><i class="fas fa-check-circle extra"></i> Priority Support &amp; SLA</li>
+            <li><i class="fas fa-check-circle extra"></i> Full API Access</li>
+          </ul>
+        </div>
+
+      </div>
+
+      <div class="plan-trial-note" style="margin-top:20px">
+        <i class="fas fa-gift" style="color:#d97706"></i>
+        <span>Your 30-day free trial starts today. You won't be charged until the trial ends and you can cancel anytime.</span>
+      </div>
+
+      <div class="ob-nav">
+        <button class="btn-ob-back" onclick="goTo(2)">
+          <i class="fas fa-arrow-left"></i> Back
+        </button>
+        <button class="btn-ob-next" onclick="goTo(4)">
+          Continue <i class="fas fa-arrow-right"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- ── STEP 4 : Review & Launch ─────────────────────── -->
+    <div class="ob-panel" id="panel-4">
+      <div class="ob-panel-header">
+        <h2>Review &amp; launch</h2>
+        <p>Everything looks good? Click <strong>Launch My School</strong> to go live.</p>
+      </div>
+
+      <div id="ob-error" class="ob-error" style="display:none">
+        <i class="fas fa-exclamation-circle"></i>
+        <span id="ob-error-msg">Something went wrong.</span>
+      </div>
+
+      <div class="ob-review-card" id="review-card">
+        <div class="ob-review-section">
+          <h4>School</h4>
+          <div class="ob-review-row">
+            <span class="lbl">Name</span>
+            <span class="val" id="rv-name">—</span>
+          </div>
+          <div class="ob-review-row">
+            <span class="lbl">Short Name</span>
+            <span class="val" id="rv-short">—</span>
+          </div>
+          <div class="ob-review-row">
+            <span class="lbl">Type</span>
+            <span class="val" id="rv-type">—</span>
+          </div>
+          <div class="ob-review-row">
+            <span class="lbl">Location</span>
+            <span class="val" id="rv-location">—</span>
+          </div>
+          <div class="ob-review-row">
+            <span class="lbl">Portal URL</span>
+            <span class="val" id="rv-url">—</span>
+          </div>
+          <div class="ob-review-row">
+            <span class="lbl">Curriculum</span>
+            <span class="val" id="rv-curriculum">—</span>
+          </div>
+          <div class="ob-review-row">
+            <span class="lbl">Sections</span>
+            <span class="val" id="rv-sections">—</span>
+          </div>
+        </div>
+        <div class="ob-review-section">
+          <h4>Admin Account</h4>
+          <div class="ob-review-row">
+            <span class="lbl">Name</span>
+            <span class="val" id="rv-admin-name">—</span>
+          </div>
+          <div class="ob-review-row">
+            <span class="lbl">Email</span>
+            <span class="val" id="rv-admin-email">—</span>
+          </div>
+        </div>
+        <div class="ob-review-section">
+          <h4>Subscription</h4>
+          <div class="ob-review-row">
+            <span class="lbl">Plan</span>
+            <span class="val" id="rv-plan">—</span>
+          </div>
+          <div class="ob-review-row">
+            <span class="lbl">Trial Period</span>
+            <span class="val" style="color:#16a34a;font-weight:600">30 days free</span>
+          </div>
+        </div>
+      </div>
+
+      <label class="ob-check-label" style="margin-bottom:20px">
+        <input type="checkbox" id="agree-terms">
+        <span>I agree to the InnoLearn <a href="#" target="_blank">Terms of Service</a> and <a href="#" target="_blank">Privacy Policy</a></span>
+      </label>
+
+      <button class="btn-ob-launch" id="launch-btn" onclick="launch()">
+        <i class="fas fa-rocket"></i> Launch My School
+      </button>
+
+      <div class="ob-nav" style="margin-top:16px">
+        <button class="btn-ob-back" onclick="goTo(3)">
+          <i class="fas fa-arrow-left"></i> Back
+        </button>
+        <div></div>
+      </div>
+    </div>
+
+    <!-- ── SUCCESS SCREEN ───────────────────────────────── -->
+    <div class="ob-success" id="panel-success">
+      <div class="ob-success-icon"><i class="fas fa-check"></i></div>
+      <h2>You're all set! 🎉</h2>
+      <p>Your InnoLearn portal has been created. Sign in now to start setting up your school.</p>
+
+      <div class="ob-success-details" id="success-details">
+        <div class="detail-row">
+          <span class="lbl">School</span>
+          <span class="val" id="sc-school">—</span>
+        </div>
+        <div class="detail-row">
+          <span class="lbl">Admin Email</span>
+          <span class="val" id="sc-email">—</span>
+        </div>
+        <div class="detail-row">
+          <span class="lbl">Plan</span>
+          <span class="val" id="sc-plan">—</span>
+        </div>
+        <div class="detail-row">
+          <span class="lbl">Trial Ends</span>
+          <span class="val" id="sc-trial">—</span>
+        </div>
+      </div>
+
+      <a href="index.html" class="btn-go-to-app" id="go-to-app-btn">
+        <i class="fas fa-arrow-right-to-bracket"></i> Go to My Portal
+      </a>
+
+      <div class="ob-already-have" style="margin-top:16px;font-size:12px;color:#9ca3af">
+        Your credentials have been saved. You'll be signed in automatically.
+      </div>
+    </div>
+
+  </div><!-- /ob-right -->
+</div><!-- /ob-wrap -->
+
+<script>
+/* ============================================================
+   InnoLearn Onboarding Wizard
+   ============================================================ */
+
+let currentStep      = 1;
+let selectedPlan     = 'standard';
+let selectedCurricula = [];   // e.g. ['cambridge', 'ib']
+let selectedSections  = [];   // e.g. ['kg', 'primary']
+const STEPS          = 4;
+const _formOpened    = Date.now();
+const PLAN_LABELS = {
+  core: 'Core — KES 15,000/mo',
+  standard: 'Standard — KES 35,000/mo',
+  premium: 'Premium — KES 65,000/mo',
+  enterprise: 'Enterprise — Custom Pricing'
+};
+
+/* ── Navigation ─────────────────────────────────────────── */
+function goTo(step) {
+  if (step > currentStep && !validate(currentStep)) return;
+
+  // Hide current panel
+  document.getElementById(`panel-${currentStep}`).classList.remove('active');
+  document.getElementById(`sl-${currentStep}`).classList.remove('active');
+  document.getElementById(`sl-${currentStep}`).classList.add('done');
+  document.getElementById(`sl-num-${currentStep}`).innerHTML = '<i class="fas fa-check" style="font-size:11px"></i>';
+
+  currentStep = step;
+
+  // Show new panel
+  const panel = document.getElementById(`panel-${currentStep}`);
+  panel.classList.add('active');
+
+  // Update left step list
+  document.getElementById(`sl-${currentStep}`).classList.remove('done');
+  document.getElementById(`sl-${currentStep}`).classList.add('active');
+  const numEl = document.getElementById(`sl-num-${currentStep}`);
+  numEl.innerHTML = currentStep;
+
+  // Restore previous steps' check marks
+  for (let i = 1; i < currentStep; i++) {
+    document.getElementById(`sl-${i}`).classList.add('done');
+    document.getElementById(`sl-${i}`).classList.remove('active');
+    document.getElementById(`sl-num-${i}`).innerHTML = '<i class="fas fa-check" style="font-size:11px"></i>';
+  }
+
+  // Progress bar
+  const pct = (currentStep / STEPS) * 100;
+  document.getElementById('ob-progress-fill').style.width = pct + '%';
+  document.getElementById('ob-progress-label').textContent = `Step ${currentStep} of ${STEPS}`;
+
+  // Populate review on step 4
+  if (currentStep === 4) populateReview();
+
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+/* ── Validation ─────────────────────────────────────────── */
+function validate(step) {
+  if (step === 1) {
+    const name  = v('school-name');
+    const short = v('school-short');
+    const type  = v('school-type');
+    const cntry = v('school-country');
+    const slug  = v('school-slug');
+    if (!name || !short || !type || !cntry || !slug) {
+      alert('Please fill in all required fields before continuing.');
+      return false;
+    }
+    if (!/^[a-z0-9-]{2,40}$/.test(slug)) {
+      alert('The URL slug can only contain lowercase letters, numbers, and hyphens (min 2 characters).');
+      return false;
+    }
+    if (selectedCurricula.length === 0) {
+      alert('Please select at least one curriculum your school offers.');
+      return false;
+    }
+    if (selectedSections.length === 0) {
+      document.getElementById('section-error').classList.add('visible');
+      document.getElementById('section-grid').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return false;
+    }
+    document.getElementById('section-error').classList.remove('visible');
+    return true;
+  }
+  if (step === 2) {
+    // Honeypot check — if this hidden field is filled, it's almost certainly a bot
+    if (document.getElementById('ob-trap').value) {
+      // Silently pretend to succeed but do nothing
+      console.warn('[Security] Honeypot triggered');
+      return false;
+    }
+
+    const name  = v('admin-name');
+    const email = v('admin-email');
+    const pw    = v('admin-password');
+    const pw2   = v('admin-password2');
+    if (!name || !email || !pw || !pw2) {
+      alert('Please fill in all required fields.');
+      return false;
+    }
+    if (!isValidEmail(email)) {
+      alert('Please enter a valid email address.');
+      return false;
+    }
+    if (pw.length < 8) {
+      alert('Password must be at least 8 characters.');
+      return false;
+    }
+    if (pw !== pw2) {
+      alert('Passwords do not match.');
+      return false;
+    }
+    return true;
+  }
+  if (step === 3) {
+    if (!selectedPlan) { alert('Please select a plan.'); return false; }
+    return true;
+  }
+  return true;
+}
+
+function v(id) { return (document.getElementById(id)?.value || '').trim(); }
+
+function isValidEmail(e) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e); }
+
+/* ── Email domain warning (not a block — just advisory) ─ */
+const FREE_DOMAINS = new Set([
+  'gmail.com','yahoo.com','yahoo.co.ke','hotmail.com','outlook.com',
+  'live.com','icloud.com','me.com','aol.com','protonmail.com',
+  'mail.com','zoho.com','ymail.com','googlemail.com'
+]);
+
+function checkEmailDomain(email) {
+  const warn = document.getElementById('email-domain-warn');
+  if (!email || !email.includes('@')) { warn.style.display = 'none'; return; }
+  const domain = email.split('@')[1]?.toLowerCase();
+  warn.style.display = domain && FREE_DOMAINS.has(domain) ? 'block' : 'none';
+}
+
+/* ── Slug generation ────────────────────────────────────── */
+function onSchoolNameInput(name) {
+  const slug = name.toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .substring(0, 40);
+  document.getElementById('school-slug').value = slug;
+
+  // Auto-fill short name from initials if empty
+  const shortEl = document.getElementById('school-short');
+  if (!shortEl.value) {
+    shortEl.value = name.split(/\s+/)
+      .filter(w => w.length > 2)
+      .map(w => w[0].toUpperCase())
+      .join('').substring(0, 6);
+  }
+}
+
+function sanitiseSlug(input) {
+  input.value = input.value.toLowerCase()
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-');
+}
+
+/* ── Curriculum selection ────────────────────────────────── */
+const CURRICULUM_META = {
+  cambridge:  { label:'Cambridge International',         url:'https://www.cambridgeinternational.org', desc:'Syllabuses, past papers, grade thresholds, teacher guides' },
+  ib:         { label:'International Baccalaureate (IBO)',url:'https://www.ibo.org',                   desc:'PYP, MYP, DP & CP programme resources and subject guides' },
+  cbc:        { label:'KICD — Kenya CBC',                url:'https://kicd.ac.ke',                    desc:'Competency-Based Curriculum designs, learning outcomes, assessment' },
+  kcse:       { label:'KNEC — KCPE / KCSE',             url:'https://www.knec.ac.ke',                desc:'National examination syllabuses, past papers and results portal' },
+  caps:       { label:'DBE — South Africa CAPS',        url:'https://www.education.gov.za',          desc:'CAPS curriculum statements, ATPs and examiner reports' },
+  waec:       { label:'WAEC — West Africa',             url:'https://www.waecdirect.org',            desc:'WASSCE/BECE syllabuses, past questions and results checker' },
+  uganda:     { label:'UNEB — Uganda',                  url:'https://www.uneb.ac.ug',               desc:'UCE and UACE syllabuses, past papers and marking guides' },
+  montessori: { label:'AMI — Montessori International', url:'https://montessori-ami.org',            desc:'Montessori philosophy, training resources and classroom guides' },
+  custom:     { label:'Custom / Mixed Curriculum',       url:null,                                    desc:'Configure your custom curriculum in Settings after setup' },
+};
+
+function toggleCurriculum(id, el) {
+  const idx = selectedCurricula.indexOf(id);
+  if (idx === -1) { selectedCurricula.push(id); el.classList.add('selected'); }
+  else            { selectedCurricula.splice(idx,1); el.classList.remove('selected'); }
+  _renderQuickLinks();
+}
+
+function _renderQuickLinks() {
+  const wrap = document.getElementById('curriculum-links');
+  wrap.innerHTML = '';
+  selectedCurricula.forEach(id => {
+    const m = CURRICULUM_META[id];
+    if (!m) return;
+    const a = document.createElement(m.url ? 'a' : 'div');
+    if (m.url) { a.href = m.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+    a.className = `curriculum-link-item ${id}`;
+    a.innerHTML = `
+      <div class="curriculum-link-icon"><i class="fas fa-external-link-alt" style="font-size:11px"></i></div>
+      <div class="curriculum-link-text">
+        <strong>${m.label}</strong>
+        <span>${m.desc}</span>
+      </div>`;
+    wrap.appendChild(a);
+  });
+}
+
+/* ── Section selection ───────────────────────────────────── */
+const SECTION_DEFS = {
+  kg:        { name:'KG / Pre-Primary',     code:'KG',  order:1 },
+  primary:   { name:'Primary',              code:'PRI', order:2 },
+  secondary: { name:'Secondary',            code:'SEC', order:3 },
+  alevel:    { name:'Sixth Form / A-Level', code:'AL',  order:4 },
+};
+
+function toggleSection(id, el) {
+  const idx = selectedSections.indexOf(id);
+  if (idx === -1) { selectedSections.push(id); el.classList.add('selected'); }
+  else            { selectedSections.splice(idx,1); el.classList.remove('selected'); }
+  if (selectedSections.length > 0) {
+    document.getElementById('section-error').classList.remove('visible');
+  }
+}
+
+/* ── Plan selection ─────────────────────────────────────── */
+function selectPlan(plan) {
+  selectedPlan = plan;
+  document.querySelectorAll('.plan-card').forEach(c => c.classList.remove('selected'));
+  document.querySelector(`[data-plan="${plan}"]`).classList.add('selected');
+}
+
+/* ── Password helpers ───────────────────────────────────── */
+function togglePw(id, btn) {
+  const inp = document.getElementById(id);
+  const showing = inp.type === 'text';
+  inp.type = showing ? 'password' : 'text';
+  btn.querySelector('i').className = showing ? 'fas fa-eye' : 'fas fa-eye-slash';
+}
+
+function checkStrength(pw) {
+  const wrap = document.getElementById('pw-strength');
+  const fill = document.getElementById('pw-fill');
+  const text = document.getElementById('pw-text');
+
+  if (!pw) { wrap.classList.remove('visible'); return; }
+  wrap.classList.add('visible');
+
+  let score = 0;
+  if (pw.length >= 8)  score++;
+  if (pw.length >= 12) score++;
+  if (/[A-Z]/.test(pw)) score++;
+  if (/[0-9]/.test(pw)) score++;
+  if (/[^A-Za-z0-9]/.test(pw)) score++;
+
+  const levels = [
+    { w:'20%',  bg:'#ef4444', label:'Very weak' },
+    { w:'40%',  bg:'#f97316', label:'Weak' },
+    { w:'60%',  bg:'#f59e0b', label:'Fair' },
+    { w:'80%',  bg:'#22c55e', label:'Good' },
+    { w:'100%', bg:'#16a34a', label:'Strong' },
+  ];
+  const lvl = levels[Math.min(score, 4)];
+  fill.style.width = lvl.w;
+  fill.style.background = lvl.bg;
+  text.style.color = lvl.bg;
+  text.textContent = lvl.label;
+}
+
+/* ── Review summary ─────────────────────────────────────── */
+const TYPE_LABELS = {
+  international:'International', private:'Private', public:'Public / Government',
+  tuition_centre:'Tuition Centre', religious:'Religious / Faith-based', special:'Special Needs'
+};
+
+const COUNTRY_LABELS = {
+  KE:'Kenya', UG:'Uganda', TZ:'Tanzania', RW:'Rwanda', ET:'Ethiopia',
+  NG:'Nigeria', GH:'Ghana', ZA:'South Africa', ZM:'Zambia', ZW:'Zimbabwe',
+  GB:'United Kingdom', US:'United States', CA:'Canada', AU:'Australia',
+  IN:'India', OTHER:'Other'
+};
+
+function populateReview() {
+  const slug    = v('school-slug');
+  const country = v('school-country');
+  const city    = v('school-city');
+  const type    = v('school-type');
+
+  document.getElementById('rv-name').textContent     = v('school-name') || '—';
+  document.getElementById('rv-short').textContent    = v('school-short') || '—';
+  document.getElementById('rv-type').textContent     = TYPE_LABELS[type] || type || '—';
+  document.getElementById('rv-location').textContent = [city, COUNTRY_LABELS[country] || country].filter(Boolean).join(', ') || '—';
+  document.getElementById('rv-url').textContent      = slug ? `InnoLearn.com/${slug}` : '—';
+  document.getElementById('rv-admin-name').textContent  = v('admin-name') || '—';
+  document.getElementById('rv-admin-email').textContent = v('admin-email') || '—';
+
+  // Curriculum
+  const curriculumNames = selectedCurricula.map(id => {
+    const labels = { cambridge:'Cambridge', ib:'IB', cbc:'CBC', kcse:'KCSE/KCPE',
+                     caps:'CAPS', waec:'WAEC', uganda:'Uganda', montessori:'Montessori', custom:'Custom' };
+    return labels[id] || id;
+  });
+  document.getElementById('rv-curriculum').textContent = curriculumNames.join(', ') || '—';
+
+  // Sections
+  const sectionNames = selectedSections
+    .sort((a,b) => (SECTION_DEFS[a]?.order||9) - (SECTION_DEFS[b]?.order||9))
+    .map(id => SECTION_DEFS[id]?.name || id);
+  document.getElementById('rv-sections').textContent = sectionNames.join(', ') || '—';
+
+  const planBadge = `<span class="plan-badge-lg plan-${selectedPlan}">${selectedPlan.charAt(0).toUpperCase()+selectedPlan.slice(1)}</span>`;
+  document.getElementById('rv-plan').innerHTML = planBadge;
+}
+
+/* ── Launch ─────────────────────────────────────────────── */
+async function launch() {
+  if (!document.getElementById('agree-terms').checked) {
+    alert('Please agree to the Terms of Service and Privacy Policy to continue.');
+    return;
+  }
+
+  const btn = document.getElementById('launch-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Launching…';
+  document.getElementById('ob-error').style.display = 'none';
+
+  const payload = {
+    schoolName:    v('school-name'),
+    shortName:     v('school-short'),
+    schoolType:    v('school-type'),
+    country:       v('school-country'),
+    city:          v('school-city'),
+    website:       v('school-website'),
+    slug:          v('school-slug'),
+    adminName:     v('admin-name'),
+    adminEmail:    v('admin-email'),
+    adminPassword: document.getElementById('admin-password').value,
+    plan:          selectedPlan,
+    curriculum:    selectedCurricula,
+    sections:      selectedSections,
+    _trap:         document.getElementById('ob-trap').value,
+    _elapsed:      Math.round((Date.now() - _formOpened) / 1000)
+  };
+
+  try {
+    let data;
+    try {
+      const res = await fetch('/api/onboard', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload)
+      });
+      // Handle non-JSON responses (e.g. static file server returning plain "Not found")
+      const ct = res.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) {
+        data = _provisionLocally(payload);
+      } else {
+        data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Registration failed. Please try again.');
+      }
+    } catch (fetchErr) {
+      // Network error or JSON parse error -> fall back to local provisioning
+      if (!fetchErr.message || fetchErr.message.match(/fetch|network|json|token|unexpected/i)) {
+        data = _provisionLocally(payload);
+      } else {
+        throw fetchErr; // real auth/validation error — re-throw to outer catch
+      }
+    }
+
+    // Store JWT (server mode)
+    if (data.token) {
+      localStorage.setItem('ss_jwt', data.token);
+      sessionStorage.setItem('ss_jwt', data.token);
+    }
+
+    // Store session for localStorage-mode app
+    if (data.session) {
+      sessionStorage.setItem('ss_session', JSON.stringify(data.session));
+    }
+
+    // Inject school + user into app localStorage DB (offline mode)
+    if (data.offline && data.school && data.user) {
+      _injectIntoLocalDB(data.school, data.user, payload.adminPassword);
+    }
+
+    showSuccess(data);
+
+  } catch (err) {
+    document.getElementById('ob-error-msg').textContent = err.message;
+    document.getElementById('ob-error').style.display = 'flex';
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-rocket"></i> Launch My School';
+  }
+}
+
+/* ── Local provisioning fallback (no backend available) ─ */
+function _provisionLocally(p) {
+  const slug     = p.slug || p.schoolName.toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'');
+  const schoolId = 'sch_' + slug + '_' + Date.now().toString(36);
+  const userId   = 'u_' + slug + '_superadmin';
+  const now      = new Date().toISOString();
+  const trialEnd = new Date(); trialEnd.setDate(trialEnd.getDate() + 30);
+
+  const CURRENCY = {KE:'KES',UG:'UGX',TZ:'TZS',RW:'RWF',NG:'NGN',GH:'GHS',ZA:'ZAR',GB:'GBP',US:'USD',CA:'CAD',AU:'AUD',IN:'INR'};
+  const SYMBOL   = {KE:'KSh',UG:'USh',TZ:'TSh',RW:'Fr', NG:'₦',GH:'₵',ZA:'R',GB:'£',US:'$',CA:'$',AU:'$',IN:'₹'};
+  const TZ_MAP   = {KE:'Africa/Nairobi',UG:'Africa/Kampala',TZ:'Africa/Dar_es_Salaam',NG:'Africa/Lagos',GH:'Africa/Accra',ZA:'Africa/Johannesburg',GB:'Europe/London',US:'America/New_York',AU:'Australia/Sydney',IN:'Asia/Kolkata'};
+
+  const school = {
+    id: schoolId, slug, name: p.schoolName,
+    shortName: p.shortName || p.schoolName.split(' ').filter(w=>w.length>2).map(w=>w[0]).join('').toUpperCase().substring(0,6),
+    type: p.schoolType || 'private',
+    country: p.country||'', city: p.city||'', website: p.website||'',
+    plan: p.plan || 'standard', addOns: [], isActive: true,
+    curriculum: p.curriculum || [],
+    sections:   p.sections   || ['primary','secondary'],
+    trialEnds: trialEnd.toISOString(),
+    currency: CURRENCY[p.country] || 'USD',
+    currencySymbol: SYMBOL[p.country] || '$',
+    timezone: TZ_MAP[p.country] || 'UTC',
+    createdAt: now
+  };
+
+  const user = {
+    id: userId, schoolId, name: p.adminName || p.adminEmail.split('@')[0],
+    email: p.adminEmail.toLowerCase(), password: p.adminPassword,
+    role: 'superadmin', primaryRole: 'superadmin', roles: ['superadmin'],
+    isActive: true, createdAt: now, lastLogin: now
+  };
+
+  const session = { user: {...user, password: undefined}, school };
+  return { success: true, token: null, session, school, user: {...user, password: undefined}, offline: true };
+}
+
+/* ── Inject new school into app localStorage DB ─────── */
+function _injectIntoLocalDB(school, user, plainPw) {
+  try {
+    const existing = JSON.parse(localStorage.getItem('ss_db') || '{}');
+    const schools  = existing.schools || [];
+    if (!schools.find(s => s.id === school.id)) schools.push(school);
+    existing.schools = schools;
+    const users = existing.users || [];
+    if (!users.find(u => u.id === user.id)) {
+      users.push({...user, password: plainPw, schoolId: school.id});
+    }
+    existing.users = users;
+    localStorage.setItem('ss_db', JSON.stringify(existing));
+  } catch(e) { /* localStorage may be full — silent fail */ }
+}
+
+/* ── Success screen ─────────────────────────────────────── */
+function showSuccess(data) {
+  // Hide all panels + progress
+  document.getElementById(`panel-${currentStep}`).classList.remove('active');
+  document.getElementById('ob-progress').style.display = 'none';
+
+  // Mark all steps done
+  for (let i = 1; i <= STEPS; i++) {
+    document.getElementById(`sl-${i}`).classList.add('done');
+    document.getElementById(`sl-${i}`).classList.remove('active');
+    document.getElementById(`sl-num-${i}`).innerHTML = '<i class="fas fa-check" style="font-size:11px"></i>';
+  }
+
+  const school = data.school || {};
+  const trialEnd = new Date();
+  trialEnd.setDate(trialEnd.getDate() + 30);
+
+  document.getElementById('sc-school').textContent = school.name || v('school-name');
+  document.getElementById('sc-email').textContent  = v('admin-email');
+  document.getElementById('sc-plan').textContent   = (selectedPlan.charAt(0).toUpperCase() + selectedPlan.slice(1)) + ' Plan';
+  document.getElementById('sc-trial').textContent  = trialEnd.toLocaleDateString('en-GB', { day:'numeric', month:'long', year:'numeric' });
+
+  document.getElementById('panel-success').classList.add('active');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+/* ── Demo / offline fallback ────────────────────────────── */
+// If server is not available, fall back to local-only mode
+window.addEventListener('unhandledrejection', () => {});
+</script>
+
+</body>
+</html>
