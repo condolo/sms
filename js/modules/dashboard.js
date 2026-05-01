@@ -17,6 +17,40 @@ const Dashboard = (() => {
     _adminDashboard();
   }
 
+  /* ─── PASSWORD EXPIRY BANNER ─── */
+  function _pwdExpiryBanner(user) {
+    if (!user) return '';
+    const ref      = user.passwordChangedAt || user.createdAt;
+    if (!ref) return '';
+    const ageDays  = Math.floor((Date.now() - new Date(ref)) / (1000 * 60 * 60 * 24));
+    const daysLeft = 60 - ageDays;
+    if (daysLeft > 7 || daysLeft < 0) return '';
+
+    let colour, icon, msg;
+    if (daysLeft <= 0) {
+      colour = '#dc2626'; icon = '🔒';
+      msg = `Your password has <strong>expired</strong> — please change it immediately to avoid being locked out.`;
+    } else if (daysLeft === 1) {
+      colour = '#dc2626'; icon = '⚠️';
+      msg = `Your password expires <strong>tomorrow</strong>. Change it now to keep your account secure.`;
+    } else if (daysLeft <= 3) {
+      colour = '#d97706'; icon = '🔑';
+      msg = `Your password expires in <strong>${daysLeft} days</strong>. Update it soon to avoid being locked out.`;
+    } else {
+      colour = '#2563eb'; icon = 'ℹ️';
+      msg = `Your password expires in <strong>${daysLeft} days</strong> (60-day policy). Consider changing it now.`;
+    }
+
+    return `
+      <div class="trial-banner" style="border-left-color:${colour}">
+        <span class="trial-banner-icon">${icon}</span>
+        <span class="trial-banner-text">${msg}</span>
+        <a href="#settings" onclick="App.navigate('settings')" class="trial-banner-btn" style="background:${colour}">
+          Change Password
+        </a>
+      </div>`;
+  }
+
   /* ─── TRIAL EXPIRY BANNER ─── */
   function _trialBanner(school) {
     if (!school?.trialEnds) return '';
@@ -168,7 +202,11 @@ const Dashboard = (() => {
     // Show trial expiry banner for admins
     const trialHtml = (Auth.isSuperAdmin() || Auth.isAdmin()) ? _trialBanner(school) : '';
 
+    // Show password expiry banner for current user
+    const pwdHtml = _pwdExpiryBanner(Auth.currentUser);
+
     App.renderPage(`
+    ${pwdHtml}
     ${trialHtml}
     ${wizardHtml}
     <div class="hero-card blue" style="margin-bottom:20px">
@@ -409,6 +447,7 @@ const Dashboard = (() => {
     const messages   = DB.get('messages').filter(m => m.recipients.includes(user.id) || m.recipients.includes('teachers') || m.recipients.includes('all')).slice(0,4);
 
     App.renderPage(`
+    ${_pwdExpiryBanner(user)}
     <div class="hero-card purple" style="margin-bottom:20px">
       <div class="hero-content" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
         <div>

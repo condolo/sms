@@ -202,6 +202,89 @@ async function sendTrialReminder({ adminName, adminEmail, schoolName, plan, days
   return _send(adminEmail, `${urgency} — InnoLearn trial for ${schoolName}`, html);
 }
 
+/* ══════════════════════════════════════════════════════════════
+   8. New user welcome — sends temporary login credentials
+   ══════════════════════════════════════════════════════════════ */
+async function sendWelcomeCredentials({ name, email, tempPassword, schoolName, role, loginUrl }) {
+  const roleLabel = (role || 'staff').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  const html = _wrap(`
+    <h2>Welcome to ${schoolName}! 🎉</h2>
+    <p>Hi ${name},</p>
+    <p>Your account on <strong>InnoLearn</strong> has been created. Here are your login credentials to get started.</p>
+    <div class="info">
+      <p><strong>School:</strong> ${schoolName}</p>
+      <p><strong>Role:</strong> ${roleLabel}</p>
+      <p><strong>Email:</strong> ${email}</p>
+      <p><strong>Temporary Password:</strong> <span style="font-family:monospace;font-size:15px;font-weight:700;color:#4f46e5;background:#ede9fe;padding:3px 8px;border-radius:4px">${tempPassword}</span></p>
+    </div>
+    <p>⚠️ You will be asked to <strong>change your password</strong> when you first sign in. Choose something strong and unique.</p>
+    <p style="text-align:center">
+      <a href="${loginUrl || APP_URL}" class="btn">Sign In Now →</a>
+    </p>
+    <p style="font-size:13px;color:#6b7280">If you did not expect this email, please contact your school administrator or reach us at <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
+    <p style="font-size:12px;color:#9ca3af">⚠️ Never share your password with anyone — InnoLearn will never ask for it.</p>
+  `);
+  return _send(email, `Your InnoLearn account is ready — ${schoolName}`, html);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   9. Password expiry reminder (sent 7 days before 60-day limit)
+   ══════════════════════════════════════════════════════════════ */
+async function sendPasswordExpirySoon({ name, email, schoolName, daysLeft }) {
+  const urgency = daysLeft <= 1 ? '🚨 Urgent' : daysLeft <= 3 ? '⚠️ Action needed' : '🔑 Reminder';
+  const html = _wrap(`
+    <h2>${urgency}: Your password expires ${daysLeft <= 0 ? 'today' : `in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`}</h2>
+    <p>Hi ${name},</p>
+    <p>Your InnoLearn password for <strong>${schoolName}</strong> ${daysLeft <= 0 ? 'has expired' : `will expire in <strong>${daysLeft} day${daysLeft !== 1 ? 's' : ''}</strong>`} as part of our 60-day security policy.</p>
+    <p>Please sign in and update your password now to avoid being locked out.</p>
+    <p style="text-align:center">
+      <a href="${APP_URL}" class="btn">Update Password Now →</a>
+    </p>
+    <p style="font-size:13px;color:#6b7280">If you need help, contact your school admin or reach us at <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
+  `);
+  return _send(email, `${urgency} — InnoLearn password expires ${daysLeft <= 0 ? 'today' : `in ${daysLeft} days`}`, html);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   10. Password changed — security confirmation
+   ══════════════════════════════════════════════════════════════ */
+async function sendPasswordChanged({ name, email, schoolName }) {
+  const html = _wrap(`
+    <h2>✅ Password updated successfully</h2>
+    <p>Hi ${name},</p>
+    <p>Your InnoLearn password for <strong>${schoolName}</strong> was just changed. Your next password change will be due in <strong>60 days</strong>.</p>
+    <p style="font-size:13px;color:#6b7280">If you did not make this change, please contact your school administrator immediately and reach us at <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
+    <p style="text-align:center">
+      <a href="${APP_URL}" class="btn">Sign In →</a>
+    </p>
+  `);
+  return _send(email, `InnoLearn password changed — ${schoolName}`, html);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   11. Role / permission change notification
+   ══════════════════════════════════════════════════════════════ */
+async function sendRoleChanged({ name, email, schoolName, oldRole, newRole, changedBy }) {
+  const fmt = r => (r || 'staff').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  const html = _wrap(`
+    <h2>🔄 Your account permissions have changed</h2>
+    <p>Hi ${name},</p>
+    <p>Your role on <strong>${schoolName}</strong> has been updated by an administrator.</p>
+    <div class="info">
+      <p><strong>School:</strong> ${schoolName}</p>
+      <p><strong>Previous role:</strong> ${fmt(oldRole)}</p>
+      <p><strong>New role:</strong> <span style="font-weight:700;color:#4f46e5">${fmt(newRole)}</span></p>
+      ${changedBy ? `<p><strong>Changed by:</strong> ${changedBy}</p>` : ''}
+    </div>
+    <p>Your access level may have changed. Sign in to see your updated dashboard.</p>
+    <p style="text-align:center">
+      <a href="${APP_URL}" class="btn">Sign In →</a>
+    </p>
+    <p style="font-size:13px;color:#6b7280">If you believe this change was made in error, contact your school administrator or <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
+  `);
+  return _send(email, `Your InnoLearn role has changed — ${schoolName}`, html);
+}
+
 module.exports = {
   sendRegistrationPending,
   sendAdminNewSchoolAlert,
@@ -210,4 +293,8 @@ module.exports = {
   sendAdminApprovalAlert,
   sendLoginOTP,
   sendTrialReminder,
+  sendWelcomeCredentials,
+  sendPasswordExpirySoon,
+  sendPasswordChanged,
+  sendRoleChanged,
 };

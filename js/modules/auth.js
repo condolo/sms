@@ -67,6 +67,13 @@ const Auth = (() => {
         return;
       }
 
+      // Handle expired / first-login password — force password change screen
+      if (res.ok && data.passwordExpired) {
+        _resetBtn();
+        _showForceChangeScreen(data.userId, data.schoolId, data.reason, data.hint);
+        return;
+      }
+
       // Handle pending / rejected school — show specific UI, don't fall back to local
       if (res.status === 403 && data.error === 'pending_approval') {
         _resetBtn();
@@ -208,6 +215,117 @@ const Auth = (() => {
         </div>`;
       loginInner.style.opacity = '1';
     }, 300);
+  }
+
+  /* Force password change screen — expired (60 days) or first login */
+  function _showForceChangeScreen(userId, schoolId, reason, hint) {
+    const isFirst  = reason === 'first_login';
+    const icon     = isFirst ? 'fas fa-key' : 'fas fa-lock';
+    const colour   = isFirst ? 'linear-gradient(135deg,#059669,#047857)' : 'linear-gradient(135deg,#dc2626,#b91c1c)';
+    const title    = isFirst ? 'Set your password' : 'Password expired';
+
+    const loginInner = document.querySelector('.login-right-inner') || document.querySelector('.login-card');
+    if (!loginInner) return;
+    loginInner.style.transition = 'opacity .3s';
+    loginInner.style.opacity = '0';
+    setTimeout(() => {
+      loginInner.innerHTML = `
+        <div style="text-align:center;padding:8px 0">
+          <div style="width:56px;height:56px;border-radius:50%;background:${colour};
+               display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:22px;color:#fff">
+            <i class="${icon}"></i>
+          </div>
+          <h2 style="font-size:20px;font-weight:700;color:#111827;margin-bottom:6px">${title}</h2>
+          <p style="font-size:13px;color:#6b7280;margin-bottom:20px">${hint || 'Please choose a new password to continue.'}</p>
+
+          <div style="margin-bottom:14px;text-align:left">
+            <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:6px">New password</label>
+            <input id="fc-pw" type="password" placeholder="At least 8 characters" autocomplete="new-password"
+              style="width:100%;padding:12px;border:2px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;box-sizing:border-box">
+          </div>
+          <div style="margin-bottom:16px;text-align:left">
+            <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:6px">Confirm new password</label>
+            <input id="fc-pw2" type="password" placeholder="Repeat password" autocomplete="new-password"
+              style="width:100%;padding:12px;border:2px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;box-sizing:border-box"
+              onkeydown="if(event.key==='Enter') document.getElementById('fc-btn').click()">
+          </div>
+          <div id="fc-hint" style="margin-bottom:10px;font-size:12px;color:#6b7280;text-align:left">
+            <span id="fc-len" style="margin-right:12px">✗ 8+ characters</span>
+            <span id="fc-match">✗ Passwords match</span>
+          </div>
+          <div id="fc-error" style="display:none;margin-bottom:12px;padding:10px;background:#fef2f2;border:1px solid #fecaca;
+               border-radius:8px;font-size:13px;color:#b91c1c"></div>
+
+          <button id="fc-btn" onclick="Auth._submitForceChange('${userId}','${schoolId}')"
+            style="width:100%;background:${colour};color:#fff;border:none;
+                   padding:13px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:12px">
+            <i class="fas fa-check"></i> Set New Password & Sign In
+          </button>
+          <button onclick="location.reload()"
+            style="width:100%;background:none;border:1.5px solid #e5e7eb;padding:10px;border-radius:8px;
+                   font-size:13px;color:#6b7280;cursor:pointer">
+            ← Back to login
+          </button>
+        </div>`;
+      loginInner.style.opacity = '1';
+
+      // Live validation hints
+      ['fc-pw','fc-pw2'].forEach(id => {
+        document.getElementById(id)?.addEventListener('input', () => {
+          const pw  = document.getElementById('fc-pw')?.value || '';
+          const pw2 = document.getElementById('fc-pw2')?.value || '';
+          const lenOk   = pw.length >= 8;
+          const matchOk = pw === pw2 && pw2.length > 0;
+          const el = (sel, ok) => { const e = document.getElementById(sel); if (e) { e.textContent = (ok ? '✓ ' : '✗ ') + e.textContent.slice(2); e.style.color = ok ? '#16a34a' : '#6b7280'; } };
+          if (document.getElementById('fc-len'))   { const e = document.getElementById('fc-len');   e.textContent = (lenOk   ? '✓ ' : '✗ ') + '8+ characters'; e.style.color = lenOk   ? '#16a34a' : '#6b7280'; }
+          if (document.getElementById('fc-match')) { const e = document.getElementById('fc-match'); e.textContent = (matchOk ? '✓ ' : '✗ ') + 'Passwords match'; e.style.color = matchOk ? '#16a34a' : '#6b7280'; }
+        });
+      });
+      setTimeout(() => document.getElementById('fc-pw')?.focus(), 100);
+    }, 300);
+  }
+
+  async function _submitForceChange(userId, schoolId) {
+    const pw   = document.getElementById('fc-pw')?.value  || '';
+    const pw2  = document.getElementById('fc-pw2')?.value || '';
+    const btn  = document.getElementById('fc-btn');
+    const errEl= document.getElementById('fc-error');
+    errEl.style.display = 'none';
+
+    if (pw.length < 8)  { errEl.textContent = 'Password must be at least 8 characters.'; errEl.style.display='block'; return; }
+    if (pw !== pw2)     { errEl.textContent = 'Passwords do not match.'; errEl.style.display='block'; return; }
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Setting password…';
+
+    try {
+      const slug = _getSchoolSlug();
+      const res  = await fetch('/api/auth/force-change', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-School-Slug': slug },
+        body:    JSON.stringify({ userId, schoolId, newPassword: pw })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        errEl.textContent = data.error || 'Failed to update password.';
+        errEl.style.display = 'block';
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-check"></i> Set New Password & Sign In';
+        return;
+      }
+      DB.setToken(data.token, false);
+      await DB.syncFromServer();
+      _user   = data.user;
+      _school = { ...data.school, ...(DB.get('schools')[0] || {}) };
+      _save(_user, _school, false);
+      showToast(`Password updated — welcome, ${data.user.name.split(' ')[0]}!`, 'success');
+      App._showApp();
+    } catch (e) {
+      errEl.textContent = 'Could not connect. Please try again.';
+      errEl.style.display = 'block';
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-check"></i> Set New Password & Sign In';
+    }
   }
 
   function _loginLocal(email, password, remember) {
@@ -432,7 +550,8 @@ const Auth = (() => {
 
   return {
     login, logout, isLoggedIn, can, hasRole, hasPermission, visibleModules,
-    _submitOTP,  // exposed for inline onclick
+    _submitOTP,          // exposed for inline onclick (2FA)
+    _submitForceChange,  // exposed for inline onclick (password rotation)
     isSuperAdmin, isAdmin, isPrincipal, isSectionHead, isTeacher,
     isAdmissionsOfficer, isExamsOfficer, isFinance, isHR, isTimetabler,
     isDeputyPrincipal, isDisciplineCommittee, isParent, isStudent,

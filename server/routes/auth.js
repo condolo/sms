@@ -14,6 +14,27 @@ function _genOTP() {
   return String(Math.floor(100000 + Math.random() * 900000)); // 6-digit
 }
 
+/* ── Temp password generator (for new user invites) ────── */
+function _genTempPassword() {
+  const alpha = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz';
+  const nums  = '23456789';
+  let pwd = '';
+  for (let i = 0; i < 8; i++) pwd += alpha[Math.floor(Math.random() * alpha.length)];
+  pwd += nums[Math.floor(Math.random() * nums.length)];
+  pwd += nums[Math.floor(Math.random() * nums.length)];
+  pwd += '!';
+  // shuffle
+  return pwd.split('').sort(() => 0.5 - Math.random()).join('');
+}
+
+/* ── Password age check (60-day policy) ─────────────────── */
+const PASSWORD_MAX_DAYS = 60;
+function _passwordAge(user) {
+  const ref = user.passwordChangedAt || user.createdAt;
+  if (!ref) return 0;
+  return Math.floor((Date.now() - new Date(ref)) / (1000 * 60 * 60 * 24));
+}
+
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,  // 15 minutes
   max: 20,
@@ -65,6 +86,36 @@ router.post('/login', loginLimiter, tenantMiddleware, async (req, res) => {
       : password === user.password;
 
     if (!match) return res.status(401).json({ error: 'Invalid email or password' });
+
+    // ── First-login forced change (new user temp password) ──
+    if (user.mustChangePassword) {
+      return res.json({
+        passwordExpired: true,
+        reason: 'first_login',
+        userId:   user.id,
+        schoolId: req.school.id,
+        hint:     'Your administrator has set a temporary password. Please choose your own password to continue.'
+      });
+    }
+
+    // ── 60-day password rotation policy ────────────────────
+    const ageDays = _passwordAge(user);
+    if (ageDays >= PASSWORD_MAX_DAYS) {
+      // Send expiry email (non-blocking, deduplication by day)
+      _checkPasswordExpiryAndNotify(user, req.school).catch(() => {});
+      return res.json({
+        passwordExpired: true,
+        reason: 'expired',
+        userId:   user.id,
+        schoolId: req.school.id,
+        hint:     `Your password is ${ageDays} days old. For your security, please set a new password to continue.`
+      });
+    }
+
+    // ── Proactive expiry reminder (≤ 7 days left) ──────────
+    if (ageDays >= PASSWORD_MAX_DAYS - 7) {
+      _checkPasswordExpiryAndNotify(user, req.school).catch(() => {});
+    }
 
     // ── 2FA for superadmin ──────────────────────────────────
     const userRole = user.primaryRole || user.role;
@@ -158,6 +209,83 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
   }
 });
 
+/* ── Password expiry email notification ─────────────────── */
+async function _checkPasswordExpiryAndNotify(user, school) {
+  const ageDays   = _passwordAge(user);
+  const daysLeft  = PASSWORD_MAX_DAYS - ageDays;
+  const todayKey  = new Date().toISOString().slice(0, 10);
+
+  // Send at 7, 3, 1 days before expiry and on expiry day
+  const notifyAt = [7, 3, 1, 0];
+  const milestone = notifyAt.find(n => daysLeft <= n && daysLeft >= n - 1);
+  if (milestone === undefined) return;
+
+  const flagField = `pwdReminderSent_${user.id}_${milestone}`;
+  if (school[flagField] === todayKey) return; // already sent today
+
+  await _model('schools').updateOne({ id: school.id }, { $set: { [flagField]: todayKey } });
+  await email.sendPasswordExpirySoon({
+    name:       user.name,
+    email:      user.email,
+    schoolName: school.name || school.slug,
+    daysLeft:   Math.max(0, daysLeft)
+  });
+}
+
+/* POST /api/auth/force-change — change password when expired or on first login
+   No JWT required (user is locked at password screen)
+   Body: { userId, schoolId, newPassword }
+*/
+const forceChangeLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10,
+  message: { error: 'Too many attempts. Please try again later.' } });
+
+router.post('/force-change', forceChangeLimiter, tenantMiddleware, async (req, res) => {
+  try {
+    const { userId, schoolId, newPassword } = req.body;
+    if (!userId || !newPassword) return res.status(400).json({ error: 'userId and newPassword required' });
+    if (newPassword.length < 8)  return res.status(400).json({ error: 'Password must be at least 8 characters' });
+
+    const User = _model('users');
+    const user = await User.findOne({ id: userId, schoolId: schoolId || req.school?.id }).lean();
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const now    = new Date().toISOString();
+    const hashed = await bcrypt.hash(newPassword, 12);
+    await User.updateOne({ id: userId }, {
+      password: hashed,
+      passwordChangedAt: now,
+      mustChangePassword: false,
+      lastLogin: now
+    });
+
+    const School = _model('schools');
+    const school = await School.findOne({ id: user.schoolId }).lean();
+
+    // Issue JWT
+    const token = sign({
+      userId:   user.id,
+      schoolId: user.schoolId,
+      email:    user.email,
+      role:     user.primaryRole || user.role,
+      roles:    user.roles || [user.role]
+    });
+
+    // Send security confirmation email (non-blocking)
+    email.sendPasswordChanged({
+      name:       user.name,
+      email:      user.email,
+      schoolName: school?.name || req.school?.name || ''
+    }).catch(() => {});
+
+    const safeUser = { ...user, password: undefined, mfaOtp: undefined, mfaExpiry: undefined,
+                       passwordChangedAt: now, mustChangePassword: false };
+    res.json({ token, user: safeUser, school });
+  } catch (err) {
+    console.error('[auth/force-change]', err);
+    res.status(500).json({ error: 'Password change failed' });
+  }
+});
+
 /* ── Trial expiry check & email reminder ─────────────────── */
 async function _checkTrialAndNotify(school) {
   if (!school?.trialEnds || !school.adminEmail) return;
@@ -222,8 +350,22 @@ router.post('/change-password', authMiddleware, async (req, res) => {
       : currentPassword === user.password;
     if (!match) return res.status(401).json({ error: 'Current password incorrect' });
 
-    const hashed = await bcrypt.hash(newPassword, 10);
-    await User.updateOne({ id: req.jwtUser.userId }, { password: hashed });
+    const hashed = await bcrypt.hash(newPassword, 12);
+    await User.updateOne({ id: req.jwtUser.userId }, {
+      password: hashed,
+      passwordChangedAt: new Date().toISOString(),
+      mustChangePassword: false
+    });
+
+    // Send security confirmation email (non-blocking)
+    const School = _model('schools');
+    const school = await School.findOne({ id: req.jwtUser.schoolId }).lean();
+    email.sendPasswordChanged({
+      name:       user.name,
+      email:      user.email,
+      schoolName: school?.name || ''
+    }).catch(() => {});
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to change password' });

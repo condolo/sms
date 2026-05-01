@@ -9,14 +9,50 @@ const cors    = require('cors');
 const path    = require('path');
 const { connect } = require('./config/db');
 
+/* ── Security: warn if JWT_SECRET not set ───────────────────── */
+if (!process.env.JWT_SECRET) {
+  console.warn('\n⚠️  [Security] JWT_SECRET env var is NOT set — using insecure default. Set it in your .env file or Render dashboard!\n');
+}
+
 const app  = express();
 const PORT = process.env.PORT || 3005;
 
-/* ── Middleware ─────────────────────────────────────────────── */
+/* ── Security headers (helmet) ──────────────────────────────── */
+try {
+  const helmet = require('helmet');
+  app.use(helmet({
+    contentSecurityPolicy: false,  // allow inline scripts in SPA
+    crossOriginEmbedderPolicy: false
+  }));
+  console.log('[Security] helmet headers active');
+} catch {
+  console.warn('[Security] helmet not installed — run: npm install helmet');
+}
+
+/* ── CORS ───────────────────────────────────────────────────── */
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map(o => o.trim()).filter(Boolean);
+ALLOWED_ORIGINS.push(
+  'https://school-management-ecosystem.onrender.com',
+  'http://localhost:3005',
+  'http://localhost:3000',
+  'http://127.0.0.1:3005'
+);
+
 app.use(cors({
-  origin: (origin, cb) => cb(null, true),  // Allow all origins (tighten in prod if needed)
+  origin: (origin, cb) => {
+    // Allow requests with no origin (mobile, Postman, server-to-server)
+    if (!origin) return cb(null, true);
+    // Allow if origin is in the list OR we're not in production
+    if (ALLOWED_ORIGINS.includes(origin) || process.env.NODE_ENV !== 'production') {
+      return cb(null, true);
+    }
+    // Block unknown origins in production
+    console.warn(`[CORS] Blocked origin: ${origin}`);
+    cb(new Error('Not allowed by CORS'));
+  },
   credentials: true
 }));
+
 app.use(express.json({ limit: '10mb' }));   // 10MB for bulk sync payloads
 app.use(express.urlencoded({ extended: true }));
 
@@ -26,12 +62,13 @@ app.use('/api/onboard',     require('./routes/onboard'));
 app.use('/api/sync',        require('./routes/sync'));
 app.use('/api/platform',    require('./routes/platform'));
 app.use('/api/collections', require('./routes/collections'));
+app.use('/api/users',       require('./routes/users'));
 
 /* ── Health check ───────────────────────────────────────────── */
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: '3.1.5',
+    version: '3.3.0',
     timestamp: new Date().toISOString(),
     db: require('./config/db').isConnected() ? 'connected' : 'disconnected'
   });
