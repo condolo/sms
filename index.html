@@ -119,18 +119,47 @@
         </div>
       </div>
 
-      <!-- Demo pills: only visible on localhost or when ?demo=1 is in the URL -->
+      <!-- Demo panel: visible when ?demo=innolearn or on localhost -->
       <div class="demo-section" id="demo-section" style="display:none">
-        <p class="demo-label">Quick demo access</p>
-        <div class="demo-pills">
-          <button onclick="fillDemo('superadmin')" class="demo-pill pill-superadmin">Super Admin</button>
-          <button onclick="fillDemo('admin')"      class="demo-pill pill-admin">Admin</button>
-          <button onclick="fillDemo('teacher')"    class="demo-pill pill-teacher">Teacher</button>
-          <button onclick="fillDemo('parent')"     class="demo-pill pill-parent">Parent</button>
-          <button onclick="fillDemo('student')"    class="demo-pill pill-student">Student</button>
-          <button onclick="fillDemo('finance')"    class="demo-pill pill-finance">Finance</button>
-          <button onclick="fillDemo('deputy')"     class="demo-pill pill-deputy">Deputy Principal</button>
-          <button onclick="fillDemo('discipline')" class="demo-pill pill-discipline">Discipline</button>
+        <div class="demo-header">
+          <span class="demo-badge"><i class="fas fa-flask"></i> Demo Mode</span>
+          <p class="demo-label">Select a role to explore InnoLearn</p>
+        </div>
+        <div class="demo-role-grid">
+          <button onclick="fillDemo('superadmin')" class="demo-role-card pill-superadmin">
+            <i class="fas fa-user-shield"></i>
+            <span class="demo-role-name">Super Admin</span>
+            <span class="demo-role-desc">Full school control</span>
+          </button>
+          <button onclick="fillDemo('teacher')" class="demo-role-card pill-teacher">
+            <i class="fas fa-chalkboard-teacher"></i>
+            <span class="demo-role-name">Teacher</span>
+            <span class="demo-role-desc">Classes & grades</span>
+          </button>
+          <button onclick="fillDemo('parent')" class="demo-role-card pill-parent">
+            <i class="fas fa-users"></i>
+            <span class="demo-role-name">Parent</span>
+            <span class="demo-role-desc">Child progress</span>
+          </button>
+          <button onclick="fillDemo('finance')" class="demo-role-card pill-finance">
+            <i class="fas fa-dollar-sign"></i>
+            <span class="demo-role-name">Finance</span>
+            <span class="demo-role-desc">Fees & invoices</span>
+          </button>
+          <button onclick="fillDemo('student')" class="demo-role-card pill-student">
+            <i class="fas fa-user-graduate"></i>
+            <span class="demo-role-name">Student</span>
+            <span class="demo-role-desc">Timetable & results</span>
+          </button>
+          <button onclick="fillDemo('deputy')" class="demo-role-card pill-deputy">
+            <i class="fas fa-user-tie"></i>
+            <span class="demo-role-name">Deputy</span>
+            <span class="demo-role-desc">Academic oversight</span>
+          </button>
+        </div>
+        <div class="demo-selected-info" id="demo-selected-info" style="display:none">
+          <i class="fas fa-check-circle" style="color:#22c55e"></i>
+          <span id="demo-info-text">Credentials loaded — click Sign In</span>
         </div>
       </div>
     </div>

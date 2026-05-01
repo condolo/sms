@@ -17,6 +17,94 @@ const Dashboard = (() => {
     _adminDashboard();
   }
 
+  /* ─── SETUP WIZARD ─── */
+  function _setupWizard(school) {
+    const students  = DB.get('students').filter(s => s.schoolId === school.id);
+    const teachers  = DB.get('teachers').filter(t => t.schoolId === school.id);
+    const classes   = DB.get('classes').filter(c => c.schoolId === school.id);
+    const fees      = DB.get('feeStructures') || [];
+    const reports   = DB.get('reportTemplates') || [];
+    const ay        = (DB.get('academicYears') || []).find(a => a.schoolId === school.id);
+
+    const steps = [
+      {
+        id:'profile', icon:'fas fa-school', label:'Complete school profile',
+        done: !!(school.address || school.phone || school.logo),
+        action: "App.navigate('settings')", hint:'Add contact details, logo & address'
+      },
+      {
+        id:'ay', icon:'fas fa-calendar', label:'Set up academic year & terms',
+        done: !!(ay && ay.terms?.length > 0),
+        action: "App.navigate('settings')", hint:'Define current term dates'
+      },
+      {
+        id:'classes', icon:'fas fa-door-open', label:'Create classes / grades',
+        done: classes.length >= 1,
+        action: "App.navigate('classes')", hint:'Add your Grade 1, Form 1… etc.'
+      },
+      {
+        id:'staff', icon:'fas fa-chalkboard-teacher', label:'Add teaching staff',
+        done: teachers.length >= 1,
+        action: "App.navigate('teachers')", hint:'Import or manually add teachers'
+      },
+      {
+        id:'students', icon:'fas fa-user-graduate', label:'Enroll your first students',
+        done: students.length >= 1,
+        action: "Students.renderNew()", hint:'Enroll students or import via CSV'
+      },
+      {
+        id:'fees', icon:'fas fa-file-invoice-dollar', label:'Configure fee structures',
+        done: fees.filter(f => f.schoolId === school.id).length >= 1,
+        action: "App.navigate('finance')", hint:'Set tuition, boarding, bus fees…'
+      },
+      {
+        id:'reports', icon:'fas fa-file-alt', label:'Set up report card templates',
+        done: reports.filter(r => r.schoolId === school.id).length >= 1,
+        action: "App.navigate('reports')", hint:'Define grading scales & layout'
+      },
+    ];
+
+    const doneCount = steps.filter(s => s.done).length;
+    const pct = Math.round(doneCount / steps.length * 100);
+    const allDone = doneCount === steps.length;
+
+    // Persist wizard dismissal
+    const dismissKey = `setup_wizard_done_${school.id}`;
+    if (localStorage.getItem(dismissKey) === 'true') return '';
+
+    return `
+      <div class="setup-wizard" id="setup-wizard">
+        <div class="setup-wizard-header">
+          <div class="setup-wizard-title">
+            <i class="fas fa-rocket" style="color:#f59e0b"></i>
+            <span>School Setup Checklist</span>
+            <span class="setup-pct-badge" style="background:${pct===100?'#22c55e':'#f59e0b'}">${pct}% complete</span>
+          </div>
+          ${allDone
+            ? `<button class="btn btn-sm btn-success" onclick="dismissWizard('${school.id}')"><i class="fas fa-check"></i> Mark complete</button>`
+            : `<button class="btn-link" onclick="dismissWizard('${school.id}')" title="Hide checklist" style="color:var(--gray-400);font-size:12px">Hide for now</button>`
+          }
+        </div>
+        <div class="setup-progress-bar">
+          <div class="setup-progress-fill" style="width:${pct}%;background:${pct===100?'#22c55e':'#4f46e5'}"></div>
+        </div>
+        <p class="setup-sub">${allDone ? '🎉 Your school is fully set up! You can now hide this panel.' : `${steps.length - doneCount} step${steps.length-doneCount!==1?'s':''} remaining — complete them to unlock the full power of InnoLearn.`}</p>
+        <div class="setup-steps">
+          ${steps.map(s => `
+            <div class="setup-step ${s.done ? 'done' : ''}" onclick="${s.done ? '' : s.action}">
+              <div class="setup-step-check">
+                ${s.done ? '<i class="fas fa-check"></i>' : ''}
+              </div>
+              <div class="setup-step-body">
+                <div class="setup-step-label">${s.label}</div>
+                ${!s.done ? `<div class="setup-step-hint">${s.hint}</div>` : ''}
+              </div>
+              ${!s.done ? '<i class="fas fa-chevron-right setup-step-arrow"></i>' : ''}
+            </div>`).join('')}
+        </div>
+      </div>`;
+  }
+
   /* ─── ADMIN DASHBOARD ─── */
   function _adminDashboard() {
     const students  = DB.get('students').filter(s => s.status === 'active');
@@ -41,7 +129,11 @@ const Dashboard = (() => {
     const ay = DB.get('academicYears').find(a => a.isCurrent);
     const term = ay?.terms?.find(t => t.isCurrent);
 
+    // Show setup wizard for superadmin on new/sparse schools
+    const wizardHtml = (Auth.isSuperAdmin() && school) ? _setupWizard(school) : '';
+
     App.renderPage(`
+    ${wizardHtml}
     <div class="hero-card blue" style="margin-bottom:20px">
       <div class="hero-content" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
         <div>
@@ -932,3 +1024,17 @@ const Dashboard = (() => {
 
   return { render };
 })();
+
+/* ── Global: dismiss setup wizard ─────────────────────────── */
+function dismissWizard(schoolId) {
+  localStorage.setItem(`setup_wizard_done_${schoolId}`, 'true');
+  const el = document.getElementById('setup-wizard');
+  if (el) {
+    el.style.transition = 'opacity .3s, max-height .4s';
+    el.style.opacity = '0';
+    el.style.overflow = 'hidden';
+    el.style.maxHeight = el.offsetHeight + 'px';
+    setTimeout(() => { el.style.maxHeight = '0'; el.style.margin = '0'; el.style.padding = '0'; }, 50);
+    setTimeout(() => el.remove(), 500);
+  }
+}

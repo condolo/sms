@@ -59,7 +59,21 @@ const Auth = (() => {
         body:    JSON.stringify({ email, password })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Login failed');
+
+      // Handle pending / rejected school — show specific UI, don't fall back to local
+      if (res.status === 403 && data.error === 'pending_approval') {
+        _resetBtn();
+        _showPendingScreen(data.message);
+        return; // stop — do NOT fall through to local login
+      }
+      if (res.status === 403 && data.error === 'rejected') {
+        _resetBtn();
+        _shake();
+        showToast(data.message, 'error');
+        return;
+      }
+
+      if (!res.ok) throw new Error(data.message || data.error || 'Login failed');
 
       // Store JWT
       DB.setToken(data.token, remember);
@@ -74,9 +88,36 @@ const Auth = (() => {
       App._showApp();
     } catch (err) {
       // If server not reachable, fall through to local login
-      if (err.message && !err.message.includes('fetch')) throw err; // re-throw auth errors
+      if (err.message && !err.message.match(/fetch|network|failed to fetch/i)) throw err;
       throw err;
     }
+  }
+
+  /* Show "Under Review" screen instead of login */
+  function _showPendingScreen(msg) {
+    const loginInner = document.querySelector('.login-right-inner') || document.querySelector('.login-card');
+    if (!loginInner) return;
+    loginInner.style.transition = 'opacity .3s';
+    loginInner.style.opacity = '0';
+    setTimeout(() => {
+      loginInner.innerHTML = `
+        <div style="text-align:center;padding:20px 0">
+          <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#f59e0b,#d97706);
+               display:flex;align-items:center;justify-content:center;margin:0 auto 20px;font-size:26px;color:#fff">
+            <i class="fas fa-hourglass-half"></i>
+          </div>
+          <h2 style="font-size:20px;font-weight:700;color:#111827;margin-bottom:10px">Application Under Review</h2>
+          <p style="font-size:14px;color:#6b7280;line-height:1.6;margin-bottom:20px">${msg || 'Your school is awaiting approval. You will receive an email once approved.'}</p>
+          <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:16px;text-align:left;font-size:13px;color:#92400e;margin-bottom:24px">
+            <i class="fas fa-envelope" style="margin-right:8px"></i>
+            Check your inbox for a confirmation email from <strong>innolearnnetwork@gmail.com</strong>
+          </div>
+          <button onclick="location.reload()" style="background:var(--primary);color:#fff;border:none;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">
+            <i class="fas fa-arrow-left"></i> Back to Login
+          </button>
+        </div>`;
+      loginInner.style.opacity = '1';
+    }, 300);
   }
 
   function _loginLocal(email, password, remember) {

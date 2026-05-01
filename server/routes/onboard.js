@@ -8,6 +8,7 @@ const mongoose   = require('mongoose');
 const bcrypt     = require('bcryptjs');
 const rateLimit  = require('express-rate-limit');
 const { sign }   = require('../utils/jwt');
+const email      = require('../utils/email');
 
 const router = express.Router();
 
@@ -171,7 +172,7 @@ async function _provisionInDB(data, res) {
   const trialEnds = new Date();
   trialEnds.setDate(trialEnds.getDate() + 30);
 
-  /* Create school */
+  /* Create school — status: pending until platform admin approves */
   const school = await School.create({
     id: schoolId, slug, name: schoolName,
     shortName: shortName || _initials(schoolName),
@@ -179,48 +180,56 @@ async function _provisionInDB(data, res) {
     country: country || '',
     city: city || '',
     website: website || '',
-    plan: plan, addOns: [], isActive: true,
+    plan: plan, addOns: [], isActive: false, status: 'pending',
     curriculum: curriculum || [],
     sections:   sections   || ['primary'],
     trialEnds: trialEnds.toISOString(),
     currency: _currencyForCountry(country),
     currencySymbol: _currencySymbol(country),
     timezone: _timezoneForCountry(country),
+    adminName: adminName || adminEmail.split('@')[0],
+    adminEmail: adminEmail.toLowerCase(),
     createdAt: now
   });
 
-  /* Create superadmin user */
+  /* Create superadmin user — inactive until approved */
   const hashed = await bcrypt.hash(adminPassword, 12);
   const user   = await User.create({
     id: userId, schoolId, name: adminName || adminEmail.split('@')[0],
     email: adminEmail.toLowerCase(), password: hashed,
     role: 'superadmin', primaryRole: 'superadmin', roles: ['superadmin'],
-    isActive: true, createdAt: now, lastLogin: now
+    isActive: false, createdAt: now
   });
 
-  /* Seed base data — only the sections this school selected */
+  /* Seed base data — sections, academic year, permissions */
   await _seedBaseData(schoolId, sections || ['primary']);
 
-  /* Issue JWT */
-  const token = sign({
-    userId, schoolId, email: adminEmail.toLowerCase(),
-    role: 'superadmin', roles: ['superadmin']
-  });
-
-  /* Build a session payload so localStorage-mode also works */
   const schoolObj = school.toObject();
   const userObj   = { ...user.toObject(), password: undefined };
-  const session   = { user: userObj, school: schoolObj };
 
-  console.log(`[ONBOARD] New school provisioned: ${schoolName} (${slug}) plan=${plan}`);
+  /* Send emails (fire-and-forget — don't block response) */
+  Promise.all([
+    email.sendRegistrationPending({
+      adminName: adminName || adminEmail.split('@')[0],
+      adminEmail: adminEmail.toLowerCase(),
+      schoolName, plan
+    }),
+    email.sendAdminNewSchoolAlert({
+      schoolName, slug,
+      adminName: adminName || adminEmail.split('@')[0],
+      adminEmail: adminEmail.toLowerCase(),
+      plan, country, city, curriculum, sections
+    })
+  ]).catch(err => console.error('[ONBOARD] Email error:', err.message));
+
+  console.log(`[ONBOARD] New school registered (pending): ${schoolName} (${slug}) plan=${plan}`);
 
   return res.status(201).json({
     success: true,
-    token,
-    session,
+    pending: true,
     school: schoolObj,
     user:   userObj,
-    loginUrl: `/index.html`
+    message: 'Your application has been received. You will be notified by email once approved.'
   });
 }
 

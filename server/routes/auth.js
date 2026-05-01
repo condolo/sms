@@ -24,14 +24,34 @@ router.post('/login', loginLimiter, tenantMiddleware, async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
 
-    const User = _model('users');
+    const User   = _model('users');
+    const School = _model('schools');
+
+    // Find user regardless of isActive so we can give a clear pending message
     const user = await User.findOne({
       email: email.toLowerCase().trim(),
-      schoolId: req.school.id,
-      isActive: true
+      schoolId: req.school.id
     }).lean();
 
     if (!user) return res.status(401).json({ error: 'Invalid email or password' });
+
+    // If user is inactive, check whether school is pending approval
+    if (!user.isActive) {
+      const school = await School.findOne({ id: req.school.id }).lean();
+      if (school?.status === 'pending') {
+        return res.status(403).json({
+          error: 'pending_approval',
+          message: 'Your school is currently under review. You will receive an email within 24 hours once approved.'
+        });
+      }
+      if (school?.status === 'rejected') {
+        return res.status(403).json({
+          error: 'rejected',
+          message: 'Your school registration was not approved. Please contact support at innolearnnetwork@gmail.com.'
+        });
+      }
+      return res.status(403).json({ error: 'Account inactive. Please contact your school administrator.' });
+    }
 
     // Support both bcrypt hashes and plain-text (migration period)
     const match = user.password.startsWith('$2')

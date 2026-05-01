@@ -331,33 +331,60 @@ img { max-width:100%; display:block; }
   transform: translateY(-1px);
 }
 
-/* Demo pills */
+/* Demo panel */
 .demo-section {
-  margin-top:28px; padding-top:24px;
+  margin-top:24px; padding-top:20px;
   border-top:1px solid var(--gray-100);
 }
+.demo-header { text-align:center; margin-bottom:14px; }
+.demo-badge {
+  display:inline-flex; align-items:center; gap:6px;
+  background:linear-gradient(135deg,#4f46e5,#7c3aed);
+  color:#fff; font-size:11px; font-weight:700;
+  padding:4px 12px; border-radius:20px; margin-bottom:6px;
+  text-transform:uppercase; letter-spacing:.5px;
+}
 .demo-label {
-  font-size:11px; color:var(--gray-400);
-  text-align:center; margin-bottom:12px;
-  text-transform:uppercase; letter-spacing:0.8px; font-weight:600;
+  font-size:12px; color:var(--gray-500);
+  margin:4px 0 0; font-weight:500;
 }
-.demo-pills { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
-.demo-pill {
-  padding:6px 16px; border-radius:20px;
-  font-size:12px; font-weight:700;
-  border:1.5px solid transparent;
-  transition:all var(--transition);
-  cursor:pointer;
+.demo-role-grid {
+  display:grid; grid-template-columns:repeat(3,1fr); gap:8px;
 }
+.demo-role-card {
+  display:flex; flex-direction:column; align-items:center;
+  gap:4px; padding:12px 8px; border-radius:10px;
+  border:1.5px solid transparent; cursor:pointer;
+  transition:all .2s; font-family:inherit;
+  text-align:center;
+}
+.demo-role-card i { font-size:20px; margin-bottom:2px; }
+.demo-role-name { font-size:12px; font-weight:700; display:block; }
+.demo-role-desc { font-size:10px; display:block; opacity:.7; }
+.demo-role-card.active { border-width:2px; transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,.12); }
+
+/* Role colours */
 .pill-superadmin { background:#FEF2F2; color:#991B1B; border-color:#FECACA; }
 .pill-admin      { background:#EFF6FF; color:#1D4ED8; border-color:#BFDBFE; }
-.pill-teacher { background:#F5F3FF; color:#5B21B6; border-color:#DDD6FE; }
-.pill-parent  { background:#ECFDF5; color:#065F46; border-color:#A7F3D0; }
-.pill-student { background:#FFFBEB; color:#92400E; border-color:#FDE68A; }
+.pill-teacher    { background:#F5F3FF; color:#5B21B6; border-color:#DDD6FE; }
+.pill-parent     { background:#ECFDF5; color:#065F46; border-color:#A7F3D0; }
+.pill-student    { background:#FFFBEB; color:#92400E; border-color:#FDE68A; }
 .pill-finance    { background:#FFF1F2; color:#9F1239; border-color:#FECDD3; }
 .pill-deputy     { background:#F0FDF4; color:#14532D; border-color:#86EFAC; }
 .pill-discipline { background:#FDF2F8; color:#831843; border-color:#F9A8D4; }
-.demo-pill:hover { transform:translateY(-2px); box-shadow:var(--shadow-sm); filter:brightness(0.96); }
+.demo-role-card:hover { transform:translateY(-2px); filter:brightness(0.97); }
+
+.demo-selected-info {
+  display:flex; align-items:center; gap:8px;
+  margin-top:12px; padding:10px 14px;
+  background:#f0fdf4; border:1px solid #bbf7d0;
+  border-radius:8px; font-size:12px; color:#065f46;
+  animation:fadeSlideIn .3s ease;
+}
+@keyframes fadeSlideIn {
+  from { opacity:0; transform:translateY(-6px); }
+  to   { opacity:1; transform:translateY(0); }
+}
 
 .login-right-footer {
   position:absolute; bottom:24px;
@@ -3606,3 +3633,130 @@ td:hover .ac-edit-btn { display:inline; }
 .plan-standard   { background: rgba(59,130,246,.15); color: #60a5fa; }
 .plan-premium    { background: rgba(139,92,246,.15); color: #a78bfa; }
 .plan-enterprise { background: rgba(236,72,153,.15); color: #f472b6; }
+
+/* ══ Setup Wizard ══════════════════════════════════════════ */
+.setup-wizard {
+  background: #fff;
+  border: 1.5px solid #e0e7ff;
+  border-radius: 14px;
+  margin-bottom: 20px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(79,70,229,.08);
+}
+
+.setup-wizard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.setup-wizard-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--gray-900);
+}
+
+.setup-pct-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.setup-progress-bar {
+  height: 6px;
+  background: #e0e7ff;
+  margin: 0 20px;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.setup-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width .6s ease;
+}
+
+.setup-sub {
+  font-size: 12px;
+  color: var(--gray-400);
+  padding: 8px 20px 12px;
+}
+
+.setup-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0;
+  border-top: 1px solid #f1f5f9;
+}
+
+.setup-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  border-right: 1px solid #f1f5f9;
+  border-bottom: 1px solid #f1f5f9;
+  cursor: pointer;
+  transition: background .15s;
+}
+
+.setup-step:hover:not(.done) { background: #f8faff; }
+.setup-step.done { opacity: .65; cursor: default; }
+
+.setup-step-check {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid #c7d2fe;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: #fff;
+  background: transparent;
+  transition: all .2s;
+}
+
+.setup-step.done .setup-step-check {
+  background: #22c55e;
+  border-color: #22c55e;
+}
+
+.setup-step-body { flex: 1; min-width: 0; }
+
+.setup-step-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gray-800);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.setup-step.done .setup-step-label {
+  text-decoration: line-through;
+  color: var(--gray-400);
+}
+
+.setup-step-hint {
+  font-size: 11px;
+  color: var(--gray-400);
+  margin-top: 2px;
+}
+
+.setup-step-arrow {
+  font-size: 11px;
+  color: #a5b4fc;
+  flex-shrink: 0;
+}

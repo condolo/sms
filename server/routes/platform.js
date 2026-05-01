@@ -7,6 +7,7 @@ const mongoose = require('mongoose');
 const bcrypt   = require('bcryptjs');
 const { platformAdmin } = require('../middleware/auth');
 const { sign } = require('../utils/jwt');
+const email    = require('../utils/email');
 
 const router = express.Router();
 
@@ -80,6 +81,77 @@ router.post('/schools', async (req, res) => {
     await _seedBaseData(schoolId);
 
     res.status(201).json({ school: school.toObject(), adminUserId: userId });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* GET /api/platform/schools/pending — list schools awaiting approval */
+router.get('/schools/pending', async (req, res) => {
+  try {
+    const School = _model('schools');
+    const schools = await School.find({ status: 'pending' }).lean();
+    res.json(schools);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* POST /api/platform/schools/:id/approve — approve a pending school */
+router.post('/schools/:id/approve', async (req, res) => {
+  try {
+    const School = _model('schools');
+    const User   = _model('users');
+
+    const school = await School.findOneAndUpdate(
+      { id: req.params.id },
+      { $set: { isActive: true, status: 'active', approvedAt: new Date().toISOString() } },
+      { new: true }
+    ).lean();
+    if (!school) return res.status(404).json({ error: 'School not found' });
+
+    /* Activate the superadmin user */
+    await User.updateMany({ schoolId: req.params.id, role: 'superadmin' }, { $set: { isActive: true } });
+
+    /* Send emails */
+    await Promise.all([
+      email.sendApprovalWelcome({
+        adminName:  school.adminName || school.name,
+        adminEmail: school.adminEmail,
+        schoolName: school.name,
+        slug:       school.slug,
+        plan:       school.plan
+      }),
+      email.sendAdminApprovalAlert({
+        schoolName: school.name,
+        adminEmail: school.adminEmail,
+        plan:       school.plan
+      })
+    ]);
+
+    console.log(`[PLATFORM] Approved school: ${school.name}`);
+    res.json({ success: true, school });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* POST /api/platform/schools/:id/reject — reject a pending school */
+router.post('/schools/:id/reject', async (req, res) => {
+  try {
+    const School = _model('schools');
+    const { reason } = req.body;
+
+    const school = await School.findOneAndUpdate(
+      { id: req.params.id },
+      { $set: { status: 'rejected', isActive: false, rejectedAt: new Date().toISOString(), rejectionReason: reason || '' } },
+      { new: true }
+    ).lean();
+    if (!school) return res.status(404).json({ error: 'School not found' });
+
+    await email.sendRejectionEmail({
+      adminName:  school.adminName || school.name,
+      adminEmail: school.adminEmail,
+      schoolName: school.name,
+      reason
+    });
+
+    console.log(`[PLATFORM] Rejected school: ${school.name}`);
+    res.json({ success: true, school });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

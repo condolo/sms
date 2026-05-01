@@ -674,21 +674,34 @@ function togglePassword() {
   else { inp.type = 'password'; icon.className = 'fas fa-eye'; }
 }
 
+const DEMO_CREDS = {
+  superadmin:  { email:'superadmin@innolearn.ac.ke',  pass:'Admin1234!',   label:'Super Admin'      },
+  admin:       { email:'admin@innolearn.ac.ke',        pass:'Admin1234!',   label:'Admin'            },
+  teacher:     { email:'teacher@innolearn.ac.ke',      pass:'Teacher123!',  label:'Teacher'          },
+  parent:      { email:'parent@innolearn.ac.ke',       pass:'Parent123!',   label:'Parent'           },
+  student:     { email:'student@innolearn.ac.ke',      pass:'Student123!',  label:'Student'          },
+  finance:     { email:'finance@innolearn.ac.ke',      pass:'Finance123!',  label:'Finance Officer'  },
+  deputy:      { email:'deputy@innolearn.ac.ke',       pass:'Deputy123!',   label:'Deputy Principal' },
+  discipline:  { email:'discipline@innolearn.ac.ke',   pass:'Discipline1!', label:'Discipline'       }
+};
+
 function fillDemo(role) {
-  const creds = {
-    superadmin:  { email:'superadmin@innolearn.ac.ke',  pass:'Admin1234!'   },
-    admin:       { email:'admin@innolearn.ac.ke',        pass:'Admin1234!'   },
-    teacher:     { email:'teacher@innolearn.ac.ke',      pass:'Teacher123!'  },
-    parent:      { email:'parent@innolearn.ac.ke',       pass:'Parent123!'   },
-    student:     { email:'student@innolearn.ac.ke',      pass:'Student123!'  },
-    finance:     { email:'finance@innolearn.ac.ke',      pass:'Finance123!'  },
-    deputy:      { email:'deputy@innolearn.ac.ke',       pass:'Deputy123!'   },
-    discipline:  { email:'discipline@innolearn.ac.ke',   pass:'Discipline1!' }
-  };
-  const c = creds[role];
-  if (c) {
-    document.getElementById('login-email').value    = c.email;
-    document.getElementById('login-password').value = c.pass;
+  const c = DEMO_CREDS[role];
+  if (!c) return;
+  document.getElementById('login-email').value    = c.email;
+  document.getElementById('login-password').value = c.pass;
+
+  // Highlight selected card
+  document.querySelectorAll('.demo-role-card').forEach(el => el.classList.remove('active'));
+  const btn = document.querySelector(`.demo-role-card.pill-${role}`);
+  if (btn) btn.classList.add('active');
+
+  // Show info strip
+  const info = document.getElementById('demo-selected-info');
+  const txt  = document.getElementById('demo-info-text');
+  if (info && txt) {
+    txt.textContent = `${c.label} loaded (${c.email}) — click Sign In →`;
+    info.style.display = 'flex';
   }
 }
 
@@ -848,17 +861,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const isLocal  = ['localhost','127.0.0.1'].includes(window.location.hostname);
   const demoMode = params.get('demo');
 
-  // Show demo pills only on localhost or when ?demo=1 is explicitly set
-  if (isLocal || demoMode === '1') {
+  // Show demo panel on localhost, ?demo=1, or ?demo=innolearn
+  if (isLocal || demoMode === '1' || demoMode?.toLowerCase() === 'innolearn') {
     const ds = document.getElementById('demo-section');
     if (ds) ds.style.display = '';
   }
 
-  // Auto-fill Super Admin demo if ?demo=innolearn
-  if (demoMode === 'innolearn') {
+  // When ?demo=innolearn: pre-select superadmin to guide the user
+  if (demoMode?.toLowerCase() === 'innolearn') {
     setTimeout(() => {
       fillDemo('superadmin');
-      showToast('Demo credentials filled — click Sign In to explore InnoLearn!', 'info');
-    }, 600);
+    }, 300);
   }
 });

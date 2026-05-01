@@ -149,32 +149,25 @@
         <div class="ob-field">
           <label>Curriculum Offered <span class="req">*</span></label>
           <div class="curriculum-grid" id="curriculum-grid">
-            <div class="curriculum-chip" data-curriculum="cambridge" onclick="toggleCurriculum('cambridge', this)">
-              <div class="chip-check"><i class="fas fa-check"></i></div> Cambridge
+            <div class="curriculum-chip" data-curriculum="cbe" onclick="toggleCurriculum('cbe', this)">
+              <div class="chip-check"><i class="fas fa-check"></i></div>
+              <span class="chip-main">CBE</span>
+              <span class="chip-sub">Kenya — Competency Based Education</span>
             </div>
             <div class="curriculum-chip" data-curriculum="ib" onclick="toggleCurriculum('ib', this)">
-              <div class="chip-check"><i class="fas fa-check"></i></div> IB
+              <div class="chip-check"><i class="fas fa-check"></i></div>
+              <span class="chip-main">IB</span>
+              <span class="chip-sub">International Baccalaureate</span>
             </div>
-            <div class="curriculum-chip" data-curriculum="cbc" onclick="toggleCurriculum('cbc', this)">
-              <div class="chip-check"><i class="fas fa-check"></i></div> CBC (Kenya)
+            <div class="curriculum-chip" data-curriculum="british" onclick="toggleCurriculum('british', this)">
+              <div class="chip-check"><i class="fas fa-check"></i></div>
+              <span class="chip-main">British</span>
+              <span class="chip-sub">Cambridge / Edexcel</span>
             </div>
-            <div class="curriculum-chip" data-curriculum="kcse" onclick="toggleCurriculum('kcse', this)">
-              <div class="chip-check"><i class="fas fa-check"></i></div> KCSE / KCPE
-            </div>
-            <div class="curriculum-chip" data-curriculum="caps" onclick="toggleCurriculum('caps', this)">
-              <div class="chip-check"><i class="fas fa-check"></i></div> CAPS (S. Africa)
-            </div>
-            <div class="curriculum-chip" data-curriculum="waec" onclick="toggleCurriculum('waec', this)">
-              <div class="chip-check"><i class="fas fa-check"></i></div> WAEC / NECO
-            </div>
-            <div class="curriculum-chip" data-curriculum="uganda" onclick="toggleCurriculum('uganda', this)">
-              <div class="chip-check"><i class="fas fa-check"></i></div> Uganda (UCE/UACE)
-            </div>
-            <div class="curriculum-chip" data-curriculum="montessori" onclick="toggleCurriculum('montessori', this)">
-              <div class="chip-check"><i class="fas fa-check"></i></div> Montessori
-            </div>
-            <div class="curriculum-chip" data-curriculum="custom" onclick="toggleCurriculum('custom', this)">
-              <div class="chip-check"><i class="fas fa-check"></i></div> Custom / Mixed
+            <div class="curriculum-chip" data-curriculum="american" onclick="toggleCurriculum('american', this)">
+              <div class="chip-check"><i class="fas fa-check"></i></div>
+              <span class="chip-main">American</span>
+              <span class="chip-sub">US Common Core / AP</span>
             </div>
           </div>
           <div class="curriculum-links-wrap" id="curriculum-links"></div>
@@ -448,13 +441,16 @@
       </div>
 
       <label class="ob-check-label" style="margin-bottom:20px">
-        <input type="checkbox" id="agree-terms">
+        <input type="checkbox" id="agree-terms" onchange="toggleLaunch()">
         <span>I agree to the InnoLearn <a href="#" target="_blank">Terms of Service</a> and <a href="#" target="_blank">Privacy Policy</a></span>
       </label>
 
-      <button class="btn-ob-launch" id="launch-btn" onclick="launch()">
+      <button class="btn-ob-launch" id="launch-btn" onclick="launch()" disabled style="opacity:0.5;cursor:not-allowed">
         <i class="fas fa-rocket"></i> Launch My School
       </button>
+      <p id="launch-hint" style="font-size:12px;color:#9ca3af;text-align:center;margin-top:8px">
+        Tick the checkbox above to activate the Launch button.
+      </p>
 
       <div class="ob-nav" style="margin-top:16px">
         <button class="btn-ob-back" onclick="goTo(3)">
@@ -466,36 +462,69 @@
 
     <!-- ── SUCCESS SCREEN ───────────────────────────────── -->
     <div class="ob-success" id="panel-success">
-      <div class="ob-success-icon"><i class="fas fa-check"></i></div>
-      <h2>You're all set! 🎉</h2>
-      <p>Your InnoLearn portal has been created. Sign in now to start setting up your school.</p>
 
-      <div class="ob-success-details" id="success-details">
-        <div class="detail-row">
-          <span class="lbl">School</span>
-          <span class="val" id="sc-school">—</span>
+      <!-- Pending state (default — server mode) -->
+      <div id="success-pending">
+        <div class="ob-success-icon" style="background:linear-gradient(135deg,#f59e0b,#d97706)">
+          <i class="fas fa-hourglass-half"></i>
         </div>
-        <div class="detail-row">
-          <span class="lbl">Admin Email</span>
-          <span class="val" id="sc-email">—</span>
+        <h2>Application Submitted! ⏳</h2>
+        <p>Your InnoLearn application has been received and is <strong>under review</strong>. You will receive an email within <strong>24 hours</strong> once approved.</p>
+        <div class="ob-success-details" id="success-details-pending" style="border-left:3px solid #f59e0b">
+          <div class="detail-row">
+            <span class="lbl">School</span>
+            <span class="val" id="sc-school-p">—</span>
+          </div>
+          <div class="detail-row">
+            <span class="lbl">Admin Email</span>
+            <span class="val" id="sc-email-p">—</span>
+          </div>
+          <div class="detail-row">
+            <span class="lbl">Plan</span>
+            <span class="val" id="sc-plan-p">—</span>
+          </div>
+          <div class="detail-row">
+            <span class="lbl">Status</span>
+            <span class="val" style="color:#d97706;font-weight:600">⏳ Pending Approval</span>
+          </div>
         </div>
-        <div class="detail-row">
-          <span class="lbl">Plan</span>
-          <span class="val" id="sc-plan">—</span>
-        </div>
-        <div class="detail-row">
-          <span class="lbl">Trial Ends</span>
-          <span class="val" id="sc-trial">—</span>
+        <div style="margin-top:24px;padding:16px 20px;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;font-size:13px;color:#92400e;text-align:left">
+          <i class="fas fa-envelope" style="margin-right:8px"></i>
+          <strong>Check your email!</strong> We've sent a confirmation to your registered address. Our team will review your application and notify you within 24 hours.
         </div>
       </div>
 
-      <a href="index.html" class="btn-go-to-app" id="go-to-app-btn">
-        <i class="fas fa-arrow-right-to-bracket"></i> Go to My Portal
-      </a>
-
-      <div class="ob-already-have" style="margin-top:16px;font-size:12px;color:#9ca3af">
-        Your credentials have been saved. You'll be signed in automatically.
+      <!-- Active state (offline / immediate provisioning) -->
+      <div id="success-active" style="display:none">
+        <div class="ob-success-icon"><i class="fas fa-check"></i></div>
+        <h2>You're all set! 🎉</h2>
+        <p>Your InnoLearn portal has been created. Sign in now to start setting up your school.</p>
+        <div class="ob-success-details" id="success-details-active">
+          <div class="detail-row">
+            <span class="lbl">School</span>
+            <span class="val" id="sc-school">—</span>
+          </div>
+          <div class="detail-row">
+            <span class="lbl">Admin Email</span>
+            <span class="val" id="sc-email">—</span>
+          </div>
+          <div class="detail-row">
+            <span class="lbl">Plan</span>
+            <span class="val" id="sc-plan">—</span>
+          </div>
+          <div class="detail-row">
+            <span class="lbl">Trial Ends</span>
+            <span class="val" id="sc-trial">—</span>
+          </div>
+        </div>
+        <a href="index.html" class="btn-go-to-app" id="go-to-app-btn">
+          <i class="fas fa-arrow-right-to-bracket"></i> Go to My Portal
+        </a>
+        <div class="ob-already-have" style="margin-top:16px;font-size:12px;color:#9ca3af">
+          Your credentials have been saved. You'll be signed in automatically.
+        </div>
       </div>
+
     </div>
 
   </div><!-- /ob-right -->
@@ -670,15 +699,10 @@ function sanitiseSlug(input) {
 
 /* ── Curriculum selection ────────────────────────────────── */
 const CURRICULUM_META = {
-  cambridge:  { label:'Cambridge International',         url:'https://www.cambridgeinternational.org', desc:'Syllabuses, past papers, grade thresholds, teacher guides' },
-  ib:         { label:'International Baccalaureate (IBO)',url:'https://www.ibo.org',                   desc:'PYP, MYP, DP & CP programme resources and subject guides' },
-  cbc:        { label:'KICD — Kenya CBC',                url:'https://kicd.ac.ke',                    desc:'Competency-Based Curriculum designs, learning outcomes, assessment' },
-  kcse:       { label:'KNEC — KCPE / KCSE',             url:'https://www.knec.ac.ke',                desc:'National examination syllabuses, past papers and results portal' },
-  caps:       { label:'DBE — South Africa CAPS',        url:'https://www.education.gov.za',          desc:'CAPS curriculum statements, ATPs and examiner reports' },
-  waec:       { label:'WAEC — West Africa',             url:'https://www.waecdirect.org',            desc:'WASSCE/BECE syllabuses, past questions and results checker' },
-  uganda:     { label:'UNEB — Uganda',                  url:'https://www.uneb.ac.ug',               desc:'UCE and UACE syllabuses, past papers and marking guides' },
-  montessori: { label:'AMI — Montessori International', url:'https://montessori-ami.org',            desc:'Montessori philosophy, training resources and classroom guides' },
-  custom:     { label:'Custom / Mixed Curriculum',       url:null,                                    desc:'Configure your custom curriculum in Settings after setup' },
+  cbe:      { label:'CBE — Kenya (KICD)',               url:'https://kicd.ac.ke',                      desc:'Competency Based Education curriculum designs, learning outcomes & assessment frameworks' },
+  ib:       { label:'IB — International Baccalaureate', url:'https://www.ibo.org',                     desc:'PYP, MYP, DP & CP programme resources, subject guides and assessment criteria' },
+  british:  { label:'British — Cambridge / Edexcel',    url:'https://www.cambridgeinternational.org',  desc:'Cambridge IGCSE, A-Level and Edexcel syllabuses, past papers and grade thresholds' },
+  american: { label:'American Curriculum (US / AP)',    url:'https://apcentral.collegeboard.org',      desc:'US Common Core standards, AP courses, SAT/ACT preparation and College Board resources' },
 };
 
 function toggleCurriculum(id, el) {
@@ -797,8 +821,7 @@ function populateReview() {
 
   // Curriculum
   const curriculumNames = selectedCurricula.map(id => {
-    const labels = { cambridge:'Cambridge', ib:'IB', cbc:'CBC', kcse:'KCSE/KCPE',
-                     caps:'CAPS', waec:'WAEC', uganda:'Uganda', montessori:'Montessori', custom:'Custom' };
+    const labels = { cbe:'CBE (Kenya)', ib:'IB', british:'British (Cambridge/Edexcel)', american:'American' };
     return labels[id] || id;
   });
   document.getElementById('rv-curriculum').textContent = curriculumNames.join(', ') || '—';
@@ -813,12 +836,20 @@ function populateReview() {
   document.getElementById('rv-plan').innerHTML = planBadge;
 }
 
+/* ── T&C toggle ─────────────────────────────────────────── */
+function toggleLaunch() {
+  const checked = document.getElementById('agree-terms').checked;
+  const btn   = document.getElementById('launch-btn');
+  const hint  = document.getElementById('launch-hint');
+  btn.disabled = !checked;
+  btn.style.opacity = checked ? '1' : '0.5';
+  btn.style.cursor  = checked ? 'pointer' : 'not-allowed';
+  if (hint) hint.style.display = checked ? 'none' : 'block';
+}
+
 /* ── Launch ─────────────────────────────────────────────── */
 async function launch() {
-  if (!document.getElementById('agree-terms').checked) {
-    alert('Please agree to the Terms of Service and Privacy Policy to continue.');
-    return;
-  }
+  if (!document.getElementById('agree-terms').checked) return;
 
   const btn = document.getElementById('launch-btn');
   btn.disabled = true;
@@ -962,13 +993,29 @@ function showSuccess(data) {
   }
 
   const school = data.school || {};
-  const trialEnd = new Date();
-  trialEnd.setDate(trialEnd.getDate() + 30);
+  const planLabel = (selectedPlan.charAt(0).toUpperCase() + selectedPlan.slice(1)) + ' Plan';
 
-  document.getElementById('sc-school').textContent = school.name || v('school-name');
-  document.getElementById('sc-email').textContent  = v('admin-email');
-  document.getElementById('sc-plan').textContent   = (selectedPlan.charAt(0).toUpperCase() + selectedPlan.slice(1)) + ' Plan';
-  document.getElementById('sc-trial').textContent  = trialEnd.toLocaleDateString('en-GB', { day:'numeric', month:'long', year:'numeric' });
+  // Pending (server response) vs Active (offline fallback)
+  const isPending = data.pending === true;
+
+  if (isPending) {
+    // Show pending state
+    document.getElementById('success-pending').style.display = '';
+    document.getElementById('success-active').style.display  = 'none';
+    document.getElementById('sc-school-p').textContent = school.name || v('school-name');
+    document.getElementById('sc-email-p').textContent  = v('admin-email');
+    document.getElementById('sc-plan-p').textContent   = planLabel;
+  } else {
+    // Show active / offline state
+    document.getElementById('success-pending').style.display = 'none';
+    document.getElementById('success-active').style.display  = '';
+    const trialEnd = new Date();
+    trialEnd.setDate(trialEnd.getDate() + 30);
+    document.getElementById('sc-school').textContent = school.name || v('school-name');
+    document.getElementById('sc-email').textContent  = v('admin-email');
+    document.getElementById('sc-plan').textContent   = planLabel;
+    document.getElementById('sc-trial').textContent  = trialEnd.toLocaleDateString('en-GB', { day:'numeric', month:'long', year:'numeric' });
+  }
 
   document.getElementById('panel-success').classList.add('active');
   window.scrollTo({ top: 0, behavior: 'smooth' });

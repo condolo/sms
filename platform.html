@@ -56,8 +56,12 @@
       <button class="pa-nav-item active" onclick="showView('overview')" id="nav-overview">
         <i class="fas fa-chart-pie"></i> Overview
       </button>
+      <button class="pa-nav-item" onclick="showView('pending')" id="nav-pending">
+        <i class="fas fa-hourglass-half"></i> Pending
+        <span class="pa-badge" id="pending-badge" style="display:none">0</span>
+      </button>
       <button class="pa-nav-item" onclick="showView('schools')" id="nav-schools">
-        <i class="fas fa-school"></i> Schools
+        <i class="fas fa-school"></i> All Schools
       </button>
       <button class="pa-nav-item" onclick="showView('provision')" id="nav-provision">
         <i class="fas fa-plus-circle"></i> Provision School
@@ -158,6 +162,8 @@ function _showApp() {
   _updateClock();
   setInterval(_updateClock, 60000);
   showView('overview');
+  // Load pending badge count
+  api('GET', '/schools/pending').then(list => _updatePendingBadge(list.length)).catch(()=>{});
 }
 
 function _updateClock() {
@@ -199,10 +205,10 @@ function showView(view) {
   document.querySelectorAll('.pa-nav-item').forEach(el => el.classList.remove('active'));
   document.getElementById('nav-' + view)?.classList.add('active');
 
-  const titles = { overview:'Overview', schools:'Registered Schools', provision:'Provision New School' };
+  const titles = { overview:'Overview', pending:'Pending Approvals', schools:'Registered Schools', provision:'Provision New School' };
   document.getElementById('view-title').textContent = titles[view] || view;
 
-  const views = { overview: renderOverview, schools: renderSchools, provision: renderProvision };
+  const views = { overview: renderOverview, pending: renderPending, schools: renderSchools, provision: renderProvision };
   (views[view] || (() => {}))();
 }
 
@@ -294,6 +300,143 @@ function _offlineStatsHTML() {
         <a href="/api/health" target="_blank" style="color:var(--primary)">Check server health →</a>
       </div>
     </div>`;
+}
+
+/* ── PENDING APPROVALS ──────────────────────────────────── */
+async function renderPending() {
+  const el = document.getElementById('pa-content');
+  el.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading pending schools…</div>';
+
+  try {
+    const schools = await api('GET', '/schools/pending');
+    _updatePendingBadge(schools.length);
+
+    if (!schools.length) {
+      el.innerHTML = `
+        <div class="pa-card">
+          <div class="pa-empty">
+            <i class="fas fa-check-circle" style="color:#22c55e;font-size:36px;margin-bottom:12px"></i>
+            <p style="font-weight:600;color:#374151">All clear!</p>
+            <p style="color:#9ca3af;font-size:13px">No schools are awaiting approval right now.</p>
+          </div>
+        </div>`;
+      return;
+    }
+
+    el.innerHTML = `
+      <div class="pa-card">
+        <div class="pa-card-header">
+          <h3>Awaiting Approval (${schools.length})</h3>
+          <button class="pa-btn" onclick="renderPending()"><i class="fas fa-sync-alt"></i> Refresh</button>
+        </div>
+        <div class="pending-list">
+          ${schools.map(s => _pendingCard(s)).join('')}
+        </div>
+      </div>`;
+  } catch (err) {
+    el.innerHTML = `
+      <div class="pa-card">
+        <div style="padding:20px;font-size:13px;color:var(--gray-500)">
+          <i class="fas fa-triangle-exclamation" style="color:#f59e0b;margin-right:8px"></i>
+          Cannot reach the server. Make sure the Express backend is running.
+        </div>
+      </div>`;
+  }
+}
+
+function _pendingCard(s) {
+  const reg = s.createdAt ? new Date(s.createdAt).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+  const curriculum = (s.curriculum || []).join(', ') || '—';
+  const sections   = (s.sections   || []).join(', ') || '—';
+  return `
+    <div class="pending-card" id="pc-${s.id}">
+      <div class="pending-card-top">
+        <div class="pending-card-info">
+          <h4>${s.name}</h4>
+          <span class="pending-meta"><i class="fas fa-link"></i> ${s.slug || '—'}</span>
+          <span class="pending-meta"><i class="fas fa-user"></i> ${s.adminName || '—'} · ${s.adminEmail || '—'}</span>
+          <span class="pending-meta"><i class="fas fa-map-marker-alt"></i> ${s.city || '—'}, ${s.country || '—'}</span>
+          <span class="pending-meta"><i class="fas fa-book"></i> ${curriculum}</span>
+          <span class="pending-meta"><i class="fas fa-layer-group"></i> ${sections}</span>
+        </div>
+        <div class="pending-card-right">
+          <span class="plan-pill ${s.plan || 'core'}">${s.plan || 'core'}</span>
+          <span style="font-size:11px;color:var(--gray-400);display:block;margin-top:6px;text-align:center">${reg}</span>
+        </div>
+      </div>
+      <div class="pending-card-actions">
+        <button class="pa-btn success" onclick="approveSchool('${s.id}','${s.name.replace(/'/g,"\\'")}')">
+          <i class="fas fa-check"></i> Approve
+        </button>
+        <button class="pa-btn danger" onclick="rejectSchool('${s.id}','${s.name.replace(/'/g,"\\'")}')">
+          <i class="fas fa-times"></i> Reject
+        </button>
+        <button class="pa-btn" onclick="confirmImpersonate('${s.id}','${s.name.replace(/'/g,"\\'")}')">
+          <i class="fas fa-eye"></i> Preview
+        </button>
+      </div>
+    </div>`;
+}
+
+function _updatePendingBadge(count) {
+  const badge = document.getElementById('pending-badge');
+  if (!badge) return;
+  if (count > 0) {
+    badge.textContent = count;
+    badge.style.display = 'inline-flex';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+async function approveSchool(schoolId, schoolName) {
+  showModal(
+    `Approve ${schoolName}?`,
+    `Approving <strong>${schoolName}</strong> will activate their account and send them a welcome email with login instructions.`,
+    [
+      { label:'Cancel',  cls:'pa-btn', action:'closeModal()' },
+      { label:'✓ Approve', cls:'pa-btn success', action:`doApprove('${schoolId}')` }
+    ]
+  );
+}
+
+async function doApprove(schoolId) {
+  closeModal();
+  try {
+    await api('POST', `/schools/${schoolId}/approve`);
+    toast('School approved and welcome email sent!', 'success');
+    renderPending();
+    // Also refresh badge
+    api('GET', '/schools/pending').then(list => _updatePendingBadge(list.length)).catch(()=>{});
+  } catch (err) {
+    toast('Approval failed: ' + err.message, 'error');
+  }
+}
+
+function rejectSchool(schoolId, schoolName) {
+  showModal(
+    `Reject ${schoolName}?`,
+    `<p style="margin-bottom:12px">Rejecting will notify the school admin by email. You can provide an optional reason:</p>
+     <textarea id="reject-reason" placeholder="Optional reason for rejection…"
+       style="width:100%;height:80px;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical"></textarea>`,
+    [
+      { label:'Cancel', cls:'pa-btn', action:'closeModal()' },
+      { label:'✗ Reject', cls:'pa-btn danger', action:`doReject('${schoolId}')` }
+    ]
+  );
+}
+
+async function doReject(schoolId) {
+  const reason = document.getElementById('reject-reason')?.value.trim() || '';
+  closeModal();
+  try {
+    await api('POST', `/schools/${schoolId}/reject`, { reason });
+    toast('School rejected. Notification email sent.', 'info');
+    renderPending();
+    api('GET', '/schools/pending').then(list => _updatePendingBadge(list.length)).catch(()=>{});
+  } catch (err) {
+    toast('Rejection failed: ' + err.message, 'error');
+  }
 }
 
 /* ── SCHOOLS ────────────────────────────────────────────── */
