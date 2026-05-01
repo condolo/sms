@@ -676,17 +676,14 @@ function togglePassword() {
 
 function fillDemo(role) {
   const creds = {
-    superadmin:  { email:'superadmin@innolearn.edu.ke',      pass:'super123' },
-    admin:       { email:'admin@innolearn.edu.ke',           pass:'admin123' },
-    teacher:     { email:'sarah.smith@innolearn.edu.ke',     pass:'teacher123' },
-    admissions:  { email:'admissions@innolearn.edu.ke',      pass:'admissions123' },
-    finance:     { email:'finance@innolearn.edu.ke',         pass:'finance123' },
-    parent:      { email:'parent1@innolearn.edu.ke',         pass:'parent123' },
-    student:     { email:'student1@innolearn.edu.ke',        pass:'student123' },
-    hr:          { email:'hr@innolearn.edu.ke',              pass:'hr123' },
-    section_sec: { email:'head.secondary@innolearn.edu.ke',  pass:'section123' },
-    deputy:      { email:'deputy@innolearn.edu.ke',          pass:'deputy123' },
-    discipline:  { email:'discipline@innolearn.edu.ke',      pass:'discipline123' }
+    superadmin:  { email:'superadmin@innolearn.ac.ke',  pass:'Admin1234!'   },
+    admin:       { email:'admin@innolearn.ac.ke',        pass:'Admin1234!'   },
+    teacher:     { email:'teacher@innolearn.ac.ke',      pass:'Teacher123!'  },
+    parent:      { email:'parent@innolearn.ac.ke',       pass:'Parent123!'   },
+    student:     { email:'student@innolearn.ac.ke',      pass:'Student123!'  },
+    finance:     { email:'finance@innolearn.ac.ke',      pass:'Finance123!'  },
+    deputy:      { email:'deputy@innolearn.ac.ke',       pass:'Deputy123!'   },
+    discipline:  { email:'discipline@innolearn.ac.ke',   pass:'Discipline1!' }
   };
   const c = creds[role];
   if (c) {
