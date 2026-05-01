@@ -23,7 +23,7 @@ const ALLOWED = new Set([
 ]);
 
 // Collections that should NOT be filtered by schoolId (global/platform data)
-const GLOBAL = new Set(['behaviour_matrix']);
+const GLOBAL = new Set(['behaviour_matrix', 'system_announcements']);
 
 // Collections only admin/superadmin can write to
 const ADMIN_WRITE = new Set(['users', 'role_permissions', 'schools', 'fee_structures']);

@@ -63,12 +63,41 @@ app.use('/api/sync',        require('./routes/sync'));
 app.use('/api/platform',    require('./routes/platform'));
 app.use('/api/collections', require('./routes/collections'));
 app.use('/api/users',       require('./routes/users'));
+app.use('/api/backup',      require('./routes/backup'));
+
+/* ── School-facing announcement routes (JWT auth, not platform key) ── */
+const { authMiddleware } = require('./middleware/auth');
+const { _model: _m }    = require('./utils/model');
+
+/* GET /api/announcements — returns active, non-expired, non-dismissed announcements for this school */
+app.get('/api/announcements', authMiddleware, async (req, res) => {
+  try {
+    const Ann  = _m('system_announcements');
+    const now  = new Date().toISOString();
+    const schoolId = req.jwtUser.schoolId;
+    const list = await Ann.find({
+      status: 'active',
+      $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }],
+      dismissedBy: { $nin: [schoolId] }
+    }).sort({ createdAt: -1 }).lean();
+    res.json(list);
+  } catch (err) { res.status(500).json({ error: 'Failed to fetch announcements' }); }
+});
+
+/* POST /api/announcements/:id/dismiss — per-school dismiss */
+app.post('/api/announcements/:id/dismiss', authMiddleware, async (req, res) => {
+  try {
+    const Ann = _m('system_announcements');
+    await Ann.updateOne({ id: req.params.id }, { $addToSet: { dismissedBy: req.jwtUser.schoolId } });
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: 'Failed to dismiss' }); }
+});
 
 /* ── Health check ───────────────────────────────────────────── */
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: '3.3.0',
+    version: '3.5.0',
     timestamp: new Date().toISOString(),
     db: require('./config/db').isConnected() ? 'connected' : 'disconnected'
   });

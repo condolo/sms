@@ -17,6 +17,81 @@ const Dashboard = (() => {
     _adminDashboard();
   }
 
+  /* ─── SYSTEM ANNOUNCEMENT BANNER ─── */
+  let _announcements = [];
+
+  async function _loadAnnouncements() {
+    try {
+      const token = DB.getToken ? DB.getToken() : localStorage.getItem('ss_token');
+      if (!token) return;
+      const res = await fetch('/api/announcements', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) _announcements = await res.json();
+    } catch { _announcements = []; }
+  }
+
+  async function dismissAnnouncement(annId) {
+    try {
+      const token = DB.getToken ? DB.getToken() : localStorage.getItem('ss_token');
+      await fetch(`/api/announcements/${annId}/dismiss`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      _announcements = _announcements.filter(a => a.id !== annId);
+      // Remove banner from DOM immediately without full re-render
+      const el = document.getElementById(`ann-banner-${annId}`);
+      if (el) { el.style.transition = 'opacity .3s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }
+    } catch { showToast('Could not dismiss. Please try again.', 'error'); }
+  }
+
+  function _announcementBanners() {
+    if (!_announcements.length) return '';
+    const colours = {
+      maintenance: { bg:'#fef3c7', border:'#d97706', icon:'🔧', label:'Scheduled Maintenance' },
+      update:      { bg:'#ede9fe', border:'#7c3aed', icon:'🚀', label:'Platform Update' },
+      security:    { bg:'#fee2e2', border:'#dc2626', icon:'🔒', label:'Security Notice' },
+      info:        { bg:'#e0f2fe', border:'#0284c7', icon:'ℹ️', label:'Platform Notice' }
+    };
+
+    return _announcements.map(ann => {
+      const c       = colours[ann.type] || colours.info;
+      const isMaint = ann.type === 'maintenance' || ann.type === 'security';
+      const dateStr = ann.scheduledAt
+        ? ` — <strong>${new Date(ann.scheduledAt).toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})}</strong>`
+        : '';
+      return `
+        <div id="ann-banner-${ann.id}" style="
+          background:${c.bg};border-left:4px solid ${c.border};border-radius:10px;
+          padding:14px 18px;margin-bottom:12px;display:flex;align-items:flex-start;
+          gap:14px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+          <span style="font-size:20px;flex-shrink:0;margin-top:1px">${c.icon}</span>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:700;font-size:13px;color:#1e1b4b;margin-bottom:3px">
+              ${c.label}${dateStr}
+            </div>
+            <div style="font-weight:600;font-size:14px;color:#111827;margin-bottom:4px">${ann.title}</div>
+            <div style="font-size:13px;color:#374151;line-height:1.5">${ann.description}</div>
+            ${isMaint ? `
+            <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap">
+              <button onclick="createBackup()" style="background:#4f46e5;color:#fff;border:none;padding:7px 16px;
+                border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">
+                <i class="fas fa-download"></i> Back Up My Data Now
+              </button>
+              <button onclick="dismissAnnouncement('${ann.id}')" style="background:none;border:1.5px solid #cbd5e1;
+                padding:7px 14px;border-radius:7px;font-size:12px;color:#64748b;cursor:pointer">
+                Dismiss
+              </button>
+            </div>` : `
+            <div style="margin-top:8px">
+              <button onclick="dismissAnnouncement('${ann.id}')" style="background:none;border:none;
+                font-size:12px;color:#6b7280;cursor:pointer;text-decoration:underline">Dismiss</button>
+            </div>`}
+          </div>
+        </div>`;
+    }).join('');
+  }
+
   /* ─── PASSWORD EXPIRY BANNER ─── */
   function _pwdExpiryBanner(user) {
     if (!user) return '';
@@ -205,7 +280,11 @@ const Dashboard = (() => {
     // Show password expiry banner for current user
     const pwdHtml = _pwdExpiryBanner(Auth.currentUser);
 
+    // Show system announcement banners (loaded async)
+    const annHtml = _announcementBanners();
+
     App.renderPage(`
+    ${annHtml}
     ${pwdHtml}
     ${trialHtml}
     ${wizardHtml}
@@ -366,8 +445,35 @@ const Dashboard = (() => {
           <i class="fas fa-calendar-alt" style="background:var(--danger-light);color:var(--danger);width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:18px"></i>
           <span>Timetable</span>
         </div>
+        ${Auth.isSuperAdmin() ? `
+        <div class="quick-action" onclick="createBackup()">
+          <i class="fas fa-download" style="background:#e0e7ff;color:#4f46e5;width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:18px"></i>
+          <span>Backup Data</span>
+        </div>` : ''}
       </div>
     </div>
+
+    ${Auth.isSuperAdmin() ? `
+    <div class="backup-card" id="backup-section">
+      <div class="backup-card-left">
+        <div class="backup-card-icon"><i class="fas fa-shield-halved"></i></div>
+        <div>
+          <p class="backup-card-title">Data Backup & Export</p>
+          <p class="backup-card-sub">Export all your school data as a secure JSON file. Back up before any platform update.</p>
+          <div class="backup-history-wrap" id="backup-history-wrap" style="display:none">
+            <div id="backup-history-list"></div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;flex-shrink:0">
+        <button id="backup-btn" class="btn btn-primary" onclick="createBackup()">
+          <i class="fas fa-download"></i> Back Up Now
+        </button>
+        <button class="btn-link" style="font-size:12px;color:#6b7280" onclick="toggleBackupHistory()">
+          View backup history
+        </button>
+      </div>
+    </div>` : ''}
     `);
 
     /* Charts */
@@ -1098,8 +1204,132 @@ const Dashboard = (() => {
     return Math.floor(h/24) + 'd ago';
   }
 
-  return { render };
+  /* Load announcements and re-render banners on next tick */
+  async function _initAnnouncements() {
+    await _loadAnnouncements();
+    // If banners area exists in DOM, refresh it without full re-render
+    const placeholders = document.querySelectorAll('[id^="ann-banner-"]');
+    if (placeholders.length === 0 && _announcements.length > 0) {
+      // banners not yet shown — trigger a full re-render is too disruptive.
+      // Instead, prepend banners to page content if possible.
+      const firstCard = document.querySelector('.hero-card,.stats-grid,.setup-wizard');
+      if (firstCard) {
+        const div = document.createElement('div');
+        div.innerHTML = _announcementBanners();
+        firstCard.parentNode.insertBefore(div, firstCard);
+      }
+    }
+  }
+
+  return { render, _loadAnnouncements, _initAnnouncements };
 })();
+
+/* ── Global: dismiss an announcement banner ────────────────── */
+function dismissAnnouncement(annId) {
+  Dashboard._loadAnnouncements && Dashboard.dismissAnnouncement
+    ? Dashboard.dismissAnnouncement(annId)
+    : Dashboard._loadAnnouncements();
+  // Call the module's internal function via a closure reference
+  const el = document.getElementById(`ann-banner-${annId}`);
+  if (el) {
+    el.style.transition = 'opacity .3s';
+    el.style.opacity = '0';
+    setTimeout(() => el.remove(), 300);
+  }
+  // Fire dismiss API
+  const token = localStorage.getItem('ss_token') || sessionStorage.getItem('ss_token');
+  if (token) {
+    fetch(`/api/announcements/${annId}/dismiss`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }
+    }).catch(() => {});
+  }
+}
+
+/* ── Global: create a data backup / export ─────────────────── */
+async function createBackup(label) {
+  const token = localStorage.getItem('ss_token') || sessionStorage.getItem('ss_token');
+  if (!token) { showToast('Please sign in to create a backup.', 'error'); return; }
+
+  showToast('Preparing your backup… this may take a few seconds.', 'info');
+  const btnEl = document.getElementById('backup-btn');
+  if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Backing up…'; }
+
+  try {
+    const res = await fetch('/api/backup/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ label: label || `Manual backup — ${new Date().toLocaleDateString('en-GB')}` })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.error || 'Backup failed. Please try again.', 'error');
+      return;
+    }
+
+    /* Trigger browser download */
+    const blob        = await res.blob();
+    const disposition = res.headers.get('Content-Disposition') || '';
+    const filenameMatch = disposition.match(/filename="(.+?)"/);
+    const filename    = filenameMatch ? filenameMatch[1] : `InnoLearn_Backup_${Date.now()}.json`;
+
+    const url  = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href  = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+
+    showToast(`✅ Backup downloaded: ${filename}`, 'success');
+
+    // Refresh backup history if panel is open
+    const histEl = document.getElementById('backup-history-list');
+    if (histEl) loadBackupHistory();
+
+  } catch (e) {
+    showToast('Backup failed — check your connection.', 'error');
+  } finally {
+    if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="fas fa-download"></i> Back Up Now'; }
+  }
+}
+
+/* ── Global: load and render backup history list ───────────── */
+async function loadBackupHistory() {
+  const el = document.getElementById('backup-history-list');
+  if (!el) return;
+  const token = localStorage.getItem('ss_token') || sessionStorage.getItem('ss_token');
+  el.innerHTML = '<div style="color:#6b7280;font-size:13px;padding:8px 0"><i class="fas fa-circle-notch fa-spin"></i> Loading…</div>';
+  try {
+    const res  = await fetch('/api/backup/history', { headers: { 'Authorization': `Bearer ${token}` } });
+    const logs = await res.json();
+    if (!logs.length) { el.innerHTML = '<div style="color:#6b7280;font-size:13px;padding:8px 0">No backups yet.</div>'; return; }
+    el.innerHTML = logs.map(l => `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f1f5f9;gap:10px">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:#1e1b4b">${l.label || 'Backup'}</div>
+          <div style="font-size:11px;color:#6b7280">${new Date(l.createdAt).toLocaleString('en-GB')} &nbsp;·&nbsp; ${l.totalRecords?.toLocaleString() || '?'} records</div>
+        </div>
+        <span style="font-size:11px;font-weight:600;background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:20px">v${l.version || '—'}</span>
+      </div>`).join('');
+  } catch {
+    el.innerHTML = '<div style="color:#ef4444;font-size:13px;padding:8px 0">Could not load history.</div>';
+  }
+}
+
+/* ── Global: toggle backup history panel ──────────────────── */
+function toggleBackupHistory() {
+  const wrap = document.getElementById('backup-history-wrap');
+  if (!wrap) return;
+  if (wrap.style.display === 'none') {
+    wrap.style.display = 'block';
+    loadBackupHistory();
+  } else {
+    wrap.style.display = 'none';
+  }
+}
 
 /* ── Global: dismiss setup wizard ─────────────────────────── */
 function dismissWizard(schoolId) {

@@ -249,4 +249,110 @@ async function _seedBaseData(schoolId) {
   }}, { upsert: true });
 }
 
+/* ════════════════════════════════════════════════════════════
+   SYSTEM ANNOUNCEMENTS — Platform admin creates global notices
+   visible on all school dashboards and sent via email
+   ════════════════════════════════════════════════════════════ */
+
+function _annId() {
+  return 'ann_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
+}
+
+/* GET /api/platform/announcements — list all announcements */
+router.get('/announcements', async (req, res) => {
+  try {
+    const Ann = _model('system_announcements');
+    const list = await Ann.find({}).sort({ createdAt: -1 }).lean();
+    res.json(list);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* POST /api/platform/announcements — create a system announcement
+   Body: { title, description, type, scheduledAt, affectsAt, expiresAt, notifyAll }
+   type: 'maintenance' | 'update' | 'security' | 'info'
+*/
+router.post('/announcements', async (req, res) => {
+  try {
+    const { title, description, type, scheduledAt, affectsAt, expiresAt, notifyAll } = req.body;
+    if (!title || !description) return res.status(400).json({ error: 'title and description required' });
+
+    const Ann    = _model('system_announcements');
+    const School = _model('schools');
+    const now    = new Date().toISOString();
+
+    const ann = await Ann.create({
+      id:           _annId(),
+      title,
+      description,
+      type:         type || 'info',
+      scheduledAt:  scheduledAt || null,
+      affectsAt:    affectsAt   || null,
+      expiresAt:    expiresAt   || null,
+      createdAt:    now,
+      status:       'active',
+      dismissedBy:  [],
+      notifiedCount: 0
+    });
+
+    /* Email all school admins if requested */
+    if (notifyAll) {
+      const schools = await School.find({ isActive: true, adminEmail: { $exists: true, $ne: '' } }).lean();
+      let sent = 0;
+
+      for (const school of schools) {
+        if (!school.adminEmail) continue;
+        await email.sendSystemUpdateNotice({
+          adminName:   school.adminName || school.name,
+          adminEmail:  school.adminEmail,
+          schoolName:  school.name,
+          title,
+          description,
+          type:        type || 'info',
+          scheduledAt: scheduledAt || null,
+          affectsAt:   affectsAt   || null
+        }).catch(err => console.error(`[ANNOUNCE email] ${school.adminEmail}:`, err.message));
+        sent++;
+      }
+
+      await Ann.updateOne({ id: ann.id }, { notifiedCount: sent });
+      console.log(`[ANNOUNCE] Created "${title}", emailed ${sent} schools`);
+    }
+
+    res.status(201).json(ann.toObject());
+  } catch (err) {
+    console.error('[announcements/create]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* PATCH /api/platform/announcements/:id — update status (cancel/complete/reactivate) */
+router.patch('/announcements/:id', async (req, res) => {
+  try {
+    const Ann  = _model('system_announcements');
+    const update = {};
+    if (req.body.status)      update.status      = req.body.status;
+    if (req.body.title)       update.title       = req.body.title;
+    if (req.body.description) update.description = req.body.description;
+    if (req.body.expiresAt)   update.expiresAt   = req.body.expiresAt;
+
+    const doc = await Ann.findOneAndUpdate({ id: req.params.id }, { $set: update }, { new: true }).lean();
+    if (!doc) return res.status(404).json({ error: 'Announcement not found' });
+    res.json(doc);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* DELETE /api/platform/announcements/:id */
+router.delete('/announcements/:id', async (req, res) => {
+  try {
+    const Ann = _model('system_announcements');
+    await Ann.deleteOne({ id: req.params.id });
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* ── School-side dismiss (uses platform router via /api/platform/announcements/:id/dismiss)
+   But schools need JWT auth, not platform key. So we expose a separate public endpoint
+   in the main collections route instead. Dismiss is tracked as schoolId in dismissedBy[].
+   We handle this via a special route here with a loose auth fallback: ── */
+
 module.exports = router;

@@ -344,6 +344,16 @@ const App = (() => {
     } else {
       _handleHash();
     }
+
+    // Load system announcements in background (non-blocking)
+    if (typeof Dashboard !== 'undefined' && Dashboard._loadAnnouncements) {
+      Dashboard._loadAnnouncements().then(() => {
+        // If we're already on the dashboard, re-render banners
+        if ((location.hash || '#dashboard').includes('dashboard')) {
+          Dashboard._initAnnouncements && Dashboard._initAnnouncements();
+        }
+      }).catch(() => {});
+    }
   }
 
   /* ── Branding helpers ────────────────────────────────────── */

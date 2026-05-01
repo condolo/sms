@@ -285,6 +285,48 @@ async function sendRoleChanged({ name, email, schoolName, oldRole, newRole, chan
   return _send(email, `Your InnoLearn role has changed — ${schoolName}`, html);
 }
 
+/* ══════════════════════════════════════════════════════════════
+   12. System-wide update / maintenance notice to school admins
+   ══════════════════════════════════════════════════════════════ */
+async function sendSystemUpdateNotice({ adminName, adminEmail, schoolName, title, description, type, scheduledAt, affectsAt }) {
+  const typeIcons  = { maintenance:'🔧', update:'🚀', security:'🔒', info:'ℹ️' };
+  const typeLabels = { maintenance:'Scheduled Maintenance', update:'Platform Update', security:'Security Notice', info:'Platform Notice' };
+  const icon  = typeIcons[type]  || 'ℹ️';
+  const label = typeLabels[type] || 'Platform Notice';
+  const urgency = type === 'maintenance' || type === 'security';
+
+  const scheduledLine = scheduledAt
+    ? `<p><strong>Scheduled:</strong> ${new Date(scheduledAt).toLocaleString('en-GB', { dateStyle:'long', timeStyle:'short' })}</p>`
+    : '';
+  const affectsLine = affectsAt
+    ? `<p><strong>Maintenance window:</strong> ${new Date(affectsAt).toLocaleString('en-GB', { dateStyle:'long', timeStyle:'short' })}</p>`
+    : '';
+
+  const html = _wrap(`
+    <h2>${icon} ${label}</h2>
+    <p>Hi ${adminName},</p>
+    <p>You are receiving this notice as the administrator of <strong>${schoolName}</strong> on InnoLearn.</p>
+    <div class="info">
+      <p><strong>Notice:</strong> ${title}</p>
+      ${scheduledLine}
+      ${affectsLine}
+    </div>
+    <p style="white-space:pre-line">${description}</p>
+    ${urgency ? `
+    <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:16px;margin:16px 0">
+      <p style="margin:0;font-size:13px;color:#92400e"><strong>⚠️ Action recommended:</strong> Before this update, please log in to your InnoLearn dashboard and create a data backup. This takes less than a minute and ensures your data is safe.</p>
+    </div>
+    <p style="text-align:center">
+      <a href="${APP_URL}" class="btn">Log In & Back Up Now →</a>
+    </p>` : `
+    <p style="text-align:center">
+      <a href="${APP_URL}" class="btn">Visit Your Dashboard →</a>
+    </p>`}
+    <p style="font-size:13px;color:#6b7280">If you have any questions about this notice, contact us at <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
+  `);
+  return _send(adminEmail, `${icon} InnoLearn — ${label}: ${title}`, html);
+}
+
 module.exports = {
   sendRegistrationPending,
   sendAdminNewSchoolAlert,
@@ -297,4 +339,5 @@ module.exports = {
   sendPasswordExpirySoon,
   sendPasswordChanged,
   sendRoleChanged,
+  sendSystemUpdateNotice,
 };
