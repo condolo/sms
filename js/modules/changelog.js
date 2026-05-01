@@ -8,6 +8,59 @@ const Changelog = (() => {
   /* ── Version data ─────────────────────────────────────── */
   const VERSIONS = [
     {
+      version: '3.3.0',
+      date: '2026-05-01',
+      tag: 'security',
+      title: 'Security · Real-time Slug Check · 2FA · Trial Reminders',
+      sections: [
+        {
+          heading: 'New — Real-time Slug Availability Check',
+          type: 'new',
+          items: [
+            'Live availability indicator as admin types school URL slug during registration (500 ms debounce)',
+            'Green tick = available · Red warning = taken or reserved word · spinner during check',
+            'Reserved words (admin, api, platform, www, innolearn…) blocked client-side immediately',
+            'Slug auto-checked when auto-filled from school name',
+            'Server: <code>GET /api/onboard/check-slug</code> with 60-request/min rate limiter',
+          ]
+        },
+        {
+          heading: 'New — Auto-Logout After 10 Minutes Inactivity',
+          type: 'security',
+          items: [
+            'Authenticated sessions are signed out after 10 minutes of no user activity',
+            'At 9 minutes an amber persistent toast warns the user with a "Stay signed in" button',
+            'Any activity (mouse, keyboard, scroll, touch) resets the idle timer',
+            'Timer polled every 30 seconds via setInterval — negligible CPU cost',
+            'Protects shared and unattended devices from session hijacking',
+          ]
+        },
+        {
+          heading: 'New — Two-Factor Authentication for Super Admin (Email OTP)',
+          type: 'security',
+          items: [
+            'After password verified, superadmin login is paused and a 6-digit OTP is emailed',
+            'OTP valid for 5 minutes; separate rate limiter (10 attempts / 5 min) prevents brute-force',
+            'Login form replaced by OTP entry screen with countdown guidance and "Back to login" link',
+            'JWT is never issued until OTP is verified — no partial session exposure',
+            'OTP cleared from DB immediately on success or expiry',
+            'Future per-user opt-out supported via <code>mfaEnabled: false</code> flag',
+          ]
+        },
+        {
+          heading: 'New — Trial Expiry Reminders',
+          type: 'new',
+          items: [
+            'Dashboard banner visible to school admin and superadmin when trial ≤ 7 days remaining',
+            'Colour-coded urgency: blue (7 d) → amber (3 d) → red (1 d / expiry day)',
+            'Email reminders sent automatically at 7, 3, 1 days and on expiry day',
+            'Deduplication: each milestone reminder sent at most once per day per school',
+            'Triggered on login — no background job or cron required',
+          ]
+        },
+      ]
+    },
+    {
       version: '3.2.0',
       date: '2026-05-01',
       tag: 'new',

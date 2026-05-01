@@ -6,6 +6,51 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [3.3.0] — 2026-05-01  Security · Real-time Slug Check · 2FA · Trial Reminders
+
+### New — Real-time URL Slug Availability Check
+- As the admin types their school URL slug during registration, a **live availability indicator** appears instantly (500 ms debounce)
+- **Green tick** = available; **Red warning** = already taken or reserved word
+- Spinner shows while the check is in flight; indicator clears gracefully when offline
+- Reserved words (`admin`, `api`, `platform`, `innolearn`, `www`, etc.) are blocked immediately without a server round-trip
+- Slug also auto-checked when it is filled in automatically from the school name
+- Server endpoint: `GET /api/onboard/check-slug` with a 60-request/minute rate limiter
+
+### New — Auto-Logout After 10 Minutes of Inactivity
+- Any authenticated session is silently **signed out after 10 minutes** of no keyboard, mouse, scroll, or touch activity
+- At **9 minutes** an amber persistent toast appears with a "Stay signed in" button — clicking it resets the timer
+- At **10 minutes** the session is destroyed and a "Signed out for security" toast is shown before returning to the login screen
+- Idle timer resets on any of: `mousemove`, `mousedown`, `keydown`, `touchstart`, `scroll`, `click`
+- Timer is checked every 30 seconds via `setInterval` (low CPU cost)
+
+### New — Two-Factor Authentication (2FA) for Super Admin via Email
+- When a **superadmin** signs in with a valid password, login is paused and a **6-digit OTP** is sent to their email address
+- OTP is valid for **5 minutes**; a separate rate limiter (10 attempts / 5 min) prevents brute-force
+- The login form is replaced by an OTP entry screen; a "Back to login" link cancels the attempt
+- Expired OTP is cleared automatically; user is prompted to restart login to get a fresh code
+- OTP stored as `mfaOtp` + `mfaExpiry` on the user document; cleared immediately on successful verify
+- Future per-user opt-out supported via `mfaEnabled: false` flag on user record (superadmin only for now)
+
+### New — Trial Expiry Reminders (Dashboard + Email)
+- All school plans include a **30-day free trial** tracked by `school.trialEnds`
+- **Dashboard banner** appears for superadmin and school admin when the trial has ≤ 7 days left:
+  - 7 days left → blue info banner ℹ️
+  - 2–3 days left → amber warning banner ⏰
+  - 1 day left → red warning banner ⚠️
+  - Expiry day → red critical banner 🚨
+  - Banner disappears automatically once the trial period has passed
+- **Email reminders** sent automatically at 7, 3, 1 days before and on the expiry day itself
+- Deduplication: each milestone email is sent **at most once per day** using a date-keyed flag on the school record (`trialReminderSent_N`)
+- Reminders triggered on login — no background job required
+
+### Security
+- `GET /api/onboard/check-slug` protected with rate limiter (60 req/min per IP)
+- `POST /api/auth/verify-otp` protected with OTP-specific rate limiter (10 req / 5 min)
+- Login now returns `mfaRequired: true` (no JWT issued) for superadmin until OTP is verified — token is never exposed before 2FA completion
+- Auto-logout ensures sessions are never left open on shared or unattended devices
+
+---
+
 ## [3.2.0] — 2026-05-01  School Approval Workflow · Email Notifications · Setup Wizard
 
 ### New — School Approval Workflow
