@@ -280,6 +280,35 @@ body {
   flex: 1;
 }
 
+/* Slug availability indicator */
+.slug-status {
+  padding: 0 12px;
+  font-size: 16px;
+  flex-shrink: 0;
+  transition: color .2s;
+}
+.slug-status.checking  { color: var(--gray-400); }
+.slug-status.available { color: #16a34a; }
+.slug-status.taken     { color: #dc2626; }
+
+.slug-check-msg {
+  font-size: 12px;
+  margin-top: 5px;
+  font-weight: 500;
+  min-height: 16px;
+}
+.slug-check-msg.checking  { color: var(--gray-400); }
+.slug-check-msg.available { color: #16a34a; }
+.slug-check-msg.taken     { color: #dc2626; }
+
+/* Slug taken → red border on the preview */
+.slug-preview:has(~ .slug-check-msg.taken) {
+  border-color: #dc2626;
+}
+.slug-preview:has(~ .slug-check-msg.available) {
+  border-color: #16a34a;
+}
+
 /* ── Password input ──────────────────────────────────────── */
 .pw-wrap { position: relative; }
 .pw-wrap input { padding-right: 40px; }

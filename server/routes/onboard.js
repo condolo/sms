@@ -55,6 +55,31 @@ const BLOCKED_DOMAINS = new Set([
   'thetempmail.com','tempinbox.com','emailondeck.com','throwam.com'
 ]);
 
+/* ── GET /api/onboard/check-slug?slug=xyz ──────────────── */
+const slugCheckLimiter = rateLimit({
+  windowMs: 60 * 1000, max: 60,
+  message: { error: 'Too many slug checks. Slow down.' }
+});
+
+router.get('/check-slug', slugCheckLimiter, async (req, res) => {
+  const raw = (req.query.slug || '').trim().toLowerCase();
+  const slug = sanitiseSlug(raw);
+  if (!slug || slug.length < 2) {
+    return res.json({ available: false, reason: 'Slug must be at least 2 characters.' });
+  }
+  const reserved = new Set(['admin','app','api','platform','www','mail','support','help','demo','innolearn','login','signup','onboard']);
+  if (reserved.has(slug)) {
+    return res.json({ available: false, reason: `"${slug}" is a reserved word and cannot be used.` });
+  }
+  try {
+    const School = _model('schools');
+    const exists = await School.findOne({ slug }).lean();
+    return res.json({ available: !exists, slug, reason: exists ? `"${slug}" is already taken. Please choose a different one.` : null });
+  } catch {
+    return res.json({ available: null, reason: 'Could not verify availability right now.' });
+  }
+});
+
 /* ── POST /api/onboard ──────────────────────────────────── */
 router.post('/', onboardLimiter, async (req, res) => {
   try {

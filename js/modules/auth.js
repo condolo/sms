@@ -60,6 +60,13 @@ const Auth = (() => {
       });
       const data = await res.json();
 
+      // Handle 2FA required — show OTP entry screen
+      if (res.ok && data.mfaRequired) {
+        _resetBtn();
+        _showOTPScreen(data.userId, data.schoolId, data.hint);
+        return;
+      }
+
       // Handle pending / rejected school — show specific UI, don't fall back to local
       if (res.status === 403 && data.error === 'pending_approval') {
         _resetBtn();
@@ -90,6 +97,89 @@ const Auth = (() => {
       // If server not reachable, fall through to local login
       if (err.message && !err.message.match(/fetch|network|failed to fetch/i)) throw err;
       throw err;
+    }
+  }
+
+  /* Show 2FA OTP entry screen */
+  function _showOTPScreen(userId, schoolId, hint) {
+    const loginInner = document.querySelector('.login-right-inner') || document.querySelector('.login-card');
+    if (!loginInner) return;
+    loginInner.style.transition = 'opacity .3s';
+    loginInner.style.opacity = '0';
+    setTimeout(() => {
+      loginInner.innerHTML = `
+        <div style="text-align:center;padding:8px 0">
+          <div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#4f46e5,#7c3aed);
+               display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:22px;color:#fff">
+            <i class="fas fa-shield-halved"></i>
+          </div>
+          <h2 style="font-size:20px;font-weight:700;color:#111827;margin-bottom:6px">Two-step verification</h2>
+          <p style="font-size:13px;color:#6b7280;margin-bottom:20px">${hint || 'A 6-digit code has been sent to your email address.'}</p>
+
+          <div style="margin-bottom:16px">
+            <label style="font-size:12px;font-weight:600;color:#374151;display:block;text-align:left;margin-bottom:6px">Enter your 6-digit code</label>
+            <input id="otp-input" type="text" inputmode="numeric" maxlength="6" placeholder="— — — — — —"
+              style="width:100%;padding:14px;font-size:24px;letter-spacing:10px;text-align:center;border:2px solid #e5e7eb;
+                     border-radius:10px;font-family:monospace;font-weight:700;color:#4f46e5;outline:none;box-sizing:border-box"
+              oninput="this.value=this.value.replace(/[^0-9]/g,'')"
+              onkeydown="if(event.key==='Enter') document.getElementById('otp-btn').click()">
+          </div>
+          <div id="otp-error" style="display:none;margin-bottom:12px;padding:10px;background:#fef2f2;border:1px solid #fecaca;
+               border-radius:8px;font-size:13px;color:#b91c1c"></div>
+
+          <button id="otp-btn" onclick="Auth._submitOTP('${userId}','${schoolId}')"
+            style="width:100%;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;
+                   padding:13px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:12px">
+            <i class="fas fa-check"></i> Verify & Sign In
+          </button>
+          <button onclick="location.reload()"
+            style="width:100%;background:none;border:1.5px solid #e5e7eb;padding:10px;border-radius:8px;
+                   font-size:13px;color:#6b7280;cursor:pointer">
+            ← Back to login
+          </button>
+          <p style="font-size:11px;color:#9ca3af;margin-top:14px">Code expires in 5 minutes. Check your spam folder if it doesn't arrive.</p>
+        </div>`;
+      loginInner.style.opacity = '1';
+      setTimeout(() => document.getElementById('otp-input')?.focus(), 100);
+    }, 300);
+  }
+
+  async function _submitOTP(userId, schoolId) {
+    const otp = document.getElementById('otp-input')?.value.trim();
+    const btn = document.getElementById('otp-btn');
+    const err = document.getElementById('otp-error');
+    if (!otp || otp.length !== 6) { err.textContent = 'Please enter the full 6-digit code.'; err.style.display='block'; return; }
+    err.style.display = 'none';
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Verifying…';
+
+    try {
+      const slug = _getSchoolSlug();
+      const res  = await fetch('/api/auth/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-School-Slug': slug },
+        body: JSON.stringify({ userId, schoolId, otp })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        err.textContent = data.error || 'Verification failed.';
+        err.style.display = 'block';
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-check"></i> Verify & Sign In';
+        return;
+      }
+      DB.setToken(data.token, false);
+      await DB.syncFromServer();
+      _user   = data.user;
+      _school = { ...data.school, ...(DB.get('schools')[0] || {}) };
+      _save(_user, _school, false);
+      showToast(`Welcome back, ${data.user.name.split(' ')[0]}!`, 'success');
+      App._showApp();
+    } catch (e) {
+      err.textContent = 'Could not verify code. Please try again.';
+      err.style.display = 'block';
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-check"></i> Verify & Sign In';
     }
   }
 
@@ -342,6 +432,7 @@ const Auth = (() => {
 
   return {
     login, logout, isLoggedIn, can, hasRole, hasPermission, visibleModules,
+    _submitOTP,  // exposed for inline onclick
     isSuperAdmin, isAdmin, isPrincipal, isSectionHead, isTeacher,
     isAdmissionsOfficer, isExamsOfficer, isFinance, isHR, isTimetabler,
     isDeputyPrincipal, isDisciplineCommittee, isParent, isStudent,

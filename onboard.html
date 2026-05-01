@@ -140,9 +140,11 @@
           <div class="slug-preview">
             <span class="slug-prefix">InnoLearn.com/</span>
             <input type="text" id="school-slug" placeholder="your-school"
-                   oninput="sanitiseSlug(this)" maxlength="40">
+                   oninput="sanitiseSlug(this); checkSlugAvailability(this.value)" maxlength="40">
+            <span class="slug-status" id="slug-status"></span>
           </div>
           <span class="field-hint" id="slug-hint">Auto-filled from your school name. You can edit it.</span>
+          <div class="slug-check-msg" id="slug-check-msg"></div>
         </div>
 
         <!-- ── Curriculum ── -->
@@ -680,6 +682,7 @@ function onSchoolNameInput(name) {
     .replace(/-+/g, '-')
     .substring(0, 40);
   document.getElementById('school-slug').value = slug;
+  checkSlugAvailability(slug);
 
   // Auto-fill short name from initials if empty
   const shortEl = document.getElementById('school-short');
@@ -695,6 +698,63 @@ function sanitiseSlug(input) {
   input.value = input.value.toLowerCase()
     .replace(/[^a-z0-9-]/g, '')
     .replace(/-+/g, '-');
+}
+
+/* ── Real-time slug availability check ──────────────────── */
+let _slugTimer = null;
+let _lastCheckedSlug = '';
+
+function checkSlugAvailability(raw) {
+  const slug = raw.toLowerCase().replace(/[^a-z0-9-]/g,'').replace(/-+/g,'-');
+  const status = document.getElementById('slug-status');
+  const msg    = document.getElementById('slug-check-msg');
+
+  // Reset if too short
+  if (slug.length < 2) {
+    status.textContent = '';
+    status.className = 'slug-status';
+    msg.textContent = '';
+    msg.className = 'slug-check-msg';
+    return;
+  }
+
+  // Show loading spinner
+  status.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+  status.className = 'slug-status checking';
+  msg.textContent = 'Checking availability…';
+  msg.className = 'slug-check-msg checking';
+
+  // Debounce: wait 500ms after last keystroke
+  clearTimeout(_slugTimer);
+  _slugTimer = setTimeout(async () => {
+    if (slug === _lastCheckedSlug) return;
+    _lastCheckedSlug = slug;
+    try {
+      const res  = await fetch(`/api/onboard/check-slug?slug=${encodeURIComponent(slug)}`);
+      const data = await res.json();
+
+      if (data.available === true) {
+        status.innerHTML = '<i class="fas fa-check-circle"></i>';
+        status.className = 'slug-status available';
+        msg.textContent = `✓ "${slug}" is available!`;
+        msg.className = 'slug-check-msg available';
+      } else if (data.available === false) {
+        status.innerHTML = '<i class="fas fa-times-circle"></i>';
+        status.className = 'slug-status taken';
+        msg.textContent = data.reason || `"${slug}" is already taken.`;
+        msg.className = 'slug-check-msg taken';
+      } else {
+        // null = server couldn't verify (offline)
+        status.textContent = '';
+        status.className = 'slug-status';
+        msg.textContent = '';
+      }
+    } catch {
+      status.textContent = '';
+      status.className = 'slug-status';
+      msg.textContent = '';
+    }
+  }, 500);
 }
 
 /* ── Curriculum selection ────────────────────────────────── */

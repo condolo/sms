@@ -17,6 +17,39 @@ const Dashboard = (() => {
     _adminDashboard();
   }
 
+  /* ─── TRIAL EXPIRY BANNER ─── */
+  function _trialBanner(school) {
+    if (!school?.trialEnds) return '';
+    const now      = new Date();
+    const ends     = new Date(school.trialEnds);
+    const daysLeft = Math.ceil((ends - now) / (1000 * 60 * 60 * 24));
+    if (daysLeft > 7 || daysLeft < 0) return ''; // outside warning window
+
+    let colour, icon, msg;
+    if (daysLeft <= 0) {
+      colour = '#dc2626'; icon = '🚨';
+      msg = `Your free trial has <strong>expired today</strong>. Your portal will be suspended at midnight unless you confirm your subscription.`;
+    } else if (daysLeft === 1) {
+      colour = '#dc2626'; icon = '⚠️';
+      msg = `Your free trial ends <strong>tomorrow</strong>. Act now to avoid any interruption.`;
+    } else if (daysLeft <= 3) {
+      colour = '#d97706'; icon = '⏰';
+      msg = `Your free trial ends in <strong>${daysLeft} days</strong> (${ends.toLocaleDateString('en-GB',{day:'numeric',month:'long'})}). Confirm your subscription to continue.`;
+    } else {
+      colour = '#2563eb'; icon = 'ℹ️';
+      msg = `Your free trial ends in <strong>${daysLeft} days</strong> (${ends.toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})}). Enjoy the ride!`;
+    }
+
+    return `
+      <div class="trial-banner" style="border-left-color:${colour}">
+        <span class="trial-banner-icon">${icon}</span>
+        <span class="trial-banner-text">${msg}</span>
+        <a href="#settings" onclick="App.navigate('settings')" class="trial-banner-btn" style="background:${colour}">
+          Manage Subscription
+        </a>
+      </div>`;
+  }
+
   /* ─── SETUP WIZARD ─── */
   function _setupWizard(school) {
     const students  = DB.get('students').filter(s => s.schoolId === school.id);
@@ -132,7 +165,11 @@ const Dashboard = (() => {
     // Show setup wizard for superadmin on new/sparse schools
     const wizardHtml = (Auth.isSuperAdmin() && school) ? _setupWizard(school) : '';
 
+    // Show trial expiry banner for admins
+    const trialHtml = (Auth.isSuperAdmin() || Auth.isAdmin()) ? _trialBanner(school) : '';
+
     App.renderPage(`
+    ${trialHtml}
     ${wizardHtml}
     <div class="hero-card blue" style="margin-bottom:20px">
       <div class="hero-content" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">

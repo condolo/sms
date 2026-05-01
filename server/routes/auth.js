@@ -5,8 +5,14 @@ const { _model } = require('../utils/model');
 const { tenantMiddleware } = require('../middleware/tenant');
 const { authMiddleware }   = require('../middleware/auth');
 const rateLimit = require('express-rate-limit');
+const email     = require('../utils/email');
 
 const router = express.Router();
+
+/* ── OTP helper ─────────────────────────────────────────── */
+function _genOTP() {
+  return String(Math.floor(100000 + Math.random() * 900000)); // 6-digit
+}
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,  // 15 minutes
@@ -60,6 +66,29 @@ router.post('/login', loginLimiter, tenantMiddleware, async (req, res) => {
 
     if (!match) return res.status(401).json({ error: 'Invalid email or password' });
 
+    // ── 2FA for superadmin ──────────────────────────────────
+    const userRole = user.primaryRole || user.role;
+    if (userRole === 'superadmin' && user.mfaEnabled !== false) {
+      const otp     = _genOTP();
+      const expiry  = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 min
+      await _model('users').updateOne({ _id: user._id }, { mfaOtp: otp, mfaExpiry: expiry });
+
+      // Send OTP email (non-blocking — log if it fails)
+      email.sendLoginOTP({
+        name:       user.name,
+        email:      user.email,
+        otp,
+        schoolName: req.school.name || req.school.slug
+      }).catch(err => console.error('[2FA email]', err.message));
+
+      return res.json({
+        mfaRequired: true,
+        userId:      user.id,
+        schoolId:    req.school.id,
+        hint:        `A 6-digit code has been sent to ${user.email.replace(/(.{2})(.*)(@.*)/, '$1***$3')}`
+      });
+    }
+
     // Update last login
     await _model('users').updateOne({ _id: user._id }, { lastLogin: new Date().toISOString() });
 
@@ -72,6 +101,9 @@ router.post('/login', loginLimiter, tenantMiddleware, async (req, res) => {
     };
     const token = sign(tokenPayload);
 
+    // Check trial expiry and send reminder if needed
+    _checkTrialAndNotify(req.school).catch(() => {});
+
     const safeUser = { ...user, password: undefined };
     res.json({ token, user: safeUser, school: req.school });
   } catch (err) {
@@ -79,6 +111,84 @@ router.post('/login', loginLimiter, tenantMiddleware, async (req, res) => {
     res.status(500).json({ error: 'Login failed' });
   }
 });
+
+/* POST /api/auth/verify-otp — complete 2FA login */
+const otpLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 10,
+  message: { error: 'Too many OTP attempts. Please try again.' } });
+
+router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
+  try {
+    const { userId, schoolId, otp } = req.body;
+    if (!userId || !otp) return res.status(400).json({ error: 'userId and otp required' });
+
+    const User = _model('users');
+    const user = await User.findOne({ id: userId, schoolId: schoolId || req.school?.id }).lean();
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    if (!user.mfaOtp || !user.mfaExpiry) {
+      return res.status(400).json({ error: 'No pending OTP. Please sign in again.' });
+    }
+    if (new Date() > new Date(user.mfaExpiry)) {
+      await User.updateOne({ id: userId }, { $unset: { mfaOtp: 1, mfaExpiry: 1 } });
+      return res.status(400).json({ error: 'Code expired. Please sign in again to get a new code.' });
+    }
+    if (otp.trim() !== user.mfaOtp) {
+      return res.status(401).json({ error: 'Incorrect code. Please check your email and try again.' });
+    }
+
+    // OTP verified — clear it, issue JWT
+    await User.updateOne({ id: userId }, { $unset: { mfaOtp: 1, mfaExpiry: 1 }, lastLogin: new Date().toISOString() });
+
+    const School = _model('schools');
+    const school = await School.findOne({ id: user.schoolId }).lean();
+
+    const token = sign({
+      userId:   user.id,
+      schoolId: user.schoolId,
+      email:    user.email,
+      role:     user.primaryRole || user.role,
+      roles:    user.roles || [user.role]
+    });
+
+    _checkTrialAndNotify(school).catch(() => {});
+    res.json({ token, user: { ...user, password: undefined, mfaOtp: undefined, mfaExpiry: undefined }, school });
+  } catch (err) {
+    console.error('[auth/verify-otp]', err);
+    res.status(500).json({ error: 'Verification failed' });
+  }
+});
+
+/* ── Trial expiry check & email reminder ─────────────────── */
+async function _checkTrialAndNotify(school) {
+  if (!school?.trialEnds || !school.adminEmail) return;
+  const now      = new Date();
+  const ends     = new Date(school.trialEnds);
+  const daysLeft = Math.ceil((ends - now) / (1000 * 60 * 60 * 24));
+
+  // Only send at exactly 7, 3, 1 days left and on expiry day (0)
+  const notifyDays = [7, 3, 1, 0];
+  if (!notifyDays.includes(daysLeft)) return;
+
+  // Avoid sending twice on same day
+  const todayKey = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const lastKey  = school[`trialReminderSent_${daysLeft}`];
+  if (lastKey === todayKey) return;
+
+  // Mark sent
+  await _model('schools').updateOne(
+    { id: school.id },
+    { $set: { [`trialReminderSent_${daysLeft}`]: todayKey } }
+  );
+
+  await email.sendTrialReminder({
+    adminName:  school.adminName || school.name,
+    adminEmail: school.adminEmail,
+    schoolName: school.name,
+    plan:       school.plan || 'standard',
+    daysLeft,
+    trialEnds:  ends.toLocaleDateString('en-GB', { day:'numeric', month:'long', year:'numeric' })
+  });
+}
 
 /* GET /api/auth/me — verify token + return current user */
 router.get('/me', authMiddleware, async (req, res) => {

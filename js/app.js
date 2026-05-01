@@ -853,9 +853,50 @@ function isOverlapping(aStart, aEnd, bStart, bEnd) {
   return aS < bE && bS < aE;
 }
 
+/* ── Auto-logout after 10 minutes of inactivity ─────────── */
+const _IDLE_MS    = 10 * 60 * 1000;  // 10 minutes
+const _WARN_MS    = 9  * 60 * 1000;  // warn at 9 minutes
+let   _lastActive = Date.now();
+let   _idleWarned = false;
+let   _idleTimer  = null;
+
+function _resetIdle() {
+  _lastActive = Date.now();
+  if (_idleWarned) {
+    // Dismiss the warning toast if user becomes active again
+    document.getElementById('idle-warn-toast')?.remove();
+    _idleWarned = false;
+  }
+}
+
+function _startIdleWatcher() {
+  ['mousemove','mousedown','keydown','touchstart','scroll','click'].forEach(evt =>
+    document.addEventListener(evt, _resetIdle, { passive: true })
+  );
+  _idleTimer = setInterval(() => {
+    if (!Auth.isLoggedIn()) return;
+    const idle = Date.now() - _lastActive;
+    if (idle >= _IDLE_MS) {
+      clearInterval(_idleTimer);
+      Auth.logout();
+      showToast('You were signed out after 10 minutes of inactivity.', 'info');
+    } else if (idle >= _WARN_MS && !_idleWarned) {
+      _idleWarned = true;
+      // Show a persistent warning toast
+      const wrap = document.getElementById('toast-container') || document.body;
+      const el = document.createElement('div');
+      el.id = 'idle-warn-toast';
+      el.className = 'toast toast-warning toast-persistent';
+      el.innerHTML = '<i class="fas fa-clock"></i> You will be signed out in 1 minute due to inactivity. <button onclick="this.parentElement.remove();_resetIdle()" style="margin-left:10px;background:none;border:none;color:inherit;font-weight:700;cursor:pointer">Stay signed in</button>';
+      wrap.appendChild(el);
+    }
+  }, 30000); // check every 30 seconds
+}
+
 /* Boot */
 document.addEventListener('DOMContentLoaded', () => {
   App.init();
+  _startIdleWatcher();
 
   const params   = new URLSearchParams(window.location.search);
   const isLocal  = ['localhost','127.0.0.1'].includes(window.location.hostname);

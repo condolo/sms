@@ -160,10 +160,54 @@ async function sendAdminApprovalAlert({ schoolName, adminEmail, plan }) {
   return _send(PLATFORM_EMAIL, `[InnoLearn] Approved: ${schoolName}`, html);
 }
 
+/* ══════════════════════════════════════════════════════════════
+   6. Two-factor authentication OTP
+   ══════════════════════════════════════════════════════════════ */
+async function sendLoginOTP({ name, email, otp, schoolName }) {
+  const html = _wrap(`
+    <h2>Your sign-in code 🔐</h2>
+    <p>Hi ${name},</p>
+    <p>Someone (hopefully you!) is signing in to <strong>${schoolName}</strong> on InnoLearn. Use the code below to complete your login.</p>
+    <div style="text-align:center;margin:24px 0">
+      <div style="display:inline-block;background:#f1f5f9;border:2px dashed #c7d2fe;border-radius:12px;padding:18px 36px">
+        <div style="font-size:36px;font-weight:800;letter-spacing:10px;color:#4f46e5;font-family:monospace">${otp}</div>
+      </div>
+    </div>
+    <p style="font-size:13px;color:#6b7280">This code expires in <strong>5 minutes</strong>. If you did not attempt to sign in, please change your password immediately and contact <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
+    <p style="font-size:12px;color:#9ca3af">Do not share this code with anyone — InnoLearn will never ask for it.</p>
+  `);
+  return _send(email, `${otp} — Your InnoLearn sign-in code`, html);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   7. Trial expiry reminder
+   ══════════════════════════════════════════════════════════════ */
+async function sendTrialReminder({ adminName, adminEmail, schoolName, plan, daysLeft, trialEnds }) {
+  const urgency = daysLeft === 0 ? '🚨 Today is your last day' : daysLeft === 1 ? '⚠️ 1 day left' : `⏰ ${daysLeft} days left`;
+  const html = _wrap(`
+    <h2>${urgency} on your free trial</h2>
+    <p>Hi ${adminName},</p>
+    <p>Your 30-day free trial for <strong>${schoolName}</strong> ${daysLeft === 0 ? 'ends <strong>today at midnight</strong>' : `ends in <strong>${daysLeft} day${daysLeft!==1?'s':''}</strong>`}.</p>
+    <div class="info">
+      <p><strong>School:</strong> ${schoolName}</p>
+      <p><strong>Current Plan:</strong> ${plan}</p>
+      <p><strong>Trial Ends:</strong> ${trialEnds}</p>
+    </div>
+    <p>To keep your school running smoothly with no interruption, please confirm your subscription before the trial expires.</p>
+    <p style="text-align:center">
+      <a href="${APP_URL}" class="btn">Manage My Subscription →</a>
+    </p>
+    <p style="font-size:13px;color:#6b7280">If you need help choosing a plan or have any questions, contact us at <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
+  `);
+  return _send(adminEmail, `${urgency} — InnoLearn trial for ${schoolName}`, html);
+}
+
 module.exports = {
   sendRegistrationPending,
   sendAdminNewSchoolAlert,
   sendApprovalWelcome,
   sendRejectionEmail,
   sendAdminApprovalAlert,
+  sendLoginOTP,
+  sendTrialReminder,
 };

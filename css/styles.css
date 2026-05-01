@@ -1779,6 +1779,18 @@ tbody tr.row-warning td { background:rgba(217,119,6,0.04); }
 .toast-info    { border-left-color:var(--info); }
 .toast-info i  { color:var(--info); }
 
+/* Persistent idle warning toast (no auto-dismiss progress bar) */
+.toast-persistent::after { display:none; }
+.toast-persistent {
+  background:#fffbeb;
+  border-left-color:#d97706;
+  color:#92400e;
+  font-size:13px;
+  font-weight:500;
+  max-width:380px;
+}
+.toast-persistent i { color:#d97706; }
+
 /* ── Scrollbar (global) ── */
 * { scrollbar-width:thin; scrollbar-color:var(--gray-300) transparent; }
 *::-webkit-scrollbar { width:5px; height:5px; }
@@ -3633,6 +3645,42 @@ td:hover .ac-edit-btn { display:inline; }
 .plan-standard   { background: rgba(59,130,246,.15); color: #60a5fa; }
 .plan-premium    { background: rgba(139,92,246,.15); color: #a78bfa; }
 .plan-enterprise { background: rgba(236,72,153,.15); color: #f472b6; }
+
+/* ══ Trial Expiry Banner ══════════════════════════════════ */
+.trial-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 18px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-left: 4px solid #2563eb;
+  border-radius: 10px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+  box-shadow: 0 2px 8px rgba(0,0,0,.06);
+}
+
+.trial-banner-icon { font-size: 18px; flex-shrink: 0; }
+
+.trial-banner-text {
+  flex: 1;
+  font-size: 13px;
+  color: var(--gray-700);
+  line-height: 1.5;
+  min-width: 200px;
+}
+
+.trial-banner-btn {
+  flex-shrink: 0;
+  padding: 7px 16px;
+  border-radius: 7px;
+  color: #fff !important;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
 
 /* ══ Setup Wizard ══════════════════════════════════════════ */
 .setup-wizard {
