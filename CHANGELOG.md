@@ -6,6 +6,72 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [3.2.0] — 2026-05-01  School Approval Workflow · Email Notifications · Setup Wizard
+
+### New — School Approval Workflow
+- New schools registered via `/onboard` are created with **`status: 'pending'`** and **`isActive: false`** — they are **not** automatically activated
+- Platform admin must **approve or reject** each registration from the Platform dashboard
+- On approval: school + superadmin user are activated, welcome email sent to school admin, confirmation alert sent to platform owner
+- On rejection: optional reason captured, rejection email sent to school admin
+- Schools remain fully registered in the database during the pending period; no data is lost if rejected and re-applied
+
+### New — Email Notifications (`server/utils/email.js`)
+- Gmail SMTP transactional email via **nodemailer** (`innolearnnetwork@gmail.com`)
+- **Registration received** → school admin gets "under review" confirmation with 24-hour timeline
+- **New registration alert** → platform owner gets full school details + link to Platform dashboard
+- **Approval welcome** → school admin gets login URL, credentials reminder, plan info
+- **Rejection notice** → school admin gets reason (if provided) + re-application instructions
+- **Approval self-alert** → platform owner copy of every approval action
+- All emails use a branded HTML template with InnoLearn colours, responsive layout, and status badges
+
+### New — Platform Dashboard: Pending Approvals Tab
+- New **"Pending"** sidebar item with a **live red badge count** showing pending school registrations
+- Each pending school displays: name, slug, admin name + email, city, country, curriculum, sections, plan, registration timestamp
+- **Approve** button — one click activates the school and triggers welcome emails
+- **Reject** button — opens a modal for optional rejection reason before sending notification
+- Badge auto-updates after each action; "All clear" empty state when queue is empty
+- Badge count loads automatically on platform admin login
+
+### New — Login: Demo Role Selector Panel
+- Replaced flat pill buttons with a **role card grid** (6 cards: Super Admin, Teacher, Parent, Finance, Student, Deputy)
+- Each card shows role icon, name, and a one-line description of that role's scope
+- Clicking a card fills credentials, highlights the card, and shows a green confirmation strip
+- Panel is visible on `localhost`, `?demo=1`, and `?demo=innolearn` (case-insensitive)
+- Super Admin role pre-selected when landing via `?demo=innolearn`
+
+### New — Setup Wizard for New Schools
+- Super Admin dashboard shows a **setup checklist card** on first login
+- 7 steps with live **% completion progress bar**: Complete school profile · Set academic year & terms · Create classes · Add teaching staff · Enroll students · Configure fee structures · Set up report templates
+- Each incomplete step is clickable and navigates directly to the relevant module
+- Completed steps show a green tick and strikethrough label
+- "Hide for now" link dismisses the wizard (stored per school in `localStorage`); reappears if reopened
+- Wizard disappears automatically when all 7 steps are complete
+
+### Changed — Curriculum Options
+- Registration wizard curriculum chips updated to **Kenya-focused list**: CBE (Competency Based Education), IB, British (Cambridge / Edexcel), American Curriculum
+- Chips redesigned from inline pills to **card layout** with bold name + subtitle description
+- `CURRICULUM_META` resource links updated to match: KICD (CBE), IBO (IB), Cambridge International (British), College Board AP Central (American)
+
+### Changed — T&C Checkbox → Launch Button Gate
+- **Launch My School** button starts **disabled** with 50% opacity and a hint label
+- Ticking the Terms of Service checkbox **enables** the button with smooth transition
+- Cannot submit the registration form without explicitly agreeing — removes the old `alert()` fallback
+
+### Changed — Registration Success Screen
+- Two distinct states after submitting registration:
+  - **Server mode (normal)**: shows amber "Application Submitted ⏳" with pending review message and email confirmation note
+  - **Offline/fallback mode**: shows green "You're all set! 🎉" with portal link (unchanged behaviour)
+
+### Changed — Pending School Login Block
+- When a pending school admin tries to log in, the server returns `403 { error: 'pending_approval' }`
+- Frontend replaces the login form with a friendly **"Application Under Review"** screen (amber icon, clear message, check-your-email prompt)
+- Rejected schools see a toast with support email contact
+
+### Security
+- `server/routes/auth.js`: login now looks up user first **without** `isActive` filter, then checks school status before returning the appropriate error — gives specific feedback for pending vs rejected vs inactive accounts rather than a generic "wrong password" message
+
+---
+
 ## [3.1.5] — 2026-04-30  Brand Rename: SchoolSync → InnoLearn
 
 ### Changed

@@ -72,13 +72,18 @@ InnoLearn.com / app.InnoLearn.com
 
 | Variable | Description | Example |
 |---|---|---|
-| `MONGODB_URI` | MongoDB Atlas connection string | `mongodb+srv://user:pass@cluster.mongodb.net/InnoLearn` |
+| `MONGODB_URI` | MongoDB Atlas connection string | `mongodb+srv://user:pass@cluster.mongodb.net/innolearn` |
 | `JWT_SECRET` | Secret for signing JWTs — **must be long and random** | `openssl rand -hex 64` |
 | `JWT_EXPIRES_IN` | Token lifetime | `7d` |
 | `PLATFORM_ADMIN_KEY` | Secret key for platform API — keep private | `openssl rand -hex 32` |
+| `SMTP_USER` | Gmail address for sending emails | `innolearnnetwork@gmail.com` |
+| `SMTP_PASS` | Gmail App Password (16 chars, spaces OK) | `xxxx xxxx xxxx xxxx` |
+| `PLATFORM_EMAIL` | Where to receive platform alerts (defaults to `SMTP_USER`) | `innolearnnetwork@gmail.com` |
 | `PORT` | Server port (Render sets this automatically) | `3005` |
 | `NODE_ENV` | `production` on Render, `development` locally | `production` |
 | `APP_URL` | Base URL of the app | `https://innolearn-ecosystem.onrender.com` |
+
+> **Gmail App Password**: Go to your Google Account → Security → 2-Step Verification → App Passwords. Generate one for "Mail / Other" and paste it as `SMTP_PASS`. Do not use your regular Gmail password.
 
 ### Setting on Render
 
@@ -133,13 +138,53 @@ If `"db": "disconnected"` — check `MONGODB_URI` in Render environment.
 
 ## 5. Provisioning a New School
 
-Schools can self-register via `onboard.html`. You can also provision manually via the platform API (useful for enterprise clients or bulk setup).
+Schools can self-register via `onboard.html`. You can also provision manually via the platform API. All self-registered schools go through the **approval workflow** described below.
 
-### Via the onboarding page
+### Via the onboarding page (school-initiated)
 
 Direct the school to: `https://innolearn-ecosystem.onrender.com/onboard`
 
-They fill the 4-step wizard → school + admin user is created automatically → 30-day free trial starts.
+They fill the 4-step wizard:
+1. School name, type, country, URL slug, curriculum (CBE / IB / British / American), sections
+2. Admin account details + password
+3. Plan selection (Core · Standard · Premium · Enterprise — all with 30-day free trial)
+4. Review + accept Terms of Service → Submit
+
+**What happens automatically:**
+- School record created with `status: 'pending'`, `isActive: false`
+- Superadmin user created with `isActive: false` (cannot log in yet)
+- Confirmation email sent to the school admin
+- Alert email sent to you at `PLATFORM_EMAIL` with all school details + link to the Platform dashboard
+
+**What you must do next:**
+1. Open `https://innolearn-ecosystem.onrender.com/platform`
+2. Enter your Platform Admin Key
+3. Click **Pending** in the left sidebar — you will see a red badge with the count
+4. Review the school details and click **Approve** or **Reject**
+
+On **Approve**: school + admin activated immediately; welcome email with login URL sent to school admin; confirmation sent to you.  
+On **Reject**: enter an optional reason; rejection email with explanation sent to school admin.
+
+### Via Platform API (manual, instant activation)
+
+Schools provisioned via the API are **immediately active** (no pending state):
+
+```bash
+curl -X POST https://innolearn-ecosystem.onrender.com/api/platform/schools \
+  -H "Content-Type: application/json" \
+  -H "X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY" \
+  -d '{
+    "name": "Sunrise Academy",
+    "shortName": "SA",
+    "slug": "sunrise",
+    "plan": "standard",
+    "adminName": "James Mwangi",
+    "adminEmail": "james@sunriseacademy.ke",
+    "adminPassword": "SecurePass@2026",
+    "currency": "KES",
+    "timezone": "Africa/Nairobi"
+  }'
+```
 
 ### Via Platform API (manual)
 
@@ -226,8 +271,11 @@ X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/platform/schools` | List all schools with stats |
-| `POST` | `/api/platform/schools` | Provision a new school manually |
+| `GET` | `/api/platform/schools` | List all schools with student/staff stats |
+| `GET` | `/api/platform/schools/pending` | List schools awaiting approval |
+| `POST` | `/api/platform/schools` | Provision a new school manually (immediately active) |
+| `POST` | `/api/platform/schools/:id/approve` | Approve a pending school — activates account + sends emails |
+| `POST` | `/api/platform/schools/:id/reject` | Reject a pending school — sends rejection email (body: `{ reason }`) |
 | `PATCH` | `/api/platform/schools/:id` | Update plan, addOns, isActive, planExpiry |
 | `POST` | `/api/platform/schools/:id/impersonate` | Get a JWT for any school's superadmin |
 | `GET` | `/api/platform/stats` | MRR, school counts, plan breakdown |

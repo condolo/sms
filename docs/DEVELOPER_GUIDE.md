@@ -1,6 +1,6 @@
 ﻿# InnoLearn — Developer Guide
 
-**Version 2.6** · Technical Reference & Architecture
+**Version 3.2** · Technical Reference & Architecture
 
 ---
 
@@ -50,15 +50,27 @@ InnoLearn is a **vanilla JavaScript single-page application** (SPA) with no buil
 ```
 school-management/
 ├── index.html                  # App entry point — all scripts loaded here
+├── onboard.html                # 4-step school self-registration wizard
+├── platform.html               # Platform admin SPA (key-protected)
+├── server.js                   # Entry point → delegates to server/index.js
+├── render.yaml                 # Render.com deployment config
 ├── CHANGELOG.md                # Version history
+├── .env                        # Local secrets (never committed)
+├── .env.example                # Safe template for .env
+├── .gitignore
+│
 ├── css/
-│   └── styles.css              # Single stylesheet (design system + all component styles)
+│   ├── styles.css              # Main design system (app shell + all component styles)
+│   ├── onboard.css             # Onboarding wizard styles
+│   └── platform.css            # Platform admin dashboard styles
+│
 ├── js/
 │   ├── data.js                 # Seed data + DB bootstrap (loads on first run)
 │   ├── app.js                  # Router, sidebar, utilities, global functions
 │   └── modules/
 │       ├── auth.js             # Authentication, session, role/permission checks
-│       ├── dashboard.js        # Dashboard module
+│       ├── dashboard.js        # Dashboard module (+ setup wizard for new schools)
+│       ├── changelog.js        # In-app changelog viewer
 │       ├── students.js         # Student Information System
 │       ├── classes.js          # Classes and sections
 │       ├── subjects.js         # Subjects and curriculum
@@ -72,13 +84,34 @@ school-management/
 │       ├── events.js           # Events and calendar
 │       ├── reports.js          # Reports and analytics
 │       ├── hr.js               # HR and staff management
-│       ├── behaviour.js        # Behaviour & Pastoral (v2)
+│       ├── behaviour.js        # Behaviour & Pastoral
 │       ├── settings.js         # School settings and permissions
-│       ├── changelog.js        # In-app changelog viewer
 │       └── help.js             # In-app help centre
+│
+├── server/
+│   ├── index.js                # Express server bootstrap — mounts all routes
+│   ├── config/
+│   │   └── db.js               # MongoDB Atlas connection (Mongoose)
+│   ├── middleware/
+│   │   ├── auth.js             # JWT verification + platform key middleware
+│   │   └── tenant.js           # Resolves schoolId from slug / subdomain / JWT
+│   ├── routes/
+│   │   ├── auth.js             # POST /api/auth/login, /me, /change-password
+│   │   ├── onboard.js          # POST /api/onboard — school self-registration
+│   │   ├── platform.js         # GET/POST /api/platform/* — platform admin API
+│   │   ├── collections.js      # Generic CRUD for all 25+ collections
+│   │   └── sync.js             # GET /api/sync — bulk data download
+│   └── utils/
+│       ├── jwt.js              # sign() / verify() helpers
+│       ├── model.js            # Shared Mongoose model factory (_model)
+│       ├── email.js            # Transactional email utility (nodemailer/Gmail)
+│       └── seedSchool.js       # One-off seed script for Atlas demo school
+│
 └── docs/
     ├── USER_GUIDE.md           # End-user documentation
-    └── DEVELOPER_GUIDE.md      # This file
+    ├── DEVELOPER_GUIDE.md      # This file
+    ├── PLATFORM_ADMIN_GUIDE.md # Platform owner operations guide
+    └── SCHOOL_ADMIN_GUIDE.md   # School Super Admin setup guide
 ```
 
 **Script load order in `index.html`** (matters — each module depends on `DB` and `Auth`):
@@ -909,10 +942,169 @@ The login screen HTML structure (v2.6+):
 
 | Limitation | Impact | Workaround |
 |---|---|---|
-| localStorage only (~5MB) | Large schools with many incidents may approach the limit | Periodically archive old terms' data |
-| No real backend | All data is client-side; clearing browser data wipes everything | Export to CSV/PDF before clearing; production would need a real API |
+| localStorage only (~5MB) | Large schools with many incidents may approach the limit | Periodically archive old terms' data; use MongoDB sync |
 | Single browser tab | Two tabs can have conflicting localStorage writes | One active tab per session |
 | No real file uploads | Document attachments in admissions are simulated | Link to external document storage (Google Drive etc.) |
-| Password storage | Passwords are stored as plain text in localStorage (demo only) | Production: hash passwords server-side, use JWT |
 | No real-time sync | Multi-user simulation is role-switching within one session | Production: WebSocket or polling for live multi-user |
-| SEED_VERSION wipe | Bumping resets ALL data | Export critical data before bumping; production would use migration scripts |
+| SEED_VERSION wipe | Bumping resets ALL localStorage data | Export critical data before bumping; server-side data is unaffected |
+| Data isolation (new schools) | New schools currently share InnoLearn demo data from localStorage seed | Approve + login with the school's own JWT to scope data via server sync |
+
+---
+
+## 18. School Approval Workflow
+
+New schools registered via `/api/onboard` go through a manual approval step before they can log in. This section describes the full lifecycle.
+
+### School Status States
+
+```
+pending   →   active      (approved by platform admin)
+pending   →   rejected    (rejected by platform admin)
+active    →   inactive    (suspended via PATCH /api/platform/schools/:id)
+```
+
+### Registration (`POST /api/onboard`)
+
+`server/routes/onboard.js` creates records in MongoDB:
+
+```js
+// School record
+{ id, slug, name, shortName, plan, isActive: false, status: 'pending',
+  adminName, adminEmail, currency, timezone, curriculum[], sections[] }
+
+// Superadmin user record
+{ id, schoolId, email, password: bcryptHash, role: 'superadmin',
+  isActive: false }
+```
+
+Two emails are sent immediately (non-blocking):
+- **`sendRegistrationPending`** → school admin ("your application is under review")
+- **`sendAdminNewSchoolAlert`** → platform owner (`PLATFORM_EMAIL`) with school details
+
+No JWT is issued — the admin cannot log in until approved.
+
+### Approval (`POST /api/platform/schools/:id/approve`)
+
+Protected by `X-Platform-Key` header.
+
+```js
+// Atomically updates school
+{ isActive: true, status: 'active', approvedAt: ISO_DATE }
+
+// Activates superadmin user
+User.updateMany({ schoolId, role: 'superadmin' }, { isActive: true })
+
+// Fires two emails in parallel
+sendApprovalWelcome({ adminName, adminEmail, schoolName, slug, plan })
+sendAdminApprovalAlert({ schoolName, adminEmail, plan })
+```
+
+### Rejection (`POST /api/platform/schools/:id/reject`)
+
+```js
+{ isActive: false, status: 'rejected', rejectionReason: reason }
+sendRejectionEmail({ adminName, adminEmail, schoolName, reason })
+```
+
+### Login Gate
+
+`server/routes/auth.js` now looks up the user **without** the `isActive` filter first. If the user is found but `isActive === false`, it inspects the school record:
+
+| School status | HTTP status | Error key | Frontend behaviour |
+|---|---|---|---|
+| `pending` | 403 | `pending_approval` | "Application Under Review" screen replaces login form |
+| `rejected` | 403 | `rejected` | Toast with support email |
+| Other inactive | 403 | — | Generic "Account inactive" message |
+| Not found / wrong password | 401 | — | Normal shake + error toast |
+
+---
+
+## 19. Email Utility (`server/utils/email.js`)
+
+Nodemailer transport configured for Gmail SMTP using an App Password (not the account password):
+
+```js
+const transporter = nodemailer.createTransport({
+  host: 'smtp.gmail.com', port: 587, secure: false,
+  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+});
+```
+
+### Environment Variables Required
+
+| Variable | Description |
+|---|---|
+| `SMTP_USER` | Gmail address (`innolearnnetwork@gmail.com`) |
+| `SMTP_PASS` | Gmail App Password (16-char, spaces OK) |
+| `PLATFORM_EMAIL` | Recipient for platform owner alerts (defaults to `SMTP_USER`) |
+
+### Exported Functions
+
+| Function | When sent | Recipients |
+|---|---|---|
+| `sendRegistrationPending(opts)` | On school registration | School admin |
+| `sendAdminNewSchoolAlert(opts)` | On school registration | Platform owner |
+| `sendApprovalWelcome(opts)` | On approval | School admin |
+| `sendRejectionEmail(opts)` | On rejection | School admin |
+| `sendAdminApprovalAlert(opts)` | On approval | Platform owner |
+
+All functions return `true`/`false` (never throw). Email failures are logged but do not break the API response.
+
+### HTML Template
+
+All emails use a shared `_wrap(body)` function that injects content into a responsive branded wrapper: InnoLearn gradient header, content body, footer with platform URL. Status badges (`.badge.pending`, `.badge.approved`, `.badge.rejected`) are inline-styled for email client compatibility.
+
+---
+
+## 20. Mongoose Model Factory (`server/utils/model.js`)
+
+All server routes use a single shared `_model(collectionName)` factory instead of registering named Mongoose models:
+
+```js
+function _model(col) {
+  const name = col
+    .replace(/_([a-z])/g, (_, c) => c.toUpperCase())  // snake_case → camelCase
+    .replace(/^./, c => c.toUpperCase()) + 'Doc';       // PascalCase + Doc suffix
+  if (mongoose.models[name]) return mongoose.models[name];
+  const schema = new mongoose.Schema({}, { strict: false, timestamps: true });
+  schema.index({ schoolId: 1 });
+  schema.index({ id: 1 });
+  return mongoose.model(name, schema, col);
+}
+```
+
+**Why**: Mongoose throws if you call `mongoose.model('User')` more than once in the same process (e.g. when hot-reloading or across multiple route files). The factory caches the model in `mongoose.models` by a deterministic name and reuses it.
+
+**Usage**: `const User = _model('users')` — returns a Mongoose model that maps to the `users` collection with `strict: false` (accepts any fields without a predefined schema).
+
+---
+
+## 21. Setup Wizard (`js/modules/dashboard.js`)
+
+The `_setupWizard(school)` function (private to the `Dashboard` IIFE) renders a checklist card at the top of the Super Admin dashboard.
+
+### Step Completion Detection
+
+Each step inspects `DB.get(collection)` filtered by `school.id`:
+
+| Step | Done when |
+|---|---|
+| Profile | `school.address \|\| school.phone \|\| school.logo` is truthy |
+| Academic year | `academicYears` has a record with `schoolId === school.id` and `terms.length > 0` |
+| Classes | `classes` has ≥ 1 record with `schoolId === school.id` |
+| Staff | `teachers` has ≥ 1 record with `schoolId === school.id` |
+| Students | `students` has ≥ 1 record with `schoolId === school.id` |
+| Fee structures | `feeStructures` has ≥ 1 record with `schoolId === school.id` |
+| Report templates | `reportTemplates` has ≥ 1 record with `schoolId === school.id` |
+
+### Dismissal
+
+`dismissWizard(schoolId)` is a global function (outside the IIFE) that:
+1. Sets `localStorage.setItem('setup_wizard_done_<schoolId>', 'true')`
+2. Smoothly collapses and removes the `#setup-wizard` element
+
+`_setupWizard()` checks for this key at the top and returns `''` (empty string) if set, so the wizard is completely absent from the DOM on re-render.
+
+### Demo School Behaviour
+
+The InnoLearn International School demo seed has students, teachers, and classes pre-populated, so most steps will already show as complete for the demo school. The wizard is most visible on a newly approved, empty school.

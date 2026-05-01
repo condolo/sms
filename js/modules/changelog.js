@@ -8,6 +8,87 @@ const Changelog = (() => {
   /* ── Version data ─────────────────────────────────────── */
   const VERSIONS = [
     {
+      version: '3.2.0',
+      date: '2026-05-01',
+      tag: 'new',
+      title: 'School Approval Workflow · Email Notifications · Setup Wizard',
+      sections: [
+        {
+          heading: 'New — School Approval Workflow',
+          type: 'new',
+          items: [
+            'New schools registered via /onboard are created with <strong>status: pending</strong> — not activated automatically',
+            'Platform admin must approve or reject each registration from the Platform dashboard',
+            'On approval: school + superadmin activated, welcome email sent to school admin, confirmation sent to platform owner',
+            'On rejection: optional reason captured; rejection email sent to the school admin',
+          ]
+        },
+        {
+          heading: 'New — Email Notifications',
+          type: 'new',
+          items: [
+            'Gmail SMTP transactional email via nodemailer (<code>innolearnnetwork@gmail.com</code>)',
+            'Registration received → school admin gets "under review" confirmation',
+            'New registration alert → platform owner gets full school details + dashboard link',
+            'Approval welcome → login URL, credentials reminder, plan info sent to school admin',
+            'Rejection notice → reason + re-application instructions sent to school admin',
+            'Approval self-alert → platform owner copy of every approval',
+            'All emails use a branded HTML template with InnoLearn colours and status badges',
+          ]
+        },
+        {
+          heading: 'New — Platform Dashboard: Pending Approvals Tab',
+          type: 'new',
+          items: [
+            'New "Pending" sidebar nav item with a live red badge showing pending school count',
+            'Each pending card shows school name, admin details, location, curriculum, plan, and timestamp',
+            'Approve button — one click activates school + triggers welcome emails',
+            'Reject button — optional reason modal before sending notification',
+            'Badge auto-refreshes after each action; badge loads on platform admin login',
+          ]
+        },
+        {
+          heading: 'New — Demo Role Selector Panel',
+          type: 'new',
+          items: [
+            'Login page demo section redesigned as a 6-card role grid (Super Admin, Teacher, Parent, Finance, Student, Deputy)',
+            'Each card shows role icon, name, and scope description',
+            'Clicking a card fills credentials, highlights the card, and shows a green info strip',
+            'Super Admin pre-selected when landing via <code>?demo=innolearn</code>',
+          ]
+        },
+        {
+          heading: 'New — Setup Wizard for New Schools',
+          type: 'new',
+          items: [
+            'Super Admin dashboard shows a setup checklist on first login',
+            '7 steps with live % completion bar: profile · academic year · classes · staff · students · fees · reports',
+            'Each incomplete step is clickable — navigates directly to the relevant module',
+            'Dismiss button stores preference per school in localStorage',
+            'Wizard hides automatically when all 7 steps are complete',
+          ]
+        },
+        {
+          heading: 'Changed — Curriculum & T&C Gate',
+          type: 'improved',
+          items: [
+            'Curriculum chips updated: CBE (Kenya), IB, British (Cambridge/Edexcel), American — card layout with subtitle',
+            'Launch My School button disabled by default; ticking T&C checkbox enables it',
+            'Registration success: pending state shows "Application Submitted ⏳"; offline fallback unchanged',
+          ]
+        },
+        {
+          heading: 'Security — Pending Login Block',
+          type: 'security',
+          items: [
+            'Login returns 403 <code>pending_approval</code> for pending schools instead of generic "wrong password"',
+            'Frontend replaces login form with a friendly "Application Under Review" screen',
+            'Rejected schools see a toast with support email contact',
+          ]
+        },
+      ]
+    },
+    {
       version: '3.1.5',
       date: '2026-04-30',
       tag: 'improved',

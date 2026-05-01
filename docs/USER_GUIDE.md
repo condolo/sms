@@ -1,6 +1,6 @@
 ﻿# InnoLearn — User Guide
 
-**Version 3.1** · Updated 2026-04-30
+**Version 3.2** · Updated 2026-05-01
 
 > **Looking for admin guides?**
 > - 🔧 [Platform Admin Guide](PLATFORM_ADMIN_GUIDE.md) — for the InnoLearn platform owner
@@ -33,12 +33,38 @@
 
 ## 1. Getting Started
 
+### Registering Your School
+If your school is not yet on InnoLearn, visit `/onboard` or click **Get Started** on the login page to begin the 4-step registration wizard:
+
+1. **School Details** — name, type, country, URL slug, curriculum, sections
+2. **Admin Account** — your name, email, and password
+3. **Choose Plan** — Core, Standard, Premium, or Enterprise (30-day free trial on all plans)
+4. **Review & Launch** — confirm your details and tick the Terms of Service box to submit
+
+> **Curriculum options**: CBE (Kenya — Competency Based Education), IB (International Baccalaureate), British (Cambridge / Edexcel), American (US Common Core / AP)
+
+After submitting, your application enters a **pending review** state. You will receive a confirmation email and hear back within **24 hours**.
+
+### Approval Process
+Once the InnoLearn team reviews and approves your school:
+- You will receive a **welcome email** with your login URL and a reminder of your credentials
+- Your account becomes active immediately — log in and start setting up your school
+
+If your application is not approved, you will receive an email explaining why, and you are welcome to reapply after addressing any concerns.
+
+> **Note**: You cannot log in while your school is pending approval. If you try, you will see a clear "Application Under Review" screen — not an error.
+
+---
+
 ### Logging In
 1. Open InnoLearn in your browser.
 2. Enter your school email address and password.
 3. Click **Sign In**.
 
-**Demo Access** — Use the quick-access pills on the login screen to fill in demo credentials for any role without typing.
+### Demo Access
+Visit the login page with `?demo=innolearn` in the URL to open the **Demo Role Selector**. Six role cards appear — click any card to fill credentials for that role, then click **Sign In**. No typing required.
+
+Available demo roles: **Super Admin · Teacher · Parent · Finance · Student · Deputy Principal**
 
 ### Forgot Password
 Contact your school administrator to reset your password.
@@ -57,6 +83,21 @@ Your role determines which modules appear in your sidebar and what actions you c
 ## 2. Dashboard
 
 The Dashboard is the first screen after login. What you see depends on your role.
+
+### New School — Setup Wizard
+If you are a **Super Admin** and your school has just been approved, the dashboard will display a **Setup Checklist** at the top. This is a 7-step guide to getting your school fully configured:
+
+| Step | What to do | Where |
+|------|-----------|-------|
+| 1 | Complete school profile (address, phone, logo) | Settings |
+| 2 | Set up academic year & terms | Settings |
+| 3 | Create classes / grades | Classes |
+| 4 | Add teaching staff | HR & Staff |
+| 5 | Enroll your first students | Students |
+| 6 | Configure fee structures | Finance |
+| 7 | Set up report card templates | Reports |
+
+A **% completion bar** shows your progress. Each step is clickable and takes you directly to the right module. Once all 7 steps are done, you can dismiss the wizard permanently. You can also click **"Hide for now"** at any time.
 
 ### Admin / Deputy Principal / Section Head
 - **KPI cards**: total students, staff, attendance rate, fee collection rate
