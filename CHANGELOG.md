@@ -6,6 +6,59 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.2.0] — 2026-05-03  Phase 3 — API-First Data Layer · Cache · Production Writes · Module Hydration
+
+### Architecture — localStorage → API-First
+
+Phase 3 replaces the localStorage-as-primary-database pattern with a server-first data layer. All writes now go to the production API first; localStorage acts as a fast synchronous cache between server fetches. **Zero breaking changes** — all existing modules continue to work.
+
+### New — In-Memory TTL Cache (`js/cache.js`)
+- `Cache.set(key, data, ttl)` — store with TTL (default 2 minutes)
+- `Cache.get(key)` — returns null if missing or expired
+- `Cache.has(key)` — live check without returning data
+- `Cache.invalidate(key?)` — bust one key or clear everything
+- `Cache.invalidatePrefix('behaviour_')` — bust all keys matching a prefix
+- `Cache.debug()` — log all live keys with TTL remaining to console
+
+### Upgraded — DB Module (`js/data.js`)
+- **`PRODUCTION_ROUTES` map** — 13 collections mapped to their resource API routes (students, teachers, classes, attendance, invoices, payments, behaviour_*, grades, admissions, timetable)
+- **`_push()` upgraded** — for collections in PRODUCTION_ROUTES, writes now route to the correct REST endpoint (`PUT /api/students/:id`, `DELETE /api/teachers/:id`, etc.) instead of the legacy `/api/collections/:col` generic route. The backend RBAC middleware now validates all writes.
+- **`DB.hydrate(col, params)`** — new async function; fetches all pages from the production API (up to 1000 records), stores in localStorage, marks in 2-minute cache. Concurrent hydration of the same collection is deduplicated.
+- **`DB.invalidateHydration(col)`** — busts the hydration cache so the next `render()` fetches fresh data from the server
+- Both `hydrate` and `invalidateHydration` exported from the DB module
+
+### New — App Loading & Pagination Helpers (`js/app.js`)
+- `App.loadingHtml(message, subtext)` — returns a full-page loading spinner HTML
+- `App.renderLoading(message, subtext)` — calls `renderPage()` with the loading spinner
+- `App.renderError(message, retryFn?)` — renders a full-page error state with optional retry button
+- `App.pagerHtml(page, totalPages, callbackFn, totalRecords?)` — returns pagination control HTML for any table
+
+### Upgraded — Students Module (`js/modules/students.js`)
+- `render()` is now `async` — shows loading spinner on first visit (no cached data), then hydrates from `/api/students` and re-renders
+- Subsequent navigation reuses 2-minute cache — no spinner on repeat visits
+- `save()` calls `DB.invalidateHydration('students')` after update — next render gets fresh server data
+- `deleteStudent()` calls `DB.invalidateHydration('students')` and triggers a clean re-render
+
+### Upgraded — Attendance Module (`js/modules/attendance.js`)
+- `render()` is now `async` — hydrates attendance records (filtered to current class + date) and students before rendering
+- `submit()` — fires `API.attendance.bulkMark()` to the production endpoint for the whole class in one atomic request, alongside the localStorage write. Cache invalidated on success.
+
+### Upgraded — Finance Module (`js/modules/finance.js`)
+- `render()` is now `async` — hydrates invoices and payments from production API before rendering
+- `savePayment()` is now `async` — calls `API.finance.payments.record()` first; server recalculates balance and status; localStorage updated to match. Graceful fallback to localStorage-only if plan doesn't include the finance API.
+- `doGenerateInvoices()` is now `async` — calls `API.finance.invoices.create()` for each student; server assigns `INV-{year}-{000001}` format invoice numbers. Graceful fallback to legacy client-side numbering on lower plans.
+
+### Upgraded — Behaviour Module (`js/modules/behaviour.js`)
+- `render()` is now `async` — hydrates incidents, appeals, and categories in parallel before rendering
+- `DB.invalidateHydration('behaviour_incidents')` called after every incident log
+
+### Script Load Order (`index.html`)
+```
+data.js → cache.js → api.js → validators.js → modules → app.js
+```
+
+---
+
 ## [4.1.0] — 2026-05-03  Phase 2 — Remaining Resource Routes · Frontend API Client
 
 ### New — Resource Route: Behaviour (`server/routes/behaviour.js`)

@@ -16,6 +16,30 @@ const DB = (() => {
   ─────────────────────────────────────────────────────────── */
   const API_BASE = '/api/collections';
 
+  /* ── Production resource routes (Phase 1+2) ─────────────────
+     Collections listed here route to the new RBAC-protected,
+     paginated resource routes instead of the legacy /api/collections.
+     Writes go here first; reads use DB.hydrate() + localStorage.
+  ─────────────────────────────────────────────────────────────── */
+  const PRODUCTION_ROUTES = {
+    students:             '/api/students',
+    teachers:             '/api/teachers',
+    classes:              '/api/classes',
+    attendance:           '/api/attendance',
+    invoices:             '/api/finance/invoices',
+    payments:             '/api/finance/payments',
+    behaviour_incidents:  '/api/behaviour/incidents',
+    behaviour_appeals:    '/api/behaviour/appeals',
+    behaviour_categories: '/api/behaviour/categories',
+    exam_results:         '/api/exams/results/all',
+    grades:               '/api/grades',
+    admissions:           '/api/admissions',
+    timetable:            '/api/timetable',
+  };
+
+  /* Hydration state — prevents duplicate in-flight requests */
+  const _hydrating = new Set();
+
   function _token() {
     return localStorage.getItem('ss_jwt') || sessionStorage.getItem('ss_jwt') || '';
   }
@@ -28,12 +52,111 @@ const DB = (() => {
     return !!_token();
   }
 
-  /* Push a single write to the server (fire-and-forget) */
+  /* Push a single write to the server (fire-and-forget).
+     Routes to the production API for known collections,
+     falls back to legacy /api/collections for the rest. */
   function _push(method, col, data, id) {
     if (!_serverAvailable()) return;
-    const url = id ? `${API_BASE}/${col}/${id}` : `${API_BASE}/${col}`;
-    fetch(url, { method, headers: _authHeaders(), body: JSON.stringify(data) })
-      .catch(() => {}); // silent — localStorage is the source of truth during session
+
+    let url;
+    if (PRODUCTION_ROUTES[col]) {
+      const base = PRODUCTION_ROUTES[col];
+      // PUT and DELETE need the resource ID in the path
+      url = (method === 'PUT' || method === 'DELETE') ? `${base}/${id}` : base;
+    } else {
+      url = id ? `${API_BASE}/${col}/${id}` : `${API_BASE}/${col}`;
+    }
+
+    const opts = { method, headers: _authHeaders() };
+    if (data && method !== 'DELETE') opts.body = JSON.stringify(data);
+
+    fetch(url, opts)
+      .then(res => {
+        // On successful create via production route, bust the cache so
+        // the next hydrate() fetches fresh data including the new record
+        if (res.ok && PRODUCTION_ROUTES[col] && typeof Cache !== 'undefined') {
+          Cache.invalidate(`hydrate_${col}`);
+        }
+      })
+      .catch(() => {}); // silent — localStorage remains usable during session
+  }
+
+  /* ── DB.hydrate(col, params) ─────────────────────────────────
+     Async: fetches fresh data from the production API (or legacy
+     sync endpoint) and stores it in localStorage + in-memory cache.
+     Modules call this at the top of their render() function to
+     ensure the displayed data reflects the server state.
+
+     Usage:
+       await DB.hydrate('students');
+       await DB.hydrate('attendance', { dateFrom: '2026-04-01' });
+
+     Returns true on success, false on error/unavailable.
+  ─────────────────────────────────────────────────────────────── */
+  async function hydrate(col, params = {}) {
+    if (!_serverAvailable()) return false;
+
+    const cacheKey = `hydrate_${col}`;
+
+    // Cache hit — no need to re-fetch
+    if (typeof Cache !== 'undefined' && Cache.has(cacheKey)) return true;
+
+    // Prevent duplicate concurrent requests for the same collection
+    if (_hydrating.has(col)) return false;
+    _hydrating.add(col);
+
+    try {
+      let allDocs = [];
+
+      if (PRODUCTION_ROUTES[col]) {
+        // Paginated production route — fetch all pages up to 1000 records
+        let page = 1;
+        const LIMIT = 200;
+        const MAX_PAGES = 5; // safety cap: 1000 records max per hydration
+
+        while (page <= MAX_PAGES) {
+          const qs = new URLSearchParams({ ...params, page, limit: LIMIT }).toString();
+          const res = await fetch(`${PRODUCTION_ROUTES[col]}?${qs}`, { headers: _authHeaders() });
+          if (!res.ok) break;
+          const json = await res.json();
+
+          if (!json.success || !Array.isArray(json.data)) break;
+          allDocs = allDocs.concat(json.data);
+
+          const { pagination } = json;
+          if (!pagination || page >= pagination.pages) break;
+          page++;
+        }
+      } else {
+        // Legacy collections route (collections not yet migrated)
+        const res = await fetch(`${API_BASE}/${col}`, { headers: _authHeaders() });
+        if (!res.ok) { _hydrating.delete(col); return false; }
+        allDocs = await res.json();
+      }
+
+      // Store in localStorage so synchronous DB.get() returns fresh data
+      if (Array.isArray(allDocs)) {
+        set(col, allDocs);
+      }
+
+      // Mark in cache to avoid re-fetching for 2 minutes
+      if (typeof Cache !== 'undefined') {
+        Cache.set(cacheKey, true, 2 * 60 * 1000);
+      }
+
+      _hydrating.delete(col);
+      return true;
+    } catch (err) {
+      console.warn(`[DB.hydrate] Failed to hydrate '${col}':`, err.message);
+      _hydrating.delete(col);
+      return false;
+    }
+  }
+
+  /* Convenience: invalidate the hydration cache for a collection
+     so the next render() fetches fresh data from the server */
+  function invalidateHydration(col) {
+    if (typeof Cache !== 'undefined') Cache.invalidate(`hydrate_${col}`);
   }
 
   /* On login: pull ALL school data from server into localStorage */
@@ -1849,7 +1972,9 @@ const DB = (() => {
   }
 
   return { get, getById, query, insert, update, delete: remove, set, reset, isSeeded, seed,
-           syncFromServer, pushToServer, setToken, clearToken };
+           syncFromServer, pushToServer, setToken, clearToken,
+           hydrate, invalidateHydration,
+           PRODUCTION_ROUTES };
 })();
 
 /* Auto-seed on first load or when version changes */

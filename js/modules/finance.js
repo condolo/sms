@@ -5,9 +5,20 @@
 const Finance = (() => {
   let _tab = 'invoices';
 
-  function render() {
+  async function render() {
     App.setBreadcrumb('<i class="fas fa-coins"></i> Finance');
     if (Auth.isParent()) return _renderParentView();
+
+    /* Hydrate invoices and payments from the production API.
+       Show cached data immediately if available; refresh in background. */
+    const hasCached = DB.get('invoices').length > 0;
+    if (!hasCached) App.renderLoading('Loading financial data…');
+
+    await Promise.all([
+      DB.hydrate('invoices').catch(() => {}),
+      DB.hydrate('payments').catch(() => {}),
+    ]);
+
     _renderMain();
   }
 
@@ -198,7 +209,7 @@ const Finance = (() => {
     </div>`, 'sm');
   }
 
-  function savePayment(e, invoiceId) {
+  async function savePayment(e, invoiceId) {
     e.preventDefault();
     if (!Auth.hasPermission('finance', 'create')) return showToast('You do not have permission to record payments.', 'error');
     const fd     = new FormData(e.target);
@@ -209,22 +220,52 @@ const Finance = (() => {
     const err = Validators.payment(amount, inv);
     if (err) return showToast(err, 'warning');
 
+    /* ── Production API path: server recalculates balance ───── */
+    try {
+      const { data } = await API.finance.payments.record({
+        invoiceId,
+        amount,
+        paidAt:    fd.get('date'),
+        method:    fd.get('method'),
+        reference: fd.get('reference') || '',
+        notes:     fd.get('notes') || '',
+      });
+
+      /* Update localStorage cache to reflect server state */
+      if (data?.invoiceStatus) {
+        DB.update('invoices', invoiceId, {
+          status:     data.invoiceStatus,
+          balance:    data.invoiceBalance,
+          amountPaid: (inv.paidAmount || inv.amountPaid || 0) + amount,
+        });
+      }
+      DB.invalidateHydration('invoices');
+      DB.invalidateHydration('payments');
+
+      const remaining = data?.invoiceBalance ?? Math.max(0, (inv.balance || inv.totalAmount) - amount);
+      _audit('PAYMENT_RECORDED', { invoiceId, invoiceNo: inv.invoiceNo, studentId: inv.studentId, amount, method: fd.get('method'), reference: fd.get('reference') });
+      showToast(`Payment of ${fmtMoney(amount)} recorded. ${remaining > 0 ? `Balance: ${fmtMoney(remaining)}` : 'Fully paid!'}`, 'success');
+      _closeModal();
+      _renderMain();
+      return;
+    } catch (apiErr) {
+      /* If API fails (e.g. plan not premium), fall back to localStorage-only */
+      if (apiErr.code === 'PLAN_UPGRADE_REQUIRED' || apiErr.status === 403) {
+        // Plan doesn't include API route — fall through to legacy path
+      } else {
+        showToast(apiErr.message || 'Failed to record payment.', 'error');
+        return;
+      }
+    }
+
+    /* ── Legacy localStorage fallback (core/standard plan) ─── */
     const newPayment = { id: 'pay'+Date.now(), amount, date: fd.get('date'), method: fd.get('method'), reference: fd.get('reference'), notes: fd.get('notes'), recordedBy: Auth.currentUser.id };
-    const newPaid    = inv.paidAmount + amount;
-    const newBalance = Math.max(0, inv.totalAmount - newPaid);
+    const newPaid    = (inv.paidAmount || inv.amountPaid || 0) + amount;
+    const newBalance = Math.max(0, (inv.totalAmount || inv.total || 0) - newPaid);
     const newStatus  = newBalance === 0 ? 'paid' : newPaid > 0 ? 'partial' : 'unpaid';
 
-    DB.update('invoices', invoiceId, { paidAmount: newPaid, balance: newBalance, status: newStatus, payments: [...(inv.payments||[]), newPayment] });
-    _audit('PAYMENT_RECORDED', {
-      invoiceId,
-      invoiceNo:  inv.invoiceNo,
-      studentId:  inv.studentId,
-      amount,
-      method:     newPayment.method,
-      reference:  newPayment.reference,
-      before: { paidAmount: inv.paidAmount, balance: inv.balance, status: inv.status },
-      after:  { paidAmount: newPaid, balance: newBalance, status: newStatus },
-    });
+    DB.update('invoices', invoiceId, { paidAmount: newPaid, amountPaid: newPaid, balance: newBalance, status: newStatus, payments: [...(inv.payments||[]), newPayment] });
+    _audit('PAYMENT_RECORDED', { invoiceId, invoiceNo: inv.invoiceNo, studentId: inv.studentId, amount, method: newPayment.method, reference: newPayment.reference });
     showToast(`Payment of ${fmtMoney(amount)} recorded. ${newBalance > 0 ? `Balance: ${fmtMoney(newBalance)}` : 'Fully paid!'}`, 'success');
     _closeModal();
     _renderMain();
@@ -282,29 +323,73 @@ const Finance = (() => {
     </div>`, 'sm');
   }
 
-  function doGenerateInvoices() {
+  async function doGenerateInvoices() {
     const structure = DB.get('feeStructures')[0];
     if (!structure) return showToast('No fee structure found.', 'error');
     const students  = DB.query('students', s => s.status === 'active');
     const existing  = DB.get('invoices').map(i => i.studentId);
     const toGenerate= students.filter(s => !existing.includes(s.id));
-    const mandItems = structure.items.filter(i => !i.isOptional);
-    const total     = mandItems.reduce((s,i) => s+i.amount, 0);
-    const count     = DB.get('invoices').length;
+    if (!toGenerate.length) { showToast('All active students already have invoices.', 'info'); _closeModal(); return; }
 
+    const mandItems = structure.items.filter(i => !i.isOptional);
+    const term      = SchoolContext.currentTermId();
+    const acYear    = SchoolContext.currentAcYearId();
+
+    /* ── Production API path: server generates invoice numbers ─ */
+    let apiSuccess = false;
+    try {
+      const lineItems = mandItems.map(i => ({ description: i.name, quantity: 1, unitPrice: i.amount, feeType: i.type || 'tuition' }));
+      let created = 0;
+
+      for (const s of toGenerate) {
+        await API.finance.invoices.create({
+          studentId:      s.id,
+          title:          `${structure.name || 'Term Fee'} Invoice`,
+          termId:         term,
+          academicYearId: acYear,
+          dueDate:        structure.dueDate,
+          lineItems,
+          discountPct:    0,
+          taxPct:         0,
+          currency:       DB.get('schools')[0]?.currency || 'GBP',
+        });
+        created++;
+      }
+
+      DB.invalidateHydration('invoices');
+      showToast(`${created} invoices generated with server-assigned numbers.`, 'success');
+      _closeModal();
+      await render(); // full refresh from server
+      apiSuccess = true;
+    } catch (apiErr) {
+      if (apiErr.code === 'PLAN_UPGRADE_REQUIRED' || apiErr.status === 403) {
+        // Fall through to legacy path
+      } else {
+        showToast(apiErr.message || 'Failed to generate invoices.', 'error');
+        return;
+      }
+    }
+
+    if (apiSuccess) return;
+
+    /* ── Legacy localStorage fallback ───────────────────────── */
+    const total = mandItems.reduce((s, i) => s + i.amount, 0);
+    const count = DB.get('invoices').length;
     toGenerate.forEach((s, idx) => {
       DB.insert('invoices', {
-        schoolId:'sch1', studentId: s.id,
-        invoiceNo: `MIS-INV-2025-${String(count+idx+1).padStart(3,'0')}`,
-        feeStructureId: structure.id, termId:'term2', academicYearId:'ay2025',
-        totalAmount: total, paidAmount: 0, balance: total,
+        schoolId: 'sch1', studentId: s.id,
+        invoiceNo: `INV-${new Date().getFullYear()}-${String(count+idx+1).padStart(4,'0')}`,
+        feeStructureId: structure.id, termId: term, academicYearId: acYear,
+        totalAmount: total, total, paidAmount: 0, amountPaid: 0, balance: total,
         status: 'unpaid', dueDate: structure.dueDate,
-        items: mandItems.map(i=>({name:i.name,amount:i.amount})),
+        lineItems: mandItems.map(i => ({ description: i.name, quantity: 1, unitPrice: i.amount })),
+        items: mandItems.map(i => ({ name: i.name, amount: i.amount })),
         payments: []
       });
     });
     showToast(`${toGenerate.length} invoices generated.`, 'success');
-    _closeModal(); _renderMain();
+    _closeModal();
+    _renderMain();
   }
 
   function addStructureModal() {

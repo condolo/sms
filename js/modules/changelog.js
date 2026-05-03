@@ -8,6 +8,62 @@ const Changelog = (() => {
   /* ── Version data ─────────────────────────────────────── */
   const VERSIONS = [
     {
+      version: '4.2.0',
+      date: '2026-05-03',
+      tag: 'new',
+      title: 'Phase 3 — API-First Data Layer · Cache · Production Writes · Module Hydration',
+      sections: [
+        {
+          heading: 'Architecture — localStorage → API-First',
+          type: 'new',
+          items: [
+            'All writes to 13 core collections now route to production API endpoints instead of legacy /api/collections',
+            'localStorage becomes a fast synchronous read cache between server fetches — no longer the source of truth',
+            'Zero breaking changes — all existing modules continue to work; data layer transparent to UI code',
+          ]
+        },
+        {
+          heading: 'New — In-Memory TTL Cache (js/cache.js)',
+          type: 'new',
+          items: [
+            'Cache.set/get/has/invalidate/invalidatePrefix — 2-minute default TTL per collection',
+            'Prevents redundant API calls on rapid navigation between pages',
+            'Cache.invalidatePrefix("behaviour_") busts all behaviour-related keys at once',
+            'Loaded before api.js in index.html; used by DB.hydrate()',
+          ]
+        },
+        {
+          heading: 'Upgraded — DB Module (DB.hydrate, DB.invalidateHydration)',
+          type: 'improvement',
+          items: [
+            'DB.hydrate(col, params) — fetches all pages from production API (up to 1000 records) and stores in localStorage',
+            'DB.invalidateHydration(col) — busts hydration cache so next render fetches fresh data',
+            '_push() upgraded: writes to production REST routes (PUT /api/students/:id) instead of legacy /api/collections',
+            'Concurrent hydration of same collection deduplicated via Set tracking',
+          ]
+        },
+        {
+          heading: 'New — App Helpers (loadingHtml, renderLoading, renderError, pagerHtml)',
+          type: 'improvement',
+          items: [
+            'App.renderLoading("Loading students…") — full-page spinner while async data loads',
+            'App.renderError(msg, retryFn) — error state with optional retry button',
+            'App.pagerHtml(page, totalPages, callbackFn) — pagination controls for any table',
+          ]
+        },
+        {
+          heading: 'Upgraded — Students, Attendance, Finance, Behaviour Modules',
+          type: 'improvement',
+          items: [
+            'Students: async render with hydration; loading spinner on first visit; cache bust on save/delete',
+            'Attendance: async render; API.attendance.bulkMark() fires on every submit (alongside localStorage)',
+            'Finance: async render; savePayment() calls API server-side balance recalculation; doGenerateInvoices() uses API for server-generated invoice numbers — graceful fallback on lower plans',
+            'Behaviour: async render with parallel hydration of incidents + appeals + categories',
+          ]
+        },
+      ]
+    },
+    {
       version: '4.1.0',
       date: '2026-05-03',
       tag: 'new',

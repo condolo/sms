@@ -7,7 +7,7 @@ const Attendance = (() => {
   let _selectedDate  = new Date().toISOString().split('T')[0];
   let _pendingState  = {};
 
-  function render() {
+  async function render() {
     App.setBreadcrumb('<i class="fas fa-clipboard-check"></i> Attendance');
 
     if (Auth.isStudent()) return _renderStudentView();
@@ -21,6 +21,11 @@ const Attendance = (() => {
     } else if (accessibleClasses.length && !accessibleClasses.find(c => c.id === _selectedClass)) {
       _selectedClass = accessibleClasses[0]?.id || _selectedClass;
     }
+
+    /* Hydrate from server — only fetch attendance for the selected date to avoid
+       loading thousands of historical records on every page visit */
+    await DB.hydrate('attendance', { classId: _selectedClass, date: _selectedDate }).catch(() => {});
+    await DB.hydrate('students').catch(() => {});
 
     _renderMarkPage();
   }
@@ -152,11 +157,22 @@ const Attendance = (() => {
     }));
 
     const existing = DB.query('attendance', a => a.classId === _selectedClass && a.date === _selectedDate)[0];
+
+    /* ── Production API: bulk-mark whole class atomically ───── */
+    const bulkRecords = records.map(r => ({ studentId: r.studentId, status: r.status, note: r.note || '' }));
+    API.attendance.bulkMark({
+      classId:  _selectedClass,
+      date:     _selectedDate,
+      period:   'AM',
+      records:  bulkRecords,
+    }).then(() => {
+      DB.invalidateHydration('attendance');
+    }).catch(() => {}); // fire-and-forget; localStorage write below is immediate
+
     if (existing) {
       DB.update('attendance', existing.id, { records, markedAt: new Date().toISOString(), markedBy: Auth.currentUser.id });
       showToast('Attendance updated.', 'success');
     } else {
-      const _school = Auth.currentSchool;
       DB.insert('attendance', { schoolId:'sch1', classId:_selectedClass, date:_selectedDate, termId:SchoolContext.currentTermId(), academicYearId:SchoolContext.currentAcYearId(), records, markedAt:new Date().toISOString(), markedBy:Auth.currentUser.id });
       showToast('Attendance submitted successfully.', 'success');
     }

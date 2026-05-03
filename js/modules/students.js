@@ -5,11 +5,10 @@
 const Students = (() => {
   let _filter = { q:'', grade:'', status:'active', subjectId:'' };
 
-  function render(param) {
-    if (param) return _renderProfile(param);
+  async function render(param) {
     App.setBreadcrumb('<i class="fas fa-user-graduate"></i> Students');
 
-    /* Parents see only their own children */
+    /* Parents / students see only their own record — no hydration needed */
     if (Auth.isParent()) {
       const user = Auth.currentUser;
       const kids = DB.query('students', s => s.guardians?.some(g => g.userId === user.id));
@@ -20,6 +19,24 @@ const Students = (() => {
       const stu = DB.query('students', s => s.userId === user.id)[0];
       if (stu) return _renderProfile(stu.id);
     }
+
+    if (param) {
+      /* Profile view — hydrate single student if not in localStorage */
+      if (!DB.getById('students', param)) {
+        App.renderLoading('Loading student…');
+        await DB.hydrate('students');
+      }
+      return _renderProfile(param);
+    }
+
+    /* List view — show cached data immediately, then refresh from server */
+    const hasCached = DB.get('students').length > 0;
+    if (!hasCached) {
+      App.renderLoading('Loading students…', 'Fetching from server');
+    }
+
+    await DB.hydrate('students').catch(() => {});
+
     _renderList();
   }
 
@@ -616,6 +633,7 @@ const Students = (() => {
     if (err) return showToast(err, 'warning');
     const before = DB.getById('students', id);
     DB.update('students', id, data);
+    DB.invalidateHydration('students'); // bust cache so next render fetches fresh
     _audit('STUDENT_UPDATED', {
       studentId:   id,
       studentName: `${data.firstName} ${data.lastName}`,
@@ -639,8 +657,9 @@ const Students = (() => {
     confirmAction(`Delete ${s.firstName} ${s.lastName}? This cannot be undone.`, () => {
       _audit('STUDENT_DELETED', { studentId: id, studentName: `${s.firstName} ${s.lastName}`, admissionNo: s.admissionNo, class: s.classId });
       DB.delete('students', id);
+      DB.invalidateHydration('students');
       showToast('Student removed.', 'success');
-      _renderList();
+      render(); // re-render with fresh state
     });
   }
 

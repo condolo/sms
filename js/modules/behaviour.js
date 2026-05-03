@@ -203,11 +203,18 @@ const Behaviour = (() => {
   /* ─────────────────────────────────────────
      RENDER
   ───────────────────────────────────────── */
-  function render(param) {
+  async function render(param) {
     if (param) _tab = param;
     // Redirect legacy 'incidents' key → 'register'
     if (_tab === 'incidents') _tab = 'register';
     App.setBreadcrumb('<i class="fas fa-shield-alt"></i> Behaviour & Pastoral');
+
+    /* Hydrate behaviour data from the production API */
+    await Promise.all([
+      DB.hydrate('behaviour_incidents').catch(() => {}),
+      DB.hydrate('behaviour_appeals').catch(() => {}),
+      DB.hydrate('behaviour_categories').catch(() => {}),
+    ]);
 
     const roles      = Auth.currentUser?.roles || [Auth.currentUser?.role];
     const isStudent  = roles.includes('student');
@@ -2092,6 +2099,7 @@ const Behaviour = (() => {
         : `${type === 'merit' ? 'Merit' : 'Demerit'} incident logged successfully.`,
       'success'
     );
+    DB.invalidateHydration('behaviour_incidents');
     _closeModal();
     render();
   }
@@ -2216,6 +2224,7 @@ const Behaviour = (() => {
           : `${_logState.type === 'merit' ? 'Merit' : 'Demerit'} logged successfully.`,
       'success'
     );
+    DB.invalidateHydration('behaviour_incidents');
     _closeModal();
     render();
   }

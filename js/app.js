@@ -309,6 +309,61 @@ const App = (() => {
     if (el) el.innerHTML = html;
   }
 
+  /* ── Loading state helpers ───────────────────────────────────
+     Use these in async render() functions:
+
+       async function render() {
+         App.renderLoading('Loading students…');
+         await DB.hydrate('students');
+         _renderList();                          // uses localStorage (now fresh)
+       }
+  ─────────────────────────────────────────────────────────────── */
+  function loadingHtml(message = 'Loading…', subtext = '') {
+    return `
+    <div class="page-loading-full" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 0;gap:14px">
+      <div class="spinner" style="width:36px;height:36px;border:3px solid var(--gray-200);border-top-color:var(--primary);border-radius:50%;animation:spin .7s linear infinite"></div>
+      <div style="font-size:14px;font-weight:500;color:var(--gray-600)">${message}</div>
+      ${subtext ? `<div style="font-size:12px;color:var(--gray-400)">${subtext}</div>` : ''}
+    </div>`;
+  }
+
+  function renderLoading(message, subtext) {
+    renderPage(loadingHtml(message, subtext));
+  }
+
+  /* ── Error state helper ────────────────────────────────────── */
+  function renderError(message = 'Something went wrong.', retryFn = null) {
+    renderPage(`
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 0;gap:14px;text-align:center">
+      <i class="fas fa-exclamation-circle" style="font-size:40px;color:var(--danger)"></i>
+      <div style="font-size:15px;font-weight:600;color:var(--gray-700)">${message}</div>
+      ${retryFn ? `<button class="btn btn-secondary btn-sm" onclick="(${retryFn.toString()})()"><i class="fas fa-redo"></i> Retry</button>` : ''}
+    </div>`);
+  }
+
+  /* ── Pagination component ────────────────────────────────────
+     Returns HTML for pagination controls.
+
+     Usage in render functions:
+       const pager = App.pagerHtml(page, totalPages, 'Students.setPage');
+       // Add ${pager} at the bottom of your table card
+
+     The module must expose: Module.setPage(n) which updates _page and re-renders.
+  ─────────────────────────────────────────────────────────────── */
+  function pagerHtml(page, totalPages, callbackFn, totalRecords = null) {
+    if (!totalPages || totalPages <= 1) return '';
+    const prev = page > 1 ? `<button class="btn btn-sm btn-ghost" onclick="${callbackFn}(${page-1})"><i class="fas fa-chevron-left"></i></button>` : `<button class="btn btn-sm btn-ghost" disabled><i class="fas fa-chevron-left"></i></button>`;
+    const next = page < totalPages ? `<button class="btn btn-sm btn-ghost" onclick="${callbackFn}(${page+1})"><i class="fas fa-chevron-right"></i></button>` : `<button class="btn btn-sm btn-ghost" disabled><i class="fas fa-chevron-right"></i></button>`;
+    const info = totalRecords != null ? `<span style="font-size:12px;color:var(--gray-400)">${totalRecords} records</span>` : '';
+    return `
+    <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--gray-100)">
+      ${info}
+      ${prev}
+      <span style="font-size:13px;color:var(--gray-500);min-width:80px;text-align:center">Page ${page} of ${totalPages}</span>
+      ${next}
+    </div>`;
+  }
+
   function _moduleComingSoon(name) {
     renderPage(`<div class="empty-state" style="padding:60px 0"><i class="fas fa-tools" style="font-size:48px;color:var(--gray-300);margin-bottom:16px"></i><h3 style="color:var(--gray-500)">${name}</h3><p style="color:var(--gray-400)">This module is coming soon.</p></div>`);
   }
@@ -641,7 +696,10 @@ const App = (() => {
     return `${Math.floor(h/24)}d ago`;
   }
 
-  return { init, navigate, renderPage, setBreadcrumb, toggleSidebar, globalSearch, applyBranding: _applyBranding, applyLoginPage: _applyLoginPage, LP_DEFAULT_FEATURES: _LP_DEFAULT_FEATURES, _showApp, _showLogin };
+  return { init, navigate, renderPage, setBreadcrumb, toggleSidebar, globalSearch,
+           loadingHtml, renderLoading, renderError, pagerHtml,
+           applyBranding: _applyBranding, applyLoginPage: _applyLoginPage,
+           LP_DEFAULT_FEATURES: _LP_DEFAULT_FEATURES, _showApp, _showLogin };
 })();
 
 /* ─── Global Utilities ─── */
