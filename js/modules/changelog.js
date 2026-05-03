@@ -8,6 +8,65 @@ const Changelog = (() => {
   /* ── Version data ─────────────────────────────────────── */
   const VERSIONS = [
     {
+      version: '4.3.0',
+      date: '2026-05-03',
+      tag: 'new',
+      title: 'Phase 4 — React SPA (Vite + React 18 + TanStack Query + Tailwind CSS)',
+      sections: [
+        {
+          heading: 'Architecture — Modern React Front-End',
+          type: 'new',
+          items: [
+            'New client/ directory: Vite 5 + React 18 + React Router v6 + TanStack Query v5 + Zustand + Tailwind CSS 3',
+            'Zero breaking changes — legacy vanilla JS app continues to be served at root during migration',
+            'npm run dev:react starts Vite dev server on port 5173 proxying /api to Express port 3005',
+            'npm run build:react compiles React SPA into client/dist; Express serves it automatically in production',
+          ]
+        },
+        {
+          heading: 'New — React App (client/src)',
+          type: 'new',
+          items: [
+            'QueryClient with staleTime 2 min matching server TTL cache — consistent freshness across legacy and React layers',
+            'Zustand auth store persists session to localStorage, listens for api:unauthorized broadcasts',
+            'createBrowserRouter with lazy-loaded page modules and Suspense fallback spinners',
+            'ProtectedRoute guard preserves intended destination for post-login redirect',
+          ]
+        },
+        {
+          heading: 'New — Layout & UI Primitives',
+          type: 'new',
+          items: [
+            'AppShell: desktop fixed sidebar + mobile drawer with backdrop; auto-closes on navigation',
+            'Sidebar: section-grouped nav with active link highlighting and user footer',
+            'TopBar: route-derived breadcrumb, plan badge, avatar',
+            'Spinner, PageSpinner, Badge (7 variants + status helpers), EmptyState, ErrorState, Pagination',
+          ]
+        },
+        {
+          heading: 'New — Pages',
+          type: 'new',
+          items: [
+            'Login: split-panel layout; handles passwordExpired server flag with inline change-password flow',
+            'Dashboard: stat cards (students, attendance, fees, admissions) + recent students + quick actions; all TanStack Query',
+            'StudentList: debounced search, class/status/gender filters, paginated table, soft-delete confirm',
+            'StudentProfile: 5-tab detail (Overview, Attendance, Finance, Behaviour, Grades); inline edit mode',
+            'Teachers, Classes, Attendance (register editor), Finance (invoices/payments/summary), Behaviour, Exams & Grades, Admissions (funnel stats), Timetable (day-grid), Settings (school/users/account)',
+          ]
+        },
+        {
+          heading: 'Upgraded — Server (server/index.js)',
+          type: 'improvement',
+          items: [
+            'Serves client/dist when built (production); falls back to legacy root — no config change needed',
+            'Hashed Vite asset files get Cache-Control: immutable for optimal CDN caching',
+            'React SPA routes (/dashboard, /students, /login, etc.) served React index.html',
+            'Version bumped to 4.2.0 in /api/health',
+          ]
+        },
+      ]
+    },
+    {
       version: '4.2.0',
       date: '2026-05-03',
       tag: 'new',

@@ -109,38 +109,75 @@ app.post('/api/announcements/:id/dismiss', authMiddleware, async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: '4.1.0',
+    version: '4.2.0',
     timestamp: new Date().toISOString(),
     db: require('./config/db').isConnected() ? 'connected' : 'disconnected'
   });
 });
 
 /* ── Static frontend ────────────────────────────────────────── */
-const STATIC_DIR = path.join(__dirname, '..');
-app.use(express.static(STATIC_DIR, {
+const ROOT_DIR   = path.join(__dirname, '..');
+const REACT_DIST = path.join(__dirname, '..', 'client', 'dist');
+const fs         = require('fs');
+const reactBuilt = fs.existsSync(path.join(REACT_DIST, 'index.html'));
+
+// In production, prefer the compiled React app; fall back to legacy app root.
+const STATIC_DIR = (process.env.NODE_ENV === 'production' && reactBuilt) ? REACT_DIST : ROOT_DIR;
+
+// Serve React build assets (hashed filenames → long cache)
+if (reactBuilt) {
+  app.use(express.static(REACT_DIST, {
+    index: false,   // SPA fallback handled below
+    setHeaders: (res, filePath) => {
+      if (/\.[0-9a-f]{8}\.(js|css)$/.test(filePath)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      }
+    }
+  }));
+}
+
+// Serve legacy vanilla-JS app (root) — always available during migration
+app.use(express.static(ROOT_DIR, {
   index: 'index.html',
-  // Don't cache JS/CSS during development
-  setHeaders: (res, filePath) => {
+  setHeaders: (res) => {
     if (process.env.NODE_ENV !== 'production') {
       res.setHeader('Cache-Control', 'no-cache');
     }
   }
 }));
 
-// SPA fallback — serve index.html for all non-API routes
+// SPA fallback — serve the appropriate index.html for all non-API routes
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ error: 'API endpoint not found' });
   }
   // Onboarding page gets its own HTML
   if (req.path === '/onboard' || req.path === '/onboard/') {
-    return res.sendFile(path.join(STATIC_DIR, 'onboard.html'));
+    return res.sendFile(path.join(ROOT_DIR, 'onboard.html'));
   }
-  // Platform admin dashboard (private — served as its own SPA)
+  // Platform admin dashboard
   if (req.path === '/platform' || req.path === '/platform/') {
-    return res.sendFile(path.join(STATIC_DIR, 'platform.html'));
+    return res.sendFile(path.join(ROOT_DIR, 'platform.html'));
   }
-  res.sendFile(path.join(STATIC_DIR, 'index.html'));
+  // React SPA routes (/dashboard, /students, /login, etc.)
+  if (reactBuilt && (
+    req.path.startsWith('/dashboard') ||
+    req.path.startsWith('/students')  ||
+    req.path.startsWith('/teachers')  ||
+    req.path.startsWith('/classes')   ||
+    req.path.startsWith('/attendance')||
+    req.path.startsWith('/finance')   ||
+    req.path.startsWith('/behaviour') ||
+    req.path.startsWith('/exams')     ||
+    req.path.startsWith('/admissions')||
+    req.path.startsWith('/timetable') ||
+    req.path.startsWith('/settings')  ||
+    req.path === '/login'
+  )) {
+    return res.sendFile(path.join(REACT_DIST, 'index.html'));
+  }
+  // Legacy app catch-all
+  res.sendFile(path.join(ROOT_DIR, 'index.html'));
 });
 
 /* ── Error handler ──────────────────────────────────────────── */

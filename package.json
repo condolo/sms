@@ -1,12 +1,15 @@
 {
   "name": "innolearn",
-  "version": "3.1.5",
+  "version": "4.2.0",
   "description": "InnoLearn — Multi-tenant SaaS School Management Platform",
   "main": "server/index.js",
   "scripts": {
-    "start": "node server/index.js",
-    "dev": "nodemon server/index.js",
-    "seed": "node server/utils/seedSchool.js"
+    "start":        "node server/index.js",
+    "dev":          "nodemon server/index.js",
+    "dev:react":    "cd client && npm run dev",
+    "build:react":  "cd client && npm install && npm run build",
+    "build":        "npm run build:react",
+    "seed":         "node server/utils/seedSchool.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

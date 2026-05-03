@@ -6,6 +6,85 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.3.0] — 2026-05-03  Phase 4 — React SPA (Vite + React 18 + TanStack Query + Tailwind CSS)
+
+### Architecture — Modern React SPA
+
+Phase 4 introduces a production-ready React front-end (`client/`) that runs alongside the legacy vanilla-JS app. **Zero breaking changes** — the legacy app continues to be served untouched. Once `npm run build:react` is run, the compiled SPA is served automatically by the Express server at all SPA routes.
+
+### New — `client/` React App
+
+**Configuration**
+- `client/package.json` — React 18, React Router v6, TanStack Query v5, Zustand, clsx, date-fns, Tailwind CSS 3, Vite 5
+- `client/vite.config.js` — dev server on port 5173, proxy `/api` → Express port 3005, code-split chunks (react, router, query)
+- `client/tailwind.config.js` — InnoLearn brand palette (sidebar indigo, `brand-*` spectrum), card shadows, fade/slide animations
+- `client/postcss.config.js`, `client/index.html` — Inter font, `h-full` body
+
+**Entry & Routing**
+- `client/src/main.jsx` — `QueryClient` (staleTime 2 min matching server TTL), `RouterProvider`, React Query Devtools in dev
+- `client/src/App.jsx` — `createBrowserRouter` with all 12 module routes; lazy-loaded pages wrapped in `<Suspense>`; `ProtectedRoute` guard
+
+**API Client** (`client/src/api/client.js`)
+- Full port of `js/api.js` — same modules (students, teachers, classes, attendance, finance, behaviour, exams, grades, admissions, timetable, auth, settings)
+- `APIError` class with `code`, `message`, `status`
+- Dispatches `api:unauthorized` event on 401; `useAuthStore` listens and auto-logs out
+
+**Auth Store** (`client/src/store/auth.js`)
+- Zustand store persisting `innolearn_session` to localStorage
+- `setSession`, `logout`, `patchUser`, `can(feature)` helpers
+- Listens to `api:unauthorized` window event for server-side session expiry
+
+**Layout**
+- `AppShell.jsx` — desktop sidebar always visible (lg+), mobile drawer with backdrop overlay, auto-close on navigation
+- `Sidebar.jsx` — section-grouped nav, active link highlight, user footer with logout
+- `TopBar.jsx` — breadcrumb derived from current route, plan badge, user avatar
+
+**Guards & UI Primitives**
+- `ProtectedRoute.jsx` — redirects to `/login` if no session token; preserves `from` location for post-login redirect
+- `Spinner.jsx` — `Spinner` (5 sizes) + `PageSpinner` (centred loading block)
+- `Badge.jsx` — 7 variants, dot indicator; `studentStatusBadge`, `invoiceStatusBadge`, `admissionStageBadge` helpers
+- `EmptyState.jsx` — `EmptyState` (icon + CTA) and `ErrorState` (message + retry)
+- `Pagination.jsx` — smart page window (first, last, ±1 around current with ellipsis)
+
+**Pages**
+- `Login.jsx` — split-panel layout (brand left, form right), handles `passwordExpired` server flag with inline change-password flow
+- `Dashboard.jsx` — 4 stat cards (students, attendance, finance, admissions) + recent-students list + quick-action links; all data from TanStack Query
+- `StudentList.jsx` — debounced search (400 ms), class/status/gender filters, paginated table with avatar initials, soft-delete confirm
+- `StudentProfile.jsx` — tabbed detail (Overview, Attendance, Finance, Behaviour, Grades); inline edit mode with controlled form; each tab lazy-fetches its data on first activation
+- `TeacherList.jsx`, `ClassList.jsx`, `AttendancePage.jsx`, `FinancePage.jsx`, `BehaviourPage.jsx`, `ExamsPage.jsx`, `AdmissionsPage.jsx`, `TimetablePage.jsx`, `SettingsPage.jsx` — fully functional with TanStack Query, pagination, and table/card UIs
+- `NotFound.jsx` — friendly 404 page
+
+### Upgraded — Server (`server/index.js`)
+- Serves `client/dist` as a primary static directory when `NODE_ENV=production` and the React build exists
+- Long-lived cache headers (`immutable`) on hashed asset filenames
+- React SPA routes (`/dashboard`, `/students`, `/login`, etc.) served React's `index.html`; legacy routes fall back to legacy `index.html`
+- `/onboard` and `/platform` continue to serve their dedicated HTML pages
+- Version bumped to `4.2.0` in health endpoint
+
+### Upgraded — Root `package.json`
+- Version bumped to `4.2.0`
+- `dev:react` — run Vite dev server (`cd client && npm run dev`)
+- `build:react` — install client deps + Vite build
+- `build` — alias for `build:react`
+
+### How to run
+
+```bash
+# Start API (existing)
+npm run dev
+
+# Start React dev server (in a second terminal — proxies /api to port 3005)
+npm run dev:react
+
+# Build React for production
+npm run build:react
+
+# After build, npm start serves the React app automatically
+npm start
+```
+
+---
+
 ## [4.2.0] — 2026-05-03  Phase 3 — API-First Data Layer · Cache · Production Writes · Module Hydration
 
 ### Architecture — localStorage → API-First
