@@ -742,15 +742,17 @@ function togglePassword() {
   else { inp.type = 'password'; icon.className = 'fas fa-eye'; }
 }
 
+// Demo credentials must match the localStorage seed in data.js.
+// If MongoDB is also seeded (npm run seed), seedSchool.js uses the same values.
 const DEMO_CREDS = {
-  superadmin:  { email:'superadmin@innolearn.ac.ke',  pass:'Admin1234!',   label:'Super Admin'      },
-  admin:       { email:'admin@innolearn.ac.ke',        pass:'Admin1234!',   label:'Admin'            },
-  teacher:     { email:'teacher@innolearn.ac.ke',      pass:'Teacher123!',  label:'Teacher'          },
-  parent:      { email:'parent@innolearn.ac.ke',       pass:'Parent123!',   label:'Parent'           },
-  student:     { email:'student@innolearn.ac.ke',      pass:'Student123!',  label:'Student'          },
-  finance:     { email:'finance@innolearn.ac.ke',      pass:'Finance123!',  label:'Finance Officer'  },
-  deputy:      { email:'deputy@innolearn.ac.ke',       pass:'Deputy123!',   label:'Deputy Principal' },
-  discipline:  { email:'discipline@innolearn.ac.ke',   pass:'Discipline1!', label:'Discipline'       }
+  superadmin:  { email:'superadmin@innolearn.edu.ke',  pass:'super123',       label:'Super Admin'      },
+  admin:       { email:'admin@innolearn.edu.ke',        pass:'admin123',       label:'Admin'            },
+  teacher:     { email:'sarah.smith@innolearn.edu.ke',  pass:'teacher123',     label:'Teacher'          },
+  parent:      { email:'parent1@innolearn.edu.ke',      pass:'parent123',      label:'Parent'           },
+  student:     { email:'student1@innolearn.edu.ke',     pass:'student123',     label:'Student'          },
+  finance:     { email:'finance@innolearn.edu.ke',      pass:'finance123',     label:'Finance Officer'  },
+  deputy:      { email:'deputy@innolearn.edu.ke',       pass:'deputy123',      label:'Deputy Principal' },
+  discipline:  { email:'discipline@innolearn.edu.ke',   pass:'discipline123',  label:'Discipline'       }
 };
 
 function fillDemo(role) {

@@ -1980,6 +1980,13 @@ const DB = (() => {
 /* Auto-seed on first load or when version changes */
 if (!DB.isSeeded()) DB.seed();
 
+/* Always ensure the school slug is set so Auth._getSchoolSlug() returns
+   'innolearn' instead of the 'demo' default, allowing server auth to
+   find the correct school in MongoDB when the API is connected.         */
+if (!localStorage.getItem('ss_school_slug')) {
+  localStorage.setItem('ss_school_slug', 'innolearn');
+}
+
 /* ============================================================
    SchoolContext — Live accessor for the current school record,
    term, and academic year.  Replaces all hardcoded 'term2' /

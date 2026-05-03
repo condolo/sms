@@ -41,21 +41,33 @@ const SCHOOL = {
   isActive:  true,
   curriculum: ['cambridge', 'ib'],
   sections:   ['kg', 'primary', 'secondary', 'alevel'],
-  website:   'https://innolearn.ac.ke',
+  website:   'https://www.innolearn.edu.ke',
   trialEnds: null,
   createdAt: '2024-01-01T00:00:00.000Z',
 };
 
-/* ── Demo users ───────────────────────────────────────────── */
+/* ── Demo users ─────────────────────────────────────────────
+   Credentials must match the localStorage seed in js/data.js
+   AND the DEMO_CREDS object in js/app.js so that demo login
+   works whether the user is online (server auth) or offline
+   (localStorage fallback).
+   ────────────────────────────────────────────────────────── */
 const USERS = [
-  { id:'u_inno_superadmin', name:'Dr. Sarah Mitchell',    email:'superadmin@innolearn.ac.ke', role:'superadmin',  pw:'Admin1234!' },
-  { id:'u_inno_admin',      name:'James Odhiambo',        email:'admin@innolearn.ac.ke',      role:'admin',       pw:'Admin1234!' },
-  { id:'u_inno_teacher',    name:'Ms. Amina Hassan',      email:'teacher@innolearn.ac.ke',    role:'teacher',     pw:'Teacher123!' },
-  { id:'u_inno_parent',     name:'Robert & Jane Kariuki', email:'parent@innolearn.ac.ke',     role:'parent',      pw:'Parent123!' },
-  { id:'u_inno_student',    name:'Aisha Kariuki',         email:'student@innolearn.ac.ke',    role:'student',     pw:'Student123!' },
-  { id:'u_inno_finance',    name:'Patricia Wambua',       email:'finance@innolearn.ac.ke',    role:'finance',     pw:'Finance123!' },
-  { id:'u_inno_deputy',     name:'Mr. David Ngugi',       email:'deputy@innolearn.ac.ke',     role:'deputy',      pw:'Deputy123!' },
-  { id:'u_inno_discipline', name:'Mrs. Grace Achieng',    email:'discipline@innolearn.ac.ke', role:'discipline',  pw:'Discipline1!' },
+  { id:'u_super',          name:'System Administrator',    email:'superadmin@innolearn.edu.ke',    role:'superadmin',           pw:'super123'       },
+  { id:'u_admin1',         name:'Mwalimu Ndolo',           email:'admin@innolearn.edu.ke',         role:'admin',                pw:'admin123'       },
+  { id:'u_tch1',           name:'Ms. Sarah Smith',         email:'sarah.smith@innolearn.edu.ke',   role:'teacher',              pw:'teacher123'     },
+  { id:'u_par1',           name:'Mr. & Mrs. Johnson',      email:'parent1@innolearn.edu.ke',       role:'parent',               pw:'parent123'      },
+  { id:'u_stu1',           name:'Emily Johnson',           email:'student1@innolearn.edu.ke',      role:'student',              pw:'student123'     },
+  { id:'u_fin1',           name:'Ms. Nancy Njeri',         email:'finance@innolearn.edu.ke',       role:'finance',              pw:'finance123'     },
+  { id:'u_dp1',            name:'Mr. Thomas Wangila',      email:'deputy@innolearn.edu.ke',        role:'deputy_principal',     pw:'deputy123'      },
+  { id:'u_dc1',            name:'Mrs. Patricia Nduta',     email:'discipline@innolearn.edu.ke',    role:'discipline_committee', pw:'discipline123'  },
+  // Additional staff from localStorage seed (for full parity)
+  { id:'u_admin2',         name:'Mr. David Kariuki',       email:'vice@innolearn.edu.ke',          role:'admin',                pw:'admin123'       },
+  { id:'u_sh_kg',          name:'Ms. Rose Akinyi',         email:'head.kg@innolearn.edu.ke',       role:'section_head',         pw:'section123'     },
+  { id:'u_sh_pri',         name:'Mr. Collins Kimani',      email:'head.primary@innolearn.edu.ke',  role:'section_head',         pw:'section123'     },
+  { id:'u_sh_sec',         name:'Dr. Amira Osei',          email:'head.secondary@innolearn.edu.ke',role:'section_head',         pw:'section123'     },
+  { id:'u_hr1',            name:'Mr. Peter Muthoni',       email:'hr@innolearn.edu.ke',            role:'hr',                   pw:'hr123'          },
+  { id:'u_adm1',           name:'Ms. Joy Wambua',          email:'admissions@innolearn.edu.ke',    role:'admissions_officer',   pw:'admissions123'  },
 ];
 
 /* ── Sections ─────────────────────────────────────────────── */
@@ -151,8 +163,15 @@ async function seed() {
   console.log('🔐  Role permissions seeded');
 
   console.log('\n✅  InnoLearn International School seeded successfully!');
-  console.log('   Login at /index.html with any of the credentials above.');
-  console.log('   Password for all demo accounts: see USERS array above.\n');
+  console.log('   Demo credentials (same as localStorage seed + demo cards):');
+  console.log('   superadmin@innolearn.edu.ke  /  super123');
+  console.log('   admin@innolearn.edu.ke        /  admin123');
+  console.log('   sarah.smith@innolearn.edu.ke  /  teacher123');
+  console.log('   finance@innolearn.edu.ke       /  finance123');
+  console.log('   parent1@innolearn.edu.ke       /  parent123');
+  console.log('   student1@innolearn.edu.ke      /  student123');
+  console.log('   deputy@innolearn.edu.ke        /  deputy123');
+  console.log('   discipline@innolearn.edu.ke    /  discipline123\n');
 
   await mongoose.disconnect();
   process.exit(0);
