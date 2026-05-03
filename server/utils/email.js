@@ -103,10 +103,11 @@ async function sendAdminNewSchoolAlert({ schoolName, slug, adminName, adminEmail
 }
 
 /* ══════════════════════════════════════════════════════════════
-   3. School approved — welcome email to school admin
+   3. School approved — welcome email with full login credentials
    ══════════════════════════════════════════════════════════════ */
-async function sendApprovalWelcome({ adminName, adminEmail, schoolName, slug, plan }) {
-  const loginUrl = `${APP_URL}`;
+async function sendApprovalWelcome({ adminName, adminEmail, schoolName, slug, plan, tempPassword }) {
+  const loginUrl    = `${APP_URL}?school=${slug}`;
+  const hasPassword = !!tempPassword;
   const html = _wrap(`
     <h2>🎉 Your school is approved!</h2>
     <p>Hi ${adminName},</p>
@@ -115,13 +116,21 @@ async function sendApprovalWelcome({ adminName, adminEmail, schoolName, slug, pl
       <p><strong>School:</strong> ${schoolName}</p>
       <p><strong>Plan:</strong> ${plan}</p>
       <p><strong>Status:</strong> <span class="badge approved">✓ Approved</span></p>
-      <p><strong>Login URL:</strong> <a href="${loginUrl}">${loginUrl}</a></p>
+      <p><strong>Your Login URL:</strong> <a href="${loginUrl}">${loginUrl}</a></p>
     </div>
-    <p>Log in using the email address and password you set during registration. You will be guided through setting up your school profile on first login.</p>
+    <h2>Your Login Credentials</h2>
+    <div class="info">
+      <p><strong>Email / Username:</strong> ${adminEmail}</p>
+      ${hasPassword ? `<p><strong>Temporary Password:</strong> <span style="font-family:monospace;font-size:16px;font-weight:700;color:#4f46e5;background:#ede9fe;padding:4px 10px;border-radius:4px;letter-spacing:1px">${tempPassword}</span></p>` : ''}
+    </div>
+    ${hasPassword ? `<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:14px 18px;margin:16px 0">
+      <p style="margin:0;font-size:13px;color:#92400e"><strong>⚠️ Important:</strong> You will be asked to set a new password on your first login. Choose something strong and keep it safe. This temporary password will no longer work after you change it.</p>
+    </div>` : ''}
     <p style="text-align:center">
       <a href="${loginUrl}" class="btn">Log In to InnoLearn →</a>
     </p>
-    <p style="font-size:13px;color:#6b7280">Need help? Check out our <a href="${APP_URL}/docs">School Admin Guide</a> or contact us at <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
+    <p style="font-size:13px;color:#6b7280">Need help? Contact us at <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
+    <p style="font-size:12px;color:#9ca3af">⚠️ Never share your password with anyone — InnoLearn will never ask for it by email.</p>
   `);
   return _send(adminEmail, `✅ Your InnoLearn account is approved — ${schoolName}`, html);
 }
@@ -327,6 +336,31 @@ async function sendSystemUpdateNotice({ adminName, adminEmail, schoolName, title
   return _send(adminEmail, `${icon} InnoLearn — ${label}: ${title}`, html);
 }
 
+/* ══════════════════════════════════════════════════════════════
+   13. In-app message / announcement notification
+   ══════════════════════════════════════════════════════════════ */
+async function sendMessageNotification({ recipientName, recipientEmail, senderName, subject, preview, schoolName, isDirect, appUrl }) {
+  const url   = appUrl || APP_URL;
+  const icon  = isDirect ? '✉️' : '📢';
+  const label = isDirect ? 'New Message' : 'School Announcement';
+  const html  = _wrap(`
+    <h2>${icon} ${label} from ${schoolName}</h2>
+    <p>Hi ${recipientName},</p>
+    <p>${isDirect ? `<strong>${senderName}</strong> has sent you a message` : `<strong>${senderName}</strong> posted a school announcement`} on InnoLearn.</p>
+    <div class="info">
+      <p><strong>Subject:</strong> ${subject}</p>
+      <p><strong>Preview:</strong> ${preview}</p>
+      ${!isDirect ? `<p><strong>From:</strong> ${senderName} · ${schoolName}</p>` : ''}
+    </div>
+    <p>Log in to read the full message and reply.</p>
+    <p style="text-align:center">
+      <a href="${url}" class="btn">Open InnoLearn →</a>
+    </p>
+    <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a member of <strong>${schoolName}</strong> on InnoLearn. Log in to manage your notification preferences.</p>
+  `);
+  return _send(recipientEmail, `${icon} ${label}: ${subject} — ${schoolName}`, html);
+}
+
 module.exports = {
   sendRegistrationPending,
   sendAdminNewSchoolAlert,
@@ -340,4 +374,5 @@ module.exports = {
   sendPasswordChanged,
   sendRoleChanged,
   sendSystemUpdateNotice,
+  sendMessageNotification,
 };

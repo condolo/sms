@@ -6,6 +6,7 @@
 const express    = require('express');
 const mongoose   = require('mongoose');
 const bcrypt     = require('bcryptjs');
+const crypto     = require('crypto');
 const rateLimit  = require('express-rate-limit');
 const { sign }   = require('../utils/jwt');
 const email      = require('../utils/email');
@@ -43,6 +44,16 @@ function sanitiseSlug(raw) {
 /* ── Auto-generate slug from school name ────────────────── */
 function slugFromName(name) {
   return sanitiseSlug(name.replace(/\s+/g, '-'));
+}
+
+/* ── Secure temp password generator ────────────────────── */
+function _genTempPassword() {
+  // 12 readable characters — no ambiguous chars (0/O, 1/l/I)
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  const bytes = crypto.randomBytes(12);
+  let pwd = '';
+  for (const b of bytes) pwd += chars[b % chars.length];
+  return pwd;
 }
 
 /* ── Disposable / known-abuse email domains (block list) ── */
@@ -85,7 +96,7 @@ router.post('/', onboardLimiter, async (req, res) => {
   try {
     const {
       schoolName, shortName, schoolType, country, city, website,
-      adminName, adminEmail, adminPassword,
+      adminName, adminEmail,
       plan, slug: rawSlug,
       curriculum, sections,
       _trap, _elapsed
@@ -93,7 +104,6 @@ router.post('/', onboardLimiter, async (req, res) => {
 
     /* ── Anti-bot: honeypot check ── */
     if (_trap && _trap.length > 0) {
-      // Bot filled the hidden field — silently reject with fake success delay
       console.warn(`[Security] Honeypot triggered from IP ${req.ip}`);
       await new Promise(r => setTimeout(r, 2000));
       return res.status(400).json({ error: 'Registration could not be completed. Please try again.' });
@@ -108,9 +118,8 @@ router.post('/', onboardLimiter, async (req, res) => {
 
     /* ── Validate required fields ── */
     const missing = [];
-    if (!schoolName)    missing.push('schoolName');
-    if (!adminEmail)    missing.push('adminEmail');
-    if (!adminPassword) missing.push('adminPassword');
+    if (!schoolName) missing.push('schoolName');
+    if (!adminEmail) missing.push('adminEmail');
     if (missing.length) {
       return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
     }
@@ -143,9 +152,12 @@ router.post('/', onboardLimiter, async (req, res) => {
       ? sections.filter(s => VALID_SECTIONS.includes(s))
       : ['primary','secondary'];
 
+    /* ── Generate secure temp password (server-side, not set by user) ── */
+    const tempPassword = _genTempPassword();
+
     const schoolData = {
       schoolName, shortName, schoolType, country, city, website,
-      adminName, adminEmail, adminPassword,
+      adminName, adminEmail, tempPassword,
       plan: validPlan, slug,
       curriculum: validCurriculum,
       sections: validSections.length ? validSections : ['primary']
@@ -168,7 +180,7 @@ router.post('/', onboardLimiter, async (req, res) => {
 /* ── DB provisioning (MongoDB connected) ────────────────── */
 async function _provisionInDB(data, res) {
   const { schoolName, shortName, schoolType, country, city, website,
-          adminName, adminEmail, adminPassword, plan, slug,
+          adminName, adminEmail, tempPassword, plan, slug,
           curriculum, sections } = data;
 
   const School = _model('schools');
@@ -217,13 +229,17 @@ async function _provisionInDB(data, res) {
     createdAt: now
   });
 
-  /* Create superadmin user — inactive until approved */
-  const hashed = await bcrypt.hash(adminPassword, 12);
+  /* Create superadmin user — inactive until approved
+     tempPassword stored in plaintext so approval email can include it,
+     then cleared after approval is sent. mustChangePassword forces reset on first login. */
+  const hashed = await bcrypt.hash(tempPassword, 12);
   const user   = await User.create({
     id: userId, schoolId, name: adminName || adminEmail.split('@')[0],
     email: adminEmail.toLowerCase(), password: hashed,
     role: 'superadmin', primaryRole: 'superadmin', roles: ['superadmin'],
-    isActive: false, createdAt: now
+    isActive: false, mustChangePassword: true,
+    tempPassword,   // cleared after approval email is sent
+    createdAt: now
   });
 
   /* Seed base data — sections, academic year, permissions */
@@ -261,7 +277,7 @@ async function _provisionInDB(data, res) {
 /* ── Offline provisioning (no MongoDB) ──────────────────── */
 function _provisionOffline(data, res) {
   const { schoolName, shortName, schoolType, country, city, website,
-          adminName, adminEmail, adminPassword, plan, slug,
+          adminName, adminEmail, tempPassword, plan, slug,
           curriculum, sections } = data;
 
   const schoolId = `sch_${slug}_${Date.now().toString(36)}`;
@@ -286,13 +302,12 @@ function _provisionOffline(data, res) {
     createdAt: now
   };
 
-  /* NOTE: password stored in plain text only in offline demo mode.
-     In production, MongoDB is always expected to be connected.      */
+  /* Offline mode: store plaintext password so the user can log in without a server */
   const user = {
     id: userId, schoolId, name: adminName || adminEmail.split('@')[0],
-    email: adminEmail.toLowerCase(), password: adminPassword,
+    email: adminEmail.toLowerCase(), password: tempPassword,
     role: 'superadmin', primaryRole: 'superadmin', roles: ['superadmin'],
-    isActive: true, createdAt: now, lastLogin: now
+    isActive: true, mustChangePassword: true, createdAt: now, lastLogin: now
   };
 
   /* The client must inject these into its localStorage DB on receipt */
@@ -305,6 +320,7 @@ function _provisionOffline(data, res) {
     token: null,   // no JWT in offline mode
     session,
     school,
+    tempPassword,  // shown in success screen so user knows their credentials
     user: { ...user, password: undefined },
     offline: true,
     loginUrl: `/index.html`

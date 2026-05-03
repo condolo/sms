@@ -6,6 +6,53 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.4.0] — 2026-05-03  Persistent messaging, auto-credential registration, dedicated school URLs
+
+### School Registration — Password Removed, System-Generated Credentials
+- Removed password fields from the onboarding form — schools no longer set their own password during registration
+- Server generates a cryptographically secure 12-character temp password using `crypto.randomBytes` (no ambiguous characters)
+- Temp password stored alongside the hashed version in the user document; cleared from DB once the approval email is sent
+- `mustChangePassword: true` set on all newly registered school admins — forced password change on first login
+- Offline (localStorage) mode also generates a local temp password and displays it in the success screen with a prominent "save this now" warning
+
+### School Approval — Full Credentials Email
+- Approval email now includes the school's **dedicated login URL** (`APP_URL?school={slug}`), their email, and the auto-generated temp password
+- Email styled with a highlighted monospace password block and a security warning about first-login password change
+- Temp password cleared from DB after the approval email is dispatched
+- `sendApprovalWelcome` updated to accept `tempPassword` parameter
+
+### Dedicated School Login URL (`?school=slug`)
+- `js/app.js` reads `?school=` query param on page load and stores it in `localStorage` as `ss_school_slug`
+- URL is cleaned with `history.replaceState` after storing — slug does not remain visible in browser history
+- Enables school-specific links like `https://app.innolearn.edu.ke?school=greenhill` to route users to their tenant automatically
+
+### Communication Hub — MongoDB-Persistent Messages
+- Messages and announcements now stored in MongoDB via `POST /api/messages`; no longer ephemeral in localStorage
+- Messages load from server on every tab open; fall back to localStorage DB when offline
+- Loading skeleton shown while fetching from server
+- `GET /api/messages?tab=inbox|sent` — scoped to the user's school; inbox shows `all`, role-group, and direct messages
+- `PATCH /api/messages/:id/read` — persists read status per user
+- `DELETE /api/messages/:id` — sender, admin, and deputy principal can delete
+
+### Email Notifications for In-App Messages
+- Every sent message and announcement triggers real email delivery to all recipients (`sendMessageNotification`)
+- Direct messages: personal notification email to the recipient with subject preview
+- Announcements (`all` / `teachers` / `parents` / `students` / `staff`): notification email sent to every matching active user in the school
+- Group emails sent in parallel (non-blocking `Promise.allSettled`) — failed sends logged, do not block the response
+- New email template: `sendMessageNotification` — branded InnoLearn header, sender name, subject, 160-char preview, "Open InnoLearn" CTA
+
+### New Server Route — `server/routes/messages.js`
+- `GET /` — list messages (inbox/sent) with pagination; role-group filtering
+- `POST /` — create message, resolve recipients, send notification emails
+- `PATCH /:id/read` — mark as read
+- `DELETE /:id` — delete with role check
+- Registered in `server/index.js` at `/api/messages`
+
+### Frontend API Client — `js/api.js`
+- Added `API.messages` namespace: `list()`, `send()`, `markRead()`, `remove()`
+
+---
+
 ## [4.3.0] — 2026-05-03  Phase 4 — React SPA (Vite + React 18 + TanStack Query + Tailwind CSS)
 
 ### Architecture — Modern React SPA

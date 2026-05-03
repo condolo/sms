@@ -76,6 +76,7 @@ app.use('/api/exams',       require('./routes/exams'));
 app.use('/api/grades',      require('./routes/grades'));
 app.use('/api/admissions',  require('./routes/admissions'));
 app.use('/api/timetable',   require('./routes/timetable'));
+app.use('/api/messages',    require('./routes/messages'));
 
 /* ── School-facing announcement routes (JWT auth, not platform key) ── */
 const { authMiddleware } = require('./middleware/auth');

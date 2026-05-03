@@ -252,32 +252,11 @@
           </div>
         </div>
 
-        <div class="ob-field">
-          <label>Password <span class="req">*</span></label>
-          <div class="pw-wrap">
-            <input type="password" id="admin-password" placeholder="Min. 8 characters"
-                   oninput="checkStrength(this.value)" autocomplete="new-password">
-            <button type="button" class="pw-toggle" onclick="togglePw('admin-password', this)">
-              <i class="fas fa-eye"></i>
-            </button>
-          </div>
-          <div class="pw-strength" id="pw-strength">
-            <div class="pw-strength-bar">
-              <div class="pw-strength-fill" id="pw-fill"></div>
-            </div>
-            <div class="pw-strength-text" id="pw-text"></div>
-          </div>
-        </div>
-
-        <div class="ob-field">
-          <label>Confirm Password <span class="req">*</span></label>
-          <div class="pw-wrap">
-            <input type="password" id="admin-password2" placeholder="Re-enter password"
-                   autocomplete="new-password">
-            <button type="button" class="pw-toggle" onclick="togglePw('admin-password2', this)">
-              <i class="fas fa-eye"></i>
-            </button>
-          </div>
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-top:4px">
+          <p style="margin:0;font-size:13px;color:#1d4ed8">
+            <i class="fas fa-lock" style="margin-right:6px"></i>
+            <strong>No password needed.</strong> Once your school is approved, we will email you a secure temporary password along with your personal login link. You will be prompted to set your own password on first login.
+          </p>
         </div>
 
         <div class="ob-nav">
@@ -518,6 +497,13 @@
             <span class="lbl">Trial Ends</span>
             <span class="val" id="sc-trial">—</span>
           </div>
+          <div class="detail-row" id="sc-temp-password-row" style="display:none">
+            <span class="lbl">Temp Password</span>
+            <span class="val" id="sc-temp-password" style="font-family:monospace;font-weight:700;color:#4f46e5;background:#ede9fe;padding:2px 8px;border-radius:4px">—</span>
+          </div>
+        </div>
+        <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:#92400e;display:none" id="offline-pw-notice">
+          <i class="fas fa-triangle-exclamation"></i> <strong>Save this password now.</strong> You will need it to log in. You will be asked to set a new one on first login.
         </div>
         <a href="index.html" class="btn-go-to-app" id="go-to-app-btn">
           <i class="fas fa-arrow-right-to-bracket"></i> Go to My Portal
@@ -621,29 +607,18 @@ function validate(step) {
   if (step === 2) {
     // Honeypot check — if this hidden field is filled, it's almost certainly a bot
     if (document.getElementById('ob-trap').value) {
-      // Silently pretend to succeed but do nothing
       console.warn('[Security] Honeypot triggered');
       return false;
     }
 
     const name  = v('admin-name');
     const email = v('admin-email');
-    const pw    = v('admin-password');
-    const pw2   = v('admin-password2');
-    if (!name || !email || !pw || !pw2) {
-      alert('Please fill in all required fields.');
+    if (!name || !email) {
+      alert('Please fill in your name and email address.');
       return false;
     }
     if (!isValidEmail(email)) {
       alert('Please enter a valid email address.');
-      return false;
-    }
-    if (pw.length < 8) {
-      alert('Password must be at least 8 characters.');
-      return false;
-    }
-    if (pw !== pw2) {
-      alert('Passwords do not match.');
       return false;
     }
     return true;
@@ -815,42 +790,7 @@ function selectPlan(plan) {
   document.querySelector(`[data-plan="${plan}"]`).classList.add('selected');
 }
 
-/* ── Password helpers ───────────────────────────────────── */
-function togglePw(id, btn) {
-  const inp = document.getElementById(id);
-  const showing = inp.type === 'text';
-  inp.type = showing ? 'password' : 'text';
-  btn.querySelector('i').className = showing ? 'fas fa-eye' : 'fas fa-eye-slash';
-}
-
-function checkStrength(pw) {
-  const wrap = document.getElementById('pw-strength');
-  const fill = document.getElementById('pw-fill');
-  const text = document.getElementById('pw-text');
-
-  if (!pw) { wrap.classList.remove('visible'); return; }
-  wrap.classList.add('visible');
-
-  let score = 0;
-  if (pw.length >= 8)  score++;
-  if (pw.length >= 12) score++;
-  if (/[A-Z]/.test(pw)) score++;
-  if (/[0-9]/.test(pw)) score++;
-  if (/[^A-Za-z0-9]/.test(pw)) score++;
-
-  const levels = [
-    { w:'20%',  bg:'#ef4444', label:'Very weak' },
-    { w:'40%',  bg:'#f97316', label:'Weak' },
-    { w:'60%',  bg:'#f59e0b', label:'Fair' },
-    { w:'80%',  bg:'#22c55e', label:'Good' },
-    { w:'100%', bg:'#16a34a', label:'Strong' },
-  ];
-  const lvl = levels[Math.min(score, 4)];
-  fill.style.width = lvl.w;
-  fill.style.background = lvl.bg;
-  text.style.color = lvl.bg;
-  text.textContent = lvl.label;
-}
+/* Password fields removed — server generates a secure temp password on registration */
 
 /* ── Review summary ─────────────────────────────────────── */
 const TYPE_LABELS = {
@@ -924,10 +864,9 @@ async function launch() {
     city:          v('school-city'),
     website:       v('school-website'),
     slug:          v('school-slug'),
-    adminName:     v('admin-name'),
-    adminEmail:    v('admin-email'),
-    adminPassword: document.getElementById('admin-password').value,
-    plan:          selectedPlan,
+    adminName:  v('admin-name'),
+    adminEmail: v('admin-email'),
+    plan:       selectedPlan,
     curriculum:    selectedCurricula,
     sections:      selectedSections,
     _trap:         document.getElementById('ob-trap').value,
@@ -972,7 +911,7 @@ async function launch() {
 
     // Inject school + user into app localStorage DB (offline mode)
     if (data.offline && data.school && data.user) {
-      _injectIntoLocalDB(data.school, data.user, payload.adminPassword);
+      _injectIntoLocalDB(data.school, data.user, data.tempPassword);
     }
 
     showSuccess(data);
@@ -1012,15 +951,20 @@ function _provisionLocally(p) {
     createdAt: now
   };
 
+  // Generate a local temp password for offline mode
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  let tempPw = '';
+  for (let i = 0; i < 12; i++) tempPw += chars[Math.floor(Math.random() * chars.length)];
+
   const user = {
     id: userId, schoolId, name: p.adminName || p.adminEmail.split('@')[0],
-    email: p.adminEmail.toLowerCase(), password: p.adminPassword,
+    email: p.adminEmail.toLowerCase(), password: tempPw,
     role: 'superadmin', primaryRole: 'superadmin', roles: ['superadmin'],
-    isActive: true, createdAt: now, lastLogin: now
+    isActive: true, mustChangePassword: true, createdAt: now, lastLogin: now
   };
 
   const session = { user: {...user, password: undefined}, school };
-  return { success: true, token: null, session, school, user: {...user, password: undefined}, offline: true };
+  return { success: true, token: null, session, school, tempPassword: tempPw, user: {...user, password: undefined}, offline: true };
 }
 
 /* ── Inject new school into app localStorage DB ─────── */
@@ -1075,6 +1019,15 @@ function showSuccess(data) {
     document.getElementById('sc-email').textContent  = v('admin-email');
     document.getElementById('sc-plan').textContent   = planLabel;
     document.getElementById('sc-trial').textContent  = trialEnd.toLocaleDateString('en-GB', { day:'numeric', month:'long', year:'numeric' });
+    // Show temp password for offline mode
+    if (data.tempPassword) {
+      const pwEl     = document.getElementById('sc-temp-password');
+      const pwRow    = document.getElementById('sc-temp-password-row');
+      const pwNotice = document.getElementById('offline-pw-notice');
+      if (pwEl)     pwEl.textContent  = data.tempPassword;
+      if (pwRow)    pwRow.style.display    = '';
+      if (pwNotice) pwNotice.style.display = '';
+    }
   }
 
   document.getElementById('panel-success').classList.add('active');

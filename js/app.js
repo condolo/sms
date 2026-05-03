@@ -972,6 +972,17 @@ document.addEventListener('DOMContentLoaded', () => {
   const isLocal  = ['localhost','127.0.0.1'].includes(window.location.hostname);
   const demoMode = params.get('demo');
 
+  /* ── ?school=slug — dedicated login link sent in approval email ──
+     Stores the school slug in localStorage so API calls use the
+     correct tenant (X-School-Slug header) without subdomain routing. */
+  const schoolParam = params.get('school');
+  if (schoolParam && /^[a-z0-9-]{2,40}$/.test(schoolParam)) {
+    localStorage.setItem('ss_school_slug', schoolParam);
+    // Clean the URL without a page reload
+    const clean = window.location.pathname;
+    window.history.replaceState({}, '', clean);
+  }
+
   // Show demo panel on localhost, ?demo=1, or ?demo=innolearn
   if (isLocal || demoMode === '1' || demoMode?.toLowerCase() === 'innolearn') {
     const ds = document.getElementById('demo-section');

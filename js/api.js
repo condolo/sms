@@ -224,6 +224,14 @@ const API = (() => {
     forceChange: (data)       => _post('/auth/force-change', data),
   };
 
+  /* ── Messages (persistent, MongoDB-backed) ──────────────────── */
+  const messages = {
+    list:    (params) => _get('/messages', params),      // { tab: 'inbox'|'sent', page }
+    send:    (data)   => _post('/messages', data),        // { subject, body, recipients, type }
+    markRead:(id)     => _patch(`/messages/${id}/read`),
+    remove:  (id)     => _delete(`/messages/${id}`),
+  };
+
   /* ── Announcements ──────────────────────────────────────────── */
   const announcements = {
     list:    ()   => _get('/announcements'),
@@ -269,6 +277,7 @@ const API = (() => {
     admissions,
     timetable,
     auth,
+    messages,
     announcements,
     backup,
     collections,

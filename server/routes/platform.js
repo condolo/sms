@@ -106,17 +106,25 @@ router.post('/schools/:id/approve', async (req, res) => {
     ).lean();
     if (!school) return res.status(404).json({ error: 'School not found' });
 
-    /* Activate the superadmin user */
-    await User.updateMany({ schoolId: req.params.id, role: 'superadmin' }, { $set: { isActive: true } });
+    /* Fetch the superadmin — we need their tempPassword before clearing it */
+    const adminUser = await User.findOne({ schoolId: req.params.id, role: 'superadmin' }).lean();
+    const tempPassword = adminUser?.tempPassword || null;
 
-    /* Send emails */
+    /* Activate the superadmin user and clear stored tempPassword */
+    await User.updateMany(
+      { schoolId: req.params.id, role: 'superadmin' },
+      { $set: { isActive: true }, $unset: { tempPassword: '' } }
+    );
+
+    /* Send emails — include login credentials in the welcome email */
     await Promise.all([
       email.sendApprovalWelcome({
-        adminName:  school.adminName || school.name,
-        adminEmail: school.adminEmail,
-        schoolName: school.name,
-        slug:       school.slug,
-        plan:       school.plan
+        adminName:    school.adminName || school.name,
+        adminEmail:   school.adminEmail,
+        schoolName:   school.name,
+        slug:         school.slug,
+        plan:         school.plan,
+        tempPassword, // included in email so admin has their credentials
       }),
       email.sendAdminApprovalAlert({
         schoolName: school.name,
@@ -125,7 +133,7 @@ router.post('/schools/:id/approve', async (req, res) => {
       })
     ]);
 
-    console.log(`[PLATFORM] Approved school: ${school.name}`);
+    console.log(`[PLATFORM] Approved school: ${school.name} (credentials emailed)`);
     res.json({ success: true, school });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
