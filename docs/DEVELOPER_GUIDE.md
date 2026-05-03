@@ -1,6 +1,6 @@
 ﻿# InnoLearn — Developer Guide
 
-**Version 3.2** · Technical Reference & Architecture
+**Version 4.0** · Technical Reference & Architecture
 
 ---
 
@@ -94,17 +94,28 @@ school-management/
 │   │   └── db.js               # MongoDB Atlas connection (Mongoose)
 │   ├── middleware/
 │   │   ├── auth.js             # JWT verification + platform key middleware
+│   │   ├── rbac.js             # ★ Server-side RBAC: rbac(module, action) factory
+│   │   ├── plan.js             # ★ Plan tier gating: planGate(feature) factory
 │   │   └── tenant.js           # Resolves schoolId from slug / subdomain / JWT
 │   ├── routes/
 │   │   ├── auth.js             # POST /api/auth/login, /me, /change-password
 │   │   ├── onboard.js          # POST /api/onboard — school self-registration
 │   │   ├── platform.js         # GET/POST /api/platform/* — platform admin API
-│   │   ├── collections.js      # Generic CRUD for all 25+ collections
-│   │   └── sync.js             # GET /api/sync — bulk data download
+│   │   ├── collections.js      # Legacy generic CRUD (kept for backward compat.)
+│   │   ├── sync.js             # GET /api/sync — bulk data download
+│   │   ├── users.js            # POST /api/users/invite, /bulk-invite, /role-change
+│   │   ├── backup.js           # POST /api/backup/export, /history, /preview
+│   │   ├── students.js         # ★ /api/students — RBAC + paginated + Zod
+│   │   ├── teachers.js         # ★ /api/teachers — RBAC + paginated + Zod
+│   │   ├── classes.js          # ★ /api/classes  — RBAC + paginated + Zod
+│   │   ├── attendance.js       # ★ /api/attendance — RBAC + paginated + bulk
+│   │   └── finance.js          # ★ /api/finance — invoices + payments (server-side math)
 │   └── utils/
 │       ├── jwt.js              # sign() / verify() helpers
 │       ├── model.js            # Shared Mongoose model factory (_model)
 │       ├── email.js            # Transactional email utility (nodemailer/Gmail)
+│       ├── counters.js         # ★ Atomic sequential counters (admission nos., IDs)
+│       ├── response.js         # ★ Standardised ok() / fail() / paginate() helpers
 │       └── seedSchool.js       # One-off seed script for Atlas demo school
 │
 └── docs/
@@ -940,14 +951,108 @@ The login screen HTML structure (v2.6+):
 
 ## 17. Known Limitations
 
-| Limitation | Impact | Workaround |
+| Limitation | Impact | Workaround / Phase |
 |---|---|---|
-| localStorage only (~5MB) | Large schools with many incidents may approach the limit | Periodically archive old terms' data; use MongoDB sync |
-| Single browser tab | Two tabs can have conflicting localStorage writes | One active tab per session |
+| localStorage only (~5MB) | Large schools with many incidents may approach the limit | **Phase 3**: localStorage CRUD replaced by API calls |
+| Single browser tab | Two tabs can have conflicting localStorage writes | **Phase 3**: State managed via API; tabs become independent |
 | No real file uploads | Document attachments in admissions are simulated | Link to external document storage (Google Drive etc.) |
-| No real-time sync | Multi-user simulation is role-switching within one session | Production: WebSocket or polling for live multi-user |
+| No real-time sync | Multi-user simulation is role-switching within one session | **Phase 4**: Socket.io WebSocket layer |
 | SEED_VERSION wipe | Bumping resets ALL localStorage data | Export critical data before bumping; server-side data is unaffected |
-| Data isolation (new schools) | New schools currently share InnoLearn demo data from localStorage seed | Approve + login with the school's own JWT to scope data via server sync |
+| Data isolation (new schools) | New schools currently share InnoLearn demo data from localStorage seed | **Phase 3**: All reads go to server |
+| Frontend reads legacy /api/collections/* | No RBAC or pagination on legacy route | **Phase 2–3**: Migrate frontend module by module to new routes |
+
+---
+
+## 18a. Phase 1 — Production Backend Architecture
+
+> **Status: Implemented (v4.0.0).** All new routes coexist with `/api/collections/*`.
+
+### New Middleware Stack
+
+Every new resource route passes through this middleware chain:
+
+```
+authMiddleware → planGate(feature) → rbac(module, action) → handler
+```
+
+1. **`authMiddleware`** — Verifies JWT; attaches `req.jwtUser = { userId, schoolId, role, roles, email }`
+2. **`planGate(feature)`** — Verifies the school's subscription plan includes the feature  
+3. **`rbac(module, action)`** — Verifies the user's role has the required permission
+
+### RBAC Permission Document Shape
+
+```json
+{
+  "schoolId": "sch_abc123",
+  "role": "teacher",
+  "permissions": {
+    "students":   ["read"],
+    "attendance": ["read", "create", "update"],
+    "finance":    []
+  }
+}
+```
+
+- `superadmin` and `admin` bypass the DB check — always granted access
+- Cache TTL: 5 minutes per `schoolId::role` pair
+- Call `invalidatePermCache(schoolId)` after any `role_permissions` update
+
+### Plan Tier Map
+
+```
+core     → students, attendance, classes, teachers, grades, subjects, events, messaging
+standard → + behaviour, timetable, exams, key_stages, houses, sections
+premium  → + finance, admissions, reports, report_cards, custom_roles
+enterprise → + api_access, sso, advanced_analytics, multi_campus, white_label
+```
+
+Plans are cumulative — `premium` includes all `standard` and `core` features.
+
+### Standardised Response Envelope
+
+All new routes return one of two shapes:
+
+```js
+// Success
+{ success: true, data: <any>, pagination?: { page, limit, total, pages } }
+
+// Failure
+{ success: false, error: { code: "ERROR_CODE", message: "Human message" } }
+```
+
+Use `ok(res, data, pagination?)` and `fail(res, code, message, status?)` from `server/utils/response.js`.
+
+### Atomic Sequential IDs
+
+Never accept admission numbers, staff IDs, or invoice numbers from the client. Always generate server-side:
+
+```js
+const { nextAdmissionNumber } = require('../utils/counters');
+const admNo = await nextAdmissionNumber(schoolId); // "ADM-2026-00001"
+```
+
+Counter documents in MongoDB `counters` collection:
+```json
+{ "_id": "admission_sch_abc_2026", "seq": 42 }
+```
+
+### Adding a New Resource Route (v4 Pattern)
+
+1. Create `server/routes/myresource.js`
+2. Import: `authMiddleware`, `rbac`, `planGate`, `_model`, `counters` (if IDs needed), `response`
+3. Add Zod schema, `_validate()` helper
+4. Use middleware chain: `authMiddleware, planGate('feature'), rbac('module', 'action')`
+5. Use `parsePagination(req.query)` for all list endpoints
+6. Use `ok()` / `created()` / `E.*` for all responses
+7. Register in `server/index.js`: `app.use('/api/myresource', require('./routes/myresource'))`
+
+### Migration Strategy (Legacy → Production)
+
+The `/api/collections/:col` route remains active throughout all migration phases. Frontend modules are migrated one at a time:
+
+1. Update the JS module to call `API.students.list(params)` instead of `DB.get('students')`
+2. Remove the fallback `DB.get()` call once the new route is stable
+3. Delete the collection from `ALLOWED` in `collections.js` once all frontend references are gone
 
 ---
 

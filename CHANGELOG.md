@@ -6,6 +6,126 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.0.0] — 2026-05-01  Phase 1 Architecture — Server-Side RBAC · Plan Gating · Paginated Resource APIs · Atomic IDs
+
+### Architecture — Zero-Trust Backend Security (Phase 1)
+This release begins the production architecture migration. All changes are **backward-compatible** — the existing `/api/collections/*` route is untouched. New resource routes co-exist alongside the legacy route allowing a gradual frontend migration.
+
+### New — Server-Side RBAC Middleware (`server/middleware/rbac.js`)
+- `rbac(module, action)` — Express middleware factory; checks the requesting user's role permissions before any handler runs
+- Permissions loaded from the `role_permissions` MongoDB collection, scoped per `schoolId + role`
+- **5-minute in-memory cache** per `schoolId::role` pair — avoids a DB round-trip on every request
+- `invalidatePermCache(schoolId)` — exported for cache-busting when permissions change
+- `superadmin` and `admin` roles bypass all permission checks automatically
+- Standardised 403 response: `{ success: false, error: { code: 'FORBIDDEN', message: '...' } }`
+
+### New — Plan Tier Gating Middleware (`server/middleware/plan.js`)
+- `planGate(feature)` — Express middleware factory; gates access by the school's subscription plan
+- Cumulative plan hierarchy: **core ⊂ standard ⊂ premium ⊂ enterprise**
+- Feature → minimum plan map:
+  - **Core**: students, attendance, classes, teachers, grades, subjects, events, messaging
+  - **Standard**: behaviour, timetable, exams, key stages, houses, sections
+  - **Premium**: finance, admissions, reports, report cards, custom roles
+  - **Enterprise**: API access, SSO, advanced analytics, multi-campus, white-label
+- School plan cached per schoolId (5-min TTL, `invalidatePlanCache(schoolId)` exported)
+- Standardised 403 response includes `currentPlan` and `requiredPlan` fields
+
+### New — Atomic Counter Utility (`server/utils/counters.js`)
+- `nextId(name)` — race-safe atomic increment using MongoDB `$inc + upsert` on `counters` collection
+- `nextAdmissionNumber(schoolId)` → `ADM-{year}-{00001}` (5-digit zero-padded)
+- `nextStaffId(schoolId)` → `STF-{year}-{00001}`
+- `nextInvoiceNumber(schoolId)` → `INV-{year}-{000001}` (6-digit)
+- `nextReceiptNumber(schoolId)` → `RCP-{year}-{000001}`
+- All counters are per-school, per-year — reset naturally each academic year
+
+### New — Standardised Response Helpers (`server/utils/response.js`)
+- `ok(res, data, pagination?)` — `{ success: true, data, pagination }`
+- `created(res, data)` — 201 Created with same envelope
+- `fail(res, code, message, status?, extra?)` — `{ success: false, error: { code, message } }`
+- `paginate(page, limit, total)` — builds `{ page, limit, total, pages }` meta object
+- `parsePagination(query)` — parses `?page=1&limit=50` with safe defaults (max 200/page)
+- `E.*` — shortcut error helpers: `E.notFound`, `E.forbidden`, `E.validation`, `E.conflict`, etc.
+
+### New — Resource Route: Students (`server/routes/students.js`)
+- Full CRUD + bulk import for student records
+- **Zod validation** on all inputs; unknown fields and type coercion handled safely
+- Admission numbers generated **server-side** via atomic counter — never accepted from client
+- Soft delete: sets `status: 'inactive'` with `deletedAt` + `deletedBy` (record preserved)
+- Filters: `status`, `classId`, `houseId`, `keyStageId`, `gender`, free-text `search`
+- `POST /api/students/bulk` — up to 500 students, per-row validation errors, 207 Multi-Status on partial success
+
+### New — Resource Route: Teachers (`server/routes/teachers.js`)
+- Full CRUD for teaching/staff records
+- Staff IDs generated **server-side** (`STF-{year}-{00001}`)
+- Email uniqueness enforced per school at API layer
+- Soft delete with audit trail
+
+### New — Resource Route: Classes (`server/routes/classes.js`)
+- Full CRUD for class management
+- `GET /api/classes/:id/students` — paginated list of students enrolled in a class (requires `students:read` permission)
+- Duplicate class name check within same school + academic year
+
+### New — Resource Route: Attendance (`server/routes/attendance.js`)
+- `GET /api/attendance` — paginated with date, dateFrom/dateTo range, classId, studentId, period, status filters
+- `GET /api/attendance/summary` — server-side MongoDB aggregation of attendance rates per student
+- `POST /api/attendance/bulk` — mark all students in a class in one request using MongoDB `bulkWrite` upserts
+- Upsert behaviour: same student + date + period combination is updated, not duplicated
+- Attendance statuses: `present`, `absent`, `late`, `authorised_absence`, `excluded`, `holiday`
+
+### New — Resource Route: Finance (`server/routes/finance.js`)
+- **All financial totals calculated server-side** — client-supplied totals are ignored
+- Invoice creation: `subtotal`, `discountAmount`, `taxAmount`, `total` derived from line items
+- Payment recording: validates against outstanding balance, rejects overpayments
+- Invoice status auto-updated on every payment: `unpaid` → `partial` → `paid`
+- `GET /api/finance/summary` — aggregate overview: total invoiced, collected, outstanding, breakdown by payment method
+- Void protection: paid invoices cannot be edited or voided
+- `INV-{year}-{000001}` invoice numbers and `RCP-{year}-{000001}` receipt numbers, server-generated
+
+### New API Endpoints (v4.0.0)
+| Method | Route | Auth | RBAC | Plan | Description |
+|---|---|---|---|---|---|
+| `GET` | `/api/students` | JWT | `students:read` | core | Paginated student list |
+| `POST` | `/api/students` | JWT | `students:create` | core | Create student (server admission no.) |
+| `POST` | `/api/students/bulk` | JWT | `students:create` | core | Bulk import up to 500 |
+| `GET` | `/api/students/:id` | JWT | `students:read` | core | Single student |
+| `PUT` | `/api/students/:id` | JWT | `students:update` | core | Update student |
+| `DELETE` | `/api/students/:id` | JWT | `students:delete` | core | Soft-delete student |
+| `GET` | `/api/teachers` | JWT | `teachers:read` | core | Paginated teacher list |
+| `POST` | `/api/teachers` | JWT | `teachers:create` | core | Create teacher (server staff ID) |
+| `GET` | `/api/teachers/:id` | JWT | `teachers:read` | core | Single teacher |
+| `PUT` | `/api/teachers/:id` | JWT | `teachers:update` | core | Update teacher |
+| `DELETE` | `/api/teachers/:id` | JWT | `teachers:delete` | core | Soft-delete teacher |
+| `GET` | `/api/classes` | JWT | `classes:read` | core | Paginated class list |
+| `POST` | `/api/classes` | JWT | `classes:create` | core | Create class |
+| `GET` | `/api/classes/:id` | JWT | `classes:read` | core | Single class |
+| `GET` | `/api/classes/:id/students` | JWT | `students:read` | core | Students in class |
+| `PUT` | `/api/classes/:id` | JWT | `classes:update` | core | Update class |
+| `DELETE` | `/api/classes/:id` | JWT | `classes:delete` | core | Soft-delete class |
+| `GET` | `/api/attendance` | JWT | `attendance:read` | core | Paginated attendance |
+| `POST` | `/api/attendance` | JWT | `attendance:create` | core | Single attendance record (upsert) |
+| `POST` | `/api/attendance/bulk` | JWT | `attendance:create` | core | Bulk-mark whole class |
+| `GET` | `/api/attendance/summary` | JWT | `attendance:read` | core | Aggregated rates per student |
+| `PUT` | `/api/attendance/:id` | JWT | `attendance:update` | core | Update record |
+| `DELETE` | `/api/attendance/:id` | JWT | `attendance:delete` | core | Delete record |
+| `GET` | `/api/finance/invoices` | JWT | `finance:read` | premium | Paginated invoices |
+| `POST` | `/api/finance/invoices` | JWT | `finance:create` | premium | Create invoice (server totals) |
+| `PUT` | `/api/finance/invoices/:id` | JWT | `finance:update` | premium | Update invoice + recalc |
+| `DELETE` | `/api/finance/invoices/:id` | JWT | `finance:delete` | premium | Void invoice |
+| `GET` | `/api/finance/payments` | JWT | `finance:read` | premium | Paginated payments |
+| `POST` | `/api/finance/payments` | JWT | `finance:create` | premium | Record payment + auto-update invoice |
+| `GET` | `/api/finance/summary` | JWT | `finance:read` | premium | Financial summary/overview |
+
+### Dependencies Added
+- `zod@^3.23.8` — runtime schema validation and input parsing
+- `uuid@^9.0.1` — RFC-4122 UUID generation for document IDs
+
+### Notes
+- All new routes coexist with `/api/collections/*` — **zero breaking changes** to the current frontend
+- The legacy route remains available during frontend migration (Phase 2–3)
+- `uuid` was already used in some prior code but was not listed in `package.json`
+
+---
+
 ## [3.5.0] — 2026-05-03  Global Update Announcements · Data Backup & Export · Zero-Interruption Updates
 
 ### New — System Announcement Platform (Platform Admin)

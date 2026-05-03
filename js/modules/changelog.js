@@ -8,6 +8,94 @@ const Changelog = (() => {
   /* ── Version data ─────────────────────────────────────── */
   const VERSIONS = [
     {
+      version: '4.0.0',
+      date: '2026-05-01',
+      tag: 'new',
+      title: 'Phase 1 Architecture — Server-Side RBAC · Plan Gating · Paginated APIs · Atomic IDs',
+      sections: [
+        {
+          heading: 'Architecture — Zero-Trust Backend (Phase 1)',
+          type: 'new',
+          items: [
+            'Production architecture migration begins — all changes are backward-compatible, existing /api/collections/* route unchanged',
+            'New resource routes coexist alongside the legacy route; frontend can migrate module by module',
+            'Zero-trust principle: every API request verified server-side for authentication, role permissions, and plan entitlement',
+          ]
+        },
+        {
+          heading: 'New — Server-Side RBAC Middleware',
+          type: 'security',
+          items: [
+            'rbac(module, action) middleware factory — enforces permissions before any route handler runs',
+            'Permissions loaded from role_permissions MongoDB collection, scoped per schoolId + role',
+            '5-minute in-memory cache per schoolId::role pair — no DB round-trip on every request',
+            'superadmin and admin bypass all permission checks automatically',
+            'invalidatePermCache(schoolId) exported for cache-busting when permissions change',
+          ]
+        },
+        {
+          heading: 'New — Plan Tier Gating Middleware',
+          type: 'new',
+          items: [
+            'planGate(feature) middleware factory — gates route access by school subscription plan',
+            'Cumulative plan hierarchy: core ⊂ standard ⊂ premium ⊂ enterprise',
+            'Core: students, attendance, classes, teachers, grades, subjects, events, messaging',
+            'Standard adds: behaviour, timetable, exams, key stages, houses, sections',
+            'Premium adds: finance, admissions, reports, report cards, custom roles',
+            'Enterprise adds: API access, SSO, advanced analytics, multi-campus, white-label',
+            '5-minute plan cache per school with invalidatePlanCache(schoolId) for instant plan upgrades',
+          ]
+        },
+        {
+          heading: 'New — Atomic Sequential ID Counters',
+          type: 'new',
+          items: [
+            'Race-safe atomic counter using MongoDB $inc + upsert — works correctly under concurrent load',
+            'nextAdmissionNumber(schoolId) → ADM-2026-00001 format (server-generated, never accepted from client)',
+            'nextStaffId(schoolId) → STF-2026-00001',
+            'nextInvoiceNumber(schoolId) → INV-2026-000001',
+            'nextReceiptNumber(schoolId) → RCP-2026-000001',
+            'All counters are per-school and per-year — naturally reset each academic year',
+          ]
+        },
+        {
+          heading: 'New — Resource Routes (RBAC + Paginated)',
+          type: 'new',
+          items: [
+            'GET /api/students — paginated (page, limit, search, classId, houseId, status, gender)',
+            'POST /api/students — Zod-validated; server generates admission number; soft delete',
+            'POST /api/students/bulk — up to 500 students; per-row validation; 207 Multi-Status on partial success',
+            'Full CRUD for /api/teachers — server-generated staff IDs; email uniqueness enforced',
+            'Full CRUD for /api/classes — GET /api/classes/:id/students returns enrolled students',
+            'GET /api/attendance/summary — MongoDB aggregation of per-student attendance rates',
+            'POST /api/attendance/bulk — mark whole class in one request via MongoDB bulkWrite upserts',
+            'Finance: server-side invoice totals (subtotal, discount, tax, total) — client values ignored',
+            'Finance: payment recording validates against outstanding balance; overpayments rejected',
+            'Finance: invoice status auto-progresses unpaid → partial → paid on each payment',
+            'GET /api/finance/summary — aggregate financial overview with breakdown by payment method',
+          ]
+        },
+        {
+          heading: 'New — Standardised API Response Envelope',
+          type: 'improvement',
+          items: [
+            'All new routes return { success: true, data, pagination } or { success: false, error: { code, message } }',
+            'Consistent HTTP status codes across all endpoints',
+            'Pagination meta on all list endpoints: { page, limit, total, pages }',
+            'Max 200 records per page; default 50',
+          ]
+        },
+        {
+          heading: 'Dependencies',
+          type: 'improvement',
+          items: [
+            'Added zod@^3.23.8 — runtime schema validation and input parsing',
+            'Added uuid@^9.0.1 — formally added to package.json (was used but unlisted)',
+          ]
+        },
+      ]
+    },
+    {
       version: '3.5.0',
       date: '2026-05-03',
       tag: 'new',
