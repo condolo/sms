@@ -1,6 +1,6 @@
 ﻿# InnoLearn — User Guide
 
-**Version 3.2** · Updated 2026-05-01
+**Version 3.5** · Updated 2026-05-03
 
 > **Looking for admin guides?**
 > - 🔧 [Platform Admin Guide](PLATFORM_ADMIN_GUIDE.md) — for the InnoLearn platform owner
@@ -66,8 +66,22 @@ Visit the login page with `?demo=innolearn` in the URL to open the **Demo Role S
 
 Available demo roles: **Super Admin · Teacher · Parent · Finance · Student · Deputy Principal**
 
+### First Login — Setting Your Password
+If your account was created by an administrator (individually or via bulk import), you will be asked to **set your own password** the very first time you sign in. Your temporary password (sent to your email) is valid for one login only.
+
 ### Forgot Password
 Contact your school administrator to reset your password.
+
+### Auto-Logout (Security)
+For your security, InnoLearn automatically signs you out after **10 minutes of inactivity**. At 9 minutes, an amber warning toast appears — click **Stay signed in** to reset the timer. This protects shared or unattended devices.
+
+### Password Policy (60-Day Rotation)
+All passwords expire every **60 days**. When your password is about to expire:
+- A **dashboard banner** appears at the top of your screen (blue → amber → red as expiry approaches)
+- An **email reminder** is sent at 7, 3, 1, and 0 days before expiry
+- On the expiry day, you will be prompted to set a new password **before** you can log in
+
+Your new password must be at least 8 characters. After changing it, a security confirmation email is sent to your address.
 
 ### Your Role
 Your role determines which modules appear in your sidebar and what actions you can take. See [Role Reference](#17-role-reference) for a full breakdown.
@@ -84,6 +98,24 @@ Your role determines which modules appear in your sidebar and what actions you c
 
 The Dashboard is the first screen after login. What you see depends on your role.
 
+### System Announcement Banners
+When InnoLearn schedules a platform update or maintenance window, a **coloured banner** appears at the very top of your dashboard:
+
+| Banner type | Colour | What it means |
+|---|---|---|
+| 🔧 Scheduled Maintenance | Amber | A maintenance window is planned — back up your data |
+| 🚀 Platform Update | Purple | A new version is being deployed |
+| 🔒 Security Notice | Red | A security-related change is being applied |
+| ℹ️ General Info | Blue | A general platform notice |
+
+For **maintenance and security** banners, you will see a **"Back Up My Data Now"** button — as a superadmin, click it to immediately download a full export of your school's data before the update. Click **Dismiss** when you have read and actioned the notice.
+
+### Password Expiry Banner
+If your password is expiring within 7 days, a banner appears above the dashboard cards (urgency colour-coded). Click **Change Password** to update it immediately.
+
+### Trial Expiry Banner
+If your school's free trial ends within 7 days, a banner displays the days remaining. Click **Manage Subscription** to review your plan.
+
 ### New School — Setup Wizard
 If you are a **Super Admin** and your school has just been approved, the dashboard will display a **Setup Checklist** at the top. This is a 7-step guide to getting your school fully configured:
 
@@ -98,6 +130,14 @@ If you are a **Super Admin** and your school has just been approved, the dashboa
 | 7 | Set up report card templates | Reports |
 
 A **% completion bar** shows your progress. Each step is clickable and takes you directly to the right module. Once all 7 steps are done, you can dismiss the wizard permanently. You can also click **"Hide for now"** at any time.
+
+### Data Backup (Super Admin)
+A **"Data Backup & Export"** card is visible on the Super Admin dashboard, below the Quick Actions. Click **Back Up Now** to instantly download a complete JSON export of all your school's data — students, staff, classes, finance, attendance, behaviour, reports, and every other module. The download begins immediately in your browser.
+
+- No data is stored on InnoLearn's servers during the backup — the file goes directly to your computer
+- Every backup is logged (date, record count, system version) — click **View backup history** to review past exports
+- You can also trigger a backup from the **"Backup Data"** tile in the Quick Actions grid
+- **Always back up before a major platform update** (you will be reminded automatically by dashboard banners and email)
 
 ### Admin / Deputy Principal / Section Head
 - **KPI cards**: total students, staff, attendance rate, fee collection rate

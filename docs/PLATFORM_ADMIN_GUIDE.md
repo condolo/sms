@@ -49,6 +49,9 @@ InnoLearn.com / app.InnoLearn.com
   │  ├── /api/onboard       signup  │
   │  ├── /api/sync          data    │
   │  ├── /api/collections   CRUD    │
+  │  ├── /api/users         invites │
+  │  ├── /api/backup        export  │
+  │  ├── /api/announcements notices │
   │  └── /api/platform      admin   │
   │  Static: index.html, onboard.html │
   └─────────────────────────────────┘
@@ -107,7 +110,38 @@ node server/index.js
 
 InnoLearn is deployed via GitHub → Render (auto-deploy on push to `main`).
 
-### Normal update flow
+### Update Safety Protocol (Zero-Interruption Updates)
+
+Before deploying any major or breaking change, follow this protocol to ensure no school loses data:
+
+**Step 1 — Create a system announcement**
+1. Open `https://innolearn-ecosystem.onrender.com/platform`
+2. Click **Announcements** in the left sidebar
+3. Click **New Announcement**
+4. Set type to **🔧 Scheduled Maintenance**, fill the title and description
+5. Set the scheduled date/time and an expiry time (typically 6 hours after the maintenance window)
+6. Tick **"Email all active school administrators immediately"**
+7. Click **Send Announcement**
+
+All school superadmins now see a dashboard banner with a **"Back Up My Data Now"** button, and receive an email with the same CTA.
+
+**Step 2 — Allow time for backups**
+Give schools at least 24–48 hours to export their data. They can click the banner or the "Backup Data" tile on their dashboard to download a full JSON export.
+
+**Step 3 — Deploy the update**
+```bash
+git add -A
+git commit -m "feat: describe what changed"
+git push origin main
+# Render auto-deploys within ~60 seconds
+```
+
+**Step 4 — Mark the announcement as completed**
+Back in the Platform dashboard → Announcements, click **Cancel** on the announcement (or let it expire naturally). Schools will no longer see the maintenance banner.
+
+> **Note**: InnoLearn updates never modify or delete existing school data. The backup protocol exists as a professional safeguard and to maintain school confidence in the platform.
+
+### Normal update flow (minor changes)
 
 ```bash
 # Make your changes
@@ -127,7 +161,7 @@ Expected response:
 ```json
 {
   "status": "ok",
-  "version": "3.1.0",
+  "version": "3.5.0",
   "db": "connected"
 }
 ```
@@ -269,6 +303,8 @@ All platform routes require the header:
 X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY
 ```
 
+**School management**
+
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/api/platform/schools` | List all schools with student/staff stats |
@@ -279,6 +315,30 @@ X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY
 | `PATCH` | `/api/platform/schools/:id` | Update plan, addOns, isActive, planExpiry |
 | `POST` | `/api/platform/schools/:id/impersonate` | Get a JWT for any school's superadmin |
 | `GET` | `/api/platform/stats` | MRR, school counts, plan breakdown |
+
+**System announcements**
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/platform/announcements` | List all announcements (with notifiedCount, dismissedBy) |
+| `POST` | `/api/platform/announcements` | Create announcement; if `notifyAll: true` emails all school admins |
+| `PATCH` | `/api/platform/announcements/:id` | Update status (`active`/`cancelled`), title, description, expiresAt |
+| `DELETE` | `/api/platform/announcements/:id` | Delete announcement permanently |
+
+Announcement body fields:
+```json
+{
+  "title":       "Scheduled Maintenance — v3.6.0",
+  "description": "We will be upgrading the platform on Saturday 10 May at 02:00 UTC...",
+  "type":        "maintenance",
+  "scheduledAt": "2026-05-10T02:00:00Z",
+  "affectsAt":   "2026-05-10T02:00:00Z",
+  "expiresAt":   "2026-05-10T08:00:00Z",
+  "notifyAll":   true
+}
+```
+
+Types: `maintenance` | `update` | `security` | `info`
 
 ---
 
@@ -369,23 +429,47 @@ location.reload();
 
 ## 11. Backup & Recovery
 
-### MongoDB Atlas automated backups
+InnoLearn uses a **two-tier backup strategy**: school-level self-service exports and platform-level MongoDB snapshots.
+
+### Tier 1 — School self-service backup (built-in)
+
+Every school superadmin can export their own data at any time from the InnoLearn dashboard:
+
+- Dashboard → **"Data Backup & Export"** card → **Back Up Now**
+- Exports all collections for their school as a structured JSON file
+- File is downloaded directly to their browser — nothing stored on the InnoLearn server
+- Every export is logged in `backup_logs` collection (date, user, record count, version)
+
+**As platform admin**, before any major deployment:
+1. Follow the Update Safety Protocol in §4 to notify all schools
+2. Allow time for schools to self-backup
+3. Deploy the update — all data is untouched
+
+### Tier 2 — MongoDB Atlas automated backups (platform-level)
 
 1. Go to MongoDB Atlas → your cluster → **Backup**
 2. Enable **Continuous Cloud Backup** (recommended)
-3. Set a retention period (7 days minimum)
+3. Set a retention period of at least 14 days
 
-### Manual export
+### Tier 2 — Manual MongoDB export
 
 ```bash
 mongodump --uri="$MONGODB_URI" --out=./backup/$(date +%Y%m%d)
 ```
 
-### Restore
+### MongoDB restore
 
 ```bash
 mongorestore --uri="$MONGODB_URI" ./backup/20260430/
 ```
+
+### School backup API reference
+
+| Method | Route | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/backup/export` | JWT (superadmin) | Full JSON export download |
+| `GET` | `/api/backup/history` | JWT (superadmin) | List backup log entries |
+| `GET` | `/api/backup/preview` | JWT (superadmin) | Record counts per collection |
 
 ### localStorage data migration
 

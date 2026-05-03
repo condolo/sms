@@ -6,6 +6,57 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [3.5.0] — 2026-05-03  Global Update Announcements · Data Backup & Export · Zero-Interruption Updates
+
+### New — System Announcement Platform (Platform Admin)
+- Platform admin has a new **"Announcements"** tab in the Platform dashboard
+- Create notices with four types: **🔧 Scheduled Maintenance**, **🚀 Platform Update**, **🔒 Security Notice**, **ℹ️ General Info**
+- Each announcement has a title, description, scheduled date/time, and optional expiry timestamp
+- **"Notify all schools"** checkbox — instantly emails every active school admin with a branded notice, including a direct "Back Up My Data Now" call-to-action for maintenance and security notices
+- Cancel, reactivate, or delete announcements at any time
+- Dashboard shows notified school count and how many schools have dismissed the notice
+
+### New — Announcement Banners on Every School Dashboard
+- When a system announcement is active, a **colour-coded banner** appears at the top of every user's dashboard:
+  - 🔧 Maintenance / 🔒 Security → amber/red banner with inline **"Back Up My Data Now"** button
+  - 🚀 Update / ℹ️ Info → blue/purple banner with Dismiss link
+- Banners load asynchronously on login — do not block or delay the dashboard
+- Each school can dismiss a banner independently (stored server-side per school)
+- Dismissed banners never reappear; expired banners (past `expiresAt`) are hidden automatically
+
+### New — Data Backup & Export (Superadmin)
+- Superadmin dashboard now shows a **"Data Backup & Export"** card and a **"Backup Data"** quick-action tile
+- One click exports **all school data** across every collection (students, staff, classes, finance, attendance, behaviour, reports, and more) as a single structured **JSON file**
+- File is downloaded directly to the browser — nothing is stored on InnoLearn servers
+- Backup is version-stamped, timestamped, and labelled with the school name
+- **Backup history log** — every export is logged with date, who triggered it, record count, and version; viewable via "View backup history" expander on the dashboard
+- `GET /api/backup/preview` — shows record counts per collection before committing to a download
+- Rate-limited: maximum 10 exports per hour per school
+
+### New — Update Safety Protocol
+- Before any major platform update, platform admin creates an announcement with `notifyAll: true`
+- All school superadmins receive an email **and** a dashboard banner — both prompt them to back up their data first
+- The update proceeds only after schools have had time to export — no school data is touched by the update process
+- The backup file is a complete, self-contained JSON snapshot that can be used to verify data integrity after any change
+
+### New API Endpoints
+| Method | Route | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/announcements` | JWT | Active notices for this school |
+| `POST` | `/api/announcements/:id/dismiss` | JWT | Per-school dismiss |
+| `GET` | `/api/platform/announcements` | Platform Key | List all announcements |
+| `POST` | `/api/platform/announcements` | Platform Key | Create + optionally email all schools |
+| `PATCH` | `/api/platform/announcements/:id` | Platform Key | Update status/content |
+| `DELETE` | `/api/platform/announcements/:id` | Platform Key | Remove announcement |
+| `POST` | `/api/backup/export` | JWT (superadmin) | Full JSON export download |
+| `GET` | `/api/backup/history` | JWT (superadmin) | List backup log entries |
+| `GET` | `/api/backup/preview` | JWT (superadmin) | Record counts per collection |
+
+### Email
+- `sendSystemUpdateNotice` — branded maintenance/update email with urgency block; links directly to dashboard for backup action
+
+---
+
 ## [3.4.0] — 2026-05-01  Password Rotation · User Invites · Role Notifications · Security Hardening
 
 ### Security — Critical Fixes

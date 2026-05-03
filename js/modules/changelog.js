@@ -8,6 +8,57 @@ const Changelog = (() => {
   /* ── Version data ─────────────────────────────────────── */
   const VERSIONS = [
     {
+      version: '3.5.0',
+      date: '2026-05-03',
+      tag: 'new',
+      title: 'Global Update Announcements · Data Backup · Zero-Interruption Updates',
+      sections: [
+        {
+          heading: 'New — System Announcement Platform',
+          type: 'new',
+          items: [
+            'Platform admin can create global notices (Maintenance, Update, Security, Info) from a new "Announcements" tab',
+            '"Notify all schools" option emails every active school admin instantly with a branded notice',
+            'Maintenance and security notices include a direct "Back Up My Data Now" CTA in the email',
+            'Announcements can be cancelled, reactivated, or deleted at any time',
+            'Dashboard shows notified count and how many schools dismissed each notice',
+          ]
+        },
+        {
+          heading: 'New — Dashboard Announcement Banners',
+          type: 'new',
+          items: [
+            'Colour-coded banners appear at the top of every user\'s dashboard when an active announcement exists',
+            'Maintenance/security banners include an inline "Back Up My Data Now" button',
+            'Each school can dismiss a banner independently — stored server-side, never reappears',
+            'Expired banners (past expiresAt) hidden automatically; loads async without blocking dashboard',
+          ]
+        },
+        {
+          heading: 'New — Data Backup & Export (Superadmin)',
+          type: 'new',
+          items: [
+            'One-click export of all school data across every collection as a structured JSON file',
+            'File downloaded directly to browser — nothing stored on InnoLearn servers',
+            'Backup is version-stamped, timestamped, and named with school name + date',
+            'Backup history log: every export logged with date, user, record count, and version',
+            'GET /api/backup/preview shows per-collection record counts before export',
+            'Rate-limited to 10 exports per hour per school',
+          ]
+        },
+        {
+          heading: 'New — Update Safety Protocol',
+          type: 'security',
+          items: [
+            'Platform admin creates an announcement before any major update — all schools notified',
+            'Schools back up their data first via dashboard or email CTA',
+            'Update deploys only after schools have had time to export — no school data touched by the update',
+            'Backup file is a complete JSON snapshot for data integrity verification',
+          ]
+        },
+      ]
+    },
+    {
       version: '3.4.0',
       date: '2026-05-01',
       tag: 'security',
