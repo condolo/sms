@@ -1,6 +1,6 @@
 ﻿# InnoLearn — Developer Guide
 
-**Version 4.0** · Technical Reference & Architecture
+**Version 4.3** · Technical Reference & Architecture
 
 ---
 
@@ -23,6 +23,8 @@
 15. [Help Centre Articles](#15-help-centre-articles)
 16. [Branding & Login Page System](#16-branding--login-page-system)
 17. [Known Limitations](#17-known-limitations)
+18. [Production API Layer (v4.1+)](#18-production-api-layer-v41)
+19. [React SPA (v4.3+)](#19-react-spa-v43)
 
 ---
 
@@ -49,7 +51,7 @@ InnoLearn is a **vanilla JavaScript single-page application** (SPA) with no buil
 
 ```
 school-management/
-├── index.html                  # App entry point — all scripts loaded here
+├── index.html                  # Legacy app entry point — all scripts loaded here
 ├── onboard.html                # 4-step school self-registration wizard
 ├── platform.html               # Platform admin SPA (key-protected)
 ├── server.js                   # Entry point → delegates to server/index.js
@@ -59,13 +61,58 @@ school-management/
 ├── .env.example                # Safe template for .env
 ├── .gitignore
 │
+├── client/                     # ★ React SPA (v4.3+) — Vite + React 18 + Tailwind
+│   ├── index.html              # Vite HTML entry point
+│   ├── package.json            # React dependencies (separate from root)
+│   ├── vite.config.js          # Dev server :5173, /api proxy → :3005, code-split
+│   ├── tailwind.config.js      # InnoLearn brand palette + component tokens
+│   ├── postcss.config.js
+│   └── src/
+│       ├── main.jsx            # QueryClient, RouterProvider, RQ Devtools
+│       ├── App.jsx             # createBrowserRouter — all routes, lazy pages
+│       ├── index.css           # Tailwind directives + component layer (@apply)
+│       ├── api/
+│       │   └── client.js       # Fetch wrapper — all 11 API modules, APIError
+│       ├── store/
+│       │   └── auth.js         # Zustand auth store, session persistence, can()
+│       ├── components/
+│       │   ├── guards/
+│       │   │   └── ProtectedRoute.jsx
+│       │   ├── layout/
+│       │   │   ├── AppShell.jsx    # Desktop sidebar + mobile drawer
+│       │   │   ├── Sidebar.jsx     # Section nav, user footer, logout
+│       │   │   └── TopBar.jsx      # Breadcrumb, plan badge, avatar
+│       │   └── ui/
+│       │       ├── Spinner.jsx     # Spinner + PageSpinner
+│       │       ├── Badge.jsx       # 7 variants + status helpers
+│       │       ├── EmptyState.jsx  # EmptyState + ErrorState
+│       │       └── Pagination.jsx  # Smart page window with ellipsis
+│       └── pages/
+│           ├── Login.jsx           # Split-panel + password-expired flow
+│           ├── Dashboard.jsx       # Stat cards + recent students + quick actions
+│           ├── NotFound.jsx
+│           ├── students/
+│           │   ├── StudentList.jsx     # Debounced search, filters, paginated table
+│           │   └── StudentProfile.jsx  # 5-tab detail with inline edit
+│           ├── teachers/TeacherList.jsx
+│           ├── classes/ClassList.jsx
+│           ├── attendance/AttendancePage.jsx   # Register editor (radio-button grid)
+│           ├── finance/FinancePage.jsx         # Invoices / Payments / Summary tabs
+│           ├── behaviour/BehaviourPage.jsx     # Incidents + Appeals tabs
+│           ├── exams/ExamsPage.jsx             # Exams + Grade Report tabs
+│           ├── admissions/AdmissionsPage.jsx   # Funnel stats + stage filter
+│           ├── timetable/TimetablePage.jsx     # Day-grid per class
+│           └── settings/SettingsPage.jsx       # School / Users / Account tabs
+│
 ├── css/
 │   ├── styles.css              # Main design system (app shell + all component styles)
 │   ├── onboard.css             # Onboarding wizard styles
 │   └── platform.css            # Platform admin dashboard styles
 │
 ├── js/
-│   ├── data.js                 # Seed data + DB bootstrap (loads on first run)
+│   ├── data.js                 # Seed data + DB bootstrap + hydration layer (v4.2+)
+│   ├── cache.js                # ★ In-memory TTL cache (v4.2+)
+│   ├── api.js                  # ★ Production API client — all modules (v4.1+)
 │   ├── app.js                  # Router, sidebar, utilities, global functions
 │   └── modules/
 │       ├── auth.js             # Authentication, session, role/permission checks
@@ -105,11 +152,16 @@ school-management/
 │   │   ├── sync.js             # GET /api/sync — bulk data download
 │   │   ├── users.js            # POST /api/users/invite, /bulk-invite, /role-change
 │   │   ├── backup.js           # POST /api/backup/export, /history, /preview
-│   │   ├── students.js         # ★ /api/students — RBAC + paginated + Zod
-│   │   ├── teachers.js         # ★ /api/teachers — RBAC + paginated + Zod
-│   │   ├── classes.js          # ★ /api/classes  — RBAC + paginated + Zod
+│   │   ├── students.js         # ★ /api/students  — RBAC + paginated + Zod
+│   │   ├── teachers.js         # ★ /api/teachers  — RBAC + paginated + Zod
+│   │   ├── classes.js          # ★ /api/classes   — RBAC + paginated + Zod
 │   │   ├── attendance.js       # ★ /api/attendance — RBAC + paginated + bulk
-│   │   └── finance.js          # ★ /api/finance — invoices + payments (server-side math)
+│   │   ├── finance.js          # ★ /api/finance   — invoices + payments (server-side math)
+│   │   ├── behaviour.js        # ★ /api/behaviour — incidents, appeals, categories
+│   │   ├── exams.js            # ★ /api/exams     — results, stats, grading scale
+│   │   ├── grades.js           # ★ /api/grades    — weighted average report
+│   │   ├── admissions.js       # ★ /api/admissions — pipeline + stage history
+│   │   └── timetable.js        # ★ /api/timetable — slot collision detection
 │   └── utils/
 │       ├── jwt.js              # sign() / verify() helpers
 │       ├── model.js            # Shared Mongoose model factory (_model)
@@ -125,11 +177,13 @@ school-management/
     └── SCHOOL_ADMIN_GUIDE.md   # School Super Admin setup guide
 ```
 
-**Script load order in `index.html`** (matters — each module depends on `DB` and `Auth`):
+**Legacy script load order in `index.html`** (matters — each module depends on `DB` and `Auth`):
 ```
-chart.js → data.js → auth.js → [all feature modules] → app.js
+chart.js → data.js → cache.js → api.js → auth.js → [all feature modules] → app.js
 ```
 `app.js` is always last — it calls `App.init()` on `DOMContentLoaded`.
+
+**React SPA** (`client/`) is an independent app with its own `package.json`. It proxies `/api` to the same Express server.
 
 ---
 
@@ -261,6 +315,7 @@ Each row is keyed by role name and contains an object of `{ module: { view, crea
 
 ### API
 ```js
+// Synchronous localStorage CRUD
 DB.get(collection)                    // → array of all records
 DB.getById(collection, id)            // → single record or null
 DB.query(collection, predicateFn)     // → filtered array
@@ -268,7 +323,15 @@ DB.insert(collection, object)         // → inserted object (id auto-generated 
 DB.update(collection, id, partial)    // → updated object (shallow merge)
 DB.remove(collection, id)             // → void
 DB.set(collection, array)             // → replaces entire collection (used in seed)
+
+// ★ Async server-hydration (v4.2+)
+await DB.hydrate(collection, params)  // → true if hydrated, false if skipped/error
+                                      //   fetches all pages from production API,
+                                      //   stores in localStorage, caches for 2 min
+DB.invalidateHydration(collection)    // bust 2-min cache so next render re-fetches
 ```
+
+Writes that hit `DB.update`, `DB.insert`, or `DB.remove` are fire-and-forget synced to the production API via `_push()` for the 13 collections listed in `PRODUCTION_ROUTES`. All other collections continue to use the legacy `/api/collections/:col` route.
 
 ### ID Generation
 `DB.insert` auto-generates an ID if the object has none: `Date.now().toString(36) + Math.random().toString(36).slice(2)`.
@@ -1213,3 +1276,154 @@ Each step inspects `DB.get(collection)` filtered by `school.id`:
 ### Demo School Behaviour
 
 The InnoLearn International School demo seed has students, teachers, and classes pre-populated, so most steps will already show as complete for the demo school. The wizard is most visible on a newly approved, empty school.
+
+---
+
+## 18. Production API Layer (v4.1+)
+
+> **Status: Implemented.** All 10 resource routes live alongside `/api/collections/*`. Zero breaking changes.
+
+### Route Inventory
+
+| Route | Plan gate | Key features |
+|---|---|---|
+| `GET/POST /api/students` | core | Paginated, search, Zod validation, server-generated `admissionNumber`, bulk import (207) |
+| `GET/POST /api/teachers` | core | `staffId` auto-generated, email uniqueness per school |
+| `GET/POST /api/classes` | core | `GET /api/classes/:id/students` sub-route |
+| `GET/POST /api/attendance` | core | `GET /api/attendance/summary` aggregation, `POST /api/attendance/bulk` atomic upsert |
+| `GET/POST /api/finance/invoices` | premium | Server-side totals (subtotal, discount, tax), `PATCH .../void` |
+| `POST /api/finance/payments` | premium | Server validates amount ≤ outstanding; auto-advances invoice status |
+| `GET /api/finance/summary` | premium | Aggregate by payment method |
+| `GET/POST /api/behaviour/incidents` | standard | `GET .../summary` merits/demerits per student |
+| `GET/POST /api/behaviour/appeals` | standard | `PATCH .../resolve` updates incident status atomically |
+| `GET/POST /api/exams` | standard | `GET /api/exams/:id/results` with class stats, `POST /api/exams/:id/results` bulk-upsert |
+| `GET /api/grades/report` | standard | Weighted average per student per subject via aggregation |
+| `GET/POST /api/admissions` | premium | `applicationRef` auto-generated, `stageHistory` append-only, `PATCH .../stage`, `GET .../stats` funnel |
+| `GET/POST /api/timetable` | standard | Slot collision detection (409), `GET /api/timetable/class/:classId`, `POST .../bulk` |
+
+### Middleware Chain
+
+```
+authMiddleware → planGate(feature) → rbac(module, action) → handler
+```
+
+`superadmin` and `admin` roles bypass the RBAC DB check. Plan cache and RBAC cache both TTL at 5 minutes.
+
+### Frontend API Client (`js/api.js`)
+
+```js
+// All modules:
+API.students.list(params)           // → paginated response
+API.students.get(id)
+API.students.create(data)
+API.students.update(id, data)
+API.students.remove(id)
+API.students.bulkImport(rows)
+
+API.finance.invoices.list(params)
+API.finance.payments.record(data)
+API.finance.summary(params)
+
+API.behaviour.incidents.summary(params)
+API.behaviour.appeals.resolve(id, data)
+
+API.exams.results.bulkUpsert(examId, data)
+API.admissions.changeStage(id, data)
+API.timetable.bulkSet(data)
+```
+
+`APIError` class exposes `.code`, `.message`, `.status`. On 401, `api:unauthorized` is dispatched on `window` and the session is cleared.
+
+### DB Hydration Flow
+
+```
+Module.render() called
+    ↓
+DB.hydrate('students') — checks in-memory Cache first (2-min TTL)
+    ↓ cache miss
+Fetch GET /api/students?limit=1000&page=1...N  (all pages)
+    ↓
+DB.set('students', allDocs)  — replaces localStorage collection
+Cache.set('hydrate_students', true, 120_000)
+    ↓
+Module renders from localStorage (synchronous, fast)
+```
+
+On write (`DB.update`, `DB.insert`, `DB.remove`), `_push()` fires to the correct REST endpoint and calls `Cache.invalidate('hydrate_students')` on success — next render fetches fresh data.
+
+---
+
+## 19. React SPA (v4.3+)
+
+> **Status: Implemented.** The `client/` app runs as an independent SPA that proxies all API calls to the same Express server.
+
+### Development Workflow
+
+```bash
+# Terminal 1 — API server (port 3005)
+npm run dev
+
+# Terminal 2 — React dev server (port 5173, /api proxied to :3005)
+npm run dev:react
+# Open http://localhost:5173
+```
+
+### Production Build & Serve
+
+```bash
+npm run build:react        # Vite compiles → client/dist/
+npm start                  # Express detects client/dist and serves it
+```
+
+Express checks `fs.existsSync('client/dist/index.html')` at startup. If present, it:
+- Serves hashed assets (`*.8f3a1c2d.js`) with `Cache-Control: immutable`
+- Returns `client/dist/index.html` for all SPA routes (`/dashboard`, `/students`, `/login`, etc.)
+- Continues to return `index.html` (legacy) at `/` and `/platform`, `/onboard` at their own paths
+
+### Key Architectural Decisions
+
+| Decision | Rationale |
+|---|---|
+| `staleTime: 2 * 60 * 1000` | Matches server TTL cache — consistent freshness across legacy JS and React layers |
+| `keepPreviousData: true` on list queries | No flash-to-empty on page/filter change |
+| `api:unauthorized` window event | Decouples auth store from every API call; single listener in `auth.js` |
+| Lazy-loaded pages with `<Suspense>` | Keeps initial bundle small; each module loads on first navigation |
+| `can(feature)` on `useAuthStore` | Same permission model as legacy `Auth.hasPermission()` |
+| `ProtectedRoute` preserves `from` location | After login, user lands on their originally intended page |
+
+### TanStack Query Key Conventions
+
+```js
+['students', 'count']                          // single stat
+['students', { page, search, classId, ... }]   // paginated list
+['students', studentId]                        // single record
+['attendance', 'summary', studentId]           // derived aggregation
+['finance', 'invoices', { page }]              // sub-resource list
+['finance', 'summary', year]                   // aggregated summary
+```
+
+Invalidation after mutation:
+```js
+qc.invalidateQueries({ queryKey: ['students'] })  // bust all student queries
+```
+
+### Adding a New Page
+
+1. Create `client/src/pages/mymodule/MyPage.jsx`
+2. Import API calls from `@/api/client.js`
+3. Use `useQuery` for reads, `useMutation` for writes
+4. Add the route to `client/src/App.jsx` (lazy import + route entry)
+5. Add a nav item to `client/src/components/layout/Sidebar.jsx` under the appropriate section
+
+### CSS Conventions (Tailwind)
+
+All reusable patterns are defined in `src/index.css` under `@layer components`:
+
+```css
+.card        { @apply bg-white rounded-xl shadow-card border border-surface-border p-5; }
+.btn-primary { @apply btn bg-brand-600 text-white hover:bg-brand-700; }
+.form-input  { @apply w-full rounded-lg border border-slate-300 px-3 py-2 text-sm ...; }
+.data-table  { @apply w-full text-sm; }
+```
+
+Use these class names directly in JSX — avoid writing Tailwind utility strings for common patterns.

@@ -1,6 +1,6 @@
 ﻿# InnoLearn — User Guide
 
-**Version 3.5** · Updated 2026-05-03
+**Version 4.3** · Updated 2026-05-03
 
 > **Looking for admin guides?**
 > - 🔧 [Platform Admin Guide](PLATFORM_ADMIN_GUIDE.md) — for the InnoLearn platform owner
