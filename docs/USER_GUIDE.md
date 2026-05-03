@@ -1,6 +1,6 @@
 ﻿# InnoLearn — User Guide
 
-**Version 4.3** · Updated 2026-05-03
+**Version 4.5** · Updated 2026-05-03
 
 > **Looking for admin guides?**
 > - 🔧 [Platform Admin Guide](PLATFORM_ADMIN_GUIDE.md) — for the InnoLearn platform owner
@@ -37,18 +37,28 @@
 If your school is not yet on InnoLearn, visit `/onboard` or click **Get Started** on the login page to begin the 4-step registration wizard:
 
 1. **School Details** — name, type, country, URL slug, curriculum, sections
-2. **Admin Account** — your name, email, and password
+2. **Admin Account** — your name and email address (no password needed — see below)
 3. **Choose Plan** — Core, Standard, Premium, or Enterprise (30-day free trial on all plans)
 4. **Review & Launch** — confirm your details and tick the Terms of Service box to submit
 
 > **Curriculum options**: CBE (Kenya — Competency Based Education), IB (International Baccalaureate), British (Cambridge / Edexcel), American (US Common Core / AP)
 
+> **No password at registration** — InnoLearn generates a secure temporary password for you. It will be emailed to you when your school is approved. You do not set a password during registration.
+
 After submitting, your application enters a **pending review** state. You will receive a confirmation email and hear back within **24 hours**.
 
 ### Approval Process
-Once the InnoLearn team reviews and approves your school:
-- You will receive a **welcome email** with your login URL and a reminder of your credentials
-- Your account becomes active immediately — log in and start setting up your school
+Once the InnoLearn team reviews and approves your school, you will receive a **welcome email** containing:
+
+| What | Example |
+|------|---------|
+| **Your dedicated login URL** | `https://app.innolearn.edu.ke?school=greenhill` |
+| **Your email / username** | `admin@greenhill.edu` |
+| **Temporary password** | `xK7mNpQrBvW3` (system-generated) |
+
+Click the link in the email — it will take you directly to the InnoLearn login page with your school pre-selected. Enter the temporary password and you will immediately be asked to set a permanent one.
+
+> ⚠️ **Save the approval email.** The temporary password is shown once. If you miss it, contact the InnoLearn team to reset it.
 
 If your application is not approved, you will receive an email explaining why, and you are welcome to reapply after addressing any concerns.
 
@@ -345,18 +355,39 @@ Shows:
 
 ## 11. Communication
 
+> **Messages are now stored in the cloud.** They persist across all devices and sessions — no data is lost when you clear your browser or log in from a different computer.
+
 ### Sending a Message
 1. Navigate to **Communication → + Compose**.
-2. Select recipients: individual users, a class, a role group, or everyone.
-3. Write subject and body.
-4. Click **Send**.
+2. Select recipients: an individual user, a role group (All Teachers, All Parents, etc.), or Everyone.
+3. Write a subject and body.
+4. Click **Send Message**.
+
+The recipient will receive an **email notification** immediately with a preview of your message and a link to log in and reply.
+
+### Sending a School Announcement
+Admins and Deputy Principals see an additional **Announcement** button:
+1. Click **Announcement**.
+2. Choose your audience (Everyone / Teachers / Parents / Students / Staff).
+3. Write the subject and message.
+4. Click **Send Announcement**.
+
+Every member of the selected audience receives a notification email. The announcement also appears in their in-app inbox.
 
 ### Inbox
-Your inbox shows messages sent to you directly, to your role group, or to all users.
+Your inbox shows all messages sent:
+- Directly to you
+- To your role group (e.g. All Teachers)
+- To Everyone in the school
+
+Unread messages are highlighted. Click a message to open it — it is automatically marked as read.
+
+### Replying
+Open a message and scroll to the **Reply** box at the bottom. Type your reply and click **Send Reply**. The original sender receives an email notification.
 
 ### Notifications vs Messages
 - **Notifications** (bell icon, top-right): automatic system alerts (attendance, behaviour, finance).
-- **Messages** (Communication module): manually composed messages between users.
+- **Messages** (Communication module): manually composed messages — permanently stored and accessible from any device.
 
 ---
 

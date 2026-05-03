@@ -6,6 +6,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.5.0] — 2026-05-03  Security hardening — rate limiting + Render deploy fix
+
+### Security — Global Rate Limiting (`server/index.js`) · commit `503e51f`
+- Added two limiters at the server level — `express-rate-limit` was already a dependency (used in route files) but never applied globally
+- **General limiter**: 300 req / 15 min / IP across all `/api/*` — skipped in development so local workflows are unaffected
+- **Auth limiter**: 20 req / 15 min / IP on `/api/auth` — stacked on top of the general limiter, always enforced including in dev
+- Standard `RateLimit-*` headers returned on every response so API clients can back off gracefully before hitting the wall
+
+### Fix — Render Deployment (`render.yaml` + `client/.npmrc`) · commit `16f725c`
+- `buildCommand` was `npm install` only — React `client/dist/` was never compiled; `fs.existsSync` returned `false`; Express fell back to the legacy `index.html` on every Render deploy
+- Fixed: `npm install && cd client && npm install --include=dev && npm run build`
+- `--include=dev` required because `vite` and `tailwindcss` live in `devDependencies`; Render strips them by default in production
+- Added `client/.npmrc` with `include=dev` as a second-line safety net for any CI environment that ignores the CLI flag
+
+---
+
 ## [4.4.0] — 2026-05-03  Persistent messaging, auto-credential registration, dedicated school URLs
 
 ### School Registration — Password Removed, System-Generated Credentials

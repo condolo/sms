@@ -1,6 +1,6 @@
 ﻿# InnoLearn — Developer Guide
 
-**Version 4.3** · Technical Reference & Architecture
+**Version 4.5** · Technical Reference & Architecture
 
 ---
 
@@ -25,6 +25,9 @@
 17. [Known Limitations](#17-known-limitations)
 18. [Production API Layer (v4.1+)](#18-production-api-layer-v41)
 19. [React SPA (v4.3+)](#19-react-spa-v43)
+20. [Security Layer (v4.5+)](#20-security-layer-v45)
+21. [Messaging API (v4.4+)](#21-messaging-api-v44)
+22. [School Registration & Credentials Flow (v4.4+)](#22-school-registration--credentials-flow-v44)
 
 ---
 
@@ -64,6 +67,7 @@ school-management/
 ├── client/                     # ★ React SPA (v4.3+) — Vite + React 18 + Tailwind
 │   ├── index.html              # Vite HTML entry point
 │   ├── package.json            # React dependencies (separate from root)
+│   ├── .npmrc                  # ★ include=dev — ensures vite/tailwind installed on Render
 │   ├── vite.config.js          # Dev server :5173, /api proxy → :3005, code-split
 │   ├── tailwind.config.js      # InnoLearn brand palette + component tokens
 │   ├── postcss.config.js
@@ -161,11 +165,12 @@ school-management/
 │   │   ├── exams.js            # ★ /api/exams     — results, stats, grading scale
 │   │   ├── grades.js           # ★ /api/grades    — weighted average report
 │   │   ├── admissions.js       # ★ /api/admissions — pipeline + stage history
-│   │   └── timetable.js        # ★ /api/timetable — slot collision detection
+│   │   ├── timetable.js        # ★ /api/timetable — slot collision detection
+│   │   └── messages.js         # ★ /api/messages  — persistent inbox, email notifications
 │   └── utils/
 │       ├── jwt.js              # sign() / verify() helpers
 │       ├── model.js            # Shared Mongoose model factory (_model)
-│       ├── email.js            # Transactional email utility (nodemailer/Gmail)
+│       ├── email.js            # ★ 13 transactional email functions (nodemailer/Gmail)
 │       ├── counters.js         # ★ Atomic sequential counters (admission nos., IDs)
 │       ├── response.js         # ★ Standardised ok() / fail() / paginate() helpers
 │       └── seedSchool.js       # One-off seed script for Atlas demo school
@@ -1023,6 +1028,7 @@ The login screen HTML structure (v2.6+):
 | SEED_VERSION wipe | Bumping resets ALL localStorage data | Export critical data before bumping; server-side data is unaffected |
 | Data isolation (new schools) | New schools currently share InnoLearn demo data from localStorage seed | **Phase 3**: All reads go to server |
 | Frontend reads legacy /api/collections/* | No RBAC or pagination on legacy route | **Phase 2–3**: Migrate frontend module by module to new routes |
+| Messages offline sync | Offline messages in localStorage are not auto-synced on reconnect | Manual page refresh merges local + server messages |
 
 ---
 
@@ -1427,3 +1433,240 @@ All reusable patterns are defined in `src/index.css` under `@layer components`:
 ```
 
 Use these class names directly in JSX — avoid writing Tailwind utility strings for common patterns.
+
+---
+
+## 20. Security Layer (v4.5+)
+
+### Global Rate Limiting (`server/index.js`)
+
+Two limiters are applied before any route handler runs:
+
+```
+Request → apiLimiter → [authLimiter if /api/auth] → route handler
+```
+
+| Limiter | Window | Max | Scope | Dev mode |
+|---------|--------|-----|-------|----------|
+| `apiLimiter` | 15 min | 300 req/IP | All `/api/*` | **Disabled** (skipped when `NODE_ENV !== 'production'`) |
+| `authLimiter` | 15 min | 20 req/IP | `/api/auth` only | **Always on** |
+
+**Why skip `apiLimiter` in dev?** Running seed scripts, automated tests, or hot-reload against `localhost` easily exceeds 300 requests. The auth limiter is always active so brute-force behaviour is testable locally.
+
+**Standard headers** — every response includes:
+```
+RateLimit-Limit: 300
+RateLimit-Remaining: 299
+RateLimit-Reset: 1746285600
+```
+
+**Client back-off pattern** (React SPA `client/src/api/client.js`):
+```js
+if (res.status === 429) {
+  const retryAfter = res.headers.get('RateLimit-Reset');
+  throw new APIError('rate_limited', 'Too many requests — please wait and try again.', 429);
+}
+```
+
+### Existing Per-Route Limits (unchanged)
+
+Individual route files add their own stricter limits on top of the global ones:
+
+| Route | Limit | Purpose |
+|-------|-------|---------|
+| `POST /api/auth/login` | 10 / 15 min | Login brute-force |
+| `POST /api/auth/verify-otp` | 5 / 15 min | OTP exhaustion |
+| `POST /api/auth/force-change` | 10 / 15 min | Prevent password spray |
+| `POST /api/onboard` | 5 / hour | Registration abuse |
+| `GET /api/onboard/check-slug` | 60 / min | Slug enumeration |
+
+### Helmet Headers
+
+Applied at startup before all routes:
+```js
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+```
+Sets: `X-Frame-Options`, `X-Content-Type-Options`, `Strict-Transport-Security`, `X-XSS-Protection`, `Referrer-Policy`.
+
+`contentSecurityPolicy` is disabled because the legacy app uses inline `<script>` tags. Enable it for the React SPA by adding a nonce or hash-based policy when fully migrating.
+
+### Deployment — Render (`render.yaml`)
+
+```yaml
+buildCommand: npm install && cd client && npm install --include=dev && npm run build
+startCommand: node server/index.js
+```
+
+**Why `--include=dev`?** `vite` and `tailwindcss` are in `devDependencies` of `client/package.json`. Render's default npm install strips devDependencies in production environments. The `--include=dev` flag and `client/.npmrc` (`include=dev`) together ensure the build step always has the tools it needs.
+
+**Build sequence:**
+1. `npm install` — installs Express, Mongoose, bcryptjs, etc. (root)
+2. `cd client && npm install --include=dev` — installs React, Vite, Tailwind (client)
+3. `npm run build` — Vite compiles `client/dist/`
+4. `node server/index.js` — `fs.existsSync('client/dist/index.html')` returns `true` → React SPA served
+
+---
+
+## 21. Messaging API (v4.4+)
+
+### Route — `server/routes/messages.js`
+
+Mounted at `/api/messages`. Requires `authMiddleware` + `tenantMiddleware` (all requests scoped to the logged-in school).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/messages?tab=inbox&page=1` | List messages visible to current user |
+| `POST` | `/api/messages` | Create message + send notification emails |
+| `PATCH` | `/api/messages/:id/read` | Mark a message as read (per-user flag) |
+| `DELETE` | `/api/messages/:id` | Delete (sender, admin, or deputy principal only) |
+
+### Inbox Visibility Rules
+
+The inbox query matches any message where `recipients` contains:
+- `'all'` — sent to everyone in the school
+- A **role group** that includes the user's role (e.g. `'teachers'` matches `teacher`, `section_head`, `deputy_principal`)
+- The user's own **ID** (direct message)
+
+Role group mapping:
+```js
+teachers: ['teacher', 'section_head', 'deputy_principal']
+parents:  ['parent']
+students: ['student']
+staff:    ['teacher', 'section_head', 'deputy_principal', 'hr',
+           'admissions_officer', 'finance', 'exams_officer',
+           'timetabler', 'discipline_committee']
+```
+
+### Email Notifications
+
+Every `POST /api/messages` triggers `sendMessageNotification()` for each resolved recipient:
+
+```js
+await email.sendMessageNotification({
+  recipientName, recipientEmail,
+  senderName, subject,
+  preview,        // body trimmed to 160 chars
+  schoolName,
+  isDirect,       // true → "New Message", false → "School Announcement"
+  appUrl,
+});
+```
+
+Emails are fired with `Promise.allSettled()` — individual failures are logged but do not block the API response or affect other recipients.
+
+### Frontend Integration (`js/modules/communication.js`)
+
+The communication module uses `API.messages.*` with a full localStorage fallback:
+
+```js
+// Load inbox
+const result = await API.messages.list({ tab: 'inbox', limit: 100 });
+
+// Send message (triggers server-side email)
+await API.messages.send({ subject, body, recipients: ['teachers'], type: 'announcement' });
+
+// Mark read
+await API.messages.markRead(messageId);
+```
+
+On any network failure, the module falls back to `DB.get('messages')` / `DB.insert('messages', ...)` so offline users retain full functionality.
+
+### MongoDB Collection — `messages`
+
+```js
+{
+  _id, id,
+  schoolId,
+  senderId, senderName, senderRole,
+  recipients: ['all'] | ['teachers'] | ['parents'] | ['students'] | ['staff'] | [userId],
+  subject, body,
+  type: 'direct' | 'announcement',
+  isRead: { [userId]: true },   // per-user read tracking
+  createdAt,
+}
+```
+
+---
+
+## 22. School Registration & Credentials Flow (v4.4+)
+
+### Registration Form Changes
+
+The onboarding form (`onboard.html`) no longer includes a password field. The **Step 2** admin account section now only collects `adminName` and `adminEmail`.
+
+**Server-side temp password generation** (`server/routes/onboard.js`):
+```js
+function _genTempPassword() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  const bytes = crypto.randomBytes(12);
+  let pwd = '';
+  for (const b of bytes) pwd += chars[b % chars.length];
+  return pwd;
+}
+```
+- 12 characters from a 55-char alphabet (no ambiguous `0/O`, `1/l/I`)
+- ~74 bits of entropy — unguessable
+- Stored in plaintext as `user.tempPassword` alongside the bcrypt hash, **only until the approval email is sent**
+
+### User Document at Registration
+
+```js
+{
+  id, schoolId, name, email,
+  password: bcryptHash,
+  tempPassword: 'xK7mNpQrBvW3',   // ← cleared after approval email
+  mustChangePassword: true,
+  isActive: false,                  // ← activated on approval
+  role: 'superadmin',
+}
+```
+
+### Approval Flow (`server/routes/platform.js`)
+
+```
+Platform admin clicks Approve
+  → fetch adminUser (read tempPassword before clearing)
+  → User.updateMany({ isActive: true, $unset: { tempPassword } })
+  → sendApprovalWelcome({ ..., tempPassword })
+  → tempPassword gone from DB; only exists in the email
+```
+
+### Approval Email Contents
+
+The school admin receives a single email with:
+- **Dedicated login URL**: `https://app.innolearn.edu.ke?school={slug}`
+- **Email / Username**: the email used at registration
+- **Temporary Password**: styled monospace block, e.g. `xK7mNpQrBvW3`
+- Security notice: "You will be asked to set a new password on first login"
+
+### `?school=slug` URL Parameter Handling
+
+```js
+// js/app.js — DOMContentLoaded
+const schoolParam = params.get('school');
+if (schoolParam && /^[a-z0-9-]{2,40}$/.test(schoolParam)) {
+  localStorage.setItem('ss_school_slug', schoolParam);
+  window.history.replaceState({}, '', window.location.pathname);
+}
+```
+
+The slug is validated against a strict regex before storing. The URL is cleaned immediately so the slug doesn't appear in browser history or shared links.
+
+**Effect**: `_getSchoolSlug()` (called by the API client when building `X-School-Slug` headers) now returns `'greenhill'` instead of `'demo'`, routing all API calls to the correct tenant from the very first request.
+
+### Force Password Change on First Login
+
+`auth.js` login handler checks `user.mustChangePassword` before issuing a JWT:
+
+```js
+if (user.mustChangePassword) {
+  return res.json({
+    passwordExpired: true,
+    reason: 'first_login',
+    userId, schoolId,
+    hint: 'Your administrator has set a temporary password. Please choose your own password to continue.'
+  });
+}
+```
+
+The frontend (`js/app.js` and `client/src/pages/Login.jsx`) catches `passwordExpired: true` and renders the inline change-password form before granting access to the dashboard.

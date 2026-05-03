@@ -8,6 +8,66 @@ const Changelog = (() => {
   /* ── Version data ─────────────────────────────────────── */
   const VERSIONS = [
     {
+      version: '4.5.0',
+      date: '2026-05-03',
+      tag: 'fix',
+      title: 'Security hardening — rate limiting, Render deploy fix, persistent messaging, auto-credentials',
+      sections: [
+        {
+          heading: 'Security — Global Rate Limiting (server/index.js)',
+          type: 'improvement',
+          items: [
+            'General API limiter: 300 requests per 15 min per IP across all /api/* routes (skipped in development)',
+            'Strict auth limiter: 20 requests per 15 min per IP on /api/auth — blocks brute-force and credential-stuffing',
+            'Auth limiter stacked on top of general limiter — both apply to login/OTP/force-change endpoints',
+            'Standard RateLimit-* headers returned on every response so clients can back off gracefully',
+            'express-rate-limit was already a dependency (used in route files) — now applied globally at the server level',
+          ]
+        },
+        {
+          heading: 'Fix — Render Deployment (render.yaml + client/.npmrc)',
+          type: 'fix',
+          items: [
+            'buildCommand was "npm install" only — React client/dist never compiled; Express served old legacy app on every deploy',
+            'Fixed: buildCommand now runs npm install && cd client && npm install --include=dev && npm run build',
+            '--include=dev required because vite and tailwindcss are devDependencies; Render strips them by default',
+            'Added client/.npmrc with include=dev as a belt-and-braces fallback for any CI that ignores the flag',
+          ]
+        },
+        {
+          heading: 'Feature — Persistent Messaging (MongoDB)',
+          type: 'new',
+          items: [
+            'Messages and announcements now stored in MongoDB via POST /api/messages — no longer ephemeral in localStorage',
+            'Persist across all devices and sessions; visible when any staff member logs in anywhere',
+            'New server/routes/messages.js: GET list (inbox/sent), POST create+notify, PATCH read, DELETE',
+            'Communication module falls back to localStorage DB when server is unreachable (offline mode)',
+          ]
+        },
+        {
+          heading: 'Feature — Email Notifications for Messages',
+          type: 'new',
+          items: [
+            'Every sent message and announcement triggers real notification email to all recipients',
+            'Direct messages: personal notification email with subject preview and sender name',
+            'Announcements (all/teachers/parents/students/staff): email sent to every matching active user in the school',
+            'Emails sent in parallel via Promise.allSettled — failures logged but do not block the API response',
+          ]
+        },
+        {
+          heading: 'Feature — Auto-Generated Credentials & Dedicated School URL',
+          type: 'new',
+          items: [
+            'Registration form no longer asks for a password — server generates a secure 12-char temp password (crypto.randomBytes)',
+            'mustChangePassword: true set on all new admins — forced password change on first login',
+            'Approval email includes dedicated login URL (?school=slug), email address, and temp password in a styled block',
+            'Temp password cleared from DB after approval email is sent',
+            '?school=slug URL param stored in localStorage on page load; URL cleaned with history.replaceState',
+          ]
+        },
+      ]
+    },
+    {
       version: '4.3.0',
       date: '2026-05-03',
       tag: 'new',
