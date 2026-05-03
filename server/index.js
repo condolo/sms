@@ -4,9 +4,10 @@
    Serves both the API (/api/*) and the static frontend
    ============================================================ */
 require('dotenv').config();
-const express = require('express');
-const cors    = require('cors');
-const path    = require('path');
+const express   = require('express');
+const cors      = require('cors');
+const path      = require('path');
+const rateLimit = require('express-rate-limit');
 const { connect } = require('./config/db');
 
 /* ── Security: warn if JWT_SECRET not set ───────────────────── */
@@ -55,6 +56,32 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));   // 10MB for bulk sync payloads
 app.use(express.urlencoded({ extended: true }));
+
+/* ── Rate limiting ──────────────────────────────────────────── */
+// General limiter: 300 requests per 15 min per IP across all /api/* routes
+const apiLimiter = rateLimit({
+  windowMs:          15 * 60 * 1000,
+  max:               300,
+  standardHeaders:   true,   // Return rate-limit info in RateLimit-* headers
+  legacyHeaders:     false,
+  message:           { error: 'Too many requests — please slow down and try again shortly.' },
+  skip: (req) => process.env.NODE_ENV !== 'production', // disabled in dev/test
+});
+
+// Strict auth limiter: 20 attempts per 15 min per IP — blocks brute-force
+const authLimiter = rateLimit({
+  windowMs:          15 * 60 * 1000,
+  max:               20,
+  standardHeaders:   true,
+  legacyHeaders:     false,
+  message:           { error: 'Too many login attempts — please wait 15 minutes before trying again.' },
+  // Always enforce, even in development, so the behaviour is testable
+});
+
+app.use('/api/', apiLimiter);
+app.use('/api/auth', authLimiter);   // applied on top of the general limiter
+
+console.log('[Security] rate limiting active — general: 300/15min, auth: 20/15min');
 
 /* ── API Routes ─────────────────────────────────────────────── */
 app.use('/api/auth',        require('./routes/auth'));
