@@ -8,6 +8,36 @@ const Changelog = (() => {
   /* ── Version data ─────────────────────────────────────── */
   const VERSIONS = [
     {
+      version: '4.1.0',
+      date: '2026-05-03',
+      tag: 'new',
+      title: 'Phase 2 — Remaining Resource Routes · Frontend API Client',
+      sections: [
+        {
+          heading: 'New — Behaviour, Exams, Grades, Admissions, Timetable Routes',
+          type: 'new',
+          items: [
+            '/api/behaviour — incidents log, appeals lifecycle, school categories; per-student merit/demerit aggregate',
+            '/api/exams — exam schedules + bulk result entry; class statistics (highest, lowest, average, pass count) computed server-side',
+            '/api/grades — gradebook with weighted averages computed by MongoDB aggregation; bulk upsert',
+            '/api/admissions — full pipeline from enquiry → enrolled; stageHistory audit trail; funnel stats aggregate',
+            '/api/timetable — class and teacher view grouped by day; bulk populate with optional replace; collision detection',
+          ]
+        },
+        {
+          heading: 'New — Frontend API Client (js/api.js)',
+          type: 'new',
+          items: [
+            'Centralised fetch wrapper — attaches JWT, parses response envelope, throws APIError on failure',
+            'Named module namespaces: API.students, API.teachers, API.classes, API.attendance, API.finance, API.behaviour, API.exams, API.grades, API.admissions, API.timetable',
+            'api:unauthorized event dispatched on 401 — auto-redirects to login when session expires',
+            'API.collections.* legacy wrapper preserved for backward-compatible migration',
+            'Loaded before all feature modules in index.html',
+          ]
+        },
+      ]
+    },
+    {
       version: '4.0.0',
       date: '2026-05-01',
       tag: 'new',

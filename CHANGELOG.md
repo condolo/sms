@@ -6,6 +6,80 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.1.0] — 2026-05-03  Phase 2 — Remaining Resource Routes · Frontend API Client
+
+### New — Resource Route: Behaviour (`server/routes/behaviour.js`)
+- `GET /api/behaviour/incidents` — paginated log with student/class/type/severity/category/date-range filters
+- `GET /api/behaviour/incidents/summary` — MongoDB aggregation: merits, demerits, points total per student
+- Full CRUD for incidents with soft-delete (sets `status: resolved`)
+- `GET /api/behaviour/appeals` — paginated; `POST` creates appeal and marks incident as `appealed`; `PUT` records outcome and auto-resolves incident
+- Full CRUD for `GET/POST/PUT/DELETE /api/behaviour/categories` — school-defined category definitions
+
+### New — Resource Route: Exams (`server/routes/exams.js`)
+- Full CRUD for exam schedules (test, mock, terminal, internal, external, coursework)
+- `GET /api/exams/:id/results` — paginated; includes server-computed class stats (highest, lowest, average, pass count)
+- `POST /api/exams/:id/results` — bulk upsert results for all students; validates scores ≤ maxScore; computes grade letter from school grading scale; auto-marks exam as `completed`
+- `GET /api/exams/results/all` — cross-exam results query with student/class/subject filters
+
+### New — Resource Route: Grades (`server/routes/grades.js`)
+- Full CRUD for gradebook entries (classwork, homework, project, test, midterm, final, coursework)
+- Percentage auto-calculated server-side; client values ignored
+- Score > maxScore rejected at API layer
+- `POST /api/grades/bulk` — bulk upsert via MongoDB `bulkWrite`; validates all scores before insert
+- `GET /api/grades/report` — weighted average per student per subject using MongoDB aggregation (accounts for assessment weight field)
+
+### New — Resource Route: Admissions (`server/routes/admissions.js`)
+- Full pipeline CRUD from enquiry → enrolled/withdrawn
+- Auto-generated `applicationRef` (`APP-{year}-{6char}`)
+- `stageHistory` array appended on every stage change — full audit trail
+- `GET /api/admissions/stats` — aggregated pipeline counts per stage, ordered by funnel position
+- `PATCH /api/admissions/:id/stage` — quick stage-change endpoint with optional notes
+
+### New — Resource Route: Timetable (`server/routes/timetable.js`)
+- Full CRUD for timetable slots (class + day + period + subject + teacher + room)
+- Slot collision detection: duplicate class + day + period rejected with 409
+- `GET /api/timetable/class/:classId` — full class timetable grouped by day for easy rendering
+- `GET /api/timetable/teacher/:teacherId` — teacher's full schedule grouped by day
+- `POST /api/timetable/bulk` — populate whole timetable at once; optional `replaceClass` / `replaceDay` to clear and rebuild
+
+### New — Frontend API Client (`js/api.js`)
+- Centralised fetch wrapper: attaches JWT, handles the `{ success, data, pagination }` envelope, throws `APIError` on failure
+- Dispatches `api:unauthorized` event on 401 — auto-redirects to login when session expires
+- Module namespaces: `API.students`, `API.teachers`, `API.classes`, `API.attendance`, `API.finance.invoices`, `API.finance.payments`, `API.behaviour.incidents`, `API.behaviour.appeals`, `API.behaviour.categories`, `API.exams`, `API.exams.results`, `API.grades`, `API.admissions`, `API.timetable`, `API.auth`, `API.announcements`, `API.backup`
+- `API.collections.*` — legacy wrapper for `/api/collections/:col` (kept for backward compat. during migration)
+- Loaded in `index.html` before all feature modules
+
+### New API Endpoints (v4.1.0)
+| Method | Route | Auth | Plan | Description |
+|---|---|---|---|---|
+| `GET` | `/api/behaviour/incidents` | JWT | standard | Paginated incident log |
+| `POST` | `/api/behaviour/incidents` | JWT | standard | Log incident |
+| `GET` | `/api/behaviour/incidents/summary` | JWT | standard | Per-student merit/demerit totals |
+| `PUT` | `/api/behaviour/incidents/:id` | JWT | standard | Update incident |
+| `DELETE` | `/api/behaviour/incidents/:id` | JWT | standard | Soft-close incident |
+| `GET/POST/PUT` | `/api/behaviour/appeals` | JWT | standard | Appeal lifecycle |
+| `GET/POST/PUT/DELETE` | `/api/behaviour/categories` | JWT | standard | Category management |
+| `GET` | `/api/exams` | JWT | standard | Paginated exams |
+| `POST` | `/api/exams` | JWT | standard | Schedule exam |
+| `GET` | `/api/exams/:id/results` | JWT | standard | Results + class stats |
+| `POST` | `/api/exams/:id/results` | JWT | standard | Bulk enter results |
+| `GET` | `/api/exams/results/all` | JWT | standard | Cross-exam results query |
+| `GET` | `/api/grades` | JWT | core | Paginated gradebook |
+| `POST` | `/api/grades` | JWT | core | Create grade entry |
+| `POST` | `/api/grades/bulk` | JWT | core | Bulk upsert grades |
+| `GET` | `/api/grades/report` | JWT | core | Weighted average report |
+| `GET` | `/api/admissions` | JWT | premium | Paginated pipeline |
+| `POST` | `/api/admissions` | JWT | premium | Create application |
+| `GET` | `/api/admissions/stats` | JWT | premium | Pipeline funnel stats |
+| `PATCH` | `/api/admissions/:id/stage` | JWT | premium | Quick stage change |
+| `GET` | `/api/timetable` | JWT | standard | Filtered timetable slots |
+| `GET` | `/api/timetable/class/:classId` | JWT | standard | Class timetable (grouped by day) |
+| `GET` | `/api/timetable/teacher/:teacherId` | JWT | standard | Teacher schedule |
+| `POST` | `/api/timetable` | JWT | standard | Create slot (collision check) |
+| `POST` | `/api/timetable/bulk` | JWT | standard | Bulk populate/replace timetable |
+
+---
+
 ## [4.0.0] — 2026-05-01  Phase 1 Architecture — Server-Side RBAC · Plan Gating · Paginated Resource APIs · Atomic IDs
 
 ### Architecture — Zero-Trust Backend Security (Phase 1)

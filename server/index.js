@@ -65,12 +65,17 @@ app.use('/api/collections', require('./routes/collections'));
 app.use('/api/users',       require('./routes/users'));
 app.use('/api/backup',      require('./routes/backup'));
 
-/* ── Phase 1: Production resource routes (RBAC + paginated) ─── */
+/* ── Phase 1+2: Production resource routes (RBAC + paginated) ── */
 app.use('/api/students',    require('./routes/students'));
 app.use('/api/teachers',    require('./routes/teachers'));
 app.use('/api/classes',     require('./routes/classes'));
 app.use('/api/attendance',  require('./routes/attendance'));
 app.use('/api/finance',     require('./routes/finance'));
+app.use('/api/behaviour',   require('./routes/behaviour'));
+app.use('/api/exams',       require('./routes/exams'));
+app.use('/api/grades',      require('./routes/grades'));
+app.use('/api/admissions',  require('./routes/admissions'));
+app.use('/api/timetable',   require('./routes/timetable'));
 
 /* ── School-facing announcement routes (JWT auth, not platform key) ── */
 const { authMiddleware } = require('./middleware/auth');
@@ -104,7 +109,7 @@ app.post('/api/announcements/:id/dismiss', authMiddleware, async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: '4.0.0',
+    version: '4.1.0',
     timestamp: new Date().toISOString(),
     db: require('./config/db').isConnected() ? 'connected' : 'disconnected'
   });
