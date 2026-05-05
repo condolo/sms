@@ -8,6 +8,87 @@ const Changelog = (() => {
   /* ── Version data ─────────────────────────────────────── */
   const VERSIONS = [
     {
+      version: '4.5.4',
+      date: '2026-05-04',
+      tag: 'improvement',
+      title: 'Platform — delete / wipe schools + no more browser confirm dialogs',
+      sections: [
+        {
+          heading: 'Platform Admin — Delete & Wipe',
+          type: 'new',
+          items: [
+            'Delete School button (trash icon) added to every school row — uses modal confirmation, not browser confirm()',
+            'Wipe All button in the table header — deletes all non-demo schools and all their tenant data in one click',
+            'DELETE /api/platform/schools/:id — removes school doc and all tenant data (users, students, classes, finance, behaviour, timetable, messages, etc.)',
+            'DELETE /api/platform/schools/all — bulk wipe; innolearn demo school always preserved',
+            'Suspend / Reinstate confirmation moved from browser confirm() to showModal() — consistent with the rest of the platform UI',
+          ]
+        }
+      ]
+    },
+    {
+      version: '4.5.3',
+      date: '2026-05-04',
+      tag: 'improvement',
+      title: 'UX — inline validation on onboarding form replaces browser popups',
+      sections: [
+        {
+          heading: 'onboard.html — Inline Field Validation',
+          type: 'improvement',
+          items: [
+            'Removed all alert() calls — no more intrusive browser popups that block the UI',
+            'Red error banner with animated slide-in appears below the step header when Continue is clicked with errors',
+            'Individual fields that are empty or invalid are highlighted red with a soft glow (border + background)',
+            'Error banner clears automatically as soon as the user starts editing any invalid field',
+            'Step 1: identifies missing fields, bad slug format, no curriculum, and no sections individually',
+            'Step 2: distinguishes "missing name/email" from "invalid email format" with per-field red highlight',
+            'Step 3: friendly inline prompt appears on the plan grid itself',
+          ]
+        }
+      ]
+    },
+    {
+      version: '4.5.2',
+      date: '2026-05-04',
+      tag: 'fix',
+      title: 'Hotfix — platform approve/impersonate "School not found" (Mongoose id virtual conflict)',
+      sections: [
+        {
+          heading: 'Critical Fix — platform.html + server/routes/platform.js',
+          type: 'fix',
+          items: [
+            'Root cause: Mongoose\'s built-in id virtual (alias for _id) conflicts with the custom id field; s.id in the frontend resolved to undefined, making every action call .../schools/undefined/approve → 404',
+            'Frontend: all action buttons (approve, reject, impersonate, plan change, toggle active) now use s._id (MongoDB ObjectId, always present)',
+            'Announcement buttons also fixed to use ann._id',
+            'Backend: all school lookups changed from findOneAndUpdate({ id }) to findByIdAndUpdate(id) — Mongoose auto-casts string to ObjectId',
+            'Impersonate route now resolves user by school.id with adminEmail fallback — handles schools where custom id was not stored',
+            'JWT schoolId now taken from the found user document, not the URL param',
+            'apiFetch helper defined — announcement management called it but it was never declared',
+          ]
+        }
+      ]
+    },
+    {
+      version: '4.5.1',
+      date: '2026-05-04',
+      tag: 'fix',
+      title: 'Hotfix — school registration crash (stale adminPassword reference)',
+      sections: [
+        {
+          heading: 'Critical Fix — server/routes/onboard.js',
+          type: 'fix',
+          items: [
+            'Stale `if (adminPassword.length < 8)` line left from v4.4.0 caused a ReferenceError on every school registration attempt',
+            'The crash meant school and user documents were never written to MongoDB — causing three downstream failures',
+            'Bug 1: No "pending review" email sent to the registrant after form submission',
+            'Bug 2: Platform Approve → "School not found" (school record never created)',
+            'Bug 3: Platform Impersonate → "School has no super admin" (user record never created)',
+            'Fix: removed the three stale lines — no other logic changed',
+          ]
+        }
+      ]
+    },
+    {
       version: '4.5.0',
       date: '2026-05-03',
       tag: 'fix',

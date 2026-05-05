@@ -189,7 +189,7 @@ function toggleKeyVis(btn) {
   btn.querySelector('i').className = show ? 'fas fa-eye' : 'fas fa-eye-slash';
 }
 
-/* ── API helper ─────────────────────────────────────────── */
+/* ── API helpers ────────────────────────────────────────── */
 async function api(method, path, body) {
   const opts = {
     method,
@@ -200,6 +200,12 @@ async function api(method, path, body) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
+}
+
+/* Fetch wrapper that always sends the platform key — used for full-path calls */
+async function apiFetch(url, opts = {}) {
+  opts.headers = Object.assign({ 'X-Platform-Key': _key }, opts.headers || {});
+  return fetch(url, opts);
 }
 
 /* ── Navigation ─────────────────────────────────────────── */
@@ -352,7 +358,7 @@ function _pendingCard(s) {
   const curriculum = (s.curriculum || []).join(', ') || '—';
   const sections   = (s.sections   || []).join(', ') || '—';
   return `
-    <div class="pending-card" id="pc-${s.id}">
+    <div class="pending-card" id="pc-${s._id}">
       <div class="pending-card-top">
         <div class="pending-card-info">
           <h4>${s.name}</h4>
@@ -368,13 +374,13 @@ function _pendingCard(s) {
         </div>
       </div>
       <div class="pending-card-actions">
-        <button class="pa-btn success" onclick="approveSchool('${s.id}','${s.name.replace(/'/g,"\\'")}')">
+        <button class="pa-btn success" onclick="approveSchool('${s._id}','${s.name.replace(/'/g,"\\'")}')">
           <i class="fas fa-check"></i> Approve
         </button>
-        <button class="pa-btn danger" onclick="rejectSchool('${s.id}','${s.name.replace(/'/g,"\\'")}')">
+        <button class="pa-btn danger" onclick="rejectSchool('${s._id}','${s.name.replace(/'/g,"\\'")}')">
           <i class="fas fa-times"></i> Reject
         </button>
-        <button class="pa-btn" onclick="confirmImpersonate('${s.id}','${s.name.replace(/'/g,"\\'")}')">
+        <button class="pa-btn" onclick="confirmImpersonate('${s._id}','${s.name.replace(/'/g,"\\'")}')">
           <i class="fas fa-eye"></i> Preview
         </button>
       </div>
@@ -471,9 +477,15 @@ function _renderSchoolsTable(el, schools) {
     <div class="pa-card">
       <div class="pa-card-header">
         <h3>Registered Schools (${schools.length})</h3>
-        <button class="pa-btn primary" onclick="showView('provision')">
-          <i class="fas fa-plus"></i> Add School
-        </button>
+        <div style="display:flex;gap:8px">
+          <button class="pa-btn" onclick="wipeAllSchools()"
+            style="color:#dc2626;border-color:#fca5a5;font-size:12px">
+            <i class="fas fa-fire"></i> Wipe All
+          </button>
+          <button class="pa-btn primary" onclick="showView('provision')">
+            <i class="fas fa-plus"></i> Add School
+          </button>
+        </div>
       </div>
       <div class="pa-table-wrap">
         <table class="pa-table">
@@ -519,16 +531,21 @@ function _schoolRow(s) {
       <td>${trialStr}</td>
       <td>
         <div class="pa-action-wrap">
-          <button class="pa-btn" title="Impersonate admin" onclick="confirmImpersonate('${s.id}','${s.name}')">
+          <button class="pa-btn" title="Log in as admin" onclick="confirmImpersonate('${s._id}','${s.name}')">
             <i class="fas fa-user-secret"></i> Log in
           </button>
-          <button class="pa-btn" title="Change plan" onclick="changePlan('${s.id}','${s.plan}','${s.name}')">
+          <button class="pa-btn" title="Change plan" onclick="changePlan('${s._id}','${s.plan}','${s.name}')">
             <i class="fas fa-layer-group"></i> Plan
           </button>
           ${s.isActive
-            ? `<button class="pa-btn danger" onclick="toggleActive('${s.id}',false,'${s.name}')"><i class="fas fa-ban"></i></button>`
-            : `<button class="pa-btn success" onclick="toggleActive('${s.id}',true,'${s.name}')"><i class="fas fa-check"></i></button>`
+            ? `<button class="pa-btn danger" title="Suspend school" onclick="toggleActive('${s._id}',false,'${s.name}')"><i class="fas fa-ban"></i></button>`
+            : `<button class="pa-btn success" title="Reinstate school" onclick="toggleActive('${s._id}',true,'${s.name}')"><i class="fas fa-check"></i></button>`
           }
+          <button class="pa-btn" title="Delete school permanently"
+            style="color:#dc2626;border-color:#fca5a5"
+            onclick="deleteSchool('${s._id}','${s.name.replace(/'/g,"\\'")}')">
+            <i class="fas fa-trash-alt"></i>
+          </button>
         </div>
       </td>
     </tr>`;
@@ -595,16 +612,88 @@ async function doChangePlan(schoolId) {
   }
 }
 
-/* ── Toggle active ──────────────────────────────────────── */
-async function toggleActive(schoolId, active, schoolName) {
-  const action = active ? 'reinstate' : 'suspend';
-  if (!confirm(`${action.charAt(0).toUpperCase()+action.slice(1)} ${schoolName}?`)) return;
+/* ── Toggle active (suspend / reinstate) ────────────────── */
+function toggleActive(schoolId, active, schoolName) {
+  const action     = active ? 'Reinstate' : 'Suspend';
+  const actionLow  = action.toLowerCase();
+  const cls        = active ? 'success' : 'danger';
+  const icon       = active ? 'fa-check-circle' : 'fa-ban';
+  const body       = active
+    ? `<strong>${schoolName}</strong> will be reactivated and its admins will be able to log in again.`
+    : `<strong>${schoolName}</strong> will be suspended. All users will be locked out immediately.`;
+
+  showModal(`${action} ${schoolName}?`, body, [
+    { label: 'Cancel', cls: 'pa-btn', action: 'closeModal()' },
+    { label: `<i class="fas ${icon}"></i> ${action}`, cls: `pa-btn ${cls}`,
+      action: `_doToggleActive('${schoolId}',${active},'${schoolName.replace(/'/g,"\\'")}')` }
+  ]);
+}
+
+async function _doToggleActive(schoolId, active, schoolName) {
+  closeModal();
   try {
     await api('PATCH', `/schools/${schoolId}`, { isActive: active });
-    toast(`${schoolName} ${action}d`, 'success');
+    toast(`${schoolName} ${active ? 'reinstated' : 'suspended'}`, active ? 'success' : 'info');
     renderSchools();
   } catch (err) {
     toast('Failed: ' + err.message, 'error');
+  }
+}
+
+/* ── Delete school (purges all school data) ─────────────── */
+function deleteSchool(schoolId, schoolName) {
+  showModal(
+    `⚠️ Delete ${schoolName}?`,
+    `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px 14px;margin-bottom:10px;font-size:13px;color:#b91c1c">
+       <strong>This is permanent and cannot be undone.</strong>
+     </div>
+     <p style="font-size:14px;color:#374151">All data for <strong>${schoolName}</strong> will be removed from the database — school record, admin users, students, classes, attendance, finance records, timetable, and all other school data.</p>`,
+    [
+      { label: 'Cancel', cls: 'pa-btn', action: 'closeModal()' },
+      { label: '<i class="fas fa-trash-alt"></i> Yes, Delete Permanently', cls: 'pa-btn danger',
+        action: `_doDeleteSchool('${schoolId}','${schoolName.replace(/'/g,"\\'")}')` }
+    ]
+  );
+}
+
+async function _doDeleteSchool(schoolId, schoolName) {
+  closeModal();
+  try {
+    await api('DELETE', `/schools/${schoolId}`);
+    toast(`${schoolName} deleted permanently.`, 'info');
+    renderSchools();
+    api('GET', '/schools/pending').then(list => _updatePendingBadge(list.length)).catch(()=>{});
+  } catch (err) {
+    toast('Delete failed: ' + err.message, 'error');
+  }
+}
+
+/* ── Wipe ALL schools (danger zone) ─────────────────────── */
+function wipeAllSchools() {
+  showModal(
+    '🚨 Wipe ALL Schools?',
+    `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px 14px;margin-bottom:10px;font-size:13px;color:#b91c1c">
+       <strong>DANGER — This will permanently delete every school and all their data.</strong><br>
+       This action cannot be reversed.
+     </div>
+     <p style="font-size:14px;color:#374151">The <strong>InnoLearn demo school</strong> (slug: <code>innolearn</code>) will be preserved. All self-registered and provisioned schools will be wiped.</p>`,
+    [
+      { label: 'Cancel', cls: 'pa-btn', action: 'closeModal()' },
+      { label: '<i class="fas fa-fire"></i> Wipe All Schools', cls: 'pa-btn danger',
+        action: `_doWipeAll()` }
+    ]
+  );
+}
+
+async function _doWipeAll() {
+  closeModal();
+  try {
+    const result = await api('DELETE', '/schools/all');
+    toast(`Wiped ${result.deleted} school(s). Fresh start!`, 'info');
+    renderSchools();
+    api('GET', '/schools/pending').then(list => _updatePendingBadge(list.length)).catch(()=>{});
+  } catch (err) {
+    toast('Wipe failed: ' + err.message, 'error');
   }
 }
 
@@ -761,11 +850,11 @@ async function renderAnnouncements() {
             </div>
             <div style="display:flex;gap:8px;flex-shrink:0">
               ${ann.status === 'active' ? `
-              <button class="pa-btn" onclick="cancelAnnouncement('${ann.id}')" title="Cancel announcement"
+              <button class="pa-btn" onclick="cancelAnnouncement('${ann._id}')" title="Cancel announcement"
                 style="padding:6px 14px;font-size:12px">Cancel</button>` : `
-              <button class="pa-btn success" onclick="reactivateAnnouncement('${ann.id}')" title="Reactivate"
+              <button class="pa-btn success" onclick="reactivateAnnouncement('${ann._id}')" title="Reactivate"
                 style="padding:6px 14px;font-size:12px">Reactivate</button>`}
-              <button class="pa-btn" onclick="deleteAnnouncement('${ann.id}')"
+              <button class="pa-btn" onclick="deleteAnnouncement('${ann._id}')"
                 style="padding:6px 14px;font-size:12px;color:#dc2626;border-color:#fca5a5">Delete</button>
             </div>
           </div>

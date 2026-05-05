@@ -99,20 +99,26 @@ router.post('/schools/:id/approve', async (req, res) => {
     const School = _model('schools');
     const User   = _model('users');
 
-    const school = await School.findOneAndUpdate(
-      { id: req.params.id },
+    /* Find by MongoDB _id — always reliable regardless of custom id field */
+    const school = await School.findByIdAndUpdate(
+      req.params.id,
       { $set: { isActive: true, status: 'active', approvedAt: new Date().toISOString() } },
       { new: true }
     ).lean();
     if (!school) return res.status(404).json({ error: 'School not found' });
 
-    /* Fetch the superadmin — we need their tempPassword before clearing it */
-    const adminUser = await User.findOne({ schoolId: req.params.id, role: 'superadmin' }).lean();
+    /* Locate the superadmin: try schoolId (custom id field) first, fall back to email */
+    const userQuery = { role: 'superadmin',
+      $or: [
+        ...(school.id  ? [{ schoolId: school.id }]         : []),
+        ...(school.adminEmail ? [{ email: school.adminEmail }] : []),
+      ]
+    };
+    const adminUser    = await User.findOne(userQuery).lean();
     const tempPassword = adminUser?.tempPassword || null;
 
-    /* Activate the superadmin user and clear stored tempPassword */
-    await User.updateMany(
-      { schoolId: req.params.id, role: 'superadmin' },
+    /* Activate superadmin(s) and clear stored temp password */
+    await User.updateMany(userQuery,
       { $set: { isActive: true }, $unset: { tempPassword: '' } }
     );
 
@@ -124,7 +130,7 @@ router.post('/schools/:id/approve', async (req, res) => {
         schoolName:   school.name,
         slug:         school.slug,
         plan:         school.plan,
-        tempPassword, // included in email so admin has their credentials
+        tempPassword,
       }),
       email.sendAdminApprovalAlert({
         schoolName: school.name,
@@ -144,8 +150,8 @@ router.post('/schools/:id/reject', async (req, res) => {
     const School = _model('schools');
     const { reason } = req.body;
 
-    const school = await School.findOneAndUpdate(
-      { id: req.params.id },
+    const school = await School.findByIdAndUpdate(
+      req.params.id,
       { $set: { status: 'rejected', isActive: false, rejectedAt: new Date().toISOString(), rejectionReason: reason || '' } },
       { new: true }
     ).lean();
@@ -173,7 +179,7 @@ router.patch('/schools/:id', async (req, res) => {
     if (typeof req.body.isActive === 'boolean') update.isActive = req.body.isActive;
     if (req.body.planExpiry) update.planExpiry = req.body.planExpiry;
 
-    const doc = await School.findOneAndUpdate({ id: req.params.id }, { $set: update }, { new: true }).lean();
+    const doc = await School.findByIdAndUpdate(req.params.id, { $set: update }, { new: true }).lean();
     if (!doc) return res.status(404).json({ error: 'School not found' });
     res.json(doc);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -182,17 +188,115 @@ router.patch('/schools/:id', async (req, res) => {
 /* POST /api/platform/schools/:id/impersonate — get a JWT for any school's superadmin */
 router.post('/schools/:id/impersonate', async (req, res) => {
   try {
-    const User = _model('users');
-    const admin = await User.findOne({ schoolId: req.params.id, role: 'superadmin' }).lean();
+    const School = _model('schools');
+    const User   = _model('users');
+
+    /* Find the school first so we can resolve the correct schoolId for user lookup */
+    const school = await School.findById(req.params.id).lean();
+    if (!school) return res.status(404).json({ error: 'School not found' });
+
+    /* Try by custom schoolId field (if stored), then fall back to admin email */
+    const userQuery = { role: 'superadmin',
+      $or: [
+        ...(school.id         ? [{ schoolId: school.id }]         : []),
+        ...(school.adminEmail ? [{ email: school.adminEmail }]     : []),
+      ]
+    };
+    const admin = await User.findOne(userQuery).lean();
     if (!admin) return res.status(404).json({ error: 'No superadmin found for this school' });
 
+    /* Use the schoolId stored on the user — it's what the app already knows */
     const token = sign({
-      userId: admin.id, schoolId: req.params.id,
-      email: admin.email, role: 'superadmin', roles: ['superadmin'],
+      userId:      admin.id,
+      schoolId:    admin.schoolId || school.id || req.params.id,
+      email:       admin.email,
+      role:        'superadmin',
+      roles:       ['superadmin'],
       impersonated: true
     });
     res.json({ token, user: { ...admin, password: undefined } });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* DELETE /api/platform/schools/all — wipe all non-demo schools */
+router.delete('/schools/all', async (req, res) => {
+  try {
+    const School = _model('schools');
+    const DEMO_SLUGS = ['innolearn']; // preserve the built-in demo school
+
+    /* Find all school ids to purge */
+    const toPurge = await School.find({ slug: { $nin: DEMO_SLUGS } }).lean();
+    const schoolIds    = toPurge.map(s => s.id).filter(Boolean);
+    const schoolMonIds = toPurge.map(s => s._id);
+
+    /* Delete from every collection that carries a schoolId */
+    const TENANT_COLS = [
+      'users','students','teachers','classes','attendance_records',
+      'finance_records','behaviour_incidents','behaviour_appeals',
+      'exam_schedules','grades','admissions','timetable_slots',
+      'messages','academic_years','sections','role_permissions',
+      'subjects','events','hr_records'
+    ];
+
+    await Promise.all([
+      School.deleteMany({ _id: { $in: schoolMonIds } }),
+      ...TENANT_COLS.map(col => {
+        const M = _model(col);
+        return M.deleteMany({ $or: [
+          { schoolId: { $in: schoolIds } },
+          // also match by _id-based schoolId in case some docs use ObjectId ref
+          ...(schoolIds.length ? [] : [])
+        ]});
+      })
+    ]);
+
+    console.log(`[PLATFORM] Wiped ${toPurge.length} school(s) and all their data`);
+    res.json({ success: true, deleted: toPurge.length });
+  } catch (err) {
+    console.error('[PLATFORM] Wipe error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* DELETE /api/platform/schools/:id — delete one school and all its data */
+router.delete('/schools/:id', async (req, res) => {
+  try {
+    const School = _model('schools');
+    const school = await School.findById(req.params.id).lean();
+    if (!school) return res.status(404).json({ error: 'School not found' });
+
+    /* Custom schoolId used as FK in every tenant collection */
+    const schoolCustomId = school.id;  // e.g. "sch_mascitacademy_xyz"
+    const adminEmail     = school.adminEmail;
+
+    /* Build the schoolId match — try custom id, fall back to email for users */
+    const tenantMatch = schoolCustomId ? { schoolId: schoolCustomId } : null;
+
+    const TENANT_COLS = [
+      'users','students','teachers','classes','attendance_records',
+      'finance_records','behaviour_incidents','behaviour_appeals',
+      'exam_schedules','grades','admissions','timetable_slots',
+      'messages','academic_years','sections','role_permissions',
+      'subjects','events','hr_records'
+    ];
+
+    const deleteOps = [School.findByIdAndDelete(req.params.id)];
+
+    if (tenantMatch) {
+      TENANT_COLS.forEach(col => deleteOps.push(_model(col).deleteMany(tenantMatch)));
+    } else if (adminEmail) {
+      /* Fallback: at minimum remove the user account by email */
+      deleteOps.push(_model('users').deleteMany({ email: adminEmail }));
+    }
+
+    await Promise.all(deleteOps);
+
+    console.log(`[PLATFORM] Deleted school: ${school.name} (${school.slug})`);
+    res.json({ success: true, name: school.name });
+  } catch (err) {
+    console.error('[PLATFORM] Delete school error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /* GET /api/platform/stats — MRR, school counts, plan breakdown */
@@ -343,7 +447,7 @@ router.patch('/announcements/:id', async (req, res) => {
     if (req.body.description) update.description = req.body.description;
     if (req.body.expiresAt)   update.expiresAt   = req.body.expiresAt;
 
-    const doc = await Ann.findOneAndUpdate({ id: req.params.id }, { $set: update }, { new: true }).lean();
+    const doc = await Ann.findByIdAndUpdate(req.params.id, { $set: update }, { new: true }).lean();
     if (!doc) return res.status(404).json({ error: 'Announcement not found' });
     res.json(doc);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -353,7 +457,7 @@ router.patch('/announcements/:id', async (req, res) => {
 router.delete('/announcements/:id', async (req, res) => {
   try {
     const Ann = _model('system_announcements');
-    await Ann.deleteOne({ id: req.params.id });
+    await Ann.findByIdAndDelete(req.params.id);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

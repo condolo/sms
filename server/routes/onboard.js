@@ -135,10 +135,6 @@ router.post('/', onboardLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Disposable email addresses are not allowed. Please use your school or institutional email.' });
     }
 
-    if (adminPassword.length < 8) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters' });
-    }
-
     /* ── Determine slug ── */
     const slug = sanitiseSlug(rawSlug) || slugFromName(schoolName);
     if (slug.length < 2) {

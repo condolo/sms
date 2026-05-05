@@ -6,6 +6,53 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.5.4] — 2026-05-04  Platform — delete school, wipe all, no more browser confirm() dialogs
+
+### Platform Admin (`platform.html` + `server/routes/platform.js`)
+- **Removed all `confirm()` calls** — the Suspend / Reinstate confirmation now uses the platform's existing `showModal()` system with proper action buttons
+- **Delete School button** added to every row in the All Schools table (red trash icon) — triggers a modal with a permanent-warning banner before deleting
+- **Wipe All button** added to the Schools table header — purges every non-demo school and all their tenant data (users, students, classes, attendance, finance, behaviour, timetable, messages, academic years, sections, role permissions, subjects, events, HR records) in one operation; the InnoLearn demo school (`slug: innolearn`) is always preserved
+- **`DELETE /api/platform/schools/:id`** — new server route; deletes the school document and all data in every tenant collection that shares the same `schoolId`
+- **`DELETE /api/platform/schools/all`** — new server route; bulk-deletes all non-`innolearn` schools and their tenant data; returns `{ deleted: N }`
+- Route order: `/schools/all` registered before `/schools/:id` so Express matches the literal path correctly
+
+---
+
+## [4.5.3] — 2026-05-04  UX — inline form validation on onboarding form (no more browser popups)
+
+### Changed — `onboard.html` + `css/onboard.css`
+- Removed all seven `alert()` calls from the `validate()` function — browser native popups were jarring and blocked the UI
+- Added `.ob-step-error` inline error banner below the panel heading on each step — appears with a slide-in animation, styled red with a left accent border
+- Red field highlights (`.ob-field-invalid`) appear on individual empty/invalid inputs and selects when Continue is clicked — border turns red with a soft red glow
+- Error banner auto-dismisses as soon as the user starts editing any highlighted field (`input` / `change` listeners on all required fields)
+- Step 1 errors now individually identify which field caused the issue (empty required fields vs. bad slug format vs. no curriculum vs. no sections)
+- Step 2 errors distinguish "missing name/email" from "invalid email format" with field-specific highlighting
+- Step 3 shows a friendly "select a plan" prompt directly on the plan grid instead of an alert
+- Added `apiFetch()` helper in `platform.html` — announcement management was calling it but it was undefined
+
+---
+
+## [4.5.2] — 2026-05-04  Hotfix — platform approve/impersonate always returned "School not found"
+
+### Fix — `server/routes/platform.js` + `platform.html`
+- **Root cause**: Mongoose has a built-in `id` virtual (an alias for `_id.toString()`) which conflicts with the custom `id` field stored on school documents. When `School.find({}).lean()` is called, the serialised JSON may not carry the custom `id` field, so `s.id` in the frontend evaluates to `undefined`. Every Approve / Reject / Impersonate / Plan-change action then called e.g. `POST /api/platform/schools/undefined/approve`, and the server-side `findOneAndUpdate({ id: 'undefined' })` query found nothing → 404 "School not found".
+- **Frontend fix** (`platform.html`): all platform action buttons now use `s._id` (MongoDB's native ObjectId string, always present in `.lean()` output) instead of `s.id`. Same fix applied to announcement action buttons (`ann._id`).
+- **Backend fix** (`platform.js`): all school lookup queries changed from `findOneAndUpdate({ id: ... })` to `findByIdAndUpdate(id, ...)` — Mongoose auto-casts the string to ObjectId. Announcement patch/delete routes updated identically.
+- **Impersonate robustness**: route now first fetches the school by `_id`, then locates the superadmin user via `{ schoolId: school.id }` with an email-address fallback (`{ email: school.adminEmail }`) for any school where the custom `id` field was not stored. JWT `schoolId` is taken from the found user document rather than the URL param.
+- **Missing `apiFetch` helper defined**: announcement management functions called `apiFetch()` which was never defined; added a thin wrapper that mirrors the platform key header behaviour of the existing `api()` helper.
+
+---
+
+## [4.5.1] — 2026-05-04  Hotfix — school registration 500 error (stale `adminPassword` reference)
+
+### Fix — `server/routes/onboard.js`
+- **Root cause of three reported platform bugs**: a stale `if (adminPassword.length < 8)` validation line was left in `_provisionInDB` after the password field was removed from the registration form in v4.4.0. `adminPassword` was never declared, so every `POST /api/onboard` call threw a `ReferenceError` and crashed with a 500 response — the school and user documents were never written to MongoDB.
+- **Consequence**: (1) no "pending" email sent to the registrant, (2) Approve → "School not found" (school never existed in DB), (3) Impersonate → "School has no super admin" (user never existed in DB).
+- **Fix**: removed the three stale lines; the rest of the provisioning flow (slug generation, DB writes, email dispatch) was already correct.
+- No other logic changed; the fix is a pure removal of dead code.
+
+---
+
 ## [4.5.0] — 2026-05-03  Security hardening — rate limiting + Render deploy fix
 
 ### Security — Global Rate Limiting (`server/index.js`) · commit `503e51f`

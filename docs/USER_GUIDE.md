@@ -1,6 +1,6 @@
 ﻿# InnoLearn — User Guide
 
-**Version 4.5** · Updated 2026-05-03
+**Version 4.5.1** · Updated 2026-05-04
 
 > **Looking for admin guides?**
 > - 🔧 [Platform Admin Guide](PLATFORM_ADMIN_GUIDE.md) — for the InnoLearn platform owner
@@ -46,6 +46,8 @@ If your school is not yet on InnoLearn, visit `/onboard` or click **Get Started*
 > **No password at registration** — InnoLearn generates a secure temporary password for you. It will be emailed to you when your school is approved. You do not set a password during registration.
 
 After submitting, your application enters a **pending review** state. You will receive a confirmation email and hear back within **24 hours**.
+
+> **v4.5.1**: A bug in earlier versions (v4.4.0–4.5.0) caused the confirmation email and all downstream approval actions to silently fail. This was fixed on 2026-05-04 — registration now works correctly end-to-end.
 
 ### Approval Process
 Once the InnoLearn team reviews and approves your school, you will receive a **welcome email** containing:

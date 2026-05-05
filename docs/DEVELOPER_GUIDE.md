@@ -1,6 +1,6 @@
 ﻿# InnoLearn — Developer Guide
 
-**Version 4.5** · Technical Reference & Architecture
+**Version 4.5.1** · Technical Reference & Architecture
 
 ---
 
@@ -1029,6 +1029,10 @@ The login screen HTML structure (v2.6+):
 | Data isolation (new schools) | New schools currently share InnoLearn demo data from localStorage seed | **Phase 3**: All reads go to server |
 | Frontend reads legacy /api/collections/* | No RBAC or pagination on legacy route | **Phase 2–3**: Migrate frontend module by module to new routes |
 | Messages offline sync | Offline messages in localStorage are not auto-synced on reconnect | Manual page refresh merges local + server messages |
+
+### v4.5.1 Hotfix Note — `server/routes/onboard.js`
+
+When removing the password field from the onboarding form (v4.4.0), a stale `if (adminPassword.length < 8)` validation block was left in `_provisionInDB`. Because `adminPassword` was no longer declared anywhere in scope, Node.js threw a `ReferenceError` on every `POST /api/onboard` call — the school and user records were never written to MongoDB, and all downstream platform actions (approve, impersonate, emails) appeared broken. The three stale lines were removed in v4.5.1. **Lesson**: always run `node -e "require('./server/routes/<file>')"` after editing a route to catch syntax and reference errors before pushing.
 
 ---
 
