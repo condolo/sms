@@ -6,6 +6,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.5.5] — 2026-05-05  Fix — new schools see correct branding & clean dashboard (no demo data)
+
+### Fixed — `platform.html` + `client/src/components/layout/Sidebar.jsx`
+- **Impersonate now redirects to React SPA** (`/login`) instead of the legacy vanilla-JS app (`/index.html`). Previously, clicking "Log In as Admin" sent the operator into the old InnoLearn demo app which seeds fake data (20 students, 8 staff, 29 classes, InnoLearn branding) into `localStorage` regardless of the school. The React SPA is fully tenant-scoped and shows empty/correct data for new schools.
+- **Session correctly written for React SPA** — `doImpersonate` now stores `{ token, user, school }` under the `innolearn_session` key that the React auth store reads, so the operator lands on the SPA already authenticated.
+- **Sidebar shows school name, not "InnoLearn"** — replaced the hardcoded `"InnoLearn"` platform title and `"IL"` badge with dynamic values derived from `user.schoolName` in the JWT session. The two-letter initials badge is also computed from the school name.
+- **Sidebar subtext shows user role** — the secondary line under the school name now shows the user's role (e.g. "Superadmin") instead of the static school name fallback.
+
+---
+
 ## [4.5.4] — 2026-05-04  Platform — delete school, wipe all, no more browser confirm() dialogs
 
 ### Platform Admin (`platform.html` + `server/routes/platform.js`)

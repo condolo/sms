@@ -42,6 +42,15 @@ export default function Sidebar({ onClose }) {
   const logout    = useAuthStore((s) => s.logout);
   const user      = useAuthStore((s) => s.session?.user);
 
+  // Derive school display info from session
+  const schoolName = user?.schoolName || 'My School';
+  const schoolInitials = schoolName
+    .split(/\s+/)
+    .map((w) => w[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
+
   async function handleLogout() {
     try { await authApi.logout(); } catch { /* ignore */ }
     logout();
@@ -53,12 +62,12 @@ export default function Sidebar({ onClose }) {
       {/* Logo */}
       <div className="flex h-16 shrink-0 items-center gap-3 px-5 border-b border-sidebar-border">
         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500 text-white font-bold text-sm select-none">
-          IL
+          {schoolInitials}
         </span>
         <div className="leading-none">
-          <p className="font-semibold text-white text-sm">InnoLearn</p>
+          <p className="font-semibold text-white text-sm truncate max-w-[150px]">{schoolName}</p>
           <p className="text-xs text-sidebar-muted mt-0.5 truncate max-w-[140px]">
-            {user?.schoolName ?? 'School Management'}
+            {user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'Portal'}
           </p>
         </div>
         {/* Mobile close */}

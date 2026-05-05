@@ -568,13 +568,16 @@ async function doImpersonate(schoolId) {
   try {
     const data = await api('POST', `/schools/${schoolId}/impersonate`);
     // Store JWT and redirect to the school app
+    // Store session for the React SPA (innolearn_session key used by auth store)
+    const sessionPayload = { token: data.token, user: data.user || {}, school: {} };
+    localStorage.setItem('innolearn_session', JSON.stringify(sessionPayload));
     localStorage.setItem('ss_jwt', data.token);
     sessionStorage.setItem('ss_jwt', data.token);
     if (data.user) {
-      sessionStorage.setItem('ss_session', JSON.stringify({ user: data.user, school: {} }));
+      sessionStorage.setItem('ss_session', JSON.stringify(sessionPayload));
     }
     toast('Redirecting to school portal…', 'success');
-    setTimeout(() => { window.location.href = '/index.html'; }, 800);
+    setTimeout(() => { window.location.href = '/login'; }, 800);
   } catch (err) {
     toast('Impersonation failed: ' + err.message, 'error');
   }

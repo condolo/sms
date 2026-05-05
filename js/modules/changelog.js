@@ -8,6 +8,25 @@ const Changelog = (() => {
   /* ── Version data ─────────────────────────────────────── */
   const VERSIONS = [
     {
+      version: '4.5.5',
+      date: '2026-05-05',
+      tag: 'fix',
+      title: 'Fix — new schools see correct branding & clean dashboard (no demo data)',
+      sections: [
+        {
+          heading: 'Platform Impersonation + React Sidebar',
+          type: 'fix',
+          items: [
+            'Impersonate now redirects to the React SPA (/login) instead of the legacy /index.html — new schools no longer see InnoLearn demo data (20 fake students, 8 staff, 29 classes etc.)',
+            'doImpersonate stores { token, user, school } under the innolearn_session key so the React auth store picks it up correctly on arrival',
+            'Sidebar school badge now shows the school\'s own initials (e.g. "MA" for Mascit Academy) instead of the hardcoded "IL"',
+            'Sidebar title now shows the school\'s real name from user.schoolName in the JWT session instead of "InnoLearn"',
+            'Sidebar subtext now shows the user\'s role (e.g. Superadmin) for clearer context',
+          ]
+        }
+      ]
+    },
+    {
       version: '4.5.4',
       date: '2026-05-04',
       tag: 'improvement',
