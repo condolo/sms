@@ -206,15 +206,26 @@ router.post('/schools/:id/impersonate', async (req, res) => {
     if (!admin) return res.status(404).json({ error: 'No superadmin found for this school' });
 
     /* Use the schoolId stored on the user — it's what the app already knows */
+    const resolvedSchoolId = admin.schoolId || school.id || req.params.id;
     const token = sign({
       userId:      admin.id,
-      schoolId:    admin.schoolId || school.id || req.params.id,
+      schoolId:    resolvedSchoolId,
       email:       admin.email,
       role:        'superadmin',
       roles:       ['superadmin'],
+      schoolName:  school.name,
       impersonated: true
     });
-    res.json({ token, user: { ...admin, password: undefined } });
+    /* Merge schoolName into the user object so the React SPA sidebar can display it */
+    res.json({
+      token,
+      user: {
+        ...admin,
+        password:   undefined,
+        schoolName: school.name,
+        schoolId:   resolvedSchoolId,
+      }
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -460,6 +471,48 @@ router.delete('/announcements/:id', async (req, res) => {
     await Ann.findByIdAndDelete(req.params.id);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* GET /api/platform/test-email — verify SMTP is working (sends a test email to PLATFORM_EMAIL) */
+router.get('/test-email', async (req, res) => {
+  const smtpUser    = process.env.SMTP_USER;
+  const smtpPass    = process.env.SMTP_PASS;
+  const platformAddr = process.env.PLATFORM_EMAIL || smtpUser;
+  const appUrl      = process.env.APP_URL || '(not set)';
+
+  const config = {
+    SMTP_USER:      smtpUser     ? `${smtpUser.slice(0, 4)}***` : '❌ NOT SET',
+    SMTP_PASS:      smtpPass     ? '*** (set)'                   : '❌ NOT SET',
+    PLATFORM_EMAIL: platformAddr ? platformAddr                   : '❌ NOT SET',
+    APP_URL:        appUrl,
+    smtpReady:      !!(smtpUser && smtpPass),
+  };
+
+  if (!config.smtpReady) {
+    return res.status(503).json({
+      success: false,
+      config,
+      error: 'SMTP_USER and SMTP_PASS environment variables are not set. Add them in Render dashboard → Environment.',
+    });
+  }
+
+  const sent = await email.sendAdminNewSchoolAlert({
+    schoolName: 'TEST SCHOOL (diagnostic)',
+    slug:       'test',
+    adminName:  'Platform Admin',
+    adminEmail: platformAddr,
+    plan:       'core',
+    country:    'KE', city: 'Nairobi',
+    curriculum: ['CBC'], sections: ['primary'],
+  });
+
+  res.json({
+    success: sent,
+    config,
+    message: sent
+      ? `✅ Test email sent successfully to ${platformAddr}`
+      : `❌ Email send failed — check Render logs for SMTP error details`,
+  });
 });
 
 /* ── School-side dismiss (uses platform router via /api/platform/announcements/:id/dismiss)

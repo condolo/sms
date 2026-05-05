@@ -18,4 +18,10 @@
       - key: PLATFORM_ADMIN_KEY
         generateValue: true  # Your private platform admin API key
       - key: APP_URL
-        value: https://innolearn-ecosystem.onrender.com
+        value: https://school-management-ecosystem.onrender.com
+      - key: SMTP_USER
+        sync: false          # Set in Render dashboard: your Gmail address (e.g. yourapp@gmail.com)
+      - key: SMTP_PASS
+        sync: false          # Set in Render dashboard: Gmail App Password (16 chars, spaces OK)
+      - key: PLATFORM_EMAIL
+        sync: false          # Set in Render dashboard: email address to receive admin alerts

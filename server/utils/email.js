@@ -3,19 +3,27 @@
    ============================================================ */
 const nodemailer = require('nodemailer');
 
+const SMTP_USER      = process.env.SMTP_USER;
+const SMTP_PASS      = process.env.SMTP_PASS;
+const SMTP_READY     = !!(SMTP_USER && SMTP_PASS);
+const PLATFORM_EMAIL = process.env.PLATFORM_EMAIL || SMTP_USER || '';
+const APP_URL        = process.env.APP_URL || 'https://school-management-ecosystem.onrender.com';
+
+if (!SMTP_READY) {
+  console.warn('[EMAIL] ⚠️  SMTP_USER / SMTP_PASS not set — all emails will be skipped. Set them in Render dashboard → Environment.');
+}
+
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
   port: 587,
   secure: false,
   auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
+    user: SMTP_USER,
+    pass: SMTP_PASS,
   },
 });
 
-const FROM = `"InnoLearn" <${process.env.SMTP_USER}>`;
-const PLATFORM_EMAIL = process.env.PLATFORM_EMAIL || process.env.SMTP_USER;
-const APP_URL = process.env.APP_URL || 'https://school-management-ecosystem.onrender.com';
+const FROM = `"SchoolSync" <${SMTP_USER}>`;
 
 /* ── Shared HTML wrapper ───────────────────────────────────── */
 function _wrap(body) {
@@ -48,12 +56,16 @@ function _wrap(body) {
 }
 
 async function _send(to, subject, html) {
+  if (!SMTP_READY) {
+    console.warn(`[EMAIL] SKIPPED (no SMTP credentials): "${subject}" → ${to}`);
+    return false;
+  }
   try {
     await transporter.sendMail({ from: FROM, to, subject, html });
-    console.log(`[EMAIL] Sent "${subject}" → ${to}`);
+    console.log(`[EMAIL] ✅ Sent "${subject}" → ${to}`);
     return true;
   } catch (err) {
-    console.error(`[EMAIL] Failed to send "${subject}" → ${to}:`, err.message);
+    console.error(`[EMAIL] ❌ Failed "${subject}" → ${to}: ${err.message}`);
     return false;
   }
 }
@@ -106,7 +118,7 @@ async function sendAdminNewSchoolAlert({ schoolName, slug, adminName, adminEmail
    3. School approved — welcome email with full login credentials
    ══════════════════════════════════════════════════════════════ */
 async function sendApprovalWelcome({ adminName, adminEmail, schoolName, slug, plan, tempPassword }) {
-  const loginUrl    = `${APP_URL}?school=${slug}`;
+  const loginUrl    = `${APP_URL}/login`;
   const hasPassword = !!tempPassword;
   const html = _wrap(`
     <h2>🎉 Your school is approved!</h2>

@@ -8,6 +8,27 @@ const Changelog = (() => {
   /* ── Version data ─────────────────────────────────────── */
   const VERSIONS = [
     {
+      version: '4.5.6',
+      date: '2026-05-05',
+      tag: 'fix',
+      title: 'Diagnostic — full root-cause fix for emails, branding, and impersonate',
+      sections: [
+        {
+          heading: 'Critical Fixes',
+          type: 'fix',
+          items: [
+            'Root cause of no emails found: SMTP_USER, SMTP_PASS, PLATFORM_EMAIL were never declared in render.yaml — Render had zero email credentials. Added all three; must be set in Render dashboard → Environment.',
+            'Corrected APP_URL in render.yaml: was innolearn-ecosystem.onrender.com, now school-management-ecosystem.onrender.com',
+            'Approval email login link fixed: was APP_URL?school=slug (legacy app root), now APP_URL/login (React SPA)',
+            'Impersonate now includes schoolName in JWT payload and user response — sidebar correctly shows school name after impersonation',
+            'doImpersonate now clears all legacy InnoLearn localStorage keys before storing new session — no more demo data contamination',
+            'SMTP not configured no longer crashes email send — early guard returns false and logs a warning',
+            'Diagnostics tab added to platform admin: one-click email test, DB connection check, required env vars reference table',
+          ]
+        }
+      ]
+    },
+    {
       version: '4.5.5',
       date: '2026-05-05',
       tag: 'fix',

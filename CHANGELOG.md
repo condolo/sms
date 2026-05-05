@@ -6,6 +6,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.5.6] — 2026-05-05  Diagnostic — full email + impersonate + branding root-cause fix
+
+### Fixed — `server/utils/email.js` + `server/routes/platform.js` + `platform.html` + `render.yaml`
+- **Root cause of no emails**: `SMTP_USER`, `SMTP_PASS`, and `PLATFORM_EMAIL` were not declared in `render.yaml` at all — Render had zero email credentials. Added all three as `sync: false` keys (must be set manually in Render dashboard → Environment). Added a clear `[EMAIL] ⚠️ SMTP_USER / SMTP_PASS not set` warning to server logs on startup.
+- **Approval email linked to wrong URL**: `sendApprovalWelcome` was building `APP_URL?school=slug` which goes to the server root (`index.html`, the legacy app). Changed to `APP_URL/login` (the React SPA).
+- **`APP_URL` was wrong in `render.yaml`**: Was `innolearn-ecosystem.onrender.com`, corrected to `school-management-ecosystem.onrender.com`.
+- **Impersonate missing `schoolName` in JWT + response**: The sidebar's `user.schoolName` was `undefined` after impersonation because the impersonate endpoint never included it. Now `schoolName: school.name` is in both the JWT payload and the returned user object.
+- **Legacy localStorage not cleared on impersonate**: Old InnoLearn demo keys lingered and contaminated new school sessions. `doImpersonate` now wipes all legacy app keys before storing the new React SPA session.
+- **`_send()` no longer throws when SMTP not configured**: Added early-return guard so unconfigured email never causes approval/registration to fail.
+- **Diagnostics view added** to platform admin: "🩺 Diagnostics" tab with one-click email test (shows SMTP config state + sends a test email to `PLATFORM_EMAIL`), DB connection check, and a table of all required Render environment variables with setup instructions.
+
+---
+
 ## [4.5.5] — 2026-05-05  Fix — new schools see correct branding & clean dashboard (no demo data)
 
 ### Fixed — `platform.html` + `client/src/components/layout/Sidebar.jsx`
