@@ -229,39 +229,69 @@ router.post('/schools/:id/impersonate', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+const TENANT_COLS = [
+  'users','students','teachers','classes','attendance_records',
+  'finance_records','behaviour_incidents','behaviour_appeals',
+  'exam_schedules','grades','admissions','timetable_slots',
+  'messages','academic_years','sections','role_permissions',
+  'subjects','events','hr_records'
+];
+
+/**
+ * Build a mongo $or query that matches tenant docs for a school using
+ * THREE strategies so orphaned docs are never left behind:
+ *   1. school.id          — the custom "sch_slug_timestamp" string stored as id field
+ *   2. school._id.toString() — the MongoDB ObjectId as string (used by some docs)
+ *   3. school.adminEmail  — used directly on the users collection as final fallback
+ */
+function _tenantQuery(school) {
+  const clauses = [];
+  // Strategy 1 — custom id field (primary FK used by onboard.js)
+  if (school.id && typeof school.id === 'string' && school.id.startsWith('sch_')) {
+    clauses.push({ schoolId: school.id });
+  }
+  // Strategy 2 — ObjectId string (some older docs may use this)
+  const monIdStr = school._id?.toString();
+  if (monIdStr) clauses.push({ schoolId: monIdStr });
+
+  return clauses.length ? { $or: clauses } : null;
+}
+
 /* DELETE /api/platform/schools/all — wipe all non-demo schools */
 router.delete('/schools/all', async (req, res) => {
   try {
-    const School = _model('schools');
-    const DEMO_SLUGS = ['innolearn']; // preserve the built-in demo school
+    const School     = _model('schools');
+    const DEMO_SLUGS = ['innolearn'];
 
-    /* Find all school ids to purge */
-    const toPurge = await School.find({ slug: { $nin: DEMO_SLUGS } }).lean();
-    const schoolIds    = toPurge.map(s => s.id).filter(Boolean);
+    const toPurge    = await School.find({ slug: { $nin: DEMO_SLUGS } }).lean();
     const schoolMonIds = toPurge.map(s => s._id);
 
-    /* Delete from every collection that carries a schoolId */
-    const TENANT_COLS = [
-      'users','students','teachers','classes','attendance_records',
-      'finance_records','behaviour_incidents','behaviour_appeals',
-      'exam_schedules','grades','admissions','timetable_slots',
-      'messages','academic_years','sections','role_permissions',
-      'subjects','events','hr_records'
-    ];
+    /* Collect every adminEmail for a guaranteed user cleanup */
+    const adminEmails = toPurge.map(s => s.adminEmail).filter(Boolean);
 
-    await Promise.all([
-      School.deleteMany({ _id: { $in: schoolMonIds } }),
-      ...TENANT_COLS.map(col => {
-        const M = _model(col);
-        return M.deleteMany({ $or: [
-          { schoolId: { $in: schoolIds } },
-          // also match by _id-based schoolId in case some docs use ObjectId ref
-          ...(schoolIds.length ? [] : [])
-        ]});
-      })
-    ]);
+    /* Build one combined $or query covering all schools' tenant IDs */
+    const allTenantClauses = toPurge.flatMap(s => {
+      const q = _tenantQuery(s);
+      return q ? q.$or : [];
+    });
 
-    console.log(`[PLATFORM] Wiped ${toPurge.length} school(s) and all their data`);
+    const tenantFilter = allTenantClauses.length ? { $or: allTenantClauses } : null;
+
+    const ops = [School.deleteMany({ _id: { $in: schoolMonIds } })];
+
+    if (tenantFilter) {
+      TENANT_COLS.forEach(col => ops.push(_model(col).deleteMany(tenantFilter)));
+    }
+
+    /* Always delete users by adminEmail — this is the guaranteed fallback
+       that prevents email addresses from being "remembered" after a wipe */
+    if (adminEmails.length) {
+      ops.push(_model('users').deleteMany({ email: { $in: adminEmails } }));
+    }
+
+    await Promise.all(ops);
+
+    console.log(`[PLATFORM] Wiped ${toPurge.length} school(s) and all tenant data`);
     res.json({ success: true, deleted: toPurge.length });
   } catch (err) {
     console.error('[PLATFORM] Wipe error:', err);
@@ -276,31 +306,22 @@ router.delete('/schools/:id', async (req, res) => {
     const school = await School.findById(req.params.id).lean();
     if (!school) return res.status(404).json({ error: 'School not found' });
 
-    /* Custom schoolId used as FK in every tenant collection */
-    const schoolCustomId = school.id;  // e.g. "sch_mascitacademy_xyz"
-    const adminEmail     = school.adminEmail;
+    const tenantFilter = _tenantQuery(school);
+    const adminEmail   = school.adminEmail;
 
-    /* Build the schoolId match — try custom id, fall back to email for users */
-    const tenantMatch = schoolCustomId ? { schoolId: schoolCustomId } : null;
+    const ops = [School.findByIdAndDelete(req.params.id)];
 
-    const TENANT_COLS = [
-      'users','students','teachers','classes','attendance_records',
-      'finance_records','behaviour_incidents','behaviour_appeals',
-      'exam_schedules','grades','admissions','timetable_slots',
-      'messages','academic_years','sections','role_permissions',
-      'subjects','events','hr_records'
-    ];
-
-    const deleteOps = [School.findByIdAndDelete(req.params.id)];
-
-    if (tenantMatch) {
-      TENANT_COLS.forEach(col => deleteOps.push(_model(col).deleteMany(tenantMatch)));
-    } else if (adminEmail) {
-      /* Fallback: at minimum remove the user account by email */
-      deleteOps.push(_model('users').deleteMany({ email: adminEmail }));
+    if (tenantFilter) {
+      TENANT_COLS.forEach(col => ops.push(_model(col).deleteMany(tenantFilter)));
     }
 
-    await Promise.all(deleteOps);
+    /* Always delete the user by email — catches orphaned accounts even if
+       schoolId matching fails due to Mongoose virtual id conflict */
+    if (adminEmail) {
+      ops.push(_model('users').deleteMany({ email: adminEmail }));
+    }
+
+    await Promise.all(ops);
 
     console.log(`[PLATFORM] Deleted school: ${school.name} (${school.slug})`);
     res.json({ success: true, name: school.name });
@@ -471,6 +492,41 @@ router.delete('/announcements/:id', async (req, res) => {
     await Ann.findByIdAndDelete(req.params.id);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* DELETE /api/platform/orphans — purge user accounts with no matching school
+   Fixes emails that remain "remembered" after a wipe due to the Mongoose id virtual conflict */
+router.delete('/orphans', async (req, res) => {
+  try {
+    const School = _model('schools');
+    const User   = _model('users');
+
+    /* Get all active school adminEmails and custom schoolIds */
+    const allSchools  = await School.find({}).lean();
+    const activeEmails   = new Set(allSchools.map(s => s.adminEmail).filter(Boolean));
+    const activeSchoolIds = new Set(allSchools.map(s => s.id).filter(Boolean));
+
+    /* Find users who are superadmins but whose school no longer exists */
+    const orphanedUsers = await User.find({ role: 'superadmin' }).lean();
+    const toDelete = orphanedUsers.filter(u => {
+      const emailOrphaned   = u.email   && !activeEmails.has(u.email);
+      const schoolOrphaned  = u.schoolId && !activeSchoolIds.has(u.schoolId);
+      return emailOrphaned || schoolOrphaned;
+    });
+
+    if (toDelete.length === 0) {
+      return res.json({ success: true, deleted: 0, message: 'No orphaned users found' });
+    }
+
+    const orphanIds = toDelete.map(u => u._id);
+    await User.deleteMany({ _id: { $in: orphanIds } });
+
+    console.log(`[PLATFORM] Purged ${toDelete.length} orphaned user(s):`, toDelete.map(u => u.email));
+    res.json({ success: true, deleted: toDelete.length, emails: toDelete.map(u => u.email) });
+  } catch (err) {
+    console.error('[PLATFORM] Orphan cleanup error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /* GET /api/platform/test-email — verify SMTP is working (sends a test email to PLATFORM_EMAIL) */

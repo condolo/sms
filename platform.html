@@ -584,6 +584,18 @@ async function renderDiagnostics() {
           <div id="db-check-result" style="margin-top:12px;display:none"></div>
         </div>
 
+        <div style="background:#fff8f1;border:1px solid #fed7aa;border-radius:8px;padding:16px 20px">
+          <div style="font-weight:600;font-size:14px;margin-bottom:4px">🧹 Orphaned User Cleanup</div>
+          <p style="font-size:13px;color:#6b7280;margin:0 0 12px">
+            If an email address is still "remembered" after deleting a school (e.g. you can't re-register with the same email),
+            use this to purge user accounts that have no matching school in the database.
+          </p>
+          <button class="pa-btn" onclick="runOrphanCleanup()" style="border-color:#f97316;color:#c2410c">
+            <i class="fas fa-broom"></i> Purge Orphaned Users
+          </button>
+          <div id="orphan-result" style="margin-top:12px;display:none"></div>
+        </div>
+
         <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:16px 20px">
           <div style="font-weight:600;font-size:14px;margin-bottom:4px">📋 Environment Variables Required</div>
           <p style="font-size:13px;color:#6b7280;margin:0 0 8px">These must be set in Render dashboard → Environment:</p>
@@ -652,6 +664,29 @@ async function runDbCheck() {
       background:${ok?'#d1fae5':'#fee2e2'};border:1px solid ${ok?'#6ee7b7':'#fca5a5'};
       color:${ok?'#065f46':'#991b1b'}">
       ${ok ? `✅ MongoDB connected — ${data.totalSchools} school(s) in DB` : '❌ DB query failed: ' + JSON.stringify(data)}
+    </div>`;
+  } catch (err) {
+    out.innerHTML = `<div style="padding:12px;background:#fee2e2;border-radius:7px;font-size:13px;color:#991b1b">❌ ${err.message}</div>`;
+  }
+}
+
+async function runOrphanCleanup() {
+  const out = document.getElementById('orphan-result');
+  out.style.display = 'block';
+  out.innerHTML = '<div style="font-size:13px;color:#6b7280">Scanning for orphaned users…</div>';
+  try {
+    const res  = await apiFetch('/api/platform/orphans', { method: 'DELETE' });
+    const data = await res.json();
+    const ok   = data.success;
+    const n    = data.deleted || 0;
+    out.innerHTML = `<div style="padding:12px;border-radius:7px;font-size:13px;
+      background:${ok?'#d1fae5':'#fee2e2'};border:1px solid ${ok?'#6ee7b7':'#fca5a5'};
+      color:${ok?'#065f46':'#991b1b'}">
+      ${ok
+        ? n === 0
+          ? '✅ No orphaned users found — database is clean'
+          : `✅ Purged ${n} orphaned user account${n!==1?'s':''}: ${(data.emails||[]).join(', ')}`
+        : '❌ Cleanup failed: ' + (data.error || JSON.stringify(data))}
     </div>`;
   } catch (err) {
     out.innerHTML = `<div style="padding:12px;background:#fee2e2;border-radius:7px;font-size:13px;color:#991b1b">❌ ${err.message}</div>`;

@@ -8,6 +8,24 @@ const Changelog = (() => {
   /* ── Version data ─────────────────────────────────────── */
   const VERSIONS = [
     {
+      version: '4.5.7',
+      date: '2026-05-05',
+      tag: 'fix',
+      title: 'Fix — deleted schools still remembered email address',
+      sections: [
+        {
+          heading: 'Delete & Wipe — Bulletproof Cleanup',
+          type: 'fix',
+          items: [
+            'Root cause: Wipe-All matched users by school.id which could be undefined due to Mongoose virtual conflict — users were never deleted, email stayed in the database',
+            'Both delete routes now use three simultaneous strategies: custom id field, MongoDB _id.toString(), and adminEmail on the users collection',
+            'New DELETE /api/platform/orphans endpoint: scans for superadmin users with no matching school and removes them',
+            '"Purge Orphaned Users" button added to Diagnostics tab — fixes stuck email addresses from previous partial deletes',
+          ]
+        }
+      ]
+    },
+    {
       version: '4.5.6',
       date: '2026-05-05',
       tag: 'fix',

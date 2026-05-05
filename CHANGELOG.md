@@ -6,6 +6,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.5.7] — 2026-05-05  Fix — deleted schools still "remembered" email address
+
+### Fixed — `server/routes/platform.js` + `platform.html`
+- **Root cause**: Wipe-All and Delete-School routes matched tenant data by `school.id` (the custom string field), but Mongoose's built-in `id` virtual can shadow the stored field, leaving `schoolIds` empty. User documents were never deleted → the admin email remained "in use" in the database.
+- **Three-strategy tenant deletion**: Both delete routes now match using `school.id` (custom FK), `school._id.toString()` (MongoDB ObjectId as string), AND `school.adminEmail` directly on the users collection. All three run simultaneously via `Promise.all` — at least one will always hit.
+- **New `DELETE /api/platform/orphans` endpoint**: Scans for `superadmin` user documents whose email or `schoolId` no longer matches any school in the database, and deletes them. Fixes any emails already stuck from previous wipes.
+- **"Purge Orphaned Users" button** added to the Diagnostics tab — one click clears all stuck email addresses and shows which ones were removed.
+
+---
+
 ## [4.5.6] — 2026-05-05  Diagnostic — full email + impersonate + branding root-cause fix
 
 ### Fixed — `server/utils/email.js` + `server/routes/platform.js` + `platform.html` + `render.yaml`
