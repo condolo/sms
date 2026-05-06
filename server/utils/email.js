@@ -4,7 +4,9 @@
 const nodemailer = require('nodemailer');
 
 const SMTP_USER      = process.env.SMTP_USER;
-const SMTP_PASS      = process.env.SMTP_PASS;
+// Gmail App Passwords are displayed as "xxxx xxxx xxxx xxxx" — strip spaces
+// so admins can paste the password exactly as Google shows it without breaking auth.
+const SMTP_PASS      = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
 const SMTP_READY     = !!(SMTP_USER && SMTP_PASS);
 const PLATFORM_EMAIL = process.env.PLATFORM_EMAIL || SMTP_USER || '';
 const APP_URL        = process.env.APP_URL || 'https://school-management-ecosystem.onrender.com';
