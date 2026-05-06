@@ -1,6 +1,6 @@
 ﻿# InnoLearn — Developer Guide
 
-**Version 4.5.1** · Technical Reference & Architecture
+**Version 4.5.7** · Technical Reference & Architecture
 
 ---
 
@@ -28,6 +28,7 @@
 20. [Security Layer (v4.5+)](#20-security-layer-v45)
 21. [Messaging API (v4.4+)](#21-messaging-api-v44)
 22. [School Registration & Credentials Flow (v4.4+)](#22-school-registration--credentials-flow-v44)
+23. [Platform Admin API (v4.5+)](#23-platform-admin-api-serverroutesplatformjs--v45)
 
 ---
 
@@ -1030,9 +1031,117 @@ The login screen HTML structure (v2.6+):
 | Frontend reads legacy /api/collections/* | No RBAC or pagination on legacy route | **Phase 2–3**: Migrate frontend module by module to new routes |
 | Messages offline sync | Offline messages in localStorage are not auto-synced on reconnect | Manual page refresh merges local + server messages |
 
-### v4.5.1 Hotfix Note — `server/routes/onboard.js`
+### v4.5.1 — Hotfix: stale `adminPassword` reference (`server/routes/onboard.js`)
 
-When removing the password field from the onboarding form (v4.4.0), a stale `if (adminPassword.length < 8)` validation block was left in `_provisionInDB`. Because `adminPassword` was no longer declared anywhere in scope, Node.js threw a `ReferenceError` on every `POST /api/onboard` call — the school and user records were never written to MongoDB, and all downstream platform actions (approve, impersonate, emails) appeared broken. The three stale lines were removed in v4.5.1. **Lesson**: always run `node -e "require('./server/routes/<file>')"` after editing a route to catch syntax and reference errors before pushing.
+When removing the password field from the onboarding form (v4.4.0), a stale `if (adminPassword.length < 8)` validation block was left in `_provisionInDB`. Because `adminPassword` was no longer declared in scope, Node threw a `ReferenceError` on every `POST /api/onboard` — the school and user records were never written to MongoDB, and all downstream platform actions (approve, impersonate, emails) silently failed. The three stale lines were removed in v4.5.1.
+
+**Lesson**: always run `node -e "require('./server/routes/<file>')"` after editing a route to catch syntax and reference errors before pushing.
+
+---
+
+## 23. Platform Admin API (`server/routes/platform.js`) — v4.5+
+
+All routes require `X-Platform-Key` header (checked by `platformAdmin` middleware). Protected entirely from school-level JWT auth.
+
+### Route Reference
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/platform/schools` | List all schools with student/staff counts |
+| `POST` | `/api/platform/schools/:id/approve` | Approve school + activate user + send welcome email |
+| `POST` | `/api/platform/schools/:id/reject` | Reject school + send rejection email |
+| `PATCH` | `/api/platform/schools/:id` | Update plan / addOns / isActive |
+| `POST` | `/api/platform/schools/:id/impersonate` | Get a JWT for the school's superadmin |
+| `DELETE` | `/api/platform/schools/:id` | Delete school + all tenant data |
+| `DELETE` | `/api/platform/schools/all` | Wipe all non-demo schools + all tenant data |
+| `DELETE` | `/api/platform/orphans` | Purge superadmin users with no matching school |
+| `GET` | `/api/platform/stats` | MRR, ARR, plan breakdown, counts |
+| `GET` | `/api/platform/test-email` | Verify SMTP config + send test email |
+| `GET/POST/PATCH/DELETE` | `/api/platform/announcements[/:id]` | System announcements CRUD |
+
+> **Route ordering**: `DELETE /schools/all` MUST be registered before `DELETE /schools/:id`. Express matches routes in order — if `:id` is first, the literal string `"all"` is treated as an ID and Mongoose tries to cast it to ObjectId, causing a 500.
+
+### Mongoose `id` Virtual Conflict — Critical Pattern
+
+Mongoose has a built-in `id` **virtual** that returns `_id.toString()`. This conflicts with the custom `id` field stored in school/user documents (e.g. `sch_slug_timestamp`).
+
+**Symptoms:**
+- `School.findOneAndUpdate({ id: req.params.id }, ...)` — never matches, returns `null`
+- `s.id` on a lean result — may return `undefined` if Mongoose virtual shadows the stored field
+- `schoolIds` array built from `.map(s => s.id)` — can be all `undefined`, causing `deleteMany` to match nothing (users remain in DB)
+
+**Rules for this codebase:**
+```js
+// ✅ Always look up schools by MongoDB _id
+School.findById(req.params.id)          // uses ObjectId, always reliable
+School.findByIdAndUpdate(req.params.id) // same
+
+// ✅ On lean() results, prefer _id for identity, but id field works for custom FK
+const monIdStr = school._id.toString(); // always present
+const customId = school.id;             // the sch_slug_xxx string (if stored correctly)
+
+// ❌ Never use findOne({ id: someValue }) — Mongoose treats it as _id lookup
+```
+
+### Three-Strategy Tenant Deletion
+
+The `_tenantQuery(school)` helper builds an `$or` filter using three overlapping strategies to guarantee orphaned records are never left behind:
+
+```js
+function _tenantQuery(school) {
+  const clauses = [];
+  // 1. Custom id field (primary FK)
+  if (school.id?.startsWith('sch_')) clauses.push({ schoolId: school.id });
+  // 2. ObjectId string (some older docs)
+  clauses.push({ schoolId: school._id.toString() });
+  return clauses.length ? { $or: clauses } : null;
+}
+```
+
+Additionally, both delete routes always delete users by `school.adminEmail` regardless of `schoolId` matching — this is the guaranteed fallback.
+
+### Impersonate Flow (v4.5.5+)
+
+```
+POST /api/platform/schools/:id/impersonate
+  ↓
+School.findById(:id) → get school.name, school.id, school.adminEmail
+  ↓
+User.findOne({ role:'superadmin', $or:[{ schoolId }, { email: adminEmail }] })
+  ↓
+sign({ userId, schoolId, email, role, roles, schoolName, impersonated:true })
+  ↓
+res.json({ token, user: { ...admin, schoolName, schoolId } })
+```
+
+**Frontend (`doImpersonate` in `platform.html`):**
+1. Clears all 17 legacy localStorage keys (InnoLearn demo data)
+2. Stores `{ token, user, school }` under `innolearn_session` (the React auth store key)
+3. Redirects to `/login` (React SPA) — NOT `/index.html` (legacy app)
+
+The React SPA reads `innolearn_session` on mount. Because `session.token` is present, `isAuthenticated` is `true`, and `ProtectedRoute` immediately redirects to `/dashboard` without showing the login form.
+
+### Sidebar Dynamic Branding (v4.5.5+)
+
+`client/src/components/layout/Sidebar.jsx` derives school identity from `user.schoolName` in the JWT session:
+
+```js
+const schoolName     = user?.schoolName || 'My School';
+const schoolInitials = schoolName.split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
+```
+
+This replaces the previous hardcoded `"InnoLearn"` / `"IL"` — every school now sees their own name and initials. The secondary line shows the user's role (e.g. "Superadmin").
+
+### Orphan Cleanup Endpoint (v4.5.7+)
+
+`DELETE /api/platform/orphans` fixes stuck email addresses after a partial delete:
+
+1. Fetches all active school `adminEmail`s and custom `id`s
+2. Queries all `superadmin` users
+3. Deletes any whose email is not in the active set OR whose `schoolId` is not in the active set
+4. Returns `{ deleted: N, emails: ['...'] }`
+
+Available in the platform UI: **Diagnostics → Purge Orphaned Users**.
 
 ---
 
@@ -1210,27 +1319,62 @@ const transporter = nodemailer.createTransport({
 
 ### Environment Variables Required
 
+All five must be set in **Render dashboard → Environment** (they are not committed to git):
+
 | Variable | Description |
 |---|---|
-| `SMTP_USER` | Gmail address (`innolearnnetwork@gmail.com`) |
-| `SMTP_PASS` | Gmail App Password (16-char, spaces OK) |
-| `PLATFORM_EMAIL` | Recipient for platform owner alerts (defaults to `SMTP_USER`) |
+| `MONGODB_URI` | MongoDB Atlas connection string |
+| `JWT_SECRET` | Auto-generated by Render (via `generateValue: true` in `render.yaml`) |
+| `PLATFORM_ADMIN_KEY` | Auto-generated by Render |
+| `SMTP_USER` | Gmail address (e.g. `innolearnnetwork@gmail.com`) |
+| `SMTP_PASS` | Gmail **App Password** — 16 chars with spaces (NOT the Gmail account password). Go to myaccount.google.com → Security → 2-Step Verification → App passwords |
+| `PLATFORM_EMAIL` | Recipient for platform owner alerts (can be same as `SMTP_USER`) |
+| `APP_URL` | `https://school-management-ecosystem.onrender.com` |
 
-### Exported Functions
+> **v4.5.6**: `SMTP_USER`, `SMTP_PASS`, and `PLATFORM_EMAIL` were missing from `render.yaml` entirely — Render had no email credentials, causing all emails to fail silently. They are now declared as `sync: false` keys.
+
+### Startup Validation
+
+On module load, `email.js` checks `SMTP_USER` and `SMTP_PASS`. If either is missing, a warning is written to the server log:
+```
+[EMAIL] ⚠️  SMTP_USER / SMTP_PASS not set — all emails will be skipped.
+```
+`_send()` short-circuits immediately (`return false`) when credentials are absent, so missing config never causes an API error.
+
+### Exported Functions (13 total)
 
 | Function | When sent | Recipients |
 |---|---|---|
-| `sendRegistrationPending(opts)` | On school registration | School admin |
-| `sendAdminNewSchoolAlert(opts)` | On school registration | Platform owner |
-| `sendApprovalWelcome(opts)` | On approval | School admin |
-| `sendRejectionEmail(opts)` | On rejection | School admin |
-| `sendAdminApprovalAlert(opts)` | On approval | Platform owner |
+| `sendRegistrationPending(opts)` | School registers | School admin |
+| `sendAdminNewSchoolAlert(opts)` | School registers | Platform owner |
+| `sendApprovalWelcome(opts)` | School approved | School admin (includes temp password + `/login` URL) |
+| `sendRejectionEmail(opts)` | School rejected | School admin |
+| `sendAdminApprovalAlert(opts)` | School approved | Platform owner |
+| `sendLoginOTP(opts)` | 2FA trigger | User |
+| `sendTrialReminder(opts)` | Trial expiry (0/1/3 days) | School admin |
+| `sendWelcomeCredentials(opts)` | User created by admin | New user |
+| `sendPasswordExpirySoon(opts)` | Password nearing 60-day limit | User |
+| `sendPasswordChanged(opts)` | Password changed | User |
+| `sendRoleChanged(opts)` | Role updated | Affected user |
+| `sendSystemUpdateNotice(opts)` | Announcement (notifyAll) | All active school admins |
+| `sendMessageNotification(opts)` | In-app message sent | Recipient |
 
-All functions return `true`/`false` (never throw). Email failures are logged but do not break the API response.
+All functions return `true`/`false` (never throw). Failures are logged but do not break the API response.
+
+> **v4.5.6**: `sendApprovalWelcome` login URL was `APP_URL?school=slug` (routes to legacy `index.html`). Fixed to `APP_URL/login` (React SPA).
 
 ### HTML Template
 
-All emails use a shared `_wrap(body)` function that injects content into a responsive branded wrapper: InnoLearn gradient header, content body, footer with platform URL. Status badges (`.badge.pending`, `.badge.approved`, `.badge.rejected`) are inline-styled for email client compatibility.
+All emails use a shared `_wrap(body)` function: InnoLearn gradient header, content body, footer with platform URL. Status badges (`.badge.pending`, `.badge.approved`, `.badge.rejected`) are inline-styled for email client compatibility.
+
+### Diagnosing Email Issues
+
+Use the built-in endpoint (platform admin only):
+```
+GET /api/platform/test-email
+X-Platform-Key: <your key>
+```
+Returns `{ success, config: { SMTP_USER, SMTP_PASS, APP_URL }, message }`. Sends a real test email to `PLATFORM_EMAIL`. Also accessible via **Platform dashboard → Diagnostics → Send Test Email**.
 
 ---
 

@@ -1,6 +1,6 @@
 ﻿# InnoLearn — User Guide
 
-**Version 4.5.1** · Updated 2026-05-04
+**Version 4.5.7** · Updated 2026-05-06
 
 > **Looking for admin guides?**
 > - 🔧 [Platform Admin Guide](PLATFORM_ADMIN_GUIDE.md) — for the InnoLearn platform owner
@@ -39,32 +39,34 @@ If your school is not yet on InnoLearn, visit `/onboard` or click **Get Started*
 1. **School Details** — name, type, country, URL slug, curriculum, sections
 2. **Admin Account** — your name and email address (no password needed — see below)
 3. **Choose Plan** — Core, Standard, Premium, or Enterprise (30-day free trial on all plans)
-4. **Review & Launch** — confirm your details and tick the Terms of Service box to submit
+4. **Review & Launch** — confirm your details and click **Launch My School** to submit
 
 > **Curriculum options**: CBE (Kenya — Competency Based Education), IB (International Baccalaureate), British (Cambridge / Edexcel), American (US Common Core / AP)
 
-> **No password at registration** — InnoLearn generates a secure temporary password for you. It will be emailed to you when your school is approved. You do not set a password during registration.
+> **No password at registration** — InnoLearn generates a secure temporary password for you server-side. It will be emailed when your school is approved. You do not set a password during registration.
 
-After submitting, your application enters a **pending review** state. You will receive a confirmation email and hear back within **24 hours**.
+> **Inline validation** — if a required field is empty or invalid, a red banner appears below the step heading and the specific field turns red. Fix the highlighted fields and click Continue again — no browser popups.
 
-> **v4.5.1**: A bug in earlier versions (v4.4.0–4.5.0) caused the confirmation email and all downstream approval actions to silently fail. This was fixed on 2026-05-04 — registration now works correctly end-to-end.
+After submitting, your application enters a **pending review** state. You will receive a **confirmation email** at the address you provided, and hear back within **24 hours**.
+
+> **Note**: If you did not receive a confirmation email, check your spam folder. Ensure your school's email server is not blocking the sender `innolearnnetwork@gmail.com`.
 
 ### Approval Process
 Once the InnoLearn team reviews and approves your school, you will receive a **welcome email** containing:
 
 | What | Example |
 |------|---------|
-| **Your dedicated login URL** | `https://app.innolearn.edu.ke?school=greenhill` |
-| **Your email / username** | `admin@greenhill.edu` |
-| **Temporary password** | `xK7mNpQrBvW3` (system-generated) |
+| **Login URL** | `https://school-management-ecosystem.onrender.com/login` |
+| **Your email / username** | `admin@yourschool.edu` |
+| **Temporary password** | `xK7mNpQrBvW3` (system-generated, 12 chars) |
 
-Click the link in the email — it will take you directly to the InnoLearn login page with your school pre-selected. Enter the temporary password and you will immediately be asked to set a permanent one.
+Click the link in the email — it will take you directly to the login page. Enter your email and temporary password. You will immediately be prompted to set a permanent password.
 
-> ⚠️ **Save the approval email.** The temporary password is shown once. If you miss it, contact the InnoLearn team to reset it.
+> ⚠️ **Save the approval email.** The temporary password is displayed once. If you miss it, contact the InnoLearn team.
 
-If your application is not approved, you will receive an email explaining why, and you are welcome to reapply after addressing any concerns.
+If your application is not approved, you will receive an email explaining why, and you are welcome to reapply after addressing the concern raised.
 
-> **Note**: You cannot log in while your school is pending approval. If you try, you will see a clear "Application Under Review" screen — not an error.
+> **Note**: You cannot log in while your school is pending. If you try, you will see a clear "Application Under Review" screen.
 
 ---
 
