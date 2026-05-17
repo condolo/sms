@@ -105,6 +105,7 @@ app.use('/api/admissions',      require('./routes/admissions'));
 app.use('/api/timetable',       require('./routes/timetable'));
 app.use('/api/messages',        require('./routes/messages'));
 app.use('/api/academic-config', require('./routes/academic-config'));
+app.use('/api/report-cards',   require('./routes/report-cards'));
 
 /* ── School-facing announcement routes (JWT auth, not platform key) ── */
 const { authMiddleware } = require('./middleware/auth');
@@ -197,10 +198,12 @@ app.get('*', (req, res) => {
     req.path.startsWith('/attendance')||
     req.path.startsWith('/finance')   ||
     req.path.startsWith('/behaviour') ||
-    req.path.startsWith('/exams')     ||
-    req.path.startsWith('/admissions')||
-    req.path.startsWith('/timetable') ||
-    req.path.startsWith('/settings')  ||
+    req.path.startsWith('/exams')        ||
+    req.path.startsWith('/admissions')   ||
+    req.path.startsWith('/timetable')    ||
+    req.path.startsWith('/settings')     ||
+    req.path.startsWith('/reports')      ||
+    req.path.startsWith('/report-cards') ||
     req.path === '/login'
   )) {
     return res.sendFile(path.join(REACT_DIST, 'index.html'));
