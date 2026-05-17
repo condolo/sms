@@ -1,6 +1,6 @@
 ﻿# InnoLearn — User Guide
 
-**Version 4.5.7** · Updated 2026-05-06
+**Version 4.6.0** · Updated 2026-05-17
 
 > **Looking for admin guides?**
 > - 🔧 [Platform Admin Guide](PLATFORM_ADMIN_GUIDE.md) — for the InnoLearn platform owner
@@ -292,20 +292,45 @@ When a student is marked Absent, parents with linked accounts receive an automat
 
 ## 8. Academics & Gradebook
 
-### Entering Marks
+### Entering Continuous Assessment Marks
 1. Navigate to **Academics**.
 2. Select a class and subject.
-3. Enter marks for each student in the marks grid.
-4. Click **Save** — grades are calculated automatically based on the configured grade boundaries.
+3. Enter marks for each student in the marks grid — choose the assessment type (Classwork, Homework, Test, etc.).
+4. Click **Save** — grades and percentages are calculated automatically.
+
+### How Final Scores Are Calculated
+Each school configures its own **assessment weights** (e.g. Classwork 20% + Mid-Term 30% + End-Term 50%). The system applies these weights to produce a single **final score** per subject per student. If a student has no entry for a particular assessment type, the available types are normalised to 100%.
 
 ### Grade Boundaries
-Configured per subject or school-wide in **Settings**. Supports:
-- Cambridge A–U boundaries
-- IB 1–7 scale
-- Custom percentage thresholds
+Configured school-wide in **Settings → Academic Config**. Each school can define its own grade bands:
+
+| Grade | Score Range | Points | Descriptor |
+|---|---|---|---|
+| A | 80–100 | 4.0 | Excellent |
+| B+ | 75–79 | 3.5 | Very Good |
+| B | 65–74 | 3.0 | Good |
+| … | … | … | … |
+
+> Administrators can customise all grade bands, points, and descriptors. The default pass mark is 40%.
+
+### Mark States
+Instead of simply "absent", the system distinguishes four special mark states:
+
+| State | What it means | Counted in average? |
+|---|---|---|
+| **ABS** | Student was absent for this assessment | No (excluded) |
+| **MIS** | Mark not yet entered by teacher | No — teacher action needed |
+| **EXM** | Student exempted (medical, etc.) | No |
+| **INC** | Incomplete — blocks report approval | No — must be resolved first |
+
+A normal score uses the **present** state and is always counted.
 
 ### Report Comments
-Each teacher can add a written comment per student per subject. These appear on the generated report card.
+- **Subject teachers** can add a written comment per student per subject
+- **Class teachers** can add an overall remark per student
+- **Principals** (admin role) can add a principal's comment per student
+
+Comments carry forward when a report card is republished — they are not wiped on re-generation.
 
 ### Viewing Progress
 The **Progress** tab shows a student's grade trajectory across terms. Grade trends are colour-coded (green = improving, red = declining).
@@ -316,18 +341,83 @@ The **Progress** tab shows a student's grade trajectory across terms. Grade tren
 
 ### Creating an Exam
 1. Navigate to **Exams → + New Exam**.
-2. Set name, subject, class(es), date, time, and room.
-3. Assign an invigilator.
-4. Click **Save**.
+2. Set name, type (Test / Mock / Terminal / Internal / External / Coursework), subject, class, date, time, and room.
+3. Optionally assign a subject teacher owner — if your school enforces subject assignments, only this teacher can enter results.
+4. Click **Save**. The exam starts in **Scheduled** status.
+
+### Exam Lifecycle
+Exams follow a strict approval process to protect data integrity:
+
+```
+Scheduled → In Progress → Completed → Moderated → Approved → Locked → Published → Archived
+```
+
+| Status | Who can set it | What it means |
+|---|---|---|
+| **Scheduled** | System | Exam is created, not yet started |
+| **In Progress** | Teacher, Admin | Exam is underway |
+| **Completed** | Teacher, Admin | Results have been entered |
+| **Moderated** | Admin only | Results reviewed by moderator |
+| **Approved** | Admin only | Results approved, ready to lock |
+| **Locked** | Admin only | Results frozen — no further edits |
+| **Published** | Admin only | Results visible on report cards |
+| **Archived** | Admin only | Exam is permanently closed |
+
+> Teachers can only advance exams to **In Progress** and **Completed**. All steps from Moderated onward require an administrator.
 
 ### Recording Results
 1. Open an exam.
 2. Click **Enter Results**.
-3. Type scores for each student.
-4. Click **Save** — the system calculates grade, rank, and class average automatically.
+3. Type scores for each student, or use the mark state buttons (ABS / MIS / EXM) for non-scoring situations.
+4. Click **Save** — class statistics (highest, lowest, average, pass count) are computed instantly.
+
+> **Note**: Results cannot be edited once an exam is **Locked**. Contact your school administrator to unlock with a recorded reason.
+
+### Status History
+Every status change is logged. Open an exam and click **Status History** to see a full audit trail: who changed it, when, and why.
 
 ### Exam Timetable
 The **Timetable** tab shows all scheduled exams in a calendar view. Export as PDF for distribution.
+
+---
+
+## 9a. Report Cards *(new in v4.6)*
+
+### How Report Cards Are Generated
+Your school administrator generates report cards at the end of each term. The process:
+
+1. All exam results must be **Approved** before generation is allowed
+2. Admin clicks **Publish Report Cards** for the class and term
+3. The system combines continuous assessment grades and exam results using the school's configured weights
+4. Final scores are calculated, grades assigned, and class rankings computed
+5. A **permanent, versioned snapshot** is created for each student
+
+### Versioning — Your Records Are Safe
+If a report card needs to be corrected and republished, the **original version is never deleted**. Each republication creates a new version (v1 → v2 → v3). You can always view older versions if needed. Superseded versions are clearly marked.
+
+### Downloading Your Report Card (PDF)
+1. Navigate to **Reports → Report Cards**.
+2. Select the term and class.
+3. Click **Download PDF** next to a student's name.
+
+> **Financial hold**: If your school has an outstanding fee balance, PDF downloads may be blocked. Contact the school office to clear the hold.
+
+The PDF includes:
+- Student details and class information
+- Subject-by-subject breakdown (Classwork / Mid-Term / End-Term / Final Score / Grade)
+- ★ marks next to subjects where the student scored the highest in class
+- Class ranking
+- Attendance summary
+- Class teacher remark and principal's comment
+- Signature lines
+
+> **DRAFT watermark**: If you see a diagonal "DRAFT" watermark, the report card has not been officially published yet. Only request this as a preview — the official published version will have no watermark.
+
+### Class Report Card (Admin)
+Administrators can download a **merged PDF** containing all students in a class in a single file — useful for printing or archiving.
+
+### Ranking
+Class rankings are computed at publish time and frozen in the snapshot. If your school uses a special ranking method (e.g. Kenya's best-7-of-8 KCSE model), this is configured in **Settings → Academic Config → Ranking Strategy**. Subjects that count toward the rank are marked with ● on the PDF.
 
 ---
 
@@ -548,12 +638,29 @@ Navigate to **Reports**. Report types include:
 3. Click **Generate**.
 4. Export as **PDF** or **CSV**.
 
-### Report Cards
-Student-level term reports are generated from **Academics → Report Cards**. Each card includes:
-- Subject grades and teacher comments
-- Attendance summary
-- Behaviour summary (merit total, demerit total, current stage, highest milestone)
-- Principal's comment
+### Report Cards *(fully redesigned in v4.6)*
+Student-level term reports are generated from **Reports → Report Cards**. Each card includes:
+- Subject-by-subject breakdown (continuous assessment + exam scores + weighted final score)
+- Grade, GPA points, and descriptor per subject
+- ★ Best-in-class indicator per subject
+- Class ranking (with notation if ranking uses a subject strategy, e.g. Best 7)
+- Attendance summary (days present / absent / total / percentage)
+- Class teacher remark and principal's comment
+- Signature areas for class teacher and principal
+- Footer with generation timestamp, version number, and batch ID
+
+#### Report Card Versioning
+Every published report card is **permanently stored as an immutable versioned snapshot**. If corrections are made and the card is republished:
+- A new version is created (v1 → v2 → v3…)
+- The old version is marked "Superseded" but **never deleted**
+- Superseded PDFs show a diagonal watermark
+- Administrators can view the full version history
+
+#### Publish Batch Audit Trail
+Administrators can view a log of every report card publish run: when it ran, who triggered it, how many students were processed, and whether it succeeded or failed. Navigate to **Reports → Report Cards → Publish History**.
+
+#### Class Bulk PDF
+Administrators can download a single merged PDF containing all students in a class — useful for printing the full batch. Navigate to **Reports → Report Cards → Download Class PDF**.
 
 ---
 
@@ -566,6 +673,22 @@ Update school name, short name, code, type, address, contact details, timezone, 
 
 ### Academic Year & Terms
 Configure academic year dates, term boundaries, and set the current active term.
+
+### Academic Config *(new in v4.6)*
+> **Admin / Superadmin only** — navigate to **Settings → Academic Config**
+
+| Setting | What it controls |
+|---|---|
+| **Grading Schema** | Grade bands (e.g. A = 80–100), GPA points, descriptors, remarks |
+| **Pass Mark** | Minimum passing score (default 40%) |
+| **Assessment Weights** | How much each assessment type contributes to the final score (must sum to 100%) |
+| **Ranking Method** | Standard (1,2,2,4) or Dense (1,2,2,3) |
+| **Ranking Strategy** | All subjects / Best N subjects / Compulsory subjects only |
+| **Report Template** | Which sections appear on the PDF (GPA, deviation, attendance, comments, rank) |
+| **Signature Labels** | Customise "Class Teacher" and "Principal" signature line text |
+| **Footer Note** | Text printed at the bottom of every report card |
+
+> **Important**: changes to the grading schema or weights take effect on the **next publish run** only. Already-published report cards retain the config that was active when they were published — they are never retroactively recalculated.
 
 ### Branding *(Super Admin only)*
 

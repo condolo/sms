@@ -1,6 +1,6 @@
 ﻿# InnoLearn — Developer Guide
 
-**Version 4.5.7** · Technical Reference & Architecture
+**Version 4.6.0** · Technical Reference & Architecture
 
 ---
 
@@ -29,6 +29,8 @@
 21. [Messaging API (v4.4+)](#21-messaging-api-v44)
 22. [School Registration & Credentials Flow (v4.4+)](#22-school-registration--credentials-flow-v44)
 23. [Platform Admin API (v4.5+)](#23-platform-admin-api-serverroutesplatformjs--v45)
+24. [Academic Configuration API (v4.6+)](#24-academic-configuration-api-v46)
+25. [Academic Reporting Engine (v4.6+)](#25-academic-reporting-engine-v46)
 
 ---
 
@@ -1818,3 +1820,324 @@ if (user.mustChangePassword) {
 ```
 
 The frontend (`js/app.js` and `client/src/pages/Login.jsx`) catches `passwordExpired: true` and renders the inline change-password form before granting access to the dashboard.
+
+---
+
+## 24. Academic Configuration API (v4.6+)
+
+**Route file**: `server/routes/academic-config.js`  
+**Prefix**: `/api/academic-config`  
+**Plan gate**: `grades`  
+**RBAC**: `settings:read` (GET), `settings:update` (PUT), `settings:delete` (reset)
+
+School-level configuration that governs how grades are calculated, displayed, and ranked. Exports helpers consumed by the report-cards and exams routes.
+
+### Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/` | Fetch saved config merged with system defaults (no null fields ever returned) |
+| PUT | `/` | Save config — validates band overlap + weight sum |
+| POST | `/reset` | Delete saved config, revert to system defaults |
+| GET | `/grade?score=N` | Resolve a score to a grade band (useful for live previews) |
+
+### Grading Schema
+
+An array of up to 20 grade bands:
+
+```js
+{
+  grade:      'A',          // display label (max 5 chars)
+  minScore:   80,
+  maxScore:   100,
+  points:     4.0,          // GPA points
+  descriptor: 'Excellent',  // short label
+  remarks:    'Outstanding performance'
+}
+```
+
+**Validations**:
+- `minScore` ≤ `maxScore` per band
+- No two bands may overlap (sorted by `minScore`, each `minScore` must exceed previous `maxScore`)
+- Bands need not cover 0–100 (gaps are valid; out-of-range scores return `grade: null`)
+
+### Assessment Weights
+
+```js
+[
+  { assessmentType: 'classwork', label: 'Classwork / CAT', weight: 20 },
+  { assessmentType: 'midterm',   label: 'Mid-Term Exam',   weight: 30 },
+  { assessmentType: 'final',     label: 'End-Term Exam',   weight: 50 },
+]
+```
+
+**Validation**: weights must sum to 100 (±0.01 tolerance).  
+Valid `assessmentType` values: `classwork | homework | project | test | midterm | final | coursework | oral | practical | other`
+
+### Ranking Subject Strategy
+
+Controls which subjects count toward a student's ranking score:
+
+| Strategy | Behaviour | Use case |
+|---|---|---|
+| `all` | All subjects averaged (default) | Standard schools |
+| `best_n` | Best N subjects by final score | KCSE Kenya (best 7 of 8) |
+| `compulsory_only` | Only subjects in `compulsorySubjects[]` | Fixed-curriculum schools |
+
+```js
+// academic-config PUT body example (KCSE setup)
+{
+  rankingSubjectStrategy: 'best_n',
+  rankingN: 7,
+}
+```
+
+The `computeRankingScore()` utility in `server/utils/ranking.js` applies the strategy. Each published snapshot stores `rankingScore` (the score actually used for ranking) and `rankingSubjectsUsed[]` (which subjects were selected).
+
+### Exported Helpers
+
+```js
+const { resolveGrade, DEFAULT_GRADING_SCHEMA, mergeConfig } = require('./routes/academic-config');
+
+// Resolve a score to a grade band
+resolveGrade(74, gradingSchema);
+// → { grade: 'B', points: 3.0, descriptor: 'Good', remarks: 'Good performance' }
+
+// Merge saved config with defaults (never returns null fields)
+mergeConfig(savedDoc);  // savedDoc can be null
+```
+
+### Default Configuration
+
+```js
+// Grading: A (80-100, 4.0) → E (0-39, 0.0), 8 bands
+// Weights: Classwork 20% / Midterm 30% / Final 50%
+// Ranking: enabled, standard method, scope: class+stream+overall
+// Report: tabular template, attendance + GPA + rank + deviation shown
+// passMark: 40
+// rankingSubjectStrategy: 'all'
+// absentCountsAsZero: false
+// subjectAssignmentEnforced: false
+```
+
+---
+
+## 25. Academic Reporting Engine (v4.6+)
+
+### Overview
+
+The reporting engine aggregates grades and exam results through configured assessment weights, resolves grade bands, computes rankings, and generates immutable versioned snapshots with PDF output.
+
+**Key files**:
+- `server/routes/report-cards.js` — all report card endpoints
+- `server/utils/ranking.js` — ranking calculation utilities
+- `server/routes/academic-config.js` — config + `resolveGrade()` helper
+
+### Data Flow
+
+```
+grades collection (isPublished: true)          exam_results collection (markState: present)
+       ↓ group by studentId/subjectId/type            ↓ join exams → group same shape
+       ↓ average within type                          ↓
+       └───────────────────┬───────────────────────────┘
+                           ↓
+               _computeFinalScores()
+               × assessmentWeights (from academic-config)
+               → normalised finalScore per subject (0-100)
+                           ↓
+               resolveGrade(finalScore, gradingSchema)
+               → { grade, points, descriptor, remarks }
+                           ↓
+               computeRankingScore(subjects, strategy, n)
+               → rankingScore (filtered by strategy)
+                           ↓
+               rankStudents(classInput, method)
+               → { rank, outOf } per student
+                           ↓
+               report_card_snapshots (immutable versioned record)
+```
+
+### Endpoints
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/api/report-cards/generate` | grades:read | Live preview — not persisted |
+| POST | `/api/report-cards/publish` | grades:create + admin | Batch snapshot with versioning |
+| GET | `/api/report-cards` | grades:read | List current snapshots |
+| GET | `/api/report-cards/publish-batches` | grades:read | Audit trail of publish runs |
+| GET | `/api/report-cards/:id` | grades:read | Full snapshot detail |
+| PUT | `/api/report-cards/:id/comments` | grades:update | Save teacher/principal comments |
+| GET | `/api/report-cards/:id/pdf` | grades:read | Single-student A4 PDF |
+| GET | `/api/report-cards/bulk-pdf` | grades:read | Class-wide merged PDF |
+
+### Report Card Snapshot Schema
+
+```js
+{
+  id, version, supersedesId, superseded, supersededAt, supersededBy,
+  schoolId, studentId, studentName, admissionNo,
+  classId, className, termId, termName, academicYearId, academicYear,
+  schoolName, batchId,
+
+  // Config at publish time (immutable — config changes never corrupt old records)
+  gradingSchema, assessmentWeights, passMark, gradingType,
+  rankingSubjectStrategy, rankingN,
+
+  // Results
+  subjects: {
+    [subjectId]: {
+      finalScore, grade, points, descriptor, remarks,
+      breakdown: { classwork: 72, midterm: 68, final: 74 }
+    }
+  },
+  totalScore, averageScore, gpa, subjectCount,
+  rankingScore,          // score used for ranking (per strategy)
+  rankingSubjectsUsed,   // which subjects were selected by strategy
+
+  rankings: { class: { rank, outOf } },
+  subjectBest: { [subjectId]: true/false },   // is this student top in subject?
+
+  comments: {
+    subjectComments: { [subjectId]: 'text' },
+    classTeacherRemark, classTeacherCommentBy, classTeacherCommentAt,
+    principalRemark, principalRemarkBy, principalRemarkAt,
+  },
+
+  attendanceSummary: { daysPresent, daysAbsent, totalSchoolDays, percentage },
+  financialBlock,        // if true, PDF download blocked (admin bypass: ?force=1)
+  status,                // 'published'
+  publishedAt, publishedBy, updatedAt, updatedBy,
+}
+```
+
+### Publish Batch Record (`publish_batches`)
+
+Created before any publish work begins. Updated on completion or failure.
+
+```js
+{
+  id,           // batchId embedded in every snapshot
+  schoolId, classId, termId, academicYearId,
+  status,       // 'running' | 'completed' | 'failed'
+  startedBy, startedAt, completedAt,
+  studentCount, successCount, failedStudents,
+  failureReason,              // set on failure
+  unmoderatedExams,           // set when moderation guard fires
+  newVersions: [{ snapshotId, studentId, version }]
+}
+```
+
+**Recovery**: if a publish run is stuck in `running` after the server restarts, query `publish_batches` by `status: running` and investigate. The interrupted snapshots will be the ones pointing to that `batchId`.
+
+### Moderation Guard
+
+Before publishing, the engine checks that all exams for the class/term are in an approved state:
+
+```
+approved | locked | published | archived  → OK
+scheduled | in_progress | completed | moderated  → BLOCKED
+```
+
+Response when blocked:
+```json
+{
+  "error": "2 exam(s) for this class/term are not yet approved:\n  • \"End of Term Maths\" (completed)\n  • \"English Essay\" (moderated)",
+  "unmoderatedExams": [...]
+}
+```
+
+Override: `POST /publish` with `{ skipModerationCheck: true }` — logged in the batch record.
+
+### Versioning
+
+Every call to `/publish` for the same `classId + termId + academicYearId`:
+1. Finds existing non-superseded snapshots
+2. Creates new snapshots with `version = existing.version + 1`
+3. Marks old snapshots `superseded: true`
+4. Carries forward comments from the previous version
+
+To access old versions: `GET /api/report-cards?history=1&classId=&termId=`
+
+### PDF Generation
+
+Uses **PDFKit** (no Puppeteer, no headless browser) — runs synchronously, ~50ms per card.
+
+**DRAFT watermark**: any snapshot where `status !== 'published'` OR `superseded === true` gets a diagonal watermark at 6% opacity — "DRAFT" or "SUPERSEDED".
+
+**PDF footer** contains: generation timestamp, version number, batchId.
+
+**Bulk PDF** (`GET /bulk-pdf?classId=`): processes students in chunks of 10, each chunk fetching its attendance data independently. Financial-block students are excluded unless admin passes `?force=1`.
+
+### Exam State Machine (exams.js)
+
+```
+scheduled → in_progress → completed → moderated → approved → locked → published → archived
+         ↘                          ↘
+          cancelled                  cancelled
+```
+
+Role requirements per target state:
+- `in_progress / completed`: teacher, admin, superadmin
+- `cancelled / moderated / approved / locked / published / archived`: admin, superadmin only
+
+### Mark States (exam_results)
+
+| State | Meaning | Counts in average? | Blocks approval? |
+|---|---|---|---|
+| `present` | Valid score entered | ✅ Yes | No |
+| `ABS` | Student was absent | ❌ No (unless `absentCountsAsZero`) | No |
+| `MIS` | Mark not entered yet | ❌ No | Warning |
+| `EXM` | Exempted from averaging | ❌ No | No |
+| `INC` | Incomplete — needs resolution | ❌ No | Warning |
+
+**Backward compat**: `absent: true` in result payloads maps to `ABS`; `absent: false` maps to `present`. The `absent` boolean is stored alongside `markState` for clients that have not yet migrated.
+
+### Audit Trail (`mark_audit_log`)
+
+Every score change writes an immutable document:
+
+```js
+{
+  action,           // 'RESULT_UPDATED' | 'GRADE_UPDATED' | 'EXAM_UNLOCKED'
+  examId,           // for exam results
+  gradeId,          // for gradebook entries
+  studentId, subjectId, schoolId,
+  editedBy,         // userId of person who made the change
+  actingAs,         // teacherId if admin is entering on behalf of teacher
+  previousValue, previousState,
+  newValue,    newState,
+  reason,           // from notes field or explicit reason param
+  timestamp,
+}
+```
+
+Exam unlock (`POST /:id/unlock`) requires a mandatory `reason` field — written to both `statusHistory` on the exam and `mark_audit_log`.
+
+### Ranking Utility (`server/utils/ranking.js`)
+
+```js
+const { rankStudents, mergeRankings, bestPerSubject, computeRankingScore } = require('./utils/ranking');
+
+// Rank an array of students
+rankStudents([{ studentId: 'A', totalScore: 82 }, { studentId: 'B', totalScore: 82 }, { studentId: 'C', totalScore: 79 }], 'standard');
+// → [{ studentId: 'A', rank: 1, outOf: 3 }, { studentId: 'B', rank: 1, outOf: 3 }, { studentId: 'C', rank: 3, outOf: 3 }]
+
+// Dense method: same tie, next rank is 2 not 3
+rankStudents([...], 'dense');
+// → rank 1, 1, 2
+
+// Apply ranking strategy (KCSE best 7)
+computeRankingScore(student.subjects, 'best_n', 7, []);
+// → { rankingScore: 74.3, subjectsUsed: ['math', 'eng', 'bio', 'chem', 'geo', 'hist', 'phy'] }
+```
+
+### Financial Block
+
+`financialBlock: true` on a snapshot prevents PDF download. Set this field via a finance integration or manually via MongoDB. Admin can bypass: `GET /:id/pdf?force=1`.
+
+### Planned Extensions (next sprint)
+- **Cumulative transcript** — cross-term GPA, graduation export, signed PDF
+- **Academic year archival** — `archiveAcademicYear()` freezes all records, prevents edits
+- **Concurrent edit protection** — optimistic locking (`version` field) on exam result writes
+- **Comment templates** — configurable auto-generated remarks by grade band
+- **Notification retry** — DB-backed retry queue for email delivery failures

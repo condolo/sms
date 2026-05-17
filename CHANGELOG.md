@@ -6,6 +6,70 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.6.0] — 2026-05-17  Academic Reporting Engine — complete backend
+
+### New — `server/routes/academic-config.js` (school-level academic configuration)
+- `GET  /api/academic-config` — returns saved config merged with system defaults (no null fields)
+- `PUT  /api/academic-config` — saves config with two hard validations: grade bands must not overlap; assessment weights must sum to 100 (±0.01 tolerance)
+- `POST /api/academic-config/reset` — wipes saved config and reverts to system defaults (requires `settings:delete`)
+- `GET  /api/academic-config/grade?score=N` — resolves any numeric score to its grade band; useful for frontend previews and server-side grade assignment
+- Configurable grading schema: up to 20 grade bands with `minScore/maxScore/points/descriptor/remarks`
+- Configurable assessment weights: `classwork / homework / project / test / midterm / final / coursework / oral / practical / other`
+- Ranking settings: `enabled`, `scope` (class/stream/overall), `method` (standard 1,2,2,4 or dense 1,2,2,3), `showBestPerSubject`
+- **Ranking subject strategy** (v4.6.0): `rankingSubjectStrategy: 'all' | 'best_n' | 'compulsory_only'` + `rankingN` + `compulsorySubjects[]` — supports KCSE best-7-of-8 and compulsory-only models
+- Report card settings: `templateId`, `showAttendanceSummary`, `showGPA`, `showDeviation`, `showClassAverage`, signature labels, `footerNote`
+- Flag: `subjectAssignmentEnforced` — if true, only the assigned subject teacher can enter marks (gradual rollout)
+- Flag: `absentCountsAsZero` — default false; correct behaviour preserves absent marks out of averaging
+- Exports `resolveGrade()`, `DEFAULT_GRADING_SCHEMA`, `mergeConfig()` — shared by exams, report-cards routes
+- Default schema: A (80–100, 4.0pts) → E (0–39, 0.0pts), 8 bands
+
+### New — `server/utils/ranking.js`
+- `rankStudents(students, method)` — pure function, standard (1,2,2,4) or dense (1,2,2,3) ranking, input `[{studentId, totalScore}]`
+- `mergeRankings(studentId, scopeRanks)` — builds `{ class: {rank, outOf}, overall: {rank, outOf} }` from multiple ranked arrays
+- `bestPerSubject(studentReports)` — returns `{ [subjectId]: winnerStudentId }` across a class
+- `computeRankingScore(subjects, strategy, n, compulsorySubjects)` — filters subjects by ranking strategy before computing the score used for ranking; returns `{ rankingScore, subjectsUsed[] }`
+
+### New — `server/routes/report-cards.js` (full academic report card engine)
+- `POST /generate` — live preview: aggregates published grades + approved exam results through configured assessment weights → finalScore per subject → resolveGrade() → provisional class rankings. Not persisted.
+- `POST /publish` — admin-only batch publish with data integrity guarantees (see below)
+- `GET  /` — paginated list of current (non-superseded) snapshots; `?history=1` includes superseded
+- `GET  /publish-batches` — paginated audit trail of every publish run
+- `GET  /:id` — full snapshot detail (includes embedded grading schema, weights at publish time)
+- `PUT  /:id/comments` — role-gated comments: subject teacher → `subjectComments`, class teacher → `classTeacherRemark`, admin → `principalRemark`. Blocked on superseded snapshots.
+- `GET  /:id/pdf` — single-student A4 PDFKit report card. Checks financial block (admin bypass `?force=1`). DRAFT watermark on non-published snapshots.
+- `GET  /bulk-pdf` — class-wide merged PDF. Chunked in batches of 10 to limit memory use. Financial block filtering. Streamed as `Content-Disposition: attachment`.
+
+#### Data integrity guarantees (v4.6.0)
+- **Immutable version chain**: every publish creates a new snapshot with `version++`; old snapshot is marked `superseded:true, supersededAt, supersededBy`. Old versions are never deleted — they remain queryable via `?history=1`.
+- **Interrupt-safe batch**: a `publish_batches` document is created with `status: running` before any work begins. Updated to `completed` on success, `failed` on error (with `failureReason`). `batchId` is embedded in every snapshot for traceability.
+- **Moderation guard**: publish rejects if any exam for the class/term is not in `approved/locked/published/archived` state. Returns a list of the specific unmoderated exams. Admin can override with `skipModerationCheck: true`.
+- **Config snapshot in every record**: `gradingSchema`, `assessmentWeights`, `passMark`, `rankingSubjectStrategy` are copied into each snapshot at publish time. Config changes after publishing never corrupt historical records.
+- **DRAFT watermark**: diagonal 45° text on PDF if `status !== 'published'` or `superseded: true`. Shows "DRAFT" or "SUPERSEDED" at 6% opacity.
+- **Version badge + batchId in PDF footer**: every printed report card shows its version number and batch ID for audit trail purposes.
+- **Comments preserved across republish**: comments from the current version are carried forward to the new version; not reset on republish.
+
+### Extended — `server/routes/exams.js` (exam state machine + mark states + audit trail)
+- **State machine**: `scheduled → in_progress → completed → moderated → approved → locked → published → archived` — server enforces transition order; clients cannot skip states
+- **Role-gated transitions**: teachers can only drive `in_progress` / `completed`; admin-only for `moderated` / `approved` / `locked` / `published` / `archived`
+- **Mark states**: `present / ABS / MIS / EXM / INC` replace the old `absent: boolean`. Backward-compatible — `absent: true` still accepted and maps to `ABS`
+  - `ABS` = absent (excluded from averages unless `absentCountsAsZero: true`)
+  - `MIS` = mark not entered yet (flags for teacher action)
+  - `EXM` = exempted from averaging entirely
+  - `INC` = incomplete — warnings surfaced in response; intended to block approval
+- `POST /:id/lock` — admin only; enforces approved→locked transition; writes to `statusHistory`
+- `POST /:id/unlock` — admin only; requires mandatory `reason`; writes to `mark_audit_log`; locked→approved transition
+- `GET  /:id/status-history` — full audit trail of every status change (who, when, why)
+- Results `POST /:id/results`: blocked on `locked/published/archived`; teacher-ownership check against `exam.ownerId`; resolves mark states; writes `RESULT_UPDATED` audit entries to `mark_audit_log`; warns on `INC/MIS` marks; auto-advances exam to `completed` on first result entry
+
+### Extended — `server/routes/grades.js` (audit trail on score edits)
+- `PUT /:id` now fetches the existing record before update, writes a `GRADE_UPDATED` entry to `mark_audit_log` whenever `score` changes — captures `previousValue`, `newValue`, `editedBy`, `actingAs`, `reason`
+
+### Infrastructure
+- `server/index.js`: registered `/api/academic-config` and `/api/report-cards` routes; bumped health version to `4.5.8`; added `/reports` and `/report-cards` to SPA fallback whitelist
+- `package.json`: added `pdfkit` dependency (A4 PDF generation without Puppeteer)
+
+---
+
 ## [4.5.7] — 2026-05-05  Fix — deleted schools still "remembered" email address
 
 ### Fixed — `server/routes/platform.js` + `platform.html`
