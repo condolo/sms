@@ -95,4 +95,41 @@ function bestPerSubject(studentReports) {
   );
 }
 
-module.exports = { rankStudents, mergeRankings, bestPerSubject };
+/**
+ * Filter a student's subjects based on the school's ranking strategy,
+ * then return the totalScore to use for ranking.
+ *
+ * @param {{ [subjectId]: { finalScore: number } }} subjects
+ * @param {'all'|'best_n'|'compulsory_only'} strategy
+ * @param {number}   n                    — used with 'best_n'
+ * @param {string[]} compulsorySubjects   — used with 'compulsory_only'
+ * @returns {{ rankingScore: number, subjectsUsed: string[] }}
+ */
+function computeRankingScore(subjects, strategy = 'all', n = 7, compulsorySubjects = []) {
+  const entries = Object.entries(subjects || {})
+    .filter(([, s]) => s.finalScore != null)
+    .map(([subjectId, s]) => ({ subjectId, score: s.finalScore }));
+
+  let selected;
+
+  if (strategy === 'compulsory_only' && compulsorySubjects.length > 0) {
+    selected = entries.filter(e => compulsorySubjects.includes(e.subjectId));
+  } else if (strategy === 'best_n') {
+    selected = [...entries].sort((a, b) => b.score - a.score).slice(0, n);
+  } else {
+    // 'all' — default
+    selected = entries;
+  }
+
+  if (!selected.length) return { rankingScore: 0, subjectsUsed: [] };
+
+  const rankingScore = _round(
+    selected.reduce((s, e) => s + e.score, 0) / selected.length
+  );
+
+  return { rankingScore, subjectsUsed: selected.map(e => e.subjectId) };
+}
+
+function _round(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
+
+module.exports = { rankStudents, mergeRankings, bestPerSubject, computeRankingScore };

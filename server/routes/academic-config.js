@@ -91,6 +91,13 @@ const ConfigSchema = z.object({
   rankingMethod:       z.enum(['standard', 'dense']).optional(),
   showRankOnReport:    z.boolean().optional(),
   showBestPerSubject:  z.boolean().optional(),
+  // Ranking subject strategy — which subjects count toward rank
+  //   'all'              → all subjects averaged (default)
+  //   'best_n'           → best N subjects by score (e.g. KCSE best 7 of 8)
+  //   'compulsory_only'  → only subjects marked compulsory
+  rankingSubjectStrategy: z.enum(['all', 'best_n', 'compulsory_only']).optional(),
+  rankingN:            z.number().int().min(1).max(20).optional(),  // used with 'best_n'
+  compulsorySubjects:  z.array(z.string()).max(30).optional(),      // subjectIds for 'compulsory_only'
 
   // Mark states behaviour
   absentCountsAsZero:  z.boolean().optional(),  // default: false (correct behaviour)
@@ -139,6 +146,9 @@ function _mergeConfig(saved) {
     principalSignatureLabel:    saved?.principalSignatureLabel     ?? DEFAULT_REPORT_CONFIG.principalSignatureLabel,
     classTeacherSignatureLabel: saved?.classTeacherSignatureLabel  ?? DEFAULT_REPORT_CONFIG.classTeacherSignatureLabel,
     footerNote:            saved?.footerNote            ?? DEFAULT_REPORT_CONFIG.footerNote,
+    rankingSubjectStrategy: saved?.rankingSubjectStrategy ?? 'all',
+    rankingN:              saved?.rankingN              ?? 7,
+    compulsorySubjects:    saved?.compulsorySubjects    ?? [],
     subjectAssignmentEnforced: saved?.subjectAssignmentEnforced ?? false,
   };
 }

@@ -1,20 +1,23 @@
 /* ============================================================
-   InnoLearn — /api/report-cards
+   InnoLearn — /api/report-cards  (v2 — data-integrity hardened)
    Academic report card engine.
 
    Endpoints:
-     POST /generate              — compute live report for preview (not persisted)
-     POST /publish               — snapshot + rank whole class (admin only)
-     GET  /                      — list snapshots (filter by classId/termId/studentId)
-     GET  /:id                   — get one snapshot
+     POST /generate              — compute live preview (not persisted)
+     POST /publish               — interrupt-safe batch snapshot (admin only)
+     GET  /                      — list snapshots
+     GET  /publish-batches       — list publish batch runs
+     GET  /:id                   — get one snapshot (full detail)
      PUT  /:id/comments          — save teacher/principal comments
-     GET  /:id/pdf               — stream PDF (checks financial block)
+     GET  /:id/pdf               — stream PDF (DRAFT watermark if unpublished)
+     GET  /bulk-pdf              — merged PDF for whole class
 
-   Data flow:
-     grades collection (continuous assessment, by assessmentType)
-     + exam_results collection (exam scores, via exams.type mapping to assessmentType)
-     × academic_config.assessmentWeights (weights sum to 100)
-     → finalScore per subject → resolveGrade() → snapshot
+   Data integrity guarantees:
+     - Publish creates a new version, marks the old as superseded (never deleted)
+     - Every publish run is tracked in publish_batches (status: running/completed/failed)
+     - Moderation guard: all exams must be approved/locked/published before publish
+     - PDF shows DRAFT diagonal watermark on non-published snapshots
+     - Financial block checked before PDF download (admin bypass with ?force=1)
 
    Plan: standard | RBAC: grades:{read,create,update}
    ============================================================ */
@@ -22,13 +25,13 @@ const express = require('express');
 const { z }   = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
-const { authMiddleware }    = require('../middleware/auth');
-const { rbac }              = require('../middleware/rbac');
-const { planGate }          = require('../middleware/plan');
-const { _model }            = require('../utils/model');
+const { authMiddleware } = require('../middleware/auth');
+const { rbac }           = require('../middleware/rbac');
+const { planGate }       = require('../middleware/plan');
+const { _model }         = require('../utils/model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
-const { rankStudents, mergeRankings, bestPerSubject } = require('../utils/ranking');
-const { resolveGrade, mergeConfig }  = require('./academic-config');
+const { rankStudents, mergeRankings, bestPerSubject, computeRankingScore } = require('../utils/ranking');
+const { resolveGrade, mergeConfig } = require('./academic-config');
 
 const router = express.Router();
 const PLAN   = planGate('grades');
@@ -36,14 +39,13 @@ const PLAN   = planGate('grades');
 /* ── Helpers ────────────────────────────────────────────────── */
 function _round(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
 
-/** Load school academic config (merged with defaults) */
 async function _loadConfig(schoolId) {
   const saved = await _model('academic_config').findOne({ schoolId }).lean();
   return mergeConfig(saved);
 }
 
 /**
- * Aggregate grades (continuous assessment) for students in a class/term.
+ * Aggregate grades (continuous assessment) per student per subject per assessmentType.
  * Returns: { [studentId]: { [subjectId]: { [assessmentType]: avgPercentage } } }
  */
 async function _aggregateGrades(schoolId, classId, termId, academicYearId) {
@@ -52,19 +54,18 @@ async function _aggregateGrades(schoolId, classId, termId, academicYearId) {
   if (academicYearId) filter.academicYearId = academicYearId;
 
   const grades = await _model('grades').find(filter).lean();
-
   const grouped = {};
+
   for (const g of grades) {
     const { studentId, subjectId, assessmentType } = g;
     const pct = g.percentage ?? (g.maxScore > 0 ? _round((g.score / g.maxScore) * 100) : null);
     if (pct === null) continue;
-    grouped[studentId]               ??= {};
-    grouped[studentId][subjectId]    ??= {};
+    grouped[studentId]             ??= {};
+    grouped[studentId][subjectId]  ??= {};
     grouped[studentId][subjectId][assessmentType] ??= [];
     grouped[studentId][subjectId][assessmentType].push(pct);
   }
 
-  // Average within each assessmentType bucket
   const result = {};
   for (const [sid, subjects] of Object.entries(grouped)) {
     result[sid] = {};
@@ -79,9 +80,8 @@ async function _aggregateGrades(schoolId, classId, termId, academicYearId) {
 }
 
 /**
- * Aggregate exam results for students in a class/term.
- * Maps exam.type (e.g. 'midterm', 'final') to assessment weights.
- * Returns same shape as _aggregateGrades.
+ * Aggregate exam results per student per subject per exam type.
+ * Only includes results with valid scores (not absent/missing/exempted).
  */
 async function _aggregateExamResults(schoolId, classId, termId, academicYearId) {
   const examsFilter = {
@@ -92,12 +92,12 @@ async function _aggregateExamResults(schoolId, classId, termId, academicYearId) 
   if (academicYearId) examsFilter.academicYearId = academicYearId;
 
   const exams = await _model('exams').find(examsFilter).lean();
-  if (!exams.length) return {};
+  if (!exams.length) return { data: {}, examStatuses: [] };
 
-  const examMap = Object.fromEntries(exams.map(e => [e.id, e]));
-  const examIds = exams.map(e => e.id);
+  const examMap      = Object.fromEntries(exams.map(e => [e.id, e]));
+  const examIds      = exams.map(e => e.id);
+  const examStatuses = exams.map(e => ({ id: e.id, status: e.status, title: e.title }));
 
-  // Only include results with valid scores (not absent/missing/exempted)
   const results = await _model('exam_results').find({
     schoolId,
     examId: { $in: examIds },
@@ -108,38 +108,39 @@ async function _aggregateExamResults(schoolId, classId, termId, academicYearId) 
   const grouped = {};
   for (const r of results) {
     const exam = examMap[r.examId];
-    if (!exam || r.score == null) continue;
+    if (!exam || r.score == null || !exam.subjectId) continue;
+    const pct = exam.maxScore > 0 ? _round((r.score / exam.maxScore) * 100) : null;
+    if (pct === null) continue;
+
     const { studentId } = r;
     const subjectId = exam.subjectId;
-    const type      = exam.type; // maps to assessmentType in weights
-    const pct       = exam.maxScore > 0 ? _round((r.score / exam.maxScore) * 100) : null;
-    if (pct === null || !subjectId) continue;
+    const type      = exam.type;
 
-    grouped[studentId]             ??= {};
-    grouped[studentId][subjectId]  ??= {};
+    grouped[studentId]            ??= {};
+    grouped[studentId][subjectId] ??= {};
     grouped[studentId][subjectId][type] ??= [];
     grouped[studentId][subjectId][type].push(pct);
   }
 
-  const result = {};
+  const data = {};
   for (const [sid, subjects] of Object.entries(grouped)) {
-    result[sid] = {};
+    data[sid] = {};
     for (const [sub, types] of Object.entries(subjects)) {
-      result[sid][sub] = {};
+      data[sid][sub] = {};
       for (const [type, pcts] of Object.entries(types)) {
-        result[sid][sub][type] = _round(pcts.reduce((s, n) => s + n, 0) / pcts.length);
+        data[sid][sub][type] = _round(pcts.reduce((s, n) => s + n, 0) / pcts.length);
       }
     }
   }
-  return result;
+  return { data, examStatuses };
 }
 
 /**
- * Compute final score per student per subject using assessment weights.
- * Normalises if not all weight categories are present for a student.
+ * Compute final weighted score per student per subject.
+ * Returns: { [studentId]: { studentId, subjects, totalScore, averageScore, gpa, subjectCount } }
  */
 function _computeFinalScores(gradesData, examData, assessmentWeights, gradingSchema) {
-  const weightMap  = Object.fromEntries(assessmentWeights.map(w => [w.assessmentType, w.weight]));
+  const weightMap   = Object.fromEntries(assessmentWeights.map(w => [w.assessmentType, w.weight]));
   const allStudents = new Set([...Object.keys(gradesData), ...Object.keys(examData)]);
 
   const studentReports = {};
@@ -150,10 +151,10 @@ function _computeFinalScores(gradesData, examData, assessmentWeights, gradingSch
       ...Object.keys(examData[sid]   || {}),
     ]);
 
-    const subjects = {};
-    let totalScore  = 0;
-    let totalPoints = 0;
-    let subjectCount = 0;
+    const subjects    = {};
+    let totalScore    = 0;
+    let totalPoints   = 0;
+    let subjectCount  = 0;
 
     for (const sub of allSubjects) {
       const gradeTypes = gradesData[sid]?.[sub] || {};
@@ -165,14 +166,13 @@ function _computeFinalScores(gradesData, examData, assessmentWeights, gradingSch
 
       for (const [type, avg] of Object.entries(allTypes)) {
         const w = weightMap[type] ?? 0;
-        if (w === 0) continue; // unweighted type — skip
+        if (w === 0) continue;
         weightedSum     += avg * w;
         totalWeightUsed += w;
       }
 
-      if (totalWeightUsed === 0) continue; // no weighted data for this subject
+      if (totalWeightUsed === 0) continue;
 
-      // Normalise: scale to full 100 if only partial weight types present
       const finalScore = _round(weightedSum / totalWeightUsed);
       const gradeInfo  = resolveGrade(finalScore, gradingSchema);
 
@@ -182,24 +182,28 @@ function _computeFinalScores(gradesData, examData, assessmentWeights, gradingSch
         points:     gradeInfo.points,
         descriptor: gradeInfo.descriptor,
         remarks:    gradeInfo.remarks,
-        breakdown:  allTypes,   // { classwork: 72, midterm: 68, final: 74 }
+        breakdown:  allTypes,
       };
 
-      totalScore  += finalScore;
-      totalPoints += gradeInfo.points ?? 0;
+      totalScore   += finalScore;
+      totalPoints  += gradeInfo.points ?? 0;
       subjectCount++;
     }
 
-    const averageScore = subjectCount > 0 ? _round(totalScore / subjectCount) : 0;
-    const gpa          = subjectCount > 0 ? _round(totalPoints / subjectCount) : 0;
-
-    studentReports[sid] = { studentId: sid, subjects, totalScore: _round(totalScore), averageScore, gpa, subjectCount };
+    studentReports[sid] = {
+      studentId:    sid,
+      subjects,
+      totalScore:   _round(totalScore),
+      averageScore: subjectCount > 0 ? _round(totalScore / subjectCount) : 0,
+      gpa:          subjectCount > 0 ? _round(totalPoints / subjectCount) : 0,
+      subjectCount,
+    };
   }
 
   return studentReports;
 }
 
-/** Fetch attendance summary for a student in a class/term */
+/** Fetch attendance summary for a student */
 async function _attendanceSummary(schoolId, studentId, classId, termId, academicYearId) {
   const filter = { schoolId, studentId };
   if (classId)        filter.classId        = classId;
@@ -209,11 +213,13 @@ async function _attendanceSummary(schoolId, studentId, classId, termId, academic
   const Att = _model('attendance');
   const [present, absent, total] = await Promise.all([
     Att.countDocuments({ ...filter, status: 'present' }),
-    Att.countDocuments({ ...filter, status: 'absent'  }),
+    Att.countDocuments({ ...filter, status: 'absent' }),
     Att.countDocuments(filter),
   ]);
-  return { daysPresent: present, daysAbsent: absent, totalSchoolDays: total,
-           percentage: total > 0 ? _round((present / total) * 100) : null };
+  return {
+    daysPresent: present, daysAbsent: absent, totalSchoolDays: total,
+    percentage: total > 0 ? _round((present / total) * 100) : null,
+  };
 }
 
 /* ── Validation ─────────────────────────────────────────────── */
@@ -221,23 +227,23 @@ const GenerateSchema = z.object({
   classId:        z.string().min(1),
   termId:         z.string().optional(),
   academicYearId: z.string().optional(),
-  studentId:      z.string().optional(), // if omitted: whole class
+  studentId:      z.string().optional(),
 });
 
 const PublishSchema = z.object({
-  classId:        z.string().min(1),
-  termId:         z.string().optional(),
-  academicYearId: z.string().optional(),
-  // Optional metadata to embed in snapshots
-  className:      z.string().max(100).optional(),
-  termName:       z.string().max(100).optional(),
-  academicYear:   z.string().max(50).optional(),
-  schoolName:     z.string().max(200).optional(),
+  classId:         z.string().min(1),
+  termId:          z.string().optional(),
+  academicYearId:  z.string().optional(),
+  className:       z.string().max(100).optional(),
+  termName:        z.string().max(100).optional(),
+  academicYear:    z.string().max(50).optional(),
+  schoolName:      z.string().max(200).optional(),
+  // If true, proceed even if some exams are not fully approved
+  skipModerationCheck: z.boolean().default(false),
 });
 
 const CommentSchema = z.object({
-  // Subject-level teacher comments: { [subjectId]: string }
-  subjectComments: z.record(z.string().max(500)).optional(),
+  subjectComments:    z.record(z.string().max(500)).optional(),
   classTeacherRemark: z.string().max(1000).optional(),
   principalRemark:    z.string().max(1000).optional(),
 });
@@ -249,7 +255,7 @@ function _validate(schema, data) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   POST /api/report-cards/generate  — live preview (no persist)
+   POST /generate  — live preview (no persist)
    ══════════════════════════════════════════════════════════════ */
 router.post('/generate', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
   try {
@@ -260,124 +266,157 @@ router.post('/generate', authMiddleware, PLAN, rbac('grades', 'read'), async (re
     const { classId, termId, academicYearId, studentId } = data;
     const config = await _loadConfig(schoolId);
 
-    const [gradesData, examData] = await Promise.all([
+    const [gradesData, { data: examData }] = await Promise.all([
       _aggregateGrades(schoolId, classId, termId, academicYearId),
       _aggregateExamResults(schoolId, classId, termId, academicYearId),
     ]);
 
-    const allReports = _computeFinalScores(gradesData, examData, config.assessmentWeights, config.gradingSchema);
+    const allReports  = _computeFinalScores(gradesData, examData, config.assessmentWeights, config.gradingSchema);
+    const classInput  = Object.values(allReports).map(r => ({
+      studentId:    r.studentId,
+      totalScore:   computeRankingScore(r.subjects, config.rankingSubjectStrategy, config.rankingN, config.compulsorySubjects).rankingScore,
+    }));
+    const classRanks  = rankStudents(classInput, config.rankingMethod);
 
-    // Compute provisional class rankings (all students, so single student sees rank)
-    const classInput = Object.values(allReports).map(r => ({ studentId: r.studentId, totalScore: r.totalScore }));
-    const classRanks = rankStudents(classInput, config.rankingMethod);
-
-    // If a single studentId was requested, filter to just that student
     const targets = studentId
       ? (allReports[studentId] ? { [studentId]: allReports[studentId] } : {})
       : allReports;
 
-    const response = Object.values(targets || {}).map(r => ({
+    const students = Object.values(targets).map(r => ({
       ...r,
-      rankings: config.rankingEnabled
-        ? mergeRankings(r.studentId, { class: classRanks })
-        : {},
+      rankingScore: computeRankingScore(r.subjects, config.rankingSubjectStrategy, config.rankingN, config.compulsorySubjects).rankingScore,
+      rankings: config.rankingEnabled ? mergeRankings(r.studentId, { class: classRanks }) : {},
     }));
 
     return ok(res, {
-      generated: response.length,
+      generated: students.length,
       config: {
-        gradingType:       config.gradingType,
-        passMark:          config.passMark,
-        weightingEnabled:  config.weightingEnabled,
+        gradingType: config.gradingType, passMark: config.passMark,
+        rankingEnabled: config.rankingEnabled, rankingSubjectStrategy: config.rankingSubjectStrategy,
         assessmentWeights: config.assessmentWeights,
-        rankingEnabled:    config.rankingEnabled,
       },
-      students: response,
+      students,
     });
   } catch (err) { console.error('[report-cards/generate]', err); return E.serverError(res); }
 });
 
 /* ══════════════════════════════════════════════════════════════
-   POST /api/report-cards/publish  — snapshot whole class (admin)
+   POST /publish  — interrupt-safe versioned batch snapshot
    ══════════════════════════════════════════════════════════════ */
 router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (req, res) => {
+  const { schoolId, userId, role } = req.jwtUser;
+  if (!['admin', 'superadmin'].includes(role)) return E.forbidden(res, 'Only admins can publish report cards');
+
+  const { data, error } = _validate(PublishSchema, req.body);
+  if (error) return E.validation(res, error);
+
+  const { classId, termId, academicYearId, className, termName, academicYear, schoolName, skipModerationCheck } = data;
+  const now     = new Date().toISOString();
+  const batchId = uuidv4();
+
+  // ── Step 1: Create batch record (interrupt-safe anchor) ──────
+  const Batches = _model('publish_batches');
+  await Batches.create({
+    id: batchId, schoolId, classId, termId: termId || null,
+    academicYearId: academicYearId || null,
+    status: 'running', startedBy: userId, startedAt: now,
+    studentCount: 0, successCount: 0, failedStudents: [],
+  });
+
   try {
-    const { schoolId, userId, role } = req.jwtUser;
-    if (!['admin', 'superadmin'].includes(role)) {
-      return E.forbidden(res, 'Only admins can publish report cards');
+    const config = await _loadConfig(schoolId);
+
+    // ── Step 2: Moderation guard ─────────────────────────────
+    const { data: examData, examStatuses } = await _aggregateExamResults(schoolId, classId, termId, academicYearId);
+
+    if (!skipModerationCheck) {
+      const APPROVED_STATES = ['approved', 'locked', 'published', 'archived'];
+      const unmoderated = examStatuses.filter(e => !APPROVED_STATES.includes(e.status));
+      if (unmoderated.length > 0) {
+        await Batches.updateOne({ id: batchId }, {
+          status: 'failed',
+          failureReason: `${unmoderated.length} exam(s) not yet approved`,
+          unmoderatedExams: unmoderated.map(e => ({ id: e.id, title: e.title, status: e.status })),
+          completedAt: now,
+        });
+        return E.badRequest(res, [
+          `${unmoderated.length} exam(s) for this class/term are not yet approved:`,
+          ...unmoderated.map(e => `  • "${e.title}" (${e.status})`),
+          'Approve all exams first, or pass skipModerationCheck: true to override.'
+        ].join('\n'), { unmoderatedExams: unmoderated });
+      }
     }
 
-    const { data, error } = _validate(PublishSchema, req.body);
-    if (error) return E.validation(res, error);
-
-    const { classId, termId, academicYearId, className, termName, academicYear, schoolName } = data;
-    const config = await _loadConfig(schoolId);
-    const now    = new Date().toISOString();
-
-    // Aggregate all data for the class
-    const [gradesData, examData] = await Promise.all([
-      _aggregateGrades(schoolId, classId, termId, academicYearId),
-      _aggregateExamResults(schoolId, classId, termId, academicYearId),
-    ]);
-
+    // ── Step 3: Aggregate all data ───────────────────────────
+    const gradesData = await _aggregateGrades(schoolId, classId, termId, academicYearId);
     const allReports = _computeFinalScores(gradesData, examData, config.assessmentWeights, config.gradingSchema);
 
     if (Object.keys(allReports).length === 0) {
+      await Batches.updateOne({ id: batchId }, { status: 'failed', failureReason: 'No graded results found', completedAt: now });
       return E.badRequest(res, 'No graded results found for this class/term — nothing to publish');
     }
 
-    // Compute rankings per enabled scope
-    const classInput   = Object.values(allReports).map(r => ({ studentId: r.studentId, totalScore: r.totalScore }));
-    const classRanks   = rankStudents(classInput, config.rankingMethod);
-
-    // Best per subject
-    const subjectBest  = config.showBestPerSubject
+    // ── Step 4: Compute rankings with configured strategy ────
+    const classInput = Object.values(allReports).map(r => ({
+      studentId:  r.studentId,
+      totalScore: computeRankingScore(r.subjects, config.rankingSubjectStrategy, config.rankingN, config.compulsorySubjects).rankingScore,
+    }));
+    const classRanks = rankStudents(classInput, config.rankingMethod);
+    const subjectBest = config.showBestPerSubject
       ? bestPerSubject(Object.values(allReports).map(r => ({ studentId: r.studentId, subjects: r.subjects })))
       : {};
 
-    // Load existing comments for this class/term (so publish preserves them)
+    // ── Step 5: Fetch existing live snapshots to build version chain ──
     const existingSnaps = await _model('report_card_snapshots').find({
-      schoolId, classId, termId: termId || null, academicYearId: academicYearId || null
+      schoolId, classId,
+      termId: termId || null, academicYearId: academicYearId || null,
+      superseded: { $ne: true }   // only current (non-superseded) versions
     }).lean();
-    const commentMap = Object.fromEntries(existingSnaps.map(s => [s.studentId, s.comments || {}]));
+    const existingMap = Object.fromEntries(existingSnaps.map(s => [s.studentId, s]));
 
-    // Fetch student info for denormalization
+    // ── Step 6: Fetch student info for denormalization ───────
     const studentIds = Object.keys(allReports);
-    const students   = await _model('students').find({
-      schoolId,
+    const students   = await _model('students').find({ schoolId,
       $or: [
         { id: { $in: studentIds } },
-        { _id: { $in: studentIds.filter(s => s.match(/^[0-9a-f]{24}$/)) } }
+        { _id: { $in: studentIds.filter(s => /^[0-9a-f]{24}$/i.test(s)) } }
       ]
     }).lean();
     const studentMap = Object.fromEntries(students.map(s => [s.id || s._id.toString(), s]));
 
-    // Build snapshots
-    const snapshots = Object.values(allReports).map(r => {
-      const stu = studentMap[r.studentId] || {};
-      const rankings = config.rankingEnabled
-        ? mergeRankings(r.studentId, { class: classRanks })
-        : {};
+    // ── Step 7: Build new snapshot docs + supersession ops ───
+    const newSnaps   = [];
+    const supersedeOps = [];
 
-      return {
-        id:             uuidv4(),
+    for (const r of Object.values(allReports)) {
+      const stu  = studentMap[r.studentId] || {};
+      const prev = existingMap[r.studentId];
+      const newId = uuidv4();
+
+      const { rankingScore, subjectsUsed } = computeRankingScore(
+        r.subjects, config.rankingSubjectStrategy, config.rankingN, config.compulsorySubjects
+      );
+
+      const snap = {
+        id:             newId,
+        version:        prev ? (prev.version || 1) + 1 : 1,
+        supersedesId:   prev?.id || null,
         schoolId,
         studentId:      r.studentId,
         studentName:    [stu.firstName, stu.lastName].filter(Boolean).join(' ') || r.studentId,
         admissionNo:    stu.admissionNumber || stu.admissionNo || '',
-        classId,
-        className:      className || '',
-        termId:         termId         || null,
-        termName:       termName       || '',
-        academicYearId: academicYearId || null,
-        academicYear:   academicYear   || '',
-        schoolName:     schoolName     || '',
+        classId,        className: className || '',
+        termId:         termId         || null,  termName:  termName  || '',
+        academicYearId: academicYearId || null,  academicYear: academicYear || '',
+        schoolName:     schoolName || '',
 
-        // Snapshot of school config at publish time (immutable)
-        gradingSchema:      config.gradingSchema,
-        assessmentWeights:  config.assessmentWeights,
-        passMark:           config.passMark,
-        gradingType:        config.gradingType,
+        // Config snapshot — immutable, preserved for this version
+        gradingSchema:     config.gradingSchema,
+        assessmentWeights: config.assessmentWeights,
+        passMark:          config.passMark,
+        gradingType:       config.gradingType,
+        rankingSubjectStrategy: config.rankingSubjectStrategy,
+        rankingN:          config.rankingN,
 
         // Results
         subjects:     r.subjects,
@@ -385,102 +424,142 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
         averageScore: r.averageScore,
         gpa:          r.gpa,
         subjectCount: r.subjectCount,
+        rankingScore,            // score actually used for ranking (per strategy)
+        rankingSubjectsUsed: subjectsUsed,
 
-        // Rankings (snapshot of class at publish time)
-        rankings,
+        rankings: config.rankingEnabled
+          ? mergeRankings(r.studentId, { class: classRanks })
+          : {},
 
-        // Best in subject flags
         subjectBest: Object.fromEntries(
           Object.entries(subjectBest).map(([sub, winnerId]) => [sub, winnerId === r.studentId])
         ),
 
-        // Comments — preserved from previous snapshot or empty
-        comments: commentMap[r.studentId] || {
-          subjectComments:    {},
-          classTeacherRemark: '',
-          principalRemark:    '',
-        },
+        // Carry forward comments from previous version
+        comments: prev?.comments || { subjectComments: {}, classTeacherRemark: '', principalRemark: '' },
 
-        // Attendance — loaded lazily; populated on first PDF request or separately
-        attendanceSummary: null,
-
-        status:      'published',
-        publishedAt: now,
-        publishedBy: userId,
-        updatedAt:   now,
-        updatedBy:   userId,
+        attendanceSummary: null,     // loaded on first PDF request
+        financialBlock:    false,    // can be set separately via finance integration
+        status:            'published',
+        publishedAt:       now,
+        publishedBy:       userId,
+        batchId,
+        superseded:        false,
+        updatedAt:         now,
+        updatedBy:         userId,
       };
+
+      newSnaps.push(snap);
+
+      // Queue supersession of previous version
+      if (prev) {
+        supersedeOps.push({
+          updateOne: {
+            filter: { id: prev.id },
+            update: { $set: { superseded: true, supersededAt: now, supersededBy: newId } },
+          }
+        });
+      }
+    }
+
+    // ── Step 8: Persist — insert new snaps, then supersede old ─
+    const Snaps  = _model('report_card_snapshots');
+    const inserts = newSnaps.map(s => ({ insertOne: { document: s } }));
+    await Snaps.bulkWrite(inserts, { ordered: false });
+    if (supersedeOps.length) {
+      await Snaps.bulkWrite(supersedeOps, { ordered: false });
+    }
+
+    // ── Step 9: Mark batch completed ────────────────────────
+    await Batches.updateOne({ id: batchId }, {
+      status: 'completed', completedAt: now,
+      studentCount: newSnaps.length, successCount: newSnaps.length,
+      newVersions: newSnaps.map(s => ({ snapshotId: s.id, studentId: s.studentId, version: s.version })),
     });
 
-    // Upsert all snapshots (overwrite if already published for this student/class/term)
-    const Snaps = _model('report_card_snapshots');
-    const ops   = snapshots.map(snap => ({
-      replaceOne: {
-        filter:      { schoolId, studentId: snap.studentId, classId, termId: termId || null, academicYearId: academicYearId || null },
-        replacement: snap,
-        upsert:      true,
-      }
-    }));
-
-    const result = await Snaps.bulkWrite(ops, { ordered: false });
-
-    console.log(`[REPORT-CARDS] Published ${snapshots.length} report cards for class ${classId} by ${userId}`);
+    console.log(`[REPORT-CARDS] Published ${newSnaps.length} report cards (batch ${batchId}) by ${userId}`);
     return ok(res, {
-      published:  snapshots.length,
-      upserted:   result.upsertedCount,
-      modified:   result.modifiedCount,
+      batchId,
+      published:   newSnaps.length,
+      versioned:   supersedeOps.length,  // how many replaced prior versions
       classId,
       termId,
       publishedAt: now,
     }, null, 201);
-  } catch (err) { console.error('[report-cards/publish]', err); return E.serverError(res); }
+
+  } catch (err) {
+    // Interrupt-safe: mark batch as failed
+    await _model('publish_batches').updateOne({ id: batchId }, {
+      status: 'failed', failureReason: err.message, completedAt: new Date().toISOString()
+    }).catch(() => {});
+    console.error('[report-cards/publish]', err);
+    return E.serverError(res);
+  }
 });
 
 /* ══════════════════════════════════════════════════════════════
-   GET /api/report-cards  — list snapshots
+   GET /publish-batches  — list publish runs (audit trail)
+   ══════════════════════════════════════════════════════════════ */
+router.get('/publish-batches', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const { page, limit, skip } = parsePagination(req.query);
+
+    const filter = { schoolId };
+    if (req.query.classId) filter.classId = req.query.classId;
+    if (req.query.termId)  filter.termId  = req.query.termId;
+
+    const Batches = _model('publish_batches');
+    const [docs, total] = await Promise.all([
+      Batches.find(filter).sort({ startedAt: -1 }).skip(skip).limit(limit).select('-newVersions -__v').lean(),
+      Batches.countDocuments(filter),
+    ]);
+    return ok(res, docs, paginate(page, limit, total));
+  } catch (err) { console.error('[publish-batches GET]', err); return E.serverError(res); }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   GET /  — list snapshots (current versions only)
    ══════════════════════════════════════════════════════════════ */
 router.get('/', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
 
-    const filter = { schoolId };
+    const filter = { schoolId, superseded: { $ne: true } };
     if (req.query.classId)        filter.classId        = req.query.classId;
     if (req.query.termId)         filter.termId         = req.query.termId;
     if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
     if (req.query.studentId)      filter.studentId      = req.query.studentId;
     if (req.query.status)         filter.status         = req.query.status;
+    // ?history=1 → include superseded versions too
+    if (req.query.history === '1') delete filter.superseded;
 
     const Snaps = _model('report_card_snapshots');
     const [docs, total] = await Promise.all([
-      Snaps.find(filter)
-        .sort({ publishedAt: -1 })
-        .skip(skip).limit(limit)
-        .select('-gradingSchema -assessmentWeights -subjects -__v')
-        .lean(),
+      Snaps.find(filter).sort({ publishedAt: -1 }).skip(skip).limit(limit)
+        .select('-gradingSchema -assessmentWeights -subjects -__v').lean(),
       Snaps.countDocuments(filter),
     ]);
-
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) { console.error('[report-cards GET]', err); return E.serverError(res); }
 });
 
 /* ══════════════════════════════════════════════════════════════
-   GET /api/report-cards/:id  — get one snapshot (full detail)
+   GET /:id  — full snapshot
    ══════════════════════════════════════════════════════════════ */
 router.get('/:id', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await _model('report_card_snapshots')
-      .findOne({ id: req.params.id, schoolId })
-      .select('-__v').lean();
+      .findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Report card snapshot not found');
     return ok(res, doc);
   } catch (err) { console.error('[report-cards GET/:id]', err); return E.serverError(res); }
 });
 
 /* ══════════════════════════════════════════════════════════════
-   PUT /api/report-cards/:id/comments  — save comments
+   PUT /:id/comments  — save comments (role-gated)
    ══════════════════════════════════════════════════════════════ */
 router.put('/:id/comments', authMiddleware, PLAN, rbac('grades', 'update'), async (req, res) => {
   try {
@@ -490,25 +569,18 @@ router.put('/:id/comments', authMiddleware, PLAN, rbac('grades', 'update'), asyn
 
     const snap = await _model('report_card_snapshots').findOne({ id: req.params.id, schoolId }).lean();
     if (!snap) return E.notFound(res, 'Report card snapshot not found');
+    if (snap.superseded) return E.badRequest(res, 'Cannot edit comments on a superseded report card version. Use the current version.');
 
-    const now = new Date().toISOString();
-    const existing = snap.comments || {};
-
-    // Merge: teachers can only update subjectComments; admin can update all
-    const merged = { ...existing };
+    const now    = new Date().toISOString();
+    const merged = { ...(snap.comments || {}) };
 
     if (data.subjectComments) {
-      merged.subjectComments = { ...(existing.subjectComments || {}), ...data.subjectComments };
+      merged.subjectComments = { ...(merged.subjectComments || {}), ...data.subjectComments };
     }
     if (data.classTeacherRemark != null) {
-      if (!['admin', 'superadmin'].includes(role)) {
-        // Class teachers can set their own remark
-        merged.classTeacherRemark = data.classTeacherRemark;
-        merged.classTeacherCommentBy = userId;
-        merged.classTeacherCommentAt = now;
-      } else {
-        merged.classTeacherRemark   = data.classTeacherRemark;
-      }
+      merged.classTeacherRemark   = data.classTeacherRemark;
+      merged.classTeacherCommentBy = userId;
+      merged.classTeacherCommentAt = now;
     }
     if (data.principalRemark != null) {
       if (!['admin', 'superadmin'].includes(role)) {
@@ -529,42 +601,225 @@ router.put('/:id/comments', authMiddleware, PLAN, rbac('grades', 'update'), asyn
   } catch (err) { console.error('[report-cards/:id/comments PUT]', err); return E.serverError(res); }
 });
 
+/* ── PDF builder (shared between single and bulk) ───────────── */
+function _buildPDFPage(doc, snap, config, attendance, isFirst = true) {
+  if (!isFirst) doc.addPage();
+
+  const PAGE_WIDTH = doc.page.width  - 80;
+  const GRAY       = '#555555';
+  const DARK       = '#1a1a2e';
+  const ACCENT     = '#2563eb';
+  const LIGHT_GRAY = '#f3f4f6';
+  const BORDER     = '#d1d5db';
+  const COL_GAP    = 5;
+
+  const isDraft = snap.status !== 'published' || snap.superseded;
+
+  /* ── DRAFT WATERMARK ── */
+  if (isDraft) {
+    doc.save()
+       .translate(doc.page.width / 2, doc.page.height / 2)
+       .rotate(-45)
+       .fontSize(90).fillOpacity(0.06).fillColor('#cc0000')
+       .text(snap.superseded ? 'SUPERSEDED' : 'DRAFT', -200, -45, { width: 400, align: 'center' })
+       .restore();
+  }
+
+  /* ── HEADER ── */
+  doc.rect(40, 40, PAGE_WIDTH, 60).fill(DARK);
+  doc.fillColor('white').fontSize(17).font('Helvetica-Bold')
+     .text(snap.schoolName || 'School Management System', 50, 52, { width: PAGE_WIDTH - 20 });
+  doc.fontSize(9).font('Helvetica')
+     .text('ACADEMIC REPORT CARD' + (isDraft ? '   [DRAFT — NOT OFFICIAL]' : ''), 50, 75, { width: PAGE_WIDTH - 20 });
+  doc.fillColor(DARK);
+
+  /* ── STUDENT INFO ── */
+  const infoTop = 115;
+  doc.rect(40, infoTop, PAGE_WIDTH, 70).fill(LIGHT_GRAY).stroke(BORDER);
+  const c1 = 50, c2 = 280;
+
+  doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('STUDENT NAME', c1, infoTop + 8);
+  doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold')
+     .text(snap.studentName || '—', c1, infoTop + 19, { width: 200 });
+
+  doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('ADMISSION NO.', c2, infoTop + 8);
+  doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold')
+     .text(snap.admissionNo || '—', c2, infoTop + 19);
+
+  doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('CLASS', c1, infoTop + 42);
+  doc.fillColor(DARK).fontSize(10).font('Helvetica')
+     .text(snap.className || '—', c1, infoTop + 52);
+
+  doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('TERM / ACADEMIC YEAR', c2, infoTop + 42);
+  doc.fillColor(DARK).fontSize(10).font('Helvetica')
+     .text([snap.termName, snap.academicYear].filter(Boolean).join(' — ') || '—', c2, infoTop + 52);
+
+  /* ── VERSION BADGE (if versioned) ── */
+  if (snap.version > 1 || snap.superseded) {
+    const badge = snap.superseded
+      ? `v${snap.version} (Superseded)`
+      : `v${snap.version}`;
+    doc.fillColor(snap.superseded ? '#dc2626' : '#059669').fontSize(8).font('Helvetica-Bold')
+       .text(badge, PAGE_WIDTH - 40, infoTop + 8, { width: 70, align: 'right' });
+  }
+
+  /* ── RESULTS TABLE ── */
+  const tableTop  = infoTop + 85;
+  const colWidths = [175, 52, 52, 58, 42, 48, 88];
+  const colLabels = ['Subject', 'Classwork\n(%)', 'Mid-Term\n(%)', 'End-Term\n(%)', 'Score', 'Grade', 'Remarks'];
+  const colX = [];
+  let cx = 40;
+  for (const w of colWidths) { colX.push(cx); cx += w + COL_GAP; }
+
+  doc.rect(40, tableTop, PAGE_WIDTH, 22).fill(ACCENT);
+  doc.fillColor('white').fontSize(8).font('Helvetica-Bold');
+  colLabels.forEach((label, i) => {
+    doc.text(label, colX[i] + 3, tableTop + 5, { width: colWidths[i] - 3, align: 'center' });
+  });
+
+  const weights    = snap.assessmentWeights || config.assessmentWeights;
+  const caTypes    = weights.filter(w => !['midterm', 'final'].includes(w.assessmentType)).map(w => w.assessmentType);
+  const midTypes   = ['midterm'];
+  const finalTypes = ['final'];
+
+  function _pick(breakdown, types) {
+    const vals = types.map(t => breakdown?.[t]).filter(v => v != null);
+    return vals.length ? _round(vals.reduce((s, n) => s + n, 0) / vals.length).toFixed(1) : '—';
+  }
+
+  let rowY  = tableTop + 22;
+  const passMark = snap.passMark ?? config.passMark ?? 40;
+
+  Object.entries(snap.subjects || {}).forEach(([subjectId, sub], idx) => {
+    const rowBg = idx % 2 === 0 ? 'white' : LIGHT_GRAY;
+    const rowH  = 18;
+    doc.rect(40, rowY, PAGE_WIDTH, rowH).fill(rowBg);
+
+    const failed  = sub.finalScore != null && sub.finalScore < passMark;
+    const isBest  = snap.subjectBest?.[subjectId];
+    const isUsed  = snap.rankingSubjectsUsed?.includes(subjectId);
+
+    doc.fillColor(failed ? '#dc2626' : DARK).fontSize(8.5).font('Helvetica');
+    doc.text(
+      (isBest ? '★ ' : '') + subjectId + (isUsed && snap.rankingSubjectStrategy !== 'all' ? ' ●' : ''),
+      colX[0] + 3, rowY + 5, { width: colWidths[0] - 3 }
+    );
+    doc.text(_pick(sub.breakdown, caTypes),    colX[1] + 3, rowY + 5, { width: colWidths[1] - 3, align: 'center' });
+    doc.text(_pick(sub.breakdown, midTypes),   colX[2] + 3, rowY + 5, { width: colWidths[2] - 3, align: 'center' });
+    doc.text(_pick(sub.breakdown, finalTypes), colX[3] + 3, rowY + 5, { width: colWidths[3] - 3, align: 'center' });
+    doc.text(sub.finalScore?.toFixed(1) ?? '—', colX[4] + 3, rowY + 5, { width: colWidths[4] - 3, align: 'center' });
+
+    doc.font('Helvetica-Bold')
+       .fillColor(sub.grade ? (failed ? '#dc2626' : ACCENT) : GRAY)
+       .text(sub.grade || '—', colX[5] + 3, rowY + 5, { width: colWidths[5] - 3, align: 'center' });
+
+    doc.font('Helvetica').fillColor(GRAY).fontSize(7.5)
+       .text(sub.remarks || sub.descriptor || '', colX[6] + 3, rowY + 5, { width: colWidths[6] - 3 });
+
+    rowY += rowH;
+  });
+
+  doc.rect(40, tableTop, PAGE_WIDTH, rowY - tableTop).stroke(BORDER);
+
+  /* ── RANKING STRATEGY NOTE ── */
+  if (snap.rankingSubjectStrategy && snap.rankingSubjectStrategy !== 'all') {
+    doc.fillColor(GRAY).fontSize(7).font('Helvetica')
+       .text(
+         `● Subjects counted toward rank (${snap.rankingSubjectStrategy === 'best_n' ? `Best ${snap.rankingN}` : 'Compulsory only'})`,
+         40, rowY + 3, { width: PAGE_WIDTH }
+       );
+    rowY += 12;
+  }
+
+  /* ── SUMMARY ── */
+  rowY += 6;
+  doc.rect(40, rowY, PAGE_WIDTH, 28).fill('#eff6ff').stroke(BORDER);
+  doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold');
+  doc.text(`Total Score: ${snap.totalScore?.toFixed(1) ?? '—'}`, 50, rowY + 5);
+  doc.text(`Average: ${snap.averageScore?.toFixed(1) ?? '—'}%`, 160, rowY + 5);
+  if (config.showGPA) doc.text(`GPA: ${snap.gpa?.toFixed(2) ?? '—'}`, 265, rowY + 5);
+  if (config.rankingEnabled && snap.rankings?.class) {
+    const r = snap.rankings.class;
+    doc.fillColor(ACCENT).text(`Class Rank: ${r.rank} / ${r.outOf}`, 355, rowY + 5);
+  }
+  rowY += 28;
+
+  /* ── ATTENDANCE ── */
+  if (config.showAttendanceSummary && attendance) {
+    rowY += 8;
+    doc.rect(40, rowY, PAGE_WIDTH, 26).fill(LIGHT_GRAY).stroke(BORDER);
+    doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('ATTENDANCE', 50, rowY + 4);
+    doc.fillColor(DARK).fontSize(9).font('Helvetica')
+       .text(
+         `Present: ${attendance.daysPresent}   Absent: ${attendance.daysAbsent}   ` +
+         `Total Days: ${attendance.totalSchoolDays}` +
+         (attendance.percentage != null ? `   Attendance: ${attendance.percentage}%` : ''),
+         50, rowY + 14, { width: PAGE_WIDTH - 20 }
+       );
+    rowY += 26;
+  }
+
+  /* ── COMMENTS ── */
+  const comments = snap.comments || {};
+  rowY += 12;
+  doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text("CLASS TEACHER'S REMARK:", 40, rowY);
+  rowY += 12;
+  doc.rect(40, rowY, PAGE_WIDTH, 30).fill('white').stroke(BORDER);
+  doc.fillColor(DARK).fontSize(9).font('Helvetica')
+     .text(comments.classTeacherRemark || '— No remark entered —', 46, rowY + 9, { width: PAGE_WIDTH - 12 });
+  rowY += 38;
+
+  doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text("PRINCIPAL'S COMMENT:", 40, rowY);
+  rowY += 12;
+  doc.rect(40, rowY, PAGE_WIDTH, 30).fill('white').stroke(BORDER);
+  doc.fillColor(DARK).fontSize(9).font('Helvetica')
+     .text(comments.principalRemark || '— No comment entered —', 46, rowY + 9, { width: PAGE_WIDTH - 12 });
+  rowY += 42;
+
+  /* ── SIGNATURES ── */
+  const sigY = rowY + 8;
+  const sigW = (PAGE_WIDTH - 20) / 2;
+  doc.moveTo(40, sigY + 20).lineTo(40 + sigW - 10, sigY + 20).stroke(DARK);
+  doc.moveTo(40 + sigW + 10, sigY + 20).lineTo(40 + PAGE_WIDTH, sigY + 20).stroke(DARK);
+  doc.fillColor(GRAY).fontSize(8).font('Helvetica')
+     .text(config.classTeacherSignatureLabel || 'Class Teacher', 40, sigY + 24, { width: sigW })
+     .text(config.principalSignatureLabel || 'Principal', 40 + sigW + 10, sigY + 24, { width: sigW });
+
+  /* ── FOOTER ── */
+  const footerY = doc.page.height - 55;
+  doc.rect(40, footerY, PAGE_WIDTH, 0.5).fill(BORDER);
+  doc.fillColor(GRAY).fontSize(7.5).font('Helvetica')
+     .text(config.footerNote || 'This report card is computer-generated.', 40, footerY + 6, { width: PAGE_WIDTH, align: 'center' })
+     .text(`Generated: ${new Date().toUTCString()}  |  Version ${snap.version || 1}  |  Batch: ${snap.batchId || '—'}`, 40, footerY + 18, { width: PAGE_WIDTH, align: 'center' });
+}
+
 /* ══════════════════════════════════════════════════════════════
-   GET /api/report-cards/:id/pdf  — generate PDF
+   GET /:id/pdf  — single student PDF
    ══════════════════════════════════════════════════════════════ */
 router.get('/:id/pdf', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
+    const { schoolId, role } = req.jwtUser;
 
     const snap = await _model('report_card_snapshots').findOne({ id: req.params.id, schoolId }).lean();
     if (!snap) return E.notFound(res, 'Report card snapshot not found');
 
-    // Financial block check — admin can bypass with ?force=1
     if (snap.financialBlock && req.query.force !== '1' && !['admin', 'superadmin'].includes(role)) {
       return res.status(403).json({
-        error: 'Report card download is blocked — outstanding fee balance. Contact the school office.',
+        error: 'Report card download blocked — outstanding fee balance. Contact the school office.',
         financialBlock: true
       });
     }
 
-    // Lazy-load attendance if not already in snapshot
     let attendance = snap.attendanceSummary;
     if (!attendance) {
-      attendance = await _attendanceSummary(
-        schoolId, snap.studentId, snap.classId, snap.termId, snap.academicYearId
-      );
+      attendance = await _attendanceSummary(schoolId, snap.studentId, snap.classId, snap.termId, snap.academicYearId);
     }
 
-    // Load academic config for report display settings
     const config = await _loadConfig(schoolId);
 
-    // ── Build PDF ───────────────────────────────────────────────
     let PDFDocument;
-    try {
-      PDFDocument = require('pdfkit');
-    } catch {
-      return res.status(501).json({ error: 'PDF generation is not available — pdfkit is not installed. Run: npm install pdfkit' });
-    }
+    try { PDFDocument = require('pdfkit'); }
+    catch { return res.status(501).json({ error: 'pdfkit not installed. Run: npm install pdfkit' }); }
 
     const doc     = new PDFDocument({ margin: 40, size: 'A4' });
     const buffers = [];
@@ -572,178 +827,88 @@ router.get('/:id/pdf', authMiddleware, PLAN, rbac('grades', 'read'), async (req,
     doc.on('end', () => {
       const pdf = Buffer.concat(buffers);
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename="report-card-${snap.studentId}.pdf"`);
+      res.setHeader('Content-Disposition', `inline; filename="report-${snap.studentId}-v${snap.version || 1}.pdf"`);
       res.setHeader('Content-Length', pdf.length);
       res.send(pdf);
     });
 
-    const PAGE_WIDTH = doc.page.width  - 80; // margins
-    const COL_GAP    = 6;
-    const GRAY       = '#555555';
-    const DARK       = '#1a1a2e';
-    const ACCENT     = '#2563eb';
-    const LIGHT_GRAY = '#f3f4f6';
-    const BORDER     = '#d1d5db';
+    _buildPDFPage(doc, snap, config, attendance, true);
+    doc.end();
 
-    /* ── HEADER ── */
-    doc.rect(40, 40, PAGE_WIDTH, 60).fill(DARK);
-    doc.fillColor('white').fontSize(18).font('Helvetica-Bold')
-       .text(snap.schoolName || 'School Management System', 50, 52, { width: PAGE_WIDTH - 20 });
-    doc.fontSize(10).font('Helvetica')
-       .text('ACADEMIC REPORT CARD', 50, 75, { width: PAGE_WIDTH - 20 });
-    doc.fillColor(DARK);
-    doc.moveDown(0.5);
+  } catch (err) { console.error('[report-cards/:id/pdf]', err); return E.serverError(res); }
+});
 
-    /* ── STUDENT INFO BOX ── */
-    const infoTop = 115;
-    doc.rect(40, infoTop, PAGE_WIDTH, 70).fill(LIGHT_GRAY).stroke(BORDER);
+/* ══════════════════════════════════════════════════════════════
+   GET /bulk-pdf  — merged PDF for whole class (chunked)
+   Query: classId (required), termId, academicYearId, ?superseded=0
+   ══════════════════════════════════════════════════════════════ */
+router.get('/bulk-pdf', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
+  try {
+    const { schoolId, role } = req.jwtUser;
 
-    const col1 = 50, col2 = 280;
-    doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('STUDENT NAME', col1, infoTop + 8);
-    doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold')
-       .text(snap.studentName || '—', col1, infoTop + 19, { width: 200 });
+    if (!req.query.classId) return E.badRequest(res, 'classId query parameter is required');
 
-    doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('ADMISSION NO.', col2, infoTop + 8);
-    doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold')
-       .text(snap.admissionNo || '—', col2, infoTop + 19);
+    const filter = {
+      schoolId,
+      classId:  req.query.classId,
+      superseded: { $ne: true },
+      status:   'published',
+    };
+    if (req.query.termId)         filter.termId         = req.query.termId;
+    if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
 
-    doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('CLASS', col1, infoTop + 42);
-    doc.fillColor(DARK).fontSize(10).font('Helvetica')
-       .text(snap.className || '—', col1, infoTop + 52);
+    // Load snapshots (exclude heavy sub-arrays for initial fetch; we need all fields for PDF)
+    const snaps = await _model('report_card_snapshots')
+      .find(filter).sort({ studentName: 1 }).lean();
 
-    doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('TERM / ACADEMIC YEAR', col2, infoTop + 42);
-    doc.fillColor(DARK).fontSize(10).font('Helvetica')
-       .text([snap.termName, snap.academicYear].filter(Boolean).join(' — ') || '—', col2, infoTop + 52);
+    if (!snaps.length) return E.notFound(res, 'No published report cards found for this class/term');
 
-    /* ── RESULTS TABLE ── */
-    const tableTop   = infoTop + 85;
-    const colWidths  = [180, 55, 55, 60, 40, 50, 85]; // Subject | CA | Mid | Final | Score | Grade | Remarks
-    const colLabels  = ['Subject', 'Classwork\n(%)', 'Mid-Term\n(%)', 'End-Term\n(%)', 'Score', 'Grade', 'Remarks'];
-    const colX       = [];
-    let cx = 40;
-    for (const w of colWidths) { colX.push(cx); cx += w + COL_GAP; }
-
-    // Table header
-    doc.rect(40, tableTop, PAGE_WIDTH, 22).fill(ACCENT);
-    doc.fillColor('white').fontSize(8).font('Helvetica-Bold');
-    colLabels.forEach((label, i) => {
-      doc.text(label, colX[i] + 3, tableTop + 5, { width: colWidths[i] - 3, align: 'center' });
+    // Financial block: skip blocked students unless admin + force
+    const visibleSnaps = snaps.filter(s => {
+      if (!s.financialBlock) return true;
+      return req.query.force === '1' && ['admin', 'superadmin'].includes(role);
     });
 
-    // Find assessment type keys for breakdown columns
-    const weights   = snap.assessmentWeights || config.assessmentWeights;
-    const caTypes   = weights.filter(w => !['midterm', 'final'].includes(w.assessmentType)).map(w => w.assessmentType);
-    const midTypes  = ['midterm'];
-    const finalTypes = ['final'];
+    if (!visibleSnaps.length) return E.badRequest(res, 'All report cards in this class are blocked by financial holds');
 
-    function _pickBreakdown(breakdown, types) {
-      const values = types.map(t => breakdown?.[t]).filter(v => v != null);
-      if (!values.length) return '—';
-      return _round(values.reduce((s, n) => s + n, 0) / values.length).toFixed(1);
-    }
+    const config = await _loadConfig(schoolId);
 
-    // Rows
-    let rowY = tableTop + 22;
-    const subjectEntries = Object.entries(snap.subjects || {});
-    const passMark = snap.passMark ?? config.passMark ?? 40;
+    let PDFDocument;
+    try { PDFDocument = require('pdfkit'); }
+    catch { return res.status(501).json({ error: 'pdfkit not installed. Run: npm install pdfkit' }); }
 
-    subjectEntries.forEach(([subjectId, sub], idx) => {
-      const rowBg = idx % 2 === 0 ? 'white' : LIGHT_GRAY;
-      const rowH  = 18;
-      doc.rect(40, rowY, PAGE_WIDTH, rowH).fill(rowBg);
-
-      const failed = sub.finalScore != null && sub.finalScore < passMark;
-      doc.fillColor(failed ? '#dc2626' : DARK).fontSize(8.5).font('Helvetica');
-
-      const isBest = snap.subjectBest?.[subjectId];
-      // Subject name (subjectId is used if name not available)
-      doc.text((isBest ? '★ ' : '') + subjectId, colX[0] + 3, rowY + 5, { width: colWidths[0] - 3 });
-      doc.text(_pickBreakdown(sub.breakdown, caTypes),    colX[1] + 3, rowY + 5, { width: colWidths[1] - 3, align: 'center' });
-      doc.text(_pickBreakdown(sub.breakdown, midTypes),   colX[2] + 3, rowY + 5, { width: colWidths[2] - 3, align: 'center' });
-      doc.text(_pickBreakdown(sub.breakdown, finalTypes), colX[3] + 3, rowY + 5, { width: colWidths[3] - 3, align: 'center' });
-      doc.text(sub.finalScore?.toFixed(1) ?? '—',         colX[4] + 3, rowY + 5, { width: colWidths[4] - 3, align: 'center' });
-
-      doc.font('Helvetica-Bold')
-         .fillColor(sub.grade ? (failed ? '#dc2626' : ACCENT) : GRAY)
-         .text(sub.grade || '—', colX[5] + 3, rowY + 5, { width: colWidths[5] - 3, align: 'center' });
-
-      doc.font('Helvetica').fillColor(GRAY).fontSize(7.5)
-         .text(sub.remarks || sub.descriptor || '', colX[6] + 3, rowY + 5, { width: colWidths[6] - 3 });
-
-      rowY += rowH;
+    const doc     = new PDFDocument({ margin: 40, size: 'A4', autoFirstPage: false });
+    const buffers = [];
+    doc.on('data', chunk => buffers.push(chunk));
+    doc.on('end', () => {
+      const pdf = Buffer.concat(buffers);
+      const filename = `report-cards-class-${req.query.classId}.pdf`;
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Length', pdf.length);
+      res.send(pdf);
     });
 
-    // Table border
-    doc.rect(40, tableTop, PAGE_WIDTH, rowY - tableTop).stroke(BORDER);
+    // Chunk: process 10 students at a time to avoid holding all attendance in memory
+    const CHUNK = 10;
+    for (let i = 0; i < visibleSnaps.length; i += CHUNK) {
+      const chunk = visibleSnaps.slice(i, i + CHUNK);
+      const attendanceResults = await Promise.all(
+        chunk.map(s => s.attendanceSummary
+          ? Promise.resolve(s.attendanceSummary)
+          : _attendanceSummary(schoolId, s.studentId, s.classId, s.termId, s.academicYearId)
+        )
+      );
 
-    /* ── SUMMARY ROW ── */
-    rowY += 8;
-    doc.rect(40, rowY, PAGE_WIDTH, 28).fill('#eff6ff').stroke(BORDER);
-    doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold');
-    doc.text(`Total Score: ${snap.totalScore?.toFixed(1) ?? '—'}`, 50, rowY + 5);
-    doc.text(`Average: ${snap.averageScore?.toFixed(1) ?? '—'}%`, 160, rowY + 5);
-    if (config.showGPA) doc.text(`GPA: ${snap.gpa?.toFixed(2) ?? '—'}`, 260, rowY + 5);
-
-    if (config.rankingEnabled && snap.rankings?.class) {
-      const r = snap.rankings.class;
-      doc.fillColor(ACCENT).text(`Class Rank: ${r.rank} / ${r.outOf}`, 350, rowY + 5);
+      chunk.forEach((snap, idx) => {
+        doc.addPage();
+        _buildPDFPage(doc, snap, config, attendanceResults[idx], false);
+      });
     }
-    rowY += 28;
-
-    /* ── ATTENDANCE ── */
-    if (config.showAttendanceSummary && attendance) {
-      rowY += 10;
-      doc.rect(40, rowY, PAGE_WIDTH, 26).fill(LIGHT_GRAY).stroke(BORDER);
-      doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('ATTENDANCE', 50, rowY + 4);
-      doc.fillColor(DARK).fontSize(9).font('Helvetica')
-         .text(
-           `Days Present: ${attendance.daysPresent}   Days Absent: ${attendance.daysAbsent}   ` +
-           `Total School Days: ${attendance.totalSchoolDays}   ` +
-           (attendance.percentage != null ? `Attendance: ${attendance.percentage}%` : ''),
-           50, rowY + 14, { width: PAGE_WIDTH - 20 }
-         );
-      rowY += 26;
-    }
-
-    /* ── COMMENTS ── */
-    const comments = snap.comments || {};
-    rowY += 14;
-    doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text("CLASS TEACHER'S REMARK:", 40, rowY);
-    rowY += 12;
-    doc.rect(40, rowY, PAGE_WIDTH, 30).fill('white').stroke(BORDER);
-    doc.fillColor(DARK).fontSize(9).font('Helvetica')
-       .text(comments.classTeacherRemark || '— No remark entered —', 46, rowY + 9, { width: PAGE_WIDTH - 12 });
-    rowY += 38;
-
-    doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text("PRINCIPAL'S COMMENT:", 40, rowY);
-    rowY += 12;
-    doc.rect(40, rowY, PAGE_WIDTH, 30).fill('white').stroke(BORDER);
-    doc.fillColor(DARK).fontSize(9).font('Helvetica')
-       .text(comments.principalRemark || '— No comment entered —', 46, rowY + 9, { width: PAGE_WIDTH - 12 });
-    rowY += 42;
-
-    /* ── SIGNATURES ── */
-    const sigY = rowY + 10;
-    const sigW = (PAGE_WIDTH - 20) / 2;
-    doc.moveTo(40, sigY + 20).lineTo(40 + sigW - 10, sigY + 20).stroke(DARK);
-    doc.moveTo(40 + sigW + 10, sigY + 20).lineTo(40 + PAGE_WIDTH, sigY + 20).stroke(DARK);
-    doc.fillColor(GRAY).fontSize(8).font('Helvetica')
-       .text(config.classTeacherSignatureLabel || 'Class Teacher', 40, sigY + 24, { width: sigW })
-       .text(config.principalSignatureLabel || 'Principal', 40 + sigW + 10, sigY + 24, { width: sigW });
-
-    /* ── FOOTER ── */
-    const footerY = doc.page.height - 55;
-    doc.rect(40, footerY, PAGE_WIDTH, 0.5).fill(BORDER);
-    doc.fillColor(GRAY).fontSize(7.5).font('Helvetica')
-       .text(config.footerNote || 'This report card is computer-generated.', 40, footerY + 6, {
-         width: PAGE_WIDTH, align: 'center'
-       });
-    doc.text(`Generated: ${new Date().toUTCString()}`, 40, footerY + 18, {
-      width: PAGE_WIDTH, align: 'center'
-    });
 
     doc.end();
-  } catch (err) { console.error('[report-cards/:id/pdf]', err); return E.serverError(res); }
+
+  } catch (err) { console.error('[report-cards/bulk-pdf]', err); return E.serverError(res); }
 });
 
 module.exports = router;
