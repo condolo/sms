@@ -199,28 +199,50 @@ router.post('/bulk', authMiddleware, PLAN, rbac('grades', 'create'), async (req,
 /* ── PUT /api/grades/:id ──────────────────────────────────────── */
 router.put('/:id', authMiddleware, PLAN, rbac('grades', 'update'), async (req, res) => {
   try {
-    const { schoolId, userId } = req.jwtUser;
+    const { schoolId, userId, role } = req.jwtUser;
     const { data, error } = _validate(GradeSchema.partial(), req.body);
     if (error) return E.validation(res, error);
     delete data.schoolId; delete data.id;
 
+    // Always fetch existing record — needed for audit trail and percentage recalc
+    const existing = await _model('grades').findOne({ id: req.params.id, schoolId }).lean();
+    if (!existing) return E.notFound(res, 'Grade not found');
+
     // Recalculate percentage if score or maxScore changes
     if (data.score != null || data.maxScore != null) {
-      const existing = await _model('grades').findOne({ id: req.params.id, schoolId }).lean();
-      if (existing) {
-        const score    = data.score    ?? existing.score;
-        const maxScore = data.maxScore ?? existing.maxScore;
-        if (score > maxScore) return E.badRequest(res, `Score (${score}) cannot exceed maxScore (${maxScore})`);
-        data.percentage = _round((score / maxScore) * 100);
-      }
+      const score    = data.score    ?? existing.score;
+      const maxScore = data.maxScore ?? existing.maxScore;
+      if (score > maxScore) return E.badRequest(res, `Score (${score}) cannot exceed maxScore (${maxScore})`);
+      data.percentage = _round((score / maxScore) * 100);
     }
 
+    const now = new Date().toISOString();
     const doc = await _model('grades').findOneAndUpdate(
       { id: req.params.id, schoolId },
-      { ...data, updatedBy: userId },
+      { ...data, updatedBy: userId, updatedAt: now },
       { new: true, runValidators: false }
     ).lean();
-    if (!doc) return E.notFound(res, 'Grade not found');
+
+    // Write audit entry if score changed
+    const newScore = data.score ?? existing.score;
+    if (data.score != null && data.score !== existing.score) {
+      await _model('mark_audit_log').create({
+        action:        'GRADE_UPDATED',
+        gradeId:       req.params.id,
+        studentId:     existing.studentId,
+        subjectId:     existing.subjectId,
+        schoolId,
+        editedBy:      userId,
+        actingAs:      req.body.actingAs || null,
+        previousValue: existing.score,
+        previousState: 'present',
+        newValue:      newScore,
+        newState:      'present',
+        reason:        req.body.reason || data.notes || '',
+        timestamp:     now,
+      });
+    }
+
     return ok(res, doc);
   } catch (err) { console.error('[grades PUT/:id]', err); return E.serverError(res); }
 });

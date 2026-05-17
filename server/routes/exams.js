@@ -33,6 +33,48 @@ function _calcGrade(score, maxScore, gradeScale = []) {
 }
 
 /* ── Validation ─────────────────────────────────────────────── */
+/* ── Exam status state machine ──────────────────────────────────
+   Allowed transitions (server enforces — clients cannot skip states):
+     scheduled    → in_progress | cancelled
+     in_progress  → completed   | cancelled
+     completed    → moderated   | locked     (admin only)
+     moderated    → approved    | completed  (admin can reopen)
+     approved     → locked                   (admin only)
+     locked       → published   | approved   (unlock = back to approved)
+     published    → archived
+   ─────────────────────────────────────────────────────────────── */
+const EXAM_TRANSITIONS = {
+  scheduled:   ['in_progress', 'cancelled'],
+  in_progress: ['completed',   'cancelled'],
+  completed:   ['moderated',   'locked'],
+  moderated:   ['approved',    'completed'],
+  approved:    ['locked'],
+  locked:      ['published',   'approved'],   // 'approved' = unlock
+  published:   ['archived'],
+  archived:    [],
+  cancelled:   [],
+};
+
+/* Roles allowed to drive each transition */
+const TRANSITION_ROLES = {
+  in_progress: ['teacher', 'admin', 'superadmin'],
+  completed:   ['teacher', 'admin', 'superadmin'],
+  cancelled:   ['admin', 'superadmin'],
+  moderated:   ['admin', 'superadmin'],
+  approved:    ['admin', 'superadmin'],
+  locked:      ['admin', 'superadmin'],
+  published:   ['admin', 'superadmin'],
+  archived:    ['admin', 'superadmin'],
+};
+
+/* Mark states — distinct from absent boolean for backward compat */
+const MARK_STATES = ['present', 'ABS', 'MIS', 'EXM', 'INC'];
+// present = has a valid score
+// ABS     = absent (not treated as zero — excluded from averages unless school config says otherwise)
+// MIS     = missing mark — teacher has not entered score yet (flags for action)
+// EXM     = exempted — excluded from averaging entirely
+// INC     = incomplete — blocks report approval until resolved
+
 const ExamSchema = z.object({
   title:          z.string().min(1).max(200).trim(),
   subjectId:      z.string().optional(),
@@ -48,15 +90,26 @@ const ExamSchema = z.object({
   room:           z.string().max(100).optional(),
   invigilatorId:  z.string().optional(),
   instructions:   z.string().max(1000).optional(),
-  status:         z.enum(['scheduled', 'in_progress', 'completed', 'cancelled']).default('scheduled'),
+  // Extended status — old values (scheduled/in_progress/completed/cancelled) still valid
+  status: z.enum([
+    'scheduled', 'in_progress', 'completed', 'cancelled',
+    'moderated', 'approved', 'locked', 'published', 'archived'
+  ]).default('scheduled'),
+  // Teacher-subject ownership (set when creating — used for validation)
+  ownerId:       z.string().optional(),   // userId of subject teacher who owns this exam
+  weightPercent: z.number().min(0).max(100).optional(),  // how much this exam contributes to term grade
 });
 
 const ResultSchema = z.object({
   studentId:  z.string().min(1),
-  score:      z.number().min(0),
-  absent:     z.boolean().default(false),
+  score:      z.number().min(0).optional(),  // optional — absent/missing/exempted have no score
+  // markState replaces absent:boolean — backward-compat: absent:true → ABS, absent:false → present
+  markState:  z.enum(MARK_STATES).default('present'),
+  absent:     z.boolean().default(false),    // kept for backward compat — derived from markState
   notes:      z.string().max(500).optional(),
-  gradedBy:   z.string().optional(),   // overridden by JWT
+  gradedBy:   z.string().optional(),         // overridden by JWT
+  // Audit: who entered/changed this result
+  actingAs:   z.string().optional(),         // if admin acting as teacher: teacherId
 });
 
 const BulkResultSchema = z.object({
@@ -67,6 +120,32 @@ function _validate(schema, data) {
   const r = schema.safeParse(data);
   if (!r.success) return { error: r.error.issues.map(i => ({ field: i.path.join('.'), message: i.message })) };
   return { data: r.data };
+}
+
+/** Validate exam status transition — returns error string or null */
+function _checkTransition(fromStatus, toStatus, userRole) {
+  const allowed = EXAM_TRANSITIONS[fromStatus] || [];
+  if (!allowed.includes(toStatus)) {
+    return `Cannot transition from "${fromStatus}" to "${toStatus}". Allowed next states: [${allowed.join(', ')}]`;
+  }
+  const roleOk = TRANSITION_ROLES[toStatus] || [];
+  if (roleOk.length && !roleOk.includes(userRole)) {
+    return `Your role ("${userRole}") cannot set status to "${toStatus}"`;
+  }
+  return null;
+}
+
+/** Resolve markState + absent for backward compat.
+ *  If markState is given, derive absent from it.
+ *  If only absent is given, derive markState from it. */
+function _resolveMarkState(data) {
+  if (data.markState && data.markState !== 'present') {
+    return { markState: data.markState, absent: data.markState === 'ABS', score: null };
+  }
+  if (data.absent === true && (!data.markState || data.markState === 'present')) {
+    return { markState: 'ABS', absent: true, score: null };
+  }
+  return { markState: 'present', absent: false, score: data.score ?? null };
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -128,17 +207,38 @@ router.post('/', authMiddleware, PLAN, rbac('exams', 'create'), async (req, res)
 
 router.put('/:id', authMiddleware, PLAN, rbac('exams', 'update'), async (req, res) => {
   try {
-    const { schoolId, userId } = req.jwtUser;
+    const { schoolId, userId, role } = req.jwtUser;
     const { data, error } = _validate(ExamSchema.partial(), req.body);
     if (error) return E.validation(res, error);
     delete data.schoolId; delete data.id;
+
+    const existing = await _model('exams').findOne({ id: req.params.id, schoolId }).lean();
+    if (!existing) return E.notFound(res, 'Exam not found');
+
+    // Block edits to locked/published/archived exams (except by admin via unlock flow)
+    if (['locked', 'published', 'archived'].includes(existing.status) && !data.status) {
+      return E.badRequest(res, `Exam is "${existing.status}" — use the unlock endpoint to allow edits`);
+    }
+
+    // Validate status transition if status is being changed
+    if (data.status && data.status !== existing.status) {
+      const transitionError = _checkTransition(existing.status, data.status, role);
+      if (transitionError) return E.badRequest(res, transitionError);
+
+      // Log the transition in audit
+      data.statusChangedBy = userId;
+      data.statusChangedAt = new Date().toISOString();
+      data.statusHistory   = [
+        ...(existing.statusHistory || []),
+        { from: existing.status, to: data.status, by: userId, at: new Date().toISOString(), reason: req.body.reason || '' }
+      ];
+    }
 
     const doc = await _model('exams').findOneAndUpdate(
       { id: req.params.id, schoolId },
       { ...data, updatedBy: userId },
       { new: true, runValidators: false }
     ).lean();
-    if (!doc) return E.notFound(res, 'Exam not found');
     return ok(res, doc);
   } catch (err) { console.error('[exams PUT/:id]', err); return E.serverError(res); }
 });
@@ -154,6 +254,81 @@ router.delete('/:id', authMiddleware, PLAN, rbac('exams', 'delete'), async (req,
     if (!doc) return E.notFound(res, 'Exam not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) { console.error('[exams DELETE/:id]', err); return E.serverError(res); }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   EXAM STATUS MANAGEMENT
+   ══════════════════════════════════════════════════════════════ */
+
+/** POST /api/exams/:id/lock — admin locks an exam (approved → locked) */
+router.post('/:id/lock', authMiddleware, PLAN, rbac('exams', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    if (!['admin', 'superadmin'].includes(role)) return E.forbidden(res, 'Only admins can lock exams');
+
+    const exam = await _model('exams').findOne({ id: req.params.id, schoolId }).lean();
+    if (!exam) return E.notFound(res, 'Exam not found');
+
+    const transitionError = _checkTransition(exam.status, 'locked', role);
+    if (transitionError) return E.badRequest(res, transitionError);
+
+    const now = new Date().toISOString();
+    const doc = await _model('exams').findOneAndUpdate(
+      { id: req.params.id, schoolId },
+      {
+        status: 'locked', lockedBy: userId, lockedAt: now, updatedBy: userId,
+        $push: { statusHistory: { from: exam.status, to: 'locked', by: userId, at: now, reason: req.body.reason || 'Admin locked' } }
+      },
+      { new: true }
+    ).lean();
+
+    console.log(`[EXAMS] Locked exam "${exam.title}" by ${userId}`);
+    return ok(res, doc);
+  } catch (err) { console.error('[exams/:id/lock]', err); return E.serverError(res); }
+});
+
+/** POST /api/exams/:id/unlock — admin unlocks (locked → approved) with mandatory reason */
+router.post('/:id/unlock', authMiddleware, PLAN, rbac('exams', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    if (!['admin', 'superadmin'].includes(role)) return E.forbidden(res, 'Only admins can unlock exams');
+
+    const reason = (req.body.reason || '').trim();
+    if (!reason) return E.badRequest(res, 'A reason is required when unlocking an exam');
+
+    const exam = await _model('exams').findOne({ id: req.params.id, schoolId }).lean();
+    if (!exam) return E.notFound(res, 'Exam not found');
+    if (exam.status !== 'locked') return E.badRequest(res, `Exam is "${exam.status}" — only locked exams can be unlocked`);
+
+    const now = new Date().toISOString();
+    const doc = await _model('exams').findOneAndUpdate(
+      { id: req.params.id, schoolId },
+      {
+        status: 'approved', unlockedBy: userId, unlockedAt: now, unlockReason: reason, updatedBy: userId,
+        $push: { statusHistory: { from: 'locked', to: 'approved', by: userId, at: now, reason } }
+      },
+      { new: true }
+    ).lean();
+
+    // Write to audit log
+    await _model('mark_audit_log').create({
+      action: 'EXAM_UNLOCKED', examId: req.params.id, schoolId,
+      editedBy: userId, reason, timestamp: now
+    });
+
+    console.log(`[EXAMS] Unlocked exam "${exam.title}" by ${userId}: ${reason}`);
+    return ok(res, doc);
+  } catch (err) { console.error('[exams/:id/unlock]', err); return E.serverError(res); }
+});
+
+/** GET /api/exams/:id/status-history — audit trail of status changes */
+router.get('/:id/status-history', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const exam = await _model('exams').findOne({ id: req.params.id, schoolId }).lean();
+    if (!exam) return E.notFound(res, 'Exam not found');
+    return ok(res, { examId: req.params.id, title: exam.title, currentStatus: exam.status, history: exam.statusHistory || [] });
+  } catch (err) { console.error('[exams/:id/status-history]', err); return E.serverError(res); }
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -196,29 +371,81 @@ router.get('/:id/results', authMiddleware, PLAN, rbac('exams', 'read'), async (r
 /* POST /api/exams/:id/results  — bulk upsert results for this exam */
 router.post('/:id/results', authMiddleware, PLAN, rbac('exams', 'create'), async (req, res) => {
   try {
-    const { schoolId, userId } = req.jwtUser;
+    const { schoolId, userId, role } = req.jwtUser;
     const { data, error } = _validate(BulkResultSchema, req.body);
     if (error) return E.validation(res, error);
 
     const exam = await _model('exams').findOne({ id: req.params.id, schoolId }).lean();
     if (!exam) return E.notFound(res, 'Exam not found');
 
-    // Validate all scores are within maxScore
-    const overscored = data.results.filter(r => !r.absent && r.score > exam.maxScore);
+    // Block writes to locked/published/archived exams
+    if (['locked', 'published', 'archived'].includes(exam.status)) {
+      return E.badRequest(res, `Exam is "${exam.status}" — results are read-only. An admin must unlock it to allow changes.`);
+    }
+
+    // Teacher ownership check — if enforced, only the exam owner (or admin) can write results
+    if (exam.ownerId && exam.ownerId !== userId && !['admin', 'superadmin'].includes(role)) {
+      return E.forbidden(res, 'Only the assigned subject teacher can enter results for this exam');
+    }
+
+    // If admin is acting as teacher, require actingAs field
+    const actingAs = req.body.actingAs || null;
+    if (['admin', 'superadmin'].includes(role) && actingAs) {
+      // Will be written to audit log
+    }
+
+    // Validate scores — only 'present' results require a score; ABS/MIS/EXM/INC do not
+    const presentResults = data.results.filter(r => r.markState === 'present' && !r.absent);
+    const overscored = presentResults.filter(r => r.score != null && r.score > exam.maxScore);
     if (overscored.length) {
       return E.badRequest(res, `${overscored.length} result(s) exceed the exam maximum score of ${exam.maxScore}`);
     }
 
+    // Fetch existing results for audit trail
+    const existingResults = await _model('exam_results').find({
+      schoolId, examId: req.params.id,
+      studentId: { $in: data.results.map(r => r.studentId) }
+    }).lean();
+    const existingMap = Object.fromEntries(existingResults.map(r => [r.studentId, r]));
+
+    const now    = new Date().toISOString();
+    const auditEntries = [];
     const Results = _model('exam_results');
+
     const ops = data.results.map(r => {
-      const gradeInfo = _calcGrade(r.score, exam.maxScore, exam.gradeScale || []);
+      const resolved  = _resolveMarkState(r);
+      const gradeInfo = resolved.markState === 'present' && resolved.score != null
+        ? _calcGrade(resolved.score, exam.maxScore, exam.gradeScale || [])
+        : null;
+
+      // Build audit entry if score changed
+      const existing = existingMap[r.studentId];
+      if (existing && existing.score !== resolved.score) {
+        auditEntries.push({
+          action:        'RESULT_UPDATED',
+          examId:        req.params.id,
+          studentId:     r.studentId,
+          subjectId:     exam.subjectId,
+          schoolId,
+          editedBy:      userId,
+          actingAs:      actingAs || null,
+          previousValue: existing.score,
+          previousState: existing.markState || (existing.absent ? 'ABS' : 'present'),
+          newValue:      resolved.score,
+          newState:      resolved.markState,
+          reason:        r.notes || '',
+          timestamp:     now,
+        });
+      }
+
       return {
         updateOne: {
           filter: { schoolId, examId: req.params.id, studentId: r.studentId },
           update: {
             $set: {
-              score:      r.absent ? null : r.score,
-              absent:     r.absent,
+              score:      resolved.score,
+              markState:  resolved.markState,
+              absent:     resolved.absent,          // backward compat
               notes:      r.notes || '',
               gradedBy:   userId,
               updatedBy:  userId,
@@ -227,23 +454,36 @@ router.post('/:id/results', authMiddleware, PLAN, rbac('exams', 'create'), async
               studentId:  r.studentId,
               classId:    exam.classId,
               subjectId:  exam.subjectId,
+              updatedAt:  now,
               ...(gradeInfo || {}),
             },
-            $setOnInsert: { id: uuidv4(), createdBy: userId }
+            $setOnInsert: { id: uuidv4(), createdBy: userId, createdAt: now }
           },
           upsert: true
         }
       };
     });
 
-    const result = await Results.bulkWrite(ops, { ordered: false });
+    const [result] = await Promise.all([
+      Results.bulkWrite(ops, { ordered: false }),
+      auditEntries.length ? _model('mark_audit_log').insertMany(auditEntries) : Promise.resolve()
+    ]);
 
-    // Mark exam as completed if it was just fully entered
-    if (exam.status === 'in_progress' || exam.status === 'scheduled') {
-      await _model('exams').updateOne({ id: req.params.id }, { status: 'completed' });
+    // Auto-advance exam to 'completed' when marks are first entered
+    if (['scheduled', 'in_progress'].includes(exam.status)) {
+      await _model('exams').updateOne({ id: req.params.id }, { status: 'completed', updatedBy: userId });
     }
 
-    return ok(res, { upserted: result.upsertedCount, modified: result.modifiedCount, total: data.results.length }, null, 201);
+    // Check for any INC/MIS marks remaining — surface as warning, not error
+    const incCount = data.results.filter(r => ['INC', 'MIS'].includes(r.markState)).length;
+
+    return ok(res, {
+      upserted:  result.upsertedCount,
+      modified:  result.modifiedCount,
+      total:     data.results.length,
+      audited:   auditEntries.length,
+      warnings:  incCount ? [`${incCount} result(s) marked as INC/MIS — resolve before approving`] : [],
+    }, null, 201);
   } catch (err) { console.error('[exams/:id/results POST]', err); return E.serverError(res); }
 });
 
