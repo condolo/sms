@@ -234,6 +234,75 @@ router.get('/grade', authMiddleware, PLAN, rbac('grades', 'read'), async (req, r
   } catch (err) { console.error('[academic-config/grade GET]', err); return E.serverError(res); }
 });
 
+/* ═══════════════════════════════════════════════════════════════
+   POST /api/academic-config/archive-year — archive an academic year
+   Cascades: freezes all exams, locks all report snapshots, sets
+   an archived flag on the academic_config for the year.
+
+   Body: { academicYearId, reason }
+   Admin only. Irreversible without direct DB intervention.
+   ═══════════════════════════════════════════════════════════════ */
+router.post('/archive-year', authMiddleware, PLAN, rbac('settings', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    if (!['admin', 'superadmin'].includes(role)) {
+      return E.forbidden(res, 'Only admins can archive an academic year');
+    }
+
+    const { academicYearId, reason } = req.body;
+    if (!academicYearId) return E.badRequest(res, 'academicYearId is required');
+    if (!reason?.trim()) return E.badRequest(res, 'reason is required when archiving an academic year');
+
+    const now = new Date().toISOString();
+    const filter = { schoolId, academicYearId };
+
+    // Run cascade in parallel — all operations are additive (no data deleted)
+    const [examsResult, snapshotsResult, gradesResult] = await Promise.all([
+      // Freeze all exams not already archived/cancelled
+      _model('exams').updateMany(
+        { ...filter, status: { $nin: ['archived', 'cancelled'] } },
+        { $set: { status: 'archived', archivedAt: now, archivedBy: userId, archiveReason: reason } }
+      ),
+      // Lock all published report card snapshots for this year
+      _model('report_card_snapshots').updateMany(
+        { ...filter, status: 'published', superseded: { $ne: true } },
+        { $set: { yearArchived: true, yearArchivedAt: now, yearArchivedBy: userId } }
+      ),
+      // Prevent new grade entries by marking grades as year-archived
+      _model('grades').updateMany(
+        { ...filter },
+        { $set: { yearArchived: true, yearArchivedAt: now } }
+      ),
+    ]);
+
+    // Write an audit entry
+    await _model('mark_audit_log').create({
+      action:        'ACADEMIC_YEAR_ARCHIVED',
+      schoolId,
+      academicYearId,
+      editedBy:      userId,
+      reason,
+      timestamp:     now,
+      cascade: {
+        examsArchived:       examsResult.modifiedCount,
+        snapshotsLocked:     snapshotsResult.modifiedCount,
+        gradesLocked:        gradesResult.modifiedCount,
+      },
+    });
+
+    console.log(`[ACADEMIC-CONFIG] Year archived: ${academicYearId} by ${userId} — "${reason}"`);
+    return ok(res, {
+      academicYearId,
+      archivedAt:       now,
+      archivedBy:       userId,
+      examsArchived:    examsResult.modifiedCount,
+      snapshotsLocked:  snapshotsResult.modifiedCount,
+      gradesLocked:     gradesResult.modifiedCount,
+      message: 'Academic year archived. All exams frozen, report cards locked, grade entries prevented.',
+    });
+  } catch (err) { console.error('[academic-config/archive-year]', err); return E.serverError(res); }
+});
+
 /* ── Exported helper: resolve score → grade band ────────────── */
 function resolveGrade(score, gradingSchema = DEFAULT_GRADING_SCHEMA) {
   const sorted = [...gradingSchema].sort((a, b) => b.minScore - a.minScore);

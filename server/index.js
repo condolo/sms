@@ -8,7 +8,8 @@ const express   = require('express');
 const cors      = require('cors');
 const path      = require('path');
 const rateLimit = require('express-rate-limit');
-const { connect } = require('./config/db');
+const { connect }       = require('./config/db');
+const { ensureIndexes } = require('./utils/indexes');
 
 /* ── Security: warn if JWT_SECRET not set ───────────────────── */
 if (!process.env.JWT_SECRET) {
@@ -220,7 +221,8 @@ app.use((err, req, res, next) => {
 
 /* ── Start ──────────────────────────────────────────────────── */
 async function start() {
-  await connect();   // Connect to MongoDB (no-op if MONGODB_URI not set)
+  await connect();        // Connect to MongoDB (no-op if MONGODB_URI not set)
+  await ensureIndexes();  // Idempotent — safe to run on every startup
   app.listen(PORT, () => {
     console.log(`\n🎓 InnoLearn API running on port ${PORT}`);
     console.log(`   Local:   http://localhost:${PORT}`);
