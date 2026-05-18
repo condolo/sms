@@ -47,10 +47,13 @@ export function detectSchool() {
     return { slug: qSlug.toLowerCase(), isSchool: true, source: 'query' };
   }
 
-  // 3. localStorage shortcut — set when user explicitly navigates to a school
-  const stored = localStorage.getItem('il_school_slug');
-  if (stored) {
-    return { slug: stored, isSchool: true, source: 'stored' };
+  // 3. localStorage shortcut — only apply when NOT on a known main host
+  //    (prevents stored slug from hijacking msingi.io landing page)
+  if (!MAIN_HOSTS.has(host)) {
+    const stored = localStorage.getItem('il_school_slug');
+    if (stored) {
+      return { slug: stored, isSchool: true, source: 'stored' };
+    }
   }
 
   // 4. Main domain — show landing page

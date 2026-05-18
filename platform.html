@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>InnoLearn — Platform Admin</title>
+  <title>Msingi — Platform Admin</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
@@ -16,7 +16,7 @@
   <div class="pa-lock-card">
     <div class="pa-lock-icon"><i class="fas fa-shield-halved"></i></div>
     <h2>Platform Admin</h2>
-    <p>This area is restricted to InnoLearn system administrators. Enter your platform key to continue.</p>
+    <p>This area is restricted to Msingi system administrators. Enter your platform key to continue.</p>
 
     <div class="pa-lock-field">
       <label>Platform Admin Key</label>
@@ -47,7 +47,7 @@
     <div class="pa-sidebar-brand">
       <h1>
         <div class="pa-brand-icon"><i class="fas fa-graduation-cap"></i></div>
-        InnoLearn
+        Msingi
       </h1>
       <p>Platform Admin</p>
     </div>
@@ -102,7 +102,7 @@
 
 <script>
 /* ============================================================
-   InnoLearn Platform Admin Dashboard
+   Msingi Platform Admin Dashboard
    ============================================================ */
 
 const SESSION_KEY = 'pa_key';
@@ -290,7 +290,7 @@ function _offlineStatsHTML() {
       <div class="pa-stat-card">
         <div class="pa-stat-label">Total Students</div>
         <div class="pa-stat-value">20</div>
-        <div class="pa-stat-sub">InnoLearn demo school</div>
+        <div class="pa-stat-sub">Msingi demo school</div>
       </div>
       <div class="pa-stat-card">
         <div class="pa-stat-label">Monthly Revenue</div>
@@ -721,9 +721,9 @@ async function doImpersonate(schoolId) {
     LEGACY_KEYS.forEach(k => localStorage.removeItem(k));
     sessionStorage.clear();
 
-    // ── Store session for the React SPA (key: innolearn_session, used by auth store) ──
+    // ── Store session for the React SPA (key: msingi_session, used by auth store) ──
     const sessionPayload = { token: data.token, user: data.user || {}, school: {} };
-    localStorage.setItem('innolearn_session', JSON.stringify(sessionPayload));
+    localStorage.setItem('msingi_session', JSON.stringify(sessionPayload));
 
     toast('Redirecting to school portal…', 'success');
     setTimeout(() => { window.location.href = '/login'; }, 800);
