@@ -169,9 +169,11 @@ if (reactBuilt) {
   }));
 }
 
-// Serve legacy vanilla-JS app (root) — always available during migration
+// Serve legacy vanilla-JS static assets (css, js, images, html files)
+// index:false — do NOT auto-serve index.html for /, that is handled by the
+// SPA fallback route below so the React app takes precedence when built.
 app.use(express.static(ROOT_DIR, {
-  index: 'index.html',
+  index: false,
   setHeaders: (res) => {
     if (process.env.NODE_ENV !== 'production') {
       res.setHeader('Cache-Control', 'no-cache');
