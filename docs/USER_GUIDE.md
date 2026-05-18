@@ -1,6 +1,6 @@
-﻿# InnoLearn — User Guide
+﻿# Msingi — User Guide
 
-**Version 4.6.0** · Updated 2026-05-17
+**Version 4.7.0** · Updated 2026-05-18
 
 > **Looking for admin guides?**
 > - 🔧 [Platform Admin Guide](PLATFORM_ADMIN_GUIDE.md) — for the InnoLearn platform owner
@@ -334,6 +334,85 @@ Comments carry forward when a report card is republished — they are not wiped 
 
 ### Viewing Progress
 The **Progress** tab shows a student's grade trajectory across terms. Grade trends are colour-coded (green = improving, red = declining).
+
+---
+
+## 8A. Grades & Assessment System (CA / HW / MT / ET)
+
+Navigate to **Grades & Assessment** in the sidebar for the structured term-based grading system.
+
+### Assessment Types
+
+| Code | Full Name | Default Weight |
+|------|-----------|---------------|
+| **CA** | Continuous Assessment | 20% |
+| **HW** | Homework / Assignment | 10% |
+| **MT** | Mid-Term Exam | 30% |
+| **ET** | End-Term Exam | 40% |
+
+Weights are fully configurable by the school admin. The system enforces that they always total **100%** — it will block saving if they don't.
+
+### Mark Entry (Teachers)
+1. Go to **Grades & Assessment → ✏️ Mark Entry**
+2. Select: **Class → Subject → Term (1/2/3) → Assessment Type → Instance** (e.g. CA 1 or CA 2)
+3. Enter each student's score out of **100** — the system handles all weighting in the background
+4. Click **Save All Marks** — the grid shows live class statistics (average, pass rate, high/low)
+
+> **Note:** MT and ET can only be entered by admins and deputies by default. Your admin can enable teacher exam entry in Configuration.
+
+### How Marks Are Calculated
+
+**Multiple instances** (e.g. CA1 + CA2) are **averaged**, then the weight is applied:
+```
+CA avg = (CA1 + CA2) / 2   →   contributes CA avg × 20% to the term total
+```
+
+**Full term total:**
+```
+Term Total = (CA avg × 20%) + (HW avg × 10%) + (MT × 30%) + (ET × 40%)
+```
+
+**Half-term report** (CA + HW + MT only, re-scaled to 100%):
+```
+Half-term = CA avg × 33.3% + HW avg × 16.7% + MT × 50%
+```
+
+**Term 2 & 3 Final Grade** blends the term total with the running ET average:
+```
+Term 2 Final = (Term 2 Total + avg(ET1, ET2)) / 2
+Term 3 Final = (Term 3 Total + avg(ET1, ET2, ET3)) / 2
+```
+This rewards consistent end-term performance across the year.
+
+### Report Cards
+
+Go to **Grades & Assessment → 📊 Report Cards**. Filter by class, student, and term.
+
+**Template A — Detailed:** Shows each term's components (CA, HW, MT, ET) side-by-side, with ET reference columns from previous terms and the blended final grade. Best for full parent reports.
+
+**Template B — Summary:** Shows only Term 1, Term 2, Term 3 averages and a final annual average (equal thirds). Best for brief progress views.
+
+Toggle **Half-term report** to see a mid-term snapshot (CA + HW + MT only, rescaled to 100%).
+
+Score colour coding: 🟢 ≥70% · 🟡 ≥50% · 🔴 <50%
+
+### Assessment Configuration (Admins only)
+
+Go to **Grades & Assessment → ⚙️ Configuration**:
+
+- **Weights** — adjust CA/HW/MT/ET percentages (must total 100%)
+- **Instances** — set how many CA and HW assessments per term (1–5)
+- **Template** — choose Detailed (A) or Summary (B) as the default report style
+- **Schedule** — set date ranges for each assessment so teachers get automatic reminders
+
+### Assessment Reminders
+
+Go to **Grades & Assessment → 🔔 Reminders** to see all assessments that are:
+- 📅 **Upcoming** — opening within the next 14 days
+- ✏️ **Open** — currently active (between dateFrom and dateTo)
+- ⚠️ **Overdue** — past their close date
+
+Click **📧 Notify Teachers** to send an email + in-app notification to all teachers for all active/overdue assessments.
 
 ---
 
@@ -689,6 +768,29 @@ Configure academic year dates, term boundaries, and set the current active term.
 | **Footer Note** | Text printed at the bottom of every report card |
 
 > **Important**: changes to the grading schema or weights take effect on the **next publish run** only. Already-published report cards retain the config that was active when they were published — they are never retroactively recalculated.
+
+### Academic Year Close / Archive *(new in v4.6.1)*
+> **Admin / Superadmin only** — this action is **irreversible** without direct database access.
+
+Use **Archive Academic Year** at the end of a school year to permanently close all records for that year.
+
+**What archiving does:**
+| Action | Detail |
+|---|---|
+| Freezes all exams | Every exam not already `archived` or `cancelled` is set to `archived` — no more result entries |
+| Locks report card snapshots | All published, current snapshots are flagged `yearArchived: true` — already distributed, but immutable |
+| Prevents new grade entries | Any attempt to create or bulk-import grades for this year is rejected with an error message |
+| Blocks exam results | Submitting results for any exam from this year is rejected, even if the exam was somehow unlocked |
+| Writes audit entry | A full `ACADEMIC_YEAR_ARCHIVED` entry is recorded with cascade counts and the reason you provided |
+
+**To archive a year:**
+1. Go to **Settings → Academic Config**
+2. Click **Archive Academic Year**
+3. Select the academic year from the dropdown
+4. Enter a reason (required — becomes part of the permanent audit record)
+5. Click **Confirm Archive**
+
+> Once an academic year is archived, grade and result entry for that year are permanently blocked server-side. To reopen a year requires direct database intervention by a platform operator.
 
 ### Branding *(Super Admin only)*
 

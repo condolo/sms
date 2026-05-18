@@ -18,7 +18,8 @@ const NAV_SECTIONS = [
       { to: '/classes',     icon: '📚', label: 'Classes' },
       { to: '/timetable',   icon: '🗓', label: 'Timetable' },
       { to: '/attendance',  icon: '✅', label: 'Attendance' },
-      { to: '/exams',       icon: '📝', label: 'Exams & Grades' },
+      { to: '/exams',       icon: '📝', label: 'Exams' },
+      { to: '/grades',      icon: '📊', label: 'Grades & Assessment' },
     ],
   },
   {

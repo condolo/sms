@@ -2,6 +2,7 @@
  * InnoLearn React API client
  * Adapted from js/api.js — same contract, React-compatible.
  */
+import { detectSchool } from '@/utils/schoolDetect.js';
 
 const BASE = '/api';
 
@@ -35,6 +36,12 @@ async function _req(method, path, body = null, params = null) {
   const token = getToken();
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  // Auto-send the school slug on every request so the server can resolve
+  // the tenant without the user typing it. Detected from subdomain first,
+  // then ?school= query param, then localStorage.
+  const { slug } = detectSchool();
+  if (slug) headers['X-School-Slug'] = slug;
 
   let url = `${BASE}${path}`;
   if (params) {
@@ -88,8 +95,15 @@ function _resource(base) {
 
 // ─── Named modules ────────────────────────────────────────────────────────────
 
+export const publicApi = {
+  /** Fetch school branding — no auth required */
+  schoolInfo: (slug) => _get(`/public/school-info${slug ? `?slug=${slug}` : ''}`),
+};
+
 export const auth = {
   login:           (credentials)  => _post('/auth/login', credentials),
+  verifyOtp:       (data)         => _post('/auth/verify-otp', data),
+  forceChange:     (data)         => _post('/auth/force-change', data),
   logout:          ()             => _post('/auth/logout'),
   me:              ()             => _get('/auth/me'),
   changePassword:  (data)         => _post('/auth/change-password', data),
@@ -152,6 +166,31 @@ export const grades = {
   report: (params) => _get('/grades/report', params),
 };
 
+export const assessment = {
+  // Config
+  getConfig:    (params)     => _get('/assessment/config', params),
+  updateConfig: (data)       => _patch('/assessment/config', data),
+
+  // Schedule
+  getSchedule:    (params)   => _get('/assessment/schedule', params),
+  upsertSchedule: (data)     => _put('/assessment/schedule', data),
+  deleteSchedule: (id)       => _delete(`/assessment/schedule/${id}`),
+
+  // Marks
+  getMarks:     (params)     => _get('/assessment/marks', params),
+  marksSummary: (params)     => _get('/assessment/marks/summary', params),
+  enterMark:    (data)       => _post('/assessment/marks', data),
+  bulkMarks:    (data)       => _post('/assessment/marks/bulk', data),
+  deleteMark:   (id)         => _delete(`/assessment/marks/${id}`),
+
+  // Report
+  report:       (params)     => _get('/assessment/report', params),
+
+  // Reminders
+  reminders:    (params)     => _get('/assessment/reminders', params),
+  notify:       (data)       => _post('/assessment/reminders/notify', data),
+};
+
 export const admissions = {
   ..._resource('admissions'),
   changeStage: (id, data) => _patch(`/admissions/${id}/stage`, data),
@@ -195,6 +234,7 @@ const api = {
   behaviour,
   exams,
   grades,
+  assessment,
   admissions,
   timetable,
   announcements,

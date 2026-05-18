@@ -51,7 +51,7 @@ function StatCard({ icon, label, value, sub, to, color = 'indigo', loading }) {
 
 const QUICK_ACTIONS = [
   { label: 'Add Student',         to: '/students',    icon: '➕', desc: 'Enrol a new student' },
-  { label: 'Record Attendance',   to: '/attendance',  icon: '✅', desc: 'Mark today's register' },
+  { label: 'Record Attendance',   to: '/attendance',  icon: '✅', desc: "Mark today's register" },
   { label: 'New Invoice',         to: '/finance',     icon: '💳', desc: 'Generate fee invoice' },
   { label: 'Admissions',          to: '/admissions',  icon: '📋', desc: 'Review applications' },
 ];

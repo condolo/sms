@@ -85,6 +85,7 @@ app.use('/api/auth', authLimiter);   // applied on top of the general limiter
 console.log('[Security] rate limiting active — general: 300/15min, auth: 20/15min');
 
 /* ── API Routes ─────────────────────────────────────────────── */
+app.use('/api/public',      require('./routes/public'));   // no auth — school branding
 app.use('/api/auth',        require('./routes/auth'));
 app.use('/api/onboard',     require('./routes/onboard'));
 app.use('/api/sync',        require('./routes/sync'));
@@ -106,6 +107,7 @@ app.use('/api/admissions',      require('./routes/admissions'));
 app.use('/api/timetable',       require('./routes/timetable'));
 app.use('/api/messages',        require('./routes/messages'));
 app.use('/api/academic-config', require('./routes/academic-config'));
+app.use('/api/assessment',      require('./routes/assessment'));
 app.use('/api/report-cards',   require('./routes/report-cards'));
 
 /* ── School-facing announcement routes (JWT auth, not platform key) ── */
@@ -140,7 +142,7 @@ app.post('/api/announcements/:id/dismiss', authMiddleware, async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: '4.5.8',
+    version: '4.6.2',
     timestamp: new Date().toISOString(),
     db: require('./config/db').isConnected() ? 'connected' : 'disconnected'
   });
@@ -203,8 +205,10 @@ app.get('*', (req, res) => {
     req.path.startsWith('/admissions')   ||
     req.path.startsWith('/timetable')    ||
     req.path.startsWith('/settings')     ||
-    req.path.startsWith('/reports')      ||
-    req.path.startsWith('/report-cards') ||
+    req.path.startsWith('/reports')        ||
+    req.path.startsWith('/report-cards')   ||
+    req.path.startsWith('/grades')         ||
+    req.path.startsWith('/platform-audit') ||
     req.path === '/login'
   )) {
     return res.sendFile(path.join(REACT_DIST, 'index.html'));

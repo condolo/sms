@@ -9,7 +9,7 @@ function authMiddleware(req, res, next) {
   const payload = verify(token);
   if (!payload) return res.status(401).json({ error: 'Invalid or expired token' });
 
-  req.jwtUser = payload;   // { userId, schoolId, role, roles, email }
+  req.jwtUser = payload;   // { userId, schoolId, role, roles, email, guardianOf? (parent/guardian only) }
   next();
 }
 

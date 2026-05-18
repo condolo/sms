@@ -14,6 +14,36 @@ function _genOTP() {
   return String(Math.floor(100000 + Math.random() * 900000)); // 6-digit
 }
 
+/**
+ * Build the JWT payload from a user document + school.
+ * Single source of truth — all three login paths (password, OTP, force-change) call this.
+ *
+ * Includes guardianOf[] for parent/guardian roles so that report-card
+ * ownership checks (GET /:id and GET /:id/pdf) can verify family links
+ * without an extra DB query on every request.
+ *
+ * @param {Object} user   — lean user document
+ * @param {string} schoolId
+ * @returns {Object}      — payload passed to sign()
+ */
+function _buildTokenPayload(user, schoolId) {
+  const role  = user.primaryRole || user.role;
+  const payload = {
+    userId:   user.id,
+    schoolId: schoolId,
+    email:    user.email,
+    role,
+    roles:    user.roles || [role],
+  };
+
+  // Include guardian link only for roles that use it — keeps tokens lean for everyone else
+  if (role === 'parent' || role === 'guardian') {
+    payload.guardianOf = Array.isArray(user.guardianOf) ? user.guardianOf : [];
+  }
+
+  return payload;
+}
+
 /* ── Temp password generator (for new user invites) ────── */
 function _genTempPassword() {
   const alpha = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz';
@@ -48,15 +78,16 @@ const loginLimiter = rateLimit({
 */
 router.post('/login', loginLimiter, tenantMiddleware, async (req, res) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+    // NOTE: renamed to userEmail to avoid shadowing the module-level `email` import
+    const { email: userEmail, password } = req.body;
+    if (!userEmail || !password) return res.status(400).json({ error: 'Email and password required' });
 
     const User   = _model('users');
     const School = _model('schools');
 
     // Find user regardless of isActive so we can give a clear pending message
     const user = await User.findOne({
-      email: email.toLowerCase().trim(),
+      email: userEmail.toLowerCase().trim(),
       schoolId: req.school.id
     }).lean();
 
@@ -126,10 +157,11 @@ router.post('/login', loginLimiter, tenantMiddleware, async (req, res) => {
 
       // Send OTP email (non-blocking — log if it fails)
       email.sendLoginOTP({
-        name:       user.name,
-        email:      user.email,
+        name:        user.name,
+        email:       user.email,
         otp,
-        schoolName: req.school.name || req.school.slug
+        schoolName:  req.school.name || req.school.slug,
+        schoolEmail: req.school.systemEmail || ''
       }).catch(err => console.error('[2FA email]', err.message));
 
       return res.json({
@@ -143,14 +175,7 @@ router.post('/login', loginLimiter, tenantMiddleware, async (req, res) => {
     // Update last login
     await _model('users').updateOne({ _id: user._id }, { lastLogin: new Date().toISOString() });
 
-    const tokenPayload = {
-      userId:   user.id,
-      schoolId: req.school.id,
-      email:    user.email,
-      role:     user.primaryRole || user.role,
-      roles:    user.roles || [user.role]
-    };
-    const token = sign(tokenPayload);
+    const token = sign(_buildTokenPayload(user, req.school.id));
 
     // Check trial expiry and send reminder if needed
     _checkTrialAndNotify(req.school).catch(() => {});
@@ -193,13 +218,7 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
     const School = _model('schools');
     const school = await School.findOne({ id: user.schoolId }).lean();
 
-    const token = sign({
-      userId:   user.id,
-      schoolId: user.schoolId,
-      email:    user.email,
-      role:     user.primaryRole || user.role,
-      roles:    user.roles || [user.role]
-    });
+    const token = sign(_buildTokenPayload(user, user.schoolId));
 
     _checkTrialAndNotify(school).catch(() => {});
     res.json({ token, user: { ...user, password: undefined, mfaOtp: undefined, mfaExpiry: undefined }, school });
@@ -225,10 +244,11 @@ async function _checkPasswordExpiryAndNotify(user, school) {
 
   await _model('schools').updateOne({ id: school.id }, { $set: { [flagField]: todayKey } });
   await email.sendPasswordExpirySoon({
-    name:       user.name,
-    email:      user.email,
-    schoolName: school.name || school.slug,
-    daysLeft:   Math.max(0, daysLeft)
+    name:        user.name,
+    email:       user.email,
+    schoolName:  school.name || school.slug,
+    schoolEmail: school.systemEmail || '',
+    daysLeft:    Math.max(0, daysLeft)
   });
 }
 
@@ -262,19 +282,14 @@ router.post('/force-change', forceChangeLimiter, tenantMiddleware, async (req, r
     const school = await School.findOne({ id: user.schoolId }).lean();
 
     // Issue JWT
-    const token = sign({
-      userId:   user.id,
-      schoolId: user.schoolId,
-      email:    user.email,
-      role:     user.primaryRole || user.role,
-      roles:    user.roles || [user.role]
-    });
+    const token = sign(_buildTokenPayload(user, user.schoolId));
 
     // Send security confirmation email (non-blocking)
     email.sendPasswordChanged({
-      name:       user.name,
-      email:      user.email,
-      schoolName: school?.name || req.school?.name || ''
+      name:        user.name,
+      email:       user.email,
+      schoolName:  school?.name || req.school?.name || '',
+      schoolEmail: school?.systemEmail || req.school?.systemEmail || ''
     }).catch(() => {});
 
     const safeUser = { ...user, password: undefined, mfaOtp: undefined, mfaExpiry: undefined,
@@ -309,12 +324,13 @@ async function _checkTrialAndNotify(school) {
   );
 
   await email.sendTrialReminder({
-    adminName:  school.adminName || school.name,
-    adminEmail: school.adminEmail,
-    schoolName: school.name,
-    plan:       school.plan || 'standard',
+    adminName:   school.adminName || school.name,
+    adminEmail:  school.adminEmail,
+    schoolName:  school.name,
+    schoolEmail: school.systemEmail || '',
+    plan:        school.plan || 'standard',
     daysLeft,
-    trialEnds:  ends.toLocaleDateString('en-GB', { day:'numeric', month:'long', year:'numeric' })
+    trialEnds:   ends.toLocaleDateString('en-GB', { day:'numeric', month:'long', year:'numeric' })
   });
 }
 
@@ -361,9 +377,10 @@ router.post('/change-password', authMiddleware, async (req, res) => {
     const School = _model('schools');
     const school = await School.findOne({ id: req.jwtUser.schoolId }).lean();
     email.sendPasswordChanged({
-      name:       user.name,
-      email:      user.email,
-      schoolName: school?.name || ''
+      name:        user.name,
+      email:       user.email,
+      schoolName:  school?.name || '',
+      schoolEmail: school?.systemEmail || ''
     }).catch(() => {});
 
     res.json({ success: true });

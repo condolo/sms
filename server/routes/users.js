@@ -111,6 +111,7 @@ router.post('/invite', authMiddleware, inviteLimiter, async (req, res) => {
       email:        userEmail.toLowerCase(),
       tempPassword,
       schoolName:   school?.name || '',
+      schoolEmail:  school?.systemEmail || '',
       role:         safeRole,
       loginUrl:     process.env.APP_URL || 'https://school-management-ecosystem.onrender.com'
     }).catch(err => console.error('[invite email]', err.message));
@@ -179,12 +180,13 @@ router.post('/bulk-invite', authMiddleware, inviteLimiter, async (req, res) => {
 
       // Send welcome email (non-blocking, fire-and-forget)
       email.sendWelcomeCredentials({
-        name: name.trim(),
-        email: userEmail.toLowerCase(),
+        name:         name.trim(),
+        email:        userEmail.toLowerCase(),
         tempPassword,
-        schoolName: school?.name || '',
-        role: safeRole,
-        loginUrl: process.env.APP_URL || 'https://school-management-ecosystem.onrender.com'
+        schoolName:   school?.name || '',
+        schoolEmail:  school?.systemEmail || '',
+        role:         safeRole,
+        loginUrl:     process.env.APP_URL || 'https://school-management-ecosystem.onrender.com'
       }).catch(() => {});
 
     } catch (e) {
@@ -215,12 +217,13 @@ router.post('/:id/role-change', authMiddleware, async (req, res) => {
     const school = await School.findOne({ id: req.jwtUser.schoolId }).lean();
 
     await email.sendRoleChanged({
-      name:       user.name,
-      email:      user.email,
-      schoolName: school?.name || '',
-      oldRole:    oldRole || user.role,
+      name:        user.name,
+      email:       user.email,
+      schoolName:  school?.name || '',
+      schoolEmail: school?.systemEmail || '',
+      oldRole:     oldRole || user.role,
       newRole,
-      changedBy:  req.jwtUser.email
+      changedBy:   req.jwtUser.email
     });
 
     res.json({ success: true });

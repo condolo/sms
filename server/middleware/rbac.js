@@ -5,7 +5,7 @@
    Permission document shape (role_permissions collection):
    {
      schoolId: "sch_abc",
-     role: "teacher",
+     roleKey: "teacher",
      permissions: {
        students:   ["read"],
        attendance: ["read", "create", "update"],
@@ -55,7 +55,7 @@ async function _loadPerms(schoolId, role) {
   if (cached) return cached;
 
   const RolePerms = _model('role_permissions');
-  const doc = await RolePerms.findOne({ schoolId, role }).lean();
+  const doc = await RolePerms.findOne({ schoolId, roleKey: role }).lean();
 
   // doc.permissions is an object: { module: ['action', ...] }
   const perms = doc?.permissions || {};

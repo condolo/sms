@@ -115,6 +115,10 @@ const ConfigSchema = z.object({
 
   // Subject assignment enforcement
   subjectAssignmentEnforced: z.boolean().optional(), // if true, only assigned teacher can enter marks
+
+  // archivedAcademicYears is intentionally NOT in this schema.
+  // It is read-only from the client's perspective — only writable via POST /archive-year.
+  // Any client that sends it in a PUT body will have it silently stripped by Zod.
 });
 
 function _validate(schema, data) {
@@ -150,6 +154,11 @@ function _mergeConfig(saved) {
     rankingN:              saved?.rankingN              ?? 7,
     compulsorySubjects:    saved?.compulsorySubjects    ?? [],
     subjectAssignmentEnforced: saved?.subjectAssignmentEnforced ?? false,
+    // Archived years — read-only list; used by frontend to disable UI controls
+    // for year-scoped inputs (grade entry, exam results) for closed years.
+    archivedAcademicYears: Array.isArray(saved?.archivedAcademicYears)
+      ? saved.archivedAcademicYears
+      : [],
   };
 }
 
@@ -256,7 +265,17 @@ router.post('/archive-year', authMiddleware, PLAN, rbac('settings', 'update'), a
     const now = new Date().toISOString();
     const filter = { schoolId, academicYearId };
 
-    // Run cascade in parallel — all operations are additive (no data deleted)
+    // ── Step A: Resolve human-readable year label for audit trail ──
+    // Best-effort — does not block archival if the year document is missing.
+    let academicYearLabel = academicYearId;
+    try {
+      const yearDoc = await _model('academic_years').findOne({ schoolId, id: academicYearId }, { name: 1, year: 1 }).lean();
+      if (yearDoc) academicYearLabel = yearDoc.name || yearDoc.year || academicYearId;
+    } catch { /* non-fatal */ }
+
+    // ── Step B: Data cascade (parallel, additive — no data deleted) ──
+    // Runs first. The config write-blocking gate is written AFTER these
+    // succeed so that the gate is never active without the cascade completing.
     const [examsResult, snapshotsResult, gradesResult] = await Promise.all([
       // Freeze all exams not already archived/cancelled
       _model('exams').updateMany(
@@ -275,32 +294,148 @@ router.post('/archive-year', authMiddleware, PLAN, rbac('settings', 'update'), a
       ),
     ]);
 
-    // Write an audit entry
+    // ── Step C: Activate the write-blocking gate (MUST follow Step B) ──
+    // Sequenced after the cascade so the gate is only active once all
+    // underlying data ops have committed. If this fails, the cascade data
+    // is already marked archived but the server-side write block is not
+    // active — the error is surfaced in the response for operator action.
+    let writeBlockActive = false;
+    let writeBlockError  = null;
+    try {
+      await _model('academic_config').findOneAndUpdate(
+        { schoolId },
+        {
+          $addToSet: { archivedAcademicYears: academicYearId },
+          $set: { updatedBy: userId, updatedAt: now },
+        },
+        { upsert: true, new: true, runValidators: false }
+      );
+      writeBlockActive = true;
+    } catch (gateErr) {
+      writeBlockError = gateErr.message;
+      console.error(`[ACADEMIC-CONFIG] ⚠️  Write-blocking gate FAILED for year ${academicYearId}: ${gateErr.message}`);
+    }
+
+    // ── Step D: Audit log (includes cascade counts + label + gate status) ──
     await _model('mark_audit_log').create({
-      action:        'ACADEMIC_YEAR_ARCHIVED',
+      action:             'ACADEMIC_YEAR_ARCHIVED',
       schoolId,
       academicYearId,
-      editedBy:      userId,
+      academicYearLabel,
+      editedBy:           userId,
       reason,
-      timestamp:     now,
+      timestamp:          now,
+      writeBlockActive,
+      writeBlockError:    writeBlockError || undefined,
       cascade: {
-        examsArchived:       examsResult.modifiedCount,
-        snapshotsLocked:     snapshotsResult.modifiedCount,
-        gradesLocked:        gradesResult.modifiedCount,
+        examsArchived:    examsResult.modifiedCount,
+        snapshotsLocked:  snapshotsResult.modifiedCount,
+        gradesLocked:     gradesResult.modifiedCount,
       },
     });
 
-    console.log(`[ACADEMIC-CONFIG] Year archived: ${academicYearId} by ${userId} — "${reason}"`);
-    return ok(res, {
+    console.log(`[ACADEMIC-CONFIG] Year archived: "${academicYearLabel}" (${academicYearId}) by ${userId} — "${reason}" | gate:${writeBlockActive ? 'active' : 'FAILED'}`);
+
+    const response = {
       academicYearId,
+      academicYearLabel,
       archivedAt:       now,
       archivedBy:       userId,
       examsArchived:    examsResult.modifiedCount,
       snapshotsLocked:  snapshotsResult.modifiedCount,
       gradesLocked:     gradesResult.modifiedCount,
-      message: 'Academic year archived. All exams frozen, report cards locked, grade entries prevented.',
-    });
+      writeBlockActive,
+      message: writeBlockActive
+        ? 'Academic year archived. All exams frozen, report cards locked, grade entries prevented. Write-blocking is now active for this year.'
+        : 'Academic year archived — cascade completed, but the write-blocking gate could not be activated. Contact your platform operator.',
+    };
+
+    if (writeBlockError) response.writeBlockError = writeBlockError;
+    return ok(res, response);
   } catch (err) { console.error('[academic-config/archive-year]', err); return E.serverError(res); }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   School Profile — GET / PATCH
+   Superadmin/admin can view and update top-level school settings:
+   name, shortName, systemEmail, phone, address, logo, timezone, currency.
+   systemEmail is what appears in school-level email notifications
+   (2FA codes, password changes, message alerts, invites).
+   ══════════════════════════════════════════════════════════════ */
+
+// Allowed top-level school fields that admins may read/write
+const SCHOOL_PROFILE_FIELDS = [
+  'name', 'shortName', 'systemEmail', 'phone', 'address',
+  'logoUrl', 'website', 'timezone', 'currency', 'adminName', 'adminEmail',
+  'primaryColor', 'accentColor',
+];
+
+/* GET /api/academic-config/school-profile */
+router.get('/school-profile', authMiddleware, async (req, res) => {
+  try {
+    const { schoolId, role } = req.jwtUser;
+    if (!['superadmin', 'admin'].includes(role)) {
+      return E.forbidden(res, 'Admin access required');
+    }
+    const School = _model('schools');
+    const school = await School.findOne({ id: schoolId }).lean();
+    if (!school) return E.notFound(res, 'School not found');
+
+    const profile = {};
+    SCHOOL_PROFILE_FIELDS.forEach(f => { profile[f] = school[f] ?? null; });
+    profile.plan    = school.plan;
+    profile.addOns  = school.addOns || [];
+    profile.slug    = school.slug;
+    return ok(res, profile);
+  } catch (err) { console.error('[school-profile/get]', err); return E.serverError(res); }
+});
+
+/* PATCH /api/academic-config/school-profile */
+router.patch('/school-profile', authMiddleware, async (req, res) => {
+  try {
+    const { schoolId, role } = req.jwtUser;
+    if (!['superadmin', 'admin'].includes(role)) {
+      return E.forbidden(res, 'Admin access required');
+    }
+
+    // Validate systemEmail if provided
+    if (req.body.systemEmail !== undefined) {
+      const em = req.body.systemEmail;
+      if (em && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
+        return E.badRequest(res, 'Invalid systemEmail address');
+      }
+    }
+
+    // Whitelist updates — only allow permitted fields
+    const update = {};
+    SCHOOL_PROFILE_FIELDS.forEach(f => {
+      if (req.body[f] !== undefined) update[f] = req.body[f];
+    });
+    // Block read-only derived fields
+    delete update.slug;
+    delete update.plan;
+
+    if (!Object.keys(update).length) {
+      return E.badRequest(res, 'No valid fields to update');
+    }
+
+    const School = _model('schools');
+    const school = await School.findOneAndUpdate(
+      { id: schoolId },
+      { $set: update },
+      { new: true }
+    ).lean();
+    if (!school) return E.notFound(res, 'School not found');
+
+    const profile = {};
+    SCHOOL_PROFILE_FIELDS.forEach(f => { profile[f] = school[f] ?? null; });
+    profile.plan   = school.plan;
+    profile.addOns = school.addOns || [];
+    profile.slug   = school.slug;
+
+    console.log(`[SCHOOL-PROFILE] Updated by ${req.jwtUser.userId}: ${Object.keys(update).join(', ')}`);
+    return ok(res, profile);
+  } catch (err) { console.error('[school-profile/patch]', err); return E.serverError(res); }
 });
 
 /* ── Exported helper: resolve score → grade band ────────────── */

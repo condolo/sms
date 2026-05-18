@@ -55,9 +55,18 @@ async function _findSchool(filter) {
     const Sch = _model('schools');
     const doc = await Sch.findOne(filter).lean();
     if (!doc) return null;
-    return { id: doc.id || doc._id.toString(), slug: doc.slug,
-             plan: doc.plan || 'core', addOns: doc.addOns || [],
-             isActive: doc.isActive !== false, name: doc.name };
+    return {
+      id:           doc.id || doc._id.toString(),
+      slug:         doc.slug,
+      plan:         doc.plan    || 'core',
+      addOns:       doc.addOns  || [],
+      isActive:     doc.isActive !== false,
+      name:         doc.name,
+      shortName:    doc.shortName    || doc.name,
+      logoUrl:      doc.logoUrl      || null,
+      primaryColor: doc.primaryColor || '#4f46e5',
+      systemEmail:  doc.systemEmail  || null,
+    };
   } catch { return null; }
 }
 

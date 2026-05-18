@@ -31,9 +31,13 @@ router.get('/schools', async (req, res) => {
     const schools = await School.find({}).lean();
 
     const withStats = await Promise.all(schools.map(async s => {
+      // lean() docs don't apply Mongoose virtuals, so s.id is the raw stored
+      // field (or undefined for schools provisioned before this fix).
+      // Fall back to _id.toString() so stats still work for legacy docs.
+      const sid = s.id || s._id?.toString();
       const [students, staff] = await Promise.all([
-        Student.countDocuments({ schoolId: s.id, status: 'active' }),
-        User.countDocuments({ schoolId: s.id, isActive: true })
+        Student.countDocuments({ schoolId: sid, status: 'active' }),
+        User.countDocuments({ schoolId: sid, isActive: true })
       ]);
       return { ...s, _stats: { students, staff } };
     }));
@@ -60,17 +64,22 @@ router.post('/schools', async (req, res) => {
     const schoolId = `sch_${slug}_${Date.now().toString(36)}`;
     const userId   = `u_${slug}_admin`;
 
+    // Use raw collection API to bypass Mongoose's `id` virtual, which would
+    // silently strip any field named "id" passed to Model.create().
+    const db = mongoose.connection.db;
+
     // Create school record
-    const school = await School.create({
+    const schoolDoc = {
       id: schoolId, slug, name, shortName: shortName || name,
       plan: plan || 'core', addOns: [], isActive: true,
       currency: currency || 'KES', timezone: timezone || 'Africa/Nairobi',
       createdAt: new Date().toISOString()
-    });
+    };
+    await db.collection('schools').insertOne(schoolDoc);
 
     // Create superadmin user
     const hashed = await bcrypt.hash(adminPassword, 10);
-    await User.create({
+    await db.collection('users').insertOne({
       id: userId, schoolId, name: adminName || adminEmail,
       email: adminEmail.toLowerCase(), password: hashed,
       role: 'superadmin', primaryRole: 'superadmin', roles: ['superadmin'],
@@ -80,7 +89,7 @@ router.post('/schools', async (req, res) => {
     // Seed essential base records (academic year, role_permissions, etc.)
     await _seedBaseData(schoolId);
 
-    res.status(201).json({ school: school.toObject(), adminUserId: userId });
+    res.status(201).json({ school: schoolDoc, adminUserId: userId });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -386,11 +395,166 @@ async function _seedBaseData(schoolId) {
   ];
   await Promise.all(secs.map(s => Sec.updateOne({ id: s.id }, { $set: { ...s, schoolId } }, { upsert: true })));
 
-  // Default role permissions (superadmin gets everything)
-  await Perm.updateOne({ id: `rp_sa_${schoolId}` }, { $set: {
-    id: `rp_sa_${schoolId}`, schoolId, roleKey: 'superadmin',
-    permissions: { _all: { view: true, edit: true, delete: true, create: true } }
-  }}, { upsert: true });
+  // Default role permissions — seeded for every new school
+  const ALL_ACTIONS = ['read', 'create', 'update', 'delete'];
+  const RW  = ['read', 'create', 'update'];
+  const R   = ['read'];
+
+  const ALL_MODULES = [
+    'students','teachers','staff','users','classes','sections',
+    'attendance','grades','exams','timetable','subjects',
+    'finance','hr','admissions','behaviour','messages','events',
+    'reports','announcements','settings','academic_years','role_permissions'
+  ];
+
+  // Helper: build full-access permissions object
+  function _allPerms() {
+    return Object.fromEntries(ALL_MODULES.map(m => [m, ALL_ACTIONS]));
+  }
+
+  const roleDefaults = [
+    {
+      roleKey: 'superadmin',
+      permissions: _allPerms(),
+    },
+    {
+      roleKey: 'admin',
+      permissions: _allPerms(),
+    },
+    {
+      roleKey: 'teacher',
+      permissions: {
+        students:   R,
+        attendance: RW,
+        grades:     RW,
+        exams:      R,
+        timetable:  R,
+        subjects:   R,
+        classes:    R,
+        messages:   RW,
+        events:     R,
+        reports:    R,
+        announcements: R,
+      },
+    },
+    {
+      roleKey: 'section_head',
+      permissions: {
+        students:   R,
+        teachers:   R,
+        attendance: RW,
+        grades:     RW,
+        exams:      RW,
+        timetable:  RW,
+        subjects:   R,
+        classes:    RW,
+        messages:   RW,
+        events:     RW,
+        reports:    R,
+        announcements: R,
+      },
+    },
+    {
+      roleKey: 'deputy_principal',
+      permissions: {
+        students:   [...R, 'update'],
+        teachers:   R,
+        staff:      R,
+        attendance: RW,
+        grades:     R,
+        exams:      RW,
+        timetable:  RW,
+        subjects:   RW,
+        classes:    RW,
+        behaviour:  RW,
+        messages:   RW,
+        events:     RW,
+        reports:    R,
+        announcements: RW,
+        sections:   R,
+      },
+    },
+    {
+      roleKey: 'finance',
+      permissions: {
+        finance:    ALL_ACTIONS,
+        students:   R,
+        staff:      R,
+        reports:    R,
+        messages:   RW,
+        events:     R,
+        announcements: R,
+      },
+    },
+    {
+      roleKey: 'hr',
+      permissions: {
+        hr:         ALL_ACTIONS,
+        staff:      RW,
+        teachers:   R,
+        users:      R,
+        messages:   RW,
+        events:     R,
+        reports:    R,
+        announcements: R,
+      },
+    },
+    {
+      roleKey: 'admissions_officer',
+      permissions: {
+        admissions: ALL_ACTIONS,
+        students:   RW,
+        classes:    R,
+        sections:   R,
+        messages:   RW,
+        events:     R,
+        announcements: R,
+      },
+    },
+    {
+      roleKey: 'discipline_committee',
+      permissions: {
+        students:   R,
+        behaviour:  RW,
+        attendance: R,
+        messages:   RW,
+        events:     R,
+        announcements: R,
+      },
+    },
+    {
+      roleKey: 'parent',
+      permissions: {
+        grades:     R,
+        attendance: R,
+        timetable:  R,
+        messages:   RW,
+        events:     R,
+        announcements: R,
+      },
+    },
+    {
+      roleKey: 'student',
+      permissions: {
+        grades:     R,
+        attendance: R,
+        timetable:  R,
+        exams:      R,
+        subjects:   R,
+        messages:   RW,
+        events:     R,
+        announcements: R,
+      },
+    },
+  ];
+
+  await Promise.all(roleDefaults.map(({ roleKey, permissions }) =>
+    Perm.updateOne(
+      { schoolId, roleKey },
+      { $set: { schoolId, roleKey, permissions } },
+      { upsert: true }
+    )
+  ));
 }
 
 /* ════════════════════════════════════════════════════════════

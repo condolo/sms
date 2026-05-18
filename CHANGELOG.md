@@ -1,8 +1,197 @@
-﻿# InnoLearn — Changelog
+﻿# Msingi — Changelog
 
-All notable changes to InnoLearn are documented here.  
+All notable changes to Msingi (formerly InnoLearn) are documented here.  
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).  
 Versioning follows [Semantic Versioning](https://semver.org/).
+
+---
+
+## [4.7.0] — 2026-05-18  Platform Rebrand + Dedicated School URLs + Full Assessment System
+
+### Platform Rebrand — InnoLearn → Msingi
+- Platform renamed to **Msingi** with domain **msingi.io**
+- Updated all frontend branding: logo initials `MS`, nav header, footer copyright
+- `schoolDetect.js` MAIN_HOSTS updated to `msingi.io`, `www.msingi.io`, `app.msingi.io`
+- Landing page URL example updated: `your-school.msingi.io`
+- Demo school slug buttons updated to `.msingi.io`
+
+### Dedicated School URLs — `{slug}.msingi.io`
+- Each school gets its own branded subdomain (e.g. `greenwood.msingi.io`)
+- **`client/src/utils/schoolDetect.js`** (new) — Priority chain: subdomain → `?school=` param → localStorage → main domain. Exports `detectSchool()`, `schoolPortalUrl()`, `storeSchoolSlug()`, `clearStoredSchoolSlug()`
+- **`client/src/pages/Landing.jsx`** (new) — Marketing page shown on main domain: hero, "Find your school" search, features grid, demo role cards, URL example
+- **`client/src/pages/Login.jsx`** — Complete rewrite: dynamically branded with school logo, colours and name fetched from public API. Three modes: LOGIN → OTP → CHANGE_PASSWORD
+- **`server/routes/public.js`** (new) — No-auth `GET /api/public/school-info` returns school branding for login page; `GET /api/public/ping` health check
+- **`server/middleware/tenant.js`** — `_findSchool()` now returns `name`, `shortName`, `logoUrl`, `primaryColor`, `accentColor`, `systemEmail`
+- `server/index.js` — Mounts `/api/public` before auth middleware
+- Approval welcome email now includes the school's dedicated URL with bookmark callout
+- Cloudflare DNS: `A @→216.24.57.1`, `CNAME www→render`, `CNAME *→render` (all DNS only)
+- Render custom domains: `msingi.io`, `www.msingi.io`, `*.msingi.io` for wildcard SSL
+
+### Per-School System Email
+- Platform SMTP: `innolearnnetwork@gmail.com` (fixed, single account)
+- Each school configures `systemEmail` — used as `Reply-To` on all school-level emails
+- School emails sent as `"SchoolName via Msingi" <innolearnnetwork@gmail.com>`
+- Platform emails sent as `"Msingi Platform" <innolearnnetwork@gmail.com>`
+- **`server/utils/email.js`** refactored: `_send()`, `_sendAsSchool()`, `_wrap(schoolName)` helpers
+- All school-level functions now accept `schoolEmail` param: `sendLoginOTP`, `sendWelcomeCredentials`, `sendPasswordExpirySoon`, `sendPasswordChanged`, `sendRoleChanged`, `sendMessageNotification`
+- New: `sendAssessmentReminder()` — email + in-app notification for upcoming/open/overdue assessments
+- `PATCH /api/academic-config/school-profile` — admin can set `systemEmail`, `primaryColor`, `accentColor`, `logoUrl` etc.
+
+### RBAC & Messages Bug Fixes
+- **`server/routes/messages.js`** — Fixed `req.user` → `req.jwtUser` in 4 places (was crashing with 500)
+- **`server/middleware/rbac.js`** — Fixed field name mismatch: `{ schoolId, role }` → `{ schoolId, roleKey: role }` (was returning 403 for all non-admin roles)
+- **`scripts/seed-role-permissions.js`** (new) — One-off migration seeds default permissions for all 11 roles across all existing schools
+- `server/routes/platform.js` — `_seedBaseData` expanded to seed all 11 roles with `upsert: true` for new schools
+
+### Assessment & Grading System (CA / HW / MT / ET)
+#### Backend
+- **`server/utils/grade-calc.js`** (new) — Single source of truth for all assessment calculations:
+  - `validateWeights(weights)` — enforces sum = 100%
+  - `aggregateMarks(marks)` — averages multiple instances (CA1+CA2→avg)
+  - `computeTermTotal(typeAvgs, weights)` — weighted total; normalises to present types
+  - `computeHalfTermTotal(typeAvgs, weights)` — CA+HW+MT only, re-scaled to 100%
+  - `computeTerm1Grade()`, `computeTerm2Grade()`, `computeTerm3Grade()` — term final grades with ET running average blending
+  - `computeSummaryAverage()` — Template B equal-thirds annual average
+  - `buildSubjectReport()` — full multi-term report for one student/subject
+- **`server/routes/assessment.js`** (new) — Full REST API:
+  - `GET/PATCH /api/assessment/config` — weights (validated ≠ 100% blocked), template, instances
+  - `GET/PUT/DELETE /api/assessment/schedule` — date ranges per assessment per term
+  - `GET /api/assessment/marks` — list marks with filters
+  - `POST /api/assessment/marks` — enter/upsert single mark (teacher permission check for MT/ET)
+  - `POST /api/assessment/marks/bulk` — class-wide bulk entry
+  - `DELETE /api/assessment/marks/:id`
+  - `GET /api/assessment/marks/summary` — class completion grid
+  - `GET /api/assessment/report` — full computed report card (single student or whole class)
+  - `GET /api/assessment/reminders` — upcoming/open/overdue assessments (14-day window)
+  - `POST /api/assessment/reminders/notify` — trigger email + in-app notifications to all teachers
+
+#### Assessment Logic
+- Default weights: CA=20%, HW=10%, MT=30%, ET=40% (must total 100%)
+- All marks entered out of 100 — system handles weighting entirely in background
+- Multiple CA/HW instances averaged before weight applied (CA1+CA2÷2 → ×20%)
+- **Half-term report**: CA+HW+MT re-scaled to 100% (CA→33.3%, HW→16.7%, MT→50%)
+- **Term 1 Final** = weighted total (CA×20 + HW×10 + MT×30 + ET×40)
+- **Term 2 Final** = (Term2Total + avg(ET1,ET2)) / 2
+- **Term 3 Final** = (Term3Total + avg(ET1,ET2,ET3)) / 2
+- Teachers restricted from entering MT/ET unless admin enables `teacherExamEntry` on config
+- Two report templates: **A (Detailed)** per-term with ET reference columns; **B (Summary)** equal-weight term averages
+
+#### Frontend
+- **`client/src/pages/grades/GradesPage.jsx`** (new) — 4-tab interface:
+  - **Mark Entry** — filter by class/subject/term/type/instance → student grid with score inputs → bulk save with live class stats (avg, pass rate, high/low)
+  - **Report Cards** — Template A (detailed) or B (summary), half-term toggle, colour-coded scores
+  - **Configuration** — weight inputs with live 100% validator, instance count, template selector, assessment schedule date ranges
+  - **Reminders** — colour-coded overdue/open/upcoming cards; "Notify Teachers" button
+- `client/src/api/client.js` — `assessment` module added (12 methods)
+- `client/src/App.jsx` — `/grades` and `/grades/:tab` routes added
+- `client/src/components/layout/Sidebar.jsx` — `📊 Grades & Assessment` nav item added
+- `server/index.js` — `/platform-audit` added to SPA fallback
+
+---
+
+## [4.6.2] — 2026-05-17  Academic Reporting Engine — cross-cutting issue fixes
+
+### Fixed — Shared utility: `server/utils/archival.js` (new)
+- Extracted `_isYearArchived` into a shared utility, eliminating the DRY violation where identical code existed in both `grades.js` and `exams.js`
+- `isYearArchived(schoolId, academicYearId)` — returns false on null/missing inputs without a DB call; queries with projection so only the `archivedAcademicYears` field is loaded
+- `firstArchivedYear(schoolId, yearIds[])` — deduplicates and filters nulls before checking; short-circuits on first match; used by bulk endpoints
+
+### Fixed — `server/routes/auth.js`: guardian link broken in JWT (critical)
+- All parent and guardian users were receiving HTTP 403 on every report card access because `guardianOf` was never included in the JWT payload
+- Introduced `_buildTokenPayload(user, schoolId)` — a single source of truth for JWT construction used by all three token issuance paths (password login, OTP verify, force-change)
+- For `parent` and `guardian` roles, `guardianOf: user.guardianOf || []` is now included in the payload; absent for all other roles to keep tokens lean
+- Non-array `guardianOf` values on the user document are safely coerced to `[]`
+- `server/middleware/auth.js` comment updated to document the new field
+
+### Fixed — `server/routes/academic-config.js`: `archivedAcademicYears` not visible to frontend
+- `_mergeConfig()` now includes `archivedAcademicYears: []` in its output — `GET /api/academic-config` returns the full list of archived year IDs
+- Frontend can now disable year-scoped UI controls (grade entry, exam results, new publish) for closed years without needing a separate API call
+- `ConfigSchema` (Zod) explicitly excludes `archivedAcademicYears` from PUT body — the field is read-only via PUT; only `POST /archive-year` can write it
+
+### Fixed — `server/routes/report-cards.js`: publish not blocked for archived years
+- `POST /api/report-cards/publish` now checks `isYearArchived()` immediately after creating the batch anchor (Step 1b)
+- If the year is archived, batch is marked `failed` with a descriptive reason and HTTP 400 is returned — no further work is done
+- Closes the gap where `skipModerationCheck: true` could still publish new snapshots into a closed year
+
+### Fixed — `server/routes/academic-config.js`: archive-year cascade atomicity
+- The config write-blocking gate (`$addToSet: { archivedAcademicYears }`) is now sequenced **after** the three data cascade ops (exams, snapshots, grades) rather than running in parallel with them
+- Guarantees the gate is never active without the underlying data being archived first
+- Gate write failure is caught and surfaced separately — `writeBlockActive: false` + `writeBlockError` in both the response and the audit log entry, plus `console.error` — cascade data is preserved even if the gate fails
+- Year label resolved from `academic_years` collection (best-effort, non-blocking) and embedded in the audit entry as `academicYearLabel` for human-readable audit trails
+
+### Fixed — Audit trail gaps
+- `WRITE_BLOCKED_ARCHIVED_YEAR` entries now written to `mark_audit_log` whenever a grade write (`POST /api/grades`, `POST /api/grades/bulk`) or exam result write (`POST /api/exams/:id/results`) is rejected due to an archived year — captures `route`, `attemptedBy`, `payload` summary, `timestamp`
+- `GUARDIAN_ACCESS_DENIED` entries now written to `mark_audit_log` whenever a parent/guardian is denied access to `GET /api/report-cards/:id` or `GET /:id/pdf` — captures `requestedBy`, `requestedRole`, `targetStudentId`, `snapshotId`, `route` for GDPR/POPIA compliance
+
+### Tests — `server/__tests__/` (30 new tests, 93 total)
+- **`archival.test.js`** (18 tests) — covers `isYearArchived` and `firstArchivedYear`:
+  - Early returns on null/empty schoolId or academicYearId (no DB call made)
+  - Config doc absent, field missing, empty array, yearId not in list, yearId present
+  - Case sensitivity, projection correctness
+  - `firstArchivedYear`: empty array, all-null array, no match, first match found, deduplication, null filtering
+- **`auth-token.test.js`** (12 tests) — covers `_buildTokenPayload` logic:
+  - Parent/guardian with linked students, empty list, missing field, non-array field
+  - Guardian role, `primaryRole` takes precedence over `role`
+  - All non-guardian roles (`admin`, `superadmin`, `teacher`, `student`, `accountant`) — `guardianOf` absent
+  - Core fields always present, `roles` array vs fallback
+
+---
+
+## [4.6.1] — 2026-05-17  Academic Reporting Engine — production hardening (Phase 3)
+
+### Security & Data Integrity
+
+#### Archival write-blocking (prevents data corruption after year-end close)
+- `POST /api/academic-config/archive-year` now also writes `$addToSet: { archivedAcademicYears }` on the school's `academic_config` document. This creates a cheap, permanent server-side gate other routes can check without extra queries.
+- **`POST /api/grades`** — rejects any grade entry whose `academicYearId` is in `archivedAcademicYears` with HTTP 400.
+- **`POST /api/grades/bulk`** — checks all distinct `academicYearId` values in the payload; rejects if any is archived.
+- **`POST /api/exams/:id/results`** — checks `exam.academicYearId` against `archivedAcademicYears` before accepting results; archived years are permanently read-only regardless of exam status.
+- Both routes use a shared `_isYearArchived(schoolId, academicYearId)` helper that hits a single indexed document.
+
+#### MongoDB session transactions on publish
+- `POST /api/report-cards/publish` now wraps both bulkWrites (insert new snapshots + mark old snapshots superseded) inside `session.withTransaction()`.
+- **Graceful fallback**: if MongoDB error code 20 (`IllegalOperation — transactions only available on replica set`) is thrown, the server logs a warning and falls back to non-transactional writes automatically. No configuration required — development on standalone MongoDB works unchanged; replica sets in production get full atomicity.
+
+#### Guardian ownership enforcement on report card access
+- `GET /api/report-cards/:id` and `GET /api/report-cards/:id/pdf` now verify that users with role `parent` or `guardian` are linked to the requested student via `req.jwtUser.guardianOf[]` (an array of studentIds stored on the user's JWT).
+- Unauthorised access returns HTTP 403. This closes the cross-family data-leak vector where any authenticated parent could access any student's report card by guessing a snapshot ID.
+
+### Reliability
+
+#### Runtime type validation in `computeFinalScores`
+- `server/utils/academic-calc.js → computeFinalScores()` now validates inputs at runtime before computation:
+  - `assessmentWeights` must be a non-empty array with numeric `weight` values — throws `TypeError` with a descriptive message if not.
+  - `gradingSchema` must be a non-empty array with numeric `minScore`/`maxScore` — throws `TypeError`.
+  - `gradesData` / `examData` are coerced to `{}` if null/undefined/array rather than throwing.
+  - Individual score averages are coerced with `Number()` — non-numeric values (e.g. stale string from DB) are skipped with a `console.warn` rather than silently NaN-poisoning the final score.
+
+### Test Coverage
+
+#### New test suite — `server/__tests__/` (63 tests, all passing)
+- **`academic-calc.test.js`** (42 tests) — covers `computeFinalScores` and `attachDeviations`:
+  - Full three-component weighted score accuracy
+  - Partial weight normalisation (only a subset of types present)
+  - Single-subject averageScore and subjectCount
+  - Multi-student independence
+  - Unknown/unweighted assessment types are ignored
+  - Tied scores handled correctly
+  - Grade boundary table (`score 100 → A` through `score 0 → E`) via `test.each`
+  - Non-numeric score skipped with `console.warn` still computes remaining types
+  - GPA accumulation
+  - `attachDeviations`: class average per subject, deviation sign, single-student (zero deviation), null finalScore, multiple subjects independently, mutation in-place
+  - Input validation: empty weights throws, empty schema throws, non-numeric weight throws, null inputs coerced safely
+- **`ranking.test.js`** (14 tests) — covers `rankStudents`, `computeRankingScore`, `mergeRankings`, `bestPerSubject`:
+  - Standard vs dense tie-breaking (1,2,2,4 vs 1,2,2,3)
+  - All-tied cohort: all rank 1
+  - Two consecutive tied groups (1,1,3,3,5 standard)
+  - KCSE best-7-of-8 real-world scenario: correct subject exclusion
+  - `compulsory_only` with empty list falls back to `all`
+  - `mergeRankings` omits scopes where student is absent
+  - `bestPerSubject` skips null scores, handles single student
+- **`resolve-grade.test.js`** (7 tests) — covers `resolveGrade` from `academic-config.js`:
+  - Exact upper and lower boundaries for every grade band
+  - Decimal scores, custom schemas, default schema fallback
+- **Infrastructure**: Jest added as `devDependency`; `npm test` script added to `package.json`; test pattern `server/__tests__/**/*.test.js`; `_model()` and `resolveGrade` mocked in calc tests to keep tests fully offline (no MongoDB connection required).
 
 ---
 

@@ -36,7 +36,7 @@ const ROLE_GROUPS = {
 /* ── GET /api/messages — list messages visible to this user ─ */
 router.get('/', async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.user;
+    const { schoolId, userId, role } = req.jwtUser;
     const { tab = 'inbox', page = 1, limit = 50 } = req.query;
     const Msg = _model('messages');
 
@@ -77,7 +77,7 @@ router.get('/', async (req, res) => {
 /* ── POST /api/messages — create message + send email notifications ─ */
 router.post('/', async (req, res) => {
   try {
-    const { schoolId, userId, name: senderName, role: senderRole } = req.user;
+    const { schoolId, userId, name: senderName, role: senderRole } = req.jwtUser;
     const { subject, body, recipients, type = 'direct' } = req.body;
 
     if (!subject || !body || !recipients) {
@@ -103,10 +103,11 @@ router.post('/', async (req, res) => {
     });
 
     /* ── Send email notifications to recipients ──────────── */
-    const school    = req.school;
-    const preview   = body.length > 160 ? body.substring(0, 157) + '…' : body;
-    const isDirect  = type === 'direct';
-    const notifyJobs = [];
+    const school      = req.school;
+    const schoolEmail = school.systemEmail || '';
+    const preview     = body.length > 160 ? body.substring(0, 157) + '…' : body;
+    const isDirect    = type === 'direct';
+    const notifyJobs  = [];
 
     for (const recipient of recipientList) {
       if (recipient === 'all') {
@@ -122,9 +123,10 @@ router.post('/', async (req, res) => {
               senderName,
               subject,
               preview,
-              schoolName: school.name,
-              isDirect: false,
-              appUrl: APP_URL,
+              schoolName:  school.name,
+              schoolEmail,
+              isDirect:    false,
+              appUrl:      APP_URL,
             }));
           }
         }
@@ -144,9 +146,10 @@ router.post('/', async (req, res) => {
               senderName,
               subject,
               preview,
-              schoolName: school.name,
-              isDirect: false,
-              appUrl: APP_URL,
+              schoolName:  school.name,
+              schoolEmail,
+              isDirect:    false,
+              appUrl:      APP_URL,
             }));
           }
         }
@@ -160,9 +163,10 @@ router.post('/', async (req, res) => {
             senderName,
             subject,
             preview,
-            schoolName: school.name,
-            isDirect: true,
-            appUrl: APP_URL,
+            schoolName:  school.name,
+            schoolEmail,
+            isDirect:    true,
+            appUrl:      APP_URL,
           }));
         }
       }
@@ -181,7 +185,7 @@ router.post('/', async (req, res) => {
 /* ── PATCH /api/messages/:id/read — mark as read ─────────── */
 router.patch('/:id/read', async (req, res) => {
   try {
-    const { schoolId, userId } = req.user;
+    const { schoolId, userId } = req.jwtUser;
     const Msg = _model('messages');
     const msg = await Msg.findOneAndUpdate(
       { id: req.params.id, schoolId },
@@ -196,7 +200,7 @@ router.patch('/:id/read', async (req, res) => {
 /* ── DELETE /api/messages/:id — delete (sender or admin only) ─ */
 router.delete('/:id', async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.user;
+    const { schoolId, userId, role } = req.jwtUser;
     const Msg = _model('messages');
     const msg = await Msg.findOne({ id: req.params.id, schoolId }).lean();
     if (!msg) return res.status(404).json({ error: 'Message not found' });

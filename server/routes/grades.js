@@ -12,6 +12,7 @@ const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
+const { isYearArchived, firstArchivedYear } = require('../utils/archival');
 
 const router = express.Router();
 const PLAN   = planGate('grades');
@@ -139,6 +140,20 @@ router.post('/', authMiddleware, PLAN, rbac('grades', 'create'), async (req, res
     const { data, error } = _validate(GradeSchema, req.body);
     if (error) return E.validation(res, error);
 
+    // Block writes to archived academic years — log the attempt for auditability
+    if (await isYearArchived(schoolId, data.academicYearId)) {
+      _model('mark_audit_log').create({
+        action:        'WRITE_BLOCKED_ARCHIVED_YEAR',
+        schoolId,
+        academicYearId: data.academicYearId,
+        route:         'POST /api/grades',
+        attemptedBy:   userId,
+        payload:       { studentId: data.studentId, subjectId: data.subjectId, assessmentType: data.assessmentType },
+        timestamp:     new Date().toISOString(),
+      }).catch(e => console.error('[grades] audit log failed:', e.message));
+      return E.badRequest(res, `Academic year "${data.academicYearId}" has been archived — grade entries are no longer allowed for this year.`);
+    }
+
     if (data.score > data.maxScore) return E.badRequest(res, `Score (${data.score}) cannot exceed maxScore (${data.maxScore})`);
 
     const doc = await _model('grades').create({
@@ -161,6 +176,21 @@ router.post('/bulk', authMiddleware, PLAN, rbac('grades', 'create'), async (req,
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(BulkGradeSchema, req.body);
     if (error) return E.validation(res, error);
+
+    // Block bulk writes to archived academic years — check all distinct yearIds in the payload
+    const blockedYear = await firstArchivedYear(schoolId, data.grades.map(g => g.academicYearId));
+    if (blockedYear) {
+      _model('mark_audit_log').create({
+        action:        'WRITE_BLOCKED_ARCHIVED_YEAR',
+        schoolId,
+        academicYearId: blockedYear,
+        route:         'POST /api/grades/bulk',
+        attemptedBy:   userId,
+        payload:       { gradeCount: data.grades.length },
+        timestamp:     new Date().toISOString(),
+      }).catch(e => console.error('[grades/bulk] audit log failed:', e.message));
+      return E.badRequest(res, `Academic year "${blockedYear}" has been archived — grade entries are no longer allowed for this year.`);
+    }
 
     const invalid = data.grades.filter(g => g.score > g.maxScore);
     if (invalid.length) return E.badRequest(res, `${invalid.length} grade(s) have score exceeding maxScore`);

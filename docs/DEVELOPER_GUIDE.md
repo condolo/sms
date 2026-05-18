@@ -1,6 +1,6 @@
-﻿# InnoLearn — Developer Guide
+﻿# Msingi — Developer Guide
 
-**Version 4.6.0** · Technical Reference & Architecture
+**Version 4.7.0** · Technical Reference & Architecture
 
 ---
 
@@ -31,6 +31,10 @@
 23. [Platform Admin API (v4.5+)](#23-platform-admin-api-serverroutesplatformjs--v45)
 24. [Academic Configuration API (v4.6+)](#24-academic-configuration-api-v46)
 25. [Academic Reporting Engine (v4.6+)](#25-academic-reporting-engine-v46)
+26. [Production Hardening — Phase 3 (v4.6.1+)](#26-production-hardening--phase-3-v461)
+27. [Cross-Cutting Issue Fixes (v4.6.2+)](#27-cross-cutting-issue-fixes-v462)
+28. [Platform Rebrand & Dedicated School URLs (v4.7.0)](#28-platform-rebrand--dedicated-school-urls-v470)
+29. [Assessment & Grading System (v4.7.0)](#29-assessment--grading-system-v470)
 
 ---
 
@@ -2137,7 +2141,466 @@ computeRankingScore(student.subjects, 'best_n', 7, []);
 
 ### Planned Extensions (next sprint)
 - **Cumulative transcript** — cross-term GPA, graduation export, signed PDF
-- **Academic year archival** — `archiveAcademicYear()` freezes all records, prevents edits
 - **Concurrent edit protection** — optimistic locking (`version` field) on exam result writes
 - **Comment templates** — configurable auto-generated remarks by grade band
 - **Notification retry** — DB-backed retry queue for email delivery failures
+
+---
+
+## 26. Production Hardening — Phase 3 (v4.6.1+)
+
+### 26.1 Archival Write-Blocking
+
+When an academic year is archived via `POST /api/academic-config/archive-year`, the server:
+
+1. Runs the existing cascade (freeze exams, lock snapshots, mark grades `yearArchived: true`)
+2. **Also** writes `$addToSet: { archivedAcademicYears: academicYearId }` to the school's `academic_config` document
+
+This creates a permanent, indexed gate that other write routes check cheaply:
+
+```js
+async function _isYearArchived(schoolId, academicYearId) {
+  if (!academicYearId) return false;
+  const cfg = await _model('academic_config')
+    .findOne({ schoolId }, { archivedAcademicYears: 1 }).lean();
+  return Array.isArray(cfg?.archivedAcademicYears)
+    && cfg.archivedAcademicYears.includes(academicYearId);
+}
+```
+
+**Enforced on:**
+| Route | Check |
+|---|---|
+| `POST /api/grades` | rejects if `data.academicYearId` is archived |
+| `POST /api/grades/bulk` | rejects if any distinct `academicYearId` in payload is archived |
+| `POST /api/exams/:id/results` | rejects if `exam.academicYearId` is archived |
+
+All return `HTTP 400` with a human-readable message. This is additive to the existing `yearArchived` flag on individual documents — the config check is the server-enforced gate; the document flag is for query-time filtering.
+
+---
+
+### 26.2 MongoDB Session Transactions on Publish
+
+`POST /api/report-cards/publish` wraps the two critical bulkWrites (insert snapshots + supersede old ones) in a session transaction:
+
+```js
+const session = await mongoose.startSession();
+try {
+  await session.withTransaction(async () => {
+    await Snaps.bulkWrite(insertOps,    { ordered: false, session });
+    await Snaps.bulkWrite(supersedeOps, { ordered: false, session });
+  });
+} catch (txErr) {
+  if (txErr.code === 20 || txErr.message?.includes('Transaction')) {
+    // Standalone MongoDB (dev/test) — fall back silently
+    console.warn('[REPORT-CARDS] Transactions not available — falling back');
+    await Snaps.bulkWrite(insertOps,    { ordered: false });
+    await Snaps.bulkWrite(supersedeOps, { ordered: false });
+  } else {
+    throw txErr;
+  }
+} finally {
+  if (session) await session.endSession().catch(() => {});
+}
+```
+
+**Why this matters**: without a transaction, if the server crashes between inserting new snapshots and marking old ones superseded, both versions appear as non-superseded. With a transaction on a replica set, the two operations are atomic — either both commit or both roll back.
+
+**Fallback**: error code 20 (`IllegalOperation`) is MongoDB's signal that the deployment is a standalone (not replica set). The server falls back to non-transactional writes automatically — no `.env` flag, no startup configuration required.
+
+---
+
+### 26.3 Guardian Ownership Enforcement
+
+Users with role `parent` or `guardian` must be explicitly linked to student IDs via `guardianOf: [studentId]` stored in their JWT payload (set at login time from the users collection).
+
+**Enforced on:**
+- `GET /api/report-cards/:id` — returns `HTTP 403` if the snapshot's `studentId` is not in `req.jwtUser.guardianOf`
+- `GET /api/report-cards/:id/pdf` — same check
+
+**Implementation in auth middleware**: the `guardianOf` field must be included in the JWT payload when issuing tokens to parent/guardian users. The auth middleware makes it available on `req.jwtUser.guardianOf`.
+
+**Schema on users collection** (add this field):
+```js
+{
+  role:       'parent',        // or 'guardian'
+  schoolId:   '...',
+  guardianOf: ['stu-uuid-1', 'stu-uuid-2'],  // linked student IDs
+}
+```
+
+The `guardianOf` array is empty `[]` by default — a parent with an empty array cannot access any report card, which is the safe-fail direction.
+
+---
+
+### 26.4 Runtime Type Validation in computeFinalScores
+
+`server/utils/academic-calc.js → computeFinalScores()` performs input validation before touching any data:
+
+| Check | Action |
+|---|---|
+| `assessmentWeights` is null / not array / empty | throws `TypeError` |
+| `gradingSchema` is null / not array / empty | throws `TypeError` |
+| A weight's `.weight` is non-numeric | throws `TypeError` with field name |
+| A schema band's `minScore`/`maxScore` is non-numeric | throws `TypeError` with grade name |
+| `gradesData` or `examData` is null / array | silently coerced to `{}` |
+| An individual type average is `NaN` | skipped with `console.warn`, rest computed normally |
+
+This ensures that a misconfigured `academic_config` document (e.g. a weight accidentally stored as a string) surfaces as a clear error at the call site rather than a silent `NaN` propagating into published report cards.
+
+---
+
+### 26.5 Test Suite
+
+#### Setup
+```bash
+npm test              # run all tests once (CI-friendly, force-exits)
+npm run test:watch    # interactive watch mode during development
+```
+
+#### Test files (all in `server/__tests__/`)
+
+| File | Tests | What it covers |
+|---|---|---|
+| `academic-calc.test.js` | 42 | `computeFinalScores`, `attachDeviations` |
+| `ranking.test.js` | 14 | `rankStudents`, `computeRankingScore`, `mergeRankings`, `bestPerSubject` |
+| `resolve-grade.test.js` | 7 | `resolveGrade` boundary table + custom schema |
+| **Total** | **63** | |
+
+#### Mocking strategy
+
+`_model()` is mocked in all test files so tests never need a MongoDB connection. The mock returns a minimal object with `find`, `findOne`, `countDocuments` stubs that resolve to empty arrays/null. `resolveGrade` is re-implemented inline in the `academic-calc.test.js` mock using the same band-matching logic.
+
+This means:
+- Tests run in ~6s on a laptop with no external dependencies
+- CI pipelines need no MongoDB service container for the unit test stage
+- Integration tests (with real MongoDB) can be added separately under `server/__tests__/integration/`
+
+#### Key test scenarios
+
+**`computeFinalScores`:**
+- Full 3-component weighted score: `(80×20 + 70×30 + 90×50) / 100 = 82` → grade A
+- Partial weight normalisation: only `final` present → normalised to its raw score
+- KCSE-style: `best_n=7` out of 8 subjects, correct subject excluded
+- Grade boundary table via `test.each`: score 100→A, 80→A, 79→B+, 40→D, 39→E, 0→E
+- NaN score skipped, remaining types still compute correctly
+
+**`rankStudents`:**
+- Standard: 1,2,2,4 (competition ranking with gap)
+- Dense: 1,2,2,3 (no gap)
+- Two consecutive tied groups: 1,1,3,3,5 (standard)
+- All tied: all rank 1
+
+**`computeRankingScore`:**
+- `'all'`: averages all 5 subjects
+- `'best_n'` n=3: top 3 selected, others dropped
+- KCSE best-7-of-8: lowest subject excluded, average of remaining 7
+- `'compulsory_only'` with empty list: falls back to `'all'`
+
+---
+
+## 27. Cross-Cutting Issue Fixes (v4.6.2+)
+
+### 27.1 Shared Archival Utility — `server/utils/archival.js`
+
+Single source of truth for year-archival checks. Import this in any route that guards writes:
+
+```js
+const { isYearArchived, firstArchivedYear } = require('../utils/archival');
+
+// Single write guard
+if (await isYearArchived(schoolId, data.academicYearId)) {
+  return E.badRequest(res, `Year "${data.academicYearId}" is archived.`);
+}
+
+// Bulk write guard — checks all distinct year IDs, returns first archived one
+const blockedYear = await firstArchivedYear(schoolId, data.grades.map(g => g.academicYearId));
+if (blockedYear) return E.badRequest(res, `Year "${blockedYear}" is archived.`);
+```
+
+**Never duplicate this logic inline.** The function handles null inputs, missing config documents, missing array fields, and deduplication internally.
+
+---
+
+### 27.2 JWT Guardian Link — `_buildTokenPayload` in `auth.js`
+
+All JWT issuance flows (`/login`, `/verify-otp`, `/force-change`) use a single `_buildTokenPayload(user, schoolId)` function. The payload schema is:
+
+```js
+{
+  userId:    string,
+  schoolId:  string,
+  email:     string,
+  role:      string,
+  roles:     string[],
+  guardianOf?: string[]   // present ONLY for role: 'parent' | 'guardian'
+}
+```
+
+**Populating `guardianOf` on user records**: when creating or updating a parent/guardian user, store `guardianOf: [studentId, ...]` on their user document. The array is read at login time and embedded in the JWT. Token refresh (re-login) is required for changes to take effect.
+
+**Data migration for existing parent/guardian users** (run once):
+```js
+db.collection('users').updateMany(
+  { role: { $in: ['parent', 'guardian'] } },
+  { $set: { guardianOf: [] } }
+);
+```
+
+---
+
+### 27.3 Archive-Year Cascade Sequence
+
+The `POST /archive-year` endpoint now runs in three explicit phases:
+
+1. **Step A** (best-effort): resolve human-readable `academicYearLabel` from `academic_years` collection
+2. **Step B** (parallel): the three data cascade ops — freeze exams, lock snapshots, mark grades archived
+3. **Step C** (sequential, after B): write `$addToSet: { archivedAcademicYears }` to `academic_config`
+
+The gate (Step C) is **always written after the data** (Step B). If Step C fails, `writeBlockActive: false` and `writeBlockError` appear in both the HTTP response and the audit log entry.
+
+**Audit log entry** (`ACADEMIC_YEAR_ARCHIVED`) includes: `academicYearLabel`, `writeBlockActive`, `writeBlockError`, and cascade counts.
+
+---
+
+### 27.4 Audit Action Types Reference (complete)
+
+| Action | Written by | What it records |
+|---|---|---|
+| `RESULT_UPDATED` | `exams.js` | Score change on an exam result |
+| `GRADE_UPDATED` | `grades.js` | Score change on a gradebook entry |
+| `EXAM_UNLOCKED` | `exams.js` | Admin unlock with mandatory reason |
+| `MODERATION_BYPASS` | `report-cards.js` | Bypass of moderation guard on publish |
+| `ACADEMIC_YEAR_ARCHIVED` | `academic-config.js` | Year-end close with cascade counts + gate status |
+| `WRITE_BLOCKED_ARCHIVED_YEAR` | `grades.js`, `exams.js` | Rejected write attempt to a closed year |
+| `GUARDIAN_ACCESS_DENIED` | `report-cards.js` | Parent/guardian 403 on report card or PDF |
+
+All entries include `schoolId`, `timestamp`, and the acting user ID.
+
+---
+
+### 27.5 Test Suite Summary (v4.6.2 cumulative — 93 tests)
+
+| File | Tests | What it covers |
+|---|---|---|
+| `academic-calc.test.js` | 42 | `computeFinalScores`, `attachDeviations` |
+| `ranking.test.js` | 14 | `rankStudents`, `computeRankingScore`, `mergeRankings`, `bestPerSubject` |
+| `resolve-grade.test.js` | 7 | `resolveGrade` boundary table + custom schema |
+| `archival.test.js` | 18 | `isYearArchived`, `firstArchivedYear` |
+| `auth-token.test.js` | 12 | `_buildTokenPayload` — all role combinations |
+| **Total** | **93** | |
+
+---
+
+## 28. Platform Rebrand & Dedicated School URLs (v4.7.0)
+
+### 28.1 Domain & Branding
+
+Platform renamed from **InnoLearn** to **Msingi**, domain **msingi.io**.
+
+- `client/src/utils/schoolDetect.js` — `MAIN_HOSTS` set updated to include `msingi.io`, `www.msingi.io`, `app.msingi.io`
+- `client/src/pages/Landing.jsx` — Marketing homepage (shown when `isSchool === false`)
+- `client/src/pages/Login.jsx` — Branded login with school logo/colours from public API
+
+### 28.2 School Detection (`schoolDetect.js`)
+
+```js
+// Priority chain:
+detectSchool()
+// 1. Subdomain:  greenwood.msingi.io  → slug = "greenwood"
+// 2. ?school=X query param            → slug = X   (dev/localhost)
+// 3. localStorage il_school_slug      → slug = stored
+// 4. No match                         → { slug: null, isSchool: false }
+
+schoolPortalUrl('greenwood')
+// On localhost:  http://localhost:3005/?school=greenwood
+// On production: https://greenwood.msingi.io
+```
+
+Every API request in `client.js` automatically sends `X-School-Slug: <slug>` via the `_req()` helper. The tenant middleware resolves school context from this header.
+
+### 28.3 Public API (`/api/public`)
+
+No-auth endpoints for branding the login page before authentication:
+
+```
+GET /api/public/school-info?slug=greenwood
+→ { slug, name, shortName, logoUrl, primaryColor, accentColor, website, isActive, status }
+
+GET /api/public/ping
+→ { ok: true }
+```
+
+Mounted before `authMiddleware` in `index.js`.
+
+### 28.4 School Profile PATCH
+
+```
+PATCH /api/academic-config/school-profile
+Body: { name, shortName, systemEmail, logoUrl, primaryColor, accentColor, phone, address, timezone, currency }
+→ Updates school document; validates systemEmail format
+```
+
+Admin/superadmin only. Returns the updated profile fields plus `slug`, `plan`, `addOns`.
+
+### 28.5 Per-School Email Identity
+
+All email functions accept `schoolName` and `schoolEmail`:
+
+```js
+// School-level emails (2FA, welcome, notifications):
+From:     "Greenwood Academy via Msingi" <innolearnnetwork@gmail.com>
+Reply-To: school.systemEmail  (falls back to PLATFORM_EMAIL)
+
+// Platform-level emails (registration, approval):
+From:     "Msingi Platform" <innolearnnetwork@gmail.com>
+```
+
+Single Gmail SMTP account. `Reply-To` lets schools receive replies at their own address.
+
+### 28.6 DNS Configuration (Cloudflare + Render)
+
+For wildcard school subdomains on Render:
+
+**Cloudflare DNS** (all DNS only — grey cloud, NOT proxied):
+```
+A     @                   → 216.24.57.1
+CNAME www                 → school-management-ecosystem.onrender.com
+CNAME *                   → school-management-ecosystem.onrender.com
+CNAME _acme-challenge     → <value from Render>
+CNAME _cf-custom-hostname → <value from Render>
+```
+
+**Render Custom Domains:** Add `msingi.io`, `www.msingi.io`, `*.msingi.io` (triggers wildcard SSL via Cloudflare for SaaS).
+
+**Environment variable:** `APP_URL=https://msingi.io`
+
+---
+
+## 29. Assessment & Grading System (v4.7.0)
+
+### 29.1 Architecture
+
+```
+server/utils/grade-calc.js     ← Calculation engine (single source of truth)
+server/routes/assessment.js    ← REST API  (/api/assessment/*)
+client/src/pages/grades/       ← Frontend (GradesPage.jsx)
+client/src/api/client.js       ← assessment module (12 methods)
+```
+
+Collections:
+```
+assessment_config    — per school/year: weights, template, instances
+assessment_schedule  — date ranges per assessment per term
+assessment_marks     — individual mark entries (the new system)
+notifications        — in-app reminder notifications
+```
+
+### 29.2 Calculation Engine (`grade-calc.js`)
+
+All formulas live here. Never duplicate in routes or frontend.
+
+```js
+validateWeights({ CA:20, HW:10, MT:30, ET:40 })
+// → { valid: true, total: 100 }
+
+aggregateMarks(marks)
+// → { typeAvgs: { CA: 75, HW: 80 }, breakdown: { CA: [{instance:1, rawScore:72}, ...] } }
+
+computeTermTotal(typeAvgs, weights)
+// → weighted total; normalises to present types if some are missing
+
+computeHalfTermTotal(typeAvgs, weights)
+// → CA+HW+MT only, re-scaled so they sum to 100%
+
+computeTerm1Grade(typeAvgs, weights)
+// → { termTotal, finalGrade }  (finalGrade = termTotal for T1)
+
+computeTerm2Grade(term2TypeAvgs, weights, et1Score)
+// → { termTotal, etRunningAvg: avg(ET1,ET2), finalGrade: (termTotal+etRunningAvg)/2 }
+
+computeTerm3Grade(term3TypeAvgs, weights, et1Score, et2Score)
+// → { termTotal, etRunningAvg: avg(ET1,ET2,ET3), finalGrade: (termTotal+etRunningAvg)/2 }
+
+computeSummaryAverage(t1Total, t2Total, t3Total)
+// → (T1+T2+T3)/3  — Template B equal-thirds average
+
+buildSubjectReport({ marks, weights })
+// → { terms: { 1: {...}, 2: {...}, 3: {...} }, summaryAverage }
+```
+
+### 29.3 API Endpoints
+
+| Method | Endpoint | Auth | Purpose |
+|--------|---------|------|---------|
+| GET | `/api/assessment/config` | settings:read | Get weights, template, instances |
+| PATCH | `/api/assessment/config` | settings:update | Update config (validates sum=100%) |
+| GET | `/api/assessment/schedule` | settings:read | List date ranges |
+| PUT | `/api/assessment/schedule` | settings:update | Upsert a schedule entry |
+| DELETE | `/api/assessment/schedule/:id` | settings:update | Remove schedule entry |
+| GET | `/api/assessment/marks` | grades:read | List marks with filters |
+| POST | `/api/assessment/marks` | grades:create | Enter/upsert single mark |
+| POST | `/api/assessment/marks/bulk` | grades:create | Bulk upsert (whole class) |
+| DELETE | `/api/assessment/marks/:id` | grades:delete | Remove a mark |
+| GET | `/api/assessment/marks/summary` | grades:read | Class completion grid |
+| GET | `/api/assessment/report` | grades:read | Computed report card |
+| GET | `/api/assessment/reminders` | grades:read | Upcoming/open/overdue list |
+| POST | `/api/assessment/reminders/notify` | settings:update | Trigger email + in-app notifications |
+
+### 29.4 Mark Entry Rules
+
+- All marks entered as `rawScore: 0–100` — always out of 100 regardless of weight
+- Multiple instances (CA1, CA2) → averaged → weight applied
+- MT and ET: teachers blocked by default; admin enables via `config.teacherExamEntry: true`
+- Upsert key: `{ schoolId, studentId, subjectId, termNumber, assessmentType, instance, academicYearId }`
+
+### 29.5 Report Card Structure (Template A)
+
+```js
+// Per student, per subject
+{
+  terms: {
+    1: {
+      typeAvgs:      { CA: 75, HW: 82, MT: 70, ET: 68 },
+      breakdown:     { CA: [{instance:1, rawScore:72}, {instance:2, rawScore:78}], ... },
+      halfTermTotal: 73.5,   // CA+HW+MT re-scaled to 100%
+      termTotal:     71.2,   // weighted: CA×20+HW×10+MT×30+ET×40
+      etScore:       68,
+      etRunningAvg:  68,     // T1: just ET1
+      finalGrade:    71.2,   // T1: same as termTotal
+    },
+    2: {
+      ...
+      etRef:        { ET1: 68 },          // reference columns (read-only)
+      etRunningAvg: 70.5,                 // avg(ET1=68, ET2=73)
+      finalGrade:   71.85,                // (termTotal + etRunningAvg) / 2
+    },
+    3: {
+      ...
+      etRef:        { ET1: 68, ET2: 73 },
+      etRunningAvg: 71.67,                // avg(ET1, ET2, ET3)
+      finalGrade:   72.1,
+    }
+  },
+  summaryAverage: 71.5,  // Template B: (T1+T2+T3 totals) / 3
+}
+```
+
+### 29.6 Frontend Tabs (`GradesPage.jsx`)
+
+| Tab | Roles | Key Features |
+|-----|-------|-------------|
+| ✏️ Mark Entry | teacher, admin | Class grid, score inputs, bulk save, live stats |
+| 📊 Report Cards | all | Template A/B toggle, half-term toggle, colour-coded scores |
+| ⚙️ Configuration | admin only | Weight editor (live 100% validator), instance count, template, schedule |
+| 🔔 Reminders | teacher, admin | Overdue/open/upcoming cards, notify teachers button |
+
+### 29.7 Assessment Reminders Flow
+
+1. Admin creates schedule entries (`PUT /api/assessment/schedule`) with `dateFrom`/`dateTo`
+2. `GET /api/assessment/reminders?days=14` returns assessments in window, sorted: overdue → open → upcoming
+3. `POST /api/assessment/reminders/notify` (admin trigger):
+   - Loads all teachers for the school
+   - Creates `notifications` document per teacher per assessment (in-app)
+   - Calls `email.sendAssessmentReminder()` per teacher (email)
+4. Teachers see reminder cards in the Reminders tab; in-app notifications surfaced in TopBar
