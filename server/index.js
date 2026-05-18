@@ -213,7 +213,11 @@ app.get('*', (req, res) => {
   )) {
     return res.sendFile(path.join(REACT_DIST, 'index.html'));
   }
-  // Legacy app catch-all
+  // If React is built, serve it for all remaining routes (landing, school login, etc.)
+  if (reactBuilt) {
+    return res.sendFile(path.join(REACT_DIST, 'index.html'));
+  }
+  // Legacy app catch-all (only when React build is absent)
   res.sendFile(path.join(ROOT_DIR, 'index.html'));
 });
 
