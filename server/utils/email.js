@@ -1,12 +1,12 @@
 /* ============================================================
-   InnoLearn — Email Utility (Gmail SMTP via nodemailer)
+   Msingi — Email Utility (Gmail SMTP via nodemailer)
 
    Two sending modes:
    ─ Platform emails  (registration, approval, system notices)
-     From: "InnoLearn Platform" <innolearnnetwork@gmail.com>
+     From: "Msingi Platform" <platform SMTP user>
 
    ─ School emails  (2FA, passwords, messages, invites, etc.)
-     From: "<School Name> via InnoLearn" <innolearnnetwork@gmail.com>
+     From: "<School Name> via Msingi" <platform SMTP user>
      Reply-To: school.systemEmail  (if configured, else PLATFORM_EMAIL)
 
    All mail physically routes through one Gmail SMTP account.
@@ -35,7 +35,7 @@ const transporter = nodemailer.createTransport({
 });
 
 // Default From for platform-level emails
-const PLATFORM_FROM = `"InnoLearn Platform" <${SMTP_USER}>`;
+const PLATFORM_FROM = `"Msingi Platform" <${SMTP_USER}>`;
 
 /* ── Core send helper ──────────────────────────────────────
    opts.fromName  — display name override (e.g. "Greenwood School via InnoLearn")
@@ -69,7 +69,7 @@ async function _send(to, subject, html, opts = {}) {
                  falls back to PLATFORM_EMAIL if blank
 */
 function _sendAsSchool(to, subject, html, { schoolName, schoolEmail } = {}) {
-  const fromName = schoolName ? `${schoolName} via InnoLearn` : 'InnoLearn';
+  const fromName = schoolName ? `${schoolName} via Msingi` : 'Msingi';
   const replyTo  = schoolEmail || PLATFORM_EMAIL;
   return _send(to, subject, html, { fromName, replyTo });
 }
@@ -101,9 +101,9 @@ function _wrap(body, schoolName) {
     .badge.rejected{background:#fee2e2;color:#991b1b}
   </style></head><body>
   <div class="wrap">
-    <div class="hd"><h1>🎓 InnoLearn</h1>${subtitle}</div>
+    <div class="hd"><h1>🎓 Msingi</h1>${subtitle}</div>
     <div class="bd">${body}</div>
-    <div class="ft">© 2026 InnoLearn · <a href="${APP_URL}" style="color:#4f46e5">school-management-ecosystem.onrender.com</a><br>
+    <div class="ft">© 2026 Msingi · <a href="${APP_URL}" style="color:#4f46e5">msingi.io</a><br>
     This is an automated message — please do not reply directly to this address.</div>
   </div></body></html>`;
 }
@@ -118,7 +118,7 @@ async function sendRegistrationPending({ adminName, adminEmail, schoolName, plan
   const html = _wrap(`
     <h2>Your application is under review 👋</h2>
     <p>Hi ${adminName},</p>
-    <p>Thank you for registering <strong>${schoolName}</strong> on InnoLearn. We have received your application and our team is reviewing it.</p>
+    <p>Thank you for registering <strong>${schoolName}</strong> on Msingi. We have received your application and our team is reviewing it.</p>
     <div class="info">
       <p><strong>School:</strong> ${schoolName}</p>
       <p><strong>Plan:</strong> ${plan}</p>
@@ -126,9 +126,9 @@ async function sendRegistrationPending({ adminName, adminEmail, schoolName, plan
     </div>
     <p>You will receive another email within <strong>24 hours</strong> once your account has been reviewed. If approved, you will receive your login credentials and can start setting up your school immediately.</p>
     <p>If you have any questions, contact us at <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
-    <p>Thank you for choosing InnoLearn!</p>
+    <p>Thank you for choosing Msingi!</p>
   `);
-  return _send(adminEmail, `Application Received — ${schoolName} | InnoLearn`, html);
+  return _send(adminEmail, `Application Received — ${schoolName} | Msingi`, html);
 }
 
 /* 2. New school registered — alert to platform admin */
@@ -150,7 +150,7 @@ async function sendAdminNewSchoolAlert({ schoolName, slug, adminName, adminEmail
       <a href="${APP_URL}/platform" class="btn">Review in Platform Dashboard →</a>
     </p>
   `);
-  return _send(PLATFORM_EMAIL, `[InnoLearn] New School Registration — ${schoolName}`, html);
+  return _send(PLATFORM_EMAIL, `[Msingi] New School Registration — ${schoolName}`, html);
 }
 
 /* 3. School approved — welcome email with credentials */
@@ -174,7 +174,7 @@ async function sendApprovalWelcome({ adminName, adminEmail, schoolName, slug, pl
   const html = _wrap(`
     <h2>🎉 Your school is approved!</h2>
     <p>Hi ${adminName},</p>
-    <p>Great news! <strong>${schoolName}</strong> has been approved on InnoLearn. Your account is now active and ready to use.</p>
+    <p>Great news! <strong>${schoolName}</strong> has been approved on Msingi. Your account is now active and ready to use.</p>
     <div class="info">
       <p><strong>School:</strong> ${schoolName}</p>
       <p><strong>Plan:</strong> ${plan}</p>
@@ -183,7 +183,7 @@ async function sendApprovalWelcome({ adminName, adminEmail, schoolName, slug, pl
     </div>
     <div style="background:#ede9fe;border-radius:8px;padding:14px 18px;margin:16px 0">
       <p style="margin:0;font-size:13px;color:#4c1d95">
-        📌 <strong>Bookmark this URL</strong> — it's your school's permanent home on InnoLearn.
+        📌 <strong>Bookmark this URL</strong> — it's your school's permanent home on Msingi.
         Share it with your staff so they can log in directly.
       </p>
     </div>
@@ -196,10 +196,10 @@ async function sendApprovalWelcome({ adminName, adminEmail, schoolName, slug, pl
       <p style="margin:0;font-size:13px;color:#92400e"><strong>⚠️ Important:</strong> You will be asked to set a new password on your first login. Choose something strong — this temporary password will no longer work after you change it.</p>
     </div>` : ''}
     <p style="text-align:center">
-      <a href="${loginUrl}" class="btn">Log In to InnoLearn →</a>
+      <a href="${loginUrl}" class="btn">Log In to Msingi →</a>
     </p>
     <p style="font-size:13px;color:#6b7280">Need help? Contact us at <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
-    <p style="font-size:12px;color:#9ca3af">⚠️ Never share your password with anyone — InnoLearn will never ask for it by email.</p>
+    <p style="font-size:12px;color:#9ca3af">⚠️ Never share your password with anyone — Msingi will never ask for it by email.</p>
   `);
   return _send(adminEmail, `✅ Your InnoLearn account is approved — ${schoolName}`, html);
 }
@@ -214,7 +214,7 @@ async function sendRejectionEmail({ adminName, adminEmail, schoolName, reason })
     <p>If you believe this is an error or would like to discuss further, please contact us at <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
     <p style="font-size:13px;color:#6b7280">You are welcome to re-apply after addressing any concerns raised.</p>
   `);
-  return _send(adminEmail, `InnoLearn Application Update — ${schoolName}`, html);
+  return _send(adminEmail, `Msingi Application Update — ${schoolName}`, html);
 }
 
 /* 5. Platform admin approved alert (internal cc) */
@@ -231,7 +231,7 @@ async function sendAdminApprovalAlert({ schoolName, adminEmail, plan }) {
       <a href="${APP_URL}/platform" class="btn">View in Platform Dashboard →</a>
     </p>
   `);
-  return _send(PLATFORM_EMAIL, `[InnoLearn] Approved: ${schoolName}`, html);
+  return _send(PLATFORM_EMAIL, `[Msingi] Approved: ${schoolName}`, html);
 }
 
 /* 6. Trial expiry reminder (platform → school admin) */
@@ -253,7 +253,7 @@ async function sendTrialReminder({ adminName, adminEmail, schoolName, schoolEmai
     </p>
     <p style="font-size:13px;color:#6b7280">Questions? Contact us at <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
   `, schoolName);
-  return _send(adminEmail, `${urgency} — InnoLearn trial for ${schoolName}`, html);
+  return _send(adminEmail, `${urgency} — Msingi trial for ${schoolName}`, html);
 }
 
 /* 12. System-wide update / maintenance notice to school admins */
@@ -274,7 +274,7 @@ async function sendSystemUpdateNotice({ adminName, adminEmail, schoolName, title
   const html = _wrap(`
     <h2>${icon} ${label}</h2>
     <p>Hi ${adminName},</p>
-    <p>You are receiving this notice as the administrator of <strong>${schoolName}</strong> on InnoLearn.</p>
+    <p>You are receiving this notice as the administrator of <strong>${schoolName}</strong> on Msingi.</p>
     <div class="info">
       <p><strong>Notice:</strong> ${title}</p>
       ${scheduledLine}
@@ -293,7 +293,7 @@ async function sendSystemUpdateNotice({ adminName, adminEmail, schoolName, title
     </p>`}
     <p style="font-size:13px;color:#6b7280">Questions about this notice? Contact us at <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
   `);
-  return _send(adminEmail, `${icon} InnoLearn — ${label}: ${title}`, html);
+  return _send(adminEmail, `${icon} Msingi — ${label}: ${title}`, html);
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -311,14 +311,14 @@ async function sendLoginOTP({ name, email, otp, schoolName, schoolEmail }) {
   const html = _wrap(`
     <h2>Your sign-in code 🔐</h2>
     <p>Hi ${name},</p>
-    <p>Someone (hopefully you!) is signing in to <strong>${schoolName}</strong> on InnoLearn. Use the code below to complete your login.</p>
+    <p>Someone (hopefully you!) is signing in to <strong>${schoolName}</strong> on Msingi. Use the code below to complete your login.</p>
     <div style="text-align:center;margin:24px 0">
       <div style="display:inline-block;background:#f1f5f9;border:2px dashed #c7d2fe;border-radius:12px;padding:18px 36px">
         <div style="font-size:36px;font-weight:800;letter-spacing:10px;color:#4f46e5;font-family:monospace">${otp}</div>
       </div>
     </div>
     <p style="font-size:13px;color:#6b7280">This code expires in <strong>5 minutes</strong>. If you did not attempt to sign in, please change your password immediately and contact <a href="mailto:${support}">${support}</a>.</p>
-    <p style="font-size:12px;color:#9ca3af">Do not share this code with anyone — InnoLearn will never ask for it.</p>
+    <p style="font-size:12px;color:#9ca3af">Do not share this code with anyone — Msingi will never ask for it.</p>
   `, schoolName);
   return _sendAsSchool(email, `${otp} — Your ${schoolName} sign-in code`, html, { schoolName, schoolEmail });
 }
@@ -342,7 +342,7 @@ async function sendWelcomeCredentials({ name, email, tempPassword, schoolName, s
       <a href="${loginUrl || APP_URL}" class="btn">Sign In Now →</a>
     </p>
     <p style="font-size:13px;color:#6b7280">If you did not expect this email, contact your school administrator at <a href="mailto:${support}">${support}</a>.</p>
-    <p style="font-size:12px;color:#9ca3af">⚠️ Never share your password with anyone — InnoLearn will never ask for it.</p>
+    <p style="font-size:12px;color:#9ca3af">⚠️ Never share your password with anyone — Msingi will never ask for it.</p>
   `, schoolName);
   return _sendAsSchool(email, `Your ${schoolName} account is ready — welcome aboard`, html, { schoolName, schoolEmail });
 }

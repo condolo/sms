@@ -323,7 +323,7 @@ router.post('/marks', authMiddleware, PLAN, rbac('grades', 'create'), async (req
     // Enforce that only admin/superadmin can add MT and ET
     // (teachers add CA and HW by default; MT/ET require elevated permission)
     const role = req.jwtUser.role;
-    const canAddExams = ['admin', 'superadmin', 'deputy'].includes(role);
+    const canAddExams = ['admin', 'superadmin', 'deputy_principal'].includes(role);
     if (['MT', 'ET'].includes(d.assessmentType) && !canAddExams) {
       // Check if admin has explicitly granted this teacher exam entry permission
       const config = await _getConfig(schoolId, d.academicYearId || null);
@@ -382,6 +382,17 @@ router.post('/marks/bulk', authMiddleware, PLAN, rbac('grades', 'create'), async
       return _err(res, parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; '));
     }
     const { marks } = parsed.data;
+
+    // Enforce that only admin/deputy_principal can bulk-enter MT and ET
+    const role = req.jwtUser.role;
+    const canAddExams = ['admin', 'superadmin', 'deputy_principal'].includes(role);
+    const hasExamTypes = marks.some(d => ['MT', 'ET'].includes(d.assessmentType));
+    if (hasExamTypes && !canAddExams) {
+      const config = await _getConfig(req.jwtUser.schoolId, marks[0]?.academicYearId || null);
+      if (!config.teacherExamEntry) {
+        return _err(res, 'MT and ET marks can only be entered by admin or deputy. Contact your admin to enable teacher exam entry.', 403);
+      }
+    }
 
     const Marks = _model('assessment_marks');
     const ops = marks.map(d => ({

@@ -38,7 +38,7 @@ const API = (() => {
   /* Get the current JWT from localStorage */
   function _token() {
     try {
-      const session = JSON.parse(localStorage.getItem('innolearn_session') || '{}');
+      const session = JSON.parse(localStorage.getItem('msingi_session') || '{}');
       return session.token || null;
     } catch { return null; }
   }
@@ -291,7 +291,7 @@ const API = (() => {
 window.addEventListener('api:unauthorized', () => {
   // Only redirect if currently showing the app (not already on login)
   if (document.getElementById('app-shell')?.style.display !== 'none') {
-    localStorage.removeItem('innolearn_session');
+    localStorage.removeItem('msingi_session');
     // Use existing Auth module if available, otherwise reload
     if (typeof Auth !== 'undefined' && Auth.logout) {
       Auth.logout();

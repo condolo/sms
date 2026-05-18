@@ -106,7 +106,7 @@ router.post('/export', _requireSuperAdmin, backupLimiter, async (req, res) => {
     const schoolDoc = (data['schools'] || [])[0];
     const schoolName = (schoolDoc?.name || schoolId).replace(/[^a-z0-9]/gi, '_');
     const dateStr    = now.slice(0, 10);
-    const filename   = `InnoLearn_Backup_${schoolName}_${dateStr}.json`;
+    const filename   = `Msingi_Backup_${schoolName}_${dateStr}.json`;
 
     /* Compile the backup manifest */
     const backup = {

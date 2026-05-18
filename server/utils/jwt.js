@@ -1,5 +1,10 @@
 const jwt = require('jsonwebtoken');
 
+if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
+  console.error('[FATAL] JWT_SECRET env var is not set in production. Refusing to start with insecure default.');
+  process.exit(1);
+}
+
 const SECRET  = process.env.JWT_SECRET  || 'dev_secret_change_in_production';
 const EXPIRES = process.env.JWT_EXPIRES_IN || '7d';
 

@@ -105,7 +105,7 @@ router.post('/login', loginLimiter, tenantMiddleware, async (req, res) => {
       if (school?.status === 'rejected') {
         return res.status(403).json({
           error: 'rejected',
-          message: 'Your school registration was not approved. Please contact support at innolearnnetwork@gmail.com.'
+          message: 'Your school registration was not approved. Please contact support at hello@msingi.io.'
         });
       }
       return res.status(403).json({ error: 'Account inactive. Please contact your school administrator.' });

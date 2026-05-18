@@ -10,7 +10,7 @@ async function connect() {
     return;
   }
   try {
-    await mongoose.connect(uri, { dbName: 'innolearn' });
+    await mongoose.connect(uri, { dbName: process.env.MONGODB_DB_NAME || 'msingi' });
     _connected = true;
     console.log('[DB] MongoDB connected.');
   } catch (err) {

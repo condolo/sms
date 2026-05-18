@@ -35,6 +35,8 @@ try {
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map(o => o.trim()).filter(Boolean);
 ALLOWED_ORIGINS.push(
   'https://school-management-ecosystem.onrender.com',
+  'https://msingi.io',
+  'https://www.msingi.io',
   'http://localhost:3005',
   'http://localhost:3000',
   'http://127.0.0.1:3005'
@@ -142,7 +144,7 @@ app.post('/api/announcements/:id/dismiss', authMiddleware, async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: '4.7.0',
+    version: '4.8.0',
     timestamp: new Date().toISOString(),
     db: require('./config/db').isConnected() ? 'connected' : 'disconnected'
   });
@@ -234,7 +236,7 @@ async function start() {
   await connect();        // Connect to MongoDB (no-op if MONGODB_URI not set)
   await ensureIndexes();  // Idempotent — safe to run on every startup
   app.listen(PORT, () => {
-    console.log(`\n🎓 InnoLearn API running on port ${PORT}`);
+    console.log(`\n🎓 Msingi API running on port ${PORT}`);
     console.log(`   Local:   http://localhost:${PORT}`);
     console.log(`   Health:  http://localhost:${PORT}/api/health`);
     console.log(`   Mode:    ${process.env.NODE_ENV || 'development'}\n`);
