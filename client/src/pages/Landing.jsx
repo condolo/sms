@@ -210,7 +210,7 @@ export default function Landing() {
         <div className="rounded-3xl bg-gradient-to-br from-indigo-600 to-violet-600 p-10 text-center text-white">
           <h2 className="text-2xl font-bold mb-2">Explore the demo</h2>
           <p className="text-white/80 mb-8 max-w-md mx-auto">
-            Log in as any role on our demo school to see exactly how InnoLearn works for your team.
+            Log in as any role on our demo school to see exactly how Msingi works for your team.
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-w-md mx-auto mb-8">
             {ROLES.map((r) => (
@@ -243,7 +243,7 @@ export default function Landing() {
           </div>
           <p className="text-xs text-slate-400">© {new Date().getFullYear()} Msingi. All rights reserved.</p>
           <div className="flex gap-4 text-xs text-slate-400">
-            <a href="mailto:innolearnnetwork@gmail.com" className="hover:text-slate-600">Contact Us</a>
+            <a href="mailto:hello@msingi.io" className="hover:text-slate-600">Contact Us</a>
             <a href="/onboard.html" className="hover:text-slate-600">Register a school</a>
           </div>
         </div>

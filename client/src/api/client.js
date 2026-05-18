@@ -1,5 +1,5 @@
 /**
- * InnoLearn React API client
+ * Msingi React API client
  * Adapted from js/api.js — same contract, React-compatible.
  */
 import { detectSchool } from '@/utils/schoolDetect.js';
@@ -22,7 +22,7 @@ export class APIError extends Error {
 
 function getToken() {
   try {
-    const raw = localStorage.getItem('innolearn_session');
+    const raw = localStorage.getItem('msingi_session');
     if (!raw) return null;
     return JSON.parse(raw)?.token ?? null;
   } catch {
@@ -59,7 +59,7 @@ async function _req(method, path, body = null, params = null) {
 
   // 401 → clear session and broadcast
   if (res.status === 401) {
-    localStorage.removeItem('innolearn_session');
+    localStorage.removeItem('msingi_session');
     window.dispatchEvent(new CustomEvent('api:unauthorized'));
     throw new APIError('UNAUTHORIZED', 'Session expired. Please log in again.', 401);
   }

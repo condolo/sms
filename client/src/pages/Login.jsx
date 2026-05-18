@@ -69,7 +69,7 @@ export default function Login() {
   function clearError() { setError(''); }
 
   // ─── Branding helpers ────────────────────────────────────────────────────────
-  const schoolName   = branding?.name     || (slug ? slug.toUpperCase() : 'InnoLearn');
+  const schoolName   = branding?.name     || (slug ? slug.toUpperCase() : 'Msingi');
   const shortName    = branding?.shortName || schoolName;
   const logoUrl      = branding?.logoUrl   || null;
   const primary      = branding?.primaryColor || '#4f46e5';
@@ -182,7 +182,7 @@ export default function Login() {
           )}
           <div>
             <p className="text-white font-bold text-xl leading-tight">{schoolName}</p>
-            {slug && <p className="text-white/60 text-sm mt-0.5">Powered by InnoLearn</p>}
+            {slug && <p className="text-white/60 text-sm mt-0.5">Powered by Msingi</p>}
           </div>
         </div>
 
@@ -214,7 +214,7 @@ export default function Login() {
         </div>
 
         <p className="text-xs text-white/40">
-          © {new Date().getFullYear()} {isSchool ? schoolName : 'InnoLearn'}. All rights reserved.
+          © {new Date().getFullYear()} {isSchool ? schoolName : 'Msingi'}. All rights reserved.
         </p>
       </div>
     );
@@ -312,8 +312,8 @@ export default function Login() {
 
               <p className="mt-6 text-center text-xs text-slate-400">
                 Powered by{' '}
-                <a href="https://innolearn.com" className="hover:underline" style={{ color: primary }}>
-                  InnoLearn
+                <a href="https://msingi.io" className="hover:underline" style={{ color: primary }}>
+                  Msingi
                 </a>
               </p>
             </>

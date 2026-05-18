@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-const SESSION_KEY = 'innolearn_session';
+const SESSION_KEY = 'msingi_session';
 
 function loadSession() {
   try {
