@@ -178,7 +178,8 @@ router.post('/schools/:id/reject', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-/* PATCH /api/platform/schools/:id — update plan/addOns/status */
+/* PATCH /api/platform/schools/:id — update plan/addOns/status
+   Accepts either MongoDB _id (ObjectId) or custom id string (sch_slug_ts) */
 router.patch('/schools/:id', async (req, res) => {
   try {
     const School = _model('schools');
@@ -188,7 +189,17 @@ router.patch('/schools/:id', async (req, res) => {
     if (typeof req.body.isActive === 'boolean') update.isActive = req.body.isActive;
     if (req.body.planExpiry) update.planExpiry = req.body.planExpiry;
 
-    const doc = await School.findByIdAndUpdate(req.params.id, { $set: update }, { new: true }).lean();
+    if (Object.keys(update).length === 0) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+
+    // Support both MongoDB _id (ObjectId string) and custom id field (sch_...)
+    const rid = req.params.id;
+    const query = mongoose.isValidObjectId(rid)
+      ? { $or: [{ _id: rid }, { id: rid }] }
+      : { id: rid };
+
+    const doc = await School.findOneAndUpdate(query, { $set: update }, { new: true }).lean();
     if (!doc) return res.status(404).json({ error: 'School not found' });
     res.json(doc);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -200,8 +211,13 @@ router.post('/schools/:id/impersonate', async (req, res) => {
     const School = _model('schools');
     const User   = _model('users');
 
-    /* Find the school first so we can resolve the correct schoolId for user lookup */
-    const school = await School.findById(req.params.id).lean();
+    /* Support both MongoDB _id and custom id string */
+    const rid = req.params.id;
+    const schoolQuery = mongoose.isValidObjectId(rid)
+      ? { $or: [{ _id: rid }, { id: rid }] }
+      : { id: rid };
+
+    const school = await School.findOne(schoolQuery).lean();
     if (!school) return res.status(404).json({ error: 'School not found' });
 
     /* Try by custom schoolId field (if stored), then fall back to admin email */
@@ -270,7 +286,7 @@ function _tenantQuery(school) {
 router.delete('/schools/all', async (req, res) => {
   try {
     const School     = _model('schools');
-    const DEMO_SLUGS = ['innolearn'];
+    const DEMO_SLUGS = ['innolearn', 'msingi'];
 
     const toPurge    = await School.find({ slug: { $nin: DEMO_SLUGS } }).lean();
     const schoolMonIds = toPurge.map(s => s._id);

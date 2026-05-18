@@ -1,9 +1,9 @@
-﻿services:
+services:
   - type: web
-    name: InnoLearn
+    name: msingi
     env: node
     plan: starter
-    buildCommand: npm install && cd client && npm install --include=dev && npm run build
+    buildCommand: npm install && cd client && npm install --legacy-peer-deps && npm run build
     startCommand: node server/index.js
     healthCheckPath: /api/health
     envVars:
@@ -18,10 +18,10 @@
       - key: PLATFORM_ADMIN_KEY
         generateValue: true  # Your private platform admin API key
       - key: APP_URL
-        value: https://school-management-ecosystem.onrender.com
+        value: https://msingi.io
       - key: SMTP_USER
-        sync: false          # Set in Render dashboard: your Gmail address (e.g. yourapp@gmail.com)
+        sync: false          # Set in Render dashboard: your Gmail address
       - key: SMTP_PASS
-        sync: false          # Set in Render dashboard: Gmail App Password (16 chars, spaces OK)
+        sync: false          # Set in Render dashboard: Gmail App Password (16 chars)
       - key: PLATFORM_EMAIL
-        sync: false          # Set in Render dashboard: email address to receive admin alerts
+        sync: false          # Set in Render dashboard: email address for admin alerts
