@@ -21,9 +21,10 @@
 
    Plan: standard | RBAC: grades:{read,create,update}
    ============================================================ */
-const express = require('express');
-const { z }   = require('zod');
+const express   = require('express');
+const { z }     = require('zod');
 const { v4: uuidv4 } = require('uuid');
+const mongoose  = require('mongoose');
 
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
@@ -32,6 +33,7 @@ const { _model }         = require('../utils/model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { rankStudents, mergeRankings, bestPerSubject, computeRankingScore } = require('../utils/ranking');
 const { mergeConfig }    = require('./academic-config');
+const { isYearArchived } = require('../utils/archival');
 const {
   aggregateGrades,
   aggregateExamResults,
@@ -167,6 +169,16 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
   });
 
   try {
+    // ── Step 1b: Block publish for archived academic years ───
+    if (academicYearId && await isYearArchived(schoolId, academicYearId)) {
+      await Batches.updateOne({ id: batchId }, {
+        status: 'failed',
+        failureReason: `Academic year "${academicYearId}" is archived — publishing is not permitted for closed years.`,
+        completedAt: now,
+      });
+      return E.badRequest(res, `Academic year "${academicYearId}" has been archived — report card publishing is not permitted for closed years.`);
+    }
+
     const config = await _loadConfig(schoolId);
 
     // ── Step 2: Moderation guard ─────────────────────────────
@@ -324,11 +336,33 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
       }
     }
 
-    // ── Step 8: Persist ──────────────────────────────────────
+    // ── Step 8: Persist (transaction-wrapped when replica set available) ──
     const Snaps = _model('report_card_snapshots');
-    await Snaps.bulkWrite(newSnaps.map(s => ({ insertOne: { document: s } })), { ordered: false });
-    if (supersedeOps.length) {
-      await Snaps.bulkWrite(supersedeOps, { ordered: false });
+    const insertOps = newSnaps.map(s => ({ insertOne: { document: s } }));
+
+    let session = null;
+    try {
+      session = await mongoose.startSession();
+      await session.withTransaction(async () => {
+        await Snaps.bulkWrite(insertOps, { ordered: false, session });
+        if (supersedeOps.length) {
+          await Snaps.bulkWrite(supersedeOps, { ordered: false, session });
+        }
+      });
+    } catch (txErr) {
+      // Code 20 = "Transaction numbers are only allowed on a replica set member or mongos"
+      // Standalone MongoDB (dev/test) doesn't support transactions — fall back to non-transactional writes
+      if (txErr.code === 20 || txErr.codeName === 'IllegalOperation' || txErr.message?.includes('Transaction')) {
+        console.warn('[REPORT-CARDS] Transactions not available (standalone MongoDB) — falling back to non-transactional writes');
+        await Snaps.bulkWrite(insertOps, { ordered: false });
+        if (supersedeOps.length) {
+          await Snaps.bulkWrite(supersedeOps, { ordered: false });
+        }
+      } else {
+        throw txErr;  // Re-throw unexpected errors
+      }
+    } finally {
+      if (session) await session.endSession().catch(() => {});
     }
 
     // ── Step 9: Mark batch complete (or partial) ─────────────
@@ -427,7 +461,7 @@ router.get('/', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) =
    ══════════════════════════════════════════════════════════════ */
 router.get('/:id', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
   try {
-    const { schoolId, role } = req.jwtUser;
+    const { schoolId, role, userId, guardianOf } = req.jwtUser;
     const doc = await _model('report_card_snapshots')
       .findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Report card snapshot not found');
@@ -436,6 +470,26 @@ router.get('/:id', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res
     if (doc.superseded && RESTRICTED_ROLES.includes(role)) {
       return E.forbidden(res, 'This report card has been superseded. Please access the latest version.');
     }
+
+    // Guardian/parent: can only view their own linked children's report cards
+    if (['parent', 'guardian'].includes(role)) {
+      const linkedStudents = Array.isArray(guardianOf) ? guardianOf : [];
+      if (!linkedStudents.includes(doc.studentId)) {
+        // Log the access attempt for compliance (GDPR/POPIA: failed access to student records)
+        _model('mark_audit_log').create({
+          action:       'GUARDIAN_ACCESS_DENIED',
+          schoolId,
+          requestedBy:  userId,
+          requestedRole: role,
+          targetStudentId: doc.studentId,
+          snapshotId:   req.params.id,
+          route:        'GET /api/report-cards/:id',
+          timestamp:    new Date().toISOString(),
+        }).catch(e => console.error('[report-cards] guardian audit log failed:', e.message));
+        return E.forbidden(res, 'You are not authorised to view this student\'s report card.');
+      }
+    }
+
     return ok(res, doc);
   } catch (err) { console.error('[report-cards GET/:id]', err); return E.serverError(res); }
 });
@@ -658,7 +712,7 @@ function _buildPDFPage(doc, snap, config, attendance, isFirstPage) {
    ══════════════════════════════════════════════════════════════ */
 router.get('/:id/pdf', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
   try {
-    const { schoolId, role } = req.jwtUser;
+    const { schoolId, role, guardianOf } = req.jwtUser;
 
     const snap = await _model('report_card_snapshots').findOne({ id: req.params.id, schoolId }).lean();
     if (!snap) return E.notFound(res, 'Report card snapshot not found');
@@ -666,6 +720,25 @@ router.get('/:id/pdf', authMiddleware, PLAN, rbac('grades', 'read'), async (req,
     if (snap.superseded && RESTRICTED_ROLES.includes(role)) {
       return E.forbidden(res, 'This report card has been superseded. Please download the latest version.');
     }
+
+    // Guardian/parent: can only download their own linked children's PDFs
+    if (['parent', 'guardian'].includes(role)) {
+      const linkedStudents = Array.isArray(guardianOf) ? guardianOf : [];
+      if (!linkedStudents.includes(snap.studentId)) {
+        _model('mark_audit_log').create({
+          action:       'GUARDIAN_ACCESS_DENIED',
+          schoolId,
+          requestedBy:  userId,
+          requestedRole: role,
+          targetStudentId: snap.studentId,
+          snapshotId:   req.params.id,
+          route:        'GET /api/report-cards/:id/pdf',
+          timestamp:    new Date().toISOString(),
+        }).catch(e => console.error('[report-cards/pdf] guardian audit log failed:', e.message));
+        return E.forbidden(res, 'You are not authorised to download this student\'s report card.');
+      }
+    }
+
     if (snap.financialBlock && req.query.force !== '1' && !['admin', 'superadmin'].includes(role)) {
       return res.status(403).json({ error: 'Download blocked — outstanding fee balance.', financialBlock: true });
     }

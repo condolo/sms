@@ -155,6 +155,26 @@ async function aggregateExamResults(schoolId, classId, termId, academicYearId, s
  * @param {Array}  gradingSchema     — from academic-config
  */
 function computeFinalScores(gradesData, examData, assessmentWeights, gradingSchema) {
+  // ── Runtime input validation ─────────────────────────────────
+  if (!gradesData  || typeof gradesData  !== 'object' || Array.isArray(gradesData))  gradesData  = {};
+  if (!examData    || typeof examData    !== 'object' || Array.isArray(examData))    examData    = {};
+  if (!Array.isArray(assessmentWeights) || assessmentWeights.length === 0) {
+    throw new TypeError('[academic-calc] computeFinalScores: assessmentWeights must be a non-empty array');
+  }
+  if (!Array.isArray(gradingSchema) || gradingSchema.length === 0) {
+    throw new TypeError('[academic-calc] computeFinalScores: gradingSchema must be a non-empty array');
+  }
+  for (const w of assessmentWeights) {
+    if (typeof w.weight !== 'number' || isNaN(w.weight)) {
+      throw new TypeError(`[academic-calc] assessmentWeights entry "${w.assessmentType}" has non-numeric weight: ${w.weight}`);
+    }
+  }
+  for (const g of gradingSchema) {
+    if (typeof g.minScore !== 'number' || typeof g.maxScore !== 'number') {
+      throw new TypeError(`[academic-calc] gradingSchema band "${g.grade}" has non-numeric minScore/maxScore`);
+    }
+  }
+
   const weightMap   = Object.fromEntries(assessmentWeights.map(w => [w.assessmentType, w.weight]));
   const allStudents = new Set([...Object.keys(gradesData), ...Object.keys(examData)]);
 
@@ -182,7 +202,12 @@ function computeFinalScores(gradesData, examData, assessmentWeights, gradingSche
       for (const [type, avg] of Object.entries(allTypes)) {
         const w = weightMap[type] ?? 0;
         if (w === 0) continue;           // unweighted type — skip
-        weightedSum     += avg * w;
+        const numericAvg = Number(avg);
+        if (isNaN(numericAvg)) {
+          console.warn(`[academic-calc] Non-numeric score for assessmentType "${type}" — skipping`);
+          continue;
+        }
+        weightedSum     += numericAvg * w;
         totalWeightUsed += w;
       }
 

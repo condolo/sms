@@ -142,7 +142,7 @@ app.post('/api/announcements/:id/dismiss', authMiddleware, async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: '4.6.2',
+    version: '4.7.0',
     timestamp: new Date().toISOString(),
     db: require('./config/db').isConnected() ? 'connected' : 'disconnected'
   });

@@ -15,6 +15,7 @@ const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
+const { isYearArchived } = require('../utils/archival');
 
 const router = express.Router();
 const PLAN   = planGate('exams');
@@ -381,6 +382,21 @@ router.post('/:id/results', authMiddleware, PLAN, rbac('exams', 'create'), async
     // Block writes to locked/published/archived exams
     if (['locked', 'published', 'archived'].includes(exam.status)) {
       return E.badRequest(res, `Exam is "${exam.status}" — results are read-only. An admin must unlock it to allow changes.`);
+    }
+
+    // Block writes to archived academic years — log the attempt for auditability
+    if (await isYearArchived(schoolId, exam.academicYearId)) {
+      _model('mark_audit_log').create({
+        action:        'WRITE_BLOCKED_ARCHIVED_YEAR',
+        schoolId,
+        academicYearId: exam.academicYearId,
+        examId:        req.params.id,
+        route:         'POST /api/exams/:id/results',
+        attemptedBy:   userId,
+        payload:       { resultCount: data.results.length },
+        timestamp:     new Date().toISOString(),
+      }).catch(e => console.error('[exams/results] audit log failed:', e.message));
+      return E.badRequest(res, `Academic year for this exam has been archived — results are permanently read-only.`);
     }
 
     // Teacher ownership check — if enforced, only the exam owner (or admin) can write results
