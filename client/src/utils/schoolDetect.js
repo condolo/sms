@@ -50,7 +50,7 @@ export function detectSchool() {
   // 3. localStorage shortcut — only apply when NOT on a known main host
   //    (prevents stored slug from hijacking msingi.io landing page)
   if (!MAIN_HOSTS.has(host)) {
-    const stored = localStorage.getItem('il_school_slug');
+    const stored = localStorage.getItem('ms_school_slug');
     if (stored) {
       return { slug: stored, isSchool: true, source: 'stored' };
     }
@@ -62,7 +62,7 @@ export function detectSchool() {
 
 /**
  * Build the dedicated school portal URL for a given slug.
- * e.g.  greenwood → https://greenwood.innolearn.com
+ * e.g.  greenwood → https://greenwood.msingi.io
  *
  * Falls back to  ?school=greenwood  on localhost.
  */
@@ -81,11 +81,11 @@ export function schoolPortalUrl(slug) {
 
 /** Persist the school slug for returning-user shortcut */
 export function storeSchoolSlug(slug) {
-  if (slug) localStorage.setItem('il_school_slug', slug);
-  else      localStorage.removeItem('il_school_slug');
+  if (slug) localStorage.setItem('ms_school_slug', slug);
+  else      localStorage.removeItem('ms_school_slug');
 }
 
 /** Clear stored school slug (call on logout) */
 export function clearStoredSchoolSlug() {
-  localStorage.removeItem('il_school_slug');
+  localStorage.removeItem('ms_school_slug');
 }

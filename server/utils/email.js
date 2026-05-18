@@ -38,7 +38,7 @@ const transporter = nodemailer.createTransport({
 const PLATFORM_FROM = `"Msingi Platform" <${SMTP_USER}>`;
 
 /* ── Core send helper ──────────────────────────────────────
-   opts.fromName  — display name override (e.g. "Greenwood School via InnoLearn")
+   opts.fromName  — display name override (e.g. "Greenwood School via Msingi")
    opts.replyTo   — Reply-To address (school's systemEmail)
 */
 async function _send(to, subject, html, opts = {}) {
@@ -109,7 +109,7 @@ function _wrap(body, schoolName) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   PLATFORM EMAILS — sent from InnoLearn Platform identity
+   PLATFORM EMAILS — sent from Msingi Platform identity
    (school registration flow, system notices, platform alerts)
    ══════════════════════════════════════════════════════════════ */
 
@@ -201,7 +201,7 @@ async function sendApprovalWelcome({ adminName, adminEmail, schoolName, slug, pl
     <p style="font-size:13px;color:#6b7280">Need help? Contact us at <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
     <p style="font-size:12px;color:#9ca3af">⚠️ Never share your password with anyone — Msingi will never ask for it by email.</p>
   `);
-  return _send(adminEmail, `✅ Your InnoLearn account is approved — ${schoolName}`, html);
+  return _send(adminEmail, `✅ Your Msingi account is approved — ${schoolName}`, html);
 }
 
 /* 4. School rejected */
@@ -209,7 +209,7 @@ async function sendRejectionEmail({ adminName, adminEmail, schoolName, reason })
   const html = _wrap(`
     <h2>Application Update — ${schoolName}</h2>
     <p>Hi ${adminName},</p>
-    <p>Thank you for your interest in InnoLearn. After reviewing your application for <strong>${schoolName}</strong>, we are unable to approve it at this time.</p>
+    <p>Thank you for your interest in Msingi. After reviewing your application for <strong>${schoolName}</strong>, we are unable to approve it at this time.</p>
     ${reason ? `<div class="info"><p><strong>Reason:</strong> ${reason}</p></div>` : ''}
     <p>If you believe this is an error or would like to discuss further, please contact us at <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
     <p style="font-size:13px;color:#6b7280">You are welcome to re-apply after addressing any concerns raised.</p>
@@ -298,7 +298,7 @@ async function sendSystemUpdateNotice({ adminName, adminEmail, schoolName, title
 
 /* ══════════════════════════════════════════════════════════════
    SCHOOL EMAILS — sent from the school's identity
-   From:     "<School Name> via InnoLearn" <innolearnnetwork@gmail.com>
+   From:     "<School Name> via Msingi" <innolearnnetwork@gmail.com>
    Reply-To: school.systemEmail  (falls back to PLATFORM_EMAIL)
 
    All school-level functions accept schoolEmail as the last
