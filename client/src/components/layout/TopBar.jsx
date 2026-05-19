@@ -29,7 +29,7 @@ function useBreadcrumb() {
 export default function TopBar({ onMenuClick }) {
   const title  = useBreadcrumb();
   const user   = useAuthStore((s) => s.session?.user);
-  const plan   = useAuthStore((s) => s.session?.user?.plan ?? 'core');
+  const plan   = useAuthStore((s) => s.session?.school?.plan ?? s.session?.user?.plan ?? 'core');
 
   const PLAN_COLORS = {
     core:       'bg-slate-100 text-slate-600',

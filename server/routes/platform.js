@@ -53,7 +53,11 @@ router.get('/schools', async (req, res) => {
     const School  = _model('schools');
     const User    = _model('users');
     const Student = _model('students');
-    const schools = await School.find({}).lean();
+    // Projection: only load fields needed for the dashboard list + stats
+    // Avoids pulling large fields (logoUrl, branding, email templates) into RAM for every school
+    const schools = await School.find({})
+      .select('id _id slug name shortName plan isActive status adminName adminEmail currency currencySymbol trialEnds createdAt primaryColor sections curriculum')
+      .lean();
 
     const withStats = await Promise.all(schools.map(async s => {
       // lean() docs don't apply Mongoose virtuals, so s.id is the raw stored
@@ -388,7 +392,7 @@ router.get('/stats', async (req, res) => {
     const Student = _model('students');
 
     const [allSchools, totalStudents] = await Promise.all([
-      School.find({}).lean(),
+      School.find({}).select('plan isActive').lean(),   // only fields needed for MRR calc
       Student.countDocuments({ status: 'active' })
     ]);
 
@@ -611,7 +615,7 @@ function _annId() {
 router.get('/announcements', async (req, res) => {
   try {
     const Ann = _model('system_announcements');
-    const list = await Ann.find({}).sort({ createdAt: -1 }).lean();
+    const list = await Ann.find({}).sort({ createdAt: -1 }).limit(200).lean();
     res.json(list);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

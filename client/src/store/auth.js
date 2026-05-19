@@ -28,7 +28,7 @@ const useAuthStore = create((set, get) => ({
   get token()           { return get().session?.token ?? null; },
   get schoolId()        { return get().session?.user?.schoolId ?? null; },
   get role()            { return get().session?.user?.role ?? null; },
-  get plan()            { return get().session?.user?.plan ?? 'core'; },
+  get plan()            { return get().session?.school?.plan ?? get().session?.user?.plan ?? 'core'; },
 
   // ─── Actions ────────────────────────────────────────────────────────────────
 

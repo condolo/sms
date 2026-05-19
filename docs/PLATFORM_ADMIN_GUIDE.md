@@ -1,6 +1,6 @@
-﻿# InnoLearn — Platform Administrator Guide
+﻿# Msingi — Platform Administrator Guide
 
-> **Audience:** The InnoLearn platform owner and operator. This guide covers everything needed to run the InnoLearn SaaS platform — provisioning schools, managing subscriptions, monitoring the system, and deploying updates.
+> **Audience:** The Msingi platform owner and operator. This guide covers everything needed to run the Msingi SaaS platform — provisioning schools, managing subscriptions, monitoring the system, and deploying updates.
 
 ---
 
@@ -18,12 +18,14 @@
 10. [Security](#10-security)
 11. [Backup & Recovery](#11-backup--recovery)
 12. [Troubleshooting](#12-troubleshooting)
+13. [Demo School Management (v4.9.7+)](#13-demo-school-management-v497)
+14. [Social Links & Platform Settings (v4.9.5+)](#14-social-links--platform-settings-v495)
 
 ---
 
 ## 1. Platform Overview
 
-InnoLearn is a **multi-tenant SaaS** school management platform. Each school is an isolated tenant identified by a unique `schoolId`. All API calls are scoped to the authenticated school — no school can ever access another school's data.
+Msingi is a **multi-tenant SaaS** school management platform. Each school is an isolated tenant identified by a unique `schoolId`. All API calls are scoped to the authenticated school — no school can ever access another school's data.
 
 ### Key roles at the platform level
 
@@ -108,7 +110,7 @@ node server/index.js
 
 ## 4. Deploying & Updating
 
-InnoLearn is deployed via GitHub → Render (auto-deploy on push to `main`).
+Msingi is deployed via GitHub → Render (auto-deploy on push to `main`).
 
 ### Update Safety Protocol (Zero-Interruption Updates)
 
@@ -139,7 +141,7 @@ git push origin main
 **Step 4 — Mark the announcement as completed**
 Back in the Platform dashboard → Announcements, click **Cancel** on the announcement (or let it expire naturally). Schools will no longer see the maintenance banner.
 
-> **Note**: InnoLearn updates never modify or delete existing school data. The backup protocol exists as a professional safeguard and to maintain school confidence in the platform.
+> **Note**: Msingi updates never modify or delete existing school data. The backup protocol exists as a professional safeguard and to maintain school confidence in the platform.
 
 ### Normal update flow (minor changes)
 
@@ -429,15 +431,15 @@ location.reload();
 
 ## 11. Backup & Recovery
 
-InnoLearn uses a **two-tier backup strategy**: school-level self-service exports and platform-level MongoDB snapshots.
+Msingi uses a **two-tier backup strategy**: school-level self-service exports and platform-level MongoDB snapshots.
 
 ### Tier 1 — School self-service backup (built-in)
 
-Every school superadmin can export their own data at any time from the InnoLearn dashboard:
+Every school superadmin can export their own data at any time from the Msingi dashboard:
 
 - Dashboard → **"Data Backup & Export"** card → **Back Up Now**
 - Exports all collections for their school as a structured JSON file
-- File is downloaded directly to their browser — nothing stored on the InnoLearn server
+- File is downloaded directly to their browser — nothing stored on the Msingi server
 - Every export is logged in `backup_logs` collection (date, user, record count, version)
 
 **As platform admin**, before any major deployment:
@@ -496,4 +498,65 @@ Body: { full localStorage payload }
 
 ---
 
-*Last updated: 2026-04-30 — InnoLearn v3.1.0*
+---
+
+## 13. Demo School Management (v4.9.7+)
+
+The demo school (`demo.msingi.io`) is automatically provisioned on every server start. No manual setup is required.
+
+### Demo School Facts
+
+| Field | Value |
+|-------|-------|
+| Slug | `demo` |
+| School ID | `sch_demo` |
+| URL | `https://demo.msingi.io` |
+| Plan | `enterprise` (always forced) |
+| Password (all users) | `Demo2025!` |
+
+### Demo Users
+
+| Role | Email |
+|------|-------|
+| Admin | `admin@demo.msingi.io` |
+| Deputy Principal | `principal@demo.msingi.io` |
+| Teacher | `teacher@demo.msingi.io` |
+| Finance Officer | `finance@demo.msingi.io` |
+| Parent | `parent@demo.msingi.io` |
+| Student | `student@demo.msingi.io` |
+
+### Forcing a Demo Refresh
+
+The demo seed is idempotent — restarting the server refreshes the school document and users but does **not** overwrite content (students, behaviour records, etc.) because the data seed uses `$setOnInsert`. To fully reset demo data:
+
+1. Connect to MongoDB Atlas
+2. Delete all documents in collections where `schoolId = 'sch_demo'` (students, behaviour_incidents, timetable_slots, invoices, payments, admissions)
+3. Restart the server — `seedDemoData()` will re-seed everything
+
+### Plan Cache Note
+
+If the demo school shows a lower plan than enterprise in the UI, the 5-minute in-memory plan cache may be stale. A server restart forces a re-seed and cache invalidation. This should not occur in normal operation.
+
+---
+
+## 14. Social Links & Platform Settings (v4.9.5+)
+
+Platform-level social media links are configurable from the Platform Admin dashboard (`/platform`).
+
+### Configuring Social Links
+
+1. Navigate to `/platform` → **Settings** tab
+2. Fill in URLs for any social platforms (X/Twitter, LinkedIn, Facebook, Instagram, YouTube)
+3. Save — links are stored in `platform_settings` collection under the `socialLinks` object
+4. The Landing, Contact, and Plans public pages fetch these via `GET /api/platform/settings` and render only the links that have been configured
+
+### API
+
+```
+GET  /api/platform/settings   — no auth — returns public platform config (socialLinks, logo, colors)
+PATCH /api/platform/settings  — platform key required — update any settings fields
+```
+
+---
+
+*Last updated: 2026-05-19 — Msingi v4.9.9*

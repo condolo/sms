@@ -190,7 +190,7 @@ router.get('/schedule', authMiddleware, PLAN, rbac('settings', 'read'), async (r
     if (req.query.termNumber)     filter.termNumber     = Number(req.query.termNumber);
 
     const docs = await _model('assessment_schedule').find(filter)
-      .sort({ termNumber: 1, assessmentType: 1, instance: 1 }).lean();
+      .sort({ termNumber: 1, assessmentType: 1, instance: 1 }).limit(200).lean();
     return _ok(res, docs);
   } catch (err) {
     console.error('[assessment/schedule GET]', err);
@@ -299,7 +299,7 @@ router.get('/marks', authMiddleware, PLAN, rbac('grades', 'read'), async (req, r
     }
 
     const docs = await _model('assessment_marks').find(filter)
-      .sort({ termNumber: 1, assessmentType: 1, instance: 1 }).lean();
+      .sort({ termNumber: 1, assessmentType: 1, instance: 1 }).limit(5000).lean();
     return _ok(res, docs);
   } catch (err) {
     console.error('[assessment/marks GET]', err);
@@ -495,7 +495,9 @@ router.get('/report', authMiddleware, PLAN, rbac('grades', 'read'), async (req, 
     if (academicYearId) marksFilter.academicYearId = academicYearId;
     if (termNumber)     marksFilter.termNumber     = Number(termNumber);
 
-    const allMarks = await _model('assessment_marks').find(marksFilter).lean();
+    // Safety ceiling: 10,000 marks = ~50 students × 14 subjects × 4 types × 3-4 instances
+    // Bounded further by the classId/termNumber filters applied above
+    const allMarks = await _model('assessment_marks').find(marksFilter).limit(10000).lean();
 
     // Group marks by studentId → subjectId
     const byStudentSubject = {};
@@ -677,7 +679,7 @@ router.post('/reminders/notify', authMiddleware, PLAN, rbac('settings', 'update'
     const school = await _model('schools').findOne({ id: schoolId }).lean();
 
     // Load all teachers for this school
-    const teachers = await _model('users').find({ schoolId, role: 'teacher' }).lean();
+    const teachers = await _model('users').find({ schoolId, role: 'teacher' }).limit(200).lean();
 
     let notified = 0;
     for (const sched of schedules) {
@@ -752,7 +754,8 @@ router.get('/marks/summary', authMiddleware, PLAN, rbac('grades', 'read'), async
     if (termNumber)     filter.termNumber     = Number(termNumber);
     if (academicYearId) filter.academicYearId = academicYearId;
 
-    const marks = await _model('assessment_marks').find(filter).lean();
+    // classId is required (enforced above) — bounded to one class, safe ceiling
+    const marks = await _model('assessment_marks').find(filter).limit(5000).lean();
 
     // Group by studentId → assessmentType+instance → rawScore
     const grid = {};

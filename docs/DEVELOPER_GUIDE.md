@@ -1,6 +1,6 @@
 ﻿# Msingi — Developer Guide
 
-**Version 4.7.0** · Technical Reference & Architecture
+**Version 4.9.9** · Technical Reference & Architecture
 
 ---
 
@@ -35,6 +35,9 @@
 27. [Cross-Cutting Issue Fixes (v4.6.2+)](#27-cross-cutting-issue-fixes-v462)
 28. [Platform Rebrand & Dedicated School URLs (v4.7.0)](#28-platform-rebrand--dedicated-school-urls-v470)
 29. [Assessment & Grading System (v4.7.0)](#29-assessment--grading-system-v470)
+30. [Public Marketing Pages (v4.9.5+)](#30-public-marketing-pages-v495)
+31. [Demo School System (v4.9.7+)](#31-demo-school-system-v497)
+32. [Developer Workflow — Check Docs First (v4.9.9+)](#32-developer-workflow--check-docs-first-v499)
 
 ---
 
@@ -2604,3 +2607,204 @@ buildSubjectReport({ marks, weights })
    - Creates `notifications` document per teacher per assessment (in-app)
    - Calls `email.sendAssessmentReminder()` per teacher (email)
 4. Teachers see reminder cards in the Reminders tab; in-app notifications surfaced in TopBar
+
+---
+
+## 30. Public Marketing Pages (v4.9.5+)
+
+### 30.1 Overview
+
+Three public-facing React pages are served without authentication. They are accessible on the main domain (`msingi.io`) and handle marketing, contact, and plan comparison.
+
+| Page | Route | File |
+|------|-------|------|
+| Landing | `/` | `client/src/pages/Landing.jsx` |
+| Contact | `/contact` | `client/src/pages/Contact.jsx` |
+| Plans | `/plans` | `client/src/pages/Plans.jsx` |
+
+### 30.2 Fixed Navbar Pattern
+
+All three public pages use `position: fixed` navbars, not `position: sticky`.
+
+**Why**: `overflow-x-hidden` on the root layout element breaks `position: sticky` in Chrome and Safari. Using `fixed` is the reliable cross-browser solution.
+
+**Implementation pattern**:
+```jsx
+{/* Navbar */}
+<nav className="fixed top-0 left-0 right-0 w-full z-50 bg-white/80 backdrop-blur-xl border-b border-zinc-100/80">
+  {/* ... nav content ... */}
+</nav>
+{/* Spacer — compensates for fixed position removing element from flow */}
+<div className="h-16" />
+```
+
+### 30.3 WhatsApp FAB
+
+A permanent circular WhatsApp floating action button appears on Landing and Contact at all scroll positions.
+
+```jsx
+{/* Fixed at bottom-right, never disappears */}
+<a
+  href="https://wa.me/254700000000"
+  className="w-12 h-12 rounded-full bg-[#25D366] shadow-lg flex items-center justify-center text-white"
+  target="_blank" rel="noopener noreferrer"
+>
+  {/* Phone SVG icon */}
+</a>
+```
+
+Contact page adds a scroll-to-top button stacked above the WhatsApp FAB in a `flex flex-col gap-3` container.
+
+### 30.4 Social Icons
+
+Social links are loaded from the Platform Settings API and rendered in all public page footers.
+
+```jsx
+// Fetch on mount
+useEffect(() => {
+  getPlatformSettings().then(s => setSocialLinks(s.socialLinks || {}));
+}, []);
+
+// Render — filters to only configured links
+const SOCIAL_ICONS = [
+  { key: 'x',        Icon: XIcon,         label: 'X' },
+  { key: 'linkedin', Icon: LinkedInIcon,   label: 'LinkedIn' },
+  { key: 'facebook', Icon: FacebookIcon,   label: 'Facebook' },
+  { key: 'instagram',Icon: InstagramIcon,  label: 'Instagram' },
+  { key: 'youtube',  Icon: YouTubeIcon,    label: 'YouTube' },
+];
+function SocialLinks({ links }) {
+  return SOCIAL_ICONS
+    .filter(({ key }) => links[key])
+    .map(({ key, Icon, label }) => (
+      <a key={key} href={links[key]} target="_blank" rel="noopener noreferrer">
+        <Icon className="w-5 h-5" />
+      </a>
+    ));
+}
+```
+
+All icon components are inline SVGs (no external icon library dependency on public pages).
+
+### 30.5 Plans Page — Feature Comparison Table
+
+`Plans.jsx` mirrors the `FEATURE_PLAN` map from `server/middleware/plan.js`. When adding a new plan-gated feature, update **both** files.
+
+Feature availability per plan uses Set membership:
+```js
+const all  = new Set(['core','standard','premium','enterprise']);
+const std  = new Set(['standard','premium','enterprise']);
+const prem = new Set(['premium','enterprise']);
+const ent  = new Set(['enterprise']);
+```
+
+CTA buttons call `navigate('/contact?plan=<planKey>')`. The Contact page reads `?plan=` via `useSearchParams` and pre-fills the inquiry type and message body.
+
+---
+
+## 31. Demo School System (v4.9.7+)
+
+### 31.1 Architecture
+
+The demo school (`slug: 'demo'`, `schoolId: 'sch_demo'`) is provisioned automatically on every server start by `server/scripts/seed-demo.js`, called non-blocking from `server/index.js` after the HTTP server is listening.
+
+```
+server start
+  └── connect() [MongoDB]
+  └── ensureIndexes()
+  └── app.listen()
+        └── repairPermissions()    [fire-and-forget]
+        └── seedDemo()             [fire-and-forget]
+              └── upsert school (plan: enterprise, always via $set)
+              └── invalidatePlanCache('sch_demo')
+              └── upsert 6 demo users
+              └── upsert academic year
+              └── upsert sections
+              └── upsert role permissions
+              └── seedDemoData()   [realistic content]
+```
+
+### 31.2 Plan Enforcement
+
+The demo school **must always be on the enterprise plan**. This is enforced by:
+
+1. Using `$set` (not `$setOnInsert`) for the `plan` field in the school upsert — overrides any pre-existing value
+2. Calling `invalidatePlanCache(schoolId)` immediately after to clear the 5-minute TTL cache
+
+```js
+await School.updateOne({ slug: 'demo' }, {
+  $set: { plan: 'enterprise', ... },
+  $setOnInsert: { createdAt: now },
+}, { upsert: true });
+try {
+  const { invalidatePlanCache } = require('../middleware/plan');
+  invalidatePlanCache('sch_demo');
+} catch { /* plan middleware not loaded yet — harmless */ }
+```
+
+### 31.3 Demo Users
+
+| Email | Role | Badge |
+|-------|------|-------|
+| `admin@demo.msingi.io` | `admin` | Full access |
+| `principal@demo.msingi.io` | `deputy_principal` | Academic lead |
+| `teacher@demo.msingi.io` | `teacher` | Classroom |
+| `finance@demo.msingi.io` | `finance` | Finance |
+| `parent@demo.msingi.io` | `parent` | Guardian view |
+| `student@demo.msingi.io` | `student` | Student view |
+
+All passwords: `Demo2025!`. All users have `isActive: true`, `mustChangePassword: false`.
+
+### 31.4 Quick Login Panel (`client/src/pages/Login.jsx`)
+
+When `slug === 'demo'`, the login page renders a `DemoPanel` below the standard form. Clicking any role card calls `handleQuickLogin(email, password)` which fills the credential state and auto-submits the form.
+
+The panel only renders for the demo slug — never on any real school's login page.
+
+### 31.5 Seed Data Isolation Rule
+
+`server/scripts/seed-demo-data.js` is the ONLY file that seeds bulk demo content. It must:
+
+1. **Never** use a dynamic `schoolId` — always hardcode `const SCHOOL_ID = 'sch_demo'`
+2. **Always** use the `upsert()` helper with `$setOnInsert` — never `$set` for data fields
+3. **Never** be called from any path other than `seedDemo()`
+
+```js
+// Correct pattern — never overwrites existing demo data
+function upsert(Model, id, data) {
+  return Model.updateOne(
+    { id },
+    { $setOnInsert: { id, schoolId: SCHOOL_ID, ...data } },
+    { upsert: true }
+  );
+}
+```
+
+### 31.6 Demo Data Inventory
+
+| Collection | Count | Notes |
+|------------|-------|-------|
+| `classes` | 7 | Grade 1–4 (Primary), Form 1–3 (Secondary) |
+| `subjects` | 14 | CBC and secondary subjects |
+| `teachers` | 9 extra | Realistic Kenyan names, profiles |
+| `students` | 20 | Full profiles, guardian contacts, class assignments |
+| `behaviour_incidents` | 25 | Mix of minor/moderate/serious, open/resolved/closed |
+| `timetable_slots` | 60 | Full weekly grid, Mon–Fri, 8 periods |
+| `invoices` | 20 | Tuition/activity/transport, mix of statuses |
+| `payments` | 14 | Linked to invoices |
+| `admissions` | 8 | Spread across all pipeline stages |
+
+---
+
+## 32. Developer Workflow — Check Docs First (v4.9.9+)
+
+A Claude Code slash command `.claude/commands/check-docs.md` enforces the following mandatory protocol before any implementation:
+
+1. **Read `CHANGELOG.md`** — confirm what version introduced the feature you are touching; never rebuild what already exists
+2. **Read `docs/DEVELOPER_GUIDE.md`** — understand existing architecture, collection names, API routes
+3. **Read relevant user docs** — `USER_GUIDE.md`, `SCHOOL_ADMIN_GUIDE.md`, `PLATFORM_ADMIN_GUIDE.md` as appropriate
+4. **Declare status** — "feature exists / does not exist / partially exists" before writing code
+5. **Implement with zero regression** — tenant isolation, plan gating, no collection renames without migration
+6. **Update all docs** after every change
+
+Invoke with `/check-docs` in Claude Code before starting any feature work.

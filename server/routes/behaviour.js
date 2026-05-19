@@ -278,7 +278,7 @@ router.get('/categories', authMiddleware, PLAN, rbac('behaviour', 'read'), async
     if (req.query.type)     filter.type     = req.query.type;
     if (req.query.isActive) filter.isActive = req.query.isActive === 'true';
 
-    const docs = await _model('behaviour_categories').find(filter).sort({ type: 1, name: 1 }).select('-__v').lean();
+    const docs = await _model('behaviour_categories').find(filter).sort({ type: 1, name: 1 }).limit(200).select('-__v').lean();
     return ok(res, docs);
   } catch (err) { console.error('[behaviour/categories GET]', err); return E.serverError(res); }
 });

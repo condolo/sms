@@ -1,9 +1,9 @@
 ﻿# Msingi — User Guide
 
-**Version 4.7.0** · Updated 2026-05-18
+**Version 4.9.9** · Updated 2026-05-19
 
 > **Looking for admin guides?**
-> - 🔧 [Platform Admin Guide](PLATFORM_ADMIN_GUIDE.md) — for the InnoLearn platform owner
+> - 🔧 [Platform Admin Guide](PLATFORM_ADMIN_GUIDE.md) — for the Msingi platform owner
 > - 🏫 [School Admin Guide](SCHOOL_ADMIN_GUIDE.md) — for your school's IT admin / Super Admin
 > - 👤 This guide — for all other staff, parents, and students
 
@@ -34,7 +34,7 @@
 ## 1. Getting Started
 
 ### Registering Your School
-If your school is not yet on InnoLearn, visit `/onboard` or click **Get Started** on the login page to begin the 4-step registration wizard:
+If your school is not yet on Msingi, visit [msingi.io](https://msingi.io) and click **Get Started**, or go to [msingi.io/plans](https://msingi.io/plans) to compare what each plan includes before registering. Then complete the 4-step registration wizard:
 
 1. **School Details** — name, type, country, URL slug, curriculum, sections
 2. **Admin Account** — your name and email address (no password needed — see below)
@@ -43,7 +43,7 @@ If your school is not yet on InnoLearn, visit `/onboard` or click **Get Started*
 
 > **Curriculum options**: CBE (Kenya — Competency Based Education), IB (International Baccalaureate), British (Cambridge / Edexcel), American (US Common Core / AP)
 
-> **No password at registration** — InnoLearn generates a secure temporary password for you server-side. It will be emailed when your school is approved. You do not set a password during registration.
+> **No password at registration** — Msingi generates a secure temporary password for you server-side. It will be emailed when your school is approved. You do not set a password during registration.
 
 > **Inline validation** — if a required field is empty or invalid, a red banner appears below the step heading and the specific field turns red. Fix the highlighted fields and click Continue again — no browser popups.
 
@@ -52,7 +52,7 @@ After submitting, your application enters a **pending review** state. You will r
 > **Note**: If you did not receive a confirmation email, check your spam folder. Ensure your school's email server is not blocking the sender `innolearnnetwork@gmail.com`.
 
 ### Approval Process
-Once the InnoLearn team reviews and approves your school, you will receive a **welcome email** containing:
+Once the Msingi team reviews and approves your school, you will receive a **welcome email** containing:
 
 | What | Example |
 |------|---------|
@@ -62,21 +62,42 @@ Once the InnoLearn team reviews and approves your school, you will receive a **w
 
 Click the link in the email — it will take you directly to the login page. Enter your email and temporary password. You will immediately be prompted to set a permanent password.
 
-> ⚠️ **Save the approval email.** The temporary password is displayed once. If you miss it, contact the InnoLearn team.
+> ⚠️ **Save the approval email.** The temporary password is displayed once. If you miss it, contact the Msingi team.
 
 If your application is not approved, you will receive an email explaining why, and you are welcome to reapply after addressing the concern raised.
+
+### Trying the Platform Before Registering
+
+Not ready to commit? Visit **[demo.msingi.io](https://demo.msingi.io)** to explore the full system on the Enterprise plan with realistic sample data.
+
+Click any role card to log in instantly — no password typing needed:
+
+| Role | What you see |
+|------|-------------|
+| **Admin** | Full system — all modules, settings, reports |
+| **Deputy Principal** | Academic management, timetable, behaviour |
+| **Teacher** | Attendance registers, grade entry, messages |
+| **Finance Officer** | Invoices, fee collections, payment reports |
+| **Parent** | Child's records, attendance, communications |
+| **Student** | Own timetable, grades, behaviour history |
+
+> The demo is shared — any changes you make are visible to other demo visitors. Your real school data is always separate.
+
+### Comparing Plans
+
+Visit **[msingi.io/plans](https://msingi.io/plans)** to see a full feature-by-feature comparison across all four plans (Core, Standard, Premium, Enterprise). Each plan column has a **Get Started** button that takes you directly to the contact form pre-filled for that plan.
 
 > **Note**: You cannot log in while your school is pending. If you try, you will see a clear "Application Under Review" screen.
 
 ---
 
 ### Logging In
-1. Open InnoLearn in your browser.
+1. Open Msingi in your browser.
 2. Enter your school email address and password.
 3. Click **Sign In**.
 
 ### Demo Access
-Visit the login page with `?demo=innolearn` in the URL to open the **Demo Role Selector**. Six role cards appear — click any card to fill credentials for that role, then click **Sign In**. No typing required.
+Visit **[demo.msingi.io](https://demo.msingi.io)** and click any role card in the **Quick Login** panel. Credentials are filled automatically — click **Sign In** or wait for auto-submit. No typing required.
 
 Available demo roles: **Super Admin · Teacher · Parent · Finance · Student · Deputy Principal**
 
@@ -87,7 +108,7 @@ If your account was created by an administrator (individually or via bulk import
 Contact your school administrator to reset your password.
 
 ### Auto-Logout (Security)
-For your security, InnoLearn automatically signs you out after **10 minutes of inactivity**. At 9 minutes, an amber warning toast appears — click **Stay signed in** to reset the timer. This protects shared or unattended devices.
+For your security, Msingi automatically signs you out after **10 minutes of inactivity**. At 9 minutes, an amber warning toast appears — click **Stay signed in** to reset the timer. This protects shared or unattended devices.
 
 ### Password Policy (60-Day Rotation)
 All passwords expire every **60 days**. When your password is about to expire:
@@ -103,7 +124,7 @@ Your role determines which modules appear in your sidebar and what actions you c
 ### Navigation
 - Click any item in the **left sidebar** to navigate to that module.
 - The **topbar search** finds students by name or admission number.
-- The **back button** works normally — InnoLearn uses URL hash routing.
+- The **back button** works normally — Msingi uses URL hash routing.
 - The **bell icon** shows your latest notifications.
 
 ---
@@ -113,7 +134,7 @@ Your role determines which modules appear in your sidebar and what actions you c
 The Dashboard is the first screen after login. What you see depends on your role.
 
 ### System Announcement Banners
-When InnoLearn schedules a platform update or maintenance window, a **coloured banner** appears at the very top of your dashboard:
+When Msingi schedules a platform update or maintenance window, a **coloured banner** appears at the very top of your dashboard:
 
 | Banner type | Colour | What it means |
 |---|---|---|
@@ -148,7 +169,7 @@ A **% completion bar** shows your progress. Each step is clickable and takes you
 ### Data Backup (Super Admin)
 A **"Data Backup & Export"** card is visible on the Super Admin dashboard, below the Quick Actions. Click **Back Up Now** to instantly download a complete JSON export of all your school's data — students, staff, classes, finance, attendance, behaviour, reports, and every other module. The download begins immediately in your browser.
 
-- No data is stored on InnoLearn's servers during the backup — the file goes directly to your computer
+- No data is stored on Msingi's servers during the backup — the file goes directly to your computer
 - Every backup is logged (date, record count, system version) — click **View backup history** to review past exports
 - You can also trigger a backup from the **"Backup Data"** tile in the Quick Actions grid
 - **Always back up before a major platform update** (you will be reminded automatically by dashboard banners and email)
@@ -235,7 +256,7 @@ Click **Reject** and provide a reason. The applicant family can be notified via 
 ## 5. Classes
 
 ### Structure
-InnoLearn supports four **sections**: KG, Primary, Secondary, and A-Level. Each section contains classes.
+Msingi supports four **sections**: KG, Primary, Secondary, and A-Level. Each section contains classes.
 
 ### Managing Classes
 - **Add Class**: specify name (e.g. "Grade 7A"), section, and homeroom teacher.
@@ -590,7 +611,7 @@ The calendar automatically marks days that have student or staff birthdays with 
 
 ## 13. Behaviour & Pastoral
 
-The Behaviour module is the most comprehensive in InnoLearn. It runs a dual merit/demerit system aligned to the SAA Behaviour Points System v2.
+The Behaviour module is the most comprehensive in Msingi. It runs a dual merit/demerit system aligned to the SAA Behaviour Points System v2.
 
 ### The Point System
 - **Merits** (positive points): awarded for outstanding behaviour, achievement, leadership, etc.
@@ -794,19 +815,19 @@ Use **Archive Academic Year** at the end of a school year to permanently close a
 
 ### Branding *(Super Admin only)*
 
-Personalise the look and feel of InnoLearn for your school.
+Personalise the look and feel of Msingi for your school.
 
 **App Identity**
 - **Logo** — upload PNG/SVG/JPG (max 2 MB). Displayed in the sidebar header. Transparent background recommended.
 - **Favicon** — upload a square image (max 512 KB). Shown in browser tabs and bookmarks.
-- **App Name** — rename "InnoLearn" to your school's system name. Appears in the sidebar and browser title bar.
+- **App Name** — rename "Msingi" to your school's system name. Appears in the sidebar and browser title bar.
 
 **Theme Colors**
 - Choose from 6 quick presets (Ocean Blue, Emerald, Violet, Rose, Amber, Cyan) or set custom colors.
 - **Primary Accent** — buttons, links, badges, active sidebar item.
 - **Sidebar Background** — the left navigation panel color.
 - A live mini-preview updates as you adjust colors.
-- Click **Save Branding** to apply. **Reset to Default** restores InnoLearn defaults.
+- Click **Save Branding** to apply. **Reset to Default** restores Msingi defaults.
 
 **Login Page Animation**
 - Choose a canvas background effect for the login screen: **None · Particles · Aurora · Water · Clouds · Fire**.

@@ -6,6 +6,150 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.9.10] — 2026-05-19  Stability Hardening: Login Plan Bug, Query Limits, Session Fix
+
+### Fixed — Critical: Plan badge always showing "core" in UI (`client/src/pages/Login.jsx`, `store/auth.js`, `components/layout/TopBar.jsx`)
+- Root cause: all four login paths (`handleLogin`, `handleQuickLogin`, `handleOtp`, `handleChangePassword`) called `setSession({ token, user })` without including `school: res.school`. The `auth.js` store getter read `session?.user?.plan` — plan is on the school doc, not the user doc, so it always returned `undefined` and fell back to `'core'`
+- Fix: all four `setSession` calls now pass `school: res.school`
+- Fix: `auth.js` plan getter now reads `session?.school?.plan ?? session?.user?.plan ?? 'core'` (school first)
+- Fix: `TopBar.jsx` plan display updated with same dual-source pattern
+
+### Fixed — UI: Login page left panel too wide
+- Changed from `lg:w-1/2 xl:w-3/5` (up to 60% at xl) to `lg:w-5/12` (41.7% fixed)
+- Also reduced padding from `p-12` to `p-10` to give the form panel more breathing room
+
+### Fixed — Stability: Unbounded database queries (memory safety)
+- **`server/routes/platform.js`** — `School.find({})` for dashboard list now uses field projection (only loads slug, name, plan, status, etc. — not logoUrl, email templates, branding blobs). `School.find({})` for stats now projects only `plan, isActive`. Announcements list capped at 200.
+- **`server/routes/assessment.js`** — All `assessment_marks.find()` queries capped (5,000 for marks list, 10,000 for report generation). `assessment_schedule.find()` capped at 200. `users.find({ role: 'teacher' })` capped at 200.
+- **`server/routes/behaviour.js`** — `behaviour_categories.find()` capped at 200.
+- **`server/routes/timetable.js`** — Class timetable and teacher timetable views capped at 200 slots (5 days × 10 periods = 50 slots max in practice).
+- **Context**: `parsePagination()` in `server/utils/response.js` already enforced `Math.min(200, ...)` on all main list endpoints (students, teachers, finance, attendance, etc.). These fixes close the remaining unbounded paths in lookup and aggregation routes.
+
+### Fixed — Visibility: Unhandled Promise rejections in startup (v4.9.9 carry-forward)
+- `repairPermissions()` and `seedDemo()` in `server/index.js` now have `.catch(err => console.error(...))` — previously silent failures were invisible in Render logs
+
+---
+
+## [4.9.9] — 2026-05-19  Demo School Enterprise Plan + Realistic Seed Data
+
+### Changed — Demo School Always Forced to Enterprise Plan (`server/scripts/seed-demo.js`)
+- Demo school plan field set via `$set` (not `$setOnInsert`) — guarantees `plan: 'enterprise'` is applied on every server restart, even if the school document pre-existed with a lower plan
+- `invalidatePlanCache(schoolId)` called immediately after upsert to clear the 5-minute TTL in-memory cache, so the enterprise plan takes effect the moment the server starts
+- Wrapped in `try/catch` — `plan` middleware may not be loaded yet on very first boot; harmless
+
+### Added — Student Role in Demo User Set (`server/scripts/seed-demo.js`)
+- Added `u_demo_student` user (`student@demo.msingi.io` / `Demo2025!`, role: `student`)
+- Student permissions seeded in `role_permissions`: read-only access to students, classes, attendance, finance, behaviour, exams, grades, timetable, assessment, report_cards; messaging with read+create+update
+
+### Added — Comprehensive Realistic Demo Seed Data (`server/scripts/seed-demo-data.js`)
+- New script called by `seed-demo.js` after core provisioning
+- **Isolation guarantee**: all records hardcoded to `schoolId: 'sch_demo'` — no other school is ever touched
+- **Idempotent pattern**: every record uses `$setOnInsert` — safe to run on every server restart, never overwrites manually edited demo data
+- Data seeded:
+  - **7 classes**: Grade 1–4 (Primary), Form 1–3 (Secondary)
+  - **14 subjects**: Mathematics, English, Science, Kiswahili, Social Studies, CRE, Art, PE (Primary); additional secondary subjects
+  - **9 additional teachers** with realistic Kenyan names, profiles, and subject assignments
+  - **20 students** with full profiles: names, DOB, gender, guardian contacts, class assignments, enrolment dates, medical notes
+  - **25 behaviour incidents**: mix of minor/moderate/serious with statuses (open, resolved, closed), school-appropriate descriptions
+  - **60 timetable slots**: complete weekly grid across all 7 classes, Mon–Fri, periods 1–8
+  - **20 invoices + 14 payments**: tuition/activity/transport fees, mix of paid/partial/pending/overdue
+  - **8 admissions records**: spread across enquiry → applied → shortlisted → offered → enrolled stages
+
+### Changed — `server/index.js`
+- Version bumped to `4.9.9`
+- `seedDemo()` fires non-blocking after HTTP server starts listening (fire-and-forget)
+
+### Added — Developer Tooling: Pre-Implementation Documentation Skill
+- `.claude/commands/check-docs.md` — Claude Code slash command (`/check-docs`) that mandates a 6-step protocol before any implementation: read CHANGELOG, read DEVELOPER_GUIDE, read relevant user docs, declare what exists vs. what's missing, implement with zero regression, update all docs after changes
+- Includes collection name reference table for all 20+ known collections
+
+---
+
+## [4.9.8] — 2026-05-19  Plans Comparison Page + Contact Pre-Fill
+
+### Added — Plans Comparison Page (`client/src/pages/Plans.jsx`)
+- New public-facing `/plans` route — no authentication required
+- Fixed navbar (same pattern as Landing/Contact) with Plans link highlighted
+- **4 plan cards**: Core, Standard, Premium (highlighted as "Most popular"), Enterprise
+- **Full feature comparison table** with 5 feature groups sourced directly from `server/middleware/plan.js` FEATURE_PLAN map:
+  - Core Features (attendance, students, classes, timetable, messages)
+  - Academic (exams, grades/assessment, report cards)
+  - Admissions & HR (admissions pipeline, teacher management)
+  - Finance (invoicing, payments, reports)
+  - Enterprise (analytics, API access, custom branding, priority support)
+- `Cell` component renders check (✓) or dash (–) per plan
+- CTA buttons at bottom of each plan column: `navigate('/contact?plan=<planKey>')`
+- "Not sure?" bottom section with contact link
+
+### Changed — Contact Page (`client/src/pages/Contact.jsx`)
+- `useSearchParams` reads `?plan=` query parameter from URL
+- `PLAN_INQUIRY_MAP` maps `core/standard/premium/enterprise` → inquiry type string
+- Form pre-fills `inquiry` dropdown and `message` field when plan is specified in URL
+- Enables one-click plan selection from the Plans page directly into the contact form
+
+### Changed — `client/src/App.jsx`
+- Added `import Plans from '@/pages/Plans.jsx'`
+- Added route `{ path: '/plans', element: <Plans /> }`
+
+### Changed — Landing.jsx + Contact.jsx navbars
+- Added `Plans` link in fixed navbar on both Landing and Contact pages
+
+---
+
+## [4.9.7] — 2026-05-19  Demo School URL + Quick Login Panel
+
+### Changed — "Explore the Platform" CTA targets `demo.msingi.io` (`client/src/pages/Landing.jsx`)
+- Hero CTA and final section CTA both now call `goToSchool('demo')` — previously pointed to `innolearn` slug
+- Demo school is the canonical hands-on trial environment for all visitors
+
+### Added — Quick Login Panel on Demo Login Page (`client/src/pages/Login.jsx`)
+- `DEMO_ACCOUNTS` array defines all 6 roles with email, display color, background color, and badge text
+- `DemoPanel` component renders colored role cards — one per role (Admin, Deputy Principal, Teacher, Finance Officer, Parent, Student)
+- Click any card calls `handleQuickLogin(email, password)` which auto-fills credentials and submits the login form
+- Panel only renders when `slug === 'demo'`
+- Left panel of login page shows role list for demo slug instead of generic tagline
+- All demo credentials: `Demo2025!` password, `isActive: true`, `mustChangePassword: false`
+
+---
+
+## [4.9.6] — 2026-05-19  Public Page UI Polish (Fixed Navbar, WhatsApp FAB, Hash Fix)
+
+### Fixed — Navbar scrolls away on Landing and Contact pages
+- Root cause: `overflow-x-hidden` on parent element breaks `position: sticky` in Chrome/Safari
+- Fix: both navbars changed from `sticky top-0` to `fixed top-0 left-0 right-0 w-full z-50`
+- `<div className="h-16" />` spacer added immediately after each navbar to compensate for the fixed position removing the element from document flow
+
+### Fixed — WhatsApp FAB shape and persistence
+- Previously: expanding pill on hover (`rounded-full` with hover-expand text label)
+- Now: permanent `w-12 h-12 rounded-full bg-[#25D366]` circle with phone icon — never changes shape
+- FAB is fixed at `bottom-6 right-6` on every public page scroll position — never disappears
+
+### Fixed — `#modules` hash appearing in URL bar when clicking Modules nav link
+- Root cause: `<a href="#modules">` adds the hash to the URL on click
+- Fix: replaced with `<button onClick={() => document.getElementById('modules')?.scrollIntoView({ behavior: 'smooth' })}>`  — smooth scrolls without touching URL
+
+### Changed — Contact page (`client/src/pages/Contact.jsx`)
+- Removed "Direct Contact" card section (Email us / WhatsApp us cards)
+- Removed "Or chat on WhatsApp" inline link from form submission row
+- Added scroll-to-top button (appears after scrolling 200px) alongside WhatsApp FAB
+- Both FABs rendered in a `fixed bottom-6 right-6 flex flex-col gap-3` container
+
+---
+
+## [4.9.5] — 2026-05-19  Social Icons + Landing Navbar Cleanup
+
+### Added — Social Icons in Public Page Footers
+- Inline SVG components added to `Landing.jsx` and `Contact.jsx`: `XIcon`, `LinkedInIcon`, `FacebookIcon`, `InstagramIcon`, `YouTubeIcon`
+- `SocialLinks` component renders only links the platform admin has configured (filters empty/null URLs)
+- `getPlatformSettings()` API call in `useEffect` populates `socialLinks` state on both pages
+- `<SocialLinks links={socialLinks} />` rendered in footer of both Landing and Contact pages
+
+### Removed — "Sign In" button from Landing page navbar
+- Button removed from `Landing.jsx` navbar entirely — schools sign in via their dedicated `{slug}.msingi.io` URL
+- Prevents confusion between marketing site navigation and school portal authentication
+
+---
+
 ## [4.9.1] — 2026-05-19  Critical Security & Integrity Fixes (Platform Audit)
 
 ### Fixed — Critical: RBAC Permission Format Mismatch (`server/routes/onboard.js`)

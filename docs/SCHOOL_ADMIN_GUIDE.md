@@ -1,6 +1,6 @@
-﻿# InnoLearn — School Administrator Guide
+﻿# Msingi — School Administrator Guide
 
-> **Audience:** The Super Admin or IT Administrator for a school registered on InnoLearn. This guide covers first-time setup, managing your school's data, staff roles, and day-to-day administration.
+> **Audience:** The Super Admin or IT Administrator for a school registered on Msingi. This guide covers first-time setup, managing your school's data, staff roles, and day-to-day administration.
 
 ---
 
@@ -17,7 +17,7 @@
 9. [Your Subscription Plan](#9-your-subscription-plan)
 10. [Branding & School Profile](#10-branding--school-profile)
 11. [Data Export & Backup](#11-data-export--backup)
-12. [Demo School (InnoLearn)](#12-demo-school-InnoLearn)
+12. [Demo School (Msingi)](#12-demo-school-msingi)
 13. [Getting Help](#13-getting-help)
 
 ---
@@ -28,13 +28,13 @@ After completing the onboarding wizard, you will receive a confirmation screen w
 
 If you return later:
 
-1. Go to `https://innolearn-ecosystem.onrender.com` (or your custom URL if on Enterprise)
+1. Go to `https://yourschool.msingi.io` (or your custom URL if on Enterprise)
 2. Enter your admin email and password
 3. You can also click **"Remember me"** to stay signed in
 
 ### Quick Demo Access (for testing)
 
-On the login page there are **Quick Demo** buttons. These fill in sample credentials for each role so you can explore the system without affecting real data. These use the built-in **InnoLearn International School** demo environment — see [Section 12](#12-demo-school-InnoLearn) for details.
+Visit **[demo.msingi.io](https://demo.msingi.io)** to explore the system using the built-in demo environment with realistic data. One-click role cards let you sign in as any user type without entering credentials — see [Section 12](#12-demo-school-msingi) for details.
 
 ---
 
@@ -175,7 +175,7 @@ For a formal application workflow:
 
 *(Coming in v3.2 — Data Migration Tool)*
 
-For transitioning from another system, a CSV import tool is planned. In the meantime, use the Admissions module for batch processing or contact your InnoLearn administrator for a manual migration.
+For transitioning from another system, a CSV import tool is planned. In the meantime, use the Admissions module for batch processing or contact your Msingi administrator for a manual migration.
 
 ---
 
@@ -222,7 +222,7 @@ All new schools start on a **30-day free trial** on their chosen plan. No paymen
 
 ### Upgrading your plan
 
-Contact InnoLearn at [support@InnoLearn.com](mailto:support@InnoLearn.com) or use the **Upgrade** button shown on any locked module page. Enterprise pricing is available on request.
+Contact Msingi via the **Plans page** at [msingi.io/plans](https://msingi.io/plans) or click **Contact Us** → choose your plan to pre-fill the inquiry form. Enterprise pricing is available on request.
 
 ### What happens if I exceed my trial?
 
@@ -272,25 +272,28 @@ This export can be re-imported if you ever need to restore.
 
 ---
 
-## 12. Demo School (InnoLearn)
+## 12. Demo School (Msingi)
 
-**InnoLearn International School** is the built-in demo school. It contains realistic sample data including students, staff, timetables, grades, and events.
+**Msingi Demo School** is the built-in demo environment at `demo.msingi.io`. It contains realistic sample data including 20 students, 9+ teachers, timetables, behaviour records, finance records, and admissions.
+
+The demo school always runs on the **Enterprise plan** so you can explore every feature without restriction.
 
 ### Accessing the demo
 
-On the login page, click any of the **Quick Demo** pills:
-- **Super Admin** — full system access
-- **Admin** — principal-level access
-- **Teacher** — teacher portal
-- **Parent** — parent view
-- **Student** — student view
-- **Finance** — finance module
-- **Deputy Principal** — deputy access
-- **Discipline** — behaviour & pastoral
+Visit **[demo.msingi.io](https://demo.msingi.io)** and use the **Quick Login** panel to sign in as any role with one click:
 
-Or, from the onboarding page, click **"Try the InnoLearn demo →"** in the bottom-left corner.
+| Role | Email | What you can explore |
+|------|-------|----------------------|
+| Admin | `admin@demo.msingi.io` | Everything — full system |
+| Deputy Principal | `principal@demo.msingi.io` | Academic, timetable, behaviour |
+| Teacher | `teacher@demo.msingi.io` | Attendance, grades, messages |
+| Finance Officer | `finance@demo.msingi.io` | Invoices, payments, reports |
+| Parent | `parent@demo.msingi.io` | Child's records, messages |
+| Student | `student@demo.msingi.io` | Own profile, timetable, grades |
 
-> ⚠️ The demo school uses **sample data only**. Any changes you make are stored in your browser's local storage and do not affect other users. Demo data resets automatically when the system is updated.
+Password for all demo accounts: **`Demo2025!`**
+
+> ⚠️ The demo school uses **shared sample data**. Any changes you make are visible to all demo users but your real school's data is completely separate and unaffected.
 
 ---
 
@@ -308,13 +311,13 @@ Click **Changelog** in the sidebar to see what's new in the latest version.
 
 | Channel | Details |
 |---|---|
-| Email | support@InnoLearn.com |
+| Email | support@msingi.io |
 | Response time | Within 24 hours (business days) |
 | Priority support | Enterprise plan — 4-hour SLA |
 
 ### Reporting a bug
 
-Email support@InnoLearn.com with:
+Email support@msingi.io with:
 - Your school name and admin email
 - A description of the issue
 - Steps to reproduce
@@ -322,4 +325,4 @@ Email support@InnoLearn.com with:
 
 ---
 
-*Last updated: 2026-04-30 — InnoLearn v3.1.0*
+*Last updated: 2026-05-19 — Msingi v4.9.9*

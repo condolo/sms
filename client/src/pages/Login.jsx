@@ -145,7 +145,7 @@ export default function Login() {
       const res = await authApi.login({ email: demoEmail.toLowerCase(), password: demoPassword });
       if (res?.mfaRequired) { setPendingMfa({ userId: res.userId, schoolId: res.schoolId }); setMode(MODES.OTP); setLoading(false); return; }
       if (res?.passwordExpired) { setPendingPw({ userId: res.userId, schoolId: res.schoolId, reason: res.reason }); setMode(MODES.CHANGE_PASSWORD); setLoading(false); return; }
-      setSession({ token: res.token, user: res.user });
+      setSession({ token: res.token, user: res.user, school: res.school });
       navigate(from, { replace: true });
     } catch (err) {
       setError(err instanceof APIError ? err.message : 'Demo login failed — please try again.');
@@ -178,7 +178,7 @@ export default function Login() {
         return;
       }
 
-      setSession({ token: res.token, user: res.user });
+      setSession({ token: res.token, user: res.user, school: res.school });
       navigate(from, { replace: true });
     } catch (err) {
       setError(err instanceof APIError ? err.message : 'Unable to sign in. Please try again.');
@@ -198,7 +198,7 @@ export default function Login() {
         schoolId: pendingMfa.schoolId,
         otp:      otp.trim(),
       });
-      setSession({ token: res.token, user: res.user });
+      setSession({ token: res.token, user: res.user, school: res.school });
       navigate(from, { replace: true });
     } catch (err) {
       setError(err instanceof APIError ? err.message : 'Invalid code. Please try again.');
@@ -219,7 +219,7 @@ export default function Login() {
         schoolId:    pendingPw.schoolId,
         newPassword,
       });
-      setSession({ token: res.token, user: res.user });
+      setSession({ token: res.token, user: res.user, school: res.school });
       navigate(from, { replace: true });
     } catch (err) {
       setError(err instanceof APIError ? err.message : 'Password change failed.');
@@ -243,7 +243,7 @@ export default function Login() {
   function LeftPanel() {
     return (
       <div
-        className="hidden lg:flex lg:w-1/2 xl:w-3/5 flex-col justify-between p-12"
+        className="hidden lg:flex lg:w-5/12 flex-col justify-between p-10"
         style={{ background: `linear-gradient(135deg, ${primary}, ${accent})` }}
       >
         {/* School logo / identity */}

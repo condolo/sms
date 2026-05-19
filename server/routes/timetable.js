@@ -85,9 +85,10 @@ router.get('/class/:classId', authMiddleware, PLAN, rbac('timetable', 'read'), a
     if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
     if (req.query.termId)         filter.termId         = req.query.termId;
 
+    // Bounded by classId — a class has at most 5 days × 10 periods = 50 slots
     const docs = await _model('timetable').find(filter)
       .sort({ day: 1, periodNumber: 1, period: 1 })
-      .select('-__v').lean();
+      .limit(200).select('-__v').lean();
 
     // Group by day for easier frontend rendering
     const byDay = {};
@@ -106,9 +107,10 @@ router.get('/teacher/:teacherId', authMiddleware, PLAN, rbac('timetable', 'read'
     if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
     if (req.query.termId)         filter.termId         = req.query.termId;
 
+    // Bounded by teacherId — a teacher has at most 5 days × 10 periods = 50 slots
     const docs = await _model('timetable').find(filter)
       .sort({ day: 1, periodNumber: 1 })
-      .select('-__v').lean();
+      .limit(200).select('-__v').lean();
 
     const byDay = {};
     DAYS.forEach(d => { byDay[d] = []; });

@@ -153,7 +153,7 @@ app.post('/api/announcements/:id/dismiss', authMiddleware, async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: '4.9.9',
+    version: '4.9.10',
     timestamp: new Date().toISOString(),
     db: require('./config/db').isConnected() ? 'connected' : 'disconnected'
   });
@@ -254,8 +254,11 @@ async function start() {
     // Self-healing: run non-blocking AFTER HTTP is serving.
     // Detects and repairs broken role_permissions (legacy object → array format).
     // Idempotent — becomes a sub-1ms no-op once all schools are repaired.
-    repairPermissions();   // Fix legacy permission format (idempotent)
-    seedDemo();            // Ensure demo.msingi.io school + users exist (idempotent)
+    repairPermissions()
+      .catch(err => console.error('[repairPermissions] Unhandled error:', err));
+
+    seedDemo()
+      .catch(err => console.error('[seed-demo] Unhandled top-level error — demo school may not be provisioned correctly:', err));
   });
 }
 
