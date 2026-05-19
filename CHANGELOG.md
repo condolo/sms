@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.9.13] — 2026-05-19  Premium UI Overhaul: Settings + Timetable
+
+### Rebuilt — `client/src/pages/settings/SettingsPage.jsx`
+- **Tabs** — replaced plain text with lucide icons (Building2 / Users / User); RBAC hides Users tab for non-admin roles
+- **Removed old dependencies** — PageSpinner, Spinner, ErrorState, clsx, card/btn-primary/form-input/form-label/data-table classes
+- **School tab additions** — currency dropdown (10 currencies), timezone selector (10 zones), academic year label, terms per year, tagline field, country field; all saved to `PUT /settings/school`
+- **Houses section** — built into School tab: add houses with name + colour picker (8 swatches + `<input type="color">`), remove with X; saves to `school.houses` array (same key used by Behaviour leaderboard and Student Profile dropdown — completes the full houses data flow)
+- **Users tab** — role pills per user (colour-coded by role), invite slide-over (name/email/role, `POST /settings/users/invite`), RBAC-gated Trash2 remove with hover-reveal, skeleton loaders
+- **Account tab** — `alert()` removed → inline password mismatch/length error; show/hide password toggle (Eye/EyeOff); save button disabled when name is unchanged; toast on all mutation outcomes
+
+### Rebuilt — `client/src/pages/timetable/TimetablePage.jsx`
+- **Removed old dependencies** — PageSpinner, EmptyState, ErrorState, emoji `🗓`, card/form-select/bg-brand-* classes
+- **Premium 5-day grid** — deterministic subject colour coding (8 colour pairs), period number + room in each slot card, teacher name truncated
+- **Add Slot slide-over** — day/period/subject/teacher/room fields, `POST /timetable` on submit; RBAC-gated (admin/deputy/can('timetable'))
+- **Inline remove** — Trash2 button hover-reveals on each slot (admin/deputy only); `DELETE /timetable/:id`
+- **Quick-add button** — dashed "Add" row at the bottom of each day column
+- **Page header** — shows lesson count + active days when class is selected
+- **framer-motion** slot entry animations, toast feedback on add/remove errors
+
+---
+
 ## [4.9.12] — 2026-05-19  Premium UI Overhaul: Grades & Assessment
 
 ### Rebuilt — `client/src/pages/grades/GradesPage.jsx`
