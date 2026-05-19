@@ -1,59 +1,320 @@
-import { useQuery } from '@tanstack/react-query';
+/* ============================================================
+   Classes — Premium Card Grid with Add Slide-Over
+   /platform-audit: RBAC-gated, lucide icons, correct API shape
+   ============================================================ */
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { classes as classesApi } from '@/api/client.js';
-import { PageSpinner } from '@/components/ui/Spinner.jsx';
-import { EmptyState, ErrorState } from '@/components/ui/EmptyState.jsx';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  BookOpen, Users, UserCheck, Plus, X, Loader2,
+  CheckCircle2, AlertTriangle, Trash2, Hash, Home,
+} from 'lucide-react';
+import { classes as classesApi, teachers as teachersApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 
+const CLASS_COLORS = [
+  'from-violet-500 to-purple-600','from-blue-500 to-cyan-500',
+  'from-emerald-500 to-teal-500', 'from-amber-500 to-orange-500',
+  'from-pink-500 to-rose-500',    'from-indigo-500 to-blue-500',
+  'from-teal-500 to-cyan-500',    'from-orange-500 to-red-500',
+];
+function classColor(name='') { return CLASS_COLORS[(name.charCodeAt(0)||0) % CLASS_COLORS.length]; }
+
+/* ══════════════════════════════════════════════════════════ */
 export default function ClassList() {
-  const can = useAuthStore((s) => s.can);
+  const qc      = useQueryClient();
+  const can     = useAuthStore(s => s.can.bind(s));
+  const role    = useAuthStore(s => s.session?.user?.role ?? '');
+  const canCreate = can('classes') || role === 'admin' || role === 'superadmin';
+  const canDelete = can('classes') || role === 'admin' || role === 'superadmin';
+  const [showAdd, setShowAdd] = useState(false);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['classes', 'list'],
-    queryFn:  () => classesApi.list({ limit: 100 }),
-    staleTime: 5 * 60 * 1000,
+    queryFn:  () => classesApi.list({ limit: 200, status: 'active' }),
+    staleTime: 5 * 60_000,
   });
-
   const rows = data?.data ?? [];
 
+  const { mutate: remove } = useMutation({
+    mutationFn: id => classesApi.remove(id),
+    onSuccess:  () => qc.invalidateQueries({ queryKey: ['classes'] }),
+  });
+
+  function confirmRemove(c) {
+    if (!confirm(`Delete class "${c.name}"? This cannot be undone.`)) return;
+    remove(c._id ?? c.id);
+  }
+
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-slate-800">Classes</h2>
-          {!isLoading && <p className="text-sm text-slate-500 mt-0.5">{rows.length} class{rows.length !== 1 ? 'es' : ''}</p>}
+    <div className="min-h-screen bg-slate-50">
+      {/* Header */}
+      <div className="bg-white border-b border-slate-200 px-6 py-5">
+        <div className="max-w-screen-2xl mx-auto flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-semibold text-slate-900 tracking-tight">Classes</h1>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {isLoading ? 'Loading…' : `${rows.length} class${rows.length !== 1 ? 'es' : ''}`}
+            </p>
+          </div>
+          {canCreate && (
+            <button
+              onClick={() => setShowAdd(true)}
+              className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            >
+              <Plus size={15} />
+              Add Class
+            </button>
+          )}
         </div>
-        {can('classes') && <button className="btn-primary">+ Add class</button>}
       </div>
 
-      {isLoading ? <PageSpinner message="Loading classes…" /> :
-       isError   ? <ErrorState message={error?.message} onRetry={refetch} /> :
-       rows.length === 0 ? <EmptyState icon="📚" title="No classes yet" /> : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {rows.map((c) => (
-            <div key={c._id} className="card hover:shadow-card-hover transition-shadow">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="font-semibold text-slate-800">{c.name}</p>
-                  {c.year && <p className="text-xs text-slate-400 mt-0.5">Year {c.year}</p>}
-                </div>
-                <span className="text-2xl select-none">📚</span>
+      <div className="max-w-screen-2xl mx-auto px-6 py-5">
+        {isLoading ? (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {[...Array(8)].map((_, i) => (
+              <div key={i} className="bg-white rounded-xl border border-slate-200 p-5 animate-pulse">
+                <div className="w-10 h-10 rounded-xl bg-slate-100 mb-4" />
+                <div className="h-4 bg-slate-100 rounded w-28 mb-2" />
+                <div className="h-3 bg-slate-100 rounded w-16" />
               </div>
-              <div className="mt-3 flex items-center gap-4 text-sm text-slate-500">
-                <span>👥 {c.studentCount ?? 0} students</span>
-                {c.teacherName && <span>👩‍🏫 {c.teacherName}</span>}
-              </div>
-              <Link
-                to={`/students?classId=${c._id}`}
-                className="mt-3 text-xs text-brand-600 hover:underline font-medium"
-              >
-                View students →
-              </Link>
-            </div>
-          ))}
-        </div>
-       )
-      }
+            ))}
+          </div>
+        ) : isError ? (
+          <div className="flex flex-col items-center justify-center py-24 gap-3">
+            <AlertTriangle size={24} className="text-red-400" />
+            <p className="text-sm text-slate-500">{error?.message ?? 'Failed to load classes'}</p>
+            <button onClick={refetch} className="text-xs font-medium text-slate-700 underline">Retry</button>
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-24 text-slate-400">
+            <BookOpen size={36} className="mb-3 opacity-40" />
+            <p className="text-sm font-medium text-slate-600">No classes yet</p>
+            <p className="text-xs mt-1">Create your first class to get started</p>
+            {canCreate && (
+              <button onClick={() => setShowAdd(true)} className="mt-4 flex items-center gap-1.5 text-sm font-medium text-violet-600 hover:text-violet-800 transition">
+                <Plus size={14} /> Add first class
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {rows.map(c => {
+              const id  = c._id ?? c.id;
+              const col = classColor(c.name);
+              return (
+                <motion.div
+                  key={id}
+                  layout
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-white rounded-xl border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all group relative overflow-hidden"
+                >
+                  {/* Top colour bar */}
+                  <div className={`h-1 bg-gradient-to-r ${col}`} />
+
+                  <div className="p-5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${col} flex items-center justify-center shrink-0`}>
+                        <BookOpen size={16} className="text-white" />
+                      </div>
+                      {canDelete && (
+                        <button
+                          onClick={() => confirmRemove(c)}
+                          className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="mt-3">
+                      <h3 className="font-semibold text-slate-900">{c.name}</h3>
+                      {c.year && <p className="text-xs text-slate-400 mt-0.5">{c.year}</p>}
+                    </div>
+
+                    <div className="mt-4 space-y-1.5">
+                      <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <Users size={12} className="shrink-0" />
+                        <span>{(c.studentCount ?? 0).toLocaleString()} students</span>
+                      </div>
+                      {c.teacherName && (
+                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                          <UserCheck size={12} className="shrink-0" />
+                          <span className="truncate">{c.teacherName}</span>
+                        </div>
+                      )}
+                      {c.room && (
+                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                          <Home size={12} className="shrink-0" />
+                          <span>{c.room}</span>
+                        </div>
+                      )}
+                      {c.capacity && (
+                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                          <Hash size={12} className="shrink-0" />
+                          <span>Capacity: {c.capacity}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-4 pt-3 border-t border-slate-100">
+                      <Link
+                        to={`/students?classId=${id}`}
+                        className="text-xs font-medium text-violet-600 hover:text-violet-800 transition flex items-center gap-1"
+                      >
+                        <Users size={11} />
+                        View students
+                      </Link>
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <AnimatePresence>
+        {showAdd && (
+          <AddClassSlideOver
+            onClose={() => setShowAdd(false)}
+            onCreated={() => { setShowAdd(false); qc.invalidateQueries({ queryKey: ['classes'] }); }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
+}
+
+/* ── Add Class Slide-Over ─────────────────────────────────── */
+const EMPTY_CLASS = { name:'', year:'', room:'', capacity:'', teacherId:'', description:'', status:'active' };
+
+function AddClassSlideOver({ onClose, onCreated }) {
+  const [form, setForm] = useState(EMPTY_CLASS);
+  const [errors, setErrors] = useState({});
+
+  // Load teachers for assignment dropdown
+  const { data: teachersData } = useQuery({
+    queryKey: ['teachers', { page: 1, search: '' }],
+    queryFn:  () => teachersApi.list({ limit: 200, status: 'active' }),
+    staleTime: 5 * 60_000,
+  });
+  const teacherList = teachersData?.data ?? [];
+
+  const mutation = useMutation({
+    mutationFn: data => classesApi.create({ ...data, capacity: data.capacity ? Number(data.capacity) : undefined }),
+    onSuccess:  onCreated,
+    onError:    err => setErrors({ _server: err?.message ?? 'Failed to create class' }),
+  });
+
+  function set(field, val) {
+    setForm(f => ({ ...f, [field]: val }));
+    setErrors(e => { const n={...e}; delete n[field]; return n; });
+  }
+
+  function validate() {
+    const e = {};
+    if (!form.name.trim()) e.name = 'Class name is required';
+    return e;
+  }
+
+  function submit(ev) {
+    ev.preventDefault();
+    const e = validate();
+    if (Object.keys(e).length) { setErrors(e); return; }
+    mutation.mutate(form);
+  }
+
+  return (
+    <>
+      <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
+        className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-40" onClick={onClose} />
+      <motion.div
+        initial={{ x:'100%' }} animate={{ x:0 }} exit={{ x:'100%' }}
+        transition={{ type:'spring', damping:30, stiffness:300 }}
+        className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-50 flex flex-col"
+      >
+        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
+          <div>
+            <h2 className="text-base font-semibold text-slate-900">New Class</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Add a class or form group</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition">
+            <X size={18} />
+          </button>
+        </div>
+
+        <form onSubmit={submit} className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+          {errors._server && (
+            <div className="flex items-center gap-2 bg-red-50 text-red-700 text-sm px-3 py-2.5 rounded-lg border border-red-200">
+              <AlertTriangle size={15} className="shrink-0" />{errors._server}
+            </div>
+          )}
+
+          <FField2 label="Class Name *" error={errors.name}>
+            <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Year 7A, Grade 3, Form 4" className={iCls2(errors.name)} />
+          </FField2>
+          <div className="grid grid-cols-2 gap-4">
+            <FField2 label="Year / Level">
+              <input value={form.year} onChange={e => set('year', e.target.value)} placeholder="e.g. Year 7" className={iCls2()} />
+            </FField2>
+            <FField2 label="Room">
+              <input value={form.room} onChange={e => set('room', e.target.value)} placeholder="e.g. Room 12" className={iCls2()} />
+            </FField2>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <FField2 label="Capacity">
+              <input type="number" min="1" max="200" value={form.capacity} onChange={e => set('capacity', e.target.value)} placeholder="Max students" className={iCls2()} />
+            </FField2>
+            <FField2 label="Status">
+              <select value={form.status} onChange={e => set('status', e.target.value)} className={iCls2()}>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </FField2>
+          </div>
+          <FField2 label="Form Tutor / Class Teacher">
+            <select value={form.teacherId} onChange={e => set('teacherId', e.target.value)} className={iCls2()}>
+              <option value="">No teacher assigned</option>
+              {teacherList.map(t => (
+                <option key={t._id ?? t.id} value={t._id ?? t.id}>
+                  {t.title ? `${t.title} ` : ''}{t.firstName} {t.lastName}
+                </option>
+              ))}
+            </select>
+          </FField2>
+          <FField2 label="Description">
+            <textarea value={form.description} onChange={e => set('description', e.target.value)} rows={3} placeholder="Optional notes about this class…" className={`${iCls2()} resize-none`} />
+          </FField2>
+        </form>
+
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 transition-colors">Cancel</button>
+          <button
+            onClick={submit}
+            disabled={mutation.isPending}
+            className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors"
+          >
+            {mutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+            {mutation.isPending ? 'Creating…' : 'Create Class'}
+          </button>
+        </div>
+      </motion.div>
+    </>
+  );
+}
+
+function FField2({ label, error, children }) {
+  return (
+    <div className="space-y-1.5">
+      <label className="block text-xs font-medium text-slate-700">{label}</label>
+      {children}
+      {error && <p className="text-[11px] text-red-500">{error}</p>}
+    </div>
+  );
+}
+function iCls2(error) {
+  return `w-full text-sm px-3 py-2 rounded-lg border ${error ? 'border-red-300' : 'border-slate-200 focus:border-slate-400'} bg-white focus:outline-none focus:ring-2 ${error ? 'focus:ring-red-500/20' : 'focus:ring-slate-900/10'} text-slate-800 placeholder-slate-400 transition`;
 }
