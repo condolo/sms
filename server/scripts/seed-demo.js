@@ -18,6 +18,7 @@ const bcrypt   = require('bcryptjs');
 
 const DEMO_SLUG     = 'demo';
 const DEMO_PASSWORD = 'Demo2025!';
+const { seedDemoData } = require('./seed-demo-data');
 
 /* ── Mongoose model factory (same pattern as the rest of the app) ── */
 function _model(col) {
@@ -56,6 +57,7 @@ async function seedDemo() {
     const trialEnds = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(); // 1 yr
     const schoolId  = 'sch_demo';
 
+    // Always force enterprise plan — $set ensures upgrade even if school pre-existed with lower plan
     await School.updateOne({ slug: DEMO_SLUG }, {
       $set: {
         id: schoolId, slug: DEMO_SLUG,
@@ -71,6 +73,12 @@ async function seedDemo() {
       },
       $setOnInsert: { createdAt: now },
     }, { upsert: true });
+
+    // Invalidate plan cache so the enterprise plan takes effect immediately
+    try {
+      const { invalidatePlanCache } = require('../middleware/plan');
+      invalidatePlanCache(schoolId);
+    } catch { /* plan middleware may not be loaded yet — harmless */ }
 
     /* ── 2. Hash the shared demo password once ── */
     const hashed = await bcrypt.hash(DEMO_PASSWORD, 10);
@@ -139,7 +147,10 @@ async function seedDemo() {
       }, { upsert: true })
     ));
 
-    console.log('[seed-demo] Demo school ready — demo.msingi.io');
+    console.log('[seed-demo] Demo school provisioned — plan: enterprise');
+
+    // Seed realistic demo data (students, teachers, behaviour, finance, timetable, admissions)
+    await seedDemoData();
 
   } catch (err) {
     /* Never crash the server — demo is optional infrastructure */

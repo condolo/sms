@@ -1,0 +1,392 @@
+/* ============================================================
+   Msingi — Demo School Full Data Seed
+   Populates realistic data ONLY into the demo school (sch_demo).
+   Every other school is completely untouched.
+
+   DATA SCOPE (insert-only — never overwrites existing records):
+   ─────────────────────────────────────────────────────────────
+   • 7 classes  (3 Primary: Std 4A-6A, 4 Secondary: Form 1A-4A)
+   • 14 subjects
+   • 9 additional teachers (+ the existing u_demo_teacher)
+   • 20 students distributed across all classes
+   • 25 behaviour incidents (merits + demerits)
+   • 20 fee invoices — Term 2 2026
+   • 14 payments  (mix: fully paid, partial, outstanding)
+   • 60 timetable slots (Form 1A + Std 4A, full week)
+   • 8 admissions at various pipeline stages
+   ============================================================ */
+'use strict';
+
+const mongoose = require('mongoose');
+const bcrypt   = require('bcryptjs');
+
+const SCHOOL_ID = 'sch_demo';
+const YEAR      = new Date().getFullYear();
+const AY_ID     = `ay_${SCHOOL_ID}_${YEAR}`;
+const T2_ID     = 't2_demo';
+const SEC_PRI   = `sec_primary_${SCHOOL_ID}`;
+const SEC_SEC   = `sec_secondary_${SCHOOL_ID}`;
+const ADMIN_ID  = 'u_demo_admin';
+
+function _model(col) {
+  const name = col.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
+                  .replace(/^./, c => c.toUpperCase()) + 'Doc';
+  if (mongoose.models[name]) return mongoose.models[name];
+  const schema = new mongoose.Schema({}, { strict: false, timestamps: true });
+  return mongoose.model(name, schema, col);
+}
+
+function upsert(Model, id, data) {
+  // Insert-only: creates if not exists, skips if already there.
+  return Model.updateOne(
+    { id },
+    { $setOnInsert: { id, schoolId: SCHOOL_ID, ...data } },
+    { upsert: true }
+  );
+}
+
+/* ── Shared hashed password for demo teachers ─────────────────── */
+let _demoHash = null;
+async function _hash() {
+  if (!_demoHash) _demoHash = await bcrypt.hash('Demo2025!', 10);
+  return _demoHash;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   STATIC REFERENCE DATA
+════════════════════════════════════════════════════════════════ */
+
+/* ── Classes ── */
+const CLASSES = [
+  { id:'cls_demo_4a',  name:'Standard 4A', year:'Standard 4', sectionId:SEC_PRI, sectionKey:'primary',   order:1 },
+  { id:'cls_demo_5a',  name:'Standard 5A', year:'Standard 5', sectionId:SEC_PRI, sectionKey:'primary',   order:2 },
+  { id:'cls_demo_6a',  name:'Standard 6A', year:'Standard 6', sectionId:SEC_PRI, sectionKey:'primary',   order:3 },
+  { id:'cls_demo_f1a', name:'Form 1A',     year:'Form 1',     sectionId:SEC_SEC, sectionKey:'secondary', order:4 },
+  { id:'cls_demo_f2a', name:'Form 2A',     year:'Form 2',     sectionId:SEC_SEC, sectionKey:'secondary', order:5 },
+  { id:'cls_demo_f3a', name:'Form 3A',     year:'Form 3',     sectionId:SEC_SEC, sectionKey:'secondary', order:6 },
+  { id:'cls_demo_f4a', name:'Form 4A',     year:'Form 4',     sectionId:SEC_SEC, sectionKey:'secondary', order:7 },
+];
+
+/* ── Subjects ── */
+const SUBJECTS = [
+  { id:'subj_demo_math', name:'Mathematics',          code:'MATH', section:'all'       },
+  { id:'subj_demo_eng',  name:'English Language',     code:'ENG',  section:'all'       },
+  { id:'subj_demo_kisw', name:'Kiswahili',            code:'KSW',  section:'all'       },
+  { id:'subj_demo_sci',  name:'Science',              code:'SCI',  section:'primary'   },
+  { id:'subj_demo_ss',   name:'Social Studies',       code:'SS',   section:'primary'   },
+  { id:'subj_demo_cre',  name:'CRE',                  code:'CRE',  section:'all'       },
+  { id:'subj_demo_phy',  name:'Physics',              code:'PHY',  section:'secondary' },
+  { id:'subj_demo_chem', name:'Chemistry',            code:'CHEM', section:'secondary' },
+  { id:'subj_demo_bio',  name:'Biology',              code:'BIO',  section:'secondary' },
+  { id:'subj_demo_hist', name:'History & Government', code:'HIST', section:'secondary' },
+  { id:'subj_demo_geo',  name:'Geography',            code:'GEO',  section:'secondary' },
+  { id:'subj_demo_bs',   name:'Business Studies',     code:'BS',   section:'secondary' },
+  { id:'subj_demo_pe',   name:'PE & Sports',          code:'PE',   section:'all'       },
+  { id:'subj_demo_ict',  name:'ICT',                  code:'ICT',  section:'all'       },
+];
+
+/* ── Additional teachers (9 — u_demo_teacher already exists) ── */
+const EXTRA_TEACHERS = [
+  { id:'u_demo_t2',  name:'Mr. Peter Kamau',      email:'pkamau@demo.msingi.io',    subjects:['subj_demo_math','subj_demo_sci'] },
+  { id:'u_demo_t3',  name:'Ms. Agnes Otieno',     email:'aotieno@demo.msingi.io',   subjects:['subj_demo_eng','subj_demo_cre']  },
+  { id:'u_demo_t4',  name:'Mr. Collins Waweru',   email:'cwaweru@demo.msingi.io',   subjects:['subj_demo_kisw','subj_demo_ss']  },
+  { id:'u_demo_t5',  name:'Ms. Judith Njoroge',   email:'jnjoroge@demo.msingi.io',  subjects:['subj_demo_phy','subj_demo_chem'] },
+  { id:'u_demo_t6',  name:'Mr. Francis Ochieng',  email:'fochieng@demo.msingi.io',  subjects:['subj_demo_bio','subj_demo_sci']  },
+  { id:'u_demo_t7',  name:'Ms. Dorothy Chebet',   email:'dchebet@demo.msingi.io',   subjects:['subj_demo_hist','subj_demo_geo'] },
+  { id:'u_demo_t8',  name:'Mr. Samuel Maina',     email:'smaina@demo.msingi.io',    subjects:['subj_demo_bs','subj_demo_cre']   },
+  { id:'u_demo_t9',  name:'Ms. Lilian Wairimu',   email:'lwairimu@demo.msingi.io',  subjects:['subj_demo_ict','subj_demo_math'] },
+  { id:'u_demo_t10', name:'Mr. Joseph Kipchoge',  email:'jkipchoge@demo.msingi.io', subjects:['subj_demo_pe','subj_demo_ss']    },
+];
+
+/* ── Students (20) ── */
+const STUDENTS = [
+  /* Form 1A */
+  { id:'std_demo_1',  firstName:'Amara',     lastName:'Osei',       gender:'female', classId:'cls_demo_f1a', sectionId:SEC_SEC, dob:'2012-03-14', parent:'Mrs. Abena Osei',    pEmail:'abena.osei@gmail.com',   pPhone:'+254 712 001 001', adm:'ADM-2026-00001', status:'active',   fees:35000, paid:35000 },
+  { id:'std_demo_2',  firstName:'James',     lastName:'Mwangi',     gender:'male',   classId:'cls_demo_f1a', sectionId:SEC_SEC, dob:'2012-07-22', parent:'Mr. John Mwangi',    pEmail:'john.mwangi@gmail.com',  pPhone:'+254 722 001 002', adm:'ADM-2026-00002', status:'active',   fees:35000, paid:17500 },
+  { id:'std_demo_3',  firstName:'Fatima',    lastName:'Al-Hassan',  gender:'female', classId:'cls_demo_f1a', sectionId:SEC_SEC, dob:'2012-11-05', parent:'Mr. Hassan Omar',    pEmail:'hassan.omar@gmail.com',  pPhone:'+254 733 001 003', adm:'ADM-2026-00003', status:'active',   fees:35000, paid:0     },
+  /* Form 2A */
+  { id:'std_demo_4',  firstName:'David',     lastName:'Mutai',      gender:'male',   classId:'cls_demo_f2a', sectionId:SEC_SEC, dob:'2011-05-18', parent:'Mr. Kipchoge Mutai', pEmail:'kipchoge.mutai@yahoo.com',pPhone:'+254 722 002 001', adm:'ADM-2025-00012', status:'active',   fees:35000, paid:35000 },
+  { id:'std_demo_5',  firstName:'Grace',     lastName:'Waweru',     gender:'female', classId:'cls_demo_f2a', sectionId:SEC_SEC, dob:'2011-09-30', parent:'Mr. Peter Waweru',  pEmail:'peter.waweru@gmail.com', pPhone:'+254 711 002 002', adm:'ADM-2025-00015', status:'active',   fees:35000, paid:35000 },
+  { id:'std_demo_6',  firstName:'Samuel',    lastName:'Karimi',     gender:'male',   classId:'cls_demo_f2a', sectionId:SEC_SEC, dob:'2011-02-14', parent:'Ms. Jane Karimi',   pEmail:'jane.karimi@gmail.com',  pPhone:'+254 755 002 003', adm:'ADM-2025-00018', status:'active',   fees:35000, paid:20000 },
+  /* Form 3A */
+  { id:'std_demo_7',  firstName:'Naledi',    lastName:'Dlamini',    gender:'female', classId:'cls_demo_f3a', sectionId:SEC_SEC, dob:'2010-06-12', parent:'Mr. Bongani Dlamini',pEmail:'bongani.dlamini@gmail.com',pPhone:'+254 700 003 001', adm:'ADM-2024-00007', status:'active',   fees:38000, paid:38000 },
+  { id:'std_demo_8',  firstName:'Kevin',     lastName:'Kamau',      gender:'male',   classId:'cls_demo_f3a', sectionId:SEC_SEC, dob:'2010-10-04', parent:'Ms. Lucy Kamau',    pEmail:'lucy.kamau@gmail.com',   pPhone:'+254 721 003 002', adm:'ADM-2024-00009', status:'active',   fees:38000, paid:38000 },
+  { id:'std_demo_9',  firstName:'Aisha',     lastName:'Mombasa',    gender:'female', classId:'cls_demo_f3a', sectionId:SEC_SEC, dob:'2010-01-27', parent:'Mr. Ali Mombasa',   pEmail:'ali.mombasa@gmail.com',  pPhone:'+254 733 003 003', adm:'ADM-2024-00011', status:'active',   fees:38000, paid:19000 },
+  /* Form 4A */
+  { id:'std_demo_10', firstName:'Brian',     lastName:'Onyango',    gender:'male',   classId:'cls_demo_f4a', sectionId:SEC_SEC, dob:'2009-08-16', parent:'Mr. Otieno Onyango',pEmail:'otieno.onyango@yahoo.com', pPhone:'+254 722 004 001', adm:'ADM-2023-00003', status:'active',   fees:40000, paid:40000 },
+  { id:'std_demo_11', firstName:'Miriam',    lastName:'Gitau',      gender:'female', classId:'cls_demo_f4a', sectionId:SEC_SEC, dob:'2009-04-09', parent:'Dr. Paul Gitau',    pEmail:'paul.gitau@gmail.com',   pPhone:'+254 711 004 002', adm:'ADM-2023-00005', status:'active',   fees:40000, paid:40000 },
+  /* Standard 4A */
+  { id:'std_demo_12', firstName:'Josphat',   lastName:'Kiplagat',   gender:'male',   classId:'cls_demo_4a',  sectionId:SEC_PRI, dob:'2015-03-22', parent:'Mr. Kibet Kiplagat',pEmail:'kibet.kiplagat@gmail.com', pPhone:'+254 722 005 001', adm:'ADM-2026-00010', status:'active',   fees:22000, paid:22000 },
+  { id:'std_demo_13', firstName:'Faith',     lastName:'Mwangi',     gender:'female', classId:'cls_demo_4a',  sectionId:SEC_PRI, dob:'2015-07-11', parent:'Mr. George Mwangi', pEmail:'george.mwangi@yahoo.com', pPhone:'+254 733 005 002', adm:'ADM-2026-00011', status:'active',   fees:22000, paid:11000 },
+  { id:'std_demo_14', firstName:'Solomon',   lastName:'Auma',       gender:'male',   classId:'cls_demo_4a',  sectionId:SEC_PRI, dob:'2015-11-08', parent:'Mrs. Beatrice Auma',pEmail:'beatrice.auma@gmail.com', pPhone:'+254 700 005 003', adm:'ADM-2026-00012', status:'active',   fees:22000, paid:0     },
+  /* Standard 5A */
+  { id:'std_demo_15', firstName:'Patience',  lastName:'Adhiambo',   gender:'female', classId:'cls_demo_5a',  sectionId:SEC_PRI, dob:'2014-05-19', parent:'Mr. Ouma Adhiambo', pEmail:'ouma.adhiambo@gmail.com', pPhone:'+254 711 006 001', adm:'ADM-2025-00030', status:'active',   fees:22000, paid:22000 },
+  { id:'std_demo_16', firstName:'Michael',   lastName:'Njenga',     gender:'male',   classId:'cls_demo_5a',  sectionId:SEC_PRI, dob:'2014-02-03', parent:'Mr. Charles Njenga',pEmail:'charles.njenga@gmail.com', pPhone:'+254 722 006 002', adm:'ADM-2025-00032', status:'active',   fees:22000, paid:22000 },
+  { id:'std_demo_17', firstName:'Rose',      lastName:'Kamau',      gender:'female', classId:'cls_demo_5a',  sectionId:SEC_PRI, dob:'2014-08-25', parent:'Mr. Anthony Kamau', pEmail:'anthony.kamau@yahoo.com', pPhone:'+254 733 006 003', adm:'ADM-2025-00035', status:'active',   fees:22000, paid:15000 },
+  /* Standard 6A */
+  { id:'std_demo_18', firstName:'Joseph',    lastName:'Omondi',     gender:'male',   classId:'cls_demo_6a',  sectionId:SEC_PRI, dob:'2013-01-14', parent:'Mrs. Mary Omondi',  pEmail:'mary.omondi@gmail.com',   pPhone:'+254 722 007 001', adm:'ADM-2024-00022', status:'active',   fees:24000, paid:24000 },
+  { id:'std_demo_19', firstName:'Christine', lastName:'Chebet',     gender:'female', classId:'cls_demo_6a',  sectionId:SEC_PRI, dob:'2013-05-30', parent:'Mr. Ruto Chebet',   pEmail:'ruto.chebet@gmail.com',   pPhone:'+254 711 007 002', adm:'ADM-2024-00025', status:'active',   fees:24000, paid:24000 },
+  { id:'std_demo_20', firstName:'Emmanuel',  lastName:'Wekesa',     gender:'male',   classId:'cls_demo_6a',  sectionId:SEC_PRI, dob:'2013-09-17', parent:'Mr. Daniel Wekesa', pEmail:'daniel.wekesa@gmail.com', pPhone:'+254 700 007 003', adm:'ADM-2024-00028', status:'active',   fees:24000, paid:12000 },
+];
+
+/* ── Behaviour incidents ── */
+const now = new Date().toISOString();
+const d = (daysAgo) => new Date(Date.now() - daysAgo * 86400000).toISOString();
+
+const BEHAVIOUR = [
+  { id:'beh_demo_1',  studentId:'std_demo_1',  type:'merit',   severity:null,     title:'Outstanding Academic Performance', description:'Achieved top score in Mathematics end-of-term test — 98%.', points:10, date:d(5) },
+  { id:'beh_demo_2',  studentId:'std_demo_2',  type:'demerit', severity:'low',    title:'Late Arrival',                     description:'Arrived 20 minutes late without a valid reason.',           points:-3, date:d(8) },
+  { id:'beh_demo_3',  studentId:'std_demo_3',  type:'demerit', severity:'medium', title:'Missing Homework (3 times)',        description:'Failed to submit homework assignments three consecutive weeks.', points:-5, date:d(10) },
+  { id:'beh_demo_4',  studentId:'std_demo_4',  type:'merit',   severity:null,     title:'Sports Achievement',               description:'Represented school in regional athletics and won silver medal.', points:15, date:d(3) },
+  { id:'beh_demo_5',  studentId:'std_demo_5',  type:'merit',   severity:null,     title:'Community Service',                description:'Volunteered to lead school clean-up drive during Environmental Day.', points:8, date:d(12) },
+  { id:'beh_demo_6',  studentId:'std_demo_6',  type:'demerit', severity:'medium', title:'Disruptive Behaviour in Class',    description:'Repeatedly disrupted Mathematics lesson — warned twice by teacher.', points:-5, date:d(6) },
+  { id:'beh_demo_7',  studentId:'std_demo_7',  type:'merit',   severity:null,     title:'Subject Prize — Chemistry',        description:'Highest scoring student in Chemistry mid-term examination.',  points:12, date:d(14) },
+  { id:'beh_demo_8',  studentId:'std_demo_8',  type:'demerit', severity:'low',    title:'Uniform Violation',                description:'Found out of school uniform on two occasions this term.',    points:-2, date:d(9) },
+  { id:'beh_demo_9',  studentId:'std_demo_9',  type:'demerit', severity:'high',   title:'Bullying Incident',               description:'Involved in intimidation of a younger student — parent notified.', points:-15, date:d(20) },
+  { id:'beh_demo_10', studentId:'std_demo_9',  type:'neutral', severity:null,     title:'Counselling Session Completed',   description:'Completed mandatory counselling following earlier bullying incident.', points:0, date:d(15) },
+  { id:'beh_demo_11', studentId:'std_demo_10', type:'merit',   severity:null,     title:'Prefect — Head Boy',              description:'Elected Head Boy by student body and appointed by principal.',points:20, date:d(45) },
+  { id:'beh_demo_12', studentId:'std_demo_11', type:'merit',   severity:null,     title:'Debate Team Captain',             description:'Led school debate team to win inter-school championships.',   points:15, date:d(30) },
+  { id:'beh_demo_13', studentId:'std_demo_12', type:'merit',   severity:null,     title:'Perfect Attendance — Term 1',     description:'Achieved full attendance for the entire Term 1 2026.',       points:5,  date:d(21) },
+  { id:'beh_demo_14', studentId:'std_demo_13', type:'demerit', severity:'low',    title:'Lost Library Book',               description:'Failed to return library book for 4 weeks — replacement required.', points:-3, date:d(7) },
+  { id:'beh_demo_15', studentId:'std_demo_14', type:'demerit', severity:'medium', title:'Fighting',                       description:'Involved in physical altercation during break — suspended 1 day.', points:-10, date:d(18) },
+  { id:'beh_demo_16', studentId:'std_demo_15', type:'merit',   severity:null,     title:'Art & Design Prize',             description:'First place in Primary Art Competition — county level.',      points:10, date:d(25) },
+  { id:'beh_demo_17', studentId:'std_demo_16', type:'demerit', severity:'low',    title:'Incomplete Classwork',           description:'Left Science assignment incomplete twice this term.',         points:-3, date:d(11) },
+  { id:'beh_demo_18', studentId:'std_demo_17', type:'merit',   severity:null,     title:'Academic Improvement',           description:'Improved overall grade from C to B+ over the last term.',    points:8,  date:d(4) },
+  { id:'beh_demo_19', studentId:'std_demo_18', type:'merit',   severity:null,     title:'Eco Club President',             description:'Founded and leads the school Eco Club — 45 members.',        points:12, date:d(60) },
+  { id:'beh_demo_20', studentId:'std_demo_19', type:'demerit', severity:'low',    title:'Talking During Assembly',        description:'Reprimanded for talking during morning assembly.',            points:-2, date:d(13) },
+  { id:'beh_demo_21', studentId:'std_demo_20', type:'merit',   severity:null,     title:'Helped Classmate with Revision', description:'Organised peer tutoring sessions for Std 6 students.',       points:6,  date:d(16) },
+  { id:'beh_demo_22', studentId:'std_demo_2',  type:'demerit', severity:'medium', title:'Phone in Class',                 description:'Caught using phone during English lesson — phone confiscated.', points:-5, date:d(22) },
+  { id:'beh_demo_23', studentId:'std_demo_6',  type:'merit',   severity:null,     title:'Science Fair Project',           description:'Won 2nd place at school science fair — built water filtration model.', points:10, date:d(35) },
+  { id:'beh_demo_24', studentId:'std_demo_1',  type:'merit',   severity:null,     title:'Peer Mentoring',                 description:'Actively mentoring two Form 1 students in Mathematics.',      points:8,  date:d(28) },
+  { id:'beh_demo_25', studentId:'std_demo_10', type:'merit',   severity:null,     title:'KCSE Mock Excellence',           description:'Scored 80+ points in KCSE mock examination — top of form.',  points:25, date:d(40) },
+];
+
+/* ── Timetable — Form 1A full week ── */
+const PERIODS_SEC = ['1','2','3','Break','4','5','6'];
+const PERIODS_PRI = ['1','2','Break','3','4','5'];
+
+const F1A_TIMETABLE = [
+  // Monday
+  { day:'monday',    period:'1', periodNumber:1, subjectId:'subj_demo_math', teacherId:'u_demo_t2',  room:'F1A' },
+  { day:'monday',    period:'2', periodNumber:2, subjectId:'subj_demo_eng',  teacherId:'u_demo_t3',  room:'F1A' },
+  { day:'monday',    period:'3', periodNumber:3, subjectId:'subj_demo_kisw', teacherId:'u_demo_t4',  room:'F1A' },
+  { day:'monday',    period:'4', periodNumber:4, subjectId:'subj_demo_bio',  teacherId:'u_demo_t6',  room:'F1A' },
+  { day:'monday',    period:'5', periodNumber:5, subjectId:'subj_demo_hist', teacherId:'u_demo_t7',  room:'F1A' },
+  { day:'monday',    period:'6', periodNumber:6, subjectId:'subj_demo_pe',   teacherId:'u_demo_t10', room:'Field' },
+  // Tuesday
+  { day:'tuesday',   period:'1', periodNumber:1, subjectId:'subj_demo_phy',  teacherId:'u_demo_t5',  room:'Lab 1' },
+  { day:'tuesday',   period:'2', periodNumber:2, subjectId:'subj_demo_math', teacherId:'u_demo_t2',  room:'F1A' },
+  { day:'tuesday',   period:'3', periodNumber:3, subjectId:'subj_demo_eng',  teacherId:'u_demo_t3',  room:'F1A' },
+  { day:'tuesday',   period:'4', periodNumber:4, subjectId:'subj_demo_chem', teacherId:'u_demo_t5',  room:'Lab 1' },
+  { day:'tuesday',   period:'5', periodNumber:5, subjectId:'subj_demo_geo',  teacherId:'u_demo_t7',  room:'F1A' },
+  { day:'tuesday',   period:'6', periodNumber:6, subjectId:'subj_demo_ict',  teacherId:'u_demo_t9',  room:'Computer Lab' },
+  // Wednesday
+  { day:'wednesday', period:'1', periodNumber:1, subjectId:'subj_demo_math', teacherId:'u_demo_t2',  room:'F1A' },
+  { day:'wednesday', period:'2', periodNumber:2, subjectId:'subj_demo_kisw', teacherId:'u_demo_t4',  room:'F1A' },
+  { day:'wednesday', period:'3', periodNumber:3, subjectId:'subj_demo_bio',  teacherId:'u_demo_t6',  room:'Lab 2' },
+  { day:'wednesday', period:'4', periodNumber:4, subjectId:'subj_demo_eng',  teacherId:'u_demo_t3',  room:'F1A' },
+  { day:'wednesday', period:'5', periodNumber:5, subjectId:'subj_demo_bs',   teacherId:'u_demo_t8',  room:'F1A' },
+  { day:'wednesday', period:'6', periodNumber:6, subjectId:'subj_demo_cre',  teacherId:'u_demo_t3',  room:'F1A' },
+  // Thursday
+  { day:'thursday',  period:'1', periodNumber:1, subjectId:'subj_demo_phy',  teacherId:'u_demo_t5',  room:'Lab 1' },
+  { day:'thursday',  period:'2', periodNumber:2, subjectId:'subj_demo_math', teacherId:'u_demo_t2',  room:'F1A' },
+  { day:'thursday',  period:'3', periodNumber:3, subjectId:'subj_demo_hist', teacherId:'u_demo_t7',  room:'F1A' },
+  { day:'thursday',  period:'4', periodNumber:4, subjectId:'subj_demo_kisw', teacherId:'u_demo_t4',  room:'F1A' },
+  { day:'thursday',  period:'5', periodNumber:5, subjectId:'subj_demo_ict',  teacherId:'u_demo_t9',  room:'Computer Lab' },
+  { day:'thursday',  period:'6', periodNumber:6, subjectId:'subj_demo_chem', teacherId:'u_demo_t5',  room:'Lab 1' },
+  // Friday
+  { day:'friday',    period:'1', periodNumber:1, subjectId:'subj_demo_eng',  teacherId:'u_demo_t3',  room:'F1A' },
+  { day:'friday',    period:'2', periodNumber:2, subjectId:'subj_demo_math', teacherId:'u_demo_t2',  room:'F1A' },
+  { day:'friday',    period:'3', periodNumber:3, subjectId:'subj_demo_geo',  teacherId:'u_demo_t7',  room:'F1A' },
+  { day:'friday',    period:'4', periodNumber:4, subjectId:'subj_demo_bio',  teacherId:'u_demo_t6',  room:'Lab 2' },
+  { day:'friday',    period:'5', periodNumber:5, subjectId:'subj_demo_bs',   teacherId:'u_demo_t8',  room:'F1A' },
+  { day:'friday',    period:'6', periodNumber:6, subjectId:'subj_demo_pe',   teacherId:'u_demo_t10', room:'Field' },
+];
+
+const STD4A_TIMETABLE = [
+  { day:'monday',    period:'1', periodNumber:1, subjectId:'subj_demo_math', teacherId:'u_demo_t2',  room:'P4A' },
+  { day:'monday',    period:'2', periodNumber:2, subjectId:'subj_demo_eng',  teacherId:'u_demo_t3',  room:'P4A' },
+  { day:'monday',    period:'3', periodNumber:3, subjectId:'subj_demo_sci',  teacherId:'u_demo_t6',  room:'P4A' },
+  { day:'monday',    period:'4', periodNumber:4, subjectId:'subj_demo_kisw', teacherId:'u_demo_t4',  room:'P4A' },
+  { day:'monday',    period:'5', periodNumber:5, subjectId:'subj_demo_pe',   teacherId:'u_demo_t10', room:'Field' },
+  { day:'tuesday',   period:'1', periodNumber:1, subjectId:'subj_demo_eng',  teacherId:'u_demo_t3',  room:'P4A' },
+  { day:'tuesday',   period:'2', periodNumber:2, subjectId:'subj_demo_math', teacherId:'u_demo_t2',  room:'P4A' },
+  { day:'tuesday',   period:'3', periodNumber:3, subjectId:'subj_demo_ss',   teacherId:'u_demo_t10', room:'P4A' },
+  { day:'tuesday',   period:'4', periodNumber:4, subjectId:'subj_demo_sci',  teacherId:'u_demo_t6',  room:'P4A' },
+  { day:'tuesday',   period:'5', periodNumber:5, subjectId:'subj_demo_ict',  teacherId:'u_demo_t9',  room:'Computer Lab' },
+  { day:'wednesday', period:'1', periodNumber:1, subjectId:'subj_demo_math', teacherId:'u_demo_t2',  room:'P4A' },
+  { day:'wednesday', period:'2', periodNumber:2, subjectId:'subj_demo_kisw', teacherId:'u_demo_t4',  room:'P4A' },
+  { day:'wednesday', period:'3', periodNumber:3, subjectId:'subj_demo_eng',  teacherId:'u_demo_t3',  room:'P4A' },
+  { day:'wednesday', period:'4', periodNumber:4, subjectId:'subj_demo_cre',  teacherId:'u_demo_t3',  room:'P4A' },
+  { day:'wednesday', period:'5', periodNumber:5, subjectId:'subj_demo_ss',   teacherId:'u_demo_t10', room:'P4A' },
+  { day:'thursday',  period:'1', periodNumber:1, subjectId:'subj_demo_sci',  teacherId:'u_demo_t6',  room:'P4A' },
+  { day:'thursday',  period:'2', periodNumber:2, subjectId:'subj_demo_math', teacherId:'u_demo_t2',  room:'P4A' },
+  { day:'thursday',  period:'3', periodNumber:3, subjectId:'subj_demo_eng',  teacherId:'u_demo_t3',  room:'P4A' },
+  { day:'thursday',  period:'4', periodNumber:4, subjectId:'subj_demo_kisw', teacherId:'u_demo_t4',  room:'P4A' },
+  { day:'thursday',  period:'5', periodNumber:5, subjectId:'subj_demo_pe',   teacherId:'u_demo_t10', room:'Field' },
+  { day:'friday',    period:'1', periodNumber:1, subjectId:'subj_demo_eng',  teacherId:'u_demo_t3',  room:'P4A' },
+  { day:'friday',    period:'2', periodNumber:2, subjectId:'subj_demo_math', teacherId:'u_demo_t2',  room:'P4A' },
+  { day:'friday',    period:'3', periodNumber:3, subjectId:'subj_demo_ss',   teacherId:'u_demo_t10', room:'P4A' },
+  { day:'friday',    period:'4', periodNumber:4, subjectId:'subj_demo_sci',  teacherId:'u_demo_t6',  room:'P4A' },
+  { day:'friday',    period:'5', periodNumber:5, subjectId:'subj_demo_cre',  teacherId:'u_demo_t3',  room:'P4A' },
+];
+
+/* ── Admissions pipeline (8 applicants in various stages) ── */
+const ADMISSIONS = [
+  { id:'adm_demo_1', firstName:'Lena',    lastName:'Korir',    stage:'application', applyingForClass:'Form 1A', ref:'APP-2026-001', notes:'Applied online via website.',           stageDate:d(14), phone:'+254 712 100 001', email:'lena.korir@gmail.com',    priority:false },
+  { id:'adm_demo_2', firstName:'Mark',    lastName:'Simiyu',   stage:'application', applyingForClass:'Form 1A', ref:'APP-2026-002', notes:'Parent visited school and was given form.', stageDate:d(10), phone:'+254 733 100 002', email:'mark.simiyu@yahoo.com',   priority:false },
+  { id:'adm_demo_3', firstName:'Stacy',   lastName:'Nkirote',  stage:'assessment',  applyingForClass:'Form 2A', ref:'APP-2026-003', notes:'Assessment scheduled for next Monday.',   stageDate:d(7),  phone:'+254 722 100 003', email:'stacy.nkirote@gmail.com', priority:true  },
+  { id:'adm_demo_4', firstName:'Patrick', lastName:'Otieno',   stage:'offer',       applyingForClass:'Form 3A', ref:'APP-2026-004', notes:'Offer letter sent. Awaiting acceptance.',stageDate:d(3),  phone:'+254 711 100 004', email:'patrick.otieno@gmail.com',priority:true  },
+  { id:'adm_demo_5', firstName:'Wanjiru', lastName:'Njambi',   stage:'offer',       applyingForClass:'Standard 4A', ref:'APP-2026-005', notes:'Transfer from Nairobi Primary. Offer sent.', stageDate:d(5), phone:'+254 700 100 005', email:'wanjiru.njambi@gmail.com',priority:false },
+  { id:'adm_demo_6', firstName:'Abdi',    lastName:'Warsame',  stage:'enrolled',    applyingForClass:'Form 1A', ref:'APP-2026-006', notes:'Fully enrolled. Student record created.', stageDate:d(21), phone:'+254 733 100 006', email:'abdi.warsame@gmail.com',  priority:false },
+  { id:'adm_demo_7', firstName:'Cynthia', lastName:'Momanyi',  stage:'enrolled',    applyingForClass:'Standard 5A', ref:'APP-2026-007', notes:'Enrolled mid-term. All docs received.', stageDate:d(30), phone:'+254 722 100 007', email:'cynthia.momanyi@gmail.com',priority:false },
+  { id:'adm_demo_8', firstName:'Daniel',  lastName:'Barasa',   stage:'enquiry',     applyingForClass:'Form 4A', ref:'APP-2026-008', notes:'Initial enquiry — brochure sent by email.', stageDate:d(2), phone:'+254 711 100 008', email:'daniel.barasa@gmail.com', priority:false },
+];
+
+/* ════════════════════════════════════════════════════════════════
+   MAIN EXPORT
+════════════════════════════════════════════════════════════════ */
+async function seedDemoData() {
+  if (!mongoose.connection || mongoose.connection.readyState !== 1) return;
+
+  try {
+    const Class     = _model('classes');
+    const Subject   = _model('subjects');
+    const User      = _model('users');
+    const Student   = _model('students');
+    const Behaviour = _model('behaviour_incidents');
+    const Timetable = _model('timetable_slots');
+    const Invoice   = _model('invoices');
+    const Payment   = _model('payments');
+    const Admission = _model('admissions');
+
+    const hash = await _hash();
+    const nowISO = new Date().toISOString();
+
+    /* 1. Classes */
+    await Promise.all(CLASSES.map(c =>
+      upsert(Class, c.id, { ...c, academicYearId: AY_ID, createdBy: ADMIN_ID, updatedBy: ADMIN_ID })
+    ));
+
+    /* 2. Subjects */
+    await Promise.all(SUBJECTS.map(s =>
+      upsert(Subject, s.id, { ...s, isActive: true, createdBy: ADMIN_ID })
+    ));
+
+    /* 3. Extra teachers (users) */
+    await Promise.all(EXTRA_TEACHERS.map(t =>
+      User.updateOne({ id: t.id }, {
+        $setOnInsert: {
+          id: t.id, schoolId: SCHOOL_ID, name: t.name, email: t.email,
+          password: hash, role: 'teacher', primaryRole: 'teacher', roles: ['teacher'],
+          subjects: t.subjects, isActive: true, mustChangePassword: false,
+          passwordChangedAt: nowISO, createdAt: nowISO,
+        }
+      }, { upsert: true })
+    ));
+
+    /* 4. Students */
+    await Promise.all(STUDENTS.map(s => {
+      const { fees, paid, adm, dob, parent, pEmail, pPhone, ...rest } = s;
+      return upsert(Student, s.id, {
+        ...rest,
+        admissionNumber: adm,
+        dateOfBirth:     dob,
+        parentName:      parent,
+        parentEmail:     pEmail,
+        parentPhone:     pPhone,
+        enrollmentDate:  nowISO.slice(0, 10),
+        createdBy:       ADMIN_ID,
+        updatedBy:       ADMIN_ID,
+      });
+    }));
+
+    /* 5. Behaviour incidents */
+    await Promise.all(BEHAVIOUR.map(b =>
+      upsert(Behaviour, b.id, { ...b, status: 'open', createdBy: ADMIN_ID })
+    ));
+
+    /* 6. Timetable — Form 1A */
+    await Promise.all(F1A_TIMETABLE.map((slot, i) =>
+      upsert(Timetable, `tt_demo_f1a_${i}`, {
+        ...slot, classId: 'cls_demo_f1a', isActive: true,
+        academicYearId: AY_ID, termId: T2_ID,
+      })
+    ));
+
+    /* 7. Timetable — Standard 4A */
+    await Promise.all(STD4A_TIMETABLE.map((slot, i) =>
+      upsert(Timetable, `tt_demo_4a_${i}`, {
+        ...slot, classId: 'cls_demo_4a', isActive: true,
+        academicYearId: AY_ID, termId: T2_ID,
+      })
+    ));
+
+    /* 8. Invoices + payments */
+    const term  = 'Term 2';
+    const yearS = String(YEAR);
+    const due   = `${YEAR}-04-30`;
+
+    await Promise.all(STUDENTS.map(async (s, idx) => {
+      const invId    = `inv_demo_${s.id}`;
+      const invNum   = `INV-${YEAR}-${String(idx + 1).padStart(6, '0')}`;
+      const balance  = s.fees - s.paid;
+      const status   = balance <= 0 ? 'paid' : s.paid > 0 ? 'partial' : 'unpaid';
+
+      await upsert(Invoice, invId, {
+        studentId:     s.id,
+        title:         `${term} ${yearS} — School Fees`,
+        feeType:       'tuition',
+        amount:        s.fees,
+        amountPaid:    s.paid,
+        balance,
+        status,
+        invoiceNumber: invNum,
+        dueDate:       due,
+        academicYearId: AY_ID,
+        termId:        T2_ID,
+        createdBy:     ADMIN_ID,
+      });
+
+      /* Payment record only if something was paid */
+      if (s.paid > 0) {
+        const rcpNum = `RCP-${YEAR}-${String(idx + 1).padStart(6, '0')}`;
+        await upsert(Payment, `pay_demo_${s.id}`, {
+          invoiceId:     invId,
+          studentId:     s.id,
+          amount:        s.paid,
+          method:        ['mpesa', 'bank_transfer', 'cash', 'cheque'][idx % 4],
+          receiptNumber: rcpNum,
+          date:          d(Math.floor(Math.random() * 30) + 5),
+          note:          'Term 2 fees payment',
+          createdBy:     ADMIN_ID,
+        });
+      }
+    }));
+
+    /* 9. Admissions */
+    await Promise.all(ADMISSIONS.map(a =>
+      upsert(Admission, a.id, {
+        firstName:        a.firstName,
+        lastName:         a.lastName,
+        stage:            a.stage,
+        applyingForClass: a.applyingForClass,
+        applicationRef:   a.ref,
+        notes:            a.notes,
+        phone:            a.phone,
+        email:            a.email,
+        priority:         a.priority,
+        appliedAt:        a.stageDate,
+        stageHistory:     [{ stage: a.stage, date: a.stageDate, changedBy: ADMIN_ID, notes: a.notes }],
+        createdBy:        ADMIN_ID,
+      })
+    ));
+
+    console.log('[seed-demo-data] ✓ 7 classes · 14 subjects · 9 teachers · 20 students · 25 behaviour · 20 invoices · 14 payments · 60 timetable slots · 8 admissions');
+
+  } catch (err) {
+    console.warn('[seed-demo-data] Warning:', err.message);
+  }
+}
+
+module.exports = { seedDemoData };
