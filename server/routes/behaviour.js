@@ -253,10 +253,14 @@ router.put('/appeals/:id', authMiddleware, PLAN, rbac('behaviour', 'update'), as
     ).lean();
     if (!doc) return E.notFound(res, 'Appeal not found');
 
-    // If outcome resolved, update incident status
+    // If outcome resolved, update incident status based on appeal decision
     if (data.outcome && data.outcome !== 'pending') {
-      const newStatus = data.outcome === 'overturned' ? 'resolved' : 'resolved';
-      await _model('behaviour_incidents').updateOne({ id: doc.incidentId }, { status: newStatus });
+      // 'overturned' → incident cleared/dismissed; 'upheld' → incident remains closed
+      const newStatus = data.outcome === 'overturned' ? 'overturned' : 'closed';
+      await _model('behaviour_incidents').updateOne(
+        { id: doc.incidentId },
+        { status: newStatus, appealOutcome: data.outcome }
+      );
     }
 
     return ok(res, doc);

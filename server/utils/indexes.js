@@ -104,6 +104,91 @@ const INDEXES = [
     ],
   },
 
+  /* ── users ──────────────────────────────────────────────────
+     CRITICAL: login path queries by schoolId + email on every login.
+     Also: id lookup used by JWT verification path. */
+  {
+    col: 'users',
+    indexes: [
+      { key: { schoolId: 1, email: 1 }, name: 'users_school_email', unique: true, sparse: true },
+      { key: { id: 1 },                 name: 'users_id',           unique: true, sparse: true },
+    ],
+  },
+
+  /* ── teachers ───────────────────────────────────────────────
+     Primary: list teachers by school (common query on timetable, marks) */
+  {
+    col: 'teachers',
+    indexes: [
+      { key: { schoolId: 1, status: 1 }, name: 'teachers_school_status' },
+      { key: { id: 1 },                  name: 'teachers_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── messages / notifications ───────────────────────────────
+     Primary: inbox query by schoolId + recipientId */
+  {
+    col: 'messages',
+    indexes: [
+      { key: { schoolId: 1, recipientId: 1, createdAt: -1 }, name: 'messages_inbox' },
+      { key: { schoolId: 1, senderId: 1, createdAt: -1 },    name: 'messages_sent' },
+      { key: { id: 1 },                                       name: 'messages_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── behaviour_incidents ────────────────────────────────────
+     Primary: list incidents per student */
+  {
+    col: 'behaviour_incidents',
+    indexes: [
+      { key: { schoolId: 1, studentId: 1, date: -1 }, name: 'beh_student_date' },
+      { key: { schoolId: 1, status: 1 },               name: 'beh_status' },
+      { key: { id: 1 },                                 name: 'beh_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── admissions ─────────────────────────────────────────────
+     Primary: filter by stage in the pipeline */
+  {
+    col: 'admissions',
+    indexes: [
+      { key: { schoolId: 1, stage: 1, createdAt: -1 }, name: 'adm_stage_date' },
+      { key: { id: 1 },                                 name: 'adm_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── timetable ──────────────────────────────────────────────
+     Primary: class timetable view */
+  {
+    col: 'timetable',
+    indexes: [
+      { key: { schoolId: 1, classId: 1, dayOfWeek: 1, period: 1 }, name: 'tt_class_day_period' },
+      { key: { schoolId: 1, teacherId: 1 },                         name: 'tt_teacher' },
+      { key: { id: 1 },                                              name: 'tt_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── invoices ───────────────────────────────────────────────
+     Primary: student balance query, status filter */
+  {
+    col: 'invoices',
+    indexes: [
+      { key: { schoolId: 1, studentId: 1, status: 1 }, name: 'inv_student_status' },
+      { key: { schoolId: 1, status: 1, dueDate: 1 },   name: 'inv_status_due' },
+      { key: { id: 1 },                                 name: 'inv_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── payments ───────────────────────────────────────────────
+     Primary: sum payments for an invoice */
+  {
+    col: 'payments',
+    indexes: [
+      { key: { schoolId: 1, invoiceId: 1 }, name: 'pay_invoice' },
+      { key: { id: 1 },                      name: 'pay_id', unique: true, sparse: true },
+    ],
+  },
+
   /* ── academic_config ────────────────────────────────────────
      One document per school — already indexed by schoolId via _model() base schema.
      Extra: id field */

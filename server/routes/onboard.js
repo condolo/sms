@@ -371,11 +371,18 @@ async function _seedBaseData(schoolId, selectedSections = ['primary','secondary'
                  'exams_officer','timetabler','section_head','deputy_principal',
                  'discipline_committee','parent','student'];
 
+  const FULL_ACTIONS = ['read', 'create', 'update', 'delete'];
+  const ALL_MODULES  = [
+    'students', 'teachers', 'classes', 'attendance', 'finance', 'behaviour',
+    'exams', 'grades', 'admissions', 'timetable', 'messages', 'settings',
+    'assessment', 'report_cards'
+  ];
+
   const permDocs = roles.map(roleKey => ({
     id: `rp_${roleKey}_${schoolId}`,
     schoolId, roleKey,
     permissions: roleKey === 'superadmin'
-      ? { _all: { view: true, edit: true, delete: true, create: true } }
+      ? Object.fromEntries(ALL_MODULES.map(m => [m, FULL_ACTIONS]))  // superadmin: full access (also bypassed in middleware)
       : _defaultPerms(roleKey)
   }));
 
@@ -385,42 +392,115 @@ async function _seedBaseData(schoolId, selectedSections = ['primary','secondary'
 }
 
 /* ── Default permissions per role ───────────────────────── */
+/*
+ * IMPORTANT: RBAC middleware (middleware/rbac.js) expects the NEW array format:
+ *   { students: ['read', 'create', 'update', 'delete'], ... }
+ *
+ * DO NOT use the legacy object format { view: true, edit: true } —
+ * that format silently fails all permission checks.
+ *
+ * Permission actions: 'read' | 'create' | 'update' | 'delete'
+ *
+ * Module keys must match the strings used in rbac() calls in route files:
+ *   students, teachers, classes, attendance, finance, behaviour, exams,
+ *   grades, admissions, timetable, messages, settings, assessment, report_cards
+ */
 function _defaultPerms(role) {
-  const VIEW_ALL = ['dashboard','admissions','students','classes','subjects',
-                    'timetable','attendance','academics','exams','finance',
-                    'communication','events','reports','hr','behaviour','settings'];
-  const v = (mods) => Object.fromEntries(mods.map(m => [m, { view: true }]));
-  const ve = (mods) => Object.fromEntries(mods.map(m => [m, { view: true, edit: true, create: true }]));
-  const vea = (mods) => Object.fromEntries(mods.map(m => [m, { view: true, edit: true, create: true, delete: true }]));
+  const R    = ['read'];
+  const RCU  = ['read', 'create', 'update'];
+  const RCUD = ['read', 'create', 'update', 'delete'];
 
   switch (role) {
     case 'admin':
-      return vea(VIEW_ALL);
+      // admin gets full access to everything — also bypassed in RBAC middleware
+      return {
+        students:     RCUD, teachers:     RCUD, classes:      RCUD,
+        attendance:   RCUD, finance:      RCUD, behaviour:    RCUD,
+        exams:        RCUD, grades:       RCUD, admissions:   RCUD,
+        timetable:    RCUD, messages:     RCUD, settings:     RCUD,
+        assessment:   RCUD, report_cards: RCUD,
+      };
+
     case 'teacher':
-      return { ...v(['dashboard','students','classes','subjects','timetable','events','communication']),
-               ...ve(['attendance','academics','exams']) };
+      return {
+        students:     R,    teachers:     R,    classes:      R,
+        attendance:   RCU,  grades:       RCU,  assessment:   RCU,
+        timetable:    R,    messages:     RCU,  report_cards: R,
+        exams:        R,
+      };
+
     case 'finance':
-      return { ...v(['dashboard','students','reports']), ...vea(['finance']) };
+      return {
+        students:     R,
+        finance:      RCUD,
+        report_cards: R,
+      };
+
     case 'hr':
-      return { ...v(['dashboard']), ...vea(['hr']) };
+      return {
+        teachers:     RCUD,
+        students:     R,
+      };
+
     case 'admissions_officer':
-      return { ...v(['dashboard','students']), ...vea(['admissions']) };
+      return {
+        admissions:   RCUD,
+        students:     RCU,
+        classes:      R,
+      };
+
     case 'exams_officer':
-      return { ...v(['dashboard','students','classes','subjects']), ...vea(['exams','academics']) };
+      return {
+        exams:        RCUD,
+        grades:       RCUD,
+        assessment:   RCUD,
+        students:     R,
+        classes:      R,
+        report_cards: R,
+      };
+
     case 'timetabler':
-      return { ...v(['dashboard']), ...vea(['timetable','classes','subjects']) };
+      return {
+        timetable:    RCUD,
+        classes:      RCU,
+        teachers:     R,
+      };
+
     case 'section_head':
-      return { ...v(['dashboard','students','classes','subjects','timetable','attendance','academics','exams','reports']) };
+      return {
+        students:     R,   teachers:     R,   classes:      R,
+        attendance:   R,   grades:       R,   assessment:   R,
+        exams:        R,   timetable:    R,   report_cards: R,
+        admissions:   R,
+      };
+
     case 'deputy_principal':
-      return vea(['dashboard','students','classes','subjects','timetable','attendance','academics','exams','behaviour','events','communication','reports']);
+      return {
+        students:     RCUD, teachers:     RCU,  classes:      RCUD,
+        attendance:   RCUD, grades:       RCUD, assessment:   RCUD,
+        exams:        RCUD, behaviour:    RCUD, timetable:    RCUD,
+        messages:     RCUD, report_cards: RCU,  admissions:   RCU,
+      };
+
     case 'discipline_committee':
-      return { ...v(['dashboard','students']), ...vea(['behaviour']) };
+      return {
+        behaviour:    RCUD,
+        students:     R,
+      };
+
     case 'parent':
-      return v(['dashboard','events','communication']);
+      return {
+        messages:     R,
+        report_cards: R,   // read their own child's report cards
+      };
+
     case 'student':
-      return v(['dashboard','events']);
+      return {
+        messages:     R,
+      };
+
     default:
-      return v(['dashboard']);
+      return {};
   }
 }
 

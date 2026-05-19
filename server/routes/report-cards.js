@@ -712,7 +712,7 @@ function _buildPDFPage(doc, snap, config, attendance, isFirstPage) {
    ══════════════════════════════════════════════════════════════ */
 router.get('/:id/pdf', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
   try {
-    const { schoolId, role, guardianOf } = req.jwtUser;
+    const { schoolId, role, guardianOf, userId } = req.jwtUser;
 
     const snap = await _model('report_card_snapshots').findOne({ id: req.params.id, schoolId }).lean();
     if (!snap) return E.notFound(res, 'Report card snapshot not found');
