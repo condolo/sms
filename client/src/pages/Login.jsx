@@ -31,6 +31,64 @@ const MODES = {
   CHANGE_PASSWORD: 'change-password',
 };
 
+/* ── Demo Quick-Login panel ─────────────────────────────────────────────────
+   Only rendered when the school slug is "demo".
+   Each card one-click fills credentials and auto-submits.
+─────────────────────────────────────────────────────────────────────────── */
+const DEMO_ACCOUNTS = [
+  { role: 'Administrator',   email: 'admin@demo.msingi.io',     color: '#4f46e5', bg: '#eef2ff', badge: 'Full access'     },
+  { role: 'Deputy Principal',email: 'principal@demo.msingi.io', color: '#0891b2', bg: '#ecfeff', badge: 'Academic lead'   },
+  { role: 'Teacher',         email: 'teacher@demo.msingi.io',   color: '#059669', bg: '#ecfdf5', badge: 'Classroom'       },
+  { role: 'Finance Officer', email: 'finance@demo.msingi.io',   color: '#d97706', bg: '#fffbeb', badge: 'Finance'         },
+  { role: 'Parent',          email: 'parent@demo.msingi.io',    color: '#7c3aed', bg: '#f5f3ff', badge: 'Read-only'       },
+];
+const DEMO_PASSWORD = 'Demo2025!';
+
+function DemoPanel({ onPick }) {
+  return (
+    <div className="mt-8 pt-7 border-t border-slate-200">
+      <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mb-3 text-center">
+        Quick login — explore as any role
+      </p>
+      <div className="grid grid-cols-1 gap-2">
+        {DEMO_ACCOUNTS.map(({ role, email, color, bg, badge }) => (
+          <button
+            key={email}
+            type="button"
+            onClick={() => onPick(email, DEMO_PASSWORD)}
+            className="flex items-center gap-3 rounded-xl px-4 py-2.5 text-left transition-all hover:scale-[1.01] hover:shadow-md active:scale-100"
+            style={{ background: bg, border: `1px solid ${color}22` }}
+          >
+            {/* Avatar */}
+            <div
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+              style={{ background: color }}
+            >
+              {role[0]}
+            </div>
+            {/* Label */}
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-slate-800 leading-tight">{role}</p>
+              <p className="text-[10px] text-slate-400 truncate">{email}</p>
+            </div>
+            {/* Badge */}
+            <span
+              className="text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0"
+              style={{ background: `${color}18`, color }}
+            >
+              {badge}
+            </span>
+          </button>
+        ))}
+      </div>
+      <p className="text-[10px] text-slate-400 text-center mt-3">
+        Password: <span className="font-mono font-semibold text-slate-500">{DEMO_PASSWORD}</span>
+        {' · '}Demo data only, resets periodically.
+      </p>
+    </div>
+  );
+}
+
 export default function Login() {
   const navigate           = useNavigate();
   const location           = useLocation();
@@ -75,6 +133,25 @@ export default function Login() {
   const primary      = branding?.primaryColor || '#4f46e5';
   const accent       = branding?.accentColor  || '#7c3aed';
   const initials     = shortName.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+
+  // ─── Demo quick-login — fills credentials and submits ────────────────────────
+  async function handleQuickLogin(demoEmail, demoPassword) {
+    setEmail(demoEmail);
+    setPassword(demoPassword);
+    setError('');
+    setLoading(true);
+    try {
+      const res = await authApi.login({ email: demoEmail.toLowerCase(), password: demoPassword });
+      if (res?.mfaRequired) { setPendingMfa({ userId: res.userId, schoolId: res.schoolId }); setMode(MODES.OTP); setLoading(false); return; }
+      if (res?.passwordExpired) { setPendingPw({ userId: res.userId, schoolId: res.schoolId, reason: res.reason }); setMode(MODES.CHANGE_PASSWORD); setLoading(false); return; }
+      setSession({ token: res.token, user: res.user });
+      navigate(from, { replace: true });
+    } catch (err) {
+      setError(err instanceof APIError ? err.message : 'Demo login failed — please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }
 
   // ─── Login ──────────────────────────────────────────────────────────────────
   async function handleLogin(e) {
@@ -188,7 +265,23 @@ export default function Login() {
 
         {/* Tagline / content */}
         <div>
-          {isSchool ? (
+          {slug === 'demo' ? (
+            <>
+              <p className="text-xs font-semibold uppercase tracking-widest text-white/50 mb-4">Interactive Demo</p>
+              <blockquote className="text-2xl font-light text-white/90 leading-relaxed mb-8">
+                "Explore the full Msingi platform — sign in as any role to see the system in action."
+              </blockquote>
+              <div className="space-y-3">
+                {DEMO_ACCOUNTS.map(({ role, badge }) => (
+                  <div key={role} className="flex items-center gap-3">
+                    <div className="w-1.5 h-1.5 rounded-full bg-white/40 flex-shrink-0" />
+                    <span className="text-sm text-white/70">{role}</span>
+                    <span className="text-xs text-white/40 ml-auto">{badge}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : isSchool ? (
             <>
               <blockquote className="text-2xl font-light text-white/90 leading-relaxed">
                 "Your school management portal — students, staff, academics, and finance in one place."
@@ -316,6 +409,9 @@ export default function Login() {
                   Msingi
                 </a>
               </p>
+
+              {/* Quick-login cards — only on the demo school */}
+              {slug === 'demo' && <DemoPanel onPick={handleQuickLogin} />}
             </>
           )}
 

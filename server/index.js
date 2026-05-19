@@ -11,6 +11,7 @@ const rateLimit = require('express-rate-limit');
 const { connect }             = require('./config/db');
 const { ensureIndexes }       = require('./utils/indexes');
 const { repairPermissions }   = require('./utils/repairPermissions');
+const { seedDemo }            = require('./scripts/seed-demo');
 
 /* ── Security: warn if JWT_SECRET not set ───────────────────── */
 if (!process.env.JWT_SECRET) {
@@ -152,7 +153,7 @@ app.post('/api/announcements/:id/dismiss', authMiddleware, async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: '4.9.5',
+    version: '4.9.7',
     timestamp: new Date().toISOString(),
     db: require('./config/db').isConnected() ? 'connected' : 'disconnected'
   });
@@ -253,7 +254,8 @@ async function start() {
     // Self-healing: run non-blocking AFTER HTTP is serving.
     // Detects and repairs broken role_permissions (legacy object → array format).
     // Idempotent — becomes a sub-1ms no-op once all schools are repaired.
-    repairPermissions();
+    repairPermissions();   // Fix legacy permission format (idempotent)
+    seedDemo();            // Ensure demo.msingi.io school + users exist (idempotent)
   });
 }
 

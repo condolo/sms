@@ -550,7 +550,7 @@ export default function Landing() {
               <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" />
             </Link>
             <button
-              onClick={() => goToSchool('innolearn')}
+              onClick={() => goToSchool('demo')}
               className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-7 py-3.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 transition-all"
             >
               Explore the Platform
@@ -896,7 +896,7 @@ export default function Landing() {
                 <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" />
               </Link>
               <button
-                onClick={() => goToSchool('innolearn')}
+                onClick={() => goToSchool('demo')}
                 className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 px-8 py-4 text-sm font-semibold text-zinc-600 hover:bg-zinc-50 transition-all"
               >
                 Explore the platform
