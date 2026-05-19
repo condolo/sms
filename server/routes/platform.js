@@ -315,7 +315,7 @@ function _tenantQuery(school) {
 router.delete('/schools/all', async (req, res) => {
   try {
     const School     = _model('schools');
-    const DEMO_SLUGS = ['innolearn', 'msingi'];
+    const DEMO_SLUGS = ['innolearn', 'msingi', 'demo'];
 
     const toPurge    = await School.find({ slug: { $nin: DEMO_SLUGS } }).lean();
     const schoolMonIds = toPurge.map(s => s._id);
@@ -359,6 +359,11 @@ router.delete('/schools/:id', async (req, res) => {
     const School = _model('schools');
     const school = await School.findById(req.params.id).lean();
     if (!school) return res.status(404).json({ error: 'School not found' });
+
+    // Guard: the demo school is permanent and cannot be deleted
+    if (school.slug === 'demo' || school.id === 'sch_demo') {
+      return res.status(403).json({ error: 'The demo school cannot be deleted. It is required for platform demonstrations.' });
+    }
 
     const tenantFilter = _tenantQuery(school);
     const adminEmail   = school.adminEmail;
