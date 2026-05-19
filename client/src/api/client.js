@@ -208,6 +208,80 @@ export const timetable = {
 
 export const announcements = _resource('announcements');
 
+// ─── Import / Export ──────────────────────────────────────────────────────────
+
+function _getToken() { return getToken(); }
+
+export const importExport = {
+  /** Import a CSV file for the given type (students | teachers) */
+  importCSV: async (type, csvText) => {
+    const token = _getToken();
+    const { slug } = detectSchool();
+    const headers = { 'Content-Type': 'text/csv' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (slug)  headers['X-School-Slug'] = slug;
+
+    const res = await fetch(`${BASE}/import-export/${type}`, {
+      method: 'POST',
+      headers,
+      body: csvText,
+    });
+
+    const json = await res.json().catch(() => null);
+    // 207 = partial success — not an error
+    if (!res.ok && res.status !== 207) {
+      const { code = 'SERVER_ERROR', message = 'Import failed' } = json?.error ?? {};
+      throw new APIError(code, message, res.status, json ?? {});
+    }
+    return json;
+  },
+
+  /** Export all records for the given type as a CSV download */
+  exportCSV: async (type) => {
+    const token = _getToken();
+    const { slug } = detectSchool();
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (slug)  headers['X-School-Slug'] = slug;
+
+    const res = await fetch(`${BASE}/import-export/export/${type}`, { headers });
+    if (!res.ok) throw new APIError('EXPORT_FAILED', 'Export failed', res.status);
+
+    const blob     = await res.blob();
+    const url      = URL.createObjectURL(blob);
+    const a        = document.createElement('a');
+    const stamp    = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    a.href         = url;
+    a.download     = `msingi_${type}_${stamp}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
+
+  /** Download a blank demo template for the given type */
+  downloadTemplate: async (type) => {
+    const token = _getToken();
+    const { slug } = detectSchool();
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (slug)  headers['X-School-Slug'] = slug;
+
+    const res = await fetch(`${BASE}/import-export/template/${type}`, { headers });
+    if (!res.ok) throw new APIError('TEMPLATE_FAILED', 'Failed to download template', res.status);
+
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `msingi_${type}_template.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
+};
+
 export const settings = {
   get:    ()       => _get('/settings'),
   update: (data)   => _put('/settings', data),
@@ -239,6 +313,7 @@ const api = {
   timetable,
   announcements,
   settings,
+  importExport,
   APIError,
 };
 

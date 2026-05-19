@@ -22,9 +22,10 @@ const BehaviourPage  = lazy(() => import('@/pages/behaviour/BehaviourPage.jsx'))
 const ExamsPage      = lazy(() => import('@/pages/exams/ExamsPage.jsx'));
 const AdmissionsPage = lazy(() => import('@/pages/admissions/AdmissionsPage.jsx'));
 const TimetablePage  = lazy(() => import('@/pages/timetable/TimetablePage.jsx'));
-const SettingsPage   = lazy(() => import('@/pages/settings/SettingsPage.jsx'));
-const GradesPage     = lazy(() => import('@/pages/grades/GradesPage.jsx'));
-const NotFound       = lazy(() => import('@/pages/NotFound.jsx'));
+const SettingsPage      = lazy(() => import('@/pages/settings/SettingsPage.jsx'));
+const GradesPage        = lazy(() => import('@/pages/grades/GradesPage.jsx'));
+const ImportExportPage  = lazy(() => import('@/pages/import-export/ImportExportPage.jsx'));
+const NotFound          = lazy(() => import('@/pages/NotFound.jsx'));
 
 function SuspenseWrapper({ children }) {
   return (
@@ -99,6 +100,9 @@ export const router = createBrowserRouter([
 
       // Timetable
       { path: 'timetable',             element: <SuspenseWrapper><TimetablePage /></SuspenseWrapper> },
+
+      // Import / Export
+      { path: 'import-export',         element: <SuspenseWrapper><ImportExportPage /></SuspenseWrapper> },
 
       // Settings
       { path: 'settings',              element: <SuspenseWrapper><SettingsPage /></SuspenseWrapper> },

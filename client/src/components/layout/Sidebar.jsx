@@ -33,7 +33,8 @@ const NAV_SECTIONS = [
   {
     label: 'System',
     items: [
-      { to: '/settings',    icon: '⚙️',  label: 'Settings' },
+      { to: '/import-export', icon: '🔄', label: 'Import & Export' },
+      { to: '/settings',      icon: '⚙️', label: 'Settings' },
     ],
   },
 ];

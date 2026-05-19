@@ -6,6 +6,47 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.9.0] — 2026-05-19  Plan Gating Fix + Bulk Import/Export
+
+### Fixed — Plan Gating (`server/middleware/plan.js`)
+- **`admissions` moved from `premium` → `core`**: Every school on any plan can now use the full Admissions pipeline (enquiry → interview → offer → enrolled). Previously core/standard schools were locked out, preventing basic student intake.
+- Comment header updated: InnoLearn → Msingi
+
+### Added — Bulk Import & Export (`server/routes/import-export.js`)
+- New route mounted at `/api/import-export` (no new npm packages — zero-dependency CSV parser)
+- `GET /api/import-export/template/:type` — Download a demo CSV template with example rows and column instructions (opens directly in Excel/Google Sheets)
+- `POST /api/import-export/:type` — Import from CSV (`Content-Type: text/csv`) or JSON (`{ rows: [...] }`). Row-level validation with per-row error reporting. Class names resolved to IDs automatically. Max 500 rows per batch.
+- `GET /api/import-export/export/:type` — Export all school records as a timestamped downloadable CSV
+
+**Supported types:**
+- `students` — firstName, lastName, dateOfBirth, gender, className (resolved), parentName/Email/Phone, address, enrollmentDate, status, medicalNotes
+- `teachers` — firstName, lastName, email, phone, dateOfBirth, gender, title, qualifications, joinDate, contractType, status
+- `classes` — export only (name, section, keyStage, capacity, status)
+
+**Import features:**
+- Admission/staff numbers auto-generated (not required in CSV)
+- Comment rows starting with `#` skipped
+- Class name → classId resolution with clear error if class not found
+- Duplicate email detection for teachers (within-batch and against existing records)
+- Partial success (HTTP 207) with row/field-level error table
+- BOM prefix on all CSV output for Excel compatibility
+
+### Added — Import/Export UI (`client/src/pages/import-export/ImportExportPage.jsx`)
+- New `/import-export` route in App.jsx
+- Sidebar: `🔄 Import & Export` link added under System section
+- Per-entity card with: download template button, export button, drag-and-drop CSV upload zone, row preview, import button, results summary with error table
+- Classes export-only card (class creation is done in-app, but list can be exported for reference in student CSV)
+- `client/src/api/client.js` — `importExport` module added: `importCSV()`, `exportCSV()`, `downloadTemplate()`
+
+### Fixed — `server/index.js`
+- `/api/import-export` route registered
+
+---
+
+## [4.8.2] — 2026-05-18  Hotfix: DB name regression + onboard.html rebrand
+
+---
+
 ## [4.7.0] — 2026-05-18  Platform Rebrand + Dedicated School URLs + Full Assessment System
 
 ### Platform Rebrand — InnoLearn → Msingi

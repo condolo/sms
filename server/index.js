@@ -111,6 +111,7 @@ app.use('/api/messages',        require('./routes/messages'));
 app.use('/api/academic-config', require('./routes/academic-config'));
 app.use('/api/assessment',      require('./routes/assessment'));
 app.use('/api/report-cards',   require('./routes/report-cards'));
+app.use('/api/import-export',  require('./routes/import-export'));
 
 /* ── School-facing announcement routes (JWT auth, not platform key) ── */
 const { authMiddleware } = require('./middleware/auth');
@@ -144,7 +145,7 @@ app.post('/api/announcements/:id/dismiss', authMiddleware, async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: '4.8.0',
+    version: '4.9.0',
     timestamp: new Date().toISOString(),
     db: require('./config/db').isConnected() ? 'connected' : 'disconnected'
   });

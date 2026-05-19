@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — Plan Tier Gating Middleware
+   Msingi — Plan Tier Gating Middleware
    Usage:  router.get('/reports', planGate('reports'), handler)
 
    Plans are cumulative — each tier inherits all features below it:
@@ -24,6 +24,7 @@ const FEATURE_PLAN = {
   subjects:           'core',
   events:             'core',
   messaging:          'core',
+  admissions:         'core',   // Intake pipeline available on all plans
 
   /* ── Standard ── */
   behaviour:          'standard',
@@ -35,7 +36,6 @@ const FEATURE_PLAN = {
 
   /* ── Premium ── */
   finance:            'premium',
-  admissions:         'premium',
   reports:            'premium',
   report_cards:       'premium',
   custom_roles:       'premium',
