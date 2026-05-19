@@ -473,7 +473,12 @@ export default function Landing() {
 
           {/* Nav links */}
           <div className="hidden md:flex items-center gap-7 text-sm text-zinc-500">
-            <a href="#modules" className="hover:text-zinc-900 transition-colors">Modules</a>
+            <button
+              onClick={() => document.getElementById('modules')?.scrollIntoView({ behavior: 'smooth' })}
+              className="hover:text-zinc-900 transition-colors"
+            >
+              Modules
+            </button>
             <Link to="/contact" className="hover:text-zinc-900 transition-colors">Contact</Link>
           </div>
 
