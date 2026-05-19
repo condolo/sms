@@ -11,7 +11,32 @@ const email    = require('../utils/email');
 
 const router = express.Router();
 
-// All routes in this file require the platform admin key
+/* ── Platform Settings (public GET — no auth required) ───────── */
+/* GET /api/platform/settings — public read for landing page, etc. */
+router.get('/settings', async (req, res) => {
+  try {
+    const Settings = _model('platform_settings');
+    const doc = await Settings.findOne({ id: 'global' }).lean();
+    // Return safe public subset (no internal fields)
+    const settings = doc || {};
+    return res.json({
+      platformName:   settings.platformName   || 'Msingi',
+      tagline:        settings.tagline        || 'The Digital Operating System for Modern Schools.',
+      logoUrl:        settings.logoUrl        || null,
+      faviconUrl:     settings.faviconUrl     || null,
+      primaryColor:   settings.primaryColor   || '#4f46e5',
+      contactEmail:   settings.contactEmail   || 'hello@msingi.io',
+      contactPhone:   settings.contactPhone   || '+254 769 024 153',
+      socialLinks:    settings.socialLinks    || {},
+      updatedAt:      settings.updatedAt      || null,
+    });
+  } catch (err) {
+    console.error('[platform/settings GET]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// All routes below require the platform admin key
 router.use(platformAdmin);
 
 function _model(col) {
@@ -749,6 +774,52 @@ router.get('/test-email', async (req, res) => {
       ? `✅ Test email sent successfully to ${platformAddr}`
       : `❌ Email send failed — check Render logs for SMTP error details`,
   });
+});
+
+/* ── Platform Settings — manage branding, socials, contact info ─ */
+
+/* PUT /api/platform/settings — update platform-level settings */
+router.put('/settings', async (req, res) => {
+  try {
+    const {
+      platformName, tagline, logoUrl, faviconUrl, primaryColor,
+      contactEmail, contactPhone,
+      socialLinks,  // { twitter, linkedin, facebook, instagram, youtube, whatsapp }
+    } = req.body;
+
+    const Settings = _model('platform_settings');
+
+    const update = { updatedAt: new Date().toISOString() };
+    if (platformName  !== undefined) update.platformName  = String(platformName).trim().slice(0, 100);
+    if (tagline       !== undefined) update.tagline       = String(tagline).trim().slice(0, 300);
+    if (logoUrl       !== undefined) update.logoUrl       = logoUrl ? String(logoUrl).trim() : null;
+    if (faviconUrl    !== undefined) update.faviconUrl    = faviconUrl ? String(faviconUrl).trim() : null;
+    if (primaryColor  !== undefined) update.primaryColor  = /^#[0-9a-f]{6}$/i.test(primaryColor) ? primaryColor : '#4f46e5';
+    if (contactEmail  !== undefined) update.contactEmail  = String(contactEmail).trim().slice(0, 200);
+    if (contactPhone  !== undefined) update.contactPhone  = String(contactPhone).trim().slice(0, 50);
+    if (socialLinks   !== undefined && typeof socialLinks === 'object') {
+      update.socialLinks = {
+        twitter:   socialLinks.twitter   ? String(socialLinks.twitter).trim()   : '',
+        linkedin:  socialLinks.linkedin  ? String(socialLinks.linkedin).trim()  : '',
+        facebook:  socialLinks.facebook  ? String(socialLinks.facebook).trim()  : '',
+        instagram: socialLinks.instagram ? String(socialLinks.instagram).trim() : '',
+        youtube:   socialLinks.youtube   ? String(socialLinks.youtube).trim()   : '',
+        whatsapp:  socialLinks.whatsapp  ? String(socialLinks.whatsapp).trim()  : '',
+      };
+    }
+
+    const doc = await Settings.findOneAndUpdate(
+      { id: 'global' },
+      { $set: { id: 'global', ...update } },
+      { upsert: true, new: true }
+    ).lean();
+
+    console.log('[PLATFORM] Settings updated');
+    res.json({ success: true, settings: doc });
+  } catch (err) {
+    console.error('[platform/settings PUT]', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /* ── School-side dismiss (uses platform router via /api/platform/announcements/:id/dismiss)

@@ -72,6 +72,9 @@
       <button class="pa-nav-item" onclick="showView('diagnostics')" id="nav-diagnostics">
         <i class="fas fa-stethoscope"></i> Diagnostics
       </button>
+      <button class="pa-nav-item" onclick="showView('branding')" id="nav-branding">
+        <i class="fas fa-paint-brush"></i> Branding & Settings
+      </button>
     </nav>
 
     <div class="pa-sidebar-footer">
@@ -217,10 +220,10 @@ function showView(view) {
   document.querySelectorAll('.pa-nav-item').forEach(el => el.classList.remove('active'));
   document.getElementById('nav-' + view)?.classList.add('active');
 
-  const titles = { overview:'Overview', pending:'Pending Approvals', schools:'Registered Schools', provision:'Provision New School', announcements:'System Announcements', diagnostics:'System Diagnostics' };
+  const titles = { overview:'Overview', pending:'Pending Approvals', schools:'Registered Schools', provision:'Provision New School', announcements:'System Announcements', diagnostics:'System Diagnostics', branding:'Branding & Platform Settings' };
   document.getElementById('view-title').textContent = titles[view] || view;
 
-  const views = { overview: renderOverview, pending: renderPending, schools: renderSchools, provision: renderProvision, announcements: renderAnnouncements, diagnostics: renderDiagnostics };
+  const views = { overview: renderOverview, pending: renderPending, schools: renderSchools, provision: renderProvision, announcements: renderAnnouncements, diagnostics: renderDiagnostics, branding: renderBranding };
   (views[view] || (() => {}))();
 }
 
@@ -1149,6 +1152,173 @@ function toast(msg, type = 'info') {
   el.textContent = msg;
   wrap.appendChild(el);
   setTimeout(() => el.remove(), 4000);
+}
+
+/* ── Branding & Platform Settings ───────────────────────── */
+async function renderBranding() {
+  const main = document.getElementById('main-content');
+  main.innerHTML = `<div style="max-width:720px">
+    <p style="color:#6b7280;font-size:14px;margin-bottom:24px">
+      Manage platform-level branding, social media links, and contact information.
+      Changes take effect immediately — no redeployment needed.
+    </p>
+    <div id="branding-msg" style="display:none;margin-bottom:16px"></div>
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:28px;margin-bottom:20px">
+      <h3 style="margin:0 0 20px;font-size:15px;font-weight:600;color:#111827">Identity</h3>
+      <div style="display:grid;gap:16px">
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Platform Name</label>
+          <input id="ps-name" type="text" placeholder="Msingi" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;box-sizing:border-box"/>
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Tagline</label>
+          <input id="ps-tagline" type="text" placeholder="The Digital Operating System for Modern Schools." style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;box-sizing:border-box"/>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Logo URL</label>
+            <input id="ps-logo" type="url" placeholder="https://…/logo.png" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;box-sizing:border-box"/>
+            <p style="font-size:11px;color:#9ca3af;margin:4px 0 0">Recommended: 200×50px PNG/SVG</p>
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Favicon URL</label>
+            <input id="ps-favicon" type="url" placeholder="https://…/favicon.ico" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;box-sizing:border-box"/>
+            <p style="font-size:11px;color:#9ca3af;margin:4px 0 0">32×32px ICO or PNG</p>
+          </div>
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Primary Brand Colour</label>
+          <div style="display:flex;gap:10px;align-items:center">
+            <input id="ps-color-picker" type="color" value="#4f46e5" style="width:44px;height:40px;border:1px solid #d1d5db;border-radius:8px;padding:2px;cursor:pointer"/>
+            <input id="ps-color" type="text" placeholder="#4f46e5" maxlength="7" style="width:120px;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;font-family:monospace"/>
+            <span id="ps-color-preview" style="width:36px;height:36px;border-radius:8px;background:#4f46e5;display:inline-block;border:1px solid #e5e7eb"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:28px;margin-bottom:20px">
+      <h3 style="margin:0 0 20px;font-size:15px;font-weight:600;color:#111827">Contact Information</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Contact Email</label>
+          <input id="ps-email" type="email" placeholder="hello@msingi.io" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;box-sizing:border-box"/>
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">WhatsApp / Support Phone</label>
+          <input id="ps-phone" type="text" placeholder="+254 769 024 153" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;box-sizing:border-box"/>
+        </div>
+      </div>
+    </div>
+
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:28px;margin-bottom:28px">
+      <h3 style="margin:0 0 6px;font-size:15px;font-weight:600;color:#111827">Social Media Links</h3>
+      <p style="font-size:12px;color:#9ca3af;margin:0 0 20px">Full URLs (e.g. https://twitter.com/msingi). Leave blank to hide the icon.</p>
+      <div style="display:grid;gap:14px">
+        ${[
+          ['ps-twitter',   'fab fa-x-twitter', 'X / Twitter',  'https://x.com/msingi'],
+          ['ps-linkedin',  'fab fa-linkedin',   'LinkedIn',     'https://linkedin.com/company/msingi'],
+          ['ps-facebook',  'fab fa-facebook',   'Facebook',     'https://facebook.com/msingi'],
+          ['ps-instagram', 'fab fa-instagram',  'Instagram',    'https://instagram.com/msingi'],
+          ['ps-youtube',   'fab fa-youtube',    'YouTube',      'https://youtube.com/@msingi'],
+        ].map(([id, icon, label, ph]) => `
+          <div style="display:flex;align-items:center;gap:12px">
+            <i class="${icon}" style="width:20px;text-align:center;color:#6b7280;font-size:16px"></i>
+            <div style="flex:1">
+              <label style="display:block;font-size:11px;font-weight:600;color:#6b7280;margin-bottom:4px">${label}</label>
+              <input id="${id}" type="url" placeholder="${ph}" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:8px 12px;font-size:13px;box-sizing:border-box"/>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    <div style="display:flex;gap:12px">
+      <button onclick="saveBranding()" style="background:#111827;color:#fff;border:none;border-radius:8px;padding:12px 24px;font-size:14px;font-weight:600;cursor:pointer">
+        <i class="fas fa-save"></i> Save Settings
+      </button>
+      <button onclick="renderBranding()" style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:8px;padding:12px 24px;font-size:14px;font-weight:600;cursor:pointer">
+        <i class="fas fa-undo"></i> Reset to Saved
+      </button>
+    </div>
+  </div>`;
+
+  // Sync colour picker ↔ text field
+  const picker = document.getElementById('ps-color-picker');
+  const text   = document.getElementById('ps-color');
+  const preview = document.getElementById('ps-color-preview');
+  picker.addEventListener('input', () => { text.value = picker.value; preview.style.background = picker.value; });
+  text.addEventListener('input', () => {
+    if (/^#[0-9a-f]{6}$/i.test(text.value)) {
+      picker.value = text.value;
+      preview.style.background = text.value;
+    }
+  });
+
+  // Load current settings
+  try {
+    const res = await fetch('/api/platform/settings');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const s = await res.json();
+    document.getElementById('ps-name').value    = s.platformName   || '';
+    document.getElementById('ps-tagline').value = s.tagline        || '';
+    document.getElementById('ps-logo').value    = s.logoUrl        || '';
+    document.getElementById('ps-favicon').value = s.faviconUrl     || '';
+    document.getElementById('ps-email').value   = s.contactEmail   || '';
+    document.getElementById('ps-phone').value   = s.contactPhone   || '';
+    const c = s.primaryColor || '#4f46e5';
+    text.value = c; picker.value = c; preview.style.background = c;
+    const sl = s.socialLinks || {};
+    document.getElementById('ps-twitter').value   = sl.twitter   || '';
+    document.getElementById('ps-linkedin').value  = sl.linkedin  || '';
+    document.getElementById('ps-facebook').value  = sl.facebook  || '';
+    document.getElementById('ps-instagram').value = sl.instagram || '';
+    document.getElementById('ps-youtube').value   = sl.youtube   || '';
+  } catch(e) {
+    console.warn('Could not load platform settings:', e.message);
+  }
+}
+
+async function saveBranding() {
+  const msgEl = document.getElementById('branding-msg');
+  const payload = {
+    platformName:  document.getElementById('ps-name').value,
+    tagline:       document.getElementById('ps-tagline').value,
+    logoUrl:       document.getElementById('ps-logo').value,
+    faviconUrl:    document.getElementById('ps-favicon').value,
+    primaryColor:  document.getElementById('ps-color').value,
+    contactEmail:  document.getElementById('ps-email').value,
+    contactPhone:  document.getElementById('ps-phone').value,
+    socialLinks: {
+      twitter:   document.getElementById('ps-twitter').value,
+      linkedin:  document.getElementById('ps-linkedin').value,
+      facebook:  document.getElementById('ps-facebook').value,
+      instagram: document.getElementById('ps-instagram').value,
+      youtube:   document.getElementById('ps-youtube').value,
+      whatsapp:  document.getElementById('ps-phone').value,
+    }
+  };
+  try {
+    const res = await _api('PUT', '/platform/settings', payload);
+    msgEl.style.display = 'block';
+    msgEl.style.background = '#f0fdf4';
+    msgEl.style.border = '1px solid #bbf7d0';
+    msgEl.style.borderRadius = '8px';
+    msgEl.style.padding = '12px 16px';
+    msgEl.style.color = '#166534';
+    msgEl.style.fontSize = '14px';
+    msgEl.innerHTML = '✅ Platform settings saved successfully. Changes are live immediately.';
+    setTimeout(() => { msgEl.style.display = 'none'; }, 5000);
+  } catch(e) {
+    msgEl.style.display = 'block';
+    msgEl.style.background = '#fef2f2';
+    msgEl.style.border = '1px solid #fecaca';
+    msgEl.style.borderRadius = '8px';
+    msgEl.style.padding = '12px 16px';
+    msgEl.style.color = '#991b1b';
+    msgEl.style.fontSize = '14px';
+    msgEl.innerHTML = '❌ Failed to save: ' + e.message;
+  }
 }
 
 /* ── Boot: check saved session ──────────────────────────── */
