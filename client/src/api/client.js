@@ -206,7 +206,10 @@ export const timetable = {
   bulkSet:    (data)       => _post('/timetable/bulk', data),
 };
 
-export const announcements = _resource('announcements');
+export const announcements = {
+  ..._resource('announcements'),
+  dismiss: (id) => _post(`/announcements/${id}/dismiss`),
+};
 
 // ─── Import / Export ──────────────────────────────────────────────────────────
 

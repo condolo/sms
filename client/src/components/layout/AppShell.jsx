@@ -39,9 +39,8 @@ export default function AppShell() {
       <div className="flex flex-1 flex-col min-w-0 h-full">
         <TopBar onMenuClick={() => setSidebarOpen(true)} />
         <main className="flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-screen-xl px-4 py-6 md:px-6 lg:px-8">
-            <Outlet />
-          </div>
+          {/* No max-width constraint here — each page controls its own layout width */}
+          <Outlet />
         </main>
       </div>
     </div>
