@@ -36,11 +36,12 @@ const MODES = {
    Each card one-click fills credentials and auto-submits.
 ─────────────────────────────────────────────────────────────────────────── */
 const DEMO_ACCOUNTS = [
-  { role: 'Administrator',   email: 'admin@demo.msingi.io',     color: '#4f46e5', bg: '#eef2ff', badge: 'Full access'     },
-  { role: 'Deputy Principal',email: 'principal@demo.msingi.io', color: '#0891b2', bg: '#ecfeff', badge: 'Academic lead'   },
-  { role: 'Teacher',         email: 'teacher@demo.msingi.io',   color: '#059669', bg: '#ecfdf5', badge: 'Classroom'       },
-  { role: 'Finance Officer', email: 'finance@demo.msingi.io',   color: '#d97706', bg: '#fffbeb', badge: 'Finance'         },
-  { role: 'Parent',          email: 'parent@demo.msingi.io',    color: '#7c3aed', bg: '#f5f3ff', badge: 'Read-only'       },
+  { role: 'Administrator',   email: 'admin@demo.msingi.io',     color: '#4f46e5', bg: '#eef2ff', badge: 'Full access'   },
+  { role: 'Deputy Principal',email: 'principal@demo.msingi.io', color: '#0891b2', bg: '#ecfeff', badge: 'Academic lead' },
+  { role: 'Teacher',         email: 'teacher@demo.msingi.io',   color: '#059669', bg: '#ecfdf5', badge: 'Classroom'     },
+  { role: 'Finance Officer', email: 'finance@demo.msingi.io',   color: '#d97706', bg: '#fffbeb', badge: 'Finance'       },
+  { role: 'Parent',          email: 'parent@demo.msingi.io',    color: '#7c3aed', bg: '#f5f3ff', badge: 'Guardian view' },
+  { role: 'Student',         email: 'student@demo.msingi.io',   color: '#db2777', bg: '#fdf2f8', badge: 'Student view'  },
 ];
 const DEMO_PASSWORD = 'Demo2025!';
 

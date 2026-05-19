@@ -35,6 +35,7 @@ const DEMO_USERS = [
   { id: 'u_demo_teacher',    name: 'Demo Teacher',        email: 'teacher@demo.msingi.io',    role: 'teacher'          },
   { id: 'u_demo_finance',    name: 'Demo Finance',        email: 'finance@demo.msingi.io',    role: 'finance'          },
   { id: 'u_demo_parent',     name: 'Demo Parent',         email: 'parent@demo.msingi.io',     role: 'parent'           },
+  { id: 'u_demo_student',    name: 'Demo Student',        email: 'student@demo.msingi.io',    role: 'student'          },
 ];
 
 async function seedDemo() {
@@ -128,7 +129,8 @@ async function seedDemo() {
       deputy_principal: { students: R, teachers: R, classes: RCU, attendance: RCU, finance: R, behaviour: RCU, exams: RCU, grades: RCU, admissions: R, timetable: RCU, messages: RCU, settings: R, assessment: RCU, report_cards: RCU },
       teacher:          { students: R, teachers: R, classes: R, attendance: RCU, finance: [], behaviour: RCU, exams: RCU, grades: RCU, admissions: [], timetable: R, messages: RCU, settings: [], assessment: RCU, report_cards: R },
       finance:          { students: R, teachers: [], classes: [], attendance: [], finance: FULL, behaviour: [], exams: [], grades: [], admissions: R, timetable: [], messages: R, settings: [], assessment: [], report_cards: [] },
-      parent:           { students: R, teachers: [], classes: [], attendance: R, finance: R, behaviour: R, exams: [], grades: R, admissions: [], timetable: [], messages: RCU, settings: [], assessment: [], report_cards: R },
+      parent:           { students: R, teachers: [], classes: [], attendance: R, finance: R, behaviour: R, exams: [], grades: R, admissions: [], timetable: R, messages: RCU, settings: [], assessment: R, report_cards: R },
+      student:          { students: R, teachers: [], classes: R, attendance: R, finance: R, behaviour: R, exams: R, grades: R, admissions: [], timetable: R, messages: RCU, settings: [], assessment: R, report_cards: R },
     };
 
     await Promise.all(Object.entries(PERMS).map(([roleKey, permissions]) =>
