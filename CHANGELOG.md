@@ -6,6 +6,36 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.9.11] — 2026-05-19  Premium UI Overhaul: Behaviour BPS + Student Profile
+
+### Added — Behaviour Point System (`client/src/pages/behaviour/BehaviourPage.jsx`, `bpsConstants.js`)
+- **BPS matrix** — 8 categories, 80+ behaviour items with locked point values; staff cannot override points
+- **4-step award wizard** — Student search → Merit/Demerit toggle → Category + item select → Confirm
+- **Serious infraction enforcement** — mandatory note (min 10 chars) when |pts| ≥ 5
+- **Stage preview** — shows intervention stage trigger before submission
+- **Milestone preview** — shows merit milestone unlock before submission
+- **Intervention stages** — 5 thresholds (5/10/20/35/50 demerit pts, 90-day rolling window): Monitor → Caution → Intervention → Formal Support → Senior Review
+- **Merit milestones** — Bronze(25) → Silver(50) → Gold(100) → Principal's Award(200) → Platinum(300), all-time cumulative
+- **Appeals tab** — list pending appeals, resolve with outcome and note; admin-only
+- **Houses tab** — settings-based house configuration (name + color picker), house leaderboard computed from student incident data (merits, demerits, net, member count), medal ranking
+
+### Added — `bpsConstants.js`
+- `MATRIX`, `STAGES`, `MILESTONES` constants (locked, school-agnostic)
+- Helpers: `meritTotal`, `demeritTotal`, `studentStage`, `studentMilestone`, `isSerious`
+- Exported for reuse in StudentProfile and future report cards
+
+### Rebuilt — Student Profile (`client/src/pages/students/StudentProfile.jsx`)
+- **Replaced emoji tabs** with lucide-react icons (User/CalendarCheck/Receipt/Scale/GraduationCap)
+- **Removed old dependencies** — PageSpinner, ErrorState, Badge, clsx all removed; inline patterns
+- **Attendance tab** — rate progress bar with colour coding, per-status count cards, threshold warning (<75% pastoral flag)
+- **Finance tab** — outstanding/total-billed/total-paid summary strip; currency from `session.school.currency` (not hardcoded)
+- **Behaviour tab** — full BPS integration: demerit stage card, merit milestone card, progress bars to next stage/milestone, full incident log with type icons
+- **Grades tab** — overall average card with progress bar, subject table with % colours
+- **Overview edit mode** — house dropdown populated from school settings houses array (completes houses end-to-end: configure in Behaviour → assign in Student Profile → leaderboard in Behaviour Houses tab)
+- No `alert()`, no hardcoded currency, RBAC-gated Edit button, framer-motion tab transitions
+
+---
+
 ## [4.9.10] — 2026-05-19  Stability Hardening: Login Plan Bug, Query Limits, Session Fix
 
 ### Fixed — Critical: Plan badge always showing "core" in UI (`client/src/pages/Login.jsx`, `store/auth.js`, `components/layout/TopBar.jsx`)
