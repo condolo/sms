@@ -479,6 +479,7 @@ export default function Landing() {
             >
               Modules
             </button>
+            <Link to="/plans"   className="hover:text-zinc-900 transition-colors">Plans</Link>
             <Link to="/contact" className="hover:text-zinc-900 transition-colors">Contact</Link>
           </div>
 

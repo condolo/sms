@@ -3,7 +3,7 @@
  * Enterprise-grade contact page matching the landing page aesthetic.
  */
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, ArrowRight, ArrowUp, CheckCircle, MessageCircle,
@@ -143,8 +143,19 @@ const WA_MESSAGE = encodeURIComponent(
 );
 const WA_URL = `https://wa.me/${WA_NUMBER}?text=${WA_MESSAGE}`;
 
+const PLAN_INQUIRY_MAP = {
+  core:       'Explore institutional onboarding',
+  standard:   'Explore institutional onboarding',
+  premium:    'Request a platform demonstration',
+  enterprise: 'Deployment and support options',
+};
+
 export default function Contact() {
-  const [form, setForm]           = useState({ name: '', institution: '', role: '', email: '', phone: '', inquiry: '', message: '' });
+  const [searchParams]            = useSearchParams();
+  const planParam                 = searchParams.get('plan');
+  const defaultInquiry            = PLAN_INQUIRY_MAP[planParam] || '';
+
+  const [form, setForm]           = useState({ name: '', institution: '', role: '', email: '', phone: '', inquiry: defaultInquiry, message: planParam ? `I'm interested in the ${planParam.charAt(0).toUpperCase() + planParam.slice(1)} plan.` : '' });
   const [submitted, setSubmitted] = useState(false);
   const [sending,   setSending]   = useState(false);
   const [socialLinks, setSocialLinks] = useState({});
