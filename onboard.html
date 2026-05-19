@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Get Started — InnoLearn</title>
+  <title>Get Started — Msingi</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
@@ -17,7 +17,7 @@
   <div class="ob-left">
     <div class="ob-brand">
       <div class="ob-brand-icon"><i class="fas fa-graduation-cap"></i></div>
-      <div class="ob-brand-name">Inno<span>Learn</span></div>
+      <div class="ob-brand-name">Ms<span>ingi</span></div>
     </div>
 
     <div class="ob-steps" id="ob-step-list">
@@ -55,8 +55,8 @@
       Already have an account?<br>
       <a href="index.html">Sign in to your portal →</a><br><br>
       Want to explore first?<br>
-      <a href="index.html?demo=InnoLearn">Try the InnoLearn demo →</a><br><br>
-      © 2026 InnoLearn · <a href="#">Privacy</a> · <a href="#">Terms</a>
+      <a href="/?demo=innolearn">Try the Msingi demo →</a><br><br>
+      © 2026 Msingi · <a href="#">Privacy</a> · <a href="#">Terms</a>
     </div>
   </div>
 
@@ -75,7 +75,7 @@
     <div class="ob-panel active" id="panel-1">
       <div class="ob-panel-header">
         <h2>Tell us about your school</h2>
-        <p>We'll set up your personalised InnoLearn portal in seconds.</p>
+        <p>We'll set up your personalised Msingi portal in seconds.</p>
       </div>
 
       <div class="ob-step-error" id="step-err-1" style="display:none">
@@ -86,7 +86,7 @@
       <div class="ob-form">
         <div class="ob-field">
           <label>School Full Name <span class="req">*</span></label>
-          <input type="text" id="school-name" placeholder="e.g. InnoLearn International School"
+          <input type="text" id="school-name" placeholder="e.g. Sunrise Academy"
                  oninput="onSchoolNameInput(this.value)" autocomplete="organization">
           <span class="field-error">School name is required</span>
         </div>
@@ -143,7 +143,7 @@
         <div class="ob-field">
           <label>Your School's URL Slug <span class="req">*</span></label>
           <div class="slug-preview">
-            <span class="slug-prefix">InnoLearn.com/</span>
+            <span class="slug-prefix">msingi.io/</span>
             <input type="text" id="school-slug" placeholder="your-school"
                    oninput="sanitiseSlug(this); checkSlugAvailability(this.value)" maxlength="40">
             <span class="slug-status" id="slug-status"></span>
@@ -438,7 +438,7 @@
 
       <label class="ob-check-label" style="margin-bottom:20px">
         <input type="checkbox" id="agree-terms" onchange="toggleLaunch()">
-        <span>I agree to the InnoLearn <a href="#" target="_blank">Terms of Service</a> and <a href="#" target="_blank">Privacy Policy</a></span>
+        <span>I agree to the Msingi <a href="#" target="_blank">Terms of Service</a> and <a href="#" target="_blank">Privacy Policy</a></span>
       </label>
 
       <button class="btn-ob-launch" id="launch-btn" onclick="launch()" disabled style="opacity:0.5;cursor:not-allowed">
@@ -465,7 +465,7 @@
           <i class="fas fa-hourglass-half"></i>
         </div>
         <h2>Application Submitted! ⏳</h2>
-        <p>Your InnoLearn application has been received and is <strong>under review</strong>. You will receive an email within <strong>24 hours</strong> once approved.</p>
+        <p>Your Msingi application has been received and is <strong>under review</strong>. You will receive an email within <strong>24 hours</strong> once approved.</p>
         <div class="ob-success-details" id="success-details-pending" style="border-left:3px solid #f59e0b">
           <div class="detail-row">
             <span class="lbl">School</span>
@@ -494,7 +494,7 @@
       <div id="success-active" style="display:none">
         <div class="ob-success-icon"><i class="fas fa-check"></i></div>
         <h2>You're all set! 🎉</h2>
-        <p>Your InnoLearn portal has been created. Sign in now to start setting up your school.</p>
+        <p>Your Msingi portal has been created. Sign in now to start setting up your school.</p>
         <div class="ob-success-details" id="success-details-active">
           <div class="detail-row">
             <span class="lbl">School</span>
@@ -535,7 +535,7 @@
 
 <script>
 /* ============================================================
-   InnoLearn Onboarding Wizard
+   Msingi Onboarding Wizard
    ============================================================ */
 
 let currentStep      = 1;
@@ -899,7 +899,7 @@ function populateReview() {
   document.getElementById('rv-short').textContent    = v('school-short') || '—';
   document.getElementById('rv-type').textContent     = TYPE_LABELS[type] || type || '—';
   document.getElementById('rv-location').textContent = [city, COUNTRY_LABELS[country] || country].filter(Boolean).join(', ') || '—';
-  document.getElementById('rv-url').textContent      = slug ? `InnoLearn.com/${slug}` : '—';
+  document.getElementById('rv-url').textContent      = slug ? `${slug}.msingi.io` : '—';
   document.getElementById('rv-admin-name').textContent  = v('admin-name') || '—';
   document.getElementById('rv-admin-email').textContent = v('admin-email') || '—';
 
