@@ -9,6 +9,7 @@ import { detectSchool } from '@/utils/schoolDetect.js';
 // ─── Eager pages ──────────────────────────────────────────────────────────────
 import Login   from '@/pages/Login.jsx';
 import Landing from '@/pages/Landing.jsx';
+import Contact from '@/pages/Contact.jsx';
 
 // ─── Lazy pages ───────────────────────────────────────────────────────────────
 const Dashboard      = lazy(() => import('@/pages/Dashboard.jsx'));
@@ -54,6 +55,9 @@ export const router = createBrowserRouter([
       ? <Navigate to="/login" replace />
       : <Landing />,
   },
+
+  // Contact — public, no auth required
+  { path: '/contact', element: <Contact /> },
 
   // Login — branded when on school subdomain, generic otherwise
   { path: '/login', element: <Login /> },

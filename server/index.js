@@ -43,15 +43,21 @@ ALLOWED_ORIGINS.push(
   'http://127.0.0.1:3005'
 );
 
+// Regex: allow any *.msingi.io subdomain (school portals live here)
+const MSINGI_SUBDOMAIN_RE = /^https:\/\/[a-z0-9][a-z0-9-]*\.msingi\.io$/;
+
 app.use(cors({
   origin: (origin, cb) => {
-    // Allow requests with no origin (mobile, Postman, server-to-server)
+    // Allow requests with no origin (mobile apps, Postman, server-to-server)
     if (!origin) return cb(null, true);
-    // Allow if origin is in the list OR we're not in production
-    if (ALLOWED_ORIGINS.includes(origin) || process.env.NODE_ENV !== 'production') {
+    // Allow explicit list OR any *.msingi.io subdomain OR non-production
+    if (
+      ALLOWED_ORIGINS.includes(origin) ||
+      MSINGI_SUBDOMAIN_RE.test(origin) ||
+      process.env.NODE_ENV !== 'production'
+    ) {
       return cb(null, true);
     }
-    // Block unknown origins in production
     console.warn(`[CORS] Blocked origin: ${origin}`);
     cb(new Error('Not allowed by CORS'));
   },
@@ -146,7 +152,7 @@ app.post('/api/announcements/:id/dismiss', authMiddleware, async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: '4.9.3',
+    version: '4.9.4',
     timestamp: new Date().toISOString(),
     db: require('./config/db').isConnected() ? 'connected' : 'disconnected'
   });

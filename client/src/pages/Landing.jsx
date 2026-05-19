@@ -6,15 +6,21 @@
  * Sections: Navbar · Hero + Dashboard Mockup · Pain Points · Trust Band ·
  *           Platform Modules · Academic Records · Infrastructure · CTA · Footer
  */
-import { useState } from 'react';
-import { motion } from 'framer-motion';
+import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Activity, AlertCircle, ArrowRight, Award, BarChart3, BookOpen,
+  Activity, AlertCircle, ArrowRight, ArrowUp, Award, BarChart3,
   Calendar, CheckCircle, ChevronRight, ClipboardList, DollarSign,
-  FileText, GraduationCap, Globe, Layers, Lock, MessageSquare,
-  ShieldCheck, TrendingUp, UserCheck, Users, Zap,
+  FileText, GraduationCap, Globe, Layers, Lock, MessageCircle,
+  MessageSquare, ShieldCheck, TrendingUp, UserCheck, Users, Zap,
 } from 'lucide-react';
 import { schoolPortalUrl, storeSchoolSlug } from '@/utils/schoolDetect.js';
+
+/* WhatsApp config */
+const WA_NUMBER  = '254769024153';
+const WA_MESSAGE = encodeURIComponent('Hello Msingi, I would like to learn more about the platform.');
+const WA_URL     = `https://wa.me/${WA_NUMBER}?text=${WA_MESSAGE}`;
 
 /* ─────────────────────────────────────────────────────────────────
    ANIMATION VARIANTS
@@ -279,6 +285,56 @@ function ReportCardMockup() {
 }
 
 /* ─────────────────────────────────────────────────────────────────
+   FLOATING ACTIONS  — WhatsApp + scroll-to-top
+   Fixed bottom-right, always visible on landing.
+───────────────────────────────────────────────────────────────── */
+function FloatingActions() {
+  const [showTop, setShowTop] = useState(false);
+
+  useEffect(() => {
+    function onScroll() { setShowTop(window.scrollY > 400); }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  return (
+    <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
+
+      {/* Scroll to top */}
+      <AnimatePresence>
+        {showTop && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0.7 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.7 }}
+            transition={{ duration: 0.2 }}
+            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+            aria-label="Scroll to top"
+            className="w-10 h-10 rounded-full bg-white border border-zinc-200 shadow-md flex items-center justify-center text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 transition-all"
+          >
+            <ArrowUp size={16} />
+          </motion.button>
+        )}
+      </AnimatePresence>
+
+      {/* WhatsApp */}
+      <a
+        href={WA_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Chat on WhatsApp"
+        className="group flex items-center gap-2.5 rounded-full bg-[#25D366] px-4 py-3 shadow-lg shadow-green-500/30 hover:shadow-xl hover:shadow-green-500/40 transition-all"
+      >
+        <MessageCircle size={18} className="text-white flex-shrink-0" />
+        <span className="text-sm font-semibold text-white pr-1 max-w-0 group-hover:max-w-[120px] overflow-hidden whitespace-nowrap transition-all duration-300 ease-out">
+          WhatsApp Support
+        </span>
+      </a>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────
    LANDING PAGE
 ───────────────────────────────────────────────────────────────── */
 export default function Landing() {
@@ -333,27 +389,24 @@ export default function Landing() {
 
           {/* Nav links */}
           <div className="hidden md:flex items-center gap-7 text-sm text-zinc-500">
-            <button onClick={() => goToSchool('innolearn')} className="hover:text-zinc-900 transition-colors">
-              Platform
-            </button>
             <a href="#modules" className="hover:text-zinc-900 transition-colors">Modules</a>
-            <a href="mailto:hello@msingi.io" className="hover:text-zinc-900 transition-colors">Contact</a>
+            <Link to="/contact" className="hover:text-zinc-900 transition-colors">Contact</Link>
           </div>
 
           {/* CTAs */}
           <div className="flex items-center gap-3">
             <button
-              onClick={() => goToSchool('innolearn')}
+              onClick={() => document.getElementById('find-school')?.scrollIntoView({ behavior: 'smooth' })}
               className="hidden sm:block text-sm text-zinc-500 hover:text-zinc-900 transition-colors font-medium"
             >
               Sign in
             </button>
-            <a
-              href="/onboard.html"
+            <Link
+              to="/contact"
               className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-700 transition-colors shadow-sm"
             >
               Book Demo
-            </a>
+            </Link>
           </div>
         </div>
       </motion.nav>
@@ -403,18 +456,18 @@ export default function Landing() {
 
           {/* CTAs */}
           <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center gap-3">
-            <a
-              href="/onboard.html"
+            <Link
+              to="/contact"
               className="group inline-flex items-center gap-2 rounded-xl bg-zinc-900 px-7 py-3.5 text-sm font-semibold text-white hover:bg-zinc-700 transition-all shadow-lg shadow-zinc-900/20"
             >
               Book a Demo
               <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" />
-            </a>
+            </Link>
             <button
               onClick={() => goToSchool('innolearn')}
               className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-7 py-3.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 transition-all"
             >
-              Explore Platform
+              Explore the Platform
               <ChevronRight size={15} className="text-zinc-400" />
             </button>
           </motion.div>
@@ -749,13 +802,13 @@ export default function Landing() {
               connected operational platform.
             </motion.p>
             <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center gap-3">
-              <a
-                href="/onboard.html"
+              <Link
+                to="/contact"
                 className="group inline-flex items-center gap-2 rounded-xl bg-zinc-900 px-8 py-4 text-sm font-semibold text-white hover:bg-zinc-700 transition-all shadow-xl shadow-zinc-900/15"
               >
                 Book a Demo
                 <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" />
-              </a>
+              </Link>
               <button
                 onClick={() => goToSchool('innolearn')}
                 className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 px-8 py-4 text-sm font-semibold text-zinc-600 hover:bg-zinc-50 transition-all"
@@ -771,7 +824,7 @@ export default function Landing() {
       {/* ══════════════════════════════════════════
           FIND SCHOOL
       ══════════════════════════════════════════ */}
-      <section className="bg-zinc-50 border-t border-zinc-100 py-14">
+      <section id="find-school" className="bg-zinc-50 border-t border-zinc-100 py-14">
         <div className="max-w-md mx-auto px-6 text-center">
           <p className="text-sm font-semibold text-zinc-800 mb-1">Already have a school account?</p>
           <p className="text-xs text-zinc-400 mb-5">Enter your school name to go to your dedicated portal.</p>
@@ -808,10 +861,17 @@ export default function Landing() {
           <p className="text-xs text-zinc-400">© {new Date().getFullYear()} Msingi. All rights reserved.</p>
           <div className="flex gap-5 text-xs text-zinc-400">
             <a href="mailto:hello@msingi.io" className="hover:text-zinc-700 transition-colors">hello@msingi.io</a>
-            <a href="/onboard.html" className="hover:text-zinc-700 transition-colors">Register a school</a>
+            <Link to="/contact" className="hover:text-zinc-700 transition-colors">Contact</Link>
+            {/* Platform admin — discreet, footer-only */}
+            <a href="/platform" className="hover:text-zinc-700 transition-colors opacity-40 hover:opacity-70">⚙</a>
           </div>
         </div>
       </footer>
+
+      {/* ══════════════════════════════════════════
+          FLOATING ACTIONS  (WhatsApp + scroll top)
+      ══════════════════════════════════════════ */}
+      <FloatingActions />
     </div>
   );
 }

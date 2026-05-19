@@ -1,0 +1,424 @@
+/**
+ * Msingi — Contact Page
+ * Enterprise-grade contact page matching the landing page aesthetic.
+ */
+import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import {
+  ArrowLeft, ArrowRight, CheckCircle, Mail, MessageCircle,
+  Building2, Users, GraduationCap, DollarSign, Briefcase,
+} from 'lucide-react';
+
+const EASE = [0.16, 1, 0.3, 1];
+
+const fadeUp = {
+  hidden:  { opacity: 0, y: 24 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: EASE } },
+};
+
+const stagger = {
+  hidden:  {},
+  visible: { transition: { staggerChildren: 0.08 } },
+};
+
+const VP = { once: true, amount: 0.2 };
+
+const WHO_WE_WORK_WITH = [
+  { Icon: Building2,     label: 'School owners and directors'          },
+  { Icon: GraduationCap, label: 'Principals and academic heads'        },
+  { Icon: DollarSign,    label: 'Finance and bursary departments'      },
+  { Icon: Briefcase,     label: 'Administrative and operations teams'  },
+  { Icon: Users,         label: 'Growing institutions seeking scalable infrastructure' },
+];
+
+const CONTACT_REASONS = [
+  'Request a platform demonstration',
+  'Explore institutional onboarding',
+  'Discuss custom operational workflows',
+  'Learn about academic reporting infrastructure',
+  'Understand deployment and support options',
+];
+
+const INQUIRY_OPTIONS = [
+  'Request a platform demonstration',
+  'Explore institutional onboarding',
+  'Discuss custom operational workflows',
+  'Academic reporting infrastructure',
+  'Deployment and support options',
+  'Other',
+];
+
+const ROLE_OPTIONS = [
+  'School Owner / Director',
+  'Principal / Head Teacher',
+  'Academic Head / HOD',
+  'Finance / Bursar',
+  'Administrator',
+  'IT Lead',
+  'Other',
+];
+
+/* WhatsApp link helper */
+const WA_NUMBER = '254769024153';
+const WA_MESSAGE = encodeURIComponent(
+  'Hello Msingi, I would like to learn more about the platform for my institution.'
+);
+const WA_URL = `https://wa.me/${WA_NUMBER}?text=${WA_MESSAGE}`;
+
+export default function Contact() {
+  const [form, setForm]       = useState({ name: '', institution: '', role: '', email: '', phone: '', inquiry: '', message: '' });
+  const [submitted, setSubmitted] = useState(false);
+  const [sending,   setSending]   = useState(false);
+
+  /* Scroll to top on mount */
+  useEffect(() => { window.scrollTo({ top: 0, behavior: 'smooth' }); }, []);
+
+  function handleChange(e) {
+    setForm(f => ({ ...f, [e.target.name]: e.target.value }));
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.name || !form.institution || !form.email) return;
+    setSending(true);
+
+    /* Build a mailto body as fallback; in production wire to /api/contact */
+    const subject = encodeURIComponent(`Msingi Enquiry — ${form.institution}`);
+    const body    = encodeURIComponent(
+      `Name: ${form.name}\nInstitution: ${form.institution}\nRole: ${form.role}\n` +
+      `Email: ${form.email}\nPhone: ${form.phone}\nInquiry: ${form.inquiry}\n\n${form.message}`
+    );
+
+    /* Short delay for UX, then show success */
+    await new Promise(r => setTimeout(r, 800));
+    setSending(false);
+    setSubmitted(true);
+
+    /* Open mailto as secondary action */
+    window.location.href = `mailto:hello@msingi.io?subject=${subject}&body=${body}`;
+  }
+
+  return (
+    <div className="min-h-screen bg-white text-zinc-900 antialiased">
+
+      {/* ── NAVBAR ── */}
+      <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-zinc-100/80">
+        <div className="max-w-7xl mx-auto px-6 lg:px-8 h-16 flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-2.5 group">
+            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white text-xs font-bold shadow-sm shadow-indigo-500/30">
+              M
+            </div>
+            <span className="text-[15px] font-bold text-zinc-900 tracking-tight">Msingi</span>
+          </Link>
+          <Link
+            to="/"
+            className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-900 transition-colors"
+          >
+            <ArrowLeft size={15} />
+            Back to home
+          </Link>
+        </div>
+      </nav>
+
+      {/* ── HERO ── */}
+      <section className="max-w-7xl mx-auto px-6 lg:px-8 pt-20 pb-16">
+        <motion.div
+          initial="hidden" animate="visible" variants={stagger}
+          className="max-w-3xl"
+        >
+          <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-zinc-400 mb-4">
+            Get in Touch
+          </motion.p>
+          <motion.h1 variants={fadeUp} className="text-4xl sm:text-5xl font-bold tracking-tighter text-zinc-900 leading-[1.05] mb-6">
+            Built for schools that
+            <br />
+            <span className="text-indigo-600">need more than software.</span>
+          </motion.h1>
+          <motion.p variants={fadeUp} className="text-lg text-zinc-500 leading-relaxed">
+            Msingi is built for schools that require more than disconnected tools and routine
+            administration. We help institutions centralise academics, finance, communication,
+            reporting, and operational workflows into one secure, scalable platform.
+          </motion.p>
+        </motion.div>
+      </section>
+
+      {/* ── MAIN CONTENT ── */}
+      <section className="max-w-7xl mx-auto px-6 lg:px-8 pb-24">
+        <div className="grid lg:grid-cols-5 gap-12 xl:gap-20">
+
+          {/* ── LEFT: Context ── */}
+          <motion.div
+            initial="hidden" whileInView="visible" viewport={VP} variants={stagger}
+            className="lg:col-span-2 space-y-10"
+          >
+            {/* Mission statement */}
+            <motion.div variants={fadeUp}>
+              <p className="text-sm text-zinc-500 leading-relaxed mb-4">
+                Whether you are exploring digital transformation for the first time or looking to
+                replace rigid legacy systems, our team is ready to help you evaluate how Msingi
+                can support your institution's operational goals.
+              </p>
+              <p className="text-sm text-zinc-500 leading-relaxed">
+                At Msingi, we believe modern schools require more than software — they require a
+                reliable digital foundation for institutional growth, accountability, and
+                operational clarity.
+              </p>
+            </motion.div>
+
+            {/* Who we work with */}
+            <motion.div variants={fadeUp}>
+              <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400 mb-5">We work closely with</p>
+              <div className="space-y-3">
+                {WHO_WE_WORK_WITH.map(({ Icon, label }) => (
+                  <div key={label} className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center flex-shrink-0">
+                      <Icon size={14} />
+                    </div>
+                    <span className="text-sm text-zinc-700">{label}</span>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+
+            {/* Contact for */}
+            <motion.div variants={fadeUp}>
+              <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400 mb-5">Contact us to</p>
+              <div className="space-y-2.5">
+                {CONTACT_REASONS.map((reason) => (
+                  <div key={reason} className="flex items-start gap-3">
+                    <div className="w-4 h-4 rounded-full bg-indigo-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <CheckCircle size={9} className="text-white" />
+                    </div>
+                    <span className="text-sm text-zinc-600">{reason}</span>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+
+            {/* Direct contact options */}
+            <motion.div variants={fadeUp} className="space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400 mb-5">Direct contact</p>
+
+              <a
+                href="mailto:hello@msingi.io"
+                className="flex items-center gap-3 rounded-xl border border-zinc-100 bg-zinc-50 px-4 py-3.5 hover:border-zinc-200 hover:bg-white transition-all group"
+              >
+                <div className="w-8 h-8 rounded-lg bg-zinc-200 flex items-center justify-center flex-shrink-0 group-hover:bg-indigo-100 transition-colors">
+                  <Mail size={15} className="text-zinc-600 group-hover:text-indigo-600 transition-colors" />
+                </div>
+                <div>
+                  <p className="text-xs text-zinc-400 font-medium">Email us</p>
+                  <p className="text-sm font-semibold text-zinc-800">hello@msingi.io</p>
+                </div>
+              </a>
+
+              <a
+                href={WA_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 rounded-xl border border-green-100 bg-green-50 px-4 py-3.5 hover:border-green-200 hover:bg-green-50/80 transition-all group"
+              >
+                <div className="w-8 h-8 rounded-lg bg-green-500 flex items-center justify-center flex-shrink-0 shadow-sm shadow-green-500/30">
+                  <MessageCircle size={15} className="text-white" />
+                </div>
+                <div>
+                  <p className="text-xs text-green-600 font-medium">WhatsApp us</p>
+                  <p className="text-sm font-semibold text-zinc-800">+254 769 024 153</p>
+                </div>
+                <span className="ml-auto text-[10px] bg-green-500 text-white rounded-full px-2 py-0.5 font-semibold">
+                  Live support
+                </span>
+              </a>
+            </motion.div>
+          </motion.div>
+
+          {/* ── RIGHT: Contact form ── */}
+          <motion.div
+            initial={{ opacity: 0, y: 32 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={VP}
+            transition={{ duration: 0.7, ease: EASE }}
+            className="lg:col-span-3"
+          >
+            {submitted ? (
+              /* ── Success state ── */
+              <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-12 text-center">
+                <div className="w-14 h-14 rounded-full bg-emerald-500 flex items-center justify-center mx-auto mb-5 shadow-lg shadow-emerald-500/25">
+                  <CheckCircle size={26} className="text-white" />
+                </div>
+                <h3 className="text-xl font-bold text-zinc-900 mb-2">We'll be in touch.</h3>
+                <p className="text-sm text-zinc-500 max-w-sm mx-auto mb-6">
+                  Your enquiry has been received. Our team typically responds within one business day.
+                  For immediate assistance, reach us directly on WhatsApp.
+                </p>
+                <a
+                  href={WA_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded-xl bg-green-500 px-6 py-3 text-sm font-semibold text-white hover:bg-green-600 transition-colors shadow-sm"
+                >
+                  <MessageCircle size={15} />
+                  Chat on WhatsApp
+                </a>
+              </div>
+            ) : (
+              /* ── Form ── */
+              <form
+                onSubmit={handleSubmit}
+                className="rounded-2xl border border-zinc-100 bg-white p-8 shadow-sm space-y-5"
+              >
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400 mb-1">Send us a message</p>
+                  <h2 className="text-lg font-bold text-zinc-900">Tell us about your institution</h2>
+                </div>
+
+                {/* Name + Institution */}
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-600 mb-1.5">Full name <span className="text-red-400">*</span></label>
+                    <input
+                      type="text"
+                      name="name"
+                      value={form.name}
+                      onChange={handleChange}
+                      required
+                      placeholder="Dr. Jane Mwangi"
+                      className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300 transition"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-600 mb-1.5">Institution <span className="text-red-400">*</span></label>
+                    <input
+                      type="text"
+                      name="institution"
+                      value={form.institution}
+                      onChange={handleChange}
+                      required
+                      placeholder="Greenwood Academy"
+                      className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300 transition"
+                    />
+                  </div>
+                </div>
+
+                {/* Role */}
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-600 mb-1.5">Your role</label>
+                  <select
+                    name="role"
+                    value={form.role}
+                    onChange={handleChange}
+                    className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300 transition"
+                  >
+                    <option value="">Select your role…</option>
+                    {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+
+                {/* Email + Phone */}
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-600 mb-1.5">Email address <span className="text-red-400">*</span></label>
+                    <input
+                      type="email"
+                      name="email"
+                      value={form.email}
+                      onChange={handleChange}
+                      required
+                      placeholder="jane@greenwood.ac.ke"
+                      className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300 transition"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-600 mb-1.5">Phone / WhatsApp</label>
+                    <input
+                      type="tel"
+                      name="phone"
+                      value={form.phone}
+                      onChange={handleChange}
+                      placeholder="+254 700 000 000"
+                      className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300 transition"
+                    />
+                  </div>
+                </div>
+
+                {/* Inquiry type */}
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-600 mb-1.5">What are you interested in?</label>
+                  <select
+                    name="inquiry"
+                    value={form.inquiry}
+                    onChange={handleChange}
+                    className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300 transition"
+                  >
+                    <option value="">Select an option…</option>
+                    {INQUIRY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>
+
+                {/* Message */}
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-600 mb-1.5">Additional context</label>
+                  <textarea
+                    name="message"
+                    value={form.message}
+                    onChange={handleChange}
+                    rows={4}
+                    placeholder="Tell us about your school — size, current systems, what challenges you're facing, or any specific requirements…"
+                    className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300 transition resize-none"
+                  />
+                </div>
+
+                {/* Submit */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 pt-2">
+                  <button
+                    type="submit"
+                    disabled={sending || !form.name || !form.institution || !form.email}
+                    className="group inline-flex items-center gap-2 rounded-xl bg-zinc-900 px-6 py-3 text-sm font-semibold text-white hover:bg-zinc-700 disabled:opacity-40 transition-all shadow-sm"
+                  >
+                    {sending ? (
+                      <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <ArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
+                    )}
+                    {sending ? 'Sending…' : 'Send enquiry'}
+                  </button>
+
+                  <a
+                    href={WA_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 text-sm font-semibold text-green-600 hover:text-green-700 transition-colors"
+                  >
+                    <MessageCircle size={14} />
+                    Or chat on WhatsApp
+                  </a>
+                </div>
+
+                <p className="text-xs text-zinc-400">
+                  By submitting you agree to our privacy policy. We'll only use your details to respond to your enquiry.
+                </p>
+              </form>
+            )}
+          </motion.div>
+        </div>
+      </section>
+
+      {/* ── FOOTER ── */}
+      <footer className="border-t border-zinc-100 py-10 bg-white">
+        <div className="max-w-7xl mx-auto px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-5">
+          <Link to="/" className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center text-white text-[10px] font-bold">M</div>
+            <span className="text-sm font-bold text-zinc-900">Msingi</span>
+            <span className="text-xs text-zinc-400 ml-1">· The School Operating System</span>
+          </Link>
+          <p className="text-xs text-zinc-400">© {new Date().getFullYear()} Msingi. All rights reserved.</p>
+          <div className="flex gap-5 text-xs text-zinc-400">
+            <a href="mailto:hello@msingi.io" className="hover:text-zinc-700 transition-colors">hello@msingi.io</a>
+            <a href={WA_URL} target="_blank" rel="noopener noreferrer" className="hover:text-zinc-700 transition-colors">WhatsApp</a>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
