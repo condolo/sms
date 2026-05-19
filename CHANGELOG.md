@@ -6,6 +6,42 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.9.1] — 2026-05-19  Critical Security & Integrity Fixes (Platform Audit)
+
+### Fixed — Critical: RBAC Permission Format Mismatch (`server/routes/onboard.js`)
+- `_defaultPerms()` was seeding the legacy object format `{ view: true, edit: true }` but `middleware/rbac.js` expects the array format `{ students: ['read', 'create', 'update'] }`. This caused **100% of non-admin role users on every onboarded school to get 403 on every route**.
+- All role permission maps rewritten to array format matching the RBAC middleware contract
+- `superadmin` permissions now use `ALL_MODULES` array instead of `{ _all: { view: true } }`
+- Added `scripts/repair-permissions.js` — run once to fix all existing schools: `node scripts/repair-permissions.js`
+
+### Fixed — Critical: PDF Endpoint `ReferenceError: userId is not defined` (`server/routes/report-cards.js`)
+- `GET /:id/pdf` destructured `{ schoolId, role, guardianOf }` from `req.jwtUser` but used `userId` in the guardian audit log write — `ReferenceError` on every PDF request from a parent/guardian
+- Added `userId` to destructured fields
+
+### Fixed — Critical: `sync.js` Security Hardening
+- `GET /api/sync` restricted to `superadmin`/`admin` roles only (previously open to any authenticated role — teachers, students, parents could download the full school DB including password hashes)
+- Sensitive fields (`password`, `mfaOtp`, `mfaExpiry`, `tempPassword`) stripped from all sync output
+- `users` and `audit_log` collections excluded from export
+- `POST /api/sync` disabled (returns `HTTP 410 Gone`) — the write path accepted arbitrary unvalidated data to any collection including `users`, enabling role escalation
+- Now redirects to `/api/import-export` for structured validated imports
+
+### Added — High: 9 Missing Database Indexes (`server/utils/indexes.js`)
+- `users(schoolId, email)` — **critical**: login hot path queried on every authentication
+- `teachers(schoolId, status)`
+- `messages(schoolId, recipientId, createdAt)`, `messages(schoolId, senderId, createdAt)`
+- `behaviour_incidents(schoolId, studentId, date)`
+- `admissions(schoolId, stage, createdAt)`
+- `timetable(schoolId, classId, dayOfWeek, period)`
+- `invoices(schoolId, studentId, status)`, `invoices(schoolId, status, dueDate)`
+- `payments(schoolId, invoiceId)`
+
+### Fixed — Medium: Behaviour Appeal Outcome Logic (`server/routes/behaviour.js`)
+- Both `'overturned'` and `'upheld'` outcomes mapped to `'resolved'` (dead ternary — both branches returned the same value)
+- Now correctly: `'overturned'` → incident status `'overturned'`; `'upheld'` → `'closed'`
+- Also writes `appealOutcome` field to incident for full audit trail
+
+---
+
 ## [4.9.0] — 2026-05-19  Plan Gating Fix + Bulk Import/Export
 
 ### Fixed — Plan Gating (`server/middleware/plan.js`)
