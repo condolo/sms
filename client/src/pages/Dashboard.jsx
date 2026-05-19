@@ -1,19 +1,26 @@
 /* ============================================================
-   Dashboard — Premium Enterprise Home
-   Linear/Stripe aesthetic • Role-aware • Real data
+   Dashboard — Premium Enterprise Home with Charts
+   recharts: PieChart, BarChart · Role-aware · Real data
    ============================================================ */
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
+  PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
+} from 'recharts';
+import {
   Users, UserCheck, BadgeDollarSign, ClipboardList,
   GraduationCap, BookOpen, Calendar, TrendingUp,
   ArrowRight, X, Bell, ChevronRight, Sparkles,
-  BarChart3, Clock, AlertTriangle,
+  BarChart3, Clock, AlertTriangle, Wallet,
 } from 'lucide-react';
 import {
-  students, attendance, finance, admissions, announcements as announcementsApi,
+  students as studentsApi,
+  finance   as financeApi,
+  admissions as admissionsApi,
+  announcements as announcementsApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 
@@ -30,83 +37,83 @@ function formatDate(iso) {
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
-
 const AVATAR_COLORS = [
-  'from-violet-500 to-purple-600', 'from-blue-500 to-cyan-600',
-  'from-emerald-500 to-teal-600',  'from-amber-500 to-orange-600',
-  'from-pink-500 to-rose-600',     'from-indigo-500 to-blue-600',
+  'from-violet-500 to-purple-600','from-blue-500 to-cyan-600',
+  'from-emerald-500 to-teal-600', 'from-amber-500 to-orange-600',
+  'from-pink-500 to-rose-600',    'from-indigo-500 to-blue-600',
 ];
 function avatarColor(name = '') {
   return AVATAR_COLORS[(name.charCodeAt(0) || 0) % AVATAR_COLORS.length];
+}
+
+/* ── Chart colour palettes ────────────────────────────────── */
+const GENDER_COLORS   = { male: '#8b5cf6', female: '#ec4899', other: '#6b7280', prefer_not_to_say: '#94a3b8' };
+const STATUS_COLORS   = { active: '#10b981', inactive: '#94a3b8', suspended: '#f59e0b', graduated: '#6366f1', transferred: '#3b82f6' };
+const STAGE_COLORS    = { enquiry: '#8b5cf6', application: '#3b82f6', assessment: '#f59e0b', interview: '#f97316', offer: '#06b6d4', acceptance: '#14b8a6', enrolled: '#10b981', withdrawn: '#94a3b8', rejected: '#ef4444' };
+const METHOD_COLORS   = ['#8b5cf6','#3b82f6','#10b981','#f59e0b','#ec4899'];
+const FINANCE_COLORS  = ['#10b981','#f59e0b'];
+
+/* ── Custom tooltip ───────────────────────────────────────── */
+function ChartTip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="bg-slate-900 text-white text-xs rounded-lg px-3 py-2 shadow-xl">
+      <p className="font-medium">{payload[0].name}</p>
+      <p className="text-slate-300 mt-0.5">{payload[0].value?.toLocaleString()}</p>
+    </div>
+  );
 }
 
 /* ══════════════════════════════════════════════════════════
    MAIN DASHBOARD
    ══════════════════════════════════════════════════════════ */
 export default function Dashboard() {
-  const qc   = useQueryClient();
-  const user  = useAuthStore(s => s.session?.user);
+  const qc     = useQueryClient();
+  const user   = useAuthStore(s => s.session?.user);
   const school = useAuthStore(s => s.session?.school);
-  const can   = useAuthStore(s => s.can.bind(s));
+  const can    = useAuthStore(s => s.can.bind(s));
 
-  // School currency — multi-tenant aware
   const currency       = school?.currency       ?? 'KES';
   const currencySymbol = school?.currencySymbol ?? 'KSh';
 
   function fmtCurrency(n) {
     if (n == null) return '—';
     try {
-      return new Intl.NumberFormat('en-KE', {
-        style: 'currency', currency, maximumFractionDigits: 0,
-      }).format(n);
+      return new Intl.NumberFormat('en-KE', { style: 'currency', currency, maximumFractionDigits: 0 }).format(n);
     } catch {
       return `${currencySymbol} ${new Intl.NumberFormat().format(n)}`;
     }
   }
-  function fmt(n) {
-    if (n == null) return '—';
-    return new Intl.NumberFormat().format(n);
-  }
+  function fmt(n) { return n == null ? '—' : new Intl.NumberFormat().format(n); }
 
-  const today = new Date().toISOString().slice(0, 10);
-  const role  = user?.role ?? '';
-
-  // Visibility gates — finance sensitive; teachers don't need fee data
-  const canViewFinance    = can('finance')    || role === 'admin' || role === 'superadmin';
-  const canViewAttendance = can('attendance') || role === 'admin' || role === 'superadmin' || role === 'teacher';
-  const canViewAdmissions = can('admissions') || role === 'admin' || role === 'superadmin';
+  const role           = user?.role ?? '';
+  const canViewFinance = can('finance')    || role === 'admin' || role === 'superadmin';
+  const canViewAdm     = can('admissions') || role === 'admin' || role === 'superadmin';
 
   /* ── Queries ──────────────────────────────────────────── */
-  const { data: studentsData, isLoading: studentsLoading, isError: studentsError } = useQuery({
-    queryKey: ['students', 'count'],
-    queryFn:  () => students.list({ limit: 1, status: 'active' }),
+  const { data: stuStats, isLoading: stuLoading, isError: stuError } = useQuery({
+    queryKey: ['students', 'stats'],
+    queryFn:  () => studentsApi.stats(),
     staleTime: 5 * 60_000,
-  });
-
-  const { data: attData, isLoading: attLoading, isError: attError } = useQuery({
-    queryKey: ['attendance', 'summary', today],
-    queryFn:  () => attendance.summary({ dateFrom: today, dateTo: today }),
-    enabled:  canViewAttendance,
-    staleTime: 2 * 60_000,
   });
 
   const { data: finData, isLoading: finLoading, isError: finError } = useQuery({
     queryKey: ['finance', 'summary'],
-    queryFn:  () => finance.summary({ year: new Date().getFullYear() }),
+    queryFn:  () => financeApi.summary(),
     enabled:  canViewFinance,
     staleTime: 5 * 60_000,
   });
 
   const { data: admData, isLoading: admLoading, isError: admError } = useQuery({
     queryKey: ['admissions', 'stats'],
-    queryFn:  () => admissions.stats(),
-    enabled:  canViewAdmissions,
+    queryFn:  () => admissionsApi.stats(),
+    enabled:  canViewAdm,
     staleTime: 5 * 60_000,
   });
 
   const { data: recentData, isLoading: recentLoading } = useQuery({
     queryKey: ['students', 'recent'],
-    queryFn:  () => students.list({ limit: 8, sort: '-createdAt', status: 'active' }),
+    queryFn:  () => studentsApi.list({ limit: 8, sort: '-createdAt', status: 'active' }),
     staleTime: 2 * 60_000,
   });
 
@@ -116,21 +123,52 @@ export default function Dashboard() {
     staleTime: 60_000,
   });
 
-  /* ── Derived values ───────────────────────────────────── */
-  const totalStudents  = studentsData?.pagination?.total ?? null;
-  const presentToday   = attData?.data?.presentCount     ?? null;
-  const attendanceRate = attData?.data?.rate != null ? Math.round(attData.data.rate) : null;
-  const outstanding    = finData?.data?.outstanding       ?? null;
+  /* ── Derived ──────────────────────────────────────────── */
+  const statsObj      = stuStats?.data ?? {};
+  const totalStudents = statsObj.total   ?? null;
+  const activeStudents= statsObj.active  ?? null;
 
-  // CORRECT stats parsing: { total, byStage: [{ stage, count, highPriority }] }
-  const byStageArr     = admData?.data?.byStage ?? [];
-  const activeApps     = byStageArr
-    .filter(s => !['enrolled', 'withdrawn', 'rejected'].includes(s.stage))
-    .reduce((a, s) => a + (s.count ?? 0), 0);
-  const totalApps      = admData?.data?.total ?? null;
+  // Gender pie data
+  const genderData = (statsObj.byGender ?? []).map(g => ({
+    name:  g._id ? (g._id.charAt(0).toUpperCase() + g._id.slice(1)) : 'Unknown',
+    value: g.count,
+    fill:  GENDER_COLORS[g._id] ?? '#94a3b8',
+  }));
+
+  // Status donut data
+  const statusData = (statsObj.byStatus ?? []).map(s => ({
+    name:  s._id ? (s._id.charAt(0).toUpperCase() + s._id.slice(1)) : 'Unknown',
+    value: s.count,
+    fill:  STATUS_COLORS[s._id] ?? '#94a3b8',
+  }));
+
+  // Finance
+  const invoices        = finData?.data?.invoices ?? {};
+  const totalPaid       = invoices.totalPaid    ?? null;
+  const totalBalance    = invoices.totalBalance ?? null;
+  const totalInvoiced   = invoices.totalInvoiced ?? null;
+  const paymentMethods  = (finData?.data?.paymentsByMethod ?? []).map((m, i) => ({
+    name:  m._id ?? 'Other',
+    value: m.totalCollected,
+    count: m.count,
+    fill:  METHOD_COLORS[i % METHOD_COLORS.length],
+  }));
+  const finPieData = totalPaid != null ? [
+    { name: 'Collected', value: totalPaid,    fill: FINANCE_COLORS[0] },
+    { name: 'Outstanding', value: totalBalance ?? 0, fill: FINANCE_COLORS[1] },
+  ] : [];
+
+  // Admissions funnel bar chart
+  const byStageArr  = admData?.data?.byStage ?? [];
+  const activeApps  = byStageArr.filter(s => !['enrolled','withdrawn','rejected'].includes(s.stage)).reduce((a, s) => a + (s.count ?? 0), 0);
+  const admBarData  = byStageArr.map(s => ({
+    stage: s.stage.charAt(0).toUpperCase() + s.stage.slice(1),
+    count: s.count,
+    fill:  STAGE_COLORS[s.stage] ?? '#94a3b8',
+  }));
 
   const recentStudents = recentData?.data ?? [];
-  const announcs       = annData?.data ?? [];
+  const announcs       = annData?.data    ?? [];
 
   /* ── Dismiss announcement ─────────────────────────────── */
   const dismissMutation = useMutation({
@@ -141,7 +179,7 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-slate-50">
 
-      {/* ── Announcements banner ────────────────────────── */}
+      {/* ── Announcements ───────────────────────────────── */}
       <AnimatePresence>
         {announcs.map(ann => (
           <motion.div
@@ -154,17 +192,14 @@ export default function Dashboard() {
               <p className="text-sm font-medium text-amber-900">{ann.title}</p>
               {ann.body && <p className="text-xs text-amber-700 mt-0.5">{ann.body}</p>}
             </div>
-            <button
-              onClick={() => dismissMutation.mutate(ann.id)}
-              className="shrink-0 text-amber-500 hover:text-amber-700 transition p-0.5"
-            >
+            <button onClick={() => dismissMutation.mutate(ann.id)} className="text-amber-400 hover:text-amber-700 transition p-0.5">
               <X size={14} />
             </button>
           </motion.div>
         ))}
       </AnimatePresence>
 
-      {/* ── Header ──────────────────────────────────────── */}
+      {/* ── Page header ─────────────────────────────────── */}
       <div className="bg-white border-b border-slate-200 px-6 py-6">
         <div className="max-w-screen-2xl mx-auto flex items-end justify-between gap-4">
           <div>
@@ -183,67 +218,180 @@ export default function Dashboard() {
           </div>
           <div className="hidden sm:flex items-center gap-2 text-xs text-slate-400">
             <Clock size={13} />
-            <span>Last updated just now</span>
+            <span>Live data</span>
           </div>
         </div>
       </div>
 
       <div className="max-w-screen-2xl mx-auto px-6 py-6 space-y-6">
 
-        {/* ── KPI cards ─────────────────────────────────── */}
+        {/* ── KPI Cards ─────────────────────────────────── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <KpiCard
             icon={<Users size={18} />}
-            label="Active Students"
+            label="Total Students"
             value={fmt(totalStudents)}
-            accent="violet"
-            to="/students"
-            loading={studentsLoading}
-            error={studentsError}
-            sub={totalStudents != null ? `${totalStudents} enrolled` : null}
+            sub={activeStudents != null ? `${fmt(activeStudents)} active` : null}
+            accent="violet" to="/students"
+            loading={stuLoading} error={stuError}
           />
-          {canViewAttendance && (
+          <KpiCard
+            icon={<GraduationCap size={18} />}
+            label="Active Enrolment"
+            value={fmt(activeStudents)}
+            sub="Currently enrolled"
+            accent="emerald" to="/students"
+            loading={stuLoading} error={stuError}
+          />
+          {canViewFinance && (
             <KpiCard
-              icon={<UserCheck size={18} />}
-              label="Present Today"
-              value={presentToday != null ? fmt(presentToday) : '—'}
-              sub={attendanceRate != null ? `${attendanceRate}% attendance rate` : 'No data yet'}
-              accent="emerald"
-              to="/attendance"
-              loading={attLoading}
-              error={attError}
+              icon={<BadgeDollarSign size={18} />}
+              label="Fees Collected"
+              value={fmtCurrency(totalPaid)}
+              sub={totalInvoiced != null ? `of ${fmtCurrency(totalInvoiced)} invoiced` : 'This year'}
+              accent="blue" to="/finance"
+              loading={finLoading} error={finError}
             />
           )}
           {canViewFinance && (
             <KpiCard
-              icon={<BadgeDollarSign size={18} />}
+              icon={<Wallet size={18} />}
               label="Outstanding Fees"
-              value={fmtCurrency(outstanding)}
-              sub="Current academic year"
-              accent="amber"
-              to="/finance"
-              loading={finLoading}
-              error={finError}
-            />
-          )}
-          {canViewAdmissions && (
-            <KpiCard
-              icon={<ClipboardList size={18} />}
-              label="Active Applications"
-              value={fmt(activeApps || totalApps)}
-              sub={byStageArr.length > 0 ? `${byStageArr.find(s => s.stage === 'enquiry')?.count ?? 0} new enquiries` : 'View pipeline'}
-              accent="blue"
-              to="/admissions"
-              loading={admLoading}
-              error={admError}
+              value={fmtCurrency(totalBalance)}
+              sub="Unpaid balance"
+              accent="amber" to="/finance"
+              loading={finLoading} error={finError}
             />
           )}
         </div>
 
-        {/* ── Main content ──────────────────────────────── */}
+        {/* ── Charts row ────────────────────────────────── */}
         <div className="grid lg:grid-cols-3 gap-6">
 
-          {/* Recent Students — 2/3 width */}
+          {/* Gender pie */}
+          <ChartCard title="Students by Gender" icon={<Users size={14} />} loading={stuLoading}>
+            {genderData.length > 0 ? (
+              <div className="flex items-center gap-4">
+                <ResponsiveContainer width="55%" height={160}>
+                  <PieChart>
+                    <Pie data={genderData} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={3} dataKey="value">
+                      {genderData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                    </Pie>
+                    <Tooltip content={<ChartTip />} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="flex-1 space-y-2">
+                  {genderData.map(d => (
+                    <div key={d.name} className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ background: d.fill }} />
+                        <span className="text-xs text-slate-600">{d.name}</span>
+                      </div>
+                      <span className="text-xs font-semibold text-slate-800 tabular-nums">{d.value.toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : <EmptyChart label="No student data yet" />}
+          </ChartCard>
+
+          {/* Finance donut */}
+          {canViewFinance && (
+            <ChartCard title="Fee Collection" icon={<BadgeDollarSign size={14} />} loading={finLoading}>
+              {finPieData.length > 0 && totalInvoiced ? (
+                <div className="flex items-center gap-4">
+                  <ResponsiveContainer width="55%" height={160}>
+                    <PieChart>
+                      <Pie data={finPieData} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={3} dataKey="value">
+                        {finPieData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                      </Pie>
+                      <Tooltip content={<ChartTip />} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="flex-1 space-y-3">
+                    {finPieData.map(d => (
+                      <div key={d.name}>
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2.5 h-2.5 rounded-full" style={{ background: d.fill }} />
+                            <span className="text-xs text-slate-600">{d.name}</span>
+                          </div>
+                          <span className="text-xs font-semibold text-slate-800">{fmtCurrency(d.value)}</span>
+                        </div>
+                        <div className="h-1.5 bg-slate-100 rounded-full">
+                          <div className="h-full rounded-full" style={{ width: `${Math.round((d.value / (totalInvoiced || 1)) * 100)}%`, background: d.fill }} />
+                        </div>
+                      </div>
+                    ))}
+                    <p className="text-[11px] text-slate-400 pt-1">
+                      {totalInvoiced ? `${Math.round((totalPaid / totalInvoiced) * 100)}% collection rate` : ''}
+                    </p>
+                  </div>
+                </div>
+              ) : <EmptyChart label="No finance data yet" />}
+            </ChartCard>
+          )}
+
+          {/* Payment methods */}
+          {canViewFinance && paymentMethods.length > 0 && (
+            <ChartCard title="Payment Methods" icon={<Wallet size={14} />} loading={finLoading}>
+              <div className="space-y-2.5">
+                {paymentMethods.slice(0, 5).map((m, i) => {
+                  const max = Math.max(...paymentMethods.map(x => x.value), 1);
+                  return (
+                    <div key={m.name}>
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2.5 h-2.5 rounded-full" style={{ background: m.fill }} />
+                          <span className="text-xs font-medium text-slate-600 capitalize">{m.name}</span>
+                          <span className="text-[10px] text-slate-400">({m.count})</span>
+                        </div>
+                        <span className="text-xs font-semibold text-slate-800">{fmtCurrency(m.value)}</span>
+                      </div>
+                      <div className="h-1.5 bg-slate-100 rounded-full">
+                        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.round((m.value / max) * 100)}%`, background: m.fill }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </ChartCard>
+          )}
+        </div>
+
+        {/* ── Admissions funnel bar chart ─────────────────── */}
+        {canViewAdm && admBarData.length > 0 && (
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <ClipboardList size={15} className="text-slate-400" />
+                <h2 className="text-sm font-semibold text-slate-700">Admissions Pipeline</h2>
+                <span className="text-xs text-slate-400">({activeApps} active)</span>
+              </div>
+              <Link to="/admissions" className="text-xs font-medium text-slate-500 hover:text-slate-800 flex items-center gap-1 transition">
+                Open board <ArrowRight size={12} />
+              </Link>
+            </div>
+            <div className="px-5 py-4">
+              <ResponsiveContainer width="100%" height={140}>
+                <BarChart data={admBarData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                  <XAxis dataKey="stage" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <Tooltip content={<ChartTip />} />
+                  <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={40}>
+                    {admBarData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+
+        {/* ── Bottom grid ───────────────────────────────── */}
+        <div className="grid lg:grid-cols-3 gap-6">
+
+          {/* Recent Students — 2/3 */}
           <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <div className="flex items-center gap-2">
@@ -279,17 +427,12 @@ export default function Dashboard() {
                   const av = avatarColor(`${s.firstName}${s.lastName}`);
                   return (
                     <li key={s._id ?? s.id}>
-                      <Link
-                        to={`/students/${s._id ?? s.id}`}
-                        className="flex items-center gap-3 px-5 py-3.5 hover:bg-slate-50 transition group"
-                      >
+                      <Link to={`/students/${s._id ?? s.id}`} className="flex items-center gap-3 px-5 py-3.5 hover:bg-slate-50 transition group">
                         <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${av} flex items-center justify-center text-white text-xs font-bold shrink-0`}>
                           {initials(s.firstName, s.lastName)}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-slate-800 truncate group-hover:text-slate-900">
-                            {s.firstName} {s.lastName}
-                          </p>
+                          <p className="text-sm font-medium text-slate-800 truncate">{s.firstName} {s.lastName}</p>
                           <p className="text-xs text-slate-400 truncate">
                             {s.admissionNumber && `${s.admissionNumber} · `}{s.className ?? s.classId ?? 'No class'}
                           </p>
@@ -304,73 +447,25 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Right column */}
-          <div className="space-y-5">
-            {/* Admissions funnel */}
-            {canViewAdmissions && byStageArr.length > 0 && (
-              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-                  <div className="flex items-center gap-2">
-                    <BarChart3 size={15} className="text-slate-400" />
-                    <h2 className="text-sm font-semibold text-slate-700">Admissions Funnel</h2>
+          {/* Quick actions */}
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
+              <TrendingUp size={15} className="text-slate-400" />
+              <h2 className="text-sm font-semibold text-slate-700">Quick Actions</h2>
+            </div>
+            <div className="px-3 py-3 space-y-1">
+              {QUICK_ACTIONS.map(qa => (
+                <Link key={qa.to} to={qa.to} className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-50 transition group">
+                  <div className={`w-7 h-7 rounded-lg ${qa.iconBg} flex items-center justify-center shrink-0`}>
+                    <qa.Icon size={14} className={qa.iconColor} />
                   </div>
-                  <Link to="/admissions" className="text-xs font-medium text-slate-500 hover:text-slate-800 flex items-center gap-1 transition">
-                    Open <ArrowRight size={12} />
-                  </Link>
-                </div>
-                <div className="px-5 py-4 space-y-2.5">
-                  {byStageArr.slice(0, 6).map(s => {
-                    const maxCount = Math.max(...byStageArr.map(x => x.count ?? 0), 1);
-                    const pct = Math.round(((s.count ?? 0) / maxCount) * 100);
-                    const STAGE_COLORS = {
-                      enquiry: 'bg-violet-400', application: 'bg-blue-400',
-                      assessment: 'bg-amber-400', interview: 'bg-orange-400',
-                      offer: 'bg-cyan-400', acceptance: 'bg-teal-400',
-                      enrolled: 'bg-emerald-500', withdrawn: 'bg-slate-300', rejected: 'bg-red-300',
-                    };
-                    return (
-                      <div key={s.stage}>
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs font-medium text-slate-600 capitalize">{s.stage}</span>
-                          <span className="text-xs text-slate-400 tabular-nums">{s.count ?? 0}</span>
-                        </div>
-                        <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full ${STAGE_COLORS[s.stage] ?? 'bg-slate-400'} transition-all duration-500`}
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Quick actions */}
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-              <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
-                <TrendingUp size={15} className="text-slate-400" />
-                <h2 className="text-sm font-semibold text-slate-700">Quick Actions</h2>
-              </div>
-              <div className="px-3 py-3 space-y-1">
-                {QUICK_ACTIONS.filter(qa => !qa.role || qa.role === role || role === 'admin' || role === 'superadmin').map(qa => (
-                  <Link
-                    key={qa.to}
-                    to={qa.to}
-                    className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-50 transition group"
-                  >
-                    <div className={`w-7 h-7 rounded-lg ${qa.iconBg} flex items-center justify-center shrink-0`}>
-                      <qa.Icon size={14} className={qa.iconColor} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-slate-700 group-hover:text-slate-900 transition">{qa.label}</p>
-                      <p className="text-[11px] text-slate-400">{qa.desc}</p>
-                    </div>
-                    <ChevronRight size={13} className="text-slate-300 group-hover:text-slate-500 transition shrink-0" />
-                  </Link>
-                ))}
-              </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-slate-700 group-hover:text-slate-900 transition">{qa.label}</p>
+                    <p className="text-[11px] text-slate-400">{qa.desc}</p>
+                  </div>
+                  <ChevronRight size={13} className="text-slate-300 group-hover:text-slate-500 transition shrink-0" />
+                </Link>
+              ))}
             </div>
           </div>
         </div>
@@ -379,23 +474,47 @@ export default function Dashboard() {
   );
 }
 
+/* ── Chart card wrapper ───────────────────────────────────── */
+function ChartCard({ title, icon, loading, children }) {
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
+        <span className="text-slate-400">{icon}</span>
+        <h2 className="text-sm font-semibold text-slate-700">{title}</h2>
+      </div>
+      <div className="px-5 py-4">
+        {loading ? (
+          <div className="flex items-center justify-center h-40 animate-pulse">
+            <div className="w-32 h-32 rounded-full bg-slate-100" />
+          </div>
+        ) : children}
+      </div>
+    </div>
+  );
+}
+
+function EmptyChart({ label }) {
+  return (
+    <div className="flex items-center justify-center h-32 text-slate-400">
+      <p className="text-xs">{label}</p>
+    </div>
+  );
+}
+
 /* ── KPI Card ─────────────────────────────────────────────── */
 const ACCENT = {
-  violet:  { bg: 'bg-violet-50',  icon: 'text-violet-600',  border: 'border-violet-100' },
-  emerald: { bg: 'bg-emerald-50', icon: 'text-emerald-600', border: 'border-emerald-100' },
-  amber:   { bg: 'bg-amber-50',   icon: 'text-amber-600',   border: 'border-amber-100'  },
-  blue:    { bg: 'bg-blue-50',    icon: 'text-blue-600',    border: 'border-blue-100'   },
+  violet:  { bg: 'bg-violet-50',  icon: 'text-violet-600'  },
+  emerald: { bg: 'bg-emerald-50', icon: 'text-emerald-600' },
+  amber:   { bg: 'bg-amber-50',   icon: 'text-amber-600'   },
+  blue:    { bg: 'bg-blue-50',    icon: 'text-blue-600'    },
 };
 
 function KpiCard({ icon, label, value, sub, to, accent = 'violet', loading, error }) {
   const c = ACCENT[accent] ?? ACCENT.violet;
-
   const inner = (
     <div className="bg-white border border-slate-200 rounded-xl p-5 hover:shadow-md hover:border-slate-300 transition-all group">
       <div className="flex items-start justify-between">
-        <div className={`w-10 h-10 rounded-xl ${c.bg} flex items-center justify-center ${c.icon} shrink-0`}>
-          {icon}
-        </div>
+        <div className={`w-10 h-10 rounded-xl ${c.bg} flex items-center justify-center ${c.icon} shrink-0`}>{icon}</div>
         {to && <ChevronRight size={14} className="text-slate-300 group-hover:text-slate-500 transition mt-1 shrink-0" />}
       </div>
       <div className="mt-4">
@@ -406,8 +525,7 @@ function KpiCard({ icon, label, value, sub, to, accent = 'violet', loading, erro
           </div>
         ) : error ? (
           <div className="flex items-center gap-1.5 text-slate-400">
-            <AlertTriangle size={13} />
-            <span className="text-xs">Failed to load</span>
+            <AlertTriangle size={13} /><span className="text-xs">Failed to load</span>
           </div>
         ) : (
           <>
@@ -419,40 +537,15 @@ function KpiCard({ icon, label, value, sub, to, accent = 'violet', loading, erro
       </div>
     </div>
   );
-
-  return to ? (
-    <Link to={to} className="block focus:outline-none focus:ring-2 focus:ring-slate-300 rounded-xl">
-      {inner}
-    </Link>
-  ) : (
-    inner
-  );
+  return to ? <Link to={to} className="block focus:outline-none rounded-xl">{inner}</Link> : inner;
 }
 
-/* ── Quick Actions config ─────────────────────────────────── */
+/* ── Quick Actions ────────────────────────────────────────── */
 const QUICK_ACTIONS = [
-  {
-    label: 'Enrol Student',    to: '/students',    desc: 'Add a new student record',
-    Icon: Users,        iconBg: 'bg-violet-50',  iconColor: 'text-violet-600',
-  },
-  {
-    label: 'Mark Attendance',  to: '/attendance',  desc: "Take today's register",
-    Icon: UserCheck,    iconBg: 'bg-emerald-50', iconColor: 'text-emerald-600',
-  },
-  {
-    label: 'Finance',          to: '/finance',     desc: 'Invoices and fee collection',
-    Icon: BadgeDollarSign, iconBg: 'bg-amber-50', iconColor: 'text-amber-600',
-  },
-  {
-    label: 'Admissions',       to: '/admissions',  desc: 'Review the pipeline',
-    Icon: ClipboardList, iconBg: 'bg-blue-50',   iconColor: 'text-blue-600',
-  },
-  {
-    label: 'Timetable',        to: '/timetable',   desc: 'View class schedules',
-    Icon: Calendar,     iconBg: 'bg-cyan-50',   iconColor: 'text-cyan-600',
-  },
-  {
-    label: 'Grades',           to: '/grades',      desc: 'Assessment and reports',
-    Icon: BookOpen,     iconBg: 'bg-indigo-50', iconColor: 'text-indigo-600',
-  },
+  { label: 'Enrol Student',   to: '/students',   desc: 'Add a new student record',    Icon: Users,            iconBg: 'bg-violet-50',  iconColor: 'text-violet-600'  },
+  { label: 'Mark Attendance', to: '/attendance', desc: "Take today's register",        Icon: UserCheck,        iconBg: 'bg-emerald-50', iconColor: 'text-emerald-600' },
+  { label: 'Finance',         to: '/finance',    desc: 'Invoices and fee collection',  Icon: BadgeDollarSign,  iconBg: 'bg-blue-50',    iconColor: 'text-blue-600'    },
+  { label: 'Admissions',      to: '/admissions', desc: 'Review the pipeline',          Icon: ClipboardList,    iconBg: 'bg-amber-50',   iconColor: 'text-amber-600'   },
+  { label: 'Timetable',       to: '/timetable',  desc: 'View class schedules',         Icon: Calendar,         iconBg: 'bg-cyan-50',    iconColor: 'text-cyan-600'    },
+  { label: 'Grades',          to: '/grades',     desc: 'Assessment and reports',       Icon: BookOpen,         iconBg: 'bg-indigo-50',  iconColor: 'text-indigo-600'  },
 ];

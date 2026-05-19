@@ -112,7 +112,8 @@ export const auth = {
 
 export const students = {
   ..._resource('students'),
-  bulkImport: (data) => _post('/students/bulk', data),
+  stats:      ()           => _get('/students/stats'),
+  bulkImport: (data)       => _post('/students/bulk', data),
 };
 
 export const teachers = _resource('teachers');

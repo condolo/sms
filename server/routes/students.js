@@ -52,6 +52,38 @@ function _validate(schema, data) {
   return { data: result.data };
 }
 
+/* ── GET /api/students/stats ─ Aggregate overview for dashboard ─ */
+router.get('/stats', authMiddleware, PLAN, rbac('students', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const Students = _model('students');
+
+    const [byStatus, byGender, byClass] = await Promise.all([
+      Students.aggregate([
+        { $match: { schoolId } },
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+        { $sort: { count: -1 } }
+      ]),
+      Students.aggregate([
+        { $match: { schoolId, status: 'active' } },
+        { $group: { _id: '$gender', count: { $sum: 1 } } },
+        { $sort: { count: -1 } }
+      ]),
+      Students.aggregate([
+        { $match: { schoolId, status: 'active' } },
+        { $group: { _id: '$classId', className: { $first: '$className' }, count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 10 }
+      ]),
+    ]);
+
+    const total  = byStatus.reduce((a, s) => a + s.count, 0);
+    const active = byStatus.find(s => s._id === 'active')?.count ?? 0;
+
+    return ok(res, { total, active, byStatus, byGender, byClass });
+  } catch (err) { console.error('[students GET /stats]', err); return E.serverError(res); }
+});
+
 /* ── GET /api/students ─ Paginated list ─────────────────────── */
 router.get('/', authMiddleware, PLAN, rbac('students', 'read'), async (req, res) => {
   try {
