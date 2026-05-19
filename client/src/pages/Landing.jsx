@@ -317,18 +317,15 @@ function FloatingActions() {
         )}
       </AnimatePresence>
 
-      {/* WhatsApp */}
+      {/* WhatsApp — always-visible circle */}
       <a
         href={WA_URL}
         target="_blank"
         rel="noopener noreferrer"
         aria-label="Chat on WhatsApp"
-        className="group flex items-center gap-2.5 rounded-full bg-[#25D366] px-4 py-3 shadow-lg shadow-green-500/30 hover:shadow-xl hover:shadow-green-500/40 transition-all"
+        className="w-12 h-12 rounded-full bg-[#25D366] flex items-center justify-center shadow-lg shadow-green-500/30 hover:scale-110 hover:shadow-xl hover:shadow-green-500/40 transition-all"
       >
-        <MessageCircle size={18} className="text-white flex-shrink-0" />
-        <span className="text-sm font-semibold text-white pr-1 max-w-0 group-hover:max-w-[120px] overflow-hidden whitespace-nowrap transition-all duration-300 ease-out">
-          WhatsApp Support
-        </span>
+        <MessageCircle size={22} className="text-white" />
       </a>
     </div>
   );
@@ -463,7 +460,7 @@ export default function Landing() {
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: EASE }}
-        className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-zinc-100/80"
+        className="fixed top-0 left-0 right-0 w-full z-50 bg-white/80 backdrop-blur-xl border-b border-zinc-100/80"
       >
         <div className="max-w-7xl mx-auto px-6 lg:px-8 h-16 flex items-center justify-between">
           {/* Logo */}
@@ -491,6 +488,9 @@ export default function Landing() {
           </div>
         </div>
       </motion.nav>
+
+      {/* Spacer so content starts below the fixed navbar (h-16 = 64px nav height) */}
+      <div className="h-16" />
 
       {/* ══════════════════════════════════════════
           HERO

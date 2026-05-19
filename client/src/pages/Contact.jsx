@@ -4,9 +4,9 @@
  */
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ArrowLeft, ArrowRight, CheckCircle, Mail, MessageCircle,
+  ArrowLeft, ArrowRight, ArrowUp, CheckCircle, MessageCircle,
   Building2, Users, GraduationCap, DollarSign, Briefcase,
 } from 'lucide-react';
 
@@ -149,10 +149,15 @@ export default function Contact() {
   const [sending,   setSending]   = useState(false);
   const [socialLinks, setSocialLinks] = useState({});
 
+  const [showTop, setShowTop] = useState(false);
+
   /* Scroll to top on mount + fetch social links */
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
     getPlatformSettings().then(s => setSocialLinks(s.socialLinks || {}));
+    function onScroll() { setShowTop(window.scrollY > 300); }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
   function handleChange(e) {
@@ -184,7 +189,7 @@ export default function Contact() {
     <div className="min-h-screen bg-white text-zinc-900 antialiased">
 
       {/* ── NAVBAR ── */}
-      <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-zinc-100/80">
+      <nav className="fixed top-0 left-0 right-0 w-full z-50 bg-white/80 backdrop-blur-xl border-b border-zinc-100/80">
         <div className="max-w-7xl mx-auto px-6 lg:px-8 h-16 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2.5 group">
             <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white text-xs font-bold shadow-sm shadow-indigo-500/30">
@@ -201,6 +206,9 @@ export default function Contact() {
           </Link>
         </div>
       </nav>
+
+      {/* Spacer for fixed navbar */}
+      <div className="h-16" />
 
       {/* ── HERO ── */}
       <section className="max-w-7xl mx-auto px-6 lg:px-8 pt-20 pb-16">
@@ -277,41 +285,6 @@ export default function Contact() {
               </div>
             </motion.div>
 
-            {/* Direct contact options */}
-            <motion.div variants={fadeUp} className="space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400 mb-5">Direct contact</p>
-
-              <a
-                href="mailto:hello@msingi.io"
-                className="flex items-center gap-3 rounded-xl border border-zinc-100 bg-zinc-50 px-4 py-3.5 hover:border-zinc-200 hover:bg-white transition-all group"
-              >
-                <div className="w-8 h-8 rounded-lg bg-zinc-200 flex items-center justify-center flex-shrink-0 group-hover:bg-indigo-100 transition-colors">
-                  <Mail size={15} className="text-zinc-600 group-hover:text-indigo-600 transition-colors" />
-                </div>
-                <div>
-                  <p className="text-xs text-zinc-400 font-medium">Email us</p>
-                  <p className="text-sm font-semibold text-zinc-800">hello@msingi.io</p>
-                </div>
-              </a>
-
-              <a
-                href={WA_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-3 rounded-xl border border-green-100 bg-green-50 px-4 py-3.5 hover:border-green-200 hover:bg-green-50/80 transition-all group"
-              >
-                <div className="w-8 h-8 rounded-lg bg-green-500 flex items-center justify-center flex-shrink-0 shadow-sm shadow-green-500/30">
-                  <MessageCircle size={15} className="text-white" />
-                </div>
-                <div>
-                  <p className="text-xs text-green-600 font-medium">WhatsApp us</p>
-                  <p className="text-sm font-semibold text-zinc-800">+254 769 024 153</p>
-                </div>
-                <span className="ml-auto text-[10px] bg-green-500 text-white rounded-full px-2 py-0.5 font-semibold">
-                  Live support
-                </span>
-              </a>
-            </motion.div>
           </motion.div>
 
           {/* ── RIGHT: Contact form ── */}
@@ -465,15 +438,6 @@ export default function Contact() {
                     {sending ? 'Sending…' : 'Send enquiry'}
                   </button>
 
-                  <a
-                    href={WA_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 text-sm font-semibold text-green-600 hover:text-green-700 transition-colors"
-                  >
-                    <MessageCircle size={14} />
-                    Or chat on WhatsApp
-                  </a>
                 </div>
 
                 <p className="text-xs text-zinc-400">
@@ -484,6 +448,34 @@ export default function Contact() {
           </motion.div>
         </div>
       </section>
+
+      {/* ── FLOATING ACTIONS — WhatsApp circle + scroll-to-top ── */}
+      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
+        <AnimatePresence>
+          {showTop && (
+            <motion.button
+              initial={{ opacity: 0, scale: 0.7 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.7 }}
+              transition={{ duration: 0.2 }}
+              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              aria-label="Scroll to top"
+              className="w-10 h-10 rounded-full bg-white border border-zinc-200 shadow-md flex items-center justify-center text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 transition-all"
+            >
+              <ArrowUp size={16} />
+            </motion.button>
+          )}
+        </AnimatePresence>
+        <a
+          href={WA_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Chat on WhatsApp"
+          className="w-12 h-12 rounded-full bg-[#25D366] flex items-center justify-center shadow-lg shadow-green-500/30 hover:scale-110 hover:shadow-xl hover:shadow-green-500/40 transition-all"
+        >
+          <MessageCircle size={22} className="text-white" />
+        </a>
+      </div>
 
       {/* ── FOOTER ── */}
       <footer className="border-t border-zinc-100 py-10 bg-white">
