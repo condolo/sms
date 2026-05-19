@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.9.12] — 2026-05-19  Premium UI Overhaul: Grades & Assessment
+
+### Rebuilt — `client/src/pages/grades/GradesPage.jsx`
+- **Replaced emoji tabs** with lucide-react icons (PenLine / FileText / Settings2 / Bell)
+- **Removed all old dependencies** — PageSpinner, Spinner, EmptyState, ErrorState, Badge, clsx all eliminated; inline Tailwind patterns throughout
+- **React Query v5 compatibility fixes**:
+  - `onSuccess` callback in `useQuery` (deprecated v5) → `useEffect` with data dependency
+  - `isLoading` on `useMutation` → `isPending`
+  - `qc.invalidateQueries(['key'])` array form → `{ queryKey: ['key'] }` object form
+- **Mark Entry tab** — live class stats bar (avg / pass rate / highest / lowest), animated toast replaces `alert()`; marks only submitted for students with entered scores
+- **Report Cards tab** — student names resolved from `studentsList` (no longer shows raw MongoDB IDs); weight legend as inline TypePill chips; half-term toggle preserved
+- **Configuration tab** — lucide icons in template selector cards; schedule rows use Trash2 icon; animated toast on save/error
+- **Reminders tab** — lucide status icons per reminder type (AlertTriangle / CheckCircle2 / Calendar), overdue/open/upcoming summary counts in header
+- **All tabs** — framer-motion AnimatePresence tab transitions, skeleton loaders instead of spinners
+- **Tab visibility guard** — `useEffect` resets active tab when user's role loses access to it
+
+---
+
 ## [4.9.11] — 2026-05-19  Premium UI Overhaul: Behaviour BPS + Student Profile
 
 ### Added — Behaviour Point System (`client/src/pages/behaviour/BehaviourPage.jsx`, `bpsConstants.js`)
