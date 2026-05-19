@@ -1,76 +1,106 @@
-/**
- * Msingi — Grades & Assessment Page
- * Tabs: Mark Entry | Report Cards | Configuration | Reminders
- */
-import { useState, useMemo } from 'react';
+/* ============================================================
+   Grades & Assessment — Premium Enterprise Rebuild
+   /platform-audit: lucide icons, React Query v5 compat,
+   no old components, toast banners, correct API shapes
+   ============================================================ */
+import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import clsx from 'clsx';
-import { assessment as api, classes as classesApi, students as studentsApi } from '@/api/client.js';
-import { PageSpinner, Spinner } from '@/components/ui/Spinner.jsx';
-import { EmptyState, ErrorState } from '@/components/ui/EmptyState.jsx';
-import { Badge } from '@/components/ui/Badge.jsx';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  PenLine, FileText, Settings2, Bell,
+  CheckCircle2, AlertTriangle, Loader2, Trash2,
+  Plus, X, Save, Send, ClipboardList,
+  ChevronDown, TrendingUp, TrendingDown,
+  BookOpen, Calendar, Clock, Award,
+} from 'lucide-react';
+import { assessment as api, classes as classesApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 
 /* ── Constants ──────────────────────────────────────────────── */
 const ASSESSMENT_TYPES = ['CA', 'HW', 'MT', 'ET'];
 const TERM_NUMBERS     = [1, 2, 3];
-const TYPE_LABELS      = { CA: 'Continuous Assessment', HW: 'Homework / Assignment', MT: 'Mid-Term', ET: 'End-Term' };
-const TYPE_COLORS      = { CA: 'primary', HW: 'purple', MT: 'warning', ET: 'danger' };
+const TYPE_LABELS      = {
+  CA: 'Continuous Assessment',
+  HW: 'Homework / Assignment',
+  MT: 'Mid-Term Exam',
+  ET: 'End-Term Exam',
+};
 const DEFAULT_WEIGHTS  = { CA: 20, HW: 10, MT: 30, ET: 40 };
+const TYPE_PILL        = {
+  CA: 'bg-violet-50 text-violet-700 border-violet-200',
+  HW: 'bg-purple-50 text-purple-700 border-purple-200',
+  MT: 'bg-amber-50 text-amber-700 border-amber-200',
+  ET: 'bg-red-50 text-red-700 border-red-200',
+};
 
 const TABS = [
-  { key: 'entry',   label: '✏️ Mark Entry',      roles: ['admin','superadmin','teacher','deputy'] },
-  { key: 'report',  label: '📊 Report Cards',     roles: ['admin','superadmin','teacher','deputy','parent','student'] },
-  { key: 'config',  label: '⚙️ Configuration',    roles: ['admin','superadmin'] },
-  { key: 'remind',  label: '🔔 Reminders',        roles: ['admin','superadmin','teacher','deputy'] },
+  { key: 'entry',  label: 'Mark Entry',    Icon: PenLine,      roles: ['admin','superadmin','teacher','deputy'] },
+  { key: 'report', label: 'Report Cards',  Icon: FileText,     roles: ['admin','superadmin','teacher','deputy','parent','student'] },
+  { key: 'config', label: 'Configuration', Icon: Settings2,    roles: ['admin','superadmin'] },
+  { key: 'remind', label: 'Reminders',     Icon: Bell,         roles: ['admin','superadmin','teacher','deputy'] },
 ];
 
-function _round(n) { return n == null ? null : Math.round((n + 1e-10) * 10) / 10; }
-function _scoreColor(s) {
+/* ── Helpers ─────────────────────────────────────────────────── */
+function _round(n)        { return n == null ? null : Math.round((n + 1e-10) * 10) / 10; }
+function _pct(n)          { return n == null ? '—' : `${_round(n)}%`; }
+function _scoreColor(s)   {
   if (s == null) return 'text-slate-400';
-  if (s >= 70) return 'text-green-600 font-semibold';
-  if (s >= 50) return 'text-amber-600 font-semibold';
-  return 'text-red-600 font-semibold';
+  if (s >= 70)   return 'text-emerald-600 font-semibold';
+  if (s >= 50)   return 'text-amber-600 font-semibold';
+  return 'text-red-500 font-semibold';
 }
 
-/* ── Tab bar ────────────────────────────────────────────────── */
-function TabBar({ tab, setTab, role }) {
-  const visible = TABS.filter(t => t.roles.includes(role));
+/* ── Shared primitives ───────────────────────────────────────── */
+function Skeleton({ className = '' }) {
+  return <div className={`animate-pulse bg-slate-100 rounded-lg ${className}`} />;
+}
+
+function Toast({ msg, type = 'success', onDismiss }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 3500);
+    return () => clearTimeout(t);
+  }, [onDismiss]);
+  const isErr = type === 'error';
   return (
-    <div className="flex gap-1 border-b border-surface-border overflow-x-auto">
-      {visible.map(t => (
-        <button
-          key={t.key}
-          onClick={() => setTab(t.key)}
-          className={clsx(
-            'px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition',
-            tab === t.key
-              ? 'border-brand-600 text-brand-600'
-              : 'border-transparent text-slate-500 hover:text-slate-700'
-          )}
-        >{t.label}</button>
-      ))}
-    </div>
+    <motion.div
+      initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+      className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium border shadow-sm ${
+        isErr ? 'bg-red-50 text-red-700 border-red-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+      }`}
+    >
+      {isErr ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}
+      {msg}
+      <button onClick={onDismiss} className="ml-1 opacity-60 hover:opacity-100"><X size={12} /></button>
+    </motion.div>
   );
 }
 
-/* ── Filter row helper ──────────────────────────────────────── */
-function Select({ label, value, onChange, options, placeholder = 'All', disabled }) {
+function SelField({ label, value, onChange, options, placeholder = 'Select…', disabled }) {
   return (
-    <div className="flex flex-col gap-1 min-w-[140px]">
-      {label && <label className="text-xs font-medium text-slate-500">{label}</label>}
+    <div className="flex flex-col gap-1.5 min-w-[140px]">
+      {label && <label className="text-xs font-medium text-slate-600">{label}</label>}
       <select
         value={value}
         onChange={e => onChange(e.target.value)}
         disabled={disabled}
-        className="input-field text-sm py-2 disabled:opacity-50"
+        className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 focus:border-slate-400 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-800 disabled:opacity-50 transition"
       >
         {placeholder && <option value="">{placeholder}</option>}
-        {options.map(o => (
-          <option key={o.value} value={o.value}>{o.label}</option>
-        ))}
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
     </div>
+  );
+}
+
+function iCls() {
+  return 'w-full text-sm px-3 py-2 rounded-lg border border-slate-200 focus:border-slate-400 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-800 placeholder-slate-400 transition';
+}
+
+function TypePill({ type }) {
+  return (
+    <span className={`inline-flex px-2 py-0.5 text-[11px] font-semibold rounded border ${TYPE_PILL[type] ?? 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+      {type}
+    </span>
   );
 }
 
@@ -84,203 +114,225 @@ function MarkEntryTab() {
   const [termNumber,     setTermNumber]      = useState('');
   const [assessmentType, setAssessmentType]  = useState('');
   const [instance,       setInstance]        = useState('1');
-  const [scores,         setScores]          = useState({});  // { studentId: rawScore }
-  const [saved,          setSaved]           = useState(false);
-  const [academicYearId, setAcademicYearId]  = useState('');
+  const [scores,         setScores]          = useState({});
+  const [toast,          setToast]           = useState(null);  // { msg, type }
 
-  // Load classes
+  /* Classes */
   const { data: classesData } = useQuery({
     queryKey: ['classes', 'list'],
-    queryFn:  () => classesApi.list({ limit: 200 }),
+    queryFn:  () => classesApi.list({ limit: 200, status: 'active' }),
+    staleTime: 5 * 60_000,
   });
   const classesList = classesData?.data ?? [];
 
-  // Load config (instances, weights)
+  /* Config (CA/HW instances) */
   const { data: configData } = useQuery({
     queryKey: ['assessment', 'config'],
-    queryFn:  () => api.getConfig({ academicYearId: academicYearId || undefined }),
+    queryFn:  () => api.getConfig(),
+    staleTime: 5 * 60_000,
   });
-  const config    = configData?.data || {};
-  const instances = config.instances || { CA: 2, HW: 2 };
-  const maxInst   = assessmentType === 'CA' ? (instances.CA || 2)
-                  : assessmentType === 'HW' ? (instances.HW || 2)
+  const cfg      = configData?.data ?? {};
+  const instances = cfg.instances ?? { CA: 2, HW: 2 };
+  const maxInst   = assessmentType === 'CA' ? (instances.CA ?? 2)
+                  : assessmentType === 'HW' ? (instances.HW ?? 2)
                   : 1;
 
-  // Load students in selected class
+  /* Students in class */
   const { data: studentsData, isLoading: studentsLoading } = useQuery({
     queryKey: ['classes', classId, 'students'],
     queryFn:  () => classesApi.students(classId),
     enabled:  !!classId,
+    staleTime: 5 * 60_000,
   });
   const students = studentsData?.data ?? [];
 
-  // Load existing marks for this assessment
+  /* Existing marks — v5 compat: no onSuccess, use useEffect */
   const canQuery = !!(classId && subjectId && termNumber && assessmentType);
   const { data: existingData } = useQuery({
-    queryKey: ['assessment', 'marks', { classId, subjectId, termNumber, assessmentType, instance, academicYearId }],
-    queryFn:  () => api.getMarks({
-      classId, subjectId, termNumber: Number(termNumber),
-      assessmentType, academicYearId: academicYearId || undefined,
-    }),
-    enabled: canQuery,
-    onSuccess: (data) => {
-      const map = {};
-      for (const m of (data?.data ?? [])) {
-        if (String(m.instance) === String(instance)) {
-          map[m.studentId] = m.rawScore;
-        }
-      }
-      setScores(map);
-      setSaved(false);
-    },
+    queryKey: ['assessment', 'marks', { classId, subjectId, termNumber, assessmentType, instance }],
+    queryFn:  () => api.getMarks({ classId, subjectId, termNumber: Number(termNumber), assessmentType }),
+    enabled:  canQuery,
+    staleTime: 30_000,
   });
 
-  const { mutate: submitMarks, isLoading: submitting } = useMutation({
+  useEffect(() => {
+    if (!existingData) return;
+    const map = {};
+    for (const m of (existingData?.data ?? [])) {
+      if (String(m.instance) === String(instance)) {
+        map[m.studentId] = m.rawScore;
+      }
+    }
+    setScores(map);
+  }, [existingData, instance]);
+
+  /* Save marks */
+  const { mutate: submitMarks, isPending: submitting } = useMutation({
     mutationFn: () => api.bulkMarks({
-      marks: students.map(s => ({
-        studentId:      s.id || s._id,
-        subjectId,
-        classId,
-        termNumber:     Number(termNumber),
-        assessmentType,
-        instance:       Number(instance),
-        rawScore:       scores[s.id || s._id] != null ? Number(scores[s.id || s._id]) : 0,
-        academicYearId: academicYearId || undefined,
-      })).filter(m => scores[m.studentId] != null),
+      marks: students
+        .filter(s => scores[s._id ?? s.id] != null)
+        .map(s => ({
+          studentId:      s._id ?? s.id,
+          subjectId,
+          classId,
+          termNumber:     Number(termNumber),
+          assessmentType,
+          instance:       Number(instance),
+          rawScore:       Number(scores[s._id ?? s.id]),
+        })),
     }),
     onSuccess: () => {
-      setSaved(true);
-      qc.invalidateQueries(['assessment', 'marks']);
-      qc.invalidateQueries(['assessment', 'report']);
-      setTimeout(() => setSaved(false), 3000);
+      qc.invalidateQueries({ queryKey: ['assessment', 'marks'] });
+      qc.invalidateQueries({ queryKey: ['assessment', 'report'] });
+      setToast({ msg: 'Marks saved successfully.', type: 'success' });
     },
+    onError: err => setToast({ msg: err?.message ?? 'Failed to save marks.', type: 'error' }),
   });
+
+  /* Class stats */
+  const vals   = useMemo(() => Object.values(scores).filter(v => v != null).map(Number), [scores]);
+  const avg    = vals.length ? vals.reduce((s, n) => s + n, 0) / vals.length : null;
+  const pass   = vals.filter(v => v >= 50).length;
 
   const ready = canQuery && students.length > 0;
 
   return (
-    <div className="space-y-5">
-      {/* Filters */}
-      <div className="card">
-        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Select Assessment</p>
+    <div className="space-y-4">
+      {/* Toast */}
+      <div className="h-8 flex items-center">
+        <AnimatePresence>
+          {toast && <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}
+        </AnimatePresence>
+      </div>
+
+      {/* Filter panel */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5">
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Select Assessment</p>
         <div className="flex flex-wrap gap-3">
-          <Select
+          <SelField
             label="Class"
             value={classId}
             onChange={setClassId}
-            options={classesList.map(c => ({ value: c.id || c._id, label: c.name }))}
+            options={classesList.map(c => ({ value: c._id ?? c.id, label: c.name }))}
             placeholder="Select class"
           />
-          <div className="flex flex-col gap-1 min-w-[140px]">
-            <label className="text-xs font-medium text-slate-500">Subject</label>
+          <div className="flex flex-col gap-1.5 min-w-[160px]">
+            <label className="text-xs font-medium text-slate-600">Subject</label>
             <input
               type="text"
               value={subjectId}
               onChange={e => setSubjectId(e.target.value)}
               placeholder="e.g. Mathematics"
-              className="input-field text-sm py-2"
+              className={iCls()}
             />
           </div>
-          <Select
+          <SelField
             label="Term"
             value={termNumber}
             onChange={setTermNumber}
             options={TERM_NUMBERS.map(n => ({ value: String(n), label: `Term ${n}` }))}
             placeholder="Select term"
           />
-          <Select
-            label="Assessment Type"
+          <SelField
+            label="Assessment type"
             value={assessmentType}
             onChange={v => { setAssessmentType(v); setInstance('1'); }}
             options={ASSESSMENT_TYPES.map(t => ({ value: t, label: `${t} — ${TYPE_LABELS[t]}` }))}
             placeholder="Select type"
           />
           {maxInst > 1 && (
-            <Select
+            <SelField
               label="Instance"
               value={instance}
               onChange={setInstance}
               placeholder=""
-              options={Array.from({ length: maxInst }, (_, i) => ({ value: String(i+1), label: `${assessmentType} ${i+1}` }))}
+              options={Array.from({ length: maxInst }, (_, i) => ({ value: String(i + 1), label: `${assessmentType} ${i + 1}` }))}
             />
           )}
         </div>
       </div>
 
       {/* Mark entry grid */}
-      {!classId || !subjectId || !termNumber || !assessmentType ? (
-        <EmptyState icon="✏️" title="Select class, subject, term and assessment type above" />
+      {!ready ? (
+        <div className="bg-white border border-slate-200 rounded-xl p-10 flex flex-col items-center gap-2">
+          <PenLine size={24} className="text-slate-300" />
+          <p className="text-sm font-medium text-slate-500">Select class, subject, term and assessment type above</p>
+        </div>
       ) : studentsLoading ? (
-        <PageSpinner message="Loading students…" />
+        <div className="space-y-2">
+          {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-12" />)}
+        </div>
       ) : students.length === 0 ? (
-        <EmptyState icon="👥" title="No students in this class" />
+        <div className="bg-white border border-slate-200 rounded-xl p-10 flex flex-col items-center gap-2">
+          <BookOpen size={24} className="text-slate-300" />
+          <p className="text-sm text-slate-500">No students in this class.</p>
+        </div>
       ) : (
-        <div className="card !p-0 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-surface-border">
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          {/* Grid header */}
+          <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50/50">
             <div>
-              <p className="text-sm font-semibold text-slate-800">
-                {assessmentType} {instance} — {subjectId} — Term {termNumber}
-              </p>
-              <p className="text-xs text-slate-400 mt-0.5">Enter marks out of 100 for each student</p>
+              <div className="flex items-center gap-2">
+                <TypePill type={assessmentType} />
+                <span className="text-sm font-semibold text-slate-800">
+                  {assessmentType} {maxInst > 1 ? instance : ''} — {subjectId} — Term {termNumber}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">Enter marks out of 100</p>
             </div>
-            <div className="flex items-center gap-3">
-              {saved && <span className="text-xs text-green-600 font-medium">✅ Saved!</span>}
-              <button
-                onClick={() => submitMarks()}
-                disabled={submitting}
-                className="btn-primary text-sm"
-              >
-                {submitting ? <Spinner size="sm" /> : 'Save All Marks'}
-              </button>
-            </div>
+            <button
+              onClick={() => submitMarks()}
+              disabled={submitting || vals.length === 0}
+              className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+            >
+              {submitting ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+              {submitting ? 'Saving…' : 'Save marks'}
+            </button>
           </div>
 
-          <table className="data-table">
+          {/* Student rows */}
+          <table className="w-full text-sm">
             <thead>
-              <tr>
-                <th>#</th>
-                <th>Student</th>
-                <th className="hidden sm:table-cell">Admission No.</th>
-                <th className="text-right w-32">Score /100</th>
-                <th className="text-right w-20 hidden md:table-cell">Status</th>
+              <tr className="border-b border-slate-100">
+                <th className="text-left text-xs font-medium text-slate-500 px-5 py-2.5 w-8">#</th>
+                <th className="text-left text-xs font-medium text-slate-500 px-2 py-2.5">Student</th>
+                <th className="text-left text-xs font-medium text-slate-500 px-2 py-2.5 hidden sm:table-cell">Adm. No.</th>
+                <th className="text-right text-xs font-medium text-slate-500 px-5 py-2.5 w-32">Score /100</th>
+                <th className="text-right text-xs font-medium text-slate-500 px-5 py-2.5 w-20 hidden md:table-cell">Status</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-100">
               {students.map((s, i) => {
-                const sid   = s.id || s._id;
+                const sid   = s._id ?? s.id;
                 const score = scores[sid];
                 return (
-                  <tr key={sid}>
-                    <td className="text-slate-400 text-xs">{i + 1}</td>
-                    <td className="font-medium text-slate-800">
+                  <tr key={sid} className="hover:bg-slate-50 transition">
+                    <td className="px-5 py-2.5 text-xs text-slate-400">{i + 1}</td>
+                    <td className="px-2 py-2.5 font-medium text-slate-800">
                       {s.firstName} {s.lastName}
                     </td>
-                    <td className="hidden sm:table-cell text-xs text-slate-400">{s.admissionNumber || '—'}</td>
-                    <td className="text-right">
+                    <td className="px-2 py-2.5 text-xs text-slate-400 hidden sm:table-cell">{s.admissionNumber ?? '—'}</td>
+                    <td className="px-5 py-2.5 text-right">
                       <input
                         type="number"
-                        min="0"
-                        max="100"
-                        step="0.5"
+                        min="0" max="100" step="0.5"
                         value={score ?? ''}
                         onChange={e => {
                           const v = e.target.value === '' ? undefined : Number(e.target.value);
                           setScores(prev => ({ ...prev, [sid]: v }));
                         }}
-                        className={clsx(
-                          'w-20 rounded-lg border px-3 py-1.5 text-right text-sm tabular-nums',
-                          'focus:outline-none focus:ring-2 focus:ring-brand-400 border-slate-200'
-                        )}
+                        className="w-20 rounded-lg border border-slate-200 px-3 py-1.5 text-right text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 transition"
                         placeholder="—"
                       />
                     </td>
-                    <td className="hidden md:table-cell text-right">
-                      {score == null
-                        ? <span className="text-xs text-slate-300">Not entered</span>
-                        : score >= 50
-                          ? <Badge variant="success" size="sm">Pass</Badge>
-                          : <Badge variant="danger" size="sm">Fail</Badge>
-                      }
+                    <td className="px-5 py-2.5 text-right hidden md:table-cell">
+                      {score == null ? (
+                        <span className="text-xs text-slate-300">—</span>
+                      ) : score >= 50 ? (
+                        <span className="inline-flex px-2 py-0.5 text-[11px] font-medium rounded border bg-emerald-50 text-emerald-700 border-emerald-200">Pass</span>
+                      ) : (
+                        <span className="inline-flex px-2 py-0.5 text-[11px] font-medium rounded border bg-red-50 text-red-600 border-red-200">Fail</span>
+                      )}
                     </td>
                   </tr>
                 );
@@ -288,23 +340,14 @@ function MarkEntryTab() {
             </tbody>
           </table>
 
-          {/* Class stats */}
-          {Object.values(scores).filter(v => v != null).length > 0 && (
-            <div className="px-4 py-3 border-t border-surface-border bg-slate-50 flex gap-6 text-xs text-slate-500">
-              {(() => {
-                const vals = Object.values(scores).filter(v => v != null).map(Number);
-                const avg  = vals.reduce((s,n) => s+n, 0) / vals.length;
-                const pass = vals.filter(v => v >= 50).length;
-                return (
-                  <>
-                    <span>Entered: <strong className="text-slate-700">{vals.length}/{students.length}</strong></span>
-                    <span>Class avg: <strong className={_scoreColor(avg)}>{_round(avg)}%</strong></span>
-                    <span>Pass rate: <strong className="text-slate-700">{Math.round((pass/vals.length)*100)}%</strong></span>
-                    <span>Highest: <strong className="text-green-600">{Math.max(...vals)}%</strong></span>
-                    <span>Lowest: <strong className="text-red-600">{Math.min(...vals)}%</strong></span>
-                  </>
-                );
-              })()}
+          {/* Live class stats */}
+          {vals.length > 0 && (
+            <div className="flex flex-wrap gap-x-6 gap-y-1 px-5 py-3 border-t border-slate-100 bg-slate-50/50 text-xs text-slate-500">
+              <span>Entered: <strong className="text-slate-700">{vals.length}/{students.length}</strong></span>
+              <span>Avg: <strong className={_scoreColor(avg)}>{_pct(avg)}</strong></span>
+              <span>Pass rate: <strong className="text-slate-700">{Math.round((pass / vals.length) * 100)}%</strong></span>
+              <span>Highest: <strong className="text-emerald-600">{Math.max(...vals)}%</strong></span>
+              <span>Lowest: <strong className="text-red-500">{Math.min(...vals)}%</strong></span>
             </div>
           )}
         </div>
@@ -324,7 +367,8 @@ function ReportCardsTab() {
 
   const { data: classesData } = useQuery({
     queryKey: ['classes', 'list'],
-    queryFn:  () => classesApi.list({ limit: 200 }),
+    queryFn:  () => classesApi.list({ limit: 200, status: 'active' }),
+    staleTime: 5 * 60_000,
   });
   const classesList = classesData?.data ?? [];
 
@@ -332,6 +376,7 @@ function ReportCardsTab() {
     queryKey: ['classes', classId, 'students'],
     queryFn:  () => classesApi.students(classId),
     enabled:  !!classId,
+    staleTime: 5 * 60_000,
   });
   const studentsList = studentsData?.data ?? [];
 
@@ -343,78 +388,102 @@ function ReportCardsTab() {
       ...(termNum   ? { termNumber: termNum } : {}),
       half: half ? 'true' : undefined,
     }),
-    enabled: canQuery,
+    enabled:   canQuery,
+    staleTime: 60_000,
   });
 
-  const config   = reportData?.config || {};
-  const weights  = config.weights || DEFAULT_WEIGHTS;
-  const template = config.reportTemplate || 'detailed';
-  const students = reportData?.students ?? (reportData?.student ? [reportData.student] : []);
+  const reportCfg   = reportData?.config ?? {};
+  const weights     = reportCfg.weights  ?? DEFAULT_WEIGHTS;
+  const template    = reportCfg.reportTemplate ?? 'detailed';
+  const reportStudents = reportData?.students ?? (reportData?.student ? [reportData.student] : []);
 
   return (
-    <div className="space-y-5">
-      {/* Filters */}
-      <div className="card">
-        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Select Report</p>
+    <div className="space-y-4">
+      {/* Filter panel */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5">
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Select Report</p>
         <div className="flex flex-wrap gap-3 items-end">
-          <Select
+          <SelField
             label="Class"
             value={classId}
             onChange={v => { setClassId(v); setStudentId(''); }}
-            options={classesList.map(c => ({ value: c.id || c._id, label: c.name }))}
-            placeholder="All classes"
+            options={classesList.map(c => ({ value: c._id ?? c.id, label: c.name }))}
+            placeholder="Select class"
           />
           {classId && (
-            <Select
+            <SelField
               label="Student (optional)"
               value={studentId}
               onChange={setStudentId}
-              options={studentsList.map(s => ({ value: s.id || s._id, label: `${s.firstName} ${s.lastName}` }))}
+              options={studentsList.map(s => ({ value: s._id ?? s.id, label: `${s.firstName} ${s.lastName}` }))}
               placeholder="All students"
             />
           )}
-          <Select
+          <SelField
             label="Term"
             value={termNum}
             onChange={setTermNum}
             options={TERM_NUMBERS.map(n => ({ value: String(n), label: `Term ${n}` }))}
             placeholder="All terms"
           />
-          <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer self-end mb-0.5">
-            <input type="checkbox" checked={half} onChange={e => setHalf(e.target.checked)} className="rounded" />
-            Half-term report
+          <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer self-end pb-2">
+            <input
+              type="checkbox"
+              checked={half}
+              onChange={e => setHalf(e.target.checked)}
+              className="rounded border-slate-300 text-slate-900 focus:ring-slate-900/10"
+            />
+            Half-term view
           </label>
         </div>
       </div>
 
       {!canQuery ? (
-        <EmptyState icon="📊" title="Select a class or student to view report cards" />
+        <div className="bg-white border border-slate-200 rounded-xl p-10 flex flex-col items-center gap-2">
+          <FileText size={24} className="text-slate-300" />
+          <p className="text-sm text-slate-500">Select a class or student to view report cards.</p>
+        </div>
       ) : isLoading ? (
-        <PageSpinner message="Computing report cards…" />
+        <div className="space-y-3">
+          {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-32" />)}
+        </div>
       ) : isError ? (
-        <ErrorState message={error?.message} onRetry={refetch} />
-      ) : students.length === 0 ? (
-        <EmptyState icon="📋" title="No assessment data found" desc="Enter marks first using the Mark Entry tab." />
+        <div className="bg-white border border-red-200 rounded-xl p-8 flex flex-col items-center gap-2">
+          <AlertTriangle size={20} className="text-red-400" />
+          <p className="text-sm text-slate-600">{error?.message ?? 'Failed to load report data.'}</p>
+          <button onClick={refetch} className="text-xs font-medium text-slate-700 underline">Retry</button>
+        </div>
+      ) : reportStudents.length === 0 ? (
+        <div className="bg-white border border-slate-200 rounded-xl p-10 flex flex-col items-center gap-2">
+          <ClipboardList size={24} className="text-slate-300" />
+          <p className="text-sm font-medium text-slate-600">No assessment data found</p>
+          <p className="text-xs text-slate-400">Enter marks first using the Mark Entry tab.</p>
+        </div>
       ) : (
-        <div className="space-y-6">
-          {/* Config info bar */}
-          <div className="flex flex-wrap gap-3 text-xs">
+        <div className="space-y-4">
+          {/* Weight legend */}
+          <div className="flex flex-wrap gap-2 items-center">
             {ASSESSMENT_TYPES.map(t => (
-              <span key={t} className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">
-                <Badge variant={TYPE_COLORS[t]} size="sm">{t}</Badge>
+              <span key={t} className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 border border-slate-200 px-2.5 py-1 text-xs text-slate-600">
+                <TypePill type={t} />
                 {weights[t]}%
               </span>
             ))}
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2.5 py-1 text-indigo-700">
-              Template: {template === 'detailed' ? 'Detailed (A)' : 'Summary (B)'}
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 border border-indigo-200 px-2.5 py-1 text-xs text-indigo-700">
+              {template === 'detailed' ? 'Template A — Detailed' : 'Template B — Summary'}
             </span>
-            {half && <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700">Half-term view</span>}
+            {half && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 border border-amber-200 px-2.5 py-1 text-xs text-amber-700">
+                Half-term view
+              </span>
+            )}
           </div>
 
-          {students.map(student => (
+          {reportStudents.map(stu => (
             <StudentReportCard
-              key={student.studentId}
-              student={student}
+              key={stu.studentId}
+              student={stu}
+              studentsList={studentsList}
               template={template}
               half={half}
               termNum={termNum}
@@ -426,45 +495,54 @@ function ReportCardsTab() {
   );
 }
 
-function StudentReportCard({ student, template, half, termNum }) {
-  const subjects = Object.entries(student.subjects || {});
-  if (!subjects.length) return null;
-
+function StudentReportCard({ student, studentsList, template, half, termNum }) {
+  const subjects    = Object.entries(student.subjects ?? {});
   const termsToShow = termNum ? [Number(termNum)] : TERM_NUMBERS;
 
+  /* Resolve student name from the class students list */
+  const match = studentsList.find(s => (s._id ?? s.id) === student.studentId);
+  const name  = match ? `${match.firstName} ${match.lastName}` : (student.studentId ?? '—');
+  const admNo = match?.admissionNumber ?? '';
+
+  if (!subjects.length) return null;
+
   return (
-    <div className="card !p-0 overflow-hidden">
-      <div className="px-4 py-3 bg-slate-50 border-b border-surface-border">
-        <p className="text-sm font-semibold text-slate-800">{student.studentId}</p>
-        <p className="text-xs text-slate-400">{student.classId}</p>
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      {/* Card header */}
+      <div className="px-5 py-3 bg-slate-50/80 border-b border-slate-100 flex items-center justify-between">
+        <div>
+          <p className="text-sm font-semibold text-slate-800">{name}</p>
+          {admNo && <p className="text-xs text-slate-400">{admNo}</p>}
+        </div>
+        {student.classId && <span className="text-xs text-slate-400">{student.classId}</span>}
       </div>
 
       {template === 'summary' ? (
-        /* ── Template B: Summary ── */
+        /* ── Template B — Summary ── */
         <div className="overflow-x-auto">
-          <table className="data-table">
+          <table className="w-full text-sm">
             <thead>
-              <tr>
-                <th>Subject</th>
-                <th className="text-right">Term 1</th>
-                <th className="text-right">Term 2</th>
-                <th className="text-right">Term 3</th>
-                <th className="text-right bg-slate-50">Final Avg</th>
+              <tr className="border-b border-slate-100 bg-slate-50/50">
+                <th className="text-left text-xs font-medium text-slate-500 px-4 py-2.5">Subject</th>
+                {TERM_NUMBERS.map(n => (
+                  <th key={n} className="text-right text-xs font-medium text-slate-500 px-4 py-2.5">Term {n}</th>
+                ))}
+                <th className="text-right text-xs font-medium text-slate-700 px-4 py-2.5 bg-slate-100/50">Final avg</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-100">
               {subjects.map(([subId, data]) => {
                 const t1 = data.terms?.[1]?.termTotal;
                 const t2 = data.terms?.[2]?.termTotal;
                 const t3 = data.terms?.[3]?.termTotal;
                 return (
-                  <tr key={subId}>
-                    <td className="font-medium text-slate-800">{subId}</td>
-                    <td className={clsx('text-right tabular-nums', _scoreColor(t1))}>{t1 != null ? `${_round(t1)}%` : '—'}</td>
-                    <td className={clsx('text-right tabular-nums', _scoreColor(t2))}>{t2 != null ? `${_round(t2)}%` : '—'}</td>
-                    <td className={clsx('text-right tabular-nums', _scoreColor(t3))}>{t3 != null ? `${_round(t3)}%` : '—'}</td>
-                    <td className={clsx('text-right tabular-nums font-bold bg-slate-50', _scoreColor(data.summaryAverage))}>
-                      {data.summaryAverage != null ? `${_round(data.summaryAverage)}%` : '—'}
+                  <tr key={subId} className="hover:bg-slate-50 transition">
+                    <td className="px-4 py-2.5 font-medium text-slate-800">{subId}</td>
+                    <td className={`px-4 py-2.5 text-right tabular-nums ${_scoreColor(t1)}`}>{_pct(t1)}</td>
+                    <td className={`px-4 py-2.5 text-right tabular-nums ${_scoreColor(t2)}`}>{_pct(t2)}</td>
+                    <td className={`px-4 py-2.5 text-right tabular-nums ${_scoreColor(t3)}`}>{_pct(t3)}</td>
+                    <td className={`px-4 py-2.5 text-right tabular-nums font-bold bg-slate-50 ${_scoreColor(data.summaryAverage)}`}>
+                      {_pct(data.summaryAverage)}
                     </td>
                   </tr>
                 );
@@ -473,52 +551,50 @@ function StudentReportCard({ student, template, half, termNum }) {
           </table>
         </div>
       ) : (
-        /* ── Template A: Detailed (one block per term) ── */
+        /* ── Template A — Detailed (one block per term) ── */
         termsToShow.map(termN => (
-          <div key={termN} className="border-b border-surface-border last:border-0">
-            <div className="px-4 py-2 bg-indigo-50 border-b border-indigo-100">
+          <div key={termN} className="border-b border-slate-100 last:border-0">
+            <div className="px-5 py-2 bg-indigo-50/60 border-b border-indigo-100">
               <p className="text-xs font-semibold text-indigo-700">
                 {half ? `Term ${termN} — Half-Term Report` : `Term ${termN} Report`}
               </p>
             </div>
             <div className="overflow-x-auto">
-              <table className="data-table">
+              <table className="w-full text-sm">
                 <thead>
-                  <tr>
-                    <th>Subject</th>
-                    <th className="text-right">CA avg</th>
-                    <th className="text-right">HW avg</th>
-                    <th className="text-right">MT</th>
-                    {!half && <th className="text-right">ET</th>}
-                    {!half && <th className="text-right">Term Total</th>}
-                    {half  && <th className="text-right bg-amber-50">Half-Term /100</th>}
-                    {!half && termN >= 2 && <th className="text-right text-slate-400">ET Avg (ref)</th>}
-                    {!half && termN >= 2 && Object.keys(subjects[0]?.[1]?.terms?.[termN]?.etRef || {}).map(k => (
-                      <th key={k} className="text-right text-slate-300">{k} (ref)</th>
-                    ))}
-                    {!half && <th className="text-right font-bold bg-slate-50">Final Grade</th>}
+                  <tr className="border-b border-slate-100">
+                    <th className="text-left text-xs font-medium text-slate-500 px-4 py-2.5">Subject</th>
+                    <th className="text-right text-xs font-medium text-slate-500 px-3 py-2.5">CA avg</th>
+                    <th className="text-right text-xs font-medium text-slate-500 px-3 py-2.5">HW avg</th>
+                    <th className="text-right text-xs font-medium text-slate-500 px-3 py-2.5">MT</th>
+                    {!half && <th className="text-right text-xs font-medium text-slate-500 px-3 py-2.5">ET</th>}
+                    {!half && <th className="text-right text-xs font-medium text-slate-500 px-3 py-2.5">Term total</th>}
+                    {half  && <th className="text-right text-xs font-medium text-amber-600 px-3 py-2.5 bg-amber-50/40">Half-term /100</th>}
+                    {!half && termN >= 2 && <th className="text-right text-xs text-slate-400 px-3 py-2.5">ET avg (ref)</th>}
+                    {!half && <th className="text-right text-xs font-bold text-slate-700 px-4 py-2.5 bg-slate-50/60">Final grade</th>}
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-slate-100">
                   {subjects.map(([subId, data]) => {
                     const t = data.terms?.[termN];
                     if (!t) return (
-                      <tr key={subId}><td colSpan={9} className="text-slate-300 text-xs">No data for Term {termN}</td></tr>
+                      <tr key={subId}>
+                        <td className="px-4 py-2.5 text-slate-400 text-xs italic" colSpan={8}>
+                          {subId} — no data for Term {termN}
+                        </td>
+                      </tr>
                     );
                     return (
-                      <tr key={subId}>
-                        <td className="font-medium text-slate-800">{subId}</td>
-                        <td className={clsx('text-right tabular-nums', _scoreColor(t.typeAvgs?.CA))}>{t.typeAvgs?.CA != null ? `${_round(t.typeAvgs.CA)}%` : '—'}</td>
-                        <td className={clsx('text-right tabular-nums', _scoreColor(t.typeAvgs?.HW))}>{t.typeAvgs?.HW != null ? `${_round(t.typeAvgs.HW)}%` : '—'}</td>
-                        <td className={clsx('text-right tabular-nums', _scoreColor(t.typeAvgs?.MT))}>{t.typeAvgs?.MT != null ? `${_round(t.typeAvgs.MT)}%` : '—'}</td>
-                        {!half && <td className={clsx('text-right tabular-nums', _scoreColor(t.typeAvgs?.ET))}>{t.typeAvgs?.ET != null ? `${_round(t.typeAvgs.ET)}%` : '—'}</td>}
-                        {!half && <td className={clsx('text-right tabular-nums', _scoreColor(t.termTotal))}>{t.termTotal != null ? `${_round(t.termTotal)}%` : '—'}</td>}
-                        {half  && <td className={clsx('text-right tabular-nums font-semibold bg-amber-50', _scoreColor(t.halfTermTotal))}>{t.halfTermTotal != null ? `${_round(t.halfTermTotal)}%` : '—'}</td>}
-                        {!half && termN >= 2 && <td className={clsx('text-right tabular-nums text-slate-400', _scoreColor(t.etRunningAvg))}>{t.etRunningAvg != null ? `${_round(t.etRunningAvg)}%` : '—'}</td>}
-                        {!half && termN >= 2 && Object.entries(t.etRef || {}).map(([k, v]) => (
-                          <td key={k} className="text-right tabular-nums text-slate-300 text-xs">{v != null ? `${_round(v)}%` : '—'}</td>
-                        ))}
-                        {!half && <td className={clsx('text-right tabular-nums font-bold bg-slate-50', _scoreColor(t.finalGrade))}>{t.finalGrade != null ? `${_round(t.finalGrade)}%` : '—'}</td>}
+                      <tr key={subId} className="hover:bg-slate-50 transition">
+                        <td className="px-4 py-2.5 font-medium text-slate-800">{subId}</td>
+                        <td className={`px-3 py-2.5 text-right tabular-nums ${_scoreColor(t.typeAvgs?.CA)}`}>{_pct(t.typeAvgs?.CA)}</td>
+                        <td className={`px-3 py-2.5 text-right tabular-nums ${_scoreColor(t.typeAvgs?.HW)}`}>{_pct(t.typeAvgs?.HW)}</td>
+                        <td className={`px-3 py-2.5 text-right tabular-nums ${_scoreColor(t.typeAvgs?.MT)}`}>{_pct(t.typeAvgs?.MT)}</td>
+                        {!half && <td className={`px-3 py-2.5 text-right tabular-nums ${_scoreColor(t.typeAvgs?.ET)}`}>{_pct(t.typeAvgs?.ET)}</td>}
+                        {!half && <td className={`px-3 py-2.5 text-right tabular-nums ${_scoreColor(t.termTotal)}`}>{_pct(t.termTotal)}</td>}
+                        {half  && <td className={`px-3 py-2.5 text-right tabular-nums font-semibold bg-amber-50/40 ${_scoreColor(t.halfTermTotal)}`}>{_pct(t.halfTermTotal)}</td>}
+                        {!half && termN >= 2 && <td className={`px-3 py-2.5 text-right tabular-nums text-slate-400 ${_scoreColor(t.etRunningAvg)}`}>{_pct(t.etRunningAvg)}</td>}
+                        {!half && <td className={`px-4 py-2.5 text-right tabular-nums font-bold bg-slate-50/60 ${_scoreColor(t.finalGrade)}`}>{_pct(t.finalGrade)}</td>}
                       </tr>
                     );
                   })}
@@ -537,138 +613,173 @@ function StudentReportCard({ student, template, half, termNum }) {
    ══════════════════════════════════════════════════════════════ */
 function ConfigTab() {
   const qc = useQueryClient();
+  const [toast, setToast] = useState(null);
 
   const { data: configData, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['assessment', 'config'],
     queryFn:  () => api.getConfig(),
+    staleTime: 5 * 60_000,
   });
-  const cfg = configData?.data || {};
+  const cfg = configData?.data ?? {};
 
-  const [weights,  setWeights]  = useState(null);
-  const [template, setTemplate] = useState(null);
+  const [weights,   setWeights]   = useState(null);
+  const [template,  setTemplate]  = useState(null);
   const [instances, setInstances] = useState(null);
 
-  const activeWeights   = weights   ?? cfg.weights   ?? DEFAULT_WEIGHTS;
+  const activeWeights   = weights   ?? cfg.weights        ?? DEFAULT_WEIGHTS;
   const activeTemplate  = template  ?? cfg.reportTemplate ?? 'detailed';
-  const activeInstances = instances ?? cfg.instances  ?? { CA: 2, HW: 2 };
+  const activeInstances = instances ?? cfg.instances       ?? { CA: 2, HW: 2 };
 
   const weightTotal = Object.values(activeWeights).reduce((s, n) => s + Number(n), 0);
   const weightOk    = Math.abs(weightTotal - 100) < 0.01;
 
-  const { mutate: saveConfig, isLoading: saving } = useMutation({
+  const { mutate: saveConfig, isPending: saving } = useMutation({
     mutationFn: () => api.updateConfig({
       weights:        activeWeights,
       reportTemplate: activeTemplate,
       instances:      activeInstances,
     }),
     onSuccess: () => {
-      qc.invalidateQueries(['assessment', 'config']);
-      qc.invalidateQueries(['assessment', 'report']);
+      qc.invalidateQueries({ queryKey: ['assessment', 'config'] });
+      qc.invalidateQueries({ queryKey: ['assessment', 'report'] });
       setWeights(null); setTemplate(null); setInstances(null);
+      setToast({ msg: 'Configuration saved.', type: 'success' });
     },
+    onError: err => setToast({ msg: err?.message ?? 'Failed to save config.', type: 'error' }),
   });
 
-  // Schedule state
+  /* Schedule */
   const { data: schedData, refetch: refetchSched } = useQuery({
     queryKey: ['assessment', 'schedule'],
     queryFn:  () => api.getSchedule(),
+    staleTime: 60_000,
   });
   const schedules = schedData?.data ?? [];
-  const [newSched, setNewSched] = useState({ termNumber: 1, assessmentType: 'CA', instance: 1, dateFrom: '', dateTo: '' });
-  const { mutate: saveSched, isLoading: savingSched } = useMutation({
+
+  const EMPTY_SCHED = { termNumber: 1, assessmentType: 'CA', instance: 1, dateFrom: '', dateTo: '' };
+  const [newSched, setNewSched] = useState(EMPTY_SCHED);
+
+  const { mutate: saveSched, isPending: savingSched } = useMutation({
     mutationFn: () => api.upsertSchedule(newSched),
-    onSuccess:  () => { refetchSched(); setNewSched({ termNumber: 1, assessmentType: 'CA', instance: 1, dateFrom: '', dateTo: '' }); },
+    onSuccess:  () => { refetchSched(); setNewSched(EMPTY_SCHED); },
+    onError:    err => setToast({ msg: err?.message ?? 'Failed to save schedule.', type: 'error' }),
   });
+
   const { mutate: delSched } = useMutation({
-    mutationFn: (id) => api.deleteSchedule(id),
+    mutationFn: id => api.deleteSchedule(id),
     onSuccess:  () => refetchSched(),
   });
 
-  if (isLoading) return <PageSpinner message="Loading config…" />;
-  if (isError)   return <ErrorState message={error?.message} onRetry={refetch} />;
+  if (isLoading) return <div className="space-y-3">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-32" />)}</div>;
+  if (isError)   return (
+    <div className="bg-white border border-red-200 rounded-xl p-8 flex flex-col items-center gap-2">
+      <AlertTriangle size={20} className="text-red-400" />
+      <p className="text-sm text-slate-600">{error?.message ?? 'Failed to load config.'}</p>
+      <button onClick={refetch} className="text-xs font-medium text-slate-700 underline">Retry</button>
+    </div>
+  );
+
+  const TEMPLATE_OPTIONS = [
+    {
+      key: 'detailed',
+      Icon: ClipboardList,
+      title: 'Template A — Detailed',
+      desc: 'Shows CA, HW, MT, ET scores per term with ET reference columns and blended final grade.',
+    },
+    {
+      key: 'summary',
+      Icon: TrendingUp,
+      title: 'Template B — Summary',
+      desc: 'Shows term averages only (T1, T2, T3) with equal-weight final average.',
+    },
+  ];
 
   return (
-    <div className="space-y-6">
-      {/* Weights */}
-      <div className="card">
-        <h3 className="text-sm font-semibold text-slate-800 mb-4">Assessment Weights</h3>
+    <div className="space-y-4">
+      <div className="h-8 flex items-center">
+        <AnimatePresence>
+          {toast && <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}
+        </AnimatePresence>
+      </div>
+
+      {/* Assessment weights */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5">
+        <h3 className="text-sm font-semibold text-slate-800 mb-1">Assessment Weights</h3>
+        <p className="text-xs text-slate-400 mb-4">Must total exactly 100%.</p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {ASSESSMENT_TYPES.map(type => (
             <div key={type}>
-              <label className="text-xs font-medium text-slate-500 mb-1 block">
-                <Badge variant={TYPE_COLORS[type]} size="sm">{type}</Badge>
-                <span className="ml-1">{TYPE_LABELS[type]}</span>
+              <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600 mb-1.5">
+                <TypePill type={type} />
+                {TYPE_LABELS[type]}
               </label>
               <div className="relative">
                 <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="1"
+                  type="number" min="0" max="100" step="1"
                   value={activeWeights[type] ?? 0}
                   onChange={e => setWeights({ ...activeWeights, [type]: Number(e.target.value) })}
-                  className="input-field text-right pr-8"
+                  className={`${iCls()} pr-8 text-right`}
                 />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">%</span>
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">%</span>
               </div>
             </div>
           ))}
         </div>
-
-        {/* Weight total indicator */}
-        <div className={clsx(
-          'mt-4 flex items-center gap-2 rounded-lg px-3 py-2 text-sm',
-          weightOk ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
-        )}>
-          <span>{weightOk ? '✅' : '⚠️'}</span>
-          <span>Total: <strong>{_round(weightTotal)}%</strong></span>
+        <div className={`mt-4 flex items-center gap-2 rounded-lg px-3 py-2 text-sm border ${
+          weightOk ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'
+        }`}>
+          {weightOk ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+          Total: <strong>{_round(weightTotal)}%</strong>
           {!weightOk && <span className="ml-1">— must equal exactly 100%</span>}
         </div>
       </div>
 
-      {/* Instances */}
-      <div className="card">
-        <h3 className="text-sm font-semibold text-slate-800 mb-4">Assessment Instances per Term</h3>
-        <p className="text-xs text-slate-500 mb-4">How many CA and HW assessments per term? Scores are averaged before weighting.</p>
-        <div className="flex gap-6">
+      {/* Instances per term */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5">
+        <h3 className="text-sm font-semibold text-slate-800 mb-1">Assessment Instances per Term</h3>
+        <p className="text-xs text-slate-400 mb-4">How many CA and HW assessments per term? Scores are averaged before weighting.</p>
+        <div className="flex flex-wrap gap-6">
           {['CA', 'HW'].map(type => (
             <div key={type}>
-              <label className="text-xs font-medium text-slate-500 mb-1 block">{TYPE_LABELS[type]}</label>
+              <label className="text-xs font-medium text-slate-600 mb-1.5 flex items-center gap-1.5">
+                <TypePill type={type} />
+                {TYPE_LABELS[type]}
+              </label>
               <select
-                value={activeInstances[type] || 2}
+                value={activeInstances[type] ?? 2}
                 onChange={e => setInstances({ ...activeInstances, [type]: Number(e.target.value) })}
-                className="input-field w-24"
+                className={`${iCls()} w-32`}
               >
-                {[1,2,3,4,5].map(n => <option key={n} value={n}>{n} per term</option>)}
+                {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n} per term</option>)}
               </select>
             </div>
           ))}
           <div>
-            <label className="text-xs font-medium text-slate-500 mb-1 block">MT & ET</label>
-            <div className="input-field w-24 bg-slate-50 text-slate-400 text-sm select-none">1 (fixed)</div>
+            <label className="text-xs font-medium text-slate-500 mb-1.5 block">MT &amp; ET</label>
+            <div className="w-32 text-sm px-3 py-2 rounded-lg border border-slate-100 bg-slate-50 text-slate-400 select-none">
+              1 (fixed)
+            </div>
           </div>
         </div>
       </div>
 
       {/* Report template */}
-      <div className="card">
+      <div className="bg-white border border-slate-200 rounded-xl p-5">
         <h3 className="text-sm font-semibold text-slate-800 mb-4">Report Card Template</h3>
-        <div className="grid sm:grid-cols-2 gap-4">
-          {[
-            { key: 'detailed', icon: '📋', title: 'Template A — Detailed', desc: 'Shows CA, HW, MT, ET per term with ET reference columns and blended final grade.' },
-            { key: 'summary',  icon: '📊', title: 'Template B — Summary',  desc: 'Shows term averages only (T1, T2, T3) with equal-weight final average.' },
-          ].map(t => (
+        <div className="grid sm:grid-cols-2 gap-3">
+          {TEMPLATE_OPTIONS.map(({ key, Icon, title, desc }) => (
             <button
-              key={t.key}
-              onClick={() => setTemplate(t.key)}
-              className={clsx(
-                'text-left rounded-xl border-2 p-4 transition',
-                activeTemplate === t.key ? 'border-brand-500 bg-brand-50' : 'border-slate-200 hover:border-slate-300'
-              )}
+              key={key}
+              onClick={() => setTemplate(key)}
+              className={`text-left rounded-xl border-2 p-4 transition ${
+                activeTemplate === key
+                  ? 'border-slate-900 bg-slate-50'
+                  : 'border-slate-200 hover:border-slate-300'
+              }`}
             >
-              <p className="text-xl mb-1">{t.icon}</p>
-              <p className="text-sm font-semibold text-slate-800">{t.title}</p>
-              <p className="text-xs text-slate-500 mt-1">{t.desc}</p>
+              <Icon size={18} className={`mb-2 ${activeTemplate === key ? 'text-slate-800' : 'text-slate-400'}`} />
+              <p className="text-sm font-semibold text-slate-800">{title}</p>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">{desc}</p>
             </button>
           ))}
         </div>
@@ -678,62 +789,71 @@ function ConfigTab() {
         <button
           onClick={() => saveConfig()}
           disabled={saving || !weightOk}
-          className="btn-primary"
+          className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded-lg transition"
         >
-          {saving ? <Spinner size="sm" /> : 'Save Configuration'}
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+          {saving ? 'Saving…' : 'Save configuration'}
         </button>
       </div>
 
-      {/* Assessment Schedule */}
-      <div className="card">
+      {/* Assessment schedule */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5">
         <h3 className="text-sm font-semibold text-slate-800 mb-1">Assessment Schedule</h3>
-        <p className="text-xs text-slate-400 mb-4">Set date ranges for each assessment — teachers will be reminded automatically.</p>
+        <p className="text-xs text-slate-400 mb-4">Set date windows — teachers are reminded automatically when an assessment opens.</p>
 
-        {/* Add new schedule */}
-        <div className="flex flex-wrap gap-3 items-end p-3 bg-slate-50 rounded-xl mb-4">
-          <Select label="Term"   value={String(newSched.termNumber)}   onChange={v => setNewSched(p => ({...p, termNumber: Number(v)}))}   placeholder="" options={TERM_NUMBERS.map(n => ({value:String(n),label:`Term ${n}`}))} />
-          <Select label="Type"   value={newSched.assessmentType}        onChange={v => setNewSched(p => ({...p, assessmentType:v, instance:1}))} placeholder="" options={ASSESSMENT_TYPES.map(t => ({value:t,label:t}))} />
-          <Select label="Inst."  value={String(newSched.instance)}      onChange={v => setNewSched(p => ({...p, instance: Number(v)}))}     placeholder="" options={[1,2,3,4].map(n=>({value:String(n),label:String(n)}))} />
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-slate-500">From</label>
-            <input type="date" value={newSched.dateFrom} onChange={e=>setNewSched(p=>({...p,dateFrom:e.target.value}))} className="input-field text-sm py-2" />
+        {/* Add row */}
+        <div className="flex flex-wrap gap-3 items-end p-4 bg-slate-50 rounded-xl border border-slate-100 mb-4">
+          <SelField label="Term" value={String(newSched.termNumber)} onChange={v => setNewSched(p => ({ ...p, termNumber: Number(v) }))} placeholder="" options={TERM_NUMBERS.map(n => ({ value: String(n), label: `Term ${n}` }))} />
+          <SelField label="Type" value={newSched.assessmentType}    onChange={v => setNewSched(p => ({ ...p, assessmentType: v, instance: 1 }))} placeholder="" options={ASSESSMENT_TYPES.map(t => ({ value: t, label: t }))} />
+          <SelField label="Instance" value={String(newSched.instance)} onChange={v => setNewSched(p => ({ ...p, instance: Number(v) }))} placeholder="" options={[1,2,3,4].map(n => ({ value: String(n), label: String(n) }))} />
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-slate-600">From</label>
+            <input type="date" value={newSched.dateFrom} onChange={e => setNewSched(p => ({ ...p, dateFrom: e.target.value }))} className={iCls()} />
           </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-slate-500">To</label>
-            <input type="date" value={newSched.dateTo} onChange={e=>setNewSched(p=>({...p,dateTo:e.target.value}))} className="input-field text-sm py-2" />
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-slate-600">To</label>
+            <input type="date" value={newSched.dateTo} onChange={e => setNewSched(p => ({ ...p, dateTo: e.target.value }))} className={iCls()} />
           </div>
           <button
             onClick={() => saveSched()}
             disabled={savingSched || !newSched.dateFrom || !newSched.dateTo}
-            className="btn-primary text-sm self-end"
+            className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition self-end"
           >
-            {savingSched ? <Spinner size="sm" /> : '+ Add'}
+            {savingSched ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+            Add
           </button>
         </div>
 
-        {/* Existing schedules */}
         {schedules.length === 0 ? (
           <p className="text-sm text-slate-400 text-center py-4">No schedule entries yet.</p>
         ) : (
-          <table className="data-table">
+          <table className="w-full text-sm">
             <thead>
-              <tr>
-                <th>Assessment</th>
-                <th>Term</th>
-                <th>From</th>
-                <th>To</th>
-                <th className="text-right">Actions</th>
+              <tr className="border-b border-slate-100">
+                <th className="text-left text-xs font-medium text-slate-500 px-3 py-2.5">Assessment</th>
+                <th className="text-left text-xs font-medium text-slate-500 px-3 py-2.5">Term</th>
+                <th className="text-left text-xs font-medium text-slate-500 px-3 py-2.5">From</th>
+                <th className="text-left text-xs font-medium text-slate-500 px-3 py-2.5">To</th>
+                <th className="text-right text-xs font-medium text-slate-500 px-3 py-2.5"></th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-100">
               {schedules.map(s => (
-                <tr key={s.id}>
-                  <td><Badge variant={TYPE_COLORS[s.assessmentType] || 'default'} size="sm">{s.label || `${s.assessmentType} ${s.instance}`}</Badge></td>
-                  <td>Term {s.termNumber}</td>
-                  <td className="text-sm">{s.dateFrom}</td>
-                  <td className="text-sm">{s.dateTo}</td>
-                  <td className="text-right">
-                    <button onClick={() => delSched(s.id)} className="text-xs text-red-500 hover:text-red-700">Remove</button>
+                <tr key={s.id ?? s._id} className="hover:bg-slate-50 transition">
+                  <td className="px-3 py-2.5">
+                    <TypePill type={s.assessmentType} />
+                    <span className="ml-1.5 text-xs text-slate-600">{s.instance > 1 ? `${s.assessmentType} ${s.instance}` : ''}</span>
+                  </td>
+                  <td className="px-3 py-2.5 text-slate-600">Term {s.termNumber}</td>
+                  <td className="px-3 py-2.5 text-slate-500 text-xs font-mono">{s.dateFrom}</td>
+                  <td className="px-3 py-2.5 text-slate-500 text-xs font-mono">{s.dateTo}</td>
+                  <td className="px-3 py-2.5 text-right">
+                    <button
+                      onClick={() => delSched(s.id ?? s._id)}
+                      className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -748,65 +868,103 @@ function ConfigTab() {
 /* ══════════════════════════════════════════════════════════════
    TAB 4 — REMINDERS
    ══════════════════════════════════════════════════════════════ */
+const REMINDER_CONFIG = {
+  overdue:  { label: 'Overdue',  bg: 'bg-red-50 border-red-200',    text: 'text-red-700',    Icon: AlertTriangle },
+  open:     { label: 'Open',     bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', Icon: CheckCircle2 },
+  upcoming: { label: 'Upcoming', bg: 'bg-blue-50 border-blue-200',  text: 'text-blue-700',   Icon: Calendar },
+};
+
 function RemindersTab() {
-  const qc = useQueryClient();
+  const qc  = useQueryClient();
+  const [toast, setToast] = useState(null);
+
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['assessment', 'reminders'],
     queryFn:  () => api.reminders({ days: 14 }),
+    staleTime: 60_000,
   });
   const reminders = data?.data ?? [];
 
-  const { mutate: notify, isLoading: notifying } = useMutation({
+  const { mutate: notify, isPending: notifying } = useMutation({
     mutationFn: () => api.notify({}),
-    onSuccess:  () => qc.invalidateQueries(['assessment', 'reminders']),
+    onSuccess:  () => {
+      qc.invalidateQueries({ queryKey: ['assessment', 'reminders'] });
+      setToast({ msg: 'Notification sent to teachers.', type: 'success' });
+    },
+    onError: err => setToast({ msg: err?.message ?? 'Notification failed.', type: 'error' }),
   });
 
-  const STATUS_CONFIG = {
-    overdue:  { label: '⚠️ Overdue',  variant: 'danger',  bg: 'bg-red-50   border-red-100' },
-    open:     { label: '✏️ Open',     variant: 'success', bg: 'bg-green-50 border-green-100' },
-    upcoming: { label: '📅 Upcoming', variant: 'info',    bg: 'bg-blue-50  border-blue-100' },
-  };
-
-  if (isLoading) return <PageSpinner message="Checking assessments…" />;
-  if (isError)   return <ErrorState message={error?.message} onRetry={refetch} />;
+  const overdue  = reminders.filter(r => r.status === 'overdue').length;
+  const open     = reminders.filter(r => r.status === 'open').length;
+  const upcoming = reminders.filter(r => r.status === 'upcoming').length;
 
   return (
     <div className="space-y-4">
+      <div className="h-8 flex items-center">
+        <AnimatePresence>
+          {toast && <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}
+        </AnimatePresence>
+      </div>
+
+      {/* Header bar */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-500">
-          Showing assessments open, overdue, or opening within the next 14 days.
-        </p>
+        <div className="flex gap-3 text-xs text-slate-500">
+          <span className="text-red-600 font-medium">{overdue} overdue</span>
+          <span>·</span>
+          <span className="text-emerald-600 font-medium">{open} open</span>
+          <span>·</span>
+          <span className="text-blue-600 font-medium">{upcoming} upcoming</span>
+          <span className="text-slate-400">— next 14 days</span>
+        </div>
         <button
           onClick={() => notify()}
-          disabled={notifying}
-          className="btn-primary text-sm"
+          disabled={notifying || reminders.length === 0}
+          className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
         >
-          {notifying ? <Spinner size="sm" /> : '📧 Notify Teachers'}
+          {notifying ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+          {notifying ? 'Sending…' : 'Notify teachers'}
         </button>
       </div>
 
-      {reminders.length === 0 ? (
-        <EmptyState icon="✅" title="No reminders" desc="All assessments are on schedule or none have been configured yet." />
+      {isLoading ? (
+        <div className="space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-20" />)}</div>
+      ) : isError ? (
+        <div className="bg-white border border-red-200 rounded-xl p-8 flex flex-col items-center gap-2">
+          <AlertTriangle size={20} className="text-red-400" />
+          <p className="text-sm text-slate-600">{error?.message}</p>
+          <button onClick={refetch} className="text-xs font-medium text-slate-700 underline">Retry</button>
+        </div>
+      ) : reminders.length === 0 ? (
+        <div className="bg-white border border-slate-200 rounded-xl p-10 flex flex-col items-center gap-2">
+          <CheckCircle2 size={24} className="text-emerald-400" />
+          <p className="text-sm font-medium text-slate-600">All clear</p>
+          <p className="text-xs text-slate-400">No overdue or upcoming assessments in the next 14 days.</p>
+        </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {reminders.map(r => {
-            const sc = STATUS_CONFIG[r.status] || STATUS_CONFIG.upcoming;
+            const cfg = REMINDER_CONFIG[r.status] ?? REMINDER_CONFIG.upcoming;
+            const { Icon } = cfg;
             return (
-              <div key={r.scheduleId} className={clsx('rounded-xl border p-4', sc.bg)}>
+              <div key={r.scheduleId} className={`rounded-xl border p-4 ${cfg.bg}`}>
                 <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <Badge variant={sc.variant}>{sc.label}</Badge>
+                  <div className="flex items-start gap-3">
+                    <Icon size={16} className={`mt-0.5 shrink-0 ${cfg.text}`} />
                     <div>
-                      <p className="text-sm font-semibold text-slate-800">
-                        {r.label} — Term {r.termNumber}
-                      </p>
-                      <p className="text-xs text-slate-500 mt-0.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-xs font-semibold ${cfg.text}`}>{cfg.label}</span>
+                        <TypePill type={r.assessmentType ?? r.label?.split(' ')[0]} />
+                        <span className="text-sm font-semibold text-slate-800">
+                          {r.label ?? `${r.assessmentType} ${r.instance}`} — Term {r.termNumber}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5 font-mono">
                         {r.dateFrom} → {r.dateTo}
                       </p>
                     </div>
                   </div>
                   <div className="text-right shrink-0">
-                    <p className="text-sm font-semibold text-slate-700 tabular-nums">{r.marksEntered}</p>
+                    <p className="text-sm font-bold text-slate-700 tabular-nums">{r.marksEntered ?? 0}</p>
                     <p className="text-xs text-slate-400">marks entered</p>
                   </div>
                 </div>
@@ -823,25 +981,66 @@ function RemindersTab() {
    MAIN PAGE
    ══════════════════════════════════════════════════════════════ */
 export default function GradesPage() {
-  const role = useAuthStore(s => s.session?.user?.role) || 'teacher';
+  const role = useAuthStore(s => s.session?.user?.role ?? 'teacher');
+  const [tab, setTab] = useState('entry');  // everyone starts on Mark Entry
 
-  // Default tab based on role
-  const defaultTab = ['admin','superadmin'].includes(role) ? 'config' : 'entry';
-  const [tab, setTab] = useState(defaultTab);
+  const visibleTabs = TABS.filter(t => t.roles.includes(role));
+
+  // If current tab is not visible for this role, reset
+  useEffect(() => {
+    if (!visibleTabs.find(t => t.key === tab)) {
+      setTab(visibleTabs[0]?.key ?? 'entry');
+    }
+  }, [role]);
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-slate-800">Grades & Assessment</h2>
+    <div className="min-h-screen bg-slate-50">
+      {/* Header */}
+      <div className="bg-white border-b border-slate-200">
+        <div className="max-w-screen-2xl mx-auto px-6 py-5">
+          <div className="flex items-start justify-between gap-4 mb-5">
+            <div>
+              <h1 className="text-xl font-semibold text-slate-900 tracking-tight">Grades &amp; Assessment</h1>
+              <p className="text-sm text-slate-500 mt-0.5">Continuous assessment, report cards and configuration</p>
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <nav className="flex gap-1 -mb-px overflow-x-auto">
+            {visibleTabs.map(({ key, label, Icon }) => (
+              <button
+                key={key}
+                onClick={() => setTab(key)}
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition ${
+                  tab === key
+                    ? 'border-slate-900 text-slate-900'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                <Icon size={13} />
+                {label}
+              </button>
+            ))}
+          </nav>
+        </div>
       </div>
 
-      <TabBar tab={tab} setTab={setTab} role={role} />
-
-      <div className="pt-1">
-        {tab === 'entry'  && <MarkEntryTab />}
-        {tab === 'report' && <ReportCardsTab />}
-        {tab === 'config' && <ConfigTab />}
-        {tab === 'remind' && <RemindersTab />}
+      {/* Panel */}
+      <div className="max-w-screen-2xl mx-auto px-6 py-6">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={tab}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.15 }}
+          >
+            {tab === 'entry'  && <MarkEntryTab />}
+            {tab === 'report' && <ReportCardsTab />}
+            {tab === 'config' && <ConfigTab />}
+            {tab === 'remind' && <RemindersTab />}
+          </motion.div>
+        </AnimatePresence>
       </div>
     </div>
   );
