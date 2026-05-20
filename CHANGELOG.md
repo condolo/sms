@@ -6,6 +6,77 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.9.14] — 2026-05-20  Institutional Scheduling Engine — Timetable Phase 1
+
+### Rebuilt — `server/routes/timetable.js`
+
+**Global Conflict Detection Engine (institution-wide, not per-class):**
+- **Teacher double-booking prevention** — POST and PUT now reject any slot where the assigned `teacherId` is already scheduled in another class at the same `day + period`. Cross-class enforcement, not just same-class.
+- **Room double-booking prevention** — POST and PUT reject any slot where `room` is already occupied (case-insensitive match) at the same `day + period`.
+- **Class collision check** preserved — same class + day + period still blocked as before.
+- Conflict check extracted into `_checkConflicts(schoolId, data, excludeId)` helper — `excludeId` ensures PUT doesn't block updating a slot against itself.
+
+**New endpoint — `GET /api/timetable/workload`:**
+- Returns teacher workload summary: `teacherId`, `teacherName`, `total` lessons/week, `byDay` breakdown, `classCount`.
+- Filtered by `academicYearId` / `termId` when provided. Capped at 10,000 slot scan. Sorted by total descending.
+
+**New endpoint — `GET /api/timetable/conflicts`:**
+- Scans all active slots institution-wide for teacher double-bookings and room double-bookings.
+- Returns `{ conflicts: [...], count }` — each conflict includes type, affected resource, day, period, and slotIds.
+
+**New endpoint — `GET /api/timetable/overview`:**
+- Returns per-class lesson counts grouped by day for the master grid.
+- Returns `{ classes: [{ classId, total, byDay }], totalSlots }`.
+
+**Bug fixes:**
+- `GET /class/:classId` and `GET /teacher/:teacherId` now return a plain slots array (was returning `{ slots, byDay }` object — caused frontend `forEach` TypeError).
+- Route ordering fixed: `/workload`, `/conflicts`, `/overview` placed before `/:id` wildcard to prevent mis-routing.
+- Added `teacherName` to `SlotSchema` (denormalised display string stored alongside `teacherId`).
+- `subject` field added to schema as optional string (previously only `subjectId` existed).
+
+### Rebuilt — `client/src/pages/timetable/TimetablePage.jsx`
+
+**Three views replacing the single class grid:**
+- **Class Grid** (default) — true period-row × day-column layout with a 88px time label column, period times (`P1 07:30–08:30`), break rows, and 5 day columns.
+- **Teacher Schedule** — same grid filtered to a selected teacher's assignments; shows weekly lesson count + per-day distribution in the toolbar.
+- **Institution Overview** — compact table: all classes as rows, Mon–Fri + Total as columns; shows lesson count per day per class.
+
+**True timetable grid (Class Grid + Teacher View):**
+- Period times hardcoded from default bell schedule (P1–P8 + Short Break + Lunch).
+- Each cell shows subject, teacher name, and room; hover reveals Trash2 delete (admin/deputy only).
+- Empty cells show a dashed Add button on hover (RBAC-gated) — pre-fills the slide-over with that day + period.
+
+**Teacher Workload Panel:**
+- Collapsible right sidebar (framer-motion slide-in) triggered by `Workload` button in header.
+- Bar chart per teacher: green (normal 11–29), amber (light ≤10), red (heavy ≥30).
+- Legend at panel footer; skeleton loaders while fetching.
+
+**Global Conflicts Badge:**
+- Always-on badge in header: green "No conflicts" or red "N conflicts".
+- Clicking the red badge opens a conflicts panel listing each issue (type, teacher/room, day, period).
+- Resolves automatically as slots are fixed.
+
+**Add Slot Slide-over (upgraded):**
+- Teacher field is now a **dropdown** populated from the real teachers list (sends `teacherId` + `teacherName` to API — enables conflict detection).
+- Day/period pre-filled when clicking an empty cell.
+- Server-side conflict errors (409) surfaced inline with `AlertTriangle`.
+- Slot type selector (lesson / assembly / registration / free period).
+
+**Section filtering:**
+- Section pills in toolbar (All Sections / Kindergarten / Primary / Secondary / A-Level / Other).
+- Class names inferred into sections via `inferSection()` regex — no DB change needed.
+- Selecting a section filters the class picker; switching section resets class selection.
+
+**Bug fixes:**
+- Frontend now sends lowercase day values (`'monday'`) matching the backend `z.enum` — Add Slot was broken in v4.9.13.
+- Slot data accessed as `data?.data` array (fixed the object/array mismatch from `byClass` response change above).
+- `teachers as teachersApi` import added for dropdown.
+
+### Updated — `client/src/api/client.js`
+- Added `byTeacher(id, params)`, `workload(params)`, `conflicts(params)`, `overview(params)` to the `timetable` export.
+
+---
+
 ## [4.9.13] — 2026-05-19  Premium UI Overhaul: Settings + Timetable
 
 ### Rebuilt — `client/src/pages/settings/SettingsPage.jsx`

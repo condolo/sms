@@ -200,7 +200,11 @@ export const admissions = {
 
 export const timetable = {
   list:       (params)     => _get('/timetable', params),
-  byClass:    (classId)    => _get(`/timetable/class/${classId}`),
+  byClass:    (classId, p) => _get(`/timetable/class/${classId}`, p),
+  byTeacher:  (id, p)      => _get(`/timetable/teacher/${id}`, p),
+  workload:   (p)          => _get('/timetable/workload', p),
+  conflicts:  (p)          => _get('/timetable/conflicts', p),
+  overview:   (p)          => _get('/timetable/overview', p),
   create:     (data)       => _post('/timetable', data),
   update:     (id, data)   => _put(`/timetable/${id}`, data),
   remove:     (id)         => _delete(`/timetable/${id}`),
