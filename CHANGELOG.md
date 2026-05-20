@@ -6,6 +6,59 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.9.16] — 2026-05-20  Per-Section Bell Schedules + Cross-Section Conflict Detection
+
+### Architecture — Multi-Section Bell Schedule Support
+
+Schools running KG through A-Level on the same system now maintain **independent bell schedules per section** while remaining fully connected for teacher assignments and conflict detection.
+
+**Problem solved:** Period key "1" in KG (07:30–08:00) and Period "1" in Secondary (08:00–09:20) are entirely different time windows. A teacher assigned to both would not be caught by naive `day + period` key matching. Msingi now stores and compares actual clock times, so a double-booking across sections is caught regardless of period numbering.
+
+### New — `server/routes/bell-schedule.js` (rewritten)
+
+- **Per-section documents:** one `bell_schedules` record per `(schoolId, section)` where section ∈ `all | kg | primary | secondary | alevel`.
+- **Fallback chain:** section-specific → school `all` default → hardcoded `DEFAULT_BELL` constant. Never breaks a school that hasn't configured anything.
+- **New endpoint `GET /api/bell-schedule/sections`** — returns all VALID_SECTIONS with `configured` flag, `periodCount`, and `lessonCount` for the admin overview tab badges.
+- **`DELETE /api/bell-schedule?section=`** — reverts a section-specific schedule back to the school default (cannot delete `all`).
+- **Named exports:** `router.resolveBellSchedule` and `router.DEFAULT_BELL` — used by `server/routes/timetable.js` to resolve times during slot creation.
+
+### Updated — `server/routes/timetable.js`
+
+**Time denormalisation at write time:**
+- New helper `_inferSection(className)` — infers `kg | primary | secondary | alevel | all` from class name (regex patterns mirror frontend `inferSection()`).
+- New helper `_resolveSlotTimes(schoolId, section, periodKey)` — fetches the correct bell schedule for the class's section and returns `{ startTime, endTime }` in HH:MM.
+- On `POST /timetable` and `PUT /timetable/:id`: `section` and `startTime`/`endTime` are resolved and stored on every slot. Explicit caller-supplied times are honoured (future API flexibility).
+
+**Time-overlap conflict detection:**
+- New helper `_timesOverlap(start1, end1, start2, end2)` — HH:MM string comparison (no Date parsing needed). Returns true when two intervals overlap by any amount.
+- `_checkConflicts` upgraded: teacher double-booking and room double-booking now use time-overlap when both slots have `startTime`, falling back to period-key equality for legacy slots without times.
+- `GET /timetable/conflicts` upgraded to pairwise time-overlap within `teacherId|day` and `room|day` groups — catches cross-section double-bookings.
+
+### Updated — `server/utils/indexes.js`
+
+- `bell_schedules`: changed `bs_school_default` index to `bs_school_section` with `unique: true` — one schedule per `(schoolId, section)`.
+- `timetable`: replaced period-based teacher/room indexes (`tt_teacher_day_period`, `tt_room_day_period`) with time-based ones (`tt_teacher_day_time`, `tt_room_day_time`). Added `tt_school_section` sparse index for section-filtered queries.
+
+### Updated — `client/src/api/client.js`
+
+- `bellSchedule` extended: `sections()` → `GET /bell-schedule/sections`; `remove(section)` → `DELETE /bell-schedule?section=`.
+
+### Updated — `client/src/pages/timetable/TimetablePage.jsx`
+
+**Section-aware bell fetch:**
+- Bell schedule query is now keyed by the selected class's inferred section (`classSection`), not a static `'all'` key. When the class changes, the grid automatically re-renders with the correct period rows and times.
+- `lessonPeriods` derived from the active bell and passed into `AddSlotSlideOver` — period dropdown reflects real section times.
+
+**`BellScheduleSlideOver` — full rewrite:**
+- Five section tabs: School Default | KG | Primary | Secondary | A-Level.
+- Active tab fetches its own schedule (`GET /api/bell-schedule?section=`); amber banner shown when a section inherits from school default.
+- Green dot badge on tabs that have a custom schedule configured (`GET /api/bell-schedule/sections`).
+- `dirty` flag: Save button only enabled after the user edits something.
+- "Revert to default" button: appears only when the active section has a custom schedule; calls `DELETE` to remove it.
+- No longer receives `periods` or `onSaved` props — component is self-contained.
+
+---
+
 ## [4.9.15] — 2026-05-20  Settings API + Bell Schedule Configuration + Platform Audit Fixes
 
 ### New — `server/routes/settings.js`
