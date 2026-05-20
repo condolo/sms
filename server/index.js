@@ -120,6 +120,8 @@ app.use('/api/academic-config', require('./routes/academic-config'));
 app.use('/api/assessment',      require('./routes/assessment'));
 app.use('/api/report-cards',   require('./routes/report-cards'));
 app.use('/api/import-export',  require('./routes/import-export'));
+app.use('/api/settings',       require('./routes/settings'));
+app.use('/api/bell-schedule',  require('./routes/bell-schedule'));
 
 /* ── School-facing announcement routes (JWT auth, not platform key) ── */
 const { authMiddleware } = require('./middleware/auth');
@@ -153,7 +155,7 @@ app.post('/api/announcements/:id/dismiss', authMiddleware, async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: '4.9.10',
+    version: require('../package.json').version,
     timestamp: new Date().toISOString(),
     db: require('./config/db').isConnected() ? 'connected' : 'disconnected'
   });
@@ -192,45 +194,24 @@ app.use(express.static(ROOT_DIR, {
   }
 }));
 
-// SPA fallback — serve the appropriate index.html for all non-API routes
+// SPA fallback — serve the appropriate index.html for all non-API routes.
+// Universal wildcard: any new React route works without editing this file.
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) {
-    return res.status(404).json({ error: 'API endpoint not found' });
+    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'API endpoint not found' } });
   }
-  // Onboarding page gets its own HTML
+  // Legacy HTML pages with their own entry points
   if (req.path === '/onboard' || req.path === '/onboard/') {
     return res.sendFile(path.join(ROOT_DIR, 'onboard.html'));
   }
-  // Platform admin dashboard
   if (req.path === '/platform' || req.path === '/platform/') {
     return res.sendFile(path.join(ROOT_DIR, 'platform.html'));
   }
-  // React SPA routes (/dashboard, /students, /login, etc.)
-  if (reactBuilt && (
-    req.path.startsWith('/dashboard') ||
-    req.path.startsWith('/students')  ||
-    req.path.startsWith('/teachers')  ||
-    req.path.startsWith('/classes')   ||
-    req.path.startsWith('/attendance')||
-    req.path.startsWith('/finance')   ||
-    req.path.startsWith('/behaviour') ||
-    req.path.startsWith('/exams')        ||
-    req.path.startsWith('/admissions')   ||
-    req.path.startsWith('/timetable')    ||
-    req.path.startsWith('/settings')     ||
-    req.path.startsWith('/reports')        ||
-    req.path.startsWith('/report-cards')   ||
-    req.path.startsWith('/grades')         ||
-    req.path.startsWith('/platform-audit') ||
-    req.path === '/login'
-  )) {
-    return res.sendFile(path.join(REACT_DIST, 'index.html'));
-  }
-  // If React is built, serve it for all remaining routes (landing, school login, etc.)
+  // React SPA — serve index.html for every other route (universal wildcard)
   if (reactBuilt) {
     return res.sendFile(path.join(REACT_DIST, 'index.html'));
   }
-  // Legacy app catch-all (only when React build is absent)
+  // Legacy vanilla-JS app (only when React build is absent)
   res.sendFile(path.join(ROOT_DIR, 'index.html'));
 });
 

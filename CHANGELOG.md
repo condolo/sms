@@ -6,6 +6,54 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.9.15] — 2026-05-20  Settings API + Bell Schedule Configuration + Platform Audit Fixes
+
+### New — `server/routes/settings.js`
+
+**School Settings (`GET/PUT /api/settings/school`):**
+- Returns and updates school profile: name, tagline, email, phone, address, website, country, currency, timezone, academicYear, termsPerYear, houses, logoUrl, primaryColor.
+- RBAC: admin or superadmin role required for PUT.
+- Allowlist of updatable fields prevents accidental overwrite of system fields (plan, slug, isActive, etc.).
+
+**User Management (`GET/POST/PUT/DELETE /api/settings/users`):**
+- `GET /api/settings/users` — lists all active users for the school (admin-only; strips passwordHash).
+- `POST /api/settings/users/invite` — creates user with temp password, sends welcome email (non-fatal if email fails). Returns `{ user, tempPassword }` shown once to admin.
+- `PUT /api/settings/users/:id` — updates name or role; superadmin guard on admin role assignment.
+- `DELETE /api/settings/users/:id` — soft-delete (sets `isActive: false`); blocks self-deletion.
+
+**Account Settings (`GET/PUT /api/settings`):**
+- `GET /api/settings` — returns current user's profile (no passwordHash).
+- `PUT /api/settings` — handles two distinct operations: name update or password change (requires currentPassword verification via bcrypt).
+
+### New — `server/routes/bell-schedule.js`
+
+- `GET /api/bell-schedule` — returns school's bell schedule; seeds the default 8-period schedule (07:30–17:00) on first access.
+- `PUT /api/bell-schedule` — saves custom bell schedule; validated with Zod (period key, HH:MM times, label, isBreak).
+- Plan gate: `bell_schedule` → `standard` plan or higher.
+- Admin check on PUT.
+- Default schedule: P1–P3, Short Break, P4–P5, Lunch, P6–P8 (10 rows, 8 lessons + 2 breaks).
+
+### Updated — `server/index.js`
+- Mounted `/api/settings` and `/api/bell-schedule` routes.
+
+### Updated — `client/src/api/client.js`
+- Added `bellSchedule` export: `get()` and `update(data)`.
+
+### Updated — `client/src/pages/timetable/TimetablePage.jsx`
+- **Bell schedule now served from DB** — `DEFAULT_BELL` constant is the fallback; on mount the page fetches `/api/bell-schedule` and uses the saved schedule instead.
+- `TimetableGrid` accepts a `bell` prop (defaults to `DEFAULT_BELL`) — the live schedule is passed through.
+- `AddSlotSlideOver` accepts `lessonPeriods` prop — period dropdown reflects the actual configured schedule.
+- **Bell Schedule slide-over** — admins can open it via the new "Bell" button in the header; inline editor to set start time, end time, label for each row; add lesson or break rows; remove rows; save back to DB.
+
+### Fixed — Platform Audit items (applied in v4.9.14, documented here)
+- `package.json` version bumped from `4.2.0` to `4.9.14`.
+- `server/middleware/auth.js` — standardised to `{ success: false, error: { code, message } }` envelope (was inconsistent bare `{ error: '...' }`).
+- `server/utils/indexes.js` — fixed timetable indexes from nonexistent `dayOfWeek` field to correct `day` field; added bell_schedules indexes.
+- `server/middleware/plan.js` — registered `bell_schedule`, `rooms`, `assessment` features; fail-closed gate for unknown feature keys (was fail-open, silent privilege escalation risk).
+- `server/index.js` — health check version now reads from `package.json` (was hardcoded); SPA fallback replaced explicit 15-route allowlist with universal wildcard.
+
+---
+
 ## [4.9.14] — 2026-05-20  Institutional Scheduling Engine — Timetable Phase 1
 
 ### Rebuilt — `server/routes/timetable.js`

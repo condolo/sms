@@ -305,6 +305,11 @@ export const settings = {
   },
 };
 
+export const bellSchedule = {
+  get:    ()       => _get('/bell-schedule'),
+  update: (data)   => _put('/bell-schedule', data),
+};
+
 // Default export — single object for convenience
 const api = {
   auth,
@@ -321,6 +326,7 @@ const api = {
   timetable,
   announcements,
   settings,
+  bellSchedule,
   importExport,
   APIError,
 };

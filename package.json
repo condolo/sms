@@ -1,6 +1,6 @@
 {
   "name": "innolearn",
-  "version": "4.2.0",
+  "version": "4.9.15",
   "description": "InnoLearn — Multi-tenant SaaS School Management Platform",
   "main": "server/index.js",
   "scripts": {

@@ -158,13 +158,26 @@ const INDEXES = [
   },
 
   /* ── timetable ──────────────────────────────────────────────
-     Primary: class timetable view */
+     Primary: class timetable view + conflict detection
+     Note: field is 'day' (lowercase string), NOT 'dayOfWeek' */
   {
     col: 'timetable',
     indexes: [
-      { key: { schoolId: 1, classId: 1, dayOfWeek: 1, period: 1 }, name: 'tt_class_day_period' },
-      { key: { schoolId: 1, teacherId: 1 },                         name: 'tt_teacher' },
-      { key: { id: 1 },                                              name: 'tt_id', unique: true, sparse: true },
+      { key: { schoolId: 1, classId: 1, day: 1, period: 1 },    name: 'tt_class_day_period' },
+      { key: { schoolId: 1, teacherId: 1, day: 1, period: 1 },  name: 'tt_teacher_day_period' },
+      { key: { schoolId: 1, room: 1, day: 1, period: 1 },       name: 'tt_room_day_period' },
+      { key: { id: 1 },                                          name: 'tt_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── bell_schedules ─────────────────────────────────────────
+     One document per school (or per section within a school).
+     Primary: fetch by schoolId to render the grid. */
+  {
+    col: 'bell_schedules',
+    indexes: [
+      { key: { schoolId: 1, isDefault: 1 }, name: 'bs_school_default' },
+      { key: { id: 1 },                     name: 'bs_id', unique: true, sparse: true },
     ],
   },
 

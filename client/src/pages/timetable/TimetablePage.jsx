@@ -14,9 +14,10 @@ import {
   BookOpen, Clock, Home, Save, AlertCircle, Users, Zap,
 } from 'lucide-react';
 import {
-  timetable as ttApi,
-  classes  as classesApi,
-  teachers as teachersApi,
+  timetable    as ttApi,
+  classes      as classesApi,
+  teachers     as teachersApi,
+  bellSchedule as bellApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 
@@ -25,7 +26,7 @@ const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
 const DAY_SHORT = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri' };
 const DAY_FULL  = { monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday' };
 
-const BELL = [
+const DEFAULT_BELL = [
   { p: '1', start: '07:30', end: '08:30', label: 'Period 1', isBreak: false },
   { p: '2', start: '08:30', end: '09:30', label: 'Period 2', isBreak: false },
   { p: '3', start: '09:30', end: '10:30', label: 'Period 3', isBreak: false },
@@ -37,7 +38,6 @@ const BELL = [
   { p: '7', start: '15:00', end: '16:00', label: 'Period 7', isBreak: false },
   { p: '8', start: '16:00', end: '17:00', label: 'Period 8', isBreak: false },
 ];
-const LESSON_PERIODS = BELL.filter(b => !b.isBreak);
 
 /* ── Slot colours (deterministic by subject) ─────────────────── */
 const PALETTE = [
@@ -215,7 +215,7 @@ function PeriodRow({ bell, slotMap, onDelete, onAdd, canEdit }) {
 }
 
 /* ── Timetable grid ──────────────────────────────────────────── */
-function TimetableGrid({ slots, onDelete, onAdd, canEdit }) {
+function TimetableGrid({ slots, onDelete, onAdd, canEdit, bell = DEFAULT_BELL }) {
   const slotMap = buildSlotMap(slots);
 
   return (
@@ -239,13 +239,13 @@ function TimetableGrid({ slots, onDelete, onAdd, canEdit }) {
       {/* Period rows */}
       <div className="overflow-x-auto">
         <div style={{ minWidth: '600px' }}>
-          {BELL.map(bell =>
-            bell.isBreak
-              ? <BreakRow key={bell.p} bell={bell} />
+          {bell.map(b =>
+            b.isBreak
+              ? <BreakRow key={b.p} bell={b} />
               : (
                 <PeriodRow
-                  key={bell.p}
-                  bell={bell}
+                  key={b.p}
+                  bell={b}
                   slotMap={slotMap}
                   onDelete={onDelete}
                   onAdd={onAdd}
@@ -474,7 +474,7 @@ function OverviewView({ classList }) {
    ══════════════════════════════════════════════════════════════ */
 const EMPTY_FORM = { day: 'monday', period: '1', subject: '', teacherId: '', teacherName: '', room: '', type: 'lesson' };
 
-function AddSlotSlideOver({ classId, defaults, onClose, onCreated }) {
+function AddSlotSlideOver({ classId, defaults, onClose, onCreated, lessonPeriods = DEFAULT_BELL.filter(b => !b.isBreak) }) {
   const [form, setForm]     = useState({ ...EMPTY_FORM, ...defaults });
   const [errors, setErrors] = useState({});
 
@@ -566,7 +566,7 @@ function AddSlotSlideOver({ classId, defaults, onClose, onCreated }) {
             </FField>
             <FField label="Period">
               <select value={form.period} onChange={e => set('period', e.target.value)} className={iCls()}>
-                {LESSON_PERIODS.map(b => (
+                {lessonPeriods.map(b => (
                   <option key={b.p} value={b.p}>P{b.p} · {b.start}</option>
                 ))}
               </select>
@@ -630,6 +630,154 @@ function AddSlotSlideOver({ classId, defaults, onClose, onCreated }) {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   BELL SCHEDULE SLIDE-OVER (admin only)
+   ══════════════════════════════════════════════════════════════ */
+function BellScheduleSlideOver({ periods, onClose, onSaved }) {
+  const qc   = useQueryClient();
+  const [rows, setRows] = useState(periods.map(p => ({ ...p })));
+  const [toast, setToast] = useState(null);
+
+  function setRow(idx, key, val) {
+    setRows(r => r.map((p, i) => i === idx ? { ...p, [key]: val } : p));
+  }
+  function removeRow(idx) {
+    setRows(r => r.filter((_, i) => i !== idx));
+  }
+  function addBreak() {
+    setRows(r => [...r, { p: `B${r.length}`, start: '10:30', end: '11:00', label: 'Break', isBreak: true }]);
+  }
+  function addPeriod() {
+    const lessons = rows.filter(r => !r.isBreak);
+    const nextNum = lessons.length + 1;
+    setRows(r => [...r, { p: String(nextNum), start: '14:00', end: '15:00', label: `Period ${nextNum}`, isBreak: false }]);
+  }
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: () => bellApi.update({ periods: rows }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['bell-schedule'] });
+      setToast({ msg: 'Bell schedule saved.', type: 'success' });
+      setTimeout(() => { onSaved(rows); onClose(); }, 900);
+    },
+    onError: err => setToast({ msg: err?.message ?? 'Failed to save.', type: 'error' }),
+  });
+
+  const iCls2 = 'text-xs px-2 py-1.5 rounded border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-800 w-full';
+
+  return (
+    <>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-40" onClick={onClose} />
+      <motion.div
+        initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+        transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+        className="fixed right-0 top-0 h-full w-full max-w-lg bg-white shadow-2xl z-50 flex flex-col"
+      >
+        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
+          <div>
+            <h2 className="text-base font-semibold text-slate-900">Bell Schedule</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Configure lesson times, breaks, and durations</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-100 transition"><X size={18} /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-2">
+          {toast && (
+            <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border mb-2 ${
+              toast.type === 'error' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+            }`}>
+              {toast.type === 'error' ? <AlertTriangle size={12} /> : <CheckCircle2 size={12} />}
+              {toast.msg}
+            </div>
+          )}
+
+          {/* Column headers */}
+          <div className="grid grid-cols-[40px_80px_80px_1fr_28px] gap-2 pb-1 border-b border-slate-100">
+            <span className="text-[10px] font-semibold text-slate-400 uppercase">Key</span>
+            <span className="text-[10px] font-semibold text-slate-400 uppercase">Start</span>
+            <span className="text-[10px] font-semibold text-slate-400 uppercase">End</span>
+            <span className="text-[10px] font-semibold text-slate-400 uppercase">Label</span>
+            <span />
+          </div>
+
+          {rows.map((row, idx) => (
+            <div
+              key={idx}
+              className={`grid grid-cols-[40px_80px_80px_1fr_28px] gap-2 items-center rounded-lg px-2 py-1.5 ${
+                row.isBreak ? 'bg-slate-50 border border-dashed border-slate-200' : 'bg-white border border-slate-200'
+              }`}
+            >
+              <input
+                value={row.p}
+                onChange={e => setRow(idx, 'p', e.target.value)}
+                className={iCls2 + ' font-mono'}
+                title="Period key"
+                maxLength={6}
+              />
+              <input
+                type="time"
+                value={row.start}
+                onChange={e => setRow(idx, 'start', e.target.value)}
+                className={iCls2}
+              />
+              <input
+                type="time"
+                value={row.end}
+                onChange={e => setRow(idx, 'end', e.target.value)}
+                className={iCls2}
+              />
+              <input
+                value={row.label}
+                onChange={e => setRow(idx, 'label', e.target.value)}
+                className={iCls2}
+                maxLength={40}
+              />
+              <button
+                onClick={() => removeRow(idx)}
+                className="p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition"
+                title="Remove row"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+
+          <div className="flex gap-2 pt-2">
+            <button
+              onClick={addPeriod}
+              className="flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition"
+            >
+              <Plus size={12} /> Add Period
+            </button>
+            <button
+              onClick={addBreak}
+              className="flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-lg border border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-500 transition"
+            >
+              <Plus size={12} /> Add Break
+            </button>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+          <p className="text-[11px] text-slate-400">{rows.filter(r => !r.isBreak).length} teaching periods · {rows.filter(r => r.isBreak).length} breaks</p>
+          <div className="flex items-center gap-3">
+            <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 transition">Cancel</button>
+            <button
+              onClick={() => mutate()}
+              disabled={isPending || rows.length === 0}
+              className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded-lg transition"
+            >
+              {isPending ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+              {isPending ? 'Saving…' : 'Save schedule'}
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
    MAIN PAGE
    ══════════════════════════════════════════════════════════════ */
 const VIEWS = [
@@ -652,7 +800,20 @@ export default function TimetablePage() {
   const [addDefaults,  setAddDefaults]  = useState({ day: 'monday', period: '1' });
   const [showWorkload, setShowWorkload] = useState(false);
   const [showConflicts,setShowConflicts]= useState(false);
+  const [showBell,     setShowBell]     = useState(false);
   const [toast,        setToast]        = useState(null);
+
+  /* ── Bell schedule (live from DB, falls back to DEFAULT_BELL) ── */
+  const { data: bellData } = useQuery({
+    queryKey: ['bell-schedule'],
+    queryFn:  () => bellApi.get(),
+    staleTime: 10 * 60_000,
+  });
+  const [bell, setBell] = useState(DEFAULT_BELL);
+  useEffect(() => {
+    if (bellData?.data?.periods?.length) setBell(bellData.data.periods);
+  }, [bellData]);
+  const lessonPeriods = bell.filter(b => !b.isBreak);
 
   function showToast(msg, type = 'success') {
     setToast({ msg, type });
@@ -801,6 +962,17 @@ export default function TimetablePage() {
                 <BarChart3 size={12} /> Workload
               </button>
 
+              {/* Bell schedule config (admin only) */}
+              {canEdit && (
+                <button
+                  onClick={() => setShowBell(true)}
+                  className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 transition"
+                  title="Configure bell schedule"
+                >
+                  <Clock size={12} /> Bell
+                </button>
+              )}
+
               {/* Add slot (class view only) */}
               {canEdit && activeView === 'class' && classId && (
                 <button
@@ -942,6 +1114,7 @@ export default function TimetablePage() {
               onDelete={removeSlot}
               onAdd={openAdd}
               canEdit={canEdit}
+              bell={bell}
             />
           )
         )}
@@ -968,6 +1141,7 @@ export default function TimetablePage() {
               onDelete={removeSlot}
               onAdd={() => {}}
               canEdit={false}
+              bell={bell}
             />
           )
         )}
@@ -1001,6 +1175,18 @@ export default function TimetablePage() {
             defaults={addDefaults}
             onClose={() => setShowAdd(false)}
             onCreated={onSlotCreated}
+            lessonPeriods={lessonPeriods}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── Bell schedule slide-over ── */}
+      <AnimatePresence>
+        {showBell && (
+          <BellScheduleSlideOver
+            periods={bell}
+            onClose={() => setShowBell(false)}
+            onSaved={newPeriods => setBell(newPeriods)}
           />
         )}
       </AnimatePresence>

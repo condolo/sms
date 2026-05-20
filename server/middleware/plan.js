@@ -29,10 +29,13 @@ const FEATURE_PLAN = {
   /* ── Standard ── */
   behaviour:          'standard',
   timetable:          'standard',
+  bell_schedule:      'standard',   // configurable bell/lesson schedule
+  rooms:              'standard',   // room inventory management
   exams:              'standard',
   key_stages:         'standard',
   houses:             'standard',
   sections:           'standard',
+  assessment:         'standard',   // CA/HW/MT/ET system (was implicitly gated via 'grades')
 
   /* ── Premium ── */
   finance:            'premium',
@@ -95,7 +98,12 @@ function planGate(feature) {
       }
 
       const requiredPlan  = FEATURE_PLAN[feature];
-      if (!requiredPlan) return next(); // Unknown feature — allow (fail open for unknown)
+      // Fail CLOSED for unregistered features — prevents silent privilege escalation
+      // when new routes are added without registering in FEATURE_PLAN.
+      if (!requiredPlan) {
+        console.error(`[PlanGate] Unknown feature key: '${feature}' — denying access (fail-closed). Register it in FEATURE_PLAN.`);
+        return res.status(403).json({ success: false, error: { code: 'PLAN_UPGRADE_REQUIRED', message: `Feature '${feature}' is not available on any plan. Contact support.` } });
+      }
 
       const schoolPlan     = await _getSchoolPlan(schoolId);
       const schoolLevel    = PLAN_LEVELS[schoolPlan]    || 1;
