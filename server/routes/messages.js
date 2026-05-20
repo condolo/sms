@@ -4,16 +4,17 @@
    Stored in MongoDB so messages persist across devices/sessions.
    Notification emails sent to recipients on every new message.
    ============================================================ */
-const express  = require('express');
-const mongoose = require('mongoose');
-const { authMiddleware } = require('../middleware/auth');
+const express        = require('express');
+const mongoose       = require('mongoose');
+const { v4: uuidv4 } = require('uuid');
+const { authMiddleware }   = require('../middleware/auth');
 const { tenantMiddleware } = require('../middleware/tenant');
-const email    = require('../utils/email');
+const email = require('../utils/email');
 
 const router = express.Router();
 router.use(authMiddleware, tenantMiddleware);
 
-const APP_URL = process.env.APP_URL || 'https://school-management-ecosystem.onrender.com';
+const APP_URL = process.env.APP_URL || 'https://msingi.io';
 
 function _model(col) {
   const name = col.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
@@ -90,6 +91,7 @@ router.post('/', async (req, res) => {
     const recipientList = Array.isArray(recipients) ? recipients : [recipients];
 
     const msg = await Msg.create({
+      id:         uuidv4(),
       schoolId,
       senderId:   userId,
       senderName,

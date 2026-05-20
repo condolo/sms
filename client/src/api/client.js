@@ -319,6 +319,13 @@ export const subjects = {
   byDepartment: (departmentId, params) => _get('/subjects', { ...params, departmentId }),
 };
 
+export const messages = {
+  list:     (params) => _get('/messages', params),
+  send:     (data)   => _post('/messages', data),
+  markRead: (id)     => _patch(`/messages/${id}/read`, {}),
+  remove:   (id)     => _delete(`/messages/${id}`),
+};
+
 export const studentSubjects = {
   counts:   ()       => _get('/student-subjects/counts'),
   list:     (params) => _get('/student-subjects', params),
@@ -358,6 +365,7 @@ const api = {
   departments,
   subjects,
   studentSubjects,
+  messages,
   importExport,
   APIError,
 };

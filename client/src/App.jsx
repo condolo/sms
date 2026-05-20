@@ -28,6 +28,7 @@ const SettingsPage      = lazy(() => import('@/pages/settings/SettingsPage.jsx')
 const GradesPage        = lazy(() => import('@/pages/grades/GradesPage.jsx'));
 const ImportExportPage  = lazy(() => import('@/pages/import-export/ImportExportPage.jsx'));
 const SubjectsPage      = lazy(() => import('@/pages/subjects/SubjectsPage.jsx'));
+const MessagesPage      = lazy(() => import('@/pages/messages/MessagesPage.jsx'));
 const NotFound          = lazy(() => import('@/pages/NotFound.jsx'));
 
 function SuspenseWrapper({ children }) {
@@ -112,6 +113,9 @@ export const router = createBrowserRouter([
 
       // Subjects & Departments
       { path: 'subjects',              element: <SuspenseWrapper><SubjectsPage /></SuspenseWrapper> },
+
+      // Messages
+      { path: 'messages',              element: <SuspenseWrapper><MessagesPage /></SuspenseWrapper> },
 
       // Import / Export
       { path: 'import-export',         element: <SuspenseWrapper><ImportExportPage /></SuspenseWrapper> },

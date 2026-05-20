@@ -7,6 +7,7 @@ import {
   LayoutDashboard, GraduationCap, Users, BookOpen, Calendar,
   CheckSquare, FileText, BarChart3, ClipboardList, Scale,
   Wallet, Download, Settings, LogOut, Building2, Library,
+  MessageSquare,
 } from 'lucide-react';
 import clsx from 'clsx';
 import useAuthStore from '@/store/auth.js';
@@ -38,6 +39,7 @@ const NAV_SECTIONS = [
       { to: '/admissions', Icon: ClipboardList,    label: 'Admissions'  },
       { to: '/behaviour',  Icon: Scale,            label: 'Behaviour'   },
       { to: '/finance',    Icon: Wallet,           label: 'Finance'     },
+      { to: '/messages',   Icon: MessageSquare,    label: 'Messages'    },
     ],
   },
   {
