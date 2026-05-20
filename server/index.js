@@ -1,5 +1,5 @@
 ﻿/* ============================================================
-   InnoLearn — API Server
+   Msingi — API Server
    Node.js + Express + MongoDB
    Serves both the API (/api/*) and the static frontend
    ============================================================ */

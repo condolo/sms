@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — /api/classes  (Resource Route)
+   Msingi — /api/classes  (Resource Route)
    Server-side RBAC + plan gating + Zod validation
    ============================================================ */
 const express = require('express');

@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — Messages Route
+   Msingi — Messages Route
    /api/messages — In-app messaging & announcements
    Stored in MongoDB so messages persist across devices/sessions.
    Notification emails sent to recipients on every new message.

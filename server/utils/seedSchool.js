@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — Full Demo Seed
+   Msingi — Full Demo Seed
    Seeds InnoLearn International School with realistic data
    across ALL modules: students, teachers, classes, houses,
    attendance, behaviour, finance, grades, exams, subjects.
@@ -569,7 +569,7 @@ async function seed() {
 
   /* ── WIPE ─────────────────────────────────────────────────── */
   if (WIPE) {
-    console.log('🗑   Wiping existing InnoLearn data…');
+    console.log('🗑   Wiping existing demo school data…');
     await Promise.all([
       School.deleteMany({ id: S }),
       User.deleteMany({ schoolId: S }),
@@ -735,7 +735,7 @@ async function seed() {
   console.log('🔢  Counters updated');
 
   /* ── Summary ────────────────────────────────────────────── */
-  console.log('\n✅  InnoLearn demo seeded successfully!');
+  console.log('\n✅  Demo school seeded successfully!');
   console.log('   Parent Mr. & Mrs. Johnson → linked to Emily + James Johnson');
   console.log('   Section heads → kg / primary / secondary sections assigned');
   console.log('   Teacher Ms. Sarah Smith → email matches teacher user account\n');

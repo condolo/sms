@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — Database Index Definitions
+   Msingi — Database Index Definitions
    Called once at server startup after DB connection.
    Uses MongoDB driver directly (collection.createIndex) so
    indexes are created regardless of Mongoose schema definition.

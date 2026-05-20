@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — /api/admissions  (Admissions Pipeline)
+   Msingi — /api/admissions  (Admissions Pipeline)
    Manages applications from enquiry through to enrolment.
    Plan: premium | RBAC: admissions:{read,create,update,delete}
    ============================================================ */

@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — Ranking Utility
+   Msingi — Ranking Utility
    Computes class/stream/overall rankings from an array of
    student score objects.
 

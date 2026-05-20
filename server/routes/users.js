@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — User Management Routes
+   Msingi — User Management Routes
    POST /api/users/invite         — invite single user (sends welcome email)
    POST /api/users/bulk-invite    — invite multiple users from CSV/form
    POST /api/users/:id/role-change — notify user of role/permission change

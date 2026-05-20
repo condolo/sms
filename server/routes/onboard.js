@@ -1,5 +1,5 @@
 ﻿/* ============================================================
-   InnoLearn — Public Onboarding Route
+   Msingi — Public Onboarding Route
    POST /api/onboard — provisions a new school + admin user
    No auth required (public endpoint, rate-limited)
    ============================================================ */

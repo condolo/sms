@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — Data Backup & Export Route
+   Msingi — Data Backup & Export Route
    Superadmin-only. Exports full school data as a JSON snapshot.
    Logs backup metadata to backup_logs collection.
    ============================================================ */

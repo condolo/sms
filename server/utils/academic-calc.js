@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — Canonical Academic Calculation Engine
+   Msingi — Canonical Academic Calculation Engine
    Single source of truth for all weighted-score calculations.
 
    Exported functions are used by:

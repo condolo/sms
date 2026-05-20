@@ -1,7 +1,7 @@
 {
-  "name": "innolearn",
+  "name": "msingi",
   "version": "4.9.19",
-  "description": "InnoLearn — Multi-tenant SaaS School Management Platform",
+  "description": "Msingi — Multi-tenant SaaS School Management Platform",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",

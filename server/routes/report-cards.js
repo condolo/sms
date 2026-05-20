@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — /api/report-cards  (v3 — production hardened)
+   Msingi — /api/report-cards  (v3 — production hardened)
 
    Endpoints:
      POST /generate              — live preview (not persisted)

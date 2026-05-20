@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — /api/attendance  (Resource Route)
+   Msingi — /api/attendance  (Resource Route)
    Server-side RBAC + plan gating + Zod validation
    Paginated with class/date/student/period filters.
    ============================================================ */

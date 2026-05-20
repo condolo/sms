@@ -157,7 +157,7 @@ async function sendAdminNewSchoolAlert({ schoolName, slug, adminName, adminEmail
 async function sendApprovalWelcome({ adminName, adminEmail, schoolName, slug, plan, tempPassword }) {
   // Build the school's dedicated subdomain URL.
   // APP_URL might be "https://school-management-ecosystem.onrender.com" or
-  // "https://innolearn.com". We extract the base host and prepend the slug.
+  // "https://msingi.io". We extract the base host and prepend the slug.
   let loginUrl = `${APP_URL}/login`;
   try {
     const u     = new URL(APP_URL);
@@ -298,7 +298,7 @@ async function sendSystemUpdateNotice({ adminName, adminEmail, schoolName, title
 
 /* ══════════════════════════════════════════════════════════════
    SCHOOL EMAILS — sent from the school's identity
-   From:     "<School Name> via Msingi" <innolearnnetwork@gmail.com>
+   From:     "<School Name> via Msingi" <SMTP_USER env var>
    Reply-To: school.systemEmail  (falls back to PLATFORM_EMAIL)
 
    All school-level functions accept schoolEmail as the last

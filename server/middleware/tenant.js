@@ -4,7 +4,7 @@
    Reads the school from one of:
      1. req.jwtUser.schoolId  (most requests — already authenticated)
      2. X-School-Slug header  (login requests — not yet authenticated)
-     3. Subdomain             (e.g. innolearn.innolearn.com)
+     3. Subdomain             (e.g. greenwood.msingi.io)
    Attaches req.school = { id, slug, plan, addOns, isActive }
 ─────────────────────────────────────────────────────────────────── */
 
@@ -29,7 +29,7 @@ async function tenantMiddleware(req, res, next) {
       return next();
     }
 
-    // 3. From subdomain (e.g. InnoLearn.InnoLearn.com)
+    // 3. From subdomain (e.g. greenwood.msingi.io)
     const host = req.hostname || '';
     const parts = host.split('.');
     if (parts.length >= 3) {

@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — Server-Side RBAC Middleware
+   Msingi — Server-Side RBAC Middleware
    Usage:  router.get('/students', rbac('students', 'read'), handler)
 
    Permission document shape (role_permissions collection):

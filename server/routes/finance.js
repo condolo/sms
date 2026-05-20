@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — /api/finance  (Invoices + Payments)
+   Msingi — /api/finance  (Invoices + Payments)
    Server-side RBAC + plan gating (premium)
    All financial calculations done server-side.
    Server generates invoice/receipt numbers via atomic counter.

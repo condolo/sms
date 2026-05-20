@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — /api/teachers  (Resource Route)
+   Msingi — /api/teachers  (Resource Route)
    Server-side RBAC + plan gating + Zod validation
    Server generates staff IDs via atomic counter.
    ============================================================ */

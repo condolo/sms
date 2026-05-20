@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — /api/behaviour  (Behaviour & Pastoral)
+   Msingi — /api/behaviour  (Behaviour & Pastoral)
    Sub-routes:
      /api/behaviour/incidents   — incident log
      /api/behaviour/appeals     — appeal log

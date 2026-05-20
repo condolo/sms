@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — Standardised API Response Helpers
+   Msingi — Standardised API Response Helpers
 
    All API responses follow one of two envelopes:
 

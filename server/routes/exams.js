@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — /api/exams  (Exam Scheduling + Results)
+   Msingi — /api/exams  (Exam Scheduling + Results)
    Sub-routes:
      /api/exams              — exam definitions
      /api/exams/:id/results  — results for one exam

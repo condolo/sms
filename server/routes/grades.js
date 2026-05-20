@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — /api/grades  (Gradebook)
+   Msingi — /api/grades  (Gradebook)
    Continuous assessment grades per student per subject per term.
    Plan: core | RBAC: grades:{read,create,update,delete}
    ============================================================ */

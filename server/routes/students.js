@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — /api/students  (Resource Route)
+   Msingi — /api/students  (Resource Route)
    Server-side RBAC + plan gating + Zod validation
    Paginated, scoped to schoolId from JWT.
    Server generates admission numbers via atomic counter.

@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — Archival Utilities
+   Msingi — Archival Utilities
    Single source of truth for year-archival checks.
 
    Imported by any route that needs to guard write operations

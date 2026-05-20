@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — /api/academic-config
+   Msingi — /api/academic-config
    School-level academic configuration:
      - Grading schema (grade bands per curriculum)
      - Assessment type weighting (CAT %, Midterm %, Final %)

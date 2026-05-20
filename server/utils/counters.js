@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — Atomic Sequential ID Counter
+   Msingi — Atomic Sequential ID Counter
    Uses MongoDB findOneAndUpdate with $inc for race-safe counters.
 
    Counter documents in the 'counters' collection:

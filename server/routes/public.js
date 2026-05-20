@@ -12,7 +12,7 @@ const router = express.Router();
 /* GET /api/public/school-info
    Query:  ?slug=greenwood
    Header: X-School-Slug: greenwood  (fallback)
-   Host:   greenwood.innolearn.com   (auto-detected from subdomain)
+   Host:   greenwood.msingi.io       (auto-detected from subdomain)
 
    Returns the public-safe school profile used to brand the
    school's own login page. Never returns sensitive data.

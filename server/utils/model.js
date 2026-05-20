@@ -1,5 +1,5 @@
 /* ============================================================
-   InnoLearn — Shared Mongoose Model Factory
+   Msingi — Shared Mongoose Model Factory
    Call _model('collection_name') to get a Mongoose model.
    Caches models so each collection is only defined once.
    Matches the pattern used in sync.js and platform.js.
