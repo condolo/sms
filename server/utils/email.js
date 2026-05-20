@@ -21,7 +21,9 @@ const SMTP_USER      = process.env.SMTP_USER;
 const SMTP_PASS      = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
 const SMTP_READY     = !!(SMTP_USER && SMTP_PASS);
 const PLATFORM_EMAIL = process.env.PLATFORM_EMAIL || SMTP_USER || '';
-const APP_URL        = process.env.APP_URL || 'https://school-management-ecosystem.onrender.com';
+// Contact address shown to users in email templates (not the SMTP sender)
+const SUPPORT_EMAIL  = process.env.SUPPORT_EMAIL  || 'support@msingi.io';
+const APP_URL        = process.env.APP_URL || 'https://msingi.io';
 
 if (!SMTP_READY) {
   console.warn('[EMAIL] ⚠️  SMTP_USER / SMTP_PASS not set — all emails will be skipped. Set them in Render dashboard → Environment.');
@@ -125,7 +127,7 @@ async function sendRegistrationPending({ adminName, adminEmail, schoolName, plan
       <p><strong>Status:</strong> <span class="badge pending">⏳ Pending Review</span></p>
     </div>
     <p>You will receive another email within <strong>24 hours</strong> once your account has been reviewed. If approved, you will receive your login credentials and can start setting up your school immediately.</p>
-    <p>If you have any questions, contact us at <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
+    <p>If you have any questions, contact us at <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>
     <p>Thank you for choosing Msingi!</p>
   `);
   return _send(adminEmail, `Application Received — ${schoolName} | Msingi`, html);
@@ -198,7 +200,7 @@ async function sendApprovalWelcome({ adminName, adminEmail, schoolName, slug, pl
     <p style="text-align:center">
       <a href="${loginUrl}" class="btn">Log In to Msingi →</a>
     </p>
-    <p style="font-size:13px;color:#6b7280">Need help? Contact us at <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
+    <p style="font-size:13px;color:#6b7280">Need help? Contact us at <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>
     <p style="font-size:12px;color:#9ca3af">⚠️ Never share your password with anyone — Msingi will never ask for it by email.</p>
   `);
   return _send(adminEmail, `✅ Your Msingi account is approved — ${schoolName}`, html);
@@ -211,7 +213,7 @@ async function sendRejectionEmail({ adminName, adminEmail, schoolName, reason })
     <p>Hi ${adminName},</p>
     <p>Thank you for your interest in Msingi. After reviewing your application for <strong>${schoolName}</strong>, we are unable to approve it at this time.</p>
     ${reason ? `<div class="info"><p><strong>Reason:</strong> ${reason}</p></div>` : ''}
-    <p>If you believe this is an error or would like to discuss further, please contact us at <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
+    <p>If you believe this is an error or would like to discuss further, please contact us at <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>
     <p style="font-size:13px;color:#6b7280">You are welcome to re-apply after addressing any concerns raised.</p>
   `);
   return _send(adminEmail, `Msingi Application Update — ${schoolName}`, html);
@@ -237,7 +239,7 @@ async function sendAdminApprovalAlert({ schoolName, adminEmail, plan }) {
 /* 6. Trial expiry reminder (platform → school admin) */
 async function sendTrialReminder({ adminName, adminEmail, schoolName, schoolEmail, plan, daysLeft, trialEnds }) {
   const urgency = daysLeft === 0 ? '🚨 Today is your last day' : daysLeft === 1 ? '⚠️ 1 day left' : `⏰ ${daysLeft} days left`;
-  const support = schoolEmail || PLATFORM_EMAIL;
+  const support = schoolEmail || SUPPORT_EMAIL;
   const html = _wrap(`
     <h2>${urgency} on your free trial</h2>
     <p>Hi ${adminName},</p>
@@ -251,7 +253,7 @@ async function sendTrialReminder({ adminName, adminEmail, schoolName, schoolEmai
     <p style="text-align:center">
       <a href="${APP_URL}" class="btn">Manage My Subscription →</a>
     </p>
-    <p style="font-size:13px;color:#6b7280">Questions? Contact us at <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
+    <p style="font-size:13px;color:#6b7280">Questions? Contact us at <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>
   `, schoolName);
   return _send(adminEmail, `${urgency} — Msingi trial for ${schoolName}`, html);
 }
@@ -291,7 +293,7 @@ async function sendSystemUpdateNotice({ adminName, adminEmail, schoolName, title
     <p style="text-align:center">
       <a href="${APP_URL}" class="btn">Visit Your Dashboard →</a>
     </p>`}
-    <p style="font-size:13px;color:#6b7280">Questions about this notice? Contact us at <a href="mailto:${PLATFORM_EMAIL}">${PLATFORM_EMAIL}</a>.</p>
+    <p style="font-size:13px;color:#6b7280">Questions about this notice? Contact us at <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>
   `);
   return _send(adminEmail, `${icon} Msingi — ${label}: ${title}`, html);
 }
@@ -307,7 +309,7 @@ async function sendSystemUpdateNotice({ adminName, adminEmail, schoolName, title
 
 /* 7. Two-factor authentication OTP */
 async function sendLoginOTP({ name, email, otp, schoolName, schoolEmail }) {
-  const support = schoolEmail || PLATFORM_EMAIL;
+  const support = schoolEmail || SUPPORT_EMAIL;
   const html = _wrap(`
     <h2>Your sign-in code 🔐</h2>
     <p>Hi ${name},</p>
@@ -350,7 +352,7 @@ async function sendWelcomeCredentials({ name, email, tempPassword, schoolName, s
 /* 9. Password expiry reminder */
 async function sendPasswordExpirySoon({ name, email, schoolName, schoolEmail, daysLeft }) {
   const urgency = daysLeft <= 1 ? '🚨 Urgent' : daysLeft <= 3 ? '⚠️ Action needed' : '🔑 Reminder';
-  const support = schoolEmail || PLATFORM_EMAIL;
+  const support = schoolEmail || SUPPORT_EMAIL;
   const html = _wrap(`
     <h2>${urgency}: Your password expires ${daysLeft <= 0 ? 'today' : `in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`}</h2>
     <p>Hi ${name},</p>
@@ -366,7 +368,7 @@ async function sendPasswordExpirySoon({ name, email, schoolName, schoolEmail, da
 
 /* 10. Password changed — security confirmation */
 async function sendPasswordChanged({ name, email, schoolName, schoolEmail }) {
-  const support = schoolEmail || PLATFORM_EMAIL;
+  const support = schoolEmail || SUPPORT_EMAIL;
   const html = _wrap(`
     <h2>✅ Password updated successfully</h2>
     <p>Hi ${name},</p>
@@ -382,7 +384,7 @@ async function sendPasswordChanged({ name, email, schoolName, schoolEmail }) {
 /* 11. Role / permission change notification */
 async function sendRoleChanged({ name, email, schoolName, schoolEmail, oldRole, newRole, changedBy }) {
   const fmt    = r => (r || 'staff').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-  const support = schoolEmail || PLATFORM_EMAIL;
+  const support = schoolEmail || SUPPORT_EMAIL;
   const html = _wrap(`
     <h2>🔄 Your account permissions have changed</h2>
     <p>Hi ${name},</p>
