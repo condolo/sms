@@ -238,6 +238,20 @@ const INDEXES = [
     ],
   },
 
+  /* ── student_subjects ──────────────────────────────────────
+     Primary: list students in a subject (enrollment slide-over)
+     Secondary: list subjects per student (timetable / grade filter)
+     Unique: prevent duplicate enrollments */
+  {
+    col: 'student_subjects',
+    indexes: [
+      { key: { schoolId: 1, subjectId: 1, studentId: 1 }, name: 'ss_sub_student', unique: true, sparse: true },
+      { key: { schoolId: 1, studentId: 1 },               name: 'ss_student' },
+      { key: { schoolId: 1, subjectId: 1 },               name: 'ss_subject' },
+      { key: { id: 1 },                                   name: 'ss_id', unique: true, sparse: true },
+    ],
+  },
+
   /* ── attendance ─────────────────────────────────────────────
      Primary: count present/absent for report card attendance summary */
   {

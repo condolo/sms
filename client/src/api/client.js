@@ -319,6 +319,14 @@ export const subjects = {
   byDepartment: (departmentId, params) => _get('/subjects', { ...params, departmentId }),
 };
 
+export const studentSubjects = {
+  counts:   ()       => _get('/student-subjects/counts'),
+  list:     (params) => _get('/student-subjects', params),
+  enroll:   (data)   => _post('/student-subjects', data),
+  bulk:     (data)   => _post('/student-subjects/bulk', data),
+  unenroll: (id)     => _delete(`/student-subjects/${id}`),
+};
+
 export const bellSchedule = {
   /** Fetch a section's schedule. Falls back: section → 'all' → hardcoded default. */
   get:      (section = 'all') => _get('/bell-schedule', { section }),
@@ -349,6 +357,7 @@ const api = {
   bellSchedule,
   departments,
   subjects,
+  studentSubjects,
   importExport,
   APIError,
 };

@@ -1,17 +1,25 @@
 /* ============================================================
-   SubjectsPage — Department + Subject Registry
+   SubjectsPage — Department + Subject Registry + Enrollment
    Admin-editable. Grouped by department.
-   HoD assignment, section pills, compulsory toggle.
+   Each subject shows enrollment count; admins can manage
+   which students are enrolled (individual or by class).
    ============================================================ */
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, Pencil, Trash2, ChevronDown, ChevronRight, Search,
-  X, BookOpen, Users, Library, AlertTriangle, Check,
+  X, BookOpen, Users, Library, AlertTriangle, Check, UserPlus,
+  UserMinus, GraduationCap,
 } from 'lucide-react';
 import clsx from 'clsx';
-import { departments as deptsApi, subjects as subsApi, teachers as teachersApi } from '@/api/client.js';
+import {
+  departments as deptsApi,
+  subjects as subsApi,
+  classes as classesApi,
+  students as studentsApi,
+  studentSubjects as enrollApi,
+} from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 
 /* ── helpers ─────────────────────────────────────────────── */
@@ -77,93 +85,60 @@ function DeptForm({ initial, onSave, onClose, saving }) {
         <h2 className="text-base font-semibold text-slate-900">
           {initial ? 'Edit Department' : 'New Department'}
         </h2>
-        <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100">
-          <X size={18} />
-        </button>
+        <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100"><X size={18} /></button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Department Name <span className="text-red-500">*</span></label>
-          <input
-            value={form.name}
-            onChange={e => set('name', e.target.value)}
+          <input value={form.name} onChange={e => set('name', e.target.value)}
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
-            placeholder="e.g. Mathematics"
-          />
+            placeholder="e.g. Mathematics" />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Code <span className="text-red-500">*</span></label>
-            <input
-              value={form.code}
-              onChange={e => set('code', e.target.value.toUpperCase())}
+            <input value={form.code} onChange={e => set('code', e.target.value.toUpperCase())}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500"
-              placeholder="e.g. MATH"
-              maxLength={20}
-            />
+              placeholder="e.g. MATH" maxLength={20} />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Order</label>
-            <input
-              type="number"
-              min={0}
-              value={form.order}
-              onChange={e => set('order', parseInt(e.target.value) || 0)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
-            />
+            <input type="number" min={0} value={form.order} onChange={e => set('order', parseInt(e.target.value) || 0)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500" />
           </div>
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-2">Colour</label>
           <div className="flex flex-wrap gap-2">
             {DEPT_COLORS.map(c => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => set('color', c)}
+              <button key={c} type="button" onClick={() => set('color', c)}
                 className={clsx('h-7 w-7 rounded-full border-2 transition', form.color === c ? 'border-slate-900 scale-110' : 'border-transparent')}
-                style={{ backgroundColor: c }}
-              />
+                style={{ backgroundColor: c }} />
             ))}
-            <input
-              type="color"
-              value={form.color}
-              onChange={e => set('color', e.target.value)}
-              className="h-7 w-7 cursor-pointer rounded-full border border-slate-300 p-0.5"
-              title="Custom colour"
-            />
+            <input type="color" value={form.color} onChange={e => set('color', e.target.value)}
+              className="h-7 w-7 cursor-pointer rounded-full border border-slate-300 p-0.5" title="Custom colour" />
           </div>
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Head of Department (HoD)</label>
-          <input
-            value={form.hodName}
-            onChange={e => set('hodName', e.target.value)}
+          <input value={form.hodName} onChange={e => set('hodName', e.target.value)}
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
-            placeholder="Name of department head"
-          />
+            placeholder="Name of department head" />
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
-          <textarea
-            value={form.description}
-            onChange={e => set('description', e.target.value)}
-            rows={3}
+          <textarea value={form.description} onChange={e => set('description', e.target.value)}
+            rows={3} maxLength={500}
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 resize-none"
-            placeholder="Optional department description"
-            maxLength={500}
-          />
+            placeholder="Optional department description" />
         </div>
       </div>
 
       <div className="shrink-0 flex justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50">
         <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-200 transition">Cancel</button>
-        <button
-          onClick={() => onSave(form)}
-          disabled={saving || !form.name.trim() || !form.code.trim()}
-          className="px-4 py-2 rounded-lg text-sm bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition font-medium"
-        >
+        <button onClick={() => onSave(form)} disabled={saving || !form.name.trim() || !form.code.trim()}
+          className="px-4 py-2 rounded-lg text-sm bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition font-medium">
           {saving ? 'Saving…' : 'Save Department'}
         </button>
       </div>
@@ -200,88 +175,58 @@ function SubjectForm({ initial, departments, onSave, onClose, saving }) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-        <h2 className="text-base font-semibold text-slate-900">
-          {initial ? 'Edit Subject' : 'New Subject'}
-        </h2>
-        <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100">
-          <X size={18} />
-        </button>
+        <h2 className="text-base font-semibold text-slate-900">{initial ? 'Edit Subject' : 'New Subject'}</h2>
+        <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100"><X size={18} /></button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Subject Name <span className="text-red-500">*</span></label>
-          <input
-            value={form.name}
-            onChange={e => set('name', e.target.value)}
+          <input value={form.name} onChange={e => set('name', e.target.value)}
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
-            placeholder="e.g. Pure Mathematics"
-          />
+            placeholder="e.g. Pure Mathematics" />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Code <span className="text-red-500">*</span></label>
-            <input
-              value={form.code}
-              onChange={e => set('code', e.target.value.toUpperCase())}
+            <input value={form.code} onChange={e => set('code', e.target.value.toUpperCase())}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500"
-              placeholder="e.g. PMATH"
-              maxLength={20}
-            />
+              placeholder="e.g. PMATH" maxLength={20} />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Short Name</label>
-            <input
-              value={form.shortName}
-              onChange={e => set('shortName', e.target.value)}
+            <input value={form.shortName} onChange={e => set('shortName', e.target.value)}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
-              placeholder="e.g. Pure Maths"
-              maxLength={50}
-            />
+              placeholder="e.g. Pure Maths" maxLength={50} />
           </div>
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Department <span className="text-red-500">*</span></label>
-          <select
-            value={form.departmentId}
-            onChange={e => set('departmentId', e.target.value)}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white"
-          >
-            {departments.map(d => (
-              <option key={d.id} value={d.id}>{d.name}</option>
-            ))}
+          <select value={form.departmentId} onChange={e => set('departmentId', e.target.value)}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white">
+            {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-2">Sections</label>
           <div className="flex flex-wrap gap-2">
             {SECTIONS.map(s => (
-              <button
-                key={s.value}
-                type="button"
-                onClick={() => toggleSection(s.value)}
-                className={clsx(
-                  'rounded-full px-3 py-1 text-xs font-medium border transition',
+              <button key={s.value} type="button" onClick={() => toggleSection(s.value)}
+                className={clsx('rounded-full px-3 py-1 text-xs font-medium border transition',
                   form.sections.includes(s.value)
                     ? 'bg-violet-600 text-white border-violet-600'
-                    : 'bg-white text-slate-600 border-slate-300 hover:border-violet-400',
-                )}
-              >
+                    : 'bg-white text-slate-600 border-slate-300 hover:border-violet-400')}>
                 {s.label}
               </button>
             ))}
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => set('isCompulsory', !form.isCompulsory)}
-            className={clsx(
-              'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors',
-              form.isCompulsory ? 'bg-violet-600' : 'bg-slate-200',
-            )}
-          >
-            <span className={clsx('pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition', form.isCompulsory ? 'translate-x-4' : 'translate-x-0')} />
+          <button type="button" onClick={() => set('isCompulsory', !form.isCompulsory)}
+            className={clsx('relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors',
+              form.isCompulsory ? 'bg-violet-600' : 'bg-slate-200')}>
+            <span className={clsx('pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition',
+              form.isCompulsory ? 'translate-x-4' : 'translate-x-0')} />
           </button>
           <span className="text-sm text-slate-700">Compulsory subject</span>
         </div>
@@ -290,54 +235,33 @@ function SubjectForm({ initial, departments, onSave, onClose, saving }) {
             <label className="block text-sm font-medium text-slate-700 mb-2">Colour</label>
             <div className="flex flex-wrap gap-2">
               {DEPT_COLORS.map(c => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => set('color', c)}
+                <button key={c} type="button" onClick={() => set('color', c)}
                   className={clsx('h-6 w-6 rounded-full border-2 transition', form.color === c ? 'border-slate-900 scale-110' : 'border-transparent')}
-                  style={{ backgroundColor: c }}
-                />
+                  style={{ backgroundColor: c }} />
               ))}
-              <input
-                type="color"
-                value={form.color ?? '#6366F1'}
-                onChange={e => set('color', e.target.value)}
-                className="h-6 w-6 cursor-pointer rounded-full border border-slate-300 p-0.5"
-                title="Custom colour"
-              />
+              <input type="color" value={form.color ?? '#6366F1'} onChange={e => set('color', e.target.value)}
+                className="h-6 w-6 cursor-pointer rounded-full border border-slate-300 p-0.5" title="Custom colour" />
             </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Order</label>
-            <input
-              type="number"
-              min={0}
-              value={form.order}
-              onChange={e => set('order', parseInt(e.target.value) || 0)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
-            />
+            <input type="number" min={0} value={form.order} onChange={e => set('order', parseInt(e.target.value) || 0)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500" />
           </div>
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
-          <textarea
-            value={form.description}
-            onChange={e => set('description', e.target.value)}
-            rows={2}
+          <textarea value={form.description} onChange={e => set('description', e.target.value)}
+            rows={2} maxLength={500}
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 resize-none"
-            placeholder="Optional subject description"
-            maxLength={500}
-          />
+            placeholder="Optional subject description" />
         </div>
       </div>
 
       <div className="shrink-0 flex justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50">
         <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-200 transition">Cancel</button>
-        <button
-          onClick={() => onSave(form)}
-          disabled={saving || !form.name.trim() || !form.code.trim() || !form.departmentId}
-          className="px-4 py-2 rounded-lg text-sm bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition font-medium"
-        >
+        <button onClick={() => onSave(form)} disabled={saving || !form.name.trim() || !form.code.trim() || !form.departmentId}
+          className="px-4 py-2 rounded-lg text-sm bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition font-medium">
           {saving ? 'Saving…' : 'Save Subject'}
         </button>
       </div>
@@ -345,27 +269,230 @@ function SubjectForm({ initial, departments, onSave, onClose, saving }) {
   );
 }
 
+/* ── Enrollment slide-over ────────────────────────────────── */
+function EnrollSlideOver({ subject, onClose, flash }) {
+  const qc = useQueryClient();
+  const [classId, setClassId]           = useState('');
+  const [studentSearch, setStudentSearch] = useState('');
+  const [enrollingId, setEnrollingId]   = useState(null);
+  const [unenrollingId, setUnenrollingId] = useState(null);
+  const [bulking, setBulking]           = useState(false);
+
+  const { data: enrollments = [], isLoading: loadingEnrolled, refetch } = useQuery({
+    queryKey: ['subject-enrollments', subject.id],
+    queryFn:  () => enrollApi.list({ subjectId: subject.id }),
+    staleTime: 0,
+  });
+
+  const { data: classes = [] } = useQuery({
+    queryKey: ['classes'],
+    queryFn:  () => classesApi.list({ limit: 200 }),
+    staleTime: 60_000,
+  });
+
+  const { data: allStudents = [] } = useQuery({
+    queryKey: ['students-search-pool'],
+    queryFn:  () => studentsApi.list({ limit: 2000, status: 'active' }),
+    staleTime: 60_000,
+  });
+
+  const enrolledIds = new Set(enrollments.map(e => e.studentId));
+  const searchQ = studentSearch.trim().toLowerCase();
+  const searchResults = searchQ.length >= 2
+    ? allStudents
+        .filter(s =>
+          s.status === 'active' &&
+          !enrolledIds.has(s.id) &&
+          (`${s.firstName} ${s.lastName}`.toLowerCase().includes(searchQ) ||
+           (s.admissionNumber ?? '').toLowerCase().includes(searchQ))
+        )
+        .slice(0, 8)
+    : [];
+
+  function invalidateCounts() {
+    qc.invalidateQueries({ queryKey: ['student-subjects-counts'] });
+  }
+
+  async function handleBulkEnroll() {
+    if (!classId) return;
+    setBulking(true);
+    try {
+      const r = await enrollApi.bulk({ subjectId: subject.id, classId });
+      refetch();
+      invalidateCounts();
+      flash(r.message ?? 'Class enrolled');
+    } catch (err) {
+      flash(err.extra?.error || err.message || 'Bulk enroll failed', 'error');
+    } finally {
+      setBulking(false);
+    }
+  }
+
+  async function handleEnroll(studentId) {
+    setEnrollingId(studentId);
+    try {
+      await enrollApi.enroll({ studentId, subjectId: subject.id });
+      refetch();
+      invalidateCounts();
+      setStudentSearch('');
+    } catch (err) {
+      flash(err.extra?.error || err.message || 'Enroll failed', 'error');
+    } finally {
+      setEnrollingId(null);
+    }
+  }
+
+  async function handleUnenroll(enrollmentId) {
+    setUnenrollingId(enrollmentId);
+    try {
+      await enrollApi.unenroll(enrollmentId);
+      refetch();
+      invalidateCounts();
+    } catch (err) {
+      flash(err.extra?.error || err.message || 'Unenroll failed', 'error');
+    } finally {
+      setUnenrollingId(null);
+    }
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="h-8 w-8 shrink-0 rounded-lg flex items-center justify-center" style={{ backgroundColor: subject.color ?? '#6366F1' }}>
+            <GraduationCap size={15} className="text-white" />
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold text-slate-900 truncate">{subject.name}</h2>
+            <p className="text-xs text-slate-500">{enrollments.length} enrolled</p>
+          </div>
+        </div>
+        <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 shrink-0"><X size={18} /></button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        {/* Enroll by class */}
+        <div className="px-6 py-4 border-b border-slate-100">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Enroll by Class</p>
+          <div className="flex gap-2">
+            <select
+              value={classId}
+              onChange={e => setClassId(e.target.value)}
+              className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white"
+            >
+              <option value="">Select a class…</option>
+              {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <button
+              onClick={handleBulkEnroll}
+              disabled={!classId || bulking}
+              className="shrink-0 flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2 text-sm text-white hover:bg-violet-700 disabled:opacity-50 transition font-medium"
+            >
+              {bulking ? 'Enrolling…' : <><UserPlus size={14} />Enroll Class</>}
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1.5">Enrolls all active students in the selected class. Already-enrolled students are skipped.</p>
+        </div>
+
+        {/* Search & enroll individual student */}
+        <div className="px-6 py-4 border-b border-slate-100">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Enroll Individual Student</p>
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={studentSearch}
+              onChange={e => setStudentSearch(e.target.value)}
+              placeholder="Search by name or admission number…"
+              className="w-full rounded-lg border border-slate-300 pl-8 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+            />
+            {studentSearch && (
+              <button onClick={() => setStudentSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700">
+                <X size={13} />
+              </button>
+            )}
+          </div>
+
+          {searchQ.length >= 2 && (
+            <div className="mt-2 space-y-1">
+              {searchResults.length === 0 ? (
+                <p className="text-xs text-slate-400 py-2 text-center">No matching students (or all already enrolled)</p>
+              ) : searchResults.map(s => (
+                <div key={s.id} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-800 truncate">{s.firstName} {s.lastName}</p>
+                    {s.admissionNumber && <p className="text-[11px] text-slate-400">{s.admissionNumber}</p>}
+                  </div>
+                  <button
+                    onClick={() => handleEnroll(s.id)}
+                    disabled={enrollingId === s.id}
+                    className="shrink-0 flex items-center gap-1 rounded-lg bg-violet-600 px-2.5 py-1.5 text-xs text-white hover:bg-violet-700 disabled:opacity-50 transition"
+                  >
+                    {enrollingId === s.id ? '…' : <><Plus size={12} />Enroll</>}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {searchQ.length > 0 && searchQ.length < 2 && (
+            <p className="text-[11px] text-slate-400 mt-1.5">Type at least 2 characters to search</p>
+          )}
+        </div>
+
+        {/* Enrolled students list */}
+        <div className="px-6 py-4">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
+            Enrolled Students ({enrollments.length})
+          </p>
+          {loadingEnrolled ? (
+            <p className="text-sm text-slate-400 py-4 text-center">Loading…</p>
+          ) : enrollments.length === 0 ? (
+            <div className="rounded-xl border-2 border-dashed border-slate-200 py-8 text-center">
+              <Users size={24} className="mx-auto text-slate-300 mb-2" />
+              <p className="text-sm text-slate-400">No students enrolled yet</p>
+              <p className="text-xs text-slate-400 mt-1">Use the options above to enroll students</p>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {enrollments.map(e => (
+                <div key={e.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2.5 hover:bg-slate-50 transition">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-800 truncate">
+                      {e.student ? `${e.student.firstName} ${e.student.lastName}` : e.studentId}
+                    </p>
+                    <p className="text-[11px] text-slate-400">
+                      {[e.className, e.student?.admissionNumber].filter(Boolean).join(' · ')}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleUnenroll(e.id)}
+                    disabled={unenrollingId === e.id}
+                    className="shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 disabled:opacity-50 transition"
+                    title="Unenroll"
+                  >
+                    {unenrollingId === e.id ? <span className="text-xs">…</span> : <UserMinus size={14} />}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Slide-over shell ────────────────────────────────────── */
-function SlideOver({ open, onClose, children }) {
+function SlideOver({ open, onClose, children, wide = false }) {
   return (
     <AnimatePresence>
       {open && (
         <>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="fixed inset-0 bg-black/30 z-40"
-            onClick={onClose}
-          />
-          <motion.div
-            initial={{ x: '100%' }}
-            animate={{ x: 0 }}
-            exit={{ x: '100%' }}
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }} className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
+          <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            className="fixed inset-y-0 right-0 z-50 w-full max-w-md bg-white shadow-2xl"
-          >
+            className={clsx('fixed inset-y-0 right-0 z-50 bg-white shadow-2xl', wide ? 'w-full max-w-lg' : 'w-full max-w-md')}>
             {children}
           </motion.div>
         </>
@@ -388,19 +515,14 @@ function DeleteDialog({ item, type, onConfirm, onClose, deleting }) {
               <strong>{item.name}</strong> will be hidden from all modules. This can be undone by your system administrator.
             </p>
             {type === 'Department' && (
-              <p className="text-amber-600 text-xs mt-2 font-medium">
-                All active subjects must be moved or deactivated first.
-              </p>
+              <p className="text-amber-600 text-xs mt-2 font-medium">All active subjects must be moved or deactivated first.</p>
             )}
           </div>
         </div>
         <div className="flex justify-end gap-3">
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100">Cancel</button>
-          <button
-            onClick={onConfirm}
-            disabled={deleting}
-            className="px-4 py-2 rounded-lg text-sm bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
-          >
+          <button onClick={onConfirm} disabled={deleting}
+            className="px-4 py-2 rounded-lg text-sm bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">
             {deleting ? 'Removing…' : 'Deactivate'}
           </button>
         </div>
@@ -410,17 +532,16 @@ function DeleteDialog({ item, type, onConfirm, onClose, deleting }) {
 }
 
 /* ── Department card ─────────────────────────────────────── */
-function DeptCard({ dept, subjects, editable, onEditDept, onDeleteDept, onAddSubject, onEditSubject, onDeleteSubject }) {
+function DeptCard({ dept, subjects, editable, enrollCounts, onEditDept, onDeleteDept, onAddSubject, onEditSubject, onDeleteSubject, onEnroll }) {
   const [expanded, setExpanded] = useState(true);
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
       {/* Header */}
-      <div
-        className="flex items-center gap-3 px-5 py-3.5 cursor-pointer hover:bg-slate-50 transition select-none"
-        onClick={() => setExpanded(e => !e)}
-      >
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white text-sm font-bold" style={{ backgroundColor: dept.color ?? '#6366F1' }}>
+      <div className="flex items-center gap-3 px-5 py-3.5 cursor-pointer hover:bg-slate-50 transition select-none"
+        onClick={() => setExpanded(e => !e)}>
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white text-sm font-bold"
+          style={{ backgroundColor: dept.color ?? '#6366F1' }}>
           {dept.code?.slice(0, 2)}
         </div>
         <div className="flex-1 min-w-0">
@@ -429,8 +550,7 @@ function DeptCard({ dept, subjects, editable, onEditDept, onDeleteDept, onAddSub
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 font-mono">{dept.code}</span>
             {dept.hodName && (
               <span className="text-xs text-slate-500 flex items-center gap-1">
-                <Users size={11} className="shrink-0" />
-                {dept.hodName}
+                <Users size={11} className="shrink-0" />{dept.hodName}
               </span>
             )}
           </div>
@@ -439,25 +559,16 @@ function DeptCard({ dept, subjects, editable, onEditDept, onDeleteDept, onAddSub
         <div className="flex items-center gap-1 shrink-0">
           {editable && (
             <>
-              <button
-                onClick={e => { e.stopPropagation(); onAddSubject(dept); }}
-                className="p-1.5 rounded-lg text-violet-600 hover:bg-violet-50 transition"
-                title="Add subject"
-              >
+              <button onClick={e => { e.stopPropagation(); onAddSubject(dept); }}
+                className="p-1.5 rounded-lg text-violet-600 hover:bg-violet-50 transition" title="Add subject">
                 <Plus size={14} />
               </button>
-              <button
-                onClick={e => { e.stopPropagation(); onEditDept(dept); }}
-                className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition"
-                title="Edit department"
-              >
+              <button onClick={e => { e.stopPropagation(); onEditDept(dept); }}
+                className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition" title="Edit department">
                 <Pencil size={14} />
               </button>
-              <button
-                onClick={e => { e.stopPropagation(); onDeleteDept(dept); }}
-                className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 transition"
-                title="Deactivate department"
-              >
+              <button onClick={e => { e.stopPropagation(); onDeleteDept(dept); }}
+                className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 transition" title="Deactivate department">
                 <Trash2 size={14} />
               </button>
             </>
@@ -469,61 +580,67 @@ function DeptCard({ dept, subjects, editable, onEditDept, onDeleteDept, onAddSub
       {/* Subjects list */}
       <AnimatePresence initial={false}>
         {expanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="overflow-hidden"
-          >
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }} className="overflow-hidden">
             <div className="border-t border-slate-100">
               {subjects.length === 0 ? (
                 <div className="px-5 py-6 text-center text-sm text-slate-400">
                   No subjects in this department yet.
-                  {editable && (
-                    <button onClick={() => onAddSubject(dept)} className="ml-1 text-violet-600 hover:underline">Add one</button>
-                  )}
+                  {editable && <button onClick={() => onAddSubject(dept)} className="ml-1 text-violet-600 hover:underline">Add one</button>}
                 </div>
               ) : (
                 <div className="divide-y divide-slate-50">
-                  {subjects.map(sub => (
-                    <div key={sub.id} className="flex items-center gap-3 px-5 py-2.5 hover:bg-slate-50/60 transition group">
-                      <ColorDot color={sub.color} size="sm" />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-medium text-slate-800">{sub.name}</span>
-                          <span className="text-[11px] font-mono text-slate-400">{sub.code}</span>
-                          {sub.shortName && sub.shortName !== sub.name && (
-                            <span className="text-[11px] text-slate-400">({sub.shortName})</span>
-                          )}
-                          {sub.isCompulsory && (
-                            <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700">Compulsory</span>
+                  {subjects.map(sub => {
+                    const count = enrollCounts[sub.id] ?? 0;
+                    return (
+                      <div key={sub.id} className="flex items-center gap-3 px-5 py-2.5 hover:bg-slate-50/60 transition group">
+                        <ColorDot color={sub.color} size="sm" />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-medium text-slate-800">{sub.name}</span>
+                            <span className="text-[11px] font-mono text-slate-400">{sub.code}</span>
+                            {sub.shortName && sub.shortName !== sub.name && (
+                              <span className="text-[11px] text-slate-400">({sub.shortName})</span>
+                            )}
+                            {sub.isCompulsory && (
+                              <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700">Compulsory</span>
+                            )}
+                            {/* Enrollment count badge */}
+                            <span className={clsx(
+                              'rounded-full px-2 py-0.5 text-[10px] font-medium flex items-center gap-1',
+                              count > 0 ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-500'
+                            )}>
+                              <Users size={9} />
+                              {count} enrolled
+                            </span>
+                          </div>
+                          {sub.sections?.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {sub.sections.map(s => <SectionPill key={s} value={s} />)}
+                            </div>
                           )}
                         </div>
-                        {sub.sections?.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {sub.sections.map(s => <SectionPill key={s} value={s} />)}
-                          </div>
-                        )}
-                      </div>
-                      {editable && (
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition shrink-0">
-                          <button
-                            onClick={() => onEditSubject(sub)}
-                            className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
-                          >
+                        <div className={clsx('flex items-center gap-1 transition shrink-0', editable ? 'opacity-0 group-hover:opacity-100' : 'opacity-0 group-hover:opacity-100')}>
+                          {/* Enrollment button — visible to all editors */}
+                          {editable && (
+                            <button onClick={() => onEnroll(sub)}
+                              className="p-1 rounded text-violet-500 hover:text-violet-700 hover:bg-violet-50 transition"
+                              title="Manage enrollment">
+                              <UserPlus size={13} />
+                            </button>
+                          )}
+                          <button onClick={() => onEditSubject(sub)}
+                            className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition">
                             <Pencil size={13} />
                           </button>
-                          <button
-                            onClick={() => onDeleteSubject(sub)}
-                            className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition"
-                          >
+                          <button onClick={() => onDeleteSubject(sub)}
+                            className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition">
                             <Trash2 size={13} />
                           </button>
                         </div>
-                      )}
-                    </div>
-                  ))}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -536,15 +653,16 @@ function DeptCard({ dept, subjects, editable, onEditDept, onDeleteDept, onAddSub
 
 /* ── Main page ───────────────────────────────────────────── */
 export default function SubjectsPage() {
-  const role    = useAuthStore(s => s.session?.user?.role ?? '');
+  const role     = useAuthStore(s => s.session?.user?.role ?? '');
   const editable = canEdit(role);
   const qc       = useQueryClient();
 
-  const [search, setSearch]           = useState('');
-  const [deptSlide, setDeptSlide]     = useState(null); // null | { mode:'new'|'edit', data }
-  const [subSlide, setSubSlide]       = useState(null); // null | { mode:'new'|'edit', data, deptId }
-  const [delTarget, setDelTarget]     = useState(null); // null | { type:'Department'|'Subject', item }
-  const [toast, setToast]             = useState(null);
+  const [search, setSearch]         = useState('');
+  const [deptSlide, setDeptSlide]   = useState(null);  // null | { mode, data }
+  const [subSlide, setSubSlide]     = useState(null);  // null | { mode, data, deptId }
+  const [enrollSlide, setEnrollSlide] = useState(null); // null | subject
+  const [delTarget, setDelTarget]   = useState(null);
+  const [toast, setToast]           = useState(null);
 
   /* ── queries ─────────────────────────────────────────────── */
   const { data: depts = [], isPending: deptsLoading } = useQuery({
@@ -559,45 +677,35 @@ export default function SubjectsPage() {
     staleTime: 60_000,
   });
 
+  const { data: enrollCounts = {} } = useQuery({
+    queryKey: ['student-subjects-counts'],
+    queryFn:  () => enrollApi.counts(),
+    staleTime: 30_000,
+  });
+
   /* ── mutations — departments ──────────────────────────────── */
   const saveDept = useMutation({
     mutationFn: ({ id, data }) => id ? deptsApi.update(id, data) : deptsApi.create(data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['departments'] });
-      setDeptSlide(null);
-      flash('Department saved');
-    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['departments'] }); setDeptSlide(null); flash('Department saved'); },
     onError: err => flash(err.message ?? 'Save failed', 'error'),
   });
 
   const deleteDept = useMutation({
     mutationFn: id => deptsApi.remove(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['departments'] });
-      setDelTarget(null);
-      flash('Department deactivated');
-    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['departments'] }); setDelTarget(null); flash('Department deactivated'); },
     onError: err => flash(err.message ?? 'Delete failed', 'error'),
   });
 
   /* ── mutations — subjects ─────────────────────────────────── */
   const saveSub = useMutation({
     mutationFn: ({ id, data }) => id ? subsApi.update(id, data) : subsApi.create(data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['subjects'] });
-      setSubSlide(null);
-      flash('Subject saved');
-    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['subjects'] }); setSubSlide(null); flash('Subject saved'); },
     onError: err => flash(err.message ?? 'Save failed', 'error'),
   });
 
   const deleteSub = useMutation({
     mutationFn: id => subsApi.remove(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['subjects'] });
-      setDelTarget(null);
-      flash('Subject deactivated');
-    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['subjects'] }); setDelTarget(null); flash('Subject deactivated'); },
     onError: err => flash(err.message ?? 'Delete failed', 'error'),
   });
 
@@ -606,7 +714,7 @@ export default function SubjectsPage() {
     setTimeout(() => setToast(null), 3500);
   }
 
-  /* ── filter by search ────────────────────────────────────── */
+  /* ── filter ──────────────────────────────────────────────── */
   const q = search.trim().toLowerCase();
   const filteredDepts = q
     ? depts.filter(d => d.name.toLowerCase().includes(q) || d.code.toLowerCase().includes(q) || (d.hodName ?? '').toLowerCase().includes(q))
@@ -614,19 +722,18 @@ export default function SubjectsPage() {
 
   function subjectsFor(deptId) {
     const subs = allSubjects.filter(s => s.departmentId === deptId);
-    if (!q) return subs;
-    return subs.filter(s => s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q));
+    return q ? subs.filter(s => s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q)) : subs;
   }
 
   /* ── stats ───────────────────────────────────────────────── */
+  const totalEnrolled = Object.values(enrollCounts).reduce((a, b) => a + b, 0);
   const totalSubjects = allSubjects.length;
   const compulsoryCount = allSubjects.filter(s => s.isCompulsory).length;
-
   const loading = deptsLoading || subsLoading;
 
   return (
     <div className="min-h-full bg-slate-50">
-      {/* ── Header ─────────────────────────────────────────────── */}
+      {/* Header */}
       <div className="bg-white border-b border-slate-200 px-6 py-5">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3">
@@ -635,36 +742,31 @@ export default function SubjectsPage() {
             </div>
             <div>
               <h1 className="text-xl font-bold text-slate-900">Subjects &amp; Departments</h1>
-              <p className="text-sm text-slate-500">School-wide subject registry, grouped by department</p>
+              <p className="text-sm text-slate-500">School-wide subject registry with student enrollment</p>
             </div>
           </div>
           {editable && (
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => setSubSlide({ mode: 'new', data: null, deptId: depts[0]?.id })}
-                className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition"
-              >
-                <Plus size={15} />
-                Add Subject
+              <button onClick={() => setSubSlide({ mode: 'new', data: null, deptId: depts[0]?.id })}
+                className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition">
+                <Plus size={15} />Add Subject
               </button>
-              <button
-                onClick={() => setDeptSlide({ mode: 'new', data: null })}
-                className="flex items-center gap-2 rounded-lg bg-violet-600 px-3 py-2 text-sm text-white hover:bg-violet-700 transition font-medium"
-              >
-                <Plus size={15} />
-                Add Department
+              <button onClick={() => setDeptSlide({ mode: 'new', data: null })}
+                className="flex items-center gap-2 rounded-lg bg-violet-600 px-3 py-2 text-sm text-white hover:bg-violet-700 transition font-medium">
+                <Plus size={15} />Add Department
               </button>
             </div>
           )}
         </div>
       </div>
 
-      {/* ── Stats strip ────────────────────────────────────────── */}
-      <div className="grid grid-cols-3 gap-4 px-6 py-4">
+      {/* Stats strip */}
+      <div className="grid grid-cols-4 gap-4 px-6 py-4">
         {[
-          { label: 'Departments', value: depts.length, color: 'text-violet-600' },
-          { label: 'Subjects',    value: totalSubjects, color: 'text-blue-600'   },
-          { label: 'Compulsory',  value: compulsoryCount, color: 'text-green-600' },
+          { label: 'Departments',     value: depts.length,    color: 'text-violet-600' },
+          { label: 'Subjects',        value: totalSubjects,   color: 'text-blue-600'   },
+          { label: 'Compulsory',      value: compulsoryCount, color: 'text-green-600'  },
+          { label: 'Total Enrolled',  value: totalEnrolled,   color: 'text-amber-600'  },
         ].map(stat => (
           <div key={stat.label} className="rounded-xl bg-white border border-slate-200 px-5 py-3.5 shadow-sm">
             <p className="text-xs text-slate-500">{stat.label}</p>
@@ -673,16 +775,13 @@ export default function SubjectsPage() {
         ))}
       </div>
 
-      {/* ── Search ─────────────────────────────────────────────── */}
+      {/* Search */}
       <div className="px-6 pb-4">
         <div className="relative max-w-sm">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
+          <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search departments or subjects…"
-            className="w-full rounded-lg border border-slate-300 pl-8 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white"
-          />
+            className="w-full rounded-lg border border-slate-300 pl-8 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white" />
           {search && (
             <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700">
               <X size={14} />
@@ -691,21 +790,16 @@ export default function SubjectsPage() {
         </div>
       </div>
 
-      {/* ── Content ────────────────────────────────────────────── */}
+      {/* Content */}
       <div className="px-6 pb-10 space-y-4">
         {loading ? (
           <div className="py-20 text-center text-slate-400 text-sm">Loading…</div>
         ) : filteredDepts.length === 0 ? (
           <div className="rounded-xl border-2 border-dashed border-slate-300 py-16 text-center">
             <Library size={32} className="mx-auto text-slate-300 mb-3" />
-            <p className="text-sm text-slate-500">
-              {q ? `No results for "${search}"` : 'No departments yet.'}
-            </p>
+            <p className="text-sm text-slate-500">{q ? `No results for "${search}"` : 'No departments yet.'}</p>
             {!q && editable && (
-              <button
-                onClick={() => setDeptSlide({ mode: 'new', data: null })}
-                className="mt-3 text-sm text-violet-600 hover:underline"
-              >
+              <button onClick={() => setDeptSlide({ mode: 'new', data: null })} className="mt-3 text-sm text-violet-600 hover:underline">
                 Create your first department
               </button>
             )}
@@ -717,29 +811,28 @@ export default function SubjectsPage() {
               dept={dept}
               subjects={subjectsFor(dept.id)}
               editable={editable}
+              enrollCounts={enrollCounts}
               onEditDept={d   => setDeptSlide({ mode: 'edit', data: d })}
               onDeleteDept={d => setDelTarget({ type: 'Department', item: d })}
               onAddSubject={d => setSubSlide({ mode: 'new', data: null, deptId: d.id })}
               onEditSubject={s => setSubSlide({ mode: 'edit', data: s, deptId: s.departmentId })}
               onDeleteSubject={s => setDelTarget({ type: 'Subject', item: s })}
+              onEnroll={s => setEnrollSlide(s)}
             />
           ))
         )}
       </div>
 
-      {/* ── Department slide-over ───────────────────────────────── */}
+      {/* Department slide-over */}
       <SlideOver open={!!deptSlide} onClose={() => setDeptSlide(null)}>
         {deptSlide && (
-          <DeptForm
-            initial={deptSlide.mode === 'edit' ? deptSlide.data : null}
+          <DeptForm initial={deptSlide.mode === 'edit' ? deptSlide.data : null}
             onSave={form => saveDept.mutate({ id: deptSlide.data?.id, data: form })}
-            onClose={() => setDeptSlide(null)}
-            saving={saveDept.isPending}
-          />
+            onClose={() => setDeptSlide(null)} saving={saveDept.isPending} />
         )}
       </SlideOver>
 
-      {/* ── Subject slide-over ─────────────────────────────────── */}
+      {/* Subject slide-over */}
       <SlideOver open={!!subSlide} onClose={() => setSubSlide(null)}>
         {subSlide && (
           <SubjectForm
@@ -747,43 +840,37 @@ export default function SubjectsPage() {
             departments={depts}
             onSave={form => {
               const data = { ...form };
-              if (subSlide.mode === 'new' && subSlide.deptId && !form.departmentId) {
-                data.departmentId = subSlide.deptId;
-              }
+              if (subSlide.mode === 'new' && subSlide.deptId && !form.departmentId) data.departmentId = subSlide.deptId;
               saveSub.mutate({ id: subSlide.data?.id, data });
             }}
-            onClose={() => setSubSlide(null)}
-            saving={saveSub.isPending}
-          />
+            onClose={() => setSubSlide(null)} saving={saveSub.isPending} />
         )}
       </SlideOver>
 
-      {/* ── Delete dialog ──────────────────────────────────────── */}
+      {/* Enrollment slide-over */}
+      <SlideOver open={!!enrollSlide} onClose={() => setEnrollSlide(null)} wide>
+        {enrollSlide && (
+          <EnrollSlideOver subject={enrollSlide} onClose={() => setEnrollSlide(null)} flash={flash} />
+        )}
+      </SlideOver>
+
+      {/* Delete dialog */}
       {delTarget && (
-        <DeleteDialog
-          item={delTarget.item}
-          type={delTarget.type}
+        <DeleteDialog item={delTarget.item} type={delTarget.type}
           onClose={() => setDelTarget(null)}
           deleting={deleteDept.isPending || deleteSub.isPending}
           onConfirm={() => {
             if (delTarget.type === 'Department') deleteDept.mutate(delTarget.item.id);
             else deleteSub.mutate(delTarget.item.id);
-          }}
-        />
+          }} />
       )}
 
-      {/* ── Toast ──────────────────────────────────────────────── */}
+      {/* Toast */}
       <AnimatePresence>
         {toast && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
-            className={clsx(
-              'fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium shadow-lg',
-              toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-slate-900 text-white',
-            )}
-          >
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
+            className={clsx('fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium shadow-lg',
+              toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-slate-900 text-white')}>
             {toast.type !== 'error' && <Check size={15} />}
             {toast.msg}
           </motion.div>
