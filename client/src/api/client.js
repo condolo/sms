@@ -306,8 +306,14 @@ export const settings = {
 };
 
 export const bellSchedule = {
-  get:    ()       => _get('/bell-schedule'),
-  update: (data)   => _put('/bell-schedule', data),
+  /** Fetch a section's schedule. Falls back: section → 'all' → hardcoded default. */
+  get:      (section = 'all') => _get('/bell-schedule', { section }),
+  /** Fetch overview of all configured sections */
+  sections: ()                => _get('/bell-schedule/sections'),
+  /** Save a section's schedule. body: { section, periods } */
+  update:   (data)            => _put('/bell-schedule', data),
+  /** Revert a section to the school-wide default */
+  remove:   (section)         => _delete(`/bell-schedule?section=${section}`),
 };
 
 // Default export — single object for convenience

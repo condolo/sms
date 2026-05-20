@@ -163,21 +163,24 @@ const INDEXES = [
   {
     col: 'timetable',
     indexes: [
-      { key: { schoolId: 1, classId: 1, day: 1, period: 1 },    name: 'tt_class_day_period' },
-      { key: { schoolId: 1, teacherId: 1, day: 1, period: 1 },  name: 'tt_teacher_day_period' },
-      { key: { schoolId: 1, room: 1, day: 1, period: 1 },       name: 'tt_room_day_period' },
-      { key: { id: 1 },                                          name: 'tt_id', unique: true, sparse: true },
+      { key: { schoolId: 1, classId: 1, day: 1, period: 1 },        name: 'tt_class_day_period' },
+      { key: { schoolId: 1, teacherId: 1, day: 1, startTime: 1 },   name: 'tt_teacher_day_time' },
+      { key: { schoolId: 1, room: 1, day: 1, startTime: 1 },        name: 'tt_room_day_time' },
+      { key: { schoolId: 1, section: 1 },                            name: 'tt_school_section', sparse: true },
+      { key: { id: 1 },                                              name: 'tt_id', unique: true, sparse: true },
     ],
   },
 
   /* ── bell_schedules ─────────────────────────────────────────
-     One document per school (or per section within a school).
-     Primary: fetch by schoolId to render the grid. */
+     One document per (school, section).
+     section: 'all' | 'kg' | 'primary' | 'secondary' | 'alevel'
+     Primary: fetch by schoolId + section for the grid.
+     Unique constraint: one schedule per school per section. */
   {
     col: 'bell_schedules',
     indexes: [
-      { key: { schoolId: 1, isDefault: 1 }, name: 'bs_school_default' },
-      { key: { id: 1 },                     name: 'bs_id', unique: true, sparse: true },
+      { key: { schoolId: 1, section: 1 }, name: 'bs_school_section', unique: true, sparse: true },
+      { key: { id: 1 },                   name: 'bs_id', unique: true, sparse: true },
     ],
   },
 
