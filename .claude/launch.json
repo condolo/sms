@@ -2,17 +2,17 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "innolearn",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["serve", "-l", "3003", "."],
-      "port": 3003
-    },
-    {
-      "name": "vite",
-      "cwd": "client",
+      "name": "vite-preview",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "port": 5173
+      "runtimeArgs": [
+        "run",
+        "preview",
+        "--",
+        "--port",
+        "4173"
+      ],
+      "port": 4173,
+      "cwd": "client"
     }
   ]
 }
