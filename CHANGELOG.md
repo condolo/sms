@@ -6,6 +6,61 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.9.17] — 2026-05-20  Timetable Publishing Portal — Per-Role Views, Print Support
+
+### Feature — Publish/Unpublish Workflow
+
+Admins and timetablers now control timetable visibility with a **Draft → Published** workflow. Until published, portal users (teachers, parents, section heads) see a "not yet published" message.
+
+- **`POST /api/timetable/publish`** — marks the school's timetable as published; accepts optional `termLabel` (e.g. "Term 1, 2026") shown on the portal and print headers.
+- **`POST /api/timetable/unpublish`** — reverts to draft.
+- **`GET /api/timetable/status`** — returns `{ published, publishedAt, publishedBy, termLabel }`.
+- Publish state stored on the `schools` document under `timetableStatus` — no new collection required.
+- Admin/timetabler/deputy bypass the published gate; all other roles only see data when published.
+
+### Feature — Per-Role Timetable Portal
+
+**`GET /api/timetable/my`** (teacher / section head):
+- Teacher → resolves teacher record by email match, returns their assigned slots.
+- Section head → reads `sectionAssigned` from user document; returns all slots in that section (or all sections if not set).
+
+**`GET /api/timetable/my-children`** (parent / guardian):
+- Reads `guardianOf: [studentId...]` from JWT; fetches each linked student and their class timetable.
+- Returns `{ children: [{ student, slots }], termLabel }`.
+
+### New — `client/src/pages/timetable/TimetablePortal.jsx`
+
+Role-dispatched read-only portal:
+- **Teacher view** — weekly grid of their lessons; per-day lesson count chips; linked teacher name header.
+- **Parent view** — child-switcher tabs (one per `guardianOf` child); each child's class timetable with class name shown. Seamlessly switch between children from the same account.
+- **Section head view** — class filter tabs + summary stats (classes, lessons, teachers, rooms); full grid of all slots in their section.
+- All views: deterministic subject colour palette, `startTime`/`endTime` shown on each period row.
+- **Print button** — calls `window.print()`. Print-safe layout: nav/sidebar hidden, grid rendered cleanly in A4 landscape.
+- "Not yet published" lock screen shown when timetable is still draft.
+
+### Updated — `client/src/pages/timetable/TimetablePage.jsx`
+
+- **Role gate at top** — non-admin roles (`teacher`, `parent`, `guardian`, `section_head`, `student`) are immediately redirected to `<TimetablePortal />`.
+- **Publish banner** — amber strip (Draft) or green strip (Published) below the page header; "Publish Timetable" opens a modal to enter a term label; "Unpublish" button with confirm dialog.
+- `timetabler` role added to `canEdit` set.
+
+### Updated — `server/routes/settings.js` — User Management
+
+- `PUT /api/settings/users/:id` now accepts:
+  - `sectionAssigned` — which section (`kg|primary|secondary|alevel|all`) a section head oversees.
+  - `guardianOf` — array of student IDs for parent/guardian accounts.
+  - `timetabler` and `section_head` added to the allowed roles list.
+
+### Updated — `client/src/api/client.js`
+
+Added to `timetable`: `status()`, `publish(data)`, `unpublish()`, `my()`, `myChildren()`.
+
+### Updated — `client/src/index.css`
+
+Print stylesheet (`@media print`): hides shell chrome (nav, sidebar, buttons with `print:hidden`), sets A4 landscape page, enables colour printing for timetable cells.
+
+---
+
 ## [4.9.16] — 2026-05-20  Per-Section Bell Schedules + Cross-Section Conflict Detection
 
 ### Architecture — Multi-Section Bell Schedule Support

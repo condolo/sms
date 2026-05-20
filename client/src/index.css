@@ -83,3 +83,28 @@
     scrollbar-color: #cbd5e1 transparent;
   }
 }
+
+/* ── Print styles — timetable portal ────────────────────────── */
+@media print {
+  /* Hide everything except the timetable content */
+  body > #root > * { display: none !important; }
+  body > #root > div > div:has(#print-timetable),
+  body > #root > div:has(#print-timetable) { display: block !important; }
+
+  /* Simpler fallback: hide known shell chrome */
+  nav, aside, header:not(.print-header), footer,
+  [class*="Sidebar"], [class*="sidebar"],
+  button.print\:hidden, .print\:hidden { display: none !important; }
+
+  /* Page setup */
+  @page { margin: 1.5cm; size: A4 landscape; }
+  body  { background: white; font-size: 11px; }
+
+  /* Ensure grid renders cleanly */
+  #print-timetable { display: block !important; }
+  #print-timetable * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  /* Remove rounded corners and shadows for print */
+  .rounded-xl, .rounded-lg { border-radius: 4px !important; }
+  .shadow-xl, .shadow-2xl  { box-shadow: none !important; }
+}

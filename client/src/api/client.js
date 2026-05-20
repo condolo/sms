@@ -199,16 +199,23 @@ export const admissions = {
 };
 
 export const timetable = {
-  list:       (params)     => _get('/timetable', params),
-  byClass:    (classId, p) => _get(`/timetable/class/${classId}`, p),
-  byTeacher:  (id, p)      => _get(`/timetable/teacher/${id}`, p),
-  workload:   (p)          => _get('/timetable/workload', p),
-  conflicts:  (p)          => _get('/timetable/conflicts', p),
-  overview:   (p)          => _get('/timetable/overview', p),
-  create:     (data)       => _post('/timetable', data),
-  update:     (id, data)   => _put(`/timetable/${id}`, data),
-  remove:     (id)         => _delete(`/timetable/${id}`),
-  bulkSet:    (data)       => _post('/timetable/bulk', data),
+  list:        (params)     => _get('/timetable', params),
+  byClass:     (classId, p) => _get(`/timetable/class/${classId}`, p),
+  byTeacher:   (id, p)      => _get(`/timetable/teacher/${id}`, p),
+  workload:    (p)          => _get('/timetable/workload', p),
+  conflicts:   (p)          => _get('/timetable/conflicts', p),
+  overview:    (p)          => _get('/timetable/overview', p),
+  create:      (data)       => _post('/timetable', data),
+  update:      (id, data)   => _put(`/timetable/${id}`, data),
+  remove:      (id)         => _delete(`/timetable/${id}`),
+  bulkSet:     (data)       => _post('/timetable/bulk', data),
+  // Publishing
+  status:      ()           => _get('/timetable/status'),
+  publish:     (data)       => _post('/timetable/publish', data),
+  unpublish:   ()           => _post('/timetable/unpublish'),
+  // Portal views
+  my:          ()           => _get('/timetable/my'),
+  myChildren:  ()           => _get('/timetable/my-children'),
 };
 
 export const announcements = {

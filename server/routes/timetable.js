@@ -433,6 +433,138 @@ router.get('/teacher/:teacherId', authMiddleware, PLAN, rbac('timetable', 'read'
   } catch (err) { console.error('[timetable GET /teacher/:teacherId]', err); return E.serverError(res); }
 });
 
+/* ── Helper: can caller edit/manage the timetable? ──────────── */
+function _canEdit(req) {
+  const { role, roles = [] } = req.jwtUser || {};
+  const ed = new Set(['superadmin', 'admin', 'deputy', 'timetabler']);
+  return ed.has(role) || roles.some(r => ed.has(r));
+}
+
+/* ── GET /api/timetable/status ─ Publish state ──────────────── */
+router.get('/status', authMiddleware, async (req, res) => {
+  try {
+    const school = await _model('schools').findOne({ id: req.jwtUser.schoolId }).lean();
+    const s = school?.timetableStatus ?? { published: false, publishedAt: null, termLabel: '' };
+    return ok(res, s);
+  } catch (err) { console.error('[timetable GET /status]', err); return E.serverError(res); }
+});
+
+/* ── POST /api/timetable/publish ────────────────────────────── */
+router.post('/publish', authMiddleware, async (req, res) => {
+  try {
+    if (!_canEdit(req)) return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Admin access required to publish timetable' } });
+    const { termLabel = '' } = req.body;
+    const now = new Date().toISOString();
+    await _model('schools').updateOne({ id: req.jwtUser.schoolId }, {
+      $set: {
+        'timetableStatus.published':   true,
+        'timetableStatus.publishedAt': now,
+        'timetableStatus.publishedBy': req.jwtUser.userId,
+        'timetableStatus.termLabel':   termLabel.trim(),
+      },
+    });
+    return ok(res, { published: true, publishedAt: now, termLabel: termLabel.trim() });
+  } catch (err) { console.error('[timetable POST /publish]', err); return E.serverError(res); }
+});
+
+/* ── POST /api/timetable/unpublish ─────────────────────────── */
+router.post('/unpublish', authMiddleware, async (req, res) => {
+  try {
+    if (!_canEdit(req)) return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Admin access required' } });
+    await _model('schools').updateOne({ id: req.jwtUser.schoolId }, {
+      $set: { 'timetableStatus.published': false },
+    });
+    return ok(res, { published: false });
+  } catch (err) { console.error('[timetable POST /unpublish]', err); return E.serverError(res); }
+});
+
+/* ── GET /api/timetable/my ─ Teacher or section-head portal ── */
+router.get('/my', authMiddleware, async (req, res) => {
+  try {
+    const { schoolId, role, roles = [], email, userId } = req.jwtUser;
+    const allRoles  = [role, ...roles];
+    const isTeacher = allRoles.includes('teacher');
+    const isSectionHead = allRoles.includes('section_head');
+
+    if (!isTeacher && !isSectionHead) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Endpoint is for teachers and section heads' } });
+    }
+
+    // Published gate (admins/editors bypass)
+    if (!_canEdit(req)) {
+      const school = await _model('schools').findOne({ id: schoolId }).lean();
+      if (!school?.timetableStatus?.published) {
+        return ok(res, { slots: [], teacher: null, message: 'Timetable has not been published yet.' });
+      }
+    }
+
+    if (isSectionHead) {
+      const user    = await _model('users').findOne({ id: userId, schoolId }).lean();
+      const section = user?.sectionAssigned ?? null;
+      const filter  = { schoolId, isActive: true };
+      if (section) filter.section = section;
+      const slots = await _model('timetable').find(filter)
+        .sort({ day: 1, startTime: 1, period: 1 }).limit(5000).lean();
+      return ok(res, { slots, section: section ?? 'all', role: 'section_head' });
+    }
+
+    // Teacher — resolve teacher record by email
+    const teacher = await _model('teachers')
+      .findOne({ schoolId, email: (email || '').toLowerCase() }).lean();
+    if (!teacher) {
+      return ok(res, { slots: [], teacher: null, message: 'No teacher record is linked to this account.' });
+    }
+    const slots = await _model('timetable')
+      .find({ schoolId, teacherId: teacher.id, isActive: true })
+      .sort({ day: 1, startTime: 1, periodNumber: 1, period: 1 })
+      .limit(500).lean();
+    return ok(res, {
+      slots,
+      teacher: { id: teacher.id, firstName: teacher.firstName, lastName: teacher.lastName },
+      role: 'teacher',
+    });
+  } catch (err) { console.error('[timetable GET /my]', err); return E.serverError(res); }
+});
+
+/* ── GET /api/timetable/my-children ─ Parent/guardian portal ── */
+router.get('/my-children', authMiddleware, async (req, res) => {
+  try {
+    const { schoolId, guardianOf = [] } = req.jwtUser;
+
+    if (!guardianOf.length) {
+      return ok(res, { children: [], message: 'No children linked to this account.' });
+    }
+
+    const school = await _model('schools').findOne({ id: schoolId }).lean();
+    if (!school?.timetableStatus?.published) {
+      return ok(res, { children: [], notPublished: true, message: 'Timetable has not been published yet.' });
+    }
+
+    const students = await _model('students')
+      .find({ id: { $in: guardianOf }, schoolId }).lean();
+
+    const children = await Promise.all(students.map(async student => {
+      const slots = student.classId
+        ? await _model('timetable')
+          .find({ schoolId, classId: student.classId, isActive: true })
+          .sort({ day: 1, startTime: 1, period: 1 }).limit(300).lean()
+        : [];
+      return {
+        student: {
+          id:        student.id,
+          firstName: student.firstName,
+          lastName:  student.lastName,
+          classId:   student.classId,
+          className: student.className,
+        },
+        slots,
+      };
+    }));
+
+    return ok(res, { children, termLabel: school.timetableStatus?.termLabel ?? '' });
+  } catch (err) { console.error('[timetable GET /my-children]', err); return E.serverError(res); }
+});
+
 /* ── GET /api/timetable/:id ───────────────────────────────────── */
 router.get('/:id', authMiddleware, PLAN, rbac('timetable', 'read'), async (req, res) => {
   try {

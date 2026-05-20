@@ -245,11 +245,11 @@ router.put('/users/:id', authMiddleware, async (req, res) => {
     if (!_isAdmin(req)) {
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Admin access required.' } });
     }
-    const { role, name } = req.body;
+    const { role, name, sectionAssigned, guardianOf } = req.body;
     const update = { updatedAt: new Date().toISOString() };
     if (name)  update.name = name.trim();
     if (role) {
-      const allowedRoles = ['teacher', 'deputy', 'admin', 'parent', 'student'];
+      const allowedRoles = ['teacher', 'deputy', 'admin', 'parent', 'guardian', 'student', 'section_head', 'timetabler'];
       if (!allowedRoles.includes(role)) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Invalid role.` } });
       }
@@ -258,6 +258,15 @@ router.put('/users/:id', authMiddleware, async (req, res) => {
       }
       update.role  = role;
       update.roles = [role];
+    }
+    // Section head: which section they oversee (kg|primary|secondary|alevel|all)
+    if (sectionAssigned !== undefined) {
+      const validSections = ['all', 'kg', 'primary', 'secondary', 'alevel'];
+      update.sectionAssigned = validSections.includes(sectionAssigned) ? sectionAssigned : null;
+    }
+    // Parent/guardian: link to student IDs they are responsible for
+    if (Array.isArray(guardianOf)) {
+      update.guardianOf = guardianOf.filter(id => typeof id === 'string');
     }
 
     const Users  = _model('users');

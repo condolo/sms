@@ -20,6 +20,7 @@ import {
   bellSchedule as bellApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
+import TimetablePortal from './TimetablePortal.jsx';
 
 /* ── Days & Bell schedule ────────────────────────────────────── */
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
@@ -883,10 +884,27 @@ const VIEWS = [
 ];
 
 export default function TimetablePage() {
-  const qc  = useQueryClient();
-  const can = useAuthStore(s => s.can.bind(s));
-  const role = useAuthStore(s => s.session?.user?.role ?? '');
-  const canEdit = can('timetable') || ['admin', 'superadmin', 'deputy'].includes(role);
+  const qc   = useQueryClient();
+  const can  = useAuthStore(s => s.can.bind(s));
+  const role  = useAuthStore(s => s.session?.user?.role ?? '');
+  const roles = useAuthStore(s => s.session?.user?.roles ?? []);
+  const canEdit = can('timetable') || ['admin', 'superadmin', 'deputy', 'timetabler'].includes(role);
+
+  // Non-admin roles get the read-only portal view
+  const ADMIN_ROLES = new Set(['admin', 'superadmin', 'deputy', 'timetabler']);
+  const isAdminRole = ADMIN_ROLES.has(role) || roles.some(r => ADMIN_ROLES.has(r));
+  if (!isAdminRole) return <TimetablePortal />;
+
+  /* ── Publish state ── */
+  const [showPublishModal, setShowPublishModal] = useState(false);
+  const [termLabelInput,   setTermLabelInput]   = useState('');
+
+  const { data: statusData, refetch: refetchStatus } = useQuery({
+    queryKey: ['timetable', 'status'],
+    queryFn:  () => ttApi.status(),
+    staleTime: 30_000,
+  });
+  const publishStatus = statusData?.data ?? { published: false };
 
   const [activeView,   setActiveView]   = useState('class');
   const [classId,      setClassId]      = useState('');
@@ -931,6 +949,18 @@ export default function TimetablePage() {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 4000);
   }
+
+  /* ── Publish / Unpublish mutations ── */
+  const { mutate: doPublish, isPending: publishing } = useMutation({
+    mutationFn: () => ttApi.publish({ termLabel: termLabelInput }),
+    onSuccess:  () => { refetchStatus(); setShowPublishModal(false); showToast('Timetable published — now visible to staff and parents.'); },
+    onError:    err => showToast(err?.message ?? 'Failed to publish.', 'error'),
+  });
+  const { mutate: doUnpublish, isPending: unpublishing } = useMutation({
+    mutationFn: () => ttApi.unpublish(),
+    onSuccess:  () => { refetchStatus(); showToast('Timetable unpublished — hidden from portal users.'); },
+    onError:    err => showToast(err?.message ?? 'Failed to unpublish.', 'error'),
+  });
 
   /* ── Teachers ── */
   const { data: teachersData } = useQuery({
@@ -1102,6 +1132,54 @@ export default function TimetablePage() {
           </div>
         </div>
       </div>
+
+      {/* ── Publish banner ── */}
+      {canEdit && (
+        <div className={`px-6 py-2.5 border-b flex items-center justify-between gap-4 text-xs ${
+          publishStatus.published
+            ? 'bg-emerald-50 border-emerald-200'
+            : 'bg-amber-50 border-amber-200'
+        }`}>
+          <div className="flex items-center gap-2">
+            {publishStatus.published ? (
+              <>
+                <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
+                <span className="font-medium text-emerald-700">
+                  Published
+                  {publishStatus.termLabel ? ` · ${publishStatus.termLabel}` : ''}
+                  {publishStatus.publishedAt ? ` · ${new Date(publishStatus.publishedAt).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' })}` : ''}
+                </span>
+                <span className="text-emerald-600 hidden sm:inline">— visible to teachers, parents, and section heads</span>
+              </>
+            ) : (
+              <>
+                <AlertCircle size={13} className="text-amber-600 shrink-0" />
+                <span className="font-medium text-amber-700">Draft — not visible to portal users</span>
+                <span className="text-amber-600 hidden sm:inline">Publish when the timetable is ready</span>
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {publishStatus.published ? (
+              <button
+                onClick={() => { if (window.confirm('Unpublish the timetable? Portal users will no longer see it.')) doUnpublish(); }}
+                disabled={unpublishing}
+                className="flex items-center gap-1 px-3 py-1 rounded-md border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-100 transition font-medium"
+              >
+                {unpublishing ? <Loader2 size={11} className="animate-spin" /> : null}
+                {unpublishing ? 'Unpublishing…' : 'Unpublish'}
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowPublishModal(true)}
+                className="flex items-center gap-1 px-3 py-1 rounded-md bg-slate-900 text-white hover:bg-slate-800 transition font-medium"
+              >
+                <Zap size={11} /> Publish Timetable
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Toolbar (context-sensitive) ── */}
       <div className="bg-white border-b border-slate-100 px-6 py-3">
@@ -1285,6 +1363,53 @@ export default function TimetablePage() {
           <BellScheduleSlideOver
             onClose={() => setShowBell(false)}
           />
+        )}
+      </AnimatePresence>
+
+      {/* ── Publish modal ── */}
+      <AnimatePresence>
+        {showPublishModal && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center px-4"
+          >
+            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setShowPublishModal(false)} />
+            <motion.div
+              initial={{ scale: 0.95, y: -8 }} animate={{ scale: 1, y: 0 }}
+              className="relative bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-sm z-50 p-6 space-y-4"
+            >
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900">Publish Timetable</h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Once published, teachers, parents, and section heads can view their timetable in the portal.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-600">Term label <span className="text-slate-400">(optional)</span></label>
+                <input
+                  value={termLabelInput}
+                  onChange={e => setTermLabelInput(e.target.value)}
+                  placeholder="e.g. Term 1, 2026"
+                  className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-800"
+                  autoFocus
+                />
+                <p className="text-[11px] text-slate-400">Shown on the portal header and print pages.</p>
+              </div>
+              <div className="flex items-center justify-end gap-3 pt-1">
+                <button onClick={() => setShowPublishModal(false)} className="text-sm font-medium text-slate-600 hover:text-slate-800 transition">
+                  Cancel
+                </button>
+                <button
+                  onClick={() => doPublish()}
+                  disabled={publishing}
+                  className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded-lg transition"
+                >
+                  {publishing ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
+                  {publishing ? 'Publishing…' : 'Publish Now'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
