@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { timetable as ttApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
+import RoleGuide from '@/components/RoleGuide.jsx';
 
 /* ── Days ────────────────────────────────────────────────────── */
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
@@ -496,8 +497,9 @@ export default function TimetablePortal() {
       </div>
 
       {/* Content */}
-      <div className="max-w-screen-xl mx-auto px-6 py-5">
+      <div className="max-w-screen-xl mx-auto px-6 py-5 space-y-5">
         <Content />
+        <RoleGuide />
       </div>
     </div>
   );

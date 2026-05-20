@@ -6,6 +6,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.9.18] — 2026-05-20  Role-Contextual Help Guide
+
+### New — `client/src/components/RoleGuide.jsx`
+
+A collapsible **"What can I see?"** help panel that appears at the bottom of every portal page. It reads the current user's role from the auth store and displays role-specific guidance — teachers, parents, section heads, admins, timetablers, and students each get a distinct card explaining exactly what they can access and do.
+
+- **Role detection** — inspects `role` + `roles[]` from JWT; priority order: parent/guardian → section_head → teacher → timetabler → deputy → admin → student.
+- **Collapsed by default** — a thin strip ("What can I see? [Role badge]") with a chevron toggle; expands with a smooth animation.
+- **Per-role content**:
+  - *Teacher* — weekly schedule, period times, class assignments, print instructions.
+  - *Parent/Guardian* — child-switcher tabs, each child's subjects/teacher/room, per-child PDF print, linking help.
+  - *Section Head* — section-wide overview, class filter, teacher/room visibility, print options.
+  - *Admin/Deputy/Timetabler* — full build/edit access, bell schedule config, conflict detection, publish/unpublish workflow.
+  - *Student* — guidance that parent/guardian holds their view; how to request a printed copy.
+- **Print-hidden** — the guide is excluded from timetable print output via `print:hidden`.
+- **Footer nudge** — "Seeing something unexpected? Contact your school administrator to review your account role."
+- Reusable across all portal pages; add `<RoleGuide />` to any page.
+
+### Updated — `client/src/pages/timetable/TimetablePortal.jsx`
+
+`<RoleGuide />` added at the bottom of every portal view (teacher, parent, section head).
+
+---
+
 ## [4.9.17] — 2026-05-20  Timetable Publishing Portal — Per-Role Views, Print Support
 
 ### Feature — Publish/Unpublish Workflow
