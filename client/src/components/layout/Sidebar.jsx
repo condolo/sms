@@ -6,7 +6,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, GraduationCap, Users, BookOpen, Calendar,
   CheckSquare, FileText, BarChart3, ClipboardList, Scale,
-  Wallet, Download, Settings, LogOut, Building2,
+  Wallet, Download, Settings, LogOut, Building2, Library,
 } from 'lucide-react';
 import clsx from 'clsx';
 import useAuthStore from '@/store/auth.js';
@@ -29,6 +29,7 @@ const NAV_SECTIONS = [
       { to: '/attendance', Icon: CheckSquare,       label: 'Attendance'         },
       { to: '/exams',      Icon: FileText,          label: 'Exams'              },
       { to: '/grades',     Icon: BarChart3,         label: 'Grades & Assessment'},
+      { to: '/subjects',   Icon: Library,           label: 'Subjects'           },
     ],
   },
   {

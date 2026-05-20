@@ -215,6 +215,29 @@ const INDEXES = [
     ],
   },
 
+  /* ── departments ────────────────────────────────────────────
+     Primary: list departments for a school */
+  {
+    col: 'departments',
+    indexes: [
+      { key: { schoolId: 1, order: 1, name: 1 }, name: 'dept_school_order' },
+      { key: { schoolId: 1, code: 1 },            name: 'dept_school_code', unique: true, sparse: true },
+      { key: { id: 1 },                            name: 'dept_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── subjects ────────────────────────────────────────────────
+     Primary: list subjects per department; secondary: by section */
+  {
+    col: 'subjects',
+    indexes: [
+      { key: { schoolId: 1, departmentId: 1, order: 1 }, name: 'sub_dept_order' },
+      { key: { schoolId: 1, code: 1 },                   name: 'sub_school_code', unique: true, sparse: true },
+      { key: { schoolId: 1, sections: 1 },               name: 'sub_school_sections' },
+      { key: { id: 1 },                                  name: 'sub_id', unique: true, sparse: true },
+    ],
+  },
+
   /* ── attendance ─────────────────────────────────────────────
      Primary: count present/absent for report card attendance summary */
   {

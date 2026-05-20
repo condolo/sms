@@ -312,6 +312,13 @@ export const settings = {
   },
 };
 
+export const departments = _resource('departments');
+
+export const subjects = {
+  ..._resource('subjects'),
+  byDepartment: (departmentId, params) => _get('/subjects', { ...params, departmentId }),
+};
+
 export const bellSchedule = {
   /** Fetch a section's schedule. Falls back: section → 'all' → hardcoded default. */
   get:      (section = 'all') => _get('/bell-schedule', { section }),
@@ -340,6 +347,8 @@ const api = {
   announcements,
   settings,
   bellSchedule,
+  departments,
+  subjects,
   importExport,
   APIError,
 };

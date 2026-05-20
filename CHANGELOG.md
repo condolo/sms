@@ -6,6 +6,64 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.9.19] — 2026-05-20  Subjects & Departments Registry
+
+### New — `server/routes/departments.js`
+
+Full CRUD API for the school's **department registry**.
+
+- `GET /api/departments` — lists all active departments with embedded subject count per department.
+- `GET /api/departments/:id` — single department.
+- `POST /api/departments` — create; validates unique code within school.
+- `PUT /api/departments/:id` — update; code uniqueness check excludes self.
+- `DELETE /api/departments/:id` — soft-delete (`isActive: false`); **blocked** if active subjects still exist in that department.
+- Schema: `{name, code, color (#hex), hodName, description, order, isActive}`.
+- RBAC: write routes gated by `rbac('departments', 'create'|'update'|'delete')`.
+
+### New — `server/routes/subjects.js`
+
+Full CRUD API for the school's **subject registry**.
+
+- `GET /api/subjects` — list active subjects; filterable by `departmentId`, `section`, `isCompulsory`.
+- `GET /api/subjects/:id` — single subject.
+- `POST /api/subjects` — create; validates `departmentId` belongs to this school; enforces code uniqueness.
+- `PUT /api/subjects/:id` — update with same guards.
+- `DELETE /api/subjects/:id` — soft-delete only.
+- Schema: `{name, code, shortName, departmentId, sections['kg'|'primary'|'secondary'|'alevel'|'all'], isCompulsory, color, order, description}`.
+- RBAC: write routes gated by `rbac('subjects', 'create'|'update'|'delete')`.
+
+### New — `client/src/pages/subjects/SubjectsPage.jsx`
+
+Premium **Subjects & Departments** page accessible at `/subjects`.
+
+- **Department cards** — each department rendered as a collapsible card showing name, code, HoD name, subject count, and colour badge. Expand/collapse the subject list per department.
+- **Subject rows** — within each card, subjects listed with colour dot, code, short name, compulsory badge, and section pills (KG / Primary / Secondary / A-Level / All).
+- **Add/Edit Department slide-over** — full form: name, code, sort order, colour picker (10 presets + custom), HoD name field, description.
+- **Add/Edit Subject slide-over** — full form: name, code, short name, department selector, section multi-toggle buttons, compulsory toggle, colour picker, sort order, description.
+- **Deactivate dialogs** — confirm before soft-deleting; department deletion warns about active subjects first.
+- **Search** — filters both department names/codes and subject names/codes simultaneously.
+- **Stats strip** — Departments / Subjects / Compulsory counts at a glance.
+- **RBAC guard** — edit controls (add/edit/delete buttons) shown only to `admin`, `deputy`, `superadmin`.
+- Toasts for save success / errors.
+
+### Updated — Demo seed (`server/utils/seedSchool.js`)
+
+- **9 departments** seeded with HoD names, colours, descriptions:  
+  Mathematics, English Language & Literature, Sciences, Humanities & Social Sciences, Modern Foreign Languages, ICT & Computing, Creatives, Physical Education, Religious Studies.
+- **24 subjects** seeded across all departments with correct `departmentId`, `sections`, `isCompulsory`, `color`:  
+  Maths, Pure Maths, Statistics, Mechanics — English Language, English Literature — Science (general), Biology, Chemistry, Physics — Social Studies, History, Geography, Economics — Kiswahili, French, Spanish — ICT, Computer Science — Art & Design, Music, Drama — PE — CRE.
+- Original 6 subject IDs preserved (grades, exams, timetable references unbroken).
+
+### Updated — Route mounting, API client, Sidebar, Router, Indexes
+
+- `server/index.js` — mounts `/api/departments` and `/api/subjects`.
+- `client/src/api/client.js` — exports `departments` and `subjects` API modules.
+- `client/src/components/layout/Sidebar.jsx` — **Subjects** link (Library icon) added under Academic section.
+- `client/src/App.jsx` — lazy route `/subjects → SubjectsPage`.
+- `server/utils/indexes.js` — compound indexes for `departments` (`schoolId+code` unique, `schoolId+order`) and `subjects` (`schoolId+code` unique, `schoolId+departmentId+order`, `schoolId+sections`).
+
+---
+
 ## [4.9.18] — 2026-05-20  Role-Contextual Help Guide
 
 ### New — `client/src/components/RoleGuide.jsx`

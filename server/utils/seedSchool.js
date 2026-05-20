@@ -70,19 +70,65 @@ const SECTIONS = [
   { id: `sec_al_${S}`,  schoolId: S, name: 'Sixth Form / A-Level', code: 'AL',  order: 4, sectionKey: 'alevel'    },
 ];
 
-/* ── Subjects ───────────────────────────────────────────────── */
-const SUBJECTS = [
-  { id: `sub_math_${S}`, schoolId: S, name: 'Mathematics', code: 'MATH', color: '#6366F1' },
-  { id: `sub_eng_${S}`,  schoolId: S, name: 'English',     code: 'ENG',  color: '#0EA5E9' },
-  { id: `sub_sci_${S}`,  schoolId: S, name: 'Science',     code: 'SCI',  color: '#10B981' },
-  { id: `sub_kis_${S}`,  schoolId: S, name: 'Kiswahili',   code: 'KIS',  color: '#F59E0B' },
-  { id: `sub_ict_${S}`,  schoolId: S, name: 'ICT',         code: 'ICT',  color: '#8B5CF6' },
-  { id: `sub_sst_${S}`,  schoolId: S, name: 'Social Studies', code: 'SST', color: '#EC4899' },
+/* ── Departments ────────────────────────────────────────────── */
+const DEPT = {
+  math: `dept_math_${S}`, eng: `dept_eng_${S}`,  sci: `dept_sci_${S}`,
+  hum:  `dept_hum_${S}`,  mfl: `dept_mfl_${S}`,  ict: `dept_ict_${S}`,
+  crt:  `dept_crt_${S}`,  pe:  `dept_pe_${S}`,   rs:  `dept_rs_${S}`,
+};
+const DEPARTMENTS = [
+  { id: DEPT.math, schoolId: S, name: 'Mathematics',                  code: 'MATH', color: '#6366F1', hodName: 'Mr. James Omondi',   order: 1, isActive: true, description: 'Mathematics, Pure Maths, Statistics and Mechanics' },
+  { id: DEPT.eng,  schoolId: S, name: 'English Language & Literature', code: 'ENG',  color: '#0EA5E9', hodName: 'Ms. Sarah Smith',     order: 2, isActive: true, description: 'English Language and English Literature' },
+  { id: DEPT.sci,  schoolId: S, name: 'Sciences',                     code: 'SCI',  color: '#10B981', hodName: 'Mr. Samuel Kamau',    order: 3, isActive: true, description: 'Biology, Chemistry, Physics and General Science' },
+  { id: DEPT.hum,  schoolId: S, name: 'Humanities & Social Sciences', code: 'HUM',  color: '#F97316', hodName: 'Ms. Grace Wanjiku',   order: 4, isActive: true, description: 'History, Geography, Social Studies and Economics' },
+  { id: DEPT.mfl,  schoolId: S, name: 'Modern Foreign Languages',     code: 'MFL',  color: '#F59E0B', hodName: 'Ms. Mary Achieng',    order: 5, isActive: true, description: 'Kiswahili, French, Spanish and other modern languages' },
+  { id: DEPT.ict,  schoolId: S, name: 'ICT & Computing',              code: 'ICT',  color: '#8B5CF6', hodName: 'Mr. David Otieno',    order: 6, isActive: true, description: 'Information & Communication Technology and Computer Science' },
+  { id: DEPT.crt,  schoolId: S, name: 'Creatives',                    code: 'CRT',  color: '#EC4899', hodName: 'Ms. Faith Njeri',     order: 7, isActive: true, description: 'Art & Design, Music and Drama & Theatre' },
+  { id: DEPT.pe,   schoolId: S, name: 'Physical Education',           code: 'PE',   color: '#06B6D4', hodName: '',                    order: 8, isActive: true, description: 'Physical Education and Sports' },
+  { id: DEPT.rs,   schoolId: S, name: 'Religious Studies',            code: 'RS',   color: '#84CC16', hodName: '',                    order: 9, isActive: true, description: 'CRE, IRE and other religious studies' },
 ];
+
+/* ── Subjects ───────────────────────────────────────────────── */
+// Original 6 IDs preserved — referenced by grades, exams, teachers
 const SUB = {
   math: `sub_math_${S}`, eng: `sub_eng_${S}`, sci: `sub_sci_${S}`,
   kis:  `sub_kis_${S}`,  ict: `sub_ict_${S}`, sst: `sub_sst_${S}`,
 };
+const SUBJECTS = [
+  // Mathematics
+  { id: SUB.math,            schoolId: S, departmentId: DEPT.math, name: 'Mathematics',     code: 'MATH',    shortName: 'Maths',    sections: ['primary','secondary','alevel'], isCompulsory: true,  color: '#6366F1', order: 1, isActive: true },
+  { id: `sub_pmath_${S}`,   schoolId: S, departmentId: DEPT.math, name: 'Pure Mathematics', code: 'PMATH',   shortName: 'Pure Maths', sections: ['alevel'],                    isCompulsory: false, color: '#4F46E5', order: 2, isActive: true },
+  { id: `sub_stats_${S}`,   schoolId: S, departmentId: DEPT.math, name: 'Statistics',       code: 'STATS',   shortName: 'Stats',    sections: ['alevel'],                    isCompulsory: false, color: '#818CF8', order: 3, isActive: true },
+  { id: `sub_mech_${S}`,    schoolId: S, departmentId: DEPT.math, name: 'Mechanics',         code: 'MECH',    shortName: 'Mech',     sections: ['alevel'],                    isCompulsory: false, color: '#A5B4FC', order: 4, isActive: true },
+  // English
+  { id: SUB.eng,             schoolId: S, departmentId: DEPT.eng,  name: 'English Language', code: 'ENG',     shortName: 'Eng Lang', sections: ['all'],                       isCompulsory: true,  color: '#0EA5E9', order: 1, isActive: true },
+  { id: `sub_lit_${S}`,     schoolId: S, departmentId: DEPT.eng,  name: 'English Literature', code: 'LIT',   shortName: 'Lit',      sections: ['secondary','alevel'],        isCompulsory: false, color: '#38BDF8', order: 2, isActive: true },
+  // Sciences
+  { id: SUB.sci,             schoolId: S, departmentId: DEPT.sci,  name: 'Science',           code: 'SCI',    shortName: 'Science',  sections: ['kg','primary'],              isCompulsory: true,  color: '#10B981', order: 1, isActive: true },
+  { id: `sub_bio_${S}`,     schoolId: S, departmentId: DEPT.sci,  name: 'Biology',            code: 'BIO',    shortName: 'Bio',      sections: ['secondary','alevel'],        isCompulsory: false, color: '#34D399', order: 2, isActive: true },
+  { id: `sub_chem_${S}`,    schoolId: S, departmentId: DEPT.sci,  name: 'Chemistry',          code: 'CHEM',   shortName: 'Chem',     sections: ['secondary','alevel'],        isCompulsory: false, color: '#6EE7B7', order: 3, isActive: true },
+  { id: `sub_phys_${S}`,    schoolId: S, departmentId: DEPT.sci,  name: 'Physics',            code: 'PHYS',   shortName: 'Physics',  sections: ['secondary','alevel'],        isCompulsory: false, color: '#A7F3D0', order: 4, isActive: true },
+  // Humanities
+  { id: SUB.sst,             schoolId: S, departmentId: DEPT.hum,  name: 'Social Studies',    code: 'SST',    shortName: 'Soc St',   sections: ['primary'],                   isCompulsory: true,  color: '#F97316', order: 1, isActive: true },
+  { id: `sub_hist_${S}`,    schoolId: S, departmentId: DEPT.hum,  name: 'History',            code: 'HIST',   shortName: 'History',  sections: ['secondary','alevel'],        isCompulsory: false, color: '#FB923C', order: 2, isActive: true },
+  { id: `sub_geo_${S}`,     schoolId: S, departmentId: DEPT.hum,  name: 'Geography',          code: 'GEO',    shortName: 'Geo',      sections: ['secondary','alevel'],        isCompulsory: false, color: '#FDBA74', order: 3, isActive: true },
+  { id: `sub_econ_${S}`,    schoolId: S, departmentId: DEPT.hum,  name: 'Economics',          code: 'ECON',   shortName: 'Econ',     sections: ['alevel'],                    isCompulsory: false, color: '#FED7AA', order: 4, isActive: true },
+  // Modern Foreign Languages
+  { id: SUB.kis,             schoolId: S, departmentId: DEPT.mfl,  name: 'Kiswahili',          code: 'KIS',    shortName: 'Kiswahili', sections: ['all'],                      isCompulsory: true,  color: '#F59E0B', order: 1, isActive: true },
+  { id: `sub_fre_${S}`,     schoolId: S, departmentId: DEPT.mfl,  name: 'French',             code: 'FRE',    shortName: 'French',   sections: ['secondary','alevel'],        isCompulsory: false, color: '#FCD34D', order: 2, isActive: true },
+  { id: `sub_spa_${S}`,     schoolId: S, departmentId: DEPT.mfl,  name: 'Spanish',            code: 'SPA',    shortName: 'Spanish',  sections: ['secondary','alevel'],        isCompulsory: false, color: '#FDE68A', order: 3, isActive: true },
+  // ICT
+  { id: SUB.ict,             schoolId: S, departmentId: DEPT.ict,  name: 'ICT',               code: 'ICT',    shortName: 'ICT',      sections: ['primary','secondary'],       isCompulsory: true,  color: '#8B5CF6', order: 1, isActive: true },
+  { id: `sub_cs_${S}`,      schoolId: S, departmentId: DEPT.ict,  name: 'Computer Science',   code: 'CS',     shortName: 'Comp Sci', sections: ['secondary','alevel'],        isCompulsory: false, color: '#A78BFA', order: 2, isActive: true },
+  // Creatives
+  { id: `sub_art_${S}`,     schoolId: S, departmentId: DEPT.crt,  name: 'Art & Design',       code: 'ART',    shortName: 'Art',      sections: ['primary','secondary'],       isCompulsory: false, color: '#EC4899', order: 1, isActive: true },
+  { id: `sub_music_${S}`,   schoolId: S, departmentId: DEPT.crt,  name: 'Music',              code: 'MUSIC',  shortName: 'Music',    sections: ['primary','secondary'],       isCompulsory: false, color: '#F472B6', order: 2, isActive: true },
+  { id: `sub_drama_${S}`,   schoolId: S, departmentId: DEPT.crt,  name: 'Drama & Theatre',    code: 'DRAMA',  shortName: 'Drama',    sections: ['secondary'],                 isCompulsory: false, color: '#FBCFE8', order: 3, isActive: true },
+  // PE
+  { id: `sub_pe_${S}`,      schoolId: S, departmentId: DEPT.pe,   name: 'Physical Education', code: 'PE',     shortName: 'PE',       sections: ['all'],                       isCompulsory: true,  color: '#06B6D4', order: 1, isActive: true },
+  // RS
+  { id: `sub_cre_${S}`,     schoolId: S, departmentId: DEPT.rs,   name: 'Christian Religious Education', code: 'CRE', shortName: 'CRE', sections: ['primary','secondary'],  isCompulsory: false, color: '#84CC16', order: 1, isActive: true },
+];
 
 /* ── Teachers ───────────────────────────────────────────────── */
 const TEACHERS = [
@@ -499,14 +545,15 @@ async function seed() {
   await mongoose.connect(uri, { dbName: 'innolearn' });
   console.log('✅  Connected.\n');
 
-  const School     = model('schools');
-  const User       = model('users');
-  const Sec        = model('sections');
-  const AcYear     = model('academic_years');
-  const Perm       = model('role_permissions');
-  const House      = model('houses');
-  const Subject    = model('subjects');
-  const Teacher    = model('teachers');
+  const School      = model('schools');
+  const User        = model('users');
+  const Sec         = model('sections');
+  const AcYear      = model('academic_years');
+  const Perm        = model('role_permissions');
+  const House       = model('houses');
+  const Department  = model('departments');
+  const Subject     = model('subjects');
+  const Teacher     = model('teachers');
   const Class      = model('classes');
   const Student    = model('students');
   const Attendance = model('attendance');
@@ -530,6 +577,7 @@ async function seed() {
       AcYear.deleteMany({ schoolId: S }),
       Perm.deleteMany({ schoolId: S }),
       House.deleteMany({ schoolId: S }),
+      Department.deleteMany({ schoolId: S }),
       Subject.deleteMany({ schoolId: S }),
       Teacher.deleteMany({ schoolId: S }),
       Class.deleteMany({ schoolId: S }),
@@ -573,11 +621,17 @@ async function seed() {
   }
   console.log('🏆  Houses:', HOUSES.map(h => h.name).join(', '));
 
+  /* ── Departments ────────────────────────────────────────── */
+  for (const d of DEPARTMENTS) {
+    await Department.updateOne({ id: d.id }, { $set: d }, { upsert: true });
+  }
+  console.log('🏢  Departments:', DEPARTMENTS.map(d => d.name).join(', '));
+
   /* ── Subjects ───────────────────────────────────────────── */
   for (const s of SUBJECTS) {
     await Subject.updateOne({ id: s.id }, { $set: s }, { upsert: true });
   }
-  console.log('📖  Subjects:', SUBJECTS.map(s => s.name).join(', '));
+  console.log(`📖  Subjects: ${SUBJECTS.length} across ${DEPARTMENTS.length} departments`);
 
   /* ── Users ───────────────────────────────────────────────── */
   for (const u of USERS) {

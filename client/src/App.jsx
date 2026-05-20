@@ -27,6 +27,7 @@ const TimetablePage  = lazy(() => import('@/pages/timetable/TimetablePage.jsx'))
 const SettingsPage      = lazy(() => import('@/pages/settings/SettingsPage.jsx'));
 const GradesPage        = lazy(() => import('@/pages/grades/GradesPage.jsx'));
 const ImportExportPage  = lazy(() => import('@/pages/import-export/ImportExportPage.jsx'));
+const SubjectsPage      = lazy(() => import('@/pages/subjects/SubjectsPage.jsx'));
 const NotFound          = lazy(() => import('@/pages/NotFound.jsx'));
 
 function SuspenseWrapper({ children }) {
@@ -108,6 +109,9 @@ export const router = createBrowserRouter([
 
       // Timetable
       { path: 'timetable',             element: <SuspenseWrapper><TimetablePage /></SuspenseWrapper> },
+
+      // Subjects & Departments
+      { path: 'subjects',              element: <SuspenseWrapper><SubjectsPage /></SuspenseWrapper> },
 
       // Import / Export
       { path: 'import-export',         element: <SuspenseWrapper><ImportExportPage /></SuspenseWrapper> },

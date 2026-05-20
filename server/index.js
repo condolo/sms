@@ -122,6 +122,8 @@ app.use('/api/report-cards',   require('./routes/report-cards'));
 app.use('/api/import-export',  require('./routes/import-export'));
 app.use('/api/settings',       require('./routes/settings'));
 app.use('/api/bell-schedule',  require('./routes/bell-schedule'));
+app.use('/api/departments',    require('./routes/departments'));
+app.use('/api/subjects',       require('./routes/subjects'));
 
 /* ── School-facing announcement routes (JWT auth, not platform key) ── */
 const { authMiddleware } = require('./middleware/auth');
