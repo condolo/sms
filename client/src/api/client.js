@@ -319,6 +319,27 @@ export const subjects = {
   byDepartment: (departmentId, params) => _get('/subjects', { ...params, departmentId }),
 };
 
+export const events = {
+  list:   (params)     => _get('/events', params),
+  get:    (id)         => _get(`/events/${id}`),
+  create: (data)       => _post('/events', data),
+  update: (id, data)   => _put(`/events/${id}`, data),
+  remove: (id)         => _delete(`/events/${id}`),
+};
+
+export const hr = {
+  summary: ()          => _get('/hr/summary'),
+  leave: {
+    list:    (params)  => _get('/hr/leave', params),
+    submit:  (data)    => _post('/hr/leave', data),
+    resolve: (id, data)=> _patch(`/hr/leave/${id}/resolve`, data),
+  },
+  payroll: {
+    list:   (params)   => _get('/hr/payroll', params),
+    save:   (data)     => _post('/hr/payroll', data),
+  },
+};
+
 export const messages = {
   list:     (params) => _get('/messages', params),
   send:     (data)   => _post('/messages', data),
@@ -366,6 +387,8 @@ const api = {
   subjects,
   studentSubjects,
   messages,
+  events,
+  hr,
   importExport,
   APIError,
 };

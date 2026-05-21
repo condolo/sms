@@ -315,7 +315,7 @@ function _tenantQuery(school) {
 router.delete('/schools/all', async (req, res) => {
   try {
     const School     = _model('schools');
-    const DEMO_SLUGS = ['innolearn', 'msingi', 'demo'];
+    const DEMO_SLUGS = ['msingi', 'demo'];
 
     const toPurge    = await School.find({ slug: { $nin: DEMO_SLUGS } }).lean();
     const schoolMonIds = toPurge.map(s => s._id);

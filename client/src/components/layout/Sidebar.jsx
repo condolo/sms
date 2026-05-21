@@ -7,7 +7,7 @@ import {
   LayoutDashboard, GraduationCap, Users, BookOpen, Calendar,
   CheckSquare, FileText, BarChart3, ClipboardList, Scale,
   Wallet, Download, Settings, LogOut, Building2, Library,
-  MessageSquare,
+  MessageSquare, UserCog, TrendingUp, Tag, HelpCircle,
 } from 'lucide-react';
 import clsx from 'clsx';
 import useAuthStore from '@/store/auth.js';
@@ -40,13 +40,23 @@ const NAV_SECTIONS = [
       { to: '/behaviour',  Icon: Scale,            label: 'Behaviour'   },
       { to: '/finance',    Icon: Wallet,           label: 'Finance'     },
       { to: '/messages',   Icon: MessageSquare,    label: 'Messages'    },
+      { to: '/events',     Icon: Calendar,         label: 'Events'      },
+      { to: '/hr',         Icon: UserCog,          label: 'HR & Staff'  },
+    ],
+  },
+  {
+    label: 'Insights',
+    items: [
+      { to: '/reports',   Icon: TrendingUp, label: 'Reports & Analytics' },
     ],
   },
   {
     label: 'System',
     items: [
-      { to: '/import-export', Icon: Download,  label: 'Import & Export' },
-      { to: '/settings',      Icon: Settings,  label: 'Settings'        },
+      { to: '/import-export', Icon: Download,     label: 'Import & Export' },
+      { to: '/settings',      Icon: Settings,     label: 'Settings'        },
+      { to: '/changelog',     Icon: Tag,          label: 'Changelog'       },
+      { to: '/help',          Icon: HelpCircle,   label: 'Help Centre'     },
     ],
   },
 ];

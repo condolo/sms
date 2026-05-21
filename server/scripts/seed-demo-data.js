@@ -382,7 +382,56 @@ async function seedDemoData() {
       })
     ));
 
-    console.log('[seed-demo-data] ✓ 7 classes · 14 subjects · 9 teachers · 20 students · 25 behaviour · 20 invoices · 14 payments · 60 timetable slots · 8 admissions');
+    /* 10. Events */
+    const Event = _model('events');
+    const EVENTS = [
+      { id:'evt_demo_1',  title:'Term 2 Opening Day',         startDate:`${YEAR}-04-28`, endDate:`${YEAR}-04-28`, type:'academic', category:'term',     color:'#4f46e5', allDay:true, audience:['all'],  description:'First day of Term 2. All students and staff should report by 7:30 AM.' },
+      { id:'evt_demo_2',  title:'Parent-Teacher Conference',  startDate:`${YEAR}-05-10`, endDate:`${YEAR}-05-10`, type:'academic', category:'meeting',  color:'#0891b2', allDay:false, audience:['all'], description:'Mid-term PT conference for all classes. Parents to book slots in advance.' },
+      { id:'evt_demo_3',  title:'Sports Day',                 startDate:`${YEAR}-05-24`, endDate:`${YEAR}-05-24`, type:'event',    category:'sports',   color:'#16a34a', allDay:true, audience:['all'],  description:'Annual inter-house sports competition. All houses competing for the championship.' },
+      { id:'evt_demo_4',  title:'Mid-Term Break',             startDate:`${YEAR}-06-06`, endDate:`${YEAR}-06-08`, type:'holiday',  category:'break',    color:'#d97706', allDay:true, audience:['all'],  description:'Mid-term holiday. School resumes Monday 11 June.' },
+      { id:'evt_demo_5',  title:'Science & Innovation Fair',  startDate:`${YEAR}-06-20`, endDate:`${YEAR}-06-20`, type:'event',    category:'academic', color:'#7c3aed', allDay:true, audience:['all'],  description:'Annual science fair open to all secondary students. Entries due by June 13.' },
+      { id:'evt_demo_6',  title:'Staff Meeting — Admin',      startDate:`${YEAR}-05-07`, endDate:`${YEAR}-05-07`, type:'admin',    category:'meeting',  color:'#dc2626', allDay:false, audience:['staff'],'description':'Monthly all-staff briefing. Agenda: term progress, upcoming events, HR updates.' },
+      { id:'evt_demo_7',  title:'KCSE Mock Examinations',     startDate:`${YEAR}-06-23`, endDate:`${YEAR}-06-28`, type:'academic', category:'exam',     color:'#0f766e', allDay:true, audience:['secondary'], description:'Form 4 KCSE mock examinations. Normal timetable suspended for Form 4A.' },
+      { id:'evt_demo_8',  title:'Cultural Day',               startDate:`${YEAR}-07-05`, endDate:`${YEAR}-07-05`, type:'event',    category:'cultural', color:'#be185d', allDay:true, audience:['all'],  description:'Annual cultural festival celebrating diversity. Students to come in cultural attire.' },
+      { id:'evt_demo_9',  title:'Term 2 Closing Day',         startDate:`${YEAR}-08-09`, endDate:`${YEAR}-08-09`, type:'academic', category:'term',     color:'#4f46e5', allDay:true, audience:['all'],  description:'Last day of Term 2. Report cards distributed. School closes at 12:00 PM.' },
+      { id:'evt_demo_10', title:'Teacher Training Day',       startDate:`${YEAR}-04-27`, endDate:`${YEAR}-04-27`, type:'admin',    category:'training', color:'#dc2626', allDay:true, audience:['staff'], description:'Mandatory CPD day for all teaching staff before Term 2 opening.' },
+    ];
+    await Promise.all(EVENTS.map(e => upsert(Event, e.id, e)));
+
+    /* 11. HR — payroll */
+    const Payroll = _model('payroll');
+    const PAYROLL_PERIOD = `${YEAR}-04`;
+    const PAYROLL_STAFF = [
+      { staffId:'u_demo_teacher', staffName:'Demo Teacher',     basicSalary:65000, allowances:12000, deductions:8500 },
+      { staffId:'u_demo_t2',      staffName:'Mr. Peter Kamau',  basicSalary:60000, allowances:10000, deductions:7800 },
+      { staffId:'u_demo_t3',      staffName:'Ms. Agnes Otieno', basicSalary:58000, allowances:10000, deductions:7500 },
+      { staffId:'u_demo_t4',      staffName:'Mr. Collins Waweru', basicSalary:58000, allowances:9000, deductions:7200 },
+      { staffId:'u_demo_t5',      staffName:'Ms. Judith Njoroge',basicSalary:72000, allowances:15000, deductions:9800 },
+      { staffId:'u_demo_t6',      staffName:'Mr. Francis Ochieng',basicSalary:60000, allowances:10000, deductions:7800 },
+      { staffId:'u_demo_t7',      staffName:'Ms. Dorothy Chebet',basicSalary:58000, allowances:9000, deductions:7200 },
+      { staffId:'u_demo_t8',      staffName:'Mr. Samuel Maina', basicSalary:56000, allowances:9000, deductions:7000 },
+      { staffId:'u_demo_t9',      staffName:'Ms. Lilian Wairimu',basicSalary:60000, allowances:10000, deductions:7800 },
+      { staffId:'u_demo_t10',     staffName:'Mr. Joseph Kipchoge',basicSalary:56000, allowances:8000, deductions:6800 },
+    ];
+    await Promise.all(PAYROLL_STAFF.map(p => {
+      const grossSalary = p.basicSalary + p.allowances;
+      const netSalary   = grossSalary - p.deductions;
+      return upsert(Payroll, `pay_${p.staffId}_${PAYROLL_PERIOD}`, {
+        ...p, payPeriod: PAYROLL_PERIOD, grossSalary, netSalary,
+      });
+    }));
+
+    /* 12. HR — leave requests */
+    const Leave = _model('leave_requests');
+    const LEAVES = [
+      { id:'lr_demo_1', staffId:'u_demo_t3', staffName:'Ms. Agnes Otieno', type:'sick',    startDate:d(15), endDate:d(13), days:3, reason:'Medical leave — flu and fever.',           status:'approved', resolvedBy:'Demo Admin' },
+      { id:'lr_demo_2', staffId:'u_demo_t7', staffName:'Ms. Dorothy Chebet',type:'annual',  startDate:d(5),  endDate:d(3),  days:3, reason:'Annual leave — personal travel.',          status:'approved', resolvedBy:'Demo Admin' },
+      { id:'lr_demo_3', staffId:'u_demo_t6', staffName:'Mr. Francis Ochieng',type:'emergency',startDate:d(2), endDate:d(2), days:1, reason:'Family emergency — urgent travel.',        status:'pending',  resolvedBy:null },
+      { id:'lr_demo_4', staffId:'u_demo_t2', staffName:'Mr. Peter Kamau',   type:'annual',  startDate:`${YEAR}-06-09`, endDate:`${YEAR}-06-11`, days:3, reason:'Mid-term holiday extension.', status:'pending', resolvedBy:null },
+    ];
+    await Promise.all(LEAVES.map(l => upsert(Leave, l.id, l)));
+
+    console.log('[seed-demo-data] ✓ 7 classes · 14 subjects · 9 teachers · 20 students · 25 behaviour · 20 invoices · 14 payments · 60 timetable slots · 8 admissions · 10 events · 10 payroll · 4 leave requests');
 
   } catch (err) {
     console.warn('[seed-demo-data] Warning:', err.message);

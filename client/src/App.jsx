@@ -30,6 +30,11 @@ const ImportExportPage  = lazy(() => import('@/pages/import-export/ImportExportP
 const SubjectsPage      = lazy(() => import('@/pages/subjects/SubjectsPage.jsx'));
 const MessagesPage      = lazy(() => import('@/pages/messages/MessagesPage.jsx'));
 const NotFound          = lazy(() => import('@/pages/NotFound.jsx'));
+const EventsPage        = lazy(() => import('@/pages/events/EventsPage.jsx'));
+const ReportsPage       = lazy(() => import('@/pages/reports/ReportsPage.jsx'));
+const HRPage            = lazy(() => import('@/pages/hr/HRPage.jsx'));
+const ChangelogPage     = lazy(() => import('@/pages/changelog/ChangelogPage.jsx'));
+const HelpPage          = lazy(() => import('@/pages/help/HelpPage.jsx'));
 
 function SuspenseWrapper({ children }) {
   return (
@@ -123,6 +128,21 @@ export const router = createBrowserRouter([
       // Settings
       { path: 'settings',              element: <SuspenseWrapper><SettingsPage /></SuspenseWrapper> },
       { path: 'settings/:tab',         element: <SuspenseWrapper><SettingsPage /></SuspenseWrapper> },
+
+      // Events & Calendar
+      { path: 'events',                element: <SuspenseWrapper><EventsPage /></SuspenseWrapper> },
+
+      // Reports & Analytics
+      { path: 'reports',               element: <SuspenseWrapper><ReportsPage /></SuspenseWrapper> },
+
+      // HR & Staff
+      { path: 'hr',                    element: <SuspenseWrapper><HRPage /></SuspenseWrapper> },
+
+      // Changelog
+      { path: 'changelog',             element: <SuspenseWrapper><ChangelogPage /></SuspenseWrapper> },
+
+      // Help Centre
+      { path: 'help',                  element: <SuspenseWrapper><HelpPage /></SuspenseWrapper> },
 
       // Fallback
       { path: '*',                     element: <SuspenseWrapper><NotFound /></SuspenseWrapper> },
