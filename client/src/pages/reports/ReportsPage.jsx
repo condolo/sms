@@ -197,30 +197,82 @@ export default function ReportsPage() {
     setAcSort(prev => prev.col === col ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'desc' });
   }
 
-  /* ── Export handler ── */
+  /* ── Card-level quick export ── */
   function exportCSV(type) {
     let rows = [];
-    let filename = `msingi_report_${type}_${new Date().toISOString().slice(0,10)}.csv`;
-
+    const date = new Date().toISOString().slice(0,10);
     if (type === 'students' && studStats?.byClass) {
-      rows = [['Class','Students'], ...Object.entries(studStats.byClass)];
+      const raw = Array.isArray(studStats.byClass)
+        ? studStats.byClass.map(c => [c.className ?? c._id ?? '—', c.count ?? c.students ?? 0])
+        : Object.entries(studStats.byClass);
+      rows = [['Class','Students'], ...raw];
     } else if (type === 'finance' && finSummary) {
+      rows = [['Metric','Value'],['Total Invoiced',totalInvoiced],['Total Collected',totalCollected],['Outstanding',outstanding],['Collection Rate %',collectionRate]];
+    }
+    if (!rows.length) return;
+    const csv = rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const el = document.createElement('a');
+    el.href = url; el.download = `report_${type}_${date}.csv`;
+    el.click(); URL.revokeObjectURL(url);
+  }
+
+  /* ── Tab-aware export ── */
+  function exportCurrentTab() {
+    let rows = [];
+    const date = new Date().toISOString().slice(0,10);
+    let filename = `report_${tab}_${date}.csv`;
+
+    const toCSV = (data) => data.map(r => r.map(v => `"${String(v ?? '').replace(/"/g,'""')}"`).join(',')).join('\n');
+
+    if (tab === 'overview' || tab === 'enrollment') {
+      if (studStats?.byClass) {
+        const raw = Array.isArray(studStats.byClass)
+          ? studStats.byClass.map(c => [c.className ?? c._id ?? '—', c.count ?? c.students ?? 0])
+          : Object.entries(studStats.byClass);
+        rows = [['Class', 'Students'], ...raw];
+        filename = `report_enrollment_${date}.csv`;
+      }
+    } else if (tab === 'finance') {
       rows = [
-        ['Metric','Value'],
-        ['Total Invoiced', totalInvoiced],
-        ['Total Collected', totalCollected],
-        ['Outstanding', outstanding],
+        ['Metric', 'Value'],
+        ['Total Invoiced',   totalInvoiced],
+        ['Total Collected',  totalCollected],
+        ['Outstanding',      outstanding],
         ['Collection Rate %', collectionRate],
+      ];
+    } else if (tab === 'behaviour') {
+      rows = [
+        ['Metric', 'Count'],
+        ['Total Merits',   totalMerits],
+        ['Total Demerits', totalDemerits],
+      ];
+    } else if (tab === 'academic' && subjectRows.length > 0) {
+      rows = [
+        ['Subject','Entries','Average Score','Average %','Highest','Lowest','Pass Rate %'],
+        ...subjectRows.map(r => [r.subject, r.count, r.avg, r.avgPct, r.highest, r.lowest, r.passRate]),
+      ];
+      filename = `report_academic_${date}.csv`;
+    } else if (tab === 'attendance' && attSummary) {
+      const s = attSummary;
+      rows = [
+        ['Metric', 'Value'],
+        ['Total Records',   s.total   ?? 0],
+        ['Present',         s.present ?? 0],
+        ['Absent',          s.absent  ?? 0],
+        ['Late',            s.late    ?? 0],
+        ['Excused',         s.excused ?? 0],
+        ['Attendance Rate %', s.rate  ?? 0],
       ];
     }
 
-    const csv  = rows.map(r => r.join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
+    if (!rows.length) return;
+    const blob = new Blob([toCSV(rows)], { type: 'text/csv' });
     const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href = url; a.download = filename;
-    document.body.appendChild(a); a.click();
-    document.body.removeChild(a); URL.revokeObjectURL(url);
+    const el   = document.createElement('a');
+    el.href = url; el.download = filename;
+    el.click(); URL.revokeObjectURL(url);
   }
 
   return (
@@ -232,10 +284,10 @@ export default function ReportsPage() {
           <p className="text-slate-500 text-sm mt-0.5">School-wide insights and performance data.</p>
         </div>
         <button
-          onClick={() => exportCSV('students')}
+          onClick={exportCurrentTab}
           className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
         >
-          <Download size={14} /> Export
+          <Download size={14} /> Export {tab.charAt(0).toUpperCase() + tab.slice(1)}
         </button>
       </div>
 

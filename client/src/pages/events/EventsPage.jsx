@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Calendar, Plus, ChevronLeft, ChevronRight, List,
-  LayoutGrid, MapPin, Users, Trash2, Edit2, X, Check,
+  LayoutGrid, MapPin, Users, Trash2, Edit2, X, Check, Download,
 } from 'lucide-react';
 import { events as eventsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
@@ -152,6 +152,26 @@ function EventModal({ event, onClose, onSave, onDelete, canAdmin }) {
   );
 }
 
+function exportEventsCSV(events) {
+  const header = ['Title','Category','Start Date','End Date','Location','Audience'];
+  const rows = events.map(e => [
+    e.title ?? '',
+    CATEGORIES[e.category]?.label ?? e.category ?? '',
+    e.startDate ?? '',
+    e.endDate ?? e.startDate ?? '',
+    e.location ?? '',
+    Array.isArray(e.audience) ? e.audience.join('; ') : (e.audience ?? ''),
+  ]);
+  const csv = [header, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const el   = document.createElement('a');
+  el.href = url;
+  el.download = `events_${new Date().toISOString().slice(0,10)}.csv`;
+  el.click();
+  URL.revokeObjectURL(url);
+}
+
 /* ══════════════════════════════════════════════════════════
    MAIN COMPONENT
    ══════════════════════════════════════════════════════════ */
@@ -254,6 +274,20 @@ export default function EventsPage() {
               <List size={15} />
             </button>
           </div>
+          {/* Today nav shortcut */}
+          <button
+            onClick={() => { const d = new Date(); setCurrent({ year: d.getFullYear(), month: d.getMonth() }); }}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition"
+          >
+            Today
+          </button>
+          <button
+            onClick={() => exportEventsCSV(view === 'list' ? upcomingEvents : events)}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition"
+            title="Export events CSV"
+          >
+            <Download size={13} /> Export
+          </button>
           {canAdmin && (
             <button onClick={() => setShowNew(true)} className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2 text-sm font-semibold text-white hover:bg-violet-700 transition">
               <Plus size={14} /> Add Event

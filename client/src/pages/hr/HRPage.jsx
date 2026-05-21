@@ -8,7 +8,7 @@ import { motion } from 'framer-motion';
 import {
   Users, UserCheck, Clock, Wallet, Plus, Check, X,
   ChevronDown, AlertCircle, FileText, Calendar,
-  FolderOpen, Trash2, Edit2, Save,
+  FolderOpen, Trash2, Edit2, Save, Download,
 } from 'lucide-react';
 import { hr as hrApi, teachers as teachersApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
@@ -354,10 +354,44 @@ export default function HRPage() {
       {/* ── PAYROLL TAB ── */}
       {tab === 'payroll' && isHR && (
         <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <label className="text-sm font-medium text-slate-700">Pay Period:</label>
-            <input type="month" value={payPeriod} onChange={e => setPayPeriod(e.target.value)}
-              className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40" />
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <label className="text-sm font-medium text-slate-700">Pay Period:</label>
+              <input type="month" value={payPeriod} onChange={e => setPayPeriod(e.target.value)}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40" />
+            </div>
+            {payrollRecs.length > 0 && (
+              <button
+                onClick={() => {
+                  const header = ['Staff','Basic Salary','Allowances','Gross Salary','Deductions','Net Pay'];
+                  const rows = payrollRecs.map(p => [
+                    p.staffName ?? '',
+                    p.basicSalary ?? 0,
+                    p.allowances ?? 0,
+                    p.grossSalary ?? 0,
+                    p.deductions ?? 0,
+                    p.netSalary ?? 0,
+                  ]);
+                  const totRow = [
+                    'TOTAL',
+                    payrollRecs.reduce((s,r) => s+(r.basicSalary||0), 0),
+                    payrollRecs.reduce((s,r) => s+(r.allowances||0), 0),
+                    payrollRecs.reduce((s,r) => s+(r.grossSalary||0), 0),
+                    payrollRecs.reduce((s,r) => s+(r.deductions||0), 0),
+                    payrollRecs.reduce((s,r) => s+(r.netSalary||0), 0),
+                  ];
+                  const csv = [header, ...rows, totRow].map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+                  const blob = new Blob([csv], { type: 'text/csv' });
+                  const url = URL.createObjectURL(blob);
+                  const el = document.createElement('a');
+                  el.href = url; el.download = `payroll_${payPeriod}.csv`;
+                  el.click(); URL.revokeObjectURL(url);
+                }}
+                className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition"
+              >
+                <Download size={13} /> Export CSV
+              </button>
+            )}
           </div>
 
           {payLoading ? (

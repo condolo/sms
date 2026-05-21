@@ -11,7 +11,7 @@ import {
   UserPlus, Search, SlidersHorizontal, ChevronRight,
   X, Loader2, AlertCircle, GraduationCap, Phone, Mail,
   Calendar, Flag, ArrowRight, CheckCircle2, MoreHorizontal,
-  Users, TrendingUp, Clock, Star, Printer,
+  Users, TrendingUp, Clock, Star, Printer, Download, Edit2, Save,
 } from 'lucide-react';
 import { admissions as admissionsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
@@ -72,6 +72,36 @@ async function fetchAllForStage(stage) {
   // Fetch up to 200 records per stage (pipeline is paginated)
   const res = await admissionsApi.list({ stage, limit: 200, page: 1 });
   return res?.data ?? [];
+}
+
+function exportAdmissionsCSV(cols) {
+  const header = [
+    'First Name','Last Name','Stage','Priority',
+    'Applying For','Academic Year','Date of Birth','Gender',
+    'Parent Name','Parent Phone','Parent Email','Applied Date',
+  ];
+  const rows = cols.flatMap(col =>
+    col.items.map(a => [
+      a.firstName ?? '', a.lastName ?? '',
+      stageMeta(a.stage).label,
+      a.priority ?? 'normal',
+      a.applyingForClass ?? '', a.applyingForYear ?? '',
+      a.dateOfBirth ? new Date(a.dateOfBirth).toLocaleDateString('en-GB') : '',
+      a.gender ?? '',
+      a.parentName ?? '', a.parentPhone ?? '', a.parentEmail ?? '',
+      a.createdAt ? new Date(a.createdAt).toLocaleDateString('en-GB') : '',
+    ])
+  );
+  const csv = [header, ...rows]
+    .map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(','))
+    .join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const el   = document.createElement('a');
+  el.href = url;
+  el.download = `admissions_${new Date().toISOString().slice(0,10)}.csv`;
+  el.click();
+  URL.revokeObjectURL(url);
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -142,6 +172,14 @@ export default function AdmissionsPage() {
                   </button>
                 ))}
               </div>
+              <button
+                onClick={() => exportAdmissionsCSV(kanbanCols)}
+                className="flex items-center gap-1.5 border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-600 text-sm font-medium px-3 py-2 rounded-lg transition-colors"
+                title="Export applicants CSV"
+              >
+                <Download size={14} />
+                Export
+              </button>
               <button
                 onClick={() => setShowAdd(true)}
                 className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
@@ -731,12 +769,35 @@ function StageModal({ applicant, onClose, onChanged }) {
    DETAIL PANEL
    ══════════════════════════════════════════════════════════ */
 function DetailPanel({ applicant, onClose, onStageChange }) {
-  const a    = applicant;
-  const sm   = stageMeta(a.stage);
-  const av   = avatarColor(`${a.firstName}${a.lastName}`);
-  const pri  = PRIORITY_CONFIG[a.priority] ?? PRIORITY_CONFIG.normal;
+  const a      = applicant;
+  const sm     = stageMeta(a.stage);
+  const av     = avatarColor(`${a.firstName}${a.lastName}`);
+  const pri    = PRIORITY_CONFIG[a.priority] ?? PRIORITY_CONFIG.normal;
   const school = useAuthStore(s => s.session?.school);
+  const qc     = useQueryClient();
   const [showLetter, setShowLetter] = useState(false);
+  const [editing, setEditing]       = useState(false);
+  const [editForm, setEditForm]     = useState({
+    firstName:       a.firstName       ?? '',
+    lastName:        a.lastName        ?? '',
+    applyingForClass:a.applyingForClass ?? '',
+    applyingForYear: a.applyingForYear  ?? '',
+    parentName:      a.parentName      ?? '',
+    parentPhone:     a.parentPhone     ?? '',
+    parentEmail:     a.parentEmail     ?? '',
+    priority:        a.priority        ?? 'normal',
+    notes:           a.notes           ?? '',
+  });
+
+  const updateMut = useMutation({
+    mutationFn: data => admissionsApi.update(a.id ?? a._id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admissions'] });
+      setEditing(false);
+    },
+  });
+
+  function setF(field, val) { setEditForm(f => ({ ...f, [field]: val })); }
 
   return (
     <>
@@ -755,29 +816,118 @@ function DetailPanel({ applicant, onClose, onStageChange }) {
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3">
               <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${av} flex items-center justify-center text-white text-sm font-bold shrink-0`}>
-                {initials(a.firstName, a.lastName)}
+                {initials(editing ? editForm.firstName : a.firstName, editing ? editForm.lastName : a.lastName)}
               </div>
               <div>
-                <h2 className="text-base font-semibold text-slate-900">{a.firstName} {a.middleName ? a.middleName + ' ' : ''}{a.lastName}</h2>
+                <h2 className="text-base font-semibold text-slate-900">
+                  {editing ? `${editForm.firstName} ${editForm.lastName}` : `${a.firstName} ${a.middleName ? a.middleName + ' ' : ''}${a.lastName}`}
+                </h2>
                 <div className="flex items-center gap-2 mt-1">
                   <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ring-1 ${sm.light}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${sm.dot}`} />
                     {sm.label}
                   </span>
-                  {a.priority !== 'normal' && (
+                  {a.priority !== 'normal' && !editing && (
                     <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${pri.cls}`}>{pri.label}</span>
                   )}
                 </div>
               </div>
             </div>
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition">
-              <X size={16} />
-            </button>
+            <div className="flex items-center gap-1.5">
+              {editing ? (
+                <>
+                  <button
+                    onClick={() => setEditing(false)}
+                    className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition text-xs font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => updateMut.mutate(editForm)}
+                    disabled={updateMut.isPending}
+                    className="flex items-center gap-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    {updateMut.isPending ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                    Save
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setEditing(true)}
+                  className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 transition"
+                  title="Edit applicant"
+                >
+                  <Edit2 size={14} />
+                </button>
+              )}
+              <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition">
+                <X size={16} />
+              </button>
+            </div>
           </div>
         </div>
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto">
+          {editing ? (
+            /* ── Edit form ────────────────────────────────── */
+            <div className="px-6 py-5 space-y-4">
+              {updateMut.isError && (
+                <div className="flex items-center gap-2 bg-red-50 text-red-700 text-sm px-3 py-2 rounded-lg border border-red-200">
+                  <AlertCircle size={14} /> {updateMut.error?.message ?? 'Update failed'}
+                </div>
+              )}
+              <Section label="Applicant">
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="First Name">
+                    <input value={editForm.firstName} onChange={e => setF('firstName', e.target.value)} className={inputCls()} />
+                  </Field>
+                  <Field label="Last Name">
+                    <input value={editForm.lastName} onChange={e => setF('lastName', e.target.value)} className={inputCls()} />
+                  </Field>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Applying for Class">
+                    <input value={editForm.applyingForClass} onChange={e => setF('applyingForClass', e.target.value)} className={inputCls()} />
+                  </Field>
+                  <Field label="Academic Year">
+                    <input value={editForm.applyingForYear} onChange={e => setF('applyingForYear', e.target.value)} className={inputCls()} />
+                  </Field>
+                </div>
+                <Field label="Priority">
+                  <select value={editForm.priority} onChange={e => setF('priority', e.target.value)} className={inputCls()}>
+                    <option value="low">Low</option>
+                    <option value="normal">Normal</option>
+                    <option value="high">High</option>
+                  </select>
+                </Field>
+              </Section>
+              <Section label="Parent / Guardian">
+                <Field label="Full Name">
+                  <input value={editForm.parentName} onChange={e => setF('parentName', e.target.value)} className={inputCls()} />
+                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Phone">
+                    <input value={editForm.parentPhone} onChange={e => setF('parentPhone', e.target.value)} className={inputCls()} />
+                  </Field>
+                  <Field label="Email">
+                    <input type="email" value={editForm.parentEmail} onChange={e => setF('parentEmail', e.target.value)} className={inputCls()} />
+                  </Field>
+                </div>
+              </Section>
+              <Section label="Notes">
+                <textarea
+                  value={editForm.notes}
+                  onChange={e => setF('notes', e.target.value)}
+                  rows={3}
+                  className={`${inputCls()} resize-none`}
+                  placeholder="Any notes…"
+                />
+              </Section>
+            </div>
+          ) : (
+            /* ── View mode ────────────────────────────────── */
+            <>
           {/* Actions */}
           <div className="px-6 py-4 border-b border-slate-100 space-y-2">
             <button
@@ -832,6 +982,8 @@ function DetailPanel({ applicant, onClose, onStageChange }) {
               </DetailSection>
             )}
           </div>
+            </>
+          )}
         </div>
       </motion.div>
 
