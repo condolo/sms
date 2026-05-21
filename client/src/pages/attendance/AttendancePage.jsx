@@ -9,7 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   CalendarDays, ChevronDown, CheckCircle2, XCircle, Clock,
   FileText, Users, RefreshCw, Save, Loader2, AlertTriangle,
-  CheckSquare, Square, BarChart3, ChevronLeft, ChevronRight,
+  CheckSquare, Square, BarChart3, ChevronLeft, ChevronRight, Printer, Download,
 } from 'lucide-react';
 import { attendance as attendanceApi, classes as classesApi } from '@/api/client.js';
 
@@ -129,6 +129,53 @@ export default function AttendancePage() {
   const selectedClass = classList.find(c => (c._id ?? c.id) === classId);
   const registerLoading = isLoading || studentsLoading;
 
+  function exportRegisterCSV() {
+    const cls  = selectedClass?.name ?? 'Class';
+    const header = 'Student,Status';
+    const lines  = merged.map(r => {
+      const status = edits[r.studentId] ?? r.status ?? 'unmarked';
+      return `"${r.studentName}","${status}"`;
+    });
+    const blob = new Blob([[header, ...lines].join('\n')], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `attendance_${cls.replace(/\s+/g,'_')}_${date}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function printRegister() {
+    const cls  = selectedClass?.name ?? 'Class';
+    const rows$ = merged.map(r => {
+      const status = edits[r.studentId] ?? r.status ?? '—';
+      const cfg    = STATUS_MAP[status];
+      const badge  = cfg
+        ? `<span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;background:${
+            status==='present'?'#d1fae5':status==='absent'?'#fee2e2':status==='late'?'#fef3c7':'#dbeafe'};color:${
+            status==='present'?'#065f46':status==='absent'?'#991b1b':status==='late'?'#92400e':'#1e40af'}">${cfg.label}</span>`
+        : '<span style="color:#94a3b8">—</span>';
+      return `<tr><td style="padding:7px 12px;border-bottom:1px solid #f1f5f9">${r.studentName}</td><td style="padding:7px 12px;border-bottom:1px solid #f1f5f9;text-align:center">${badge}</td></tr>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html><html><head><title>Attendance Register — ${cls} — ${fmtDate(date)}</title>
+<style>body{font-family:'Segoe UI',Arial,sans-serif;margin:32px;color:#1e293b}h2{margin:0 0 4px}p{margin:0 0 20px;color:#64748b;font-size:13px}table{width:100%;border-collapse:collapse;font-size:13px}thead th{background:#f8fafc;padding:9px 12px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#64748b;border-bottom:2px solid #e2e8f0}tfoot td{padding:9px 12px;font-size:12px;color:#64748b;border-top:2px solid #e2e8f0}@media print{body{margin:16px}}</style>
+</head><body>
+<h2>Attendance Register</h2>
+<p>${cls} &nbsp;·&nbsp; ${fmtDate(date)}</p>
+<table>
+<thead><tr><th style="width:70%">Student</th><th style="text-align:center">Status</th></tr></thead>
+<tbody>${rows$}</tbody>
+<tfoot><tr><td colspan="2">Present: ${counts.present} &nbsp; Absent: ${counts.absent} &nbsp; Late: ${counts.late} &nbsp; Excused: ${counts.excused} &nbsp; Unmarked: ${counts.unmarked} &nbsp;·&nbsp; Rate: ${attendRate}%</td></tr></tfoot>
+</table></body></html>`;
+
+    const win = window.open('', '_blank', 'width=680,height=900');
+    if (!win) return;
+    win.document.write(html);
+    win.document.close();
+    setTimeout(() => win.print(), 400);
+  }
+
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Toast */}
@@ -196,6 +243,28 @@ export default function AttendancePage() {
               </select>
               <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             </div>
+
+            {/* Export / Print register */}
+            {classId && !registerLoading && merged.length > 0 && (
+              <>
+                <button
+                  onClick={exportRegisterCSV}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium border border-slate-200 rounded-lg bg-white text-slate-600 hover:border-slate-400 hover:text-slate-800 transition-colors"
+                  title="Export register as CSV"
+                >
+                  <Download size={14} />
+                  CSV
+                </button>
+                <button
+                  onClick={printRegister}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium border border-slate-200 rounded-lg bg-white text-slate-600 hover:border-slate-400 hover:text-slate-800 transition-colors"
+                  title="Print attendance register"
+                >
+                  <Printer size={14} />
+                  Print
+                </button>
+              </>
+            )}
 
             {/* Save button */}
             {hasEdits && classId && (
