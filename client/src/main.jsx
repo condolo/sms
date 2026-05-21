@@ -8,6 +8,11 @@ import { router } from './App.jsx';
 import ErrorBoundary from '@/components/guards/ErrorBoundary.jsx';
 import './index.css';
 
+// Auto-reload when a lazy chunk 404s (stale browser cache after new deploy)
+window.addEventListener('vite:preloadError', () => {
+  window.location.reload();
+});
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
