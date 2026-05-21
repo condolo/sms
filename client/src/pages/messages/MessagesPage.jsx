@@ -10,7 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   MessageSquare, Plus, Trash2, X, Send, ChevronLeft,
   Check, Inbox, Clock, Users, Globe, Megaphone,
-  AlertTriangle,
+  AlertTriangle, CheckCheck,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { messages as msgsApi } from '@/api/client.js';
@@ -383,6 +383,12 @@ export default function MessagesPage() {
     },
   });
 
+  async function markAllRead() {
+    const unread = msgs.filter(m => !m.isRead?.[userId]);
+    await Promise.allSettled(unread.map(m => msgsApi.markRead(m.id ?? m._id)));
+    qc.invalidateQueries({ queryKey: ['messages', 'inbox'] });
+  }
+
   const deleteMsg = useMutation({
     mutationFn: id => msgsApi.remove(id),
     onSuccess: () => {
@@ -473,6 +479,20 @@ export default function MessagesPage() {
               </button>
             ))}
           </div>
+
+          {/* Mark all read strip */}
+          {tab === 'inbox' && unreadCount > 0 && (
+            <div className="flex items-center justify-between px-4 py-2 bg-violet-50 border-b border-violet-100">
+              <span className="text-xs text-violet-700 font-medium">{unreadCount} unread</span>
+              <button
+                onClick={markAllRead}
+                className="flex items-center gap-1 text-xs font-semibold text-violet-600 hover:text-violet-800 transition"
+              >
+                <CheckCheck size={12} />
+                Mark all read
+              </button>
+            </div>
+          )}
 
           {/* Message list */}
           <div className="flex-1 overflow-y-auto">
