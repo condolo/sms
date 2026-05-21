@@ -6,12 +6,13 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useEffect } from 'react';
 import {
   Building2, Users, User, Plus, X, Save, Loader2,
   CheckCircle2, AlertTriangle, Trash2, Mail, Phone,
   Globe, MapPin, Shield, UserPlus, Home, Palette,
   Eye, EyeOff, Lock, ShieldCheck, Database, Download,
-  RefreshCcw, Info, Server, Check, Minus,
+  RefreshCcw, Info, Server, Check, Minus, ChevronDown,
 } from 'lucide-react';
 import { settings as settingsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
@@ -665,162 +666,419 @@ function AccountTab() {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   ROLES & PERMISSIONS TAB — visual RBAC matrix
+   ROLES & PERMISSIONS TAB — editable sub-module RBAC matrix
    ══════════════════════════════════════════════════════════════ */
-const ROLES_MATRIX = [
-  {
-    module: 'Dashboard',
-    superadmin: 'full', admin: 'full', deputy: 'full', teacher: 'full', parent: 'view', student: 'view',
-  },
-  {
-    module: 'Students',
-    superadmin: 'full', admin: 'full', deputy: 'edit', teacher: 'view', parent: 'own', student: 'own',
-  },
-  {
-    module: 'Teachers',
-    superadmin: 'full', admin: 'full', deputy: 'view', teacher: 'own', parent: '—', student: '—',
-  },
-  {
-    module: 'Classes & Timetable',
-    superadmin: 'full', admin: 'full', deputy: 'full', teacher: 'view', parent: 'view', student: 'view',
-  },
-  {
-    module: 'Attendance',
-    superadmin: 'full', admin: 'full', deputy: 'full', teacher: 'own classes', parent: 'view', student: 'view',
-  },
-  {
-    module: 'Finance',
-    superadmin: 'full', admin: 'full', deputy: 'view', teacher: '—', parent: 'own', student: '—',
-  },
-  {
-    module: 'Behaviour (BPS)',
-    superadmin: 'full', admin: 'full', deputy: 'full', teacher: 'award', parent: 'view', student: 'view',
-  },
-  {
-    module: 'Grades & Exams',
-    superadmin: 'full', admin: 'full', deputy: 'full', teacher: 'own classes', parent: 'view', student: 'own',
-  },
-  {
-    module: 'Admissions',
-    superadmin: 'full', admin: 'full', deputy: 'edit', teacher: 'view', parent: '—', student: '—',
-  },
-  {
-    module: 'Messages',
-    superadmin: 'full', admin: 'full', deputy: 'full', teacher: 'full', parent: 'send/receive', student: 'receive',
-  },
-  {
-    module: 'Events',
-    superadmin: 'full', admin: 'full', deputy: 'create', teacher: 'view', parent: 'view', student: 'view',
-  },
-  {
-    module: 'HR & Payroll',
-    superadmin: 'full', admin: 'full', deputy: '—', teacher: 'own records', parent: '—', student: '—',
-  },
-  {
-    module: 'Reports & Analytics',
-    superadmin: 'full', admin: 'full', deputy: 'full', teacher: 'limited', parent: '—', student: '—',
-  },
-  {
-    module: 'Import / Export',
-    superadmin: 'full', admin: 'full', deputy: 'view', teacher: '—', parent: '—', student: '—',
-  },
-  {
-    module: 'Settings',
-    superadmin: 'full', admin: 'full', deputy: 'view', teacher: 'own account', parent: 'own account', student: 'own account',
-  },
+
+const PERM_MODULES = [
+  { key: 'students',   label: 'Students', subs: [
+    { key: 'list',    label: 'View Student List' },
+    { key: 'profile', label: 'View Student Profile' },
+    { key: 'create',  label: 'Add Student' },
+    { key: 'edit',    label: 'Edit Student' },
+    { key: 'delete',  label: 'Delete Student' },
+    { key: 'export',  label: 'Export Students (CSV)' },
+  ]},
+  { key: 'teachers',   label: 'Teachers', subs: [
+    { key: 'list',   label: 'View Teacher List' },
+    { key: 'detail', label: 'View Teacher Profile' },
+    { key: 'create', label: 'Add Teacher' },
+    { key: 'edit',   label: 'Edit Teacher' },
+    { key: 'delete', label: 'Delete Teacher' },
+    { key: 'export', label: 'Export Teachers (CSV)' },
+  ]},
+  { key: 'classes',    label: 'Classes', subs: [
+    { key: 'view',   label: 'View Classes' },
+    { key: 'create', label: 'Create Class' },
+    { key: 'edit',   label: 'Edit Class' },
+    { key: 'delete', label: 'Delete Class' },
+  ]},
+  { key: 'attendance', label: 'Attendance', subs: [
+    { key: 'view',   label: 'View Register' },
+    { key: 'mark',   label: 'Mark Attendance' },
+    { key: 'edit',   label: 'Edit Records' },
+    { key: 'export', label: 'Export / Print Register' },
+  ]},
+  { key: 'finance',    label: 'Finance', subs: [
+    { key: 'invoices',       label: 'View Invoices' },
+    { key: 'create_invoice', label: 'Create Invoice' },
+    { key: 'void_invoice',   label: 'Void Invoice' },
+    { key: 'payments',       label: 'View Payments' },
+    { key: 'record_payment', label: 'Record Payment' },
+    { key: 'print',          label: 'Print Receipts / Invoices' },
+  ]},
+  { key: 'behaviour',  label: 'Behaviour (BPS)', subs: [
+    { key: 'view',   label: 'View Incidents & BPS' },
+    { key: 'create', label: 'Record Incident / Award Points' },
+    { key: 'edit',   label: 'Edit Records' },
+    { key: 'delete', label: 'Delete Records' },
+  ]},
+  { key: 'grades',     label: 'Grades & Exams', subs: [
+    { key: 'view_grades',  label: 'View Grades' },
+    { key: 'enter_marks',  label: 'Enter / Edit Marks' },
+    { key: 'view_exams',   label: 'View Exams' },
+    { key: 'create_exam',  label: 'Create / Edit Exam' },
+    { key: 'export',       label: 'Export Grades (CSV)' },
+  ]},
+  { key: 'admissions', label: 'Admissions', subs: [
+    { key: 'view',   label: 'View Pipeline' },
+    { key: 'create', label: 'Add Applicant' },
+    { key: 'edit',   label: 'Edit Applicant Details' },
+    { key: 'move',   label: 'Move Pipeline Stage' },
+    { key: 'delete', label: 'Delete Applicant' },
+    { key: 'export', label: 'Export Applicants (CSV)' },
+  ]},
+  { key: 'messages',   label: 'Messages', subs: [
+    { key: 'view',   label: 'View Messages' },
+    { key: 'send',   label: 'Send Messages' },
+    { key: 'delete', label: 'Delete Messages' },
+  ]},
+  { key: 'events',     label: 'Events & Calendar', subs: [
+    { key: 'view',   label: 'View Events' },
+    { key: 'create', label: 'Create Event' },
+    { key: 'edit',   label: 'Edit Event' },
+    { key: 'delete', label: 'Delete Event' },
+    { key: 'export', label: 'Export Events (CSV)' },
+  ]},
+  { key: 'hr',         label: 'HR & Payroll', subs: [
+    { key: 'staff',          label: 'View Staff Records' },
+    { key: 'leave_view',     label: 'View Leave Requests' },
+    { key: 'leave_approve',  label: 'Approve / Reject Leave' },
+    { key: 'payroll_view',   label: 'View Payroll' },
+    { key: 'payroll_export', label: 'Export Payroll (CSV)' },
+    { key: 'documents',      label: 'Manage Staff Documents' },
+  ]},
+  { key: 'reports',    label: 'Reports & Analytics', subs: [
+    { key: 'view',   label: 'View Reports' },
+    { key: 'export', label: 'Export Reports (CSV)' },
+  ]},
+  { key: 'timetable',  label: 'Timetable', subs: [
+    { key: 'view', label: 'View Timetable' },
+    { key: 'edit', label: 'Edit Timetable' },
+  ]},
+  { key: 'subjects',   label: 'Subjects', subs: [
+    { key: 'view',   label: 'View Subjects' },
+    { key: 'create', label: 'Create Subject / Department' },
+    { key: 'edit',   label: 'Edit Subject' },
+    { key: 'delete', label: 'Delete Subject' },
+  ]},
+  { key: 'settings',   label: 'Settings', subs: [
+    { key: 'school',      label: 'Edit School Settings' },
+    { key: 'users',       label: 'Manage Users / Invites' },
+    { key: 'permissions', label: 'Manage Roles & Permissions' },
+    { key: 'system',      label: 'View System Info' },
+  ]},
 ];
 
-const ROLE_COLUMNS = ['superadmin', 'admin', 'deputy', 'teacher', 'parent', 'student'];
-const ROLE_LABELS  = {
-  superadmin: 'Super Admin', admin: 'Admin', deputy: 'Deputy', teacher: 'Teacher', parent: 'Parent', student: 'Student',
+const PERM_ROLES = ['superadmin','admin','deputy','teacher','parent','student'];
+const PERM_ROLE_LABELS = {
+  superadmin:'Super Admin', admin:'Admin', deputy:'Deputy',
+  teacher:'Teacher', parent:'Parent', student:'Student',
 };
-const ROLE_COLORS  = {
-  superadmin: 'bg-red-50 text-red-700',
-  admin:      'bg-violet-50 text-violet-700',
-  deputy:     'bg-indigo-50 text-indigo-700',
-  teacher:    'bg-blue-50 text-blue-700',
-  parent:     'bg-emerald-50 text-emerald-700',
-  student:    'bg-amber-50 text-amber-700',
+const PERM_ROLE_COLORS = {
+  superadmin: { sel:'bg-red-600 text-white ring-red-600',        idle:'ring-slate-200 bg-white text-red-700'     },
+  admin:      { sel:'bg-violet-600 text-white ring-violet-600',  idle:'ring-slate-200 bg-white text-violet-700'  },
+  deputy:     { sel:'bg-indigo-600 text-white ring-indigo-600',  idle:'ring-slate-200 bg-white text-indigo-700'  },
+  teacher:    { sel:'bg-blue-600 text-white ring-blue-600',      idle:'ring-slate-200 bg-white text-blue-700'    },
+  parent:     { sel:'bg-emerald-600 text-white ring-emerald-600',idle:'ring-slate-200 bg-white text-emerald-700' },
+  student:    { sel:'bg-amber-500 text-white ring-amber-500',    idle:'ring-slate-200 bg-white text-amber-700'   },
 };
 
-function AccessCell({ value }) {
-  if (!value || value === '—') {
-    return <span className="text-slate-300 text-xs">—</span>;
+function _makeDefaultPerms() {
+  const T = { v:true,  e:true,  d:true  };
+  const V = { v:true,  e:false, d:false };
+  const E = { v:true,  e:true,  d:false };
+  const N = { v:false, e:false, d:false };
+  const DEFS = {
+    superadmin: ()      => T,
+    admin:      ()      => T,
+    deputy: (m, s) => {
+      if (m==='finance'  && ['void_invoice','record_payment','payroll_view','payroll_export'].includes(s)) return N;
+      if (m==='hr'       && ['payroll_view','payroll_export','documents'].includes(s)) return N;
+      if (m==='settings' && s==='permissions') return N;
+      return E;
+    },
+    teacher: (m, s) => {
+      if (['finance','admissions','hr','settings'].includes(m)) return N;
+      if (m==='attendance') return s==='edit' ? N : s==='export' ? V : E;
+      if (m==='grades')     return ['enter_marks','create_exam'].includes(s) ? E : V;
+      if (m==='behaviour')  return s==='create' ? E : V;
+      if (m==='messages')   return s==='delete' ? N : E;
+      return V;
+    },
+    parent: (m) => ['students','finance','attendance','grades','behaviour','events','messages'].includes(m) ? V : N,
+    student:(m) => ['students','timetable','grades','events'].includes(m) ? V : N,
+  };
+  const perms = { byRole:{}, byUser:{} };
+  PERM_ROLES.forEach(role => {
+    perms.byRole[role] = {};
+    PERM_MODULES.forEach(mod => mod.subs.forEach(sub => {
+      perms.byRole[role][`${mod.key}__${sub.key}`] = DEFS[role](mod.key, sub.key);
+    }));
+  });
+  return perms;
+}
+
+function _mergePerms(defaults, saved) {
+  const out = JSON.parse(JSON.stringify(defaults));
+  if (saved?.byRole) {
+    Object.entries(saved.byRole).forEach(([role, cells]) => {
+      if (!out.byRole[role]) out.byRole[role] = {};
+      Object.entries(cells).forEach(([k,v]) => { out.byRole[role][k] = { ...out.byRole[role][k], ...v }; });
+    });
   }
-  if (value === 'full') {
-    return (
-      <div className="flex items-center gap-1 text-emerald-600">
-        <Check size={13} className="shrink-0" />
-        <span className="text-xs font-medium">Full</span>
-      </div>
-    );
-  }
-  return <span className="text-xs text-slate-600 capitalize">{value}</span>;
+  if (saved?.byUser) out.byUser = JSON.parse(JSON.stringify(saved.byUser));
+  return out;
+}
+
+function PChk({ checked, onChange, color }) {
+  const ON  = { violet:'bg-violet-600 border-violet-600', amber:'bg-amber-500 border-amber-500', red:'bg-red-500 border-red-500' };
+  const OFF = 'bg-white border-slate-300';
+  return (
+    <button
+      type="button"
+      onClick={onChange}
+      disabled={!onChange}
+      className={`w-[18px] h-[18px] rounded border-2 flex items-center justify-center transition-all shrink-0 ${checked ? ON[color] : OFF} ${onChange ? 'hover:opacity-80 cursor-pointer' : 'cursor-default'}`}
+    >
+      {checked && <Check size={9} className="text-white" strokeWidth={3} />}
+    </button>
+  );
 }
 
 function RolesTab() {
+  const qc       = useQueryClient();
+  const userRole = useAuthStore(s => s.session?.user?.role ?? '');
+  const isAdmin  = ['admin','superadmin'].includes(userRole);
+
+  const [mode,     setMode]     = useState('role');   // 'role' | 'user'
+  const [selRole,  setSelRole]  = useState('admin');
+  const [selUser,  setSelUser]  = useState(null);
+  const [expanded, setExpanded] = useState({});
+  const [perms,    setPerms]    = useState(null);
+  const [dirty,    setDirty]    = useState(false);
+  const [toast,    setToast]    = useState(null);
+
+  /* Load school data (holds saved modulePermissions) */
+  const { data: schoolData } = useQuery({
+    queryKey: ['settings','school'],
+    queryFn:  () => settingsApi.school.get(),
+    staleTime: 30_000,
+  });
+
+  /* Load users for Per-User mode */
+  const { data: usersData, isLoading: usersLoading } = useQuery({
+    queryKey: ['settings','users'],
+    queryFn:  () => settingsApi.users.list(),
+    enabled:  mode === 'user',
+    staleTime: 60_000,
+  });
+  const users = usersData?.data ?? [];
+
+  /* Initialise permission state once school data arrives */
+  useEffect(() => {
+    if (!schoolData) return;
+    const saved = schoolData.data?.modulePermissions;
+    setPerms(saved ? _mergePerms(_makeDefaultPerms(), saved) : _makeDefaultPerms());
+  }, [schoolData]);
+
+  /* Save mutation */
+  const { mutate: savePerms, isPending: saving } = useMutation({
+    mutationFn: () => settingsApi.school.update({ modulePermissions: perms }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings','school'] });
+      setDirty(false);
+      setToast({ msg: 'Permissions saved.', type: 'success' });
+    },
+    onError: err => setToast({ msg: err?.message ?? 'Save failed.', type: 'error' }),
+  });
+
+  /* Toggle a single V/E/D cell */
+  function toggle(permKey, type) {
+    if (!isAdmin) return;
+    setPerms(prev => {
+      const next = JSON.parse(JSON.stringify(prev));
+      if (mode === 'role') {
+        if (!next.byRole[selRole]) next.byRole[selRole] = {};
+        const cell = next.byRole[selRole][permKey] ?? { v:false, e:false, d:false };
+        cell[type] = !cell[type];
+        next.byRole[selRole][permKey] = cell;
+      } else {
+        /* Per-user: start from current effective value, toggle, store override */
+        if (!next.byUser[selUser]) next.byUser[selUser] = {};
+        const u        = users.find(x => (x._id ?? x.id) === selUser);
+        const roleBase = u ? (next.byRole[u.role]?.[permKey] ?? { v:false,e:false,d:false }) : { v:false,e:false,d:false };
+        const override = next.byUser[selUser][permKey];
+        const current  = override ? { ...roleBase, ...override } : { ...roleBase };
+        current[type]  = !current[type];
+        next.byUser[selUser][permKey] = current;
+      }
+      return next;
+    });
+    setDirty(true);
+  }
+
+  /* Effective permission map for the selected entity */
+  const effectiveMap = (() => {
+    if (!perms) return {};
+    if (mode === 'role') return perms.byRole[selRole] ?? {};
+    if (!selUser) return {};
+    const u = users.find(x => (x._id ?? x.id) === selUser);
+    const base = u ? (perms.byRole[u.role] ?? {}) : {};
+    const over = perms.byUser?.[selUser] ?? {};
+    return Object.fromEntries(
+      Object.entries(base).map(([k,v]) => [k, over[k] ? { ...v, ...over[k] } : v])
+    );
+  })();
+
+  if (!perms) return (
+    <div className="space-y-3 max-w-4xl">
+      {[...Array(5)].map((_,i) => <div key={i} className="h-12 bg-slate-100 rounded-xl animate-pulse" />)}
+    </div>
+  );
+
   return (
-    <div className="space-y-5 max-w-5xl">
-      <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-start gap-3">
-        <Info size={14} className="text-blue-500 mt-0.5 shrink-0" />
-        <p className="text-xs text-blue-700">
-          Role-based access is enforced server-side on every API request. This matrix is a reference guide — it cannot be edited here. Contact your system administrator to change role assignments for users.
-        </p>
+    <div className="space-y-4 max-w-5xl">
+      {/* Toast */}
+      <div className="h-8 flex items-center">
+        <AnimatePresence>
+          {toast && <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}
+        </AnimatePresence>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
-          <ShieldCheck size={14} className="text-slate-400" />
-          <h3 className="text-sm font-semibold text-slate-700">Permission Matrix</h3>
-          <span className="ml-auto text-xs text-slate-400">{ROLES_MATRIX.length} modules · {ROLE_COLUMNS.length} roles</span>
+      {/* Top bar */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-2 bg-slate-100 rounded-lg p-1">
+          {[['role','Global (By Role)'],['user','Per User']].map(([v,label]) => (
+            <button key={v} onClick={() => setMode(v)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition ${mode===v ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >{label}</button>
+          ))}
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[700px]">
-            <thead>
-              <tr className="border-b border-slate-100 bg-slate-50/50">
-                <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3 uppercase tracking-wide w-44">Module</th>
-                {ROLE_COLUMNS.map(r => (
-                  <th key={r} className="text-center px-3 py-3">
-                    <span className={`inline-flex px-2 py-0.5 text-[11px] font-semibold rounded-full ${ROLE_COLORS[r]}`}>
-                      {ROLE_LABELS[r]}
-                    </span>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {ROLES_MATRIX.map((row, i) => (
-                <tr key={i} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-4 py-3 font-medium text-slate-700 text-xs">{row.module}</td>
-                  {ROLE_COLUMNS.map(r => (
-                    <td key={r} className="px-3 py-3 text-center">
-                      <AccessCell value={row[r]} />
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {isAdmin && dirty && (
+          <button onClick={() => savePerms()} disabled={saving}
+            className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+          >
+            {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+            {saving ? 'Saving…' : 'Save Permissions'}
+          </button>
+        )}
       </div>
 
-      {/* Role descriptions */}
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {ROLE_COLUMNS.map(r => (
-          <div key={r} className="bg-white border border-slate-200 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <span className={`inline-flex px-2 py-0.5 text-[11px] font-semibold rounded-full ${ROLE_COLORS[r]}`}>{ROLE_LABELS[r]}</span>
+      <div className="flex gap-4 items-start">
+
+        {/* ── Left: entity selector ── */}
+        <div className="shrink-0 w-44 space-y-1.5">
+          {mode === 'role' ? (
+            PERM_ROLES.map(r => {
+              const c = PERM_ROLE_COLORS[r];
+              return (
+                <button key={r} onClick={() => setSelRole(r)}
+                  className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold text-left transition ring-1 ${selRole===r ? c.sel : c.idle}`}
+                >
+                  <ShieldCheck size={12} className="shrink-0" />
+                  {PERM_ROLE_LABELS[r]}
+                </button>
+              );
+            })
+          ) : usersLoading ? (
+            <div className="space-y-2">{[...Array(4)].map((_,i) => <div key={i} className="h-12 bg-slate-100 rounded-xl animate-pulse" />)}</div>
+          ) : users.length === 0 ? (
+            <p className="text-xs text-slate-400 px-2 py-4 text-center">No users in school.</p>
+          ) : (
+            users.map(u => {
+              const uid = u._id ?? u.id;
+              const sel = selUser === uid;
+              return (
+                <button key={uid} onClick={() => setSelUser(uid)}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left transition ring-1 ${sel ? 'ring-slate-800 bg-slate-900' : 'ring-slate-200 bg-white hover:bg-slate-50'}`}
+                >
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${sel ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                    {(u.name ?? u.email ?? '?')[0].toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-xs font-medium truncate ${sel ? 'text-white' : 'text-slate-700'}`}>{u.name ?? u.email}</p>
+                    <p className={`text-[10px] truncate capitalize ${sel ? 'text-white/60' : 'text-slate-400'}`}>{u.role}</p>
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+
+        {/* ── Right: permission tree ── */}
+        <div className="flex-1 min-w-0 space-y-2">
+          {(mode === 'role' && selRole) || (mode === 'user' && selUser) ? (
+            <>
+              {/* Legend */}
+              <div className="flex flex-wrap items-center gap-4 px-4 py-2.5 bg-slate-50 rounded-xl border border-slate-200 text-[11px]">
+                <span className="font-semibold text-slate-600">Legend:</span>
+                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-violet-600 inline-block" /><span className="text-slate-500">V = Visible</span></span>
+                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-amber-500 inline-block" /><span className="text-slate-500">E = Editable</span></span>
+                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-500 inline-block" /><span className="text-slate-500">D = Deletable</span></span>
+                {!isAdmin && <span className="ml-auto font-medium text-amber-600">Read-only — admin required to edit</span>}
+                {mode === 'user' && selUser && (
+                  <span className="ml-auto text-slate-400">Showing inherited role defaults + any user overrides</span>
+                )}
+              </div>
+
+              {/* Module accordion rows */}
+              {PERM_MODULES.map(mod => {
+                const isOpen = expanded[mod.key] !== false; // default open
+                return (
+                  <div key={mod.key} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                    {/* Module header */}
+                    <button
+                      type="button"
+                      onClick={() => setExpanded(p => ({ ...p, [mod.key]: !isOpen }))}
+                      className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition text-left"
+                    >
+                      <span className="text-sm font-semibold text-slate-800">{mod.label}</span>
+                      <div className="flex items-center gap-2 text-slate-400">
+                        <span className="text-xs">{mod.subs.length} sub-modules</span>
+                        <ChevronDown size={14} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                      </div>
+                    </button>
+
+                    {/* Sub-module rows */}
+                    {isOpen && (
+                      <div className="border-t border-slate-100">
+                        {/* Column headers */}
+                        <div className="flex items-center px-4 py-1.5 bg-slate-50/70 border-b border-slate-100">
+                          <span className="flex-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Sub-module</span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="w-[18px] text-center text-[10px] font-bold text-violet-600">V</span>
+                            <span className="w-[18px] text-center text-[10px] font-bold text-amber-500">E</span>
+                            <span className="w-[18px] text-center text-[10px] font-bold text-red-500">D</span>
+                          </div>
+                        </div>
+
+                        {mod.subs.map(sub => {
+                          const pk   = `${mod.key}__${sub.key}`;
+                          const cell = effectiveMap[pk] ?? { v:false, e:false, d:false };
+                          return (
+                            <div key={sub.key} className="flex items-center px-4 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50/50 transition">
+                              <span className="flex-1 text-sm text-slate-700">{sub.label}</span>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <PChk checked={!!cell.v} color="violet" onChange={isAdmin ? () => toggle(pk,'v') : undefined} />
+                                <PChk checked={!!cell.e} color="amber"  onChange={isAdmin ? () => toggle(pk,'e') : undefined} />
+                                <PChk checked={!!cell.d} color="red"    onChange={isAdmin ? () => toggle(pk,'d') : undefined} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </>
+          ) : (
+            <div className="bg-white border border-slate-200 rounded-xl p-12 flex flex-col items-center gap-2">
+              <ShieldCheck size={28} className="text-slate-300" />
+              <p className="text-sm text-slate-400">Select a user from the list to view and configure their permissions.</p>
             </div>
-            <p className="text-xs text-slate-500">
-              {r === 'superadmin' && 'Platform-level access. Can manage all schools, plans, and system settings. Assigned only by Msingi.'}
-              {r === 'admin' && 'School administrator. Full access to all modules within their school. Can invite users and configure settings.'}
-              {r === 'deputy' && 'Deputy principal or HOD. Can view and manage most academic operations but cannot access finance or HR payroll.'}
-              {r === 'teacher' && 'Class teacher. Can take attendance, enter grades, award behaviour points, and view their own class data.'}
-              {r === 'parent' && 'Guardian access. Can view their own children\'s attendance, grades, behaviour, and finance records.'}
-              {r === 'student' && 'Student portal access. Read-only view of own profile, timetable, grades, and announcements.'}
-            </p>
-          </div>
-        ))}
+          )}
+        </div>
       </div>
     </div>
   );
