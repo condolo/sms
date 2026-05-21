@@ -12,7 +12,7 @@ import {
   ChevronLeft, Edit2, Save, X, Loader2, AlertTriangle,
   Star, ShieldAlert, TrendingUp, TrendingDown, Award,
   Hash, Mail, Phone, MapPin, Shield, BookOpen, Home,
-  CheckCircle2, Clock, XCircle, CheckCheck, Heart,
+  CheckCircle2, Clock, XCircle, CheckCheck, Heart, Printer,
 } from 'lucide-react';
 import {
   students  as studentsApi,
@@ -178,6 +178,46 @@ export default function StudentProfile() {
   const grad = avatarGradient(student.firstName ?? '');
   const initials = `${student.firstName?.charAt(0) ?? ''}${student.lastName?.charAt(0) ?? ''}`.toUpperCase();
 
+  function printProfile() {
+    const fmtDate = d => d ? new Date(d).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' }) : '—';
+    const rows = [
+      ['Admission No.',   student.admissionNumber ?? '—'],
+      ['Date of Birth',   fmtDate(student.dateOfBirth)],
+      ['Gender',          student.gender ?? '—'],
+      ['Class',           student.className ?? '—'],
+      ['House',           student.house ?? '—'],
+      ['Status',          student.status ?? '—'],
+      ['Email',           student.email ?? '—'],
+      ['Phone',           student.phone ?? '—'],
+      ['Parent/Guardian', student.parentName ?? '—'],
+      ['Parent Phone',    student.parentPhone ?? '—'],
+      ['Address',         student.address ?? '—'],
+    ].filter(([, v]) => v && v !== '—');
+    const html = `<!DOCTYPE html><html><head><title>Student Profile — ${student.firstName} ${student.lastName}</title>
+<style>body{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:40px;color:#1e293b;max-width:600px;margin:auto}
+.hdr{border-bottom:2px solid #e2e8f0;padding-bottom:20px;margin-bottom:24px;display:flex;align-items:center;gap:20px}
+.avatar{width:60px;height:60px;border-radius:14px;background:linear-gradient(135deg,#8b5cf6,#6d28d9);display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;font-weight:700;flex-shrink:0}
+.name{font-size:22px;font-weight:700;margin:0 0 4px}.sub{font-size:12px;color:#64748b;margin:0}
+.status{display:inline-block;background:#d1fae5;color:#065f46;border-radius:20px;padding:2px 10px;font-size:11px;font-weight:600;margin-left:8px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+tr:nth-child(odd){background:#f8fafc}
+td{padding:8px 12px}td:first-child{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.05em;width:38%}
+td:last-child{font-weight:500}
+.footer{margin-top:32px;text-align:center;font-size:11px;color:#94a3b8}
+@media print{body{padding:20px}}</style></head><body>
+<div class="hdr"><div class="avatar">${initials}</div>
+<div><p class="name">${student.firstName} ${student.lastName}<span class="status">${student.status ?? 'active'}</span></p>
+<p class="sub">${student.className ? `${student.className} · ` : ''}${student.house ? `${student.house} · ` : ''}ID: ${student.admissionNumber ?? '—'}</p></div></div>
+<table>${rows.map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>
+<div class="footer">Printed ${new Date().toLocaleString('en-GB')}</div>
+</body></html>`;
+    const win = window.open('', '_blank', 'width=680,height=900');
+    if (!win) return;
+    win.document.write(html);
+    win.document.close();
+    setTimeout(() => win.print(), 400);
+  }
+
   return (
     <div className="min-h-screen bg-slate-50">
 
@@ -218,15 +258,24 @@ export default function StudentProfile() {
               </div>
             </div>
 
-            {/* Edit button */}
-            {can('students') && !editing && (
+            {/* Action buttons */}
+            <div className="flex items-center gap-2 shrink-0">
               <button
-                onClick={() => setEditing(true)}
-                className="flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 border border-slate-200 hover:border-slate-300 rounded-lg px-3 py-1.5 transition shrink-0"
+                onClick={printProfile}
+                className="flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 border border-slate-200 hover:border-slate-300 rounded-lg px-3 py-1.5 transition"
+                title="Print student profile"
               >
-                <Edit2 size={13} /> Edit
+                <Printer size={13} />
               </button>
-            )}
+              {can('students') && !editing && (
+                <button
+                  onClick={() => setEditing(true)}
+                  className="flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 border border-slate-200 hover:border-slate-300 rounded-lg px-3 py-1.5 transition"
+                >
+                  <Edit2 size={13} /> Edit
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Tabs */}
