@@ -1,8 +1,9 @@
 /* ============================================================
-   Dashboard — Premium Enterprise Home with Charts
-   recharts: PieChart, BarChart · Role-aware · Real data
+   Dashboard — 200% Premium Enterprise Home
+   recharts · Role-aware · Real data · Birthday Widget
+   Upcoming Events · Attendance KPI · Quick Actions
    ============================================================ */
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -15,12 +16,15 @@ import {
   GraduationCap, BookOpen, Calendar, TrendingUp,
   ArrowRight, X, Bell, ChevronRight, Sparkles,
   BarChart3, Clock, AlertTriangle, Wallet,
+  Cake, CalendarDays, CheckCircle, MapPin, Tag,
 } from 'lucide-react';
 import {
   students as studentsApi,
   finance   as financeApi,
   admissions as admissionsApi,
   announcements as announcementsApi,
+  events as eventsApi,
+  attendance as attendanceApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 
@@ -37,6 +41,10 @@ function formatDate(iso) {
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 const AVATAR_COLORS = [
   'from-violet-500 to-purple-600','from-blue-500 to-cyan-600',
   'from-emerald-500 to-teal-600', 'from-amber-500 to-orange-600',
@@ -53,6 +61,18 @@ const STAGE_COLORS    = { enquiry: '#8b5cf6', application: '#3b82f6', assessment
 const METHOD_COLORS   = ['#8b5cf6','#3b82f6','#10b981','#f59e0b','#ec4899'];
 const FINANCE_COLORS  = ['#10b981','#f59e0b'];
 
+const EVENT_CATEGORY_COLORS = {
+  term:      '#8b5cf6',
+  exam:      '#ef4444',
+  meeting:   '#3b82f6',
+  sports:    '#10b981',
+  cultural:  '#f59e0b',
+  training:  '#06b6d4',
+  academic:  '#6366f1',
+  break:     '#94a3b8',
+  general:   '#64748b',
+};
+
 /* ── Custom tooltip ───────────────────────────────────────── */
 function ChartTip({ active, payload }) {
   if (!active || !payload?.length) return null;
@@ -62,6 +82,42 @@ function ChartTip({ active, payload }) {
       <p className="text-slate-300 mt-0.5">{payload[0].value?.toLocaleString()}</p>
     </div>
   );
+}
+
+/* ── Birthday helpers ─────────────────────────────────────── */
+function getBirthdays(students) {
+  const today = new Date();
+  const todayM = today.getMonth();
+  const todayD = today.getDate();
+
+  const todayBirths = [];
+  const upcomingBirths = [];
+
+  students.forEach(s => {
+    if (!s.dateOfBirth) return;
+    const dob = new Date(s.dateOfBirth);
+    const m = dob.getMonth();
+    const d = dob.getDate();
+    const age = today.getFullYear() - dob.getFullYear() - (
+      m > todayM || (m === todayM && d > todayD) ? 1 : 0
+    ) + 1;
+
+    if (m === todayM && d === todayD) {
+      todayBirths.push({ ...s, age });
+      return;
+    }
+
+    // Days until birthday this year
+    let bday = new Date(today.getFullYear(), m, d);
+    if (bday < today) bday.setFullYear(today.getFullYear() + 1);
+    const diff = Math.round((bday - today) / 86400000);
+    if (diff > 0 && diff <= 7) {
+      upcomingBirths.push({ ...s, daysUntil: diff, age });
+    }
+  });
+
+  upcomingBirths.sort((a, b) => a.daysUntil - b.daysUntil);
+  return { todayBirths, upcomingBirths };
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -123,6 +179,27 @@ export default function Dashboard() {
     staleTime: 60_000,
   });
 
+  /* Birthday computation — all active students */
+  const { data: allStuData } = useQuery({
+    queryKey: ['students', 'for-birthdays'],
+    queryFn:  () => studentsApi.list({ limit: 500, status: 'active' }),
+    staleTime: 10 * 60_000,
+  });
+
+  /* Upcoming events */
+  const { data: eventsData } = useQuery({
+    queryKey: ['events', 'dashboard-upcoming'],
+    queryFn:  () => eventsApi.list({ from: todayStr(), limit: 6 }),
+    staleTime: 5 * 60_000,
+  });
+
+  /* Today's attendance summary */
+  const { data: attData } = useQuery({
+    queryKey: ['attendance', 'today-summary'],
+    queryFn:  () => attendanceApi.summary({ date: todayStr() }),
+    staleTime: 2 * 60_000,
+  });
+
   /* ── Derived ──────────────────────────────────────────── */
   const statsObj      = stuStats?.data ?? {};
   const totalStudents = statsObj.total   ?? null;
@@ -169,6 +246,22 @@ export default function Dashboard() {
 
   const recentStudents = recentData?.data ?? [];
   const announcs       = annData?.data    ?? [];
+  const upcomingEvents = eventsData?.data ?? [];
+
+  // Birthday computation
+  const allStudents   = allStuData?.data ?? [];
+  const { todayBirths, upcomingBirths } = useMemo(
+    () => getBirthdays(allStudents),
+    [allStudents],
+  );
+
+  // Attendance today
+  const attSummary   = attData?.data ?? attData ?? null;
+  const attPresent   = attSummary?.present  ?? attSummary?.totalPresent  ?? null;
+  const attTotal     = attSummary?.total    ?? attSummary?.totalStudents  ?? null;
+  const attRate      = attPresent != null && attTotal > 0
+    ? Math.round((attPresent / attTotal) * 100)
+    : null;
 
   /* ── Dismiss announcement ─────────────────────────────── */
   const dismissMutation = useMutation({
@@ -197,6 +290,24 @@ export default function Dashboard() {
             </button>
           </motion.div>
         ))}
+      </AnimatePresence>
+
+      {/* ── Birthday toast banner ────────────────────────── */}
+      <AnimatePresence>
+        {todayBirths.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+            className="bg-gradient-to-r from-violet-600 to-purple-600 px-6 py-3 flex items-center gap-3"
+          >
+            <Cake size={15} className="text-white/90 shrink-0" />
+            <p className="text-sm text-white font-medium flex-1 truncate">
+              {todayBirths.length === 1
+                ? `🎂 Happy Birthday, ${todayBirths[0].firstName}! Turning ${todayBirths[0].age} today.`
+                : `🎂 ${todayBirths.length} students have birthdays today — ${todayBirths.map(s => s.firstName).join(', ')}`}
+            </p>
+            <Link to="/students" className="text-white/80 hover:text-white text-xs font-medium underline shrink-0">View</Link>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       {/* ── Page header ─────────────────────────────────── */}
@@ -243,7 +354,7 @@ export default function Dashboard() {
             accent="emerald" to="/students"
             loading={stuLoading} error={stuError}
           />
-          {canViewFinance && (
+          {canViewFinance ? (
             <KpiCard
               icon={<BadgeDollarSign size={18} />}
               label="Fees Collected"
@@ -252,8 +363,16 @@ export default function Dashboard() {
               accent="blue" to="/finance"
               loading={finLoading} error={finError}
             />
+          ) : (
+            <KpiCard
+              icon={<CalendarDays size={18} />}
+              label="Upcoming Events"
+              value={fmt(upcomingEvents.length)}
+              sub="In the next 30 days"
+              accent="blue" to="/events"
+            />
           )}
-          {canViewFinance && (
+          {canViewFinance ? (
             <KpiCard
               icon={<Wallet size={18} />}
               label="Outstanding Fees"
@@ -261,6 +380,14 @@ export default function Dashboard() {
               sub="Unpaid balance"
               accent="amber" to="/finance"
               loading={finLoading} error={finError}
+            />
+          ) : (
+            <KpiCard
+              icon={<CheckCircle size={18} />}
+              label="Today's Attendance"
+              value={attRate != null ? `${attRate}%` : '—'}
+              sub={attPresent != null ? `${fmt(attPresent)} present` : 'Not taken yet'}
+              accent="amber" to="/attendance"
             />
           )}
         </div>
@@ -336,7 +463,7 @@ export default function Dashboard() {
           {canViewFinance && paymentMethods.length > 0 && (
             <ChartCard title="Payment Methods" icon={<Wallet size={14} />} loading={finLoading}>
               <div className="space-y-2.5">
-                {paymentMethods.slice(0, 5).map((m, i) => {
+                {paymentMethods.slice(0, 5).map((m) => {
                   const max = Math.max(...paymentMethods.map(x => x.value), 1);
                   return (
                     <div key={m.name}>
@@ -355,6 +482,32 @@ export default function Dashboard() {
                   );
                 })}
               </div>
+            </ChartCard>
+          )}
+
+          {/* If no finance — show attendance chart */}
+          {!canViewFinance && (
+            <ChartCard title="Today's Attendance" icon={<UserCheck size={14} />}>
+              {attRate != null ? (
+                <div className="flex flex-col items-center justify-center py-4 gap-3">
+                  <div className="relative w-28 h-28">
+                    <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
+                      <circle cx="18" cy="18" r="15.9" fill="none" stroke="#f1f5f9" strokeWidth="2.5" />
+                      <circle cx="18" cy="18" r="15.9" fill="none" stroke={attRate >= 80 ? '#10b981' : attRate >= 60 ? '#f59e0b' : '#ef4444'}
+                        strokeWidth="2.5" strokeDasharray={`${attRate} ${100 - attRate}`} strokeLinecap="round" />
+                    </svg>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                      <span className={`text-2xl font-bold ${attRate >= 80 ? 'text-emerald-600' : attRate >= 60 ? 'text-amber-600' : 'text-red-500'}`}>{attRate}%</span>
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm font-semibold text-slate-700">{fmt(attPresent)} present</p>
+                    <p className="text-xs text-slate-400">of {fmt(attTotal)} students today</p>
+                  </div>
+                </div>
+              ) : (
+                <EmptyChart label="No attendance taken today" />
+              )}
             </ChartCard>
           )}
         </div>
@@ -387,6 +540,71 @@ export default function Dashboard() {
             </div>
           </div>
         )}
+
+        {/* ── Birthday + Events row ─────────────────────── */}
+        <div className="grid lg:grid-cols-3 gap-6">
+
+          {/* Birthday Widget — 1/3 */}
+          <BirthdayWidget
+            todayBirths={todayBirths}
+            upcomingBirths={upcomingBirths}
+          />
+
+          {/* Upcoming Events — 2/3 */}
+          <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <CalendarDays size={15} className="text-slate-400" />
+                <h2 className="text-sm font-semibold text-slate-700">Upcoming Events</h2>
+              </div>
+              <Link to="/events" className="text-xs font-medium text-slate-500 hover:text-slate-800 flex items-center gap-1 transition">
+                View calendar <ArrowRight size={12} />
+              </Link>
+            </div>
+            {upcomingEvents.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+                <CalendarDays size={28} className="mb-2 opacity-40" />
+                <p className="text-sm">No upcoming events</p>
+                <Link to="/events" className="text-xs text-violet-600 hover:text-violet-800 mt-1">Add events →</Link>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-50">
+                {upcomingEvents.map(ev => {
+                  const catColor = EVENT_CATEGORY_COLORS[ev.category] ?? '#64748b';
+                  const evDate   = ev.date ? new Date(ev.date) : null;
+                  const isToday  = evDate && evDate.toDateString() === new Date().toDateString();
+                  return (
+                    <div key={ev._id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50 transition">
+                      {/* Date block */}
+                      <div className="shrink-0 w-10 text-center">
+                        <p className="text-xs text-slate-400 uppercase leading-none">
+                          {evDate ? evDate.toLocaleDateString('en-GB', { month: 'short' }) : '—'}
+                        </p>
+                        <p className="text-lg font-bold text-slate-800 leading-tight">
+                          {evDate ? evDate.getDate() : '—'}
+                        </p>
+                      </div>
+
+                      {/* Category dot */}
+                      <div className="w-2 h-2 rounded-full shrink-0" style={{ background: catColor }} />
+
+                      {/* Info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium text-slate-800 truncate">{ev.title}</p>
+                          {isToday && (
+                            <span className="shrink-0 text-[10px] font-bold text-violet-600 bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded-full">TODAY</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-400 truncate capitalize">{ev.category ?? 'general'}{ev.location ? ` · ${ev.location}` : ''}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* ── Bottom grid ───────────────────────────────── */}
         <div className="grid lg:grid-cols-3 gap-6">
@@ -469,7 +687,85 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+
+        {/* ── Attendance stat (finance users) ────────────── */}
+        {canViewFinance && attRate != null && (
+          <div className="bg-white border border-slate-200 rounded-xl p-5 flex items-center gap-5">
+            <div className="relative w-14 h-14 shrink-0">
+              <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
+                <circle cx="18" cy="18" r="15.9" fill="none" stroke="#f1f5f9" strokeWidth="3" />
+                <circle cx="18" cy="18" r="15.9" fill="none"
+                  stroke={attRate >= 80 ? '#10b981' : attRate >= 60 ? '#f59e0b' : '#ef4444'}
+                  strokeWidth="3" strokeDasharray={`${attRate} ${100 - attRate}`} strokeLinecap="round" />
+              </svg>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-xs font-bold text-slate-700">{attRate}%</span>
+              </div>
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-slate-700">Today's Attendance</p>
+              <p className="text-xs text-slate-400 mt-0.5">{fmt(attPresent)} present · {fmt(attTotal)} students</p>
+            </div>
+            <Link to="/attendance" className="shrink-0 flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-800 transition">
+              Mark attendance <ArrowRight size={12} />
+            </Link>
+          </div>
+        )}
       </div>
+    </div>
+  );
+}
+
+/* ── Birthday Widget ──────────────────────────────────────── */
+function BirthdayWidget({ todayBirths, upcomingBirths }) {
+  const hasAny = todayBirths.length > 0 || upcomingBirths.length > 0;
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
+        <Cake size={15} className="text-violet-500" />
+        <h2 className="text-sm font-semibold text-slate-700">Birthdays</h2>
+        {todayBirths.length > 0 && (
+          <span className="ml-auto text-[10px] font-bold bg-violet-600 text-white px-1.5 py-0.5 rounded-full">
+            {todayBirths.length} today
+          </span>
+        )}
+      </div>
+
+      {!hasAny ? (
+        <div className="flex flex-col items-center justify-center py-10 text-slate-400">
+          <Cake size={24} className="mb-2 opacity-40" />
+          <p className="text-xs text-slate-500">No birthdays in the next 7 days</p>
+          <p className="text-xs text-slate-400 mt-1">Add DOB to student profiles</p>
+        </div>
+      ) : (
+        <div className="divide-y divide-slate-50">
+          {todayBirths.map(s => (
+            <Link key={s._id ?? s.id} to={`/students/${s._id ?? s.id}`}
+              className="flex items-center gap-3 px-4 py-3 hover:bg-violet-50 transition group">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
+                {(s.firstName?.[0] ?? '?')}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-slate-800 truncate">{s.firstName} {s.lastName}</p>
+                <p className="text-xs text-violet-600 font-medium">🎂 Turning {s.age} today!</p>
+              </div>
+            </Link>
+          ))}
+          {upcomingBirths.slice(0, 5).map(s => (
+            <Link key={s._id ?? s.id} to={`/students/${s._id ?? s.id}`}
+              className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition group">
+              <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 text-xs font-bold shrink-0">
+                {(s.firstName?.[0] ?? '?')}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-slate-800 truncate">{s.firstName} {s.lastName}</p>
+                <p className="text-xs text-slate-400">in {s.daysUntil} day{s.daysUntil !== 1 ? 's' : ''}</p>
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

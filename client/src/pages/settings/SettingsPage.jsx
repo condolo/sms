@@ -10,16 +10,19 @@ import {
   Building2, Users, User, Plus, X, Save, Loader2,
   CheckCircle2, AlertTriangle, Trash2, Mail, Phone,
   Globe, MapPin, Shield, UserPlus, Home, Palette,
-  Eye, EyeOff, Lock,
+  Eye, EyeOff, Lock, ShieldCheck, Database, Download,
+  RefreshCcw, Info, Server, Check, Minus,
 } from 'lucide-react';
 import { settings as settingsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 
 /* ── Tab config ─────────────────────────────────────────────── */
 const TABS = [
-  { id: 'school',  label: 'School',  Icon: Building2 },
-  { id: 'users',   label: 'Users',   Icon: Users      },
-  { id: 'account', label: 'Account', Icon: User       },
+  { id: 'school',  label: 'School',             Icon: Building2,  adminOnly: false },
+  { id: 'users',   label: 'Users',              Icon: Users,       adminOnly: true  },
+  { id: 'roles',   label: 'Roles & Permissions',Icon: ShieldCheck, adminOnly: true  },
+  { id: 'system',  label: 'System',             Icon: Database,    adminOnly: true  },
+  { id: 'account', label: 'Account',            Icon: User,        adminOnly: false },
 ];
 
 /* ── Role pills ─────────────────────────────────────────────── */
@@ -662,23 +665,320 @@ function AccountTab() {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   ROLES & PERMISSIONS TAB — visual RBAC matrix
+   ══════════════════════════════════════════════════════════════ */
+const ROLES_MATRIX = [
+  {
+    module: 'Dashboard',
+    superadmin: 'full', admin: 'full', deputy: 'full', teacher: 'full', parent: 'view', student: 'view',
+  },
+  {
+    module: 'Students',
+    superadmin: 'full', admin: 'full', deputy: 'edit', teacher: 'view', parent: 'own', student: 'own',
+  },
+  {
+    module: 'Teachers',
+    superadmin: 'full', admin: 'full', deputy: 'view', teacher: 'own', parent: '—', student: '—',
+  },
+  {
+    module: 'Classes & Timetable',
+    superadmin: 'full', admin: 'full', deputy: 'full', teacher: 'view', parent: 'view', student: 'view',
+  },
+  {
+    module: 'Attendance',
+    superadmin: 'full', admin: 'full', deputy: 'full', teacher: 'own classes', parent: 'view', student: 'view',
+  },
+  {
+    module: 'Finance',
+    superadmin: 'full', admin: 'full', deputy: 'view', teacher: '—', parent: 'own', student: '—',
+  },
+  {
+    module: 'Behaviour (BPS)',
+    superadmin: 'full', admin: 'full', deputy: 'full', teacher: 'award', parent: 'view', student: 'view',
+  },
+  {
+    module: 'Grades & Exams',
+    superadmin: 'full', admin: 'full', deputy: 'full', teacher: 'own classes', parent: 'view', student: 'own',
+  },
+  {
+    module: 'Admissions',
+    superadmin: 'full', admin: 'full', deputy: 'edit', teacher: 'view', parent: '—', student: '—',
+  },
+  {
+    module: 'Messages',
+    superadmin: 'full', admin: 'full', deputy: 'full', teacher: 'full', parent: 'send/receive', student: 'receive',
+  },
+  {
+    module: 'Events',
+    superadmin: 'full', admin: 'full', deputy: 'create', teacher: 'view', parent: 'view', student: 'view',
+  },
+  {
+    module: 'HR & Payroll',
+    superadmin: 'full', admin: 'full', deputy: '—', teacher: 'own records', parent: '—', student: '—',
+  },
+  {
+    module: 'Reports & Analytics',
+    superadmin: 'full', admin: 'full', deputy: 'full', teacher: 'limited', parent: '—', student: '—',
+  },
+  {
+    module: 'Import / Export',
+    superadmin: 'full', admin: 'full', deputy: 'view', teacher: '—', parent: '—', student: '—',
+  },
+  {
+    module: 'Settings',
+    superadmin: 'full', admin: 'full', deputy: 'view', teacher: 'own account', parent: 'own account', student: 'own account',
+  },
+];
+
+const ROLE_COLUMNS = ['superadmin', 'admin', 'deputy', 'teacher', 'parent', 'student'];
+const ROLE_LABELS  = {
+  superadmin: 'Super Admin', admin: 'Admin', deputy: 'Deputy', teacher: 'Teacher', parent: 'Parent', student: 'Student',
+};
+const ROLE_COLORS  = {
+  superadmin: 'bg-red-50 text-red-700',
+  admin:      'bg-violet-50 text-violet-700',
+  deputy:     'bg-indigo-50 text-indigo-700',
+  teacher:    'bg-blue-50 text-blue-700',
+  parent:     'bg-emerald-50 text-emerald-700',
+  student:    'bg-amber-50 text-amber-700',
+};
+
+function AccessCell({ value }) {
+  if (!value || value === '—') {
+    return <span className="text-slate-300 text-xs">—</span>;
+  }
+  if (value === 'full') {
+    return (
+      <div className="flex items-center gap-1 text-emerald-600">
+        <Check size={13} className="shrink-0" />
+        <span className="text-xs font-medium">Full</span>
+      </div>
+    );
+  }
+  return <span className="text-xs text-slate-600 capitalize">{value}</span>;
+}
+
+function RolesTab() {
+  return (
+    <div className="space-y-5 max-w-5xl">
+      <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-start gap-3">
+        <Info size={14} className="text-blue-500 mt-0.5 shrink-0" />
+        <p className="text-xs text-blue-700">
+          Role-based access is enforced server-side on every API request. This matrix is a reference guide — it cannot be edited here. Contact your system administrator to change role assignments for users.
+        </p>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
+          <ShieldCheck size={14} className="text-slate-400" />
+          <h3 className="text-sm font-semibold text-slate-700">Permission Matrix</h3>
+          <span className="ml-auto text-xs text-slate-400">{ROLES_MATRIX.length} modules · {ROLE_COLUMNS.length} roles</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[700px]">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/50">
+                <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3 uppercase tracking-wide w-44">Module</th>
+                {ROLE_COLUMNS.map(r => (
+                  <th key={r} className="text-center px-3 py-3">
+                    <span className={`inline-flex px-2 py-0.5 text-[11px] font-semibold rounded-full ${ROLE_COLORS[r]}`}>
+                      {ROLE_LABELS[r]}
+                    </span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {ROLES_MATRIX.map((row, i) => (
+                <tr key={i} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-4 py-3 font-medium text-slate-700 text-xs">{row.module}</td>
+                  {ROLE_COLUMNS.map(r => (
+                    <td key={r} className="px-3 py-3 text-center">
+                      <AccessCell value={row[r]} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Role descriptions */}
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {ROLE_COLUMNS.map(r => (
+          <div key={r} className="bg-white border border-slate-200 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <span className={`inline-flex px-2 py-0.5 text-[11px] font-semibold rounded-full ${ROLE_COLORS[r]}`}>{ROLE_LABELS[r]}</span>
+            </div>
+            <p className="text-xs text-slate-500">
+              {r === 'superadmin' && 'Platform-level access. Can manage all schools, plans, and system settings. Assigned only by Msingi.'}
+              {r === 'admin' && 'School administrator. Full access to all modules within their school. Can invite users and configure settings.'}
+              {r === 'deputy' && 'Deputy principal or HOD. Can view and manage most academic operations but cannot access finance or HR payroll.'}
+              {r === 'teacher' && 'Class teacher. Can take attendance, enter grades, award behaviour points, and view their own class data.'}
+              {r === 'parent' && 'Guardian access. Can view their own children\'s attendance, grades, behaviour, and finance records.'}
+              {r === 'student' && 'Student portal access. Read-only view of own profile, timetable, grades, and announcements.'}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SYSTEM TAB — system info + data management
+   ══════════════════════════════════════════════════════════════ */
+function SystemTab() {
+  const school = useAuthStore(s => s.session?.school);
+  const user   = useAuthStore(s => s.session?.user);
+  const [exporting, setExporting] = useState(false);
+
+  const planBadgeColor = {
+    free:       'bg-slate-100 text-slate-600',
+    starter:    'bg-blue-50 text-blue-700',
+    premium:    'bg-violet-50 text-violet-700',
+    enterprise: 'bg-amber-50 text-amber-700',
+  };
+
+  const plan = school?.plan ?? 'premium';
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const { importExport } = await import('@/api/client.js');
+      await importExport.exportCSV('students');
+    } catch {
+      /* silent — the browser will show the download or error */
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  return (
+    <div className="max-w-2xl space-y-5">
+
+      {/* School info card */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+        <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+          <Server size={14} className="text-slate-400" />
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">System Information</h3>
+        </div>
+        <div className="grid grid-cols-2 gap-y-3 text-sm">
+          {[
+            ['School ID',    school?.id ?? school?.slug ?? '—'],
+            ['Platform',     'Msingi School ERP'],
+            ['Subscription', <span key="plan" className={`inline-flex px-2 py-0.5 text-[11px] font-semibold rounded-full capitalize ${planBadgeColor[plan] ?? planBadgeColor.premium}`}>{plan}</span>],
+            ['Version',      'v4.9.13'],
+            ['Timezone',     school?.timezone ?? 'Africa/Nairobi'],
+            ['Currency',     school?.currency ?? 'KES'],
+            ['Academic Year',school?.academicYear ?? '—'],
+            ['Terms/Year',   school?.termsPerYear ?? 3],
+          ].map(([label, value]) => (
+            <div key={label} className="space-y-0.5">
+              <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">{label}</p>
+              <p className="text-sm font-medium text-slate-700">{value}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Data management */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+        <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+          <Database size={14} className="text-slate-400" />
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Data Management</h3>
+        </div>
+        <div className="space-y-3">
+          <DataAction
+            icon={<Download size={15} />}
+            title="Export Students"
+            desc="Download all active student records as a CSV file"
+            buttonLabel={exporting ? 'Exporting…' : 'Export CSV'}
+            buttonColor="bg-slate-900 hover:bg-slate-800"
+            loading={exporting}
+            onClick={handleExport}
+          />
+          <DataAction
+            icon={<Download size={15} />}
+            title="Export Teachers"
+            desc="Download all teacher records as a CSV file"
+            buttonLabel="Export CSV"
+            buttonColor="bg-slate-900 hover:bg-slate-800"
+            onClick={async () => {
+              const { importExport } = await import('@/api/client.js');
+              await importExport.exportCSV('teachers');
+            }}
+          />
+          <div className="pt-1">
+            <a
+              href="/import-export"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-violet-600 hover:text-violet-800 transition"
+            >
+              <RefreshCcw size={12} />
+              Full Import / Export page →
+            </a>
+          </div>
+        </div>
+      </div>
+
+      {/* Danger zone */}
+      <div className="bg-white border border-red-200 rounded-xl p-5 space-y-4">
+        <div className="flex items-center gap-2 pb-2 border-b border-red-100">
+          <AlertTriangle size={14} className="text-red-400" />
+          <h3 className="text-xs font-semibold text-red-500 uppercase tracking-wider">Danger Zone</h3>
+        </div>
+        <div className="bg-red-50 rounded-lg px-4 py-3 text-xs text-red-700 space-y-1">
+          <p className="font-semibold">Destructive operations are managed by your Msingi account manager.</p>
+          <p>To permanently delete school data, reset academic records, or deactivate your account, please contact support at support@msingi.io</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DataAction({ icon, title, desc, buttonLabel, buttonColor, loading, onClick }) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-3 border-b border-slate-100 last:border-0">
+      <div className="flex items-start gap-3">
+        <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500 shrink-0 mt-0.5">
+          {icon}
+        </div>
+        <div>
+          <p className="text-sm font-medium text-slate-700">{title}</p>
+          <p className="text-xs text-slate-400 mt-0.5">{desc}</p>
+        </div>
+      </div>
+      <button
+        onClick={onClick}
+        disabled={loading}
+        className={`shrink-0 flex items-center gap-1.5 ${buttonColor} disabled:opacity-50 text-white text-xs font-medium px-3 py-2 rounded-lg transition`}
+      >
+        {loading && <Loader2 size={12} className="animate-spin" />}
+        {buttonLabel}
+      </button>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
    MAIN PAGE
    ══════════════════════════════════════════════════════════════ */
 export default function SettingsPage() {
   const [tab, setTab] = useState('school');
   const role = useAuthStore(s => s.session?.user?.role ?? '');
-  const canManageUsers = ['admin', 'superadmin'].includes(role);
+  const isAdmin = ['admin', 'superadmin'].includes(role);
 
-  const visibleTabs = TABS.filter(t => t.id !== 'users' || canManageUsers);
+  const visibleTabs = TABS.filter(t => !t.adminOnly || isAdmin);
 
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
       <div className="bg-white border-b border-slate-200">
-        <div className="max-w-4xl mx-auto px-6 py-5">
+        <div className="max-w-5xl mx-auto px-6 py-5">
           <div className="mb-5">
             <h1 className="text-xl font-semibold text-slate-900 tracking-tight">Settings</h1>
-            <p className="text-sm text-slate-500 mt-0.5">School profile, team members and your account</p>
+            <p className="text-sm text-slate-500 mt-0.5">School profile, team management, permissions and system information</p>
           </div>
           <nav className="flex gap-1 -mb-px overflow-x-auto">
             {visibleTabs.map(({ id, label, Icon }) => (
@@ -699,7 +999,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className="max-w-4xl mx-auto px-6 py-6">
+      <div className="max-w-5xl mx-auto px-6 py-6">
         <AnimatePresence mode="wait">
           <motion.div
             key={tab}
@@ -710,6 +1010,8 @@ export default function SettingsPage() {
           >
             {tab === 'school'  && <SchoolTab />}
             {tab === 'users'   && <UsersTab />}
+            {tab === 'roles'   && <RolesTab />}
+            {tab === 'system'  && <SystemTab />}
             {tab === 'account' && <AccountTab />}
           </motion.div>
         </AnimatePresence>

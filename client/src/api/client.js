@@ -139,6 +139,13 @@ export const finance = {
     list:   (params) => _get('/finance/payments', params),
     record: (data)   => _post('/finance/payments', data),
   },
+  feeStructures: {
+    list:     ()           => _get('/finance/fee-structures'),
+    create:   (data)       => _post('/finance/fee-structures', data),
+    update:   (id, data)   => _put(`/finance/fee-structures/${id}`, data),
+    remove:   (id)         => _delete(`/finance/fee-structures/${id}`),
+    generate: (id)         => _post(`/finance/fee-structures/${id}/generate`),
+  },
   summary: (params) => _get('/finance/summary', params),
 };
 

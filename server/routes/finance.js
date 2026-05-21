@@ -317,6 +317,150 @@ router.post('/payments', authMiddleware, PLAN, rbac('finance', 'create'), async 
   }
 });
 
+/* ══════════════════════════════════════════════════════════════
+   FEE STRUCTURES — define standard fees per class/term
+   ══════════════════════════════════════════════════════════════ */
+const FeeStructureSchema = z.object({
+  name:        z.string().min(1).max(200),
+  description: z.string().max(500).optional(),
+  academicYear:z.string().max(20).optional(),
+  term:        z.number().int().min(1).max(4).optional(),
+  classIds:    z.array(z.string()).optional(),   // empty = all classes
+  lineItems:   z.array(LineItemSchema).min(1),
+  dueDate:     z.string().optional(),
+  notes:       z.string().max(500).optional(),
+});
+
+/* ── GET /api/finance/fee-structures ─────────────────────────── */
+router.get('/fee-structures', authMiddleware, PLAN, rbac('finance', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const FeeStructures = _model('fee_structures');
+    const docs = await FeeStructures.find({ schoolId }).sort({ createdAt: -1 }).lean();
+    return ok(res, docs);
+  } catch (err) {
+    console.error('[finance GET /fee-structures]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── POST /api/finance/fee-structures ────────────────────────── */
+router.post('/fee-structures', authMiddleware, PLAN, rbac('finance', 'create'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { data, error } = _validate(FeeStructureSchema, req.body);
+    if (error) return E.validation(res, error);
+
+    const totals = _calcInvoiceTotals(data.lineItems);
+    const FeeStructures = _model('fee_structures');
+    const doc = await FeeStructures.create({
+      id:        uuidv4(),
+      schoolId,
+      createdBy: userId,
+      ...data,
+      total: totals.total,
+    });
+    return created(res, doc.toObject ? doc.toObject() : doc);
+  } catch (err) {
+    console.error('[finance POST /fee-structures]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── PUT /api/finance/fee-structures/:id ─────────────────────── */
+router.put('/fee-structures/:id', authMiddleware, PLAN, rbac('finance', 'create'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { data, error } = _validate(FeeStructureSchema.partial(), req.body);
+    if (error) return E.validation(res, error);
+
+    const totals = data.lineItems ? _calcInvoiceTotals(data.lineItems) : {};
+    const FeeStructures = _model('fee_structures');
+    const doc = await FeeStructures.findOneAndUpdate(
+      { id: req.params.id, schoolId },
+      { ...data, ...(totals.total != null ? { total: totals.total } : {}), updatedBy: userId },
+      { new: true }
+    ).lean();
+    if (!doc) return E.notFound(res, 'Fee structure not found');
+    return ok(res, doc);
+  } catch (err) {
+    console.error('[finance PUT /fee-structures/:id]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── DELETE /api/finance/fee-structures/:id ──────────────────── */
+router.delete('/fee-structures/:id', authMiddleware, PLAN, rbac('finance', 'delete'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const FeeStructures = _model('fee_structures');
+    const doc = await FeeStructures.findOneAndDelete({ id: req.params.id, schoolId });
+    if (!doc) return E.notFound(res, 'Fee structure not found');
+    return ok(res, { deleted: true });
+  } catch (err) {
+    console.error('[finance DELETE /fee-structures/:id]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── POST /api/finance/fee-structures/:id/generate ─ Bulk invoices */
+router.post('/fee-structures/:id/generate', authMiddleware, PLAN, rbac('finance', 'create'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const FeeStructures = _model('fee_structures');
+    const Students      = _model('students');
+    const Invoices      = _model('invoices');
+
+    const fs = await FeeStructures.findOne({ id: req.params.id, schoolId }).lean();
+    if (!fs) return E.notFound(res, 'Fee structure not found');
+
+    // Resolve target students
+    const studentFilter = { schoolId, status: 'active' };
+    if (fs.classIds && fs.classIds.length > 0) studentFilter.classId = { $in: fs.classIds };
+
+    const students = await Students.find(studentFilter).lean();
+    if (students.length === 0) return ok(res, { created: 0, message: 'No active students found for the given criteria' });
+
+    // Skip students who already have an invoice from this structure (idempotent)
+    const existingInvStudents = await Invoices.distinct('studentId', { schoolId, feeStructureId: fs.id });
+    const existingSet = new Set(existingInvStudents);
+    const targets = students.filter(s => !existingSet.has(s.id ?? s._id?.toString()));
+
+    if (targets.length === 0) return ok(res, { created: 0, message: 'Invoices already generated for all students in this structure' });
+
+    const totals  = _calcInvoiceTotals(fs.lineItems);
+    const created_docs = [];
+
+    for (const student of targets) {
+      const invNum = await nextInvoiceNumber(schoolId);
+      const inv = await Invoices.create({
+        id:             uuidv4(),
+        schoolId,
+        invoiceNumber:  invNum,
+        studentId:      student.id ?? student._id?.toString(),
+        studentName:    `${student.firstName} ${student.lastName}`,
+        title:          fs.name,
+        lineItems:      fs.lineItems,
+        dueDate:        fs.dueDate,
+        academicYear:   fs.academicYear,
+        term:           fs.term,
+        feeStructureId: fs.id,
+        ...totals,
+        amountPaid: 0,
+        balance:    totals.total,
+        status:     'unpaid',
+        createdBy:  userId,
+      });
+      created_docs.push(inv.toObject ? inv.toObject() : inv);
+    }
+
+    return created(res, { created: created_docs.length, invoices: created_docs });
+  } catch (err) {
+    console.error('[finance POST /fee-structures/:id/generate]', err);
+    return E.serverError(res);
+  }
+});
+
 /* ── GET /api/finance/summary ─ School financial overview ────── */
 router.get('/summary', authMiddleware, PLAN, rbac('finance', 'read'), async (req, res) => {
   try {

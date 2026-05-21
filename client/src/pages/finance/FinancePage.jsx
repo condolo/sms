@@ -18,17 +18,19 @@ import {
 import {
   Wallet, FileText, CreditCard, Plus, Search, X, Filter,
   Loader2, CheckCircle2, AlertTriangle, TrendingUp,
-  BadgeDollarSign, Ban, ChevronRight,
+  BadgeDollarSign, Ban, ChevronRight, ListChecks, Trash2,
+  Zap, ChevronDown, Users,
 } from 'lucide-react';
-import { finance as financeApi, students as studentsApi } from '@/api/client.js';
+import { finance as financeApi, students as studentsApi, classes as classesApi } from '@/api/client.js';
 import { Pagination } from '@/components/ui/Pagination.jsx';
 import useAuthStore from '@/store/auth.js';
 
 const LIMIT = 20;
 const TABS  = [
-  { id: 'summary',  label: 'Overview',  Icon: TrendingUp  },
-  { id: 'invoices', label: 'Invoices',  Icon: FileText    },
-  { id: 'payments', label: 'Payments',  Icon: CreditCard  },
+  { id: 'summary',   label: 'Overview',      Icon: TrendingUp  },
+  { id: 'invoices',  label: 'Invoices',      Icon: FileText    },
+  { id: 'payments',  label: 'Payments',      Icon: CreditCard  },
+  { id: 'feestr',    label: 'Fee Structure', Icon: ListChecks  },
 ];
 
 const INV_STATUS_BADGE = {
@@ -81,6 +83,7 @@ export default function FinancePage() {
           </div>
           {canCreate && tab === 'invoices' && <CreateInvoiceButton fmtCurrency={fmtCurrency} currency={currency} />}
           {canCreate && tab === 'payments' && <RecordPaymentButton fmtCurrency={fmtCurrency} currency={currency} />}
+          {canCreate && tab === 'feestr'   && <CreateFeeStructureButton fmtCurrency={fmtCurrency} />}
         </div>
 
         {/* Tabs */}
@@ -102,6 +105,7 @@ export default function FinancePage() {
         {tab === 'summary'  && <SummaryTab  fmtCurrency={fmtCurrency} />}
         {tab === 'invoices' && <InvoicesTab fmtCurrency={fmtCurrency} page={page} onPage={setPage} canCreate={canCreate} />}
         {tab === 'payments' && <PaymentsTab fmtCurrency={fmtCurrency} page={page} onPage={setPage} />}
+        {tab === 'feestr'   && <FeeStructureTab fmtCurrency={fmtCurrency} canCreate={canCreate} currency={currency} />}
       </div>
     </div>
   );
@@ -777,6 +781,335 @@ function RecordPaymentSlideOver({ fmtCurrency, onClose, onCreated }) {
             className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors">
             {mutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
             {mutation.isPending ? 'Recording…' : 'Record Payment'}
+          </button>
+        </div>
+      </motion.div>
+    </>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════
+   FEE STRUCTURE TAB
+   ══════════════════════════════════════════════════════════ */
+function FeeStructureTab({ fmtCurrency, canCreate }) {
+  const qc = useQueryClient();
+  const [generating, setGenerating] = useState(null);
+  const [genResult,  setGenResult]  = useState(null);
+  const [expanded,   setExpanded]   = useState(null);
+
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['finance', 'fee-structures'],
+    queryFn:  () => financeApi.feeStructures.list(),
+    staleTime: 5 * 60_000,
+  });
+  const structures = data?.data ?? [];
+
+  const removeMut = useMutation({
+    mutationFn: id => financeApi.feeStructures.remove(id),
+    onSuccess:  () => qc.invalidateQueries({ queryKey: ['finance', 'fee-structures'] }),
+  });
+
+  async function generate(fs) {
+    setGenerating(fs.id);
+    setGenResult(null);
+    try {
+      const r = await financeApi.feeStructures.generate(fs.id);
+      setGenResult({ id: fs.id, count: r.data?.created ?? 0, msg: r.data?.message });
+      qc.invalidateQueries({ queryKey: ['finance'] });
+    } catch (err) {
+      setGenResult({ id: fs.id, error: err?.message ?? 'Generation failed' });
+    } finally {
+      setGenerating(null);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-start gap-3">
+        <ListChecks size={14} className="text-blue-500 mt-0.5 shrink-0" />
+        <p className="text-xs text-blue-700">
+          Define standard fee structures per term/class. Once saved, use <strong>Generate Invoices</strong> to bulk-create invoices for all matching active students — skipping any who already have an invoice from that structure.
+        </p>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-3">{[...Array(3)].map((_, i) => <div key={i} className="bg-white rounded-xl border border-slate-200 h-20 animate-pulse" />)}</div>
+      ) : isError ? (
+        <EmptyOrError icon={<AlertTriangle size={24} className="text-red-400" />} msg={error?.message} onRetry={refetch} />
+      ) : structures.length === 0 ? (
+        <EmptyOrError icon={<ListChecks size={32} className="opacity-40" />} msg="No fee structures yet. Create one to get started." />
+      ) : (
+        <div className="space-y-3">
+          {structures.map(fs => {
+            const isExpanded = expanded === fs.id;
+            const result     = genResult?.id === fs.id ? genResult : null;
+            return (
+              <div key={fs.id ?? fs._id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                {/* Header row */}
+                <div className="flex items-center gap-4 px-5 py-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-semibold text-slate-800">{fs.name}</p>
+                      {fs.academicYear && <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{fs.academicYear}</span>}
+                      {fs.term && <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">Term {fs.term}</span>}
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {fs.lineItems?.length ?? 0} line item{(fs.lineItems?.length ?? 0) !== 1 ? 's' : ''} · Total: {fmtCurrency(fs.total)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {canCreate && (
+                      <button
+                        onClick={() => generate(fs)}
+                        disabled={!!generating}
+                        className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition"
+                        title="Generate invoices for all active students"
+                      >
+                        {generating === fs.id
+                          ? <Loader2 size={12} className="animate-spin" />
+                          : <Zap size={12} />
+                        }
+                        Generate Invoices
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setExpanded(isExpanded ? null : fs.id)}
+                      className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition"
+                    >
+                      <ChevronDown size={14} className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                    </button>
+                    {canCreate && (
+                      <button
+                        onClick={() => confirm(`Delete "${fs.name}"?`) && removeMut.mutate(fs.id ?? fs._id)}
+                        className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Generation result */}
+                {result && (
+                  <div className={`mx-5 mb-3 px-3 py-2 rounded-lg text-xs font-medium ${result.error ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+                    {result.error
+                      ? `Error: ${result.error}`
+                      : result.count > 0
+                        ? `Success — ${result.count} invoice${result.count !== 1 ? 's' : ''} created.`
+                        : (result.msg ?? 'No new invoices created (already up to date).')}
+                  </div>
+                )}
+
+                {/* Expanded line items */}
+                {isExpanded && (
+                  <div className="border-t border-slate-100 px-5 py-4">
+                    {fs.description && <p className="text-xs text-slate-500 mb-3">{fs.description}</p>}
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-100">
+                          <th className="text-left py-1.5 font-semibold text-slate-500 uppercase tracking-wide">Description</th>
+                          <th className="text-center py-1.5 font-semibold text-slate-500 uppercase tracking-wide w-16">Qty</th>
+                          <th className="text-right py-1.5 font-semibold text-slate-500 uppercase tracking-wide w-24">Unit Price</th>
+                          <th className="text-right py-1.5 font-semibold text-slate-500 uppercase tracking-wide w-24">Line Total</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {(fs.lineItems ?? []).map((item, i) => (
+                          <tr key={i}>
+                            <td className="py-2 text-slate-700">{item.description}</td>
+                            <td className="py-2 text-center text-slate-500">{item.quantity ?? 1}</td>
+                            <td className="py-2 text-right text-slate-700">{fmtCurrency(item.unitPrice)}</td>
+                            <td className="py-2 text-right font-medium text-slate-800">{fmtCurrency((item.unitPrice ?? 0) * (item.quantity ?? 1))}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="border-t border-slate-200">
+                          <td colSpan={3} className="py-2 text-right font-semibold text-slate-700">Total</td>
+                          <td className="py-2 text-right font-bold text-slate-900">{fmtCurrency(fs.total)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                    {fs.dueDate && (
+                      <p className="text-xs text-slate-400 mt-2">Due date: {new Date(fs.dueDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                    )}
+                    {fs.classIds?.length > 0 && (
+                      <p className="text-xs text-slate-400 mt-1">Applies to {fs.classIds.length} class{fs.classIds.length !== 1 ? 'es' : ''}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Create Fee Structure Button + Slide-Over ─────────────── */
+function CreateFeeStructureButton({ fmtCurrency }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-1.5 bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+      >
+        <Plus size={15} /> New Fee Structure
+      </button>
+      <AnimatePresence>
+        {open && (
+          <FeeStructureSlideOver
+            fmtCurrency={fmtCurrency}
+            onClose={() => setOpen(false)}
+            onCreated={() => { setOpen(false); qc.invalidateQueries({ queryKey: ['finance', 'fee-structures'] }); }}
+          />
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
+
+function FeeStructureSlideOver({ fmtCurrency, onClose, onCreated }) {
+  const [name,    setName]    = useState('');
+  const [desc,    setDesc]    = useState('');
+  const [year,    setYear]    = useState(new Date().getFullYear().toString());
+  const [term,    setTerm]    = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [items,   setItems]   = useState([{ description: 'Tuition Fee', quantity: 1, unitPrice: 0 }]);
+  const [errors,  setErrors]  = useState({});
+
+  const total = items.reduce((s, i) => s + (i.unitPrice || 0) * (i.quantity || 1), 0);
+
+  const mutation = useMutation({
+    mutationFn: data => financeApi.feeStructures.create(data),
+    onSuccess:  onCreated,
+    onError:    err => setErrors({ _server: err?.message ?? 'Failed to create fee structure' }),
+  });
+
+  function updateItem(i, field, val) {
+    setItems(prev => prev.map((item, idx) => idx === i
+      ? { ...item, [field]: field === 'description' ? val : Number(val) }
+      : item));
+  }
+  function addItem()    { setItems(prev => [...prev, { description: '', quantity: 1, unitPrice: 0 }]); }
+  function removeItem(i){ setItems(prev => prev.filter((_, idx) => idx !== i)); }
+
+  function submit() {
+    const e = {};
+    if (!name.trim()) e.name = 'Name is required';
+    if (!items.every(i => i.description.trim())) e.items = 'All line items need a description';
+    if (Object.keys(e).length) { setErrors(e); return; }
+    mutation.mutate({
+      name: name.trim(),
+      description: desc.trim() || undefined,
+      academicYear: year || undefined,
+      term: term ? Number(term) : undefined,
+      dueDate: dueDate || undefined,
+      lineItems: items,
+    });
+  }
+
+  return (
+    <>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-40" onClick={onClose} />
+      <motion.div
+        initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+        transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+        className="fixed right-0 top-0 h-full w-full max-w-xl bg-white shadow-2xl z-50 flex flex-col"
+      >
+        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
+          <div>
+            <h2 className="text-base font-semibold text-slate-900">New Fee Structure</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Define fees for a term/year — bulk generate invoices later</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"><X size={18} /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+          {errors._server && (
+            <div className="flex items-center gap-2 bg-red-50 text-red-700 text-sm px-3 py-2.5 rounded-lg border border-red-200">
+              <AlertTriangle size={15} className="shrink-0" />{errors._server}
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1.5">Structure Name *</label>
+            <input value={name} onChange={e => setName(e.target.value)}
+              placeholder="e.g. Term 2 2025 — Full Fee"
+              className={`w-full text-sm px-3 py-2 border ${errors.name ? 'border-red-300' : 'border-slate-200'} rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10`} />
+            {errors.name && <p className="text-[11px] text-red-500 mt-1">{errors.name}</p>}
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1.5">Description (optional)</label>
+            <input value={desc} onChange={e => setDesc(e.target.value)}
+              placeholder="Brief description…"
+              className="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10" />
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1.5">Academic Year</label>
+              <input value={year} onChange={e => setYear(e.target.value)} placeholder="2025"
+                className="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1.5">Term</label>
+              <select value={term} onChange={e => setTerm(e.target.value)}
+                className="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10">
+                <option value="">All terms</option>
+                <option value="1">Term 1</option>
+                <option value="2">Term 2</option>
+                <option value="3">Term 3</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1.5">Due Date</label>
+              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
+                className="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10" />
+            </div>
+          </div>
+
+          {/* Line items */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-medium text-slate-700">Fee Items *</label>
+              <button type="button" onClick={addItem} className="text-xs font-medium text-violet-600 hover:text-violet-800 flex items-center gap-1">
+                <Plus size={12} /> Add item
+              </button>
+            </div>
+            {errors.items && <p className="text-[11px] text-red-500 mb-2">{errors.items}</p>}
+            <div className="space-y-2">
+              {items.map((item, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input value={item.description} onChange={e => updateItem(i, 'description', e.target.value)}
+                    placeholder="e.g. Tuition Fee" className="flex-1 text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10" />
+                  <input type="number" min="1" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)}
+                    className="w-14 text-sm px-2 py-2 border border-slate-200 rounded-lg text-center focus:outline-none focus:ring-2 focus:ring-slate-900/10" />
+                  <input type="number" min="0" value={item.unitPrice} onChange={e => updateItem(i, 'unitPrice', e.target.value)}
+                    placeholder="Amount" className="w-28 text-sm px-3 py-2 border border-slate-200 rounded-lg text-right focus:outline-none focus:ring-2 focus:ring-slate-900/10" />
+                  {items.length > 1 && (
+                    <button onClick={() => removeItem(i)} className="text-slate-400 hover:text-red-500 p-1"><X size={14} /></button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end mt-3 pt-3 border-t border-slate-100">
+              <div className="text-sm font-bold text-slate-800">Total per student: {fmtCurrency(total)}</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800">Cancel</button>
+          <button onClick={submit} disabled={mutation.isPending}
+            className="flex items-center gap-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors">
+            {mutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+            {mutation.isPending ? 'Saving…' : 'Save Fee Structure'}
           </button>
         </div>
       </motion.div>
