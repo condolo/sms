@@ -10,13 +10,14 @@ import {
 } from 'recharts';
 import {
   BarChart3, Users, Wallet, Scale, Calendar,
-  Download, TrendingUp, TrendingDown, AlertCircle,
+  Download, TrendingUp, TrendingDown, AlertCircle, BookOpen,
 } from 'lucide-react';
 import {
   students  as studentsApi,
   attendance as attendanceApi,
   finance    as financeApi,
   behaviour  as behaviourApi,
+  assessment as assessmentApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 
@@ -82,13 +83,15 @@ const TABS = [
   { id: 'attendance',  label: 'Attendance',  Icon: Calendar   },
   { id: 'finance',     label: 'Finance',     Icon: Wallet     },
   { id: 'behaviour',   label: 'Behaviour',   Icon: Scale      },
+  { id: 'academic',    label: 'Academic',    Icon: BookOpen   },
 ];
 
 /* ══════════════════════════════════════════════════════════
    MAIN COMPONENT
    ══════════════════════════════════════════════════════════ */
 export default function ReportsPage() {
-  const [tab, setTab]  = useState('overview');
+  const [tab, setTab]       = useState('overview');
+  const [acSort, setAcSort] = useState({ col: 'subject', dir: 'asc' });
   const school         = useAuthStore(s => s.session?.school);
   const sym            = school?.currencySymbol ?? 'KSh';
 
@@ -97,6 +100,12 @@ export default function ReportsPage() {
   const { data: finSummary } = useQuery({ queryKey: ['finance','summary'],   queryFn: () => financeApi.summary({}) });
   const { data: attSummary } = useQuery({ queryKey: ['attendance','summary'],queryFn: () => attendanceApi.summary({}) });
   const { data: behSummary } = useQuery({ queryKey: ['behaviour','summary'], queryFn: () => behaviourApi.incidents.summary({}) });
+  const { data: marksSummary, isLoading: marksLoading } = useQuery({
+    queryKey: ['assessment', 'marks-summary-report'],
+    queryFn:  () => assessmentApi.marksSummary({ limit: 200 }),
+    enabled:  tab === 'academic',
+    staleTime: 5 * 60_000,
+  });
 
   const totalStudents  = studStats?.total   ?? 0;
   const activeStudents = studStats?.active  ?? 0;
@@ -129,6 +138,56 @@ export default function ReportsPage() {
         { name: 'Partial', value: finSummary?.countPartial ?? 0 },
         { name: 'Unpaid',  value: finSummary?.countUnpaid  ?? 0 },
       ];
+
+  /* ── Academic: aggregate marks by subject ── */
+  const _marks = Array.isArray(marksSummary?.data) ? marksSummary.data
+               : Array.isArray(marksSummary) ? marksSummary
+               : [];
+  const _bySubject = {};
+  _marks.forEach(m => {
+    const key = m.subjectName || m.subject?.name || String(m.subjectId || 'Unknown');
+    if (!_bySubject[key]) _bySubject[key] = { scores: [], maxScores: [], passMarks: [] };
+    if (m.score != null) {
+      _bySubject[key].scores.push(+m.score);
+      _bySubject[key].maxScores.push(+(m.maxScore ?? m.outOf ?? 100));
+      _bySubject[key].passMarks.push(+(m.passMark ?? 50));
+    }
+  });
+  const rawSubjectRows = Object.entries(_bySubject).map(([subject, { scores, maxScores, passMarks }]) => {
+    if (!scores.length) return null;
+    const avg     = scores.reduce((a, b) => a + b, 0) / scores.length;
+    const avgMax  = maxScores.reduce((a, b) => a + b, 0) / maxScores.length;
+    const passRate = scores.filter((s, i) => s >= (passMarks[i] ?? 50)).length / scores.length * 100;
+    return {
+      subject,
+      count:    scores.length,
+      avg:      Math.round(avg * 10) / 10,
+      avgPct:   avgMax > 0 ? Math.round((avg / avgMax) * 100) : 0,
+      highest:  Math.round(Math.max(...scores)),
+      lowest:   Math.round(Math.min(...scores)),
+      passRate: Math.round(passRate),
+    };
+  }).filter(Boolean);
+
+  const subjectRows = [...rawSubjectRows].sort((a, b) => {
+    const { col, dir } = acSort;
+    const av = a[col], bv = b[col];
+    const cmp = typeof av === 'string' ? av.localeCompare(bv) : av - bv;
+    return dir === 'asc' ? cmp : -cmp;
+  });
+
+  const acOverallAvg = _marks.length
+    ? Math.round(_marks.filter(m => m.score != null).reduce((s, m) => s + +m.score, 0) / _marks.filter(m => m.score != null).length * 10) / 10
+    : 0;
+  const acOverallPass = rawSubjectRows.length
+    ? Math.round(rawSubjectRows.reduce((s, r) => s + r.passRate, 0) / rawSubjectRows.length)
+    : 0;
+
+  const chartSubjectData = subjectRows.slice(0, 10).map(r => ({ name: r.subject, avg: r.avgPct, passRate: r.passRate }));
+
+  function sortAc(col) {
+    setAcSort(prev => prev.col === col ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'desc' });
+  }
 
   /* ── Export handler ── */
   function exportCSV(type) {
@@ -346,6 +405,115 @@ export default function ReportsPage() {
               <p className="text-center text-slate-400 text-sm py-16">No behaviour data available yet.</p>
             )}
           </Card>
+        </div>
+      )}
+
+      {/* ── ACADEMIC TAB ── */}
+      {tab === 'academic' && (
+        <div className="space-y-6">
+          {marksLoading ? (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="bg-white rounded-xl border border-slate-200 p-5 animate-pulse">
+                  <div className="h-3 bg-slate-200 rounded w-24 mb-3" />
+                  <div className="h-7 bg-slate-200 rounded w-16" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <>
+              {/* KPI row */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <Stat label="Subjects Tracked"  value={rawSubjectRows.length}                Icon={BookOpen}  color="violet" />
+                <Stat label="Marks Entered"      value={_marks.filter(m => m.score != null).length.toLocaleString()} Icon={BarChart3} color="blue"   />
+                <Stat label="Overall Avg Score"  value={acOverallAvg > 0 ? `${acOverallAvg}` : '—'} Icon={TrendingUp}  color="green"  />
+                <Stat label="Avg Pass Rate"      value={acOverallPass > 0 ? `${acOverallPass}%` : '—'} Icon={Scale} color="amber"  />
+              </div>
+
+              {/* Bar chart */}
+              {chartSubjectData.length > 0 && (
+                <Card title="Average Score % by Subject">
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={chartSubjectData} margin={{ left: -10 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} domain={[0, 100]} unit="%" />
+                      <Tooltip content={<ChartTip />} />
+                      <Bar dataKey="avg" name="Avg %" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="passRate" name="Pass Rate %" fill="#10b981" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </Card>
+              )}
+
+              {/* Table */}
+              <Card title="Subject Performance Breakdown">
+                {subjectRows.length === 0 ? (
+                  <p className="text-center text-slate-400 text-sm py-12">
+                    No assessment marks recorded yet. Enter marks via the Assessment module.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-100">
+                          {[
+                            { col: 'subject',  label: 'Subject'    },
+                            { col: 'count',    label: 'Entries'    },
+                            { col: 'avgPct',   label: 'Avg %'      },
+                            { col: 'highest',  label: 'Highest'    },
+                            { col: 'lowest',   label: 'Lowest'     },
+                            { col: 'passRate', label: 'Pass Rate'  },
+                          ].map(({ col, label }) => (
+                            <th
+                              key={col}
+                              onClick={() => sortAc(col)}
+                              className="text-left py-2 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer select-none hover:text-slate-900"
+                            >
+                              {label}
+                              {acSort.col === col && (
+                                <span className="ml-1 text-violet-600">{acSort.dir === 'asc' ? '↑' : '↓'}</span>
+                              )}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {subjectRows.map((row, i) => (
+                          <tr key={row.subject} className={`border-b border-slate-50 ${i % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
+                            <td className="py-2.5 px-3 font-medium text-slate-800">{row.subject}</td>
+                            <td className="py-2.5 px-3 text-slate-600">{row.count}</td>
+                            <td className="py-2.5 px-3">
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden max-w-[60px]">
+                                  <div
+                                    className="h-full rounded-full bg-violet-500"
+                                    style={{ width: `${row.avgPct}%` }}
+                                  />
+                                </div>
+                                <span className="text-slate-700 font-medium">{row.avgPct}%</span>
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3 text-emerald-600 font-medium">{row.highest}</td>
+                            <td className="py-2.5 px-3 text-red-500 font-medium">{row.lowest}</td>
+                            <td className="py-2.5 px-3">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
+                                row.passRate >= 80 ? 'bg-emerald-100 text-emerald-700'
+                                : row.passRate >= 50 ? 'bg-amber-100 text-amber-700'
+                                : 'bg-red-100 text-red-700'
+                              }`}>
+                                {row.passRate}%
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </Card>
+            </>
+          )}
         </div>
       )}
     </div>

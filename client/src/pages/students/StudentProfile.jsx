@@ -12,7 +12,7 @@ import {
   ChevronLeft, Edit2, Save, X, Loader2, AlertTriangle,
   Star, ShieldAlert, TrendingUp, TrendingDown, Award,
   Hash, Mail, Phone, MapPin, Shield, BookOpen, Home,
-  CheckCircle2, Clock, XCircle, CheckCheck,
+  CheckCircle2, Clock, XCircle, CheckCheck, Heart,
 } from 'lucide-react';
 import {
   students  as studentsApi,
@@ -32,6 +32,7 @@ const TABS = [
   { id: 'finance',    label: 'Finance',     Icon: Receipt        },
   { id: 'behaviour',  label: 'Behaviour',   Icon: Scale          },
   { id: 'grades',     label: 'Grades',      Icon: GraduationCap  },
+  { id: 'medical',    label: 'Medical',     Icon: Heart          },
 ];
 
 /* ── Gradient avatar ─────────────────────────────────────────── */
@@ -278,6 +279,9 @@ export default function StudentProfile() {
             )}
             {tab === 'grades' && (
               <GradesTab data={gradesData?.data} loading={gradesLoading} />
+            )}
+            {tab === 'medical' && (
+              <MedicalTab student={student} saving={saving} onSave={updateStudent} canEdit={can('students')} />
             )}
           </motion.div>
         </AnimatePresence>
@@ -859,6 +863,158 @@ function GradesTab({ data, loading }) {
         </table>
       </div>
     </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   MEDICAL TAB
+   ══════════════════════════════════════════════════════════════ */
+const BLOOD_GROUPS = ['A+','A-','B+','B-','O+','O-','AB+','AB-','Unknown'];
+
+function MedicalTab({ student, saving, onSave, canEdit }) {
+  const [editing, setEditing] = useState(false);
+  const med = student.medical ?? {};
+  const [form, setForm] = useState({
+    bloodGroup:        med.bloodGroup        ?? '',
+    allergies:         med.allergies         ?? '',
+    conditions:        med.conditions        ?? '',
+    emergencyName:     med.emergencyName     ?? '',
+    emergencyPhone:    med.emergencyPhone    ?? '',
+    emergencyRelation: med.emergencyRelation ?? '',
+    doctorName:        med.doctorName        ?? '',
+    doctorPhone:       med.doctorPhone       ?? '',
+    vaccinations:      med.vaccinations      ?? '',
+  });
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
+  if (!editing) {
+    return (
+      <div className="space-y-4">
+        <div className="grid gap-4 md:grid-cols-2">
+          <InfoCard title="Medical Information" icon={<Heart size={14} />}>
+            <InfoRow label="Blood group"   value={med.bloodGroup} />
+            <InfoRow label="Allergies"     value={med.allergies} />
+            <InfoRow label="Conditions"    value={med.conditions} />
+            <InfoRow label="Vaccinations"  value={med.vaccinations} />
+          </InfoCard>
+          <div className="space-y-4">
+            <InfoCard title="Emergency Contact" icon={<Phone size={14} />}>
+              <InfoRow label="Name"         value={med.emergencyName} />
+              <InfoRow label="Relationship" value={med.emergencyRelation} />
+              <InfoRow label="Phone"        value={med.emergencyPhone} />
+            </InfoCard>
+            <InfoCard title="Doctor" icon={<User size={14} />}>
+              <InfoRow label="Doctor name"  value={med.doctorName} />
+              <InfoRow label="Doctor phone" value={med.doctorPhone} />
+            </InfoCard>
+          </div>
+        </div>
+        {canEdit && (
+          <div className="flex justify-end">
+            <button
+              onClick={() => setEditing(true)}
+              className="flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 border border-slate-200 hover:border-slate-300 rounded-lg px-3 py-1.5 transition"
+            >
+              <Edit2 size={13} /> Edit medical info
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={e => {
+        e.preventDefault();
+        onSave({ medical: form }, { onSuccess: () => setEditing(false) });
+      }}
+      className="space-y-4"
+    >
+      <div className="grid gap-4 md:grid-cols-2">
+        {/* Medical info */}
+        <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Medical Information</h3>
+          <FField label="Blood group">
+            <select className={iCls()} value={form.bloodGroup} onChange={e => set('bloodGroup', e.target.value)}>
+              <option value="">— Select —</option>
+              {BLOOD_GROUPS.map(g => <option key={g} value={g}>{g}</option>)}
+            </select>
+          </FField>
+          <FField label="Allergies">
+            <textarea
+              rows={3}
+              className={`${iCls()} resize-none`}
+              placeholder="e.g. Penicillin, peanuts, latex…"
+              value={form.allergies}
+              onChange={e => set('allergies', e.target.value)}
+            />
+          </FField>
+          <FField label="Chronic conditions">
+            <textarea
+              rows={3}
+              className={`${iCls()} resize-none`}
+              placeholder="e.g. Asthma, diabetes, epilepsy…"
+              value={form.conditions}
+              onChange={e => set('conditions', e.target.value)}
+            />
+          </FField>
+          <FField label="Vaccination notes">
+            <textarea
+              rows={2}
+              className={`${iCls()} resize-none`}
+              placeholder="e.g. BCG, MMR, Hepatitis B…"
+              value={form.vaccinations}
+              onChange={e => set('vaccinations', e.target.value)}
+            />
+          </FField>
+        </div>
+
+        {/* Emergency + Doctor */}
+        <div className="space-y-4">
+          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Emergency Contact</h3>
+            <FField label="Full name">
+              <input className={iCls()} value={form.emergencyName} onChange={e => set('emergencyName', e.target.value)} placeholder="Contact name" />
+            </FField>
+            <FField label="Relationship">
+              <input className={iCls()} value={form.emergencyRelation} onChange={e => set('emergencyRelation', e.target.value)} placeholder="e.g. Parent, sibling, uncle" />
+            </FField>
+            <FField label="Phone number">
+              <input className={iCls()} value={form.emergencyPhone} onChange={e => set('emergencyPhone', e.target.value)} placeholder="+254 7xx xxx xxx" />
+            </FField>
+          </div>
+          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Doctor / Clinic</h3>
+            <FField label="Doctor name">
+              <input className={iCls()} value={form.doctorName} onChange={e => set('doctorName', e.target.value)} placeholder="Dr. …" />
+            </FField>
+            <FField label="Doctor / clinic phone">
+              <input className={iCls()} value={form.doctorPhone} onChange={e => set('doctorPhone', e.target.value)} placeholder="+254 7xx xxx xxx" />
+            </FField>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 pt-2">
+        <button
+          type="submit"
+          disabled={saving}
+          className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+        >
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+          {saving ? 'Saving…' : 'Save medical info'}
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditing(false)}
+          disabled={saving}
+          className="flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-800 border border-slate-200 hover:border-slate-300 px-4 py-2 rounded-lg transition"
+        >
+          <X size={13} /> Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 
