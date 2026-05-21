@@ -11,7 +11,7 @@ import {
   CheckCircle2, AlertTriangle, Loader2, Trash2,
   Plus, X, Save, Send, ClipboardList,
   ChevronDown, TrendingUp, TrendingDown,
-  BookOpen, Calendar, Clock, Award,
+  BookOpen, Calendar, Clock, Award, Printer,
 } from 'lucide-react';
 import { assessment as api, classes as classesApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
@@ -506,6 +506,19 @@ function StudentReportCard({ student, studentsList, template, half, termNum }) {
 
   if (!subjects.length) return null;
 
+  function printCard() {
+    const rows = subjects.map(([subId, data]) => {
+      if (template === 'summary') {
+        const t1 = data.terms?.[1]?.termTotal, t2 = data.terms?.[2]?.termTotal, t3 = data.terms?.[3]?.termTotal;
+        return `<tr><td style="padding:6px 12px;border-bottom:1px solid #eee">${subId}</td><td style="text-align:right;padding:6px 12px;border-bottom:1px solid #eee">${t1!=null?t1.toFixed(1)+'%':'—'}</td><td style="text-align:right;padding:6px 12px;border-bottom:1px solid #eee">${t2!=null?t2.toFixed(1)+'%':'—'}</td><td style="text-align:right;padding:6px 12px;border-bottom:1px solid #eee">${t3!=null?t3.toFixed(1)+'%':'—'}</td><td style="text-align:right;padding:6px 12px;border-bottom:1px solid #eee;font-weight:bold">${data.summaryAverage!=null?data.summaryAverage.toFixed(1)+'%':'—'}</td></tr>`;
+      }
+      return termsToShow.map(tn => { const t = data.terms?.[tn]; return `<tr><td style="padding:6px 12px;border-bottom:1px solid #eee">${subId} (T${tn})</td><td style="text-align:right;padding:6px 12px;border-bottom:1px solid #eee">${t?.finalGrade!=null?t.finalGrade.toFixed(1)+'%':'—'}</td></tr>`; }).join('');
+    }).join('');
+    const html = `<html><head><title>Report Card — ${name}</title><style>body{font-family:Arial,sans-serif;max-width:700px;margin:30px auto;font-size:13px}h2{margin-bottom:4px}table{width:100%;border-collapse:collapse}th{background:#f1f5f9;padding:8px 12px;text-align:left;font-size:12px}@media print{}</style></head><body><h2>Report Card: ${name}</h2>${admNo?`<p style="color:#666;font-size:12px">Adm No: ${admNo}</p>`:''}<table><thead><tr>${template==='summary'?'<th>Subject</th><th style="text-align:right">T1</th><th style="text-align:right">T2</th><th style="text-align:right">T3</th><th style="text-align:right">Final Avg</th>':'<th>Subject</th><th style="text-align:right">Final Grade</th>'}</tr></thead><tbody>${rows}</tbody></table></body></html>`;
+    const w = window.open('','_blank','width=780,height=900');
+    w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 400);
+  }
+
   return (
     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
       {/* Card header */}
@@ -514,7 +527,16 @@ function StudentReportCard({ student, studentsList, template, half, termNum }) {
           <p className="text-sm font-semibold text-slate-800">{name}</p>
           {admNo && <p className="text-xs text-slate-400">{admNo}</p>}
         </div>
-        {student.classId && <span className="text-xs text-slate-400">{student.classId}</span>}
+        <div className="flex items-center gap-2">
+          {student.classId && <span className="text-xs text-slate-400">{student.classId}</span>}
+          <button
+            onClick={printCard}
+            title="Print report card"
+            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition"
+          >
+            <Printer size={13} />
+          </button>
+        </div>
       </div>
 
       {template === 'summary' ? (

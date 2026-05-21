@@ -11,9 +11,10 @@ import {
   UserPlus, Search, SlidersHorizontal, ChevronRight,
   X, Loader2, AlertCircle, GraduationCap, Phone, Mail,
   Calendar, Flag, ArrowRight, CheckCircle2, MoreHorizontal,
-  Users, TrendingUp, Clock, Star,
+  Users, TrendingUp, Clock, Star, Printer,
 } from 'lucide-react';
 import { admissions as admissionsApi } from '@/api/client.js';
+import useAuthStore from '@/store/auth.js';
 
 /* ── Stage config ─────────────────────────────────────────── */
 const PIPELINE = [
@@ -730,10 +731,12 @@ function StageModal({ applicant, onClose, onChanged }) {
    DETAIL PANEL
    ══════════════════════════════════════════════════════════ */
 function DetailPanel({ applicant, onClose, onStageChange }) {
-  const a  = applicant;
-  const sm = stageMeta(a.stage);
-  const av = avatarColor(`${a.firstName}${a.lastName}`);
-  const pri = PRIORITY_CONFIG[a.priority] ?? PRIORITY_CONFIG.normal;
+  const a    = applicant;
+  const sm   = stageMeta(a.stage);
+  const av   = avatarColor(`${a.firstName}${a.lastName}`);
+  const pri  = PRIORITY_CONFIG[a.priority] ?? PRIORITY_CONFIG.normal;
+  const school = useAuthStore(s => s.session?.school);
+  const [showLetter, setShowLetter] = useState(false);
 
   return (
     <>
@@ -775,8 +778,8 @@ function DetailPanel({ applicant, onClose, onStageChange }) {
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto">
-          {/* Move stage CTA */}
-          <div className="px-6 py-4 border-b border-slate-100">
+          {/* Actions */}
+          <div className="px-6 py-4 border-b border-slate-100 space-y-2">
             <button
               onClick={onStageChange}
               className="w-full flex items-center justify-between bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-colors"
@@ -786,6 +789,13 @@ function DetailPanel({ applicant, onClose, onStageChange }) {
                 Move to next stage
               </span>
               <ChevronRight size={14} />
+            </button>
+            <button
+              onClick={() => setShowLetter(true)}
+              className="w-full flex items-center justify-center gap-2 border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-sm font-medium px-4 py-2.5 rounded-xl transition-colors"
+            >
+              <Printer size={14} />
+              Print Admission Letter
             </button>
           </div>
 
@@ -824,7 +834,108 @@ function DetailPanel({ applicant, onClose, onStageChange }) {
           </div>
         </div>
       </motion.div>
+
+      {showLetter && (
+        <PrintLetterModal applicant={a} school={school} onClose={() => setShowLetter(false)} />
+      )}
     </>
+  );
+}
+
+/* ── Print Admission Letter Modal ─────────────────────────── */
+function PrintLetterModal({ applicant, school, onClose }) {
+  const a      = applicant;
+  const refNo  = `ADM-${(a._id ?? a.id ?? '').slice(-6).toUpperCase() || 'XXXXXX'}`;
+  const today  = new Date().toLocaleDateString('en-GB', { day:'numeric', month:'long', year:'numeric' });
+  const schoolName = school?.name ?? 'Msingi School';
+  const letterBody = `
+    <html>
+    <head>
+      <title>Admission Letter — ${a.firstName} ${a.lastName}</title>
+      <style>
+        body { font-family: Georgia, serif; max-width: 680px; margin: 40px auto; padding: 0 20px; color: #111; line-height: 1.6; }
+        h1 { font-size: 22px; font-weight: bold; margin-bottom: 2px; }
+        .school-sub { font-size: 13px; color: #555; margin-bottom: 32px; }
+        .date { text-align: right; font-size: 13px; color: #555; }
+        .ref  { font-size: 13px; color: #555; margin-bottom: 28px; }
+        .salutation { font-size: 15px; margin-bottom: 16px; }
+        .body-para  { font-size: 14px; margin-bottom: 14px; }
+        .detail-box { border: 1px solid #ddd; border-radius: 6px; padding: 16px 20px; margin: 24px 0; font-size: 13px; background: #f9fafb; }
+        .detail-row { display: flex; margin-bottom: 8px; }
+        .detail-label { width: 160px; color: #666; font-weight: 600; }
+        .detail-value { flex: 1; color: #111; }
+        .signature  { margin-top: 48px; }
+        .sig-line   { margin-top: 56px; border-top: 1px solid #333; width: 220px; padding-top: 6px; font-size: 13px; }
+        hr { border: none; border-top: 2px solid #111; margin: 16px 0 8px; }
+        @media print { body { margin: 0; } button { display: none; } }
+      </style>
+    </head>
+    <body>
+      <div class="date">${today}</div>
+      <h1>${schoolName}</h1>
+      <hr/>
+      <div class="school-sub">Admissions Office</div>
+      <div class="ref">Ref: ${refNo}</div>
+      <div class="salutation">Dear ${a.parentName ?? 'Parent / Guardian'},</div>
+      <p class="body-para">
+        We are pleased to confirm that the application for <strong>${a.firstName} ${a.middleName ? a.middleName + ' ' : ''}${a.lastName}</strong> has been received and is currently at the <strong>${stageMeta(a.stage).label}</strong> stage of our admissions process.
+      </p>
+      <div class="detail-box">
+        <div class="detail-row"><span class="detail-label">Applicant Name</span><span class="detail-value">${a.firstName} ${a.middleName ? a.middleName + ' ' : ''}${a.lastName}</span></div>
+        <div class="detail-row"><span class="detail-label">Date of Birth</span><span class="detail-value">${a.dateOfBirth ? new Date(a.dateOfBirth).toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'}) : '—'}</span></div>
+        <div class="detail-row"><span class="detail-label">Applying For</span><span class="detail-value">${a.applyingForClass || '—'} — ${a.applyingForYear || 'Current Year'}</span></div>
+        <div class="detail-row"><span class="detail-label">Stage</span><span class="detail-value">${stageMeta(a.stage).label}</span></div>
+        <div class="detail-row"><span class="detail-label">Reference No.</span><span class="detail-value">${refNo}</span></div>
+        <div class="detail-row"><span class="detail-label">Application Date</span><span class="detail-value">${a.createdAt ? new Date(a.createdAt).toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'}) : today}</span></div>
+      </div>
+      <p class="body-para">
+        We will be in touch to inform you of the next steps in the process. If you have any questions, please do not hesitate to contact the Admissions Office.
+      </p>
+      <p class="body-para">Yours faithfully,</p>
+      <div class="sig-line">Admissions Officer<br/>${schoolName}</div>
+    </body>
+    </html>
+  `;
+
+  function handlePrint() {
+    const win = window.open('', '_blank', 'width=800,height=900');
+    win.document.write(letterBody);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 500);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+          <h3 className="font-semibold text-slate-900">Admission Letter</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-1"><X size={16} /></button>
+        </div>
+        <div className="p-6 space-y-4">
+          {/* Preview snippet */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-1 text-sm text-slate-700 font-mono text-xs leading-relaxed">
+            <p className="font-bold text-base text-slate-900">{schoolName}</p>
+            <p className="text-slate-500">Admissions Office — Ref: {refNo}</p>
+            <p className="mt-3">Dear {a.parentName ?? 'Parent / Guardian'},</p>
+            <p className="mt-2 text-slate-600">
+              We are pleased to confirm the application for <strong>{a.firstName} {a.lastName}</strong>{' '}
+              is at the <strong>{stageMeta(a.stage).label}</strong> stage.
+            </p>
+            <p className="text-slate-500 mt-2 text-xs">Class: {a.applyingForClass || '—'} · Year: {a.applyingForYear || '—'}</p>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <button onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Cancel</button>
+            <button
+              onClick={handlePrint}
+              className="rounded-lg bg-slate-900 hover:bg-slate-800 px-4 py-2 text-sm font-semibold text-white flex items-center gap-2"
+            >
+              <Printer size={14} /> Print Letter
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
