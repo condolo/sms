@@ -10,7 +10,7 @@ import {
 } from 'recharts';
 import {
   BarChart3, Users, Wallet, Scale, Calendar,
-  Download, TrendingUp, TrendingDown, AlertCircle, BookOpen,
+  Download, TrendingUp, TrendingDown, AlertCircle, BookOpen, UserCheck,
 } from 'lucide-react';
 import {
   students  as studentsApi,
@@ -84,6 +84,7 @@ const TABS = [
   { id: 'finance',     label: 'Finance',     Icon: Wallet     },
   { id: 'behaviour',   label: 'Behaviour',   Icon: Scale      },
   { id: 'academic',    label: 'Academic',    Icon: BookOpen   },
+  { id: 'enrollment',  label: 'Enrollment',  Icon: UserCheck  },
 ];
 
 /* ══════════════════════════════════════════════════════════
@@ -104,6 +105,13 @@ export default function ReportsPage() {
     queryKey: ['assessment', 'marks-summary-report'],
     queryFn:  () => assessmentApi.marksSummary({ limit: 200 }),
     enabled:  tab === 'academic',
+    staleTime: 5 * 60_000,
+  });
+
+  const { data: recentStudents, isLoading: recentLoading } = useQuery({
+    queryKey: ['students', 'recent-enrollments'],
+    queryFn:  () => studentsApi.list({ limit: 15, sort: 'enrollmentDate', order: 'desc' }),
+    enabled:  tab === 'enrollment',
     staleTime: 5 * 60_000,
   });
 
@@ -403,6 +411,100 @@ export default function ReportsPage() {
               </ResponsiveContainer>
             ) : (
               <p className="text-center text-slate-400 text-sm py-16">No behaviour data available yet.</p>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {/* ── ENROLLMENT TAB ── */}
+      {tab === 'enrollment' && (
+        <div className="space-y-6">
+          {/* KPI row from studStats */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <Stat label="Total Enrolled"  value={(studStats?.total  ?? 0).toLocaleString()} Icon={Users}     color="violet" />
+            <Stat label="Active Students" value={(studStats?.active ?? 0).toLocaleString()} Icon={UserCheck} color="green"  />
+            <Stat label="Inactive"
+              value={((studStats?.total ?? 0) - (studStats?.active ?? 0)).toLocaleString()}
+              Icon={AlertCircle} color="amber" />
+            <Stat
+              label="Avg Class Size"
+              value={
+                studStats?.byClass && studStats.byClass.length > 0
+                  ? Math.round((studStats.total ?? 0) / studStats.byClass.length)
+                  : '—'
+              }
+              Icon={BarChart3} color="blue"
+            />
+          </div>
+
+          {/* Full class enrollment bar */}
+          {studStats?.byClass && studStats.byClass.length > 0 && (
+            <Card title="Enrollment by Class" action={
+              <button
+                onClick={() => exportCSV('students')}
+                className="text-xs text-violet-600 hover:underline flex items-center gap-1"
+              >
+                <Download size={11} /> CSV
+              </button>
+            }>
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart
+                  data={[...studStats.byClass]
+                    .sort((a, b) => (a.className ?? a._id ?? '').localeCompare(b.className ?? b._id ?? ''))
+                    .map(c => ({ name: c.className ?? c._id ?? 'Unknown', students: c.count ?? c.students ?? 0 }))}
+                  margin={{ left: -10 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="name" tick={{ fontSize: 9 }} interval={0} angle={-35} textAnchor="end" height={50} />
+                  <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+                  <Tooltip content={<ChartTip />} />
+                  <Bar dataKey="students" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Card>
+          )}
+
+          {/* Recently enrolled */}
+          <Card title="Recently Enrolled Students">
+            {recentLoading ? (
+              <div className="space-y-2">
+                {[...Array(5)].map((_, i) => <div key={i} className="h-8 bg-slate-100 rounded animate-pulse" />)}
+              </div>
+            ) : !recentStudents?.data?.length ? (
+              <p className="text-center text-slate-400 text-sm py-8">No enrollment data available.</p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    <th className="text-left py-2 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Student</th>
+                    <th className="text-left py-2 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider hidden sm:table-cell">Class</th>
+                    <th className="text-left py-2 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Enrolled</th>
+                    <th className="text-left py-2 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentStudents.data.map((s, i) => (
+                    <tr key={s._id ?? s.id} className={`border-b border-slate-50 ${i % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
+                      <td className="py-2.5 px-3 font-medium text-slate-800">{s.firstName} {s.lastName}</td>
+                      <td className="py-2.5 px-3 text-slate-600 hidden sm:table-cell">{s.className ?? '—'}</td>
+                      <td className="py-2.5 px-3 text-slate-500 text-xs">
+                        {s.enrollmentDate
+                          ? new Date(s.enrollmentDate).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' })
+                          : '—'}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium capitalize ${
+                          s.status === 'active' ? 'bg-emerald-100 text-emerald-700'
+                          : s.status === 'suspended' ? 'bg-amber-100 text-amber-700'
+                          : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          {s.status ?? 'active'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </Card>
         </div>
