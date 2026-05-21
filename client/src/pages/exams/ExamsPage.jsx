@@ -10,6 +10,7 @@ import {
   FileText, BarChart3, ClipboardList, Plus, X, Loader2,
   CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight,
   Search, Calendar, BookOpen, Layers, Save, Check,
+  Download, TrendingUp, Award, Users2,
 } from 'lucide-react';
 import { exams as examsApi, grades as gradesApi, classes as classesApi } from '@/api/client.js';
 
@@ -247,6 +248,14 @@ function ResultsTab() {
   const hasEdits = Object.keys(edits).length > 0;
   const loading  = resultsLoading || stuLoading;
 
+  /* Stats computed from saved results */
+  const scores = results.map(r => r.score).filter(s => s != null && !isNaN(s));
+  const maxS   = selectedExam?.maxScore ?? 100;
+  const avg    = scores.length ? Math.round(scores.reduce((a,b) => a+b, 0) / scores.length) : null;
+  const highest = scores.length ? Math.max(...scores) : null;
+  const lowest  = scores.length ? Math.min(...scores) : null;
+  const passRate = scores.length ? Math.round((scores.filter(s => (s/maxS)*100 >= 50).length / scores.length) * 100) : null;
+
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="space-y-4">
       {/* Exam selector + save */}
@@ -371,6 +380,28 @@ function ResultsTab() {
           )}
         </div>
       )}
+
+      {/* Stats bar — visible when exam has saved results */}
+      {scores.length > 0 && !hasEdits && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            { label: 'Average Score', value: `${avg} / ${maxS}`, Icon: TrendingUp, color: 'text-blue-600 bg-blue-50' },
+            { label: 'Highest Score', value: `${highest} / ${maxS}`, Icon: Award, color: 'text-emerald-600 bg-emerald-50' },
+            { label: 'Lowest Score',  value: `${lowest} / ${maxS}`, Icon: TrendingUp, color: 'text-amber-600 bg-amber-50' },
+            { label: 'Pass Rate',     value: `${passRate}%`, Icon: Users2, color: passRate >= 50 ? 'text-emerald-600 bg-emerald-50' : 'text-red-600 bg-red-50' },
+          ].map(({ label, value, Icon, color }) => (
+            <div key={label} className="bg-white rounded-xl border border-slate-200 p-4 flex items-center gap-3">
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${color.split(' ')[1]}`}>
+                <Icon size={16} className={color.split(' ')[0]} />
+              </div>
+              <div>
+                <p className="text-[11px] text-slate-500">{label}</p>
+                <p className="text-sm font-semibold text-slate-800 mt-0.5">{value}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -380,6 +411,21 @@ function GradesTab() {
   const [classId, setClassId]   = useState('');
   const [examId, setExamId]     = useState('');
   const [subject, setSubject]   = useState('');
+
+  function exportCSV(rows) {
+    const header = 'Student,Subject,Exam,Avg %,Grade';
+    const lines  = rows.map(r =>
+      [r.studentName ?? r.studentId, r.subject ?? '', r.examTitle ?? '',
+       r.avgPct != null ? `${Math.round(r.avgPct)}%` : (r.score ?? ''), r.grade ?? '']
+      .map(v => `"${String(v).replace(/"/g,'""')}"`)
+      .join(',')
+    );
+    const blob = new Blob([[header, ...lines].join('\n')], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = 'grade-report.csv'; a.click();
+    URL.revokeObjectURL(url);
+  }
 
   /* Classes */
   const { data: classesData } = useQuery({
@@ -436,6 +482,27 @@ function GradesTab() {
         </div>
       </div>
 
+      {/* Grade summary KPIs */}
+      {rows.length > 0 && (() => {
+        const pcts = rows.map(r => Number(r.avgPct ?? r.score ?? 0)).filter(v => !isNaN(v));
+        const gAvg = pcts.length ? Math.round(pcts.reduce((a,b)=>a+b,0)/pcts.length) : null;
+        const gPass = pcts.length ? Math.round((pcts.filter(v=>v>=50).length/pcts.length)*100) : null;
+        return (
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { label: 'Records', value: rows.length, color: 'text-violet-600 bg-violet-50' },
+              { label: 'Class Average', value: gAvg != null ? `${gAvg}%` : '—', color: gAvg >= 50 ? 'text-emerald-600 bg-emerald-50' : 'text-amber-600 bg-amber-50' },
+              { label: 'Pass Rate', value: gPass != null ? `${gPass}%` : '—', color: gPass >= 50 ? 'text-emerald-600 bg-emerald-50' : 'text-red-600 bg-red-50' },
+            ].map(({ label, value, color }) => (
+              <div key={label} className="bg-white rounded-xl border border-slate-200 px-4 py-3">
+                <p className="text-[11px] text-slate-500">{label}</p>
+                <p className={`text-lg font-bold mt-0.5 ${color.split(' ')[0]}`}>{value}</p>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+
       {/* Report table */}
       {!enabled ? (
         <EmptyMsg icon={<BarChart3 size={36} />} title="Apply a filter" subtitle="Select a class, exam or subject to load the grade report" />
@@ -477,8 +544,15 @@ function GradesTab() {
               })}
             </tbody>
           </table>
-          <div className="px-4 py-3 border-t border-slate-100 bg-slate-50">
+          <div className="px-4 py-3 border-t border-slate-100 bg-slate-50 flex items-center justify-between gap-3">
             <p className="text-xs text-slate-500">{rows.length} record{rows.length !== 1 ? 's' : ''}</p>
+            <button
+              onClick={() => exportCSV(rows)}
+              className="flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-lg transition"
+            >
+              <Download size={12} />
+              Export CSV
+            </button>
           </div>
         </div>
       )}
