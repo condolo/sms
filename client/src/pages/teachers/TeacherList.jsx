@@ -1,5 +1,5 @@
 /* ============================================================
-   Teachers — Premium List with Add Slide-Over
+   Teachers — Premium List with Add + View/Edit Slide-Overs
    /platform-audit: RBAC-gated, lucide icons, correct API shape
    ============================================================ */
 import { useState, useRef } from 'react';
@@ -8,7 +8,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, X, UserPlus, Trash2, Eye, Loader2,
   CheckCircle2, AlertTriangle, Phone, Mail,
-  BookOpen, Briefcase, Users,
+  BookOpen, Briefcase, Users, Edit2, Save, Calendar,
+  MapPin, Award, ChevronRight,
 } from 'lucide-react';
 import { teachers as teachersApi } from '@/api/client.js';
 import { Pagination } from '@/components/ui/Pagination.jsx';
@@ -47,6 +48,7 @@ export default function TeacherList() {
   const [debSearch,setDebSearch]= useState('');
   const [page,     setPage]     = useState(1);
   const [showAdd,  setShowAdd]  = useState(false);
+  const [selected, setSelected] = useState(null);
   const timer = useRef(null);
 
   function onSearch(v) {
@@ -169,7 +171,7 @@ export default function TeacherList() {
                   const sts = STATUS_BADGE[t.status] ?? STATUS_BADGE.inactive;
                   const removing = removingId === id;
                   return (
-                    <tr key={id} className={`hover:bg-slate-50 transition group ${removing ? 'opacity-40 pointer-events-none' : ''}`}>
+                    <tr key={id} onClick={() => setSelected(t)} className={`hover:bg-slate-50 transition group cursor-pointer ${removing ? 'opacity-40 pointer-events-none' : ''}`}>
                       <td className="py-3.5 px-5">
                         <div className="flex items-center gap-3">
                           <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${av} flex items-center justify-center text-white text-xs font-bold shrink-0`}>
@@ -208,8 +210,11 @@ export default function TeacherList() {
                       </td>
                       <td className="py-3.5 px-4">
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition">
+                          <button onClick={e => { e.stopPropagation(); setSelected(t); }} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition" title="View details">
+                            <Eye size={14} />
+                          </button>
                           {canDelete && (
-                            <button onClick={() => confirmRemove(t)} className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition" title="Remove">
+                            <button onClick={e => { e.stopPropagation(); confirmRemove(t); }} className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition" title="Remove">
                               <Trash2 size={14} />
                             </button>
                           )}
@@ -233,9 +238,369 @@ export default function TeacherList() {
             onCreated={() => { setShowAdd(false); qc.invalidateQueries({ queryKey: ['teachers'] }); }}
           />
         )}
+        {selected && !showAdd && (
+          <TeacherDetailSlideOver
+            teacher={selected}
+            canEdit={canCreate}
+            onClose={() => setSelected(null)}
+            onUpdated={updated => {
+              setSelected(updated);
+              qc.invalidateQueries({ queryKey: ['teachers'] });
+            }}
+            onRemove={t => { setSelected(null); confirmRemove(t); }}
+            canDelete={canDelete}
+          />
+        )}
       </AnimatePresence>
     </div>
   );
+}
+
+/* ── Teacher Detail / Edit Slide-Over ────────────────────── */
+function TeacherDetailSlideOver({ teacher: initialTeacher, canEdit, canDelete, onClose, onUpdated, onRemove }) {
+  const qc = useQueryClient();
+  const [editing, setEditing]   = useState(false);
+  const [teacher, setTeacher]   = useState(initialTeacher);
+  const [form, setForm]         = useState(null);
+  const [subjectInput, setSubjectInput] = useState('');
+  const [errors, setErrors]     = useState({});
+
+  const av = avatarColor(`${teacher.firstName}${teacher.lastName}`);
+  const sts = STATUS_BADGE[teacher.status] ?? STATUS_BADGE.inactive;
+
+  const updateMutation = useMutation({
+    mutationFn: data => teachersApi.update(teacher._id ?? teacher.id, data),
+    onSuccess: updated => {
+      const merged = { ...teacher, ...updated };
+      setTeacher(merged);
+      onUpdated(merged);
+      setEditing(false);
+    },
+    onError: err => setErrors({ _server: err?.message ?? 'Failed to update' }),
+  });
+
+  function startEdit() {
+    setForm({
+      firstName:    teacher.firstName   ?? '',
+      lastName:     teacher.lastName    ?? '',
+      middleName:   teacher.middleName  ?? '',
+      title:        teacher.title       ?? '',
+      email:        teacher.email       ?? '',
+      phone:        teacher.phone       ?? '',
+      gender:       teacher.gender      ?? '',
+      dateOfBirth:  teacher.dateOfBirth ? teacher.dateOfBirth.slice(0,10) : '',
+      qualifications: teacher.qualifications ?? '',
+      subjects:     teacher.subjects    ?? [],
+      contractType: teacher.contractType ?? 'full_time',
+      status:       teacher.status      ?? 'active',
+      joinDate:     teacher.joinDate    ? teacher.joinDate.slice(0,10) : '',
+      address:      teacher.address     ?? '',
+    });
+    setErrors({});
+    setEditing(true);
+  }
+
+  function setF(field, val) {
+    setForm(f => ({ ...f, [field]: val }));
+    setErrors(e => { const n = {...e}; delete n[field]; return n; });
+  }
+
+  function addSubject() {
+    const s = subjectInput.trim();
+    if (!s || form.subjects.includes(s)) return;
+    setF('subjects', [...form.subjects, s]);
+    setSubjectInput('');
+  }
+
+  function save() {
+    const e = {};
+    if (!form.firstName.trim()) e.firstName = 'Required';
+    if (!form.lastName.trim())  e.lastName  = 'Required';
+    if (!form.email.trim())     e.email     = 'Required';
+    if (Object.keys(e).length)  { setErrors(e); return; }
+    updateMutation.mutate(form);
+  }
+
+  const fmtDate = d => d ? new Date(d).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' }) : '—';
+
+  return (
+    <>
+      <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
+        className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-40" onClick={onClose} />
+      <motion.div
+        initial={{ x:'100%' }} animate={{ x:0 }} exit={{ x:'100%' }}
+        transition={{ type:'spring', damping:30, stiffness:300 }}
+        className="fixed right-0 top-0 h-full w-full max-w-lg bg-white shadow-2xl z-50 flex flex-col"
+      >
+        {/* Header */}
+        <div className="px-6 py-5 border-b border-slate-100">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-4">
+              <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${av} flex items-center justify-center text-white text-lg font-bold shrink-0 shadow-sm`}>
+                {initials(teacher.firstName, teacher.lastName)}
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-slate-900">
+                  {teacher.title ? `${teacher.title} ` : ''}{teacher.firstName} {teacher.middleName ? `${teacher.middleName} ` : ''}{teacher.lastName}
+                </h2>
+                <div className="flex items-center gap-2 mt-1">
+                  {teacher.staffId && <span className="font-mono text-[11px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded">{teacher.staffId}</span>}
+                  <span className={`inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full capitalize ${sts}`}>
+                    {teacher.status?.replace('_',' ') ?? 'active'}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition mt-0.5">
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto">
+          {!editing ? (
+            /* View mode */
+            <div className="px-6 py-5 space-y-6">
+              {/* Contract summary chips */}
+              <div className="flex flex-wrap gap-2">
+                <span className="flex items-center gap-1.5 text-xs bg-slate-100 text-slate-600 px-3 py-1.5 rounded-full">
+                  <Briefcase size={11} />
+                  {CONTRACT_LABELS[teacher.contractType] ?? teacher.contractType ?? 'Unknown'}
+                </span>
+                {teacher.joinDate && (
+                  <span className="flex items-center gap-1.5 text-xs bg-slate-100 text-slate-600 px-3 py-1.5 rounded-full">
+                    <Calendar size={11} />
+                    Joined {fmtDate(teacher.joinDate)}
+                  </span>
+                )}
+                {teacher.gender && (
+                  <span className="text-xs bg-slate-100 text-slate-600 px-3 py-1.5 rounded-full capitalize">
+                    {teacher.gender.replace('_',' ')}
+                  </span>
+                )}
+              </div>
+
+              {/* Contact */}
+              <div>
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-3">Contact</p>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3 text-sm">
+                    <Mail size={13} className="text-slate-400 shrink-0" />
+                    {teacher.email
+                      ? <a href={`mailto:${teacher.email}`} className="text-violet-600 hover:underline truncate">{teacher.email}</a>
+                      : <span className="text-slate-400">—</span>}
+                  </div>
+                  <div className="flex items-center gap-3 text-sm">
+                    <Phone size={13} className="text-slate-400 shrink-0" />
+                    <span className="text-slate-700">{teacher.phone || '—'}</span>
+                  </div>
+                  {teacher.address && (
+                    <div className="flex items-start gap-3 text-sm">
+                      <MapPin size={13} className="text-slate-400 shrink-0 mt-0.5" />
+                      <span className="text-slate-700">{teacher.address}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Subjects */}
+              <div>
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-3">Subjects Taught</p>
+                {(teacher.subjects ?? []).length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {teacher.subjects.map((s, i) => (
+                      <span key={i} className="text-xs bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-full font-medium">{s}</span>
+                    ))}
+                  </div>
+                ) : <p className="text-sm text-slate-400">No subjects listed</p>}
+              </div>
+
+              {/* Qualifications */}
+              {teacher.qualifications && (
+                <div>
+                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-3">Qualifications</p>
+                  <div className="flex items-start gap-2">
+                    <Award size={13} className="text-slate-400 shrink-0 mt-0.5" />
+                    <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{teacher.qualifications}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* DOB */}
+              {teacher.dateOfBirth && (
+                <div>
+                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-2">Date of Birth</p>
+                  <p className="text-sm text-slate-700">{fmtDate(teacher.dateOfBirth)}</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Edit mode */
+            <div className="px-6 py-5 space-y-5">
+              {errors._server && (
+                <div className="flex items-center gap-2 bg-red-50 text-red-700 text-sm px-3 py-2.5 rounded-lg border border-red-200">
+                  <AlertTriangle size={14} className="shrink-0" />{errors._server}
+                </div>
+              )}
+
+              <DSection label="Personal">
+                <div className="grid grid-cols-3 gap-3">
+                  <DField label="Title">
+                    <select value={form.title} onChange={e => setF('title', e.target.value)} className={dCls()}>
+                      <option value="">—</option>
+                      {['Mr','Mrs','Ms','Miss','Dr','Prof'].map(t => <option key={t}>{t}</option>)}
+                    </select>
+                  </DField>
+                  <DField label="First Name *" error={errors.firstName}>
+                    <input value={form.firstName} onChange={e => setF('firstName', e.target.value)} className={dCls(errors.firstName)} />
+                  </DField>
+                  <DField label="Last Name *" error={errors.lastName}>
+                    <input value={form.lastName} onChange={e => setF('lastName', e.target.value)} className={dCls(errors.lastName)} />
+                  </DField>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <DField label="Gender">
+                    <select value={form.gender} onChange={e => setF('gender', e.target.value)} className={dCls()}>
+                      <option value="">Select…</option>
+                      <option value="male">Male</option>
+                      <option value="female">Female</option>
+                      <option value="other">Other</option>
+                      <option value="prefer_not_to_say">Prefer not to say</option>
+                    </select>
+                  </DField>
+                  <DField label="Date of Birth">
+                    <input type="date" value={form.dateOfBirth} onChange={e => setF('dateOfBirth', e.target.value)} className={dCls()} />
+                  </DField>
+                </div>
+              </DSection>
+
+              <DSection label="Contact">
+                <DField label="Email *" error={errors.email}>
+                  <input type="email" value={form.email} onChange={e => setF('email', e.target.value)} className={dCls(errors.email)} />
+                </DField>
+                <div className="grid grid-cols-2 gap-3">
+                  <DField label="Phone">
+                    <input value={form.phone} onChange={e => setF('phone', e.target.value)} placeholder="+254 …" className={dCls()} />
+                  </DField>
+                  <DField label="Join Date">
+                    <input type="date" value={form.joinDate} onChange={e => setF('joinDate', e.target.value)} className={dCls()} />
+                  </DField>
+                </div>
+                <DField label="Address">
+                  <input value={form.address} onChange={e => setF('address', e.target.value)} placeholder="Physical address…" className={dCls()} />
+                </DField>
+              </DSection>
+
+              <DSection label="Role">
+                <div className="grid grid-cols-2 gap-3">
+                  <DField label="Contract Type">
+                    <select value={form.contractType} onChange={e => setF('contractType', e.target.value)} className={dCls()}>
+                      <option value="full_time">Full-time</option>
+                      <option value="part_time">Part-time</option>
+                      <option value="supply">Supply</option>
+                      <option value="volunteer">Volunteer</option>
+                    </select>
+                  </DField>
+                  <DField label="Status">
+                    <select value={form.status} onChange={e => setF('status', e.target.value)} className={dCls()}>
+                      <option value="active">Active</option>
+                      <option value="on_leave">On Leave</option>
+                      <option value="inactive">Inactive</option>
+                      <option value="terminated">Terminated</option>
+                    </select>
+                  </DField>
+                </div>
+                <DField label="Qualifications">
+                  <textarea value={form.qualifications} onChange={e => setF('qualifications', e.target.value)} rows={2} placeholder="Degrees, certificates…" className={`${dCls()} resize-none`} />
+                </DField>
+                <DField label="Subjects Taught">
+                  <div className="flex gap-2">
+                    <input
+                      value={subjectInput}
+                      onChange={e => setSubjectInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addSubject(); } }}
+                      placeholder="Type subject + Enter"
+                      className={dCls()}
+                    />
+                    <button type="button" onClick={addSubject} className="px-3 py-2 text-xs font-medium bg-slate-100 hover:bg-slate-200 rounded-lg transition whitespace-nowrap">
+                      Add
+                    </button>
+                  </div>
+                  {form.subjects.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {form.subjects.map(s => (
+                        <span key={s} className="flex items-center gap-1 text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded-full">
+                          {s}
+                          <button type="button" onClick={() => setF('subjects', form.subjects.filter(x => x !== s))} className="hover:text-indigo-900"><X size={10} /></button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </DField>
+              </DSection>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+          {!editing ? (
+            <>
+              <div className="flex gap-2">
+                {canDelete && (
+                  <button onClick={() => onRemove(teacher)} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition">
+                    <Trash2 size={12} /> Remove
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 transition">Close</button>
+                {canEdit && (
+                  <button onClick={startEdit} className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition">
+                    <Edit2 size={13} /> Edit
+                  </button>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <button onClick={() => setEditing(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 transition">Cancel</button>
+              <button
+                onClick={save}
+                disabled={updateMutation.isPending}
+                className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded-lg transition"
+              >
+                {updateMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                {updateMutation.isPending ? 'Saving…' : 'Save Changes'}
+              </button>
+            </>
+          )}
+        </div>
+      </motion.div>
+    </>
+  );
+}
+
+function DSection({ label, children }) {
+  return (
+    <div className="space-y-3">
+      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">{label}</p>
+      <div className="space-y-3">{children}</div>
+    </div>
+  );
+}
+function DField({ label, error, children }) {
+  return (
+    <div className="space-y-1.5">
+      <label className="block text-xs font-medium text-slate-700">{label}</label>
+      {children}
+      {error && <p className="text-[11px] text-red-500">{error}</p>}
+    </div>
+  );
+}
+function dCls(error) {
+  return `w-full text-sm px-3 py-2 rounded-lg border ${error ? 'border-red-300' : 'border-slate-200 focus:border-slate-400'} bg-white focus:outline-none focus:ring-2 ${error ? 'focus:ring-red-500/20' : 'focus:ring-slate-900/10'} text-slate-800 placeholder-slate-400 transition`;
 }
 
 /* ── Add Teacher Slide-Over ───────────────────────────────── */

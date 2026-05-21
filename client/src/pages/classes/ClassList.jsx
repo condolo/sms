@@ -100,9 +100,13 @@ export default function ClassList() {
           </div>
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {rows.map(c => {
+            {[...rows].sort((a, b) => a.name.localeCompare(b.name)).map(c => {
               const id  = c._id ?? c.id;
               const col = classColor(c.name);
+              const cap = Number(c.capacity) || 0;
+              const cnt = Number(c.studentCount) || 0;
+              const fillPct = cap > 0 ? Math.min(Math.round((cnt / cap) * 100), 100) : 0;
+              const fillColor = fillPct >= 100 ? 'bg-red-500' : fillPct >= 80 ? 'bg-amber-400' : 'bg-emerald-500';
               return (
                 <motion.div
                   key={id}
@@ -137,8 +141,18 @@ export default function ClassList() {
                     <div className="mt-4 space-y-1.5">
                       <div className="flex items-center gap-2 text-xs text-slate-500">
                         <Users size={12} className="shrink-0" />
-                        <span>{(c.studentCount ?? 0).toLocaleString()} students</span>
+                        <span>{cnt.toLocaleString()} student{cnt !== 1 ? 's' : ''}</span>
+                        {cap > 0 && (
+                          <span className={`ml-auto text-[10px] font-semibold ${fillPct >= 100 ? 'text-red-500' : fillPct >= 80 ? 'text-amber-500' : 'text-emerald-600'}`}>
+                            {fillPct}%
+                          </span>
+                        )}
                       </div>
+                      {cap > 0 && (
+                        <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                          <div className={`h-1.5 rounded-full transition-all ${fillColor}`} style={{ width: `${fillPct}%` }} />
+                        </div>
+                      )}
                       {c.teacherName && (
                         <div className="flex items-center gap-2 text-xs text-slate-500">
                           <UserCheck size={12} className="shrink-0" />
@@ -151,10 +165,10 @@ export default function ClassList() {
                           <span>{c.room}</span>
                         </div>
                       )}
-                      {c.capacity && (
+                      {cap > 0 && (
                         <div className="flex items-center gap-2 text-xs text-slate-500">
                           <Hash size={12} className="shrink-0" />
-                          <span>Capacity: {c.capacity}</span>
+                          <span>Capacity: {cap}</span>
                         </div>
                       )}
                     </div>
