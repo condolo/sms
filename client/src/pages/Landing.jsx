@@ -354,90 +354,95 @@ const WORKFLOW_STEPS = [
   {
     id: 'admission',
     phase: '01 Admission',
-    title: 'Enquiry to enrolment in one pipeline.',
-    desc: 'A parent submits an enquiry. The admission pipeline moves it through assessment, offer, and enrolment — automatically creating the student record on acceptance.',
+    title: 'Structured intake — from first enquiry to enrolled student.',
+    desc: 'A parent submits an enquiry. The admission pipeline moves it through assessment, offer, and enrolment stages — automatically creating the full student record, class placement, and fee account the moment an offer is accepted.',
     color: 'from-pink-500 to-rose-500',
     iconBg: 'bg-pink-50 text-pink-600',
     Icon: ClipboardList,
     ui: {
-      header: 'Admissions Pipeline',
+      header: 'Admissions Pipeline · Term 3 2025–26',
+      stats: '18 active applications · 4 enrolled this week · 2 offers awaiting response',
       items: [
-        { name: 'J. Kamau',  status: 'Enrolled',    badge: 'bg-emerald-50 text-emerald-700' },
-        { name: 'A. Osei',   status: 'Offer Sent',  badge: 'bg-indigo-50 text-indigo-700'  },
-        { name: 'M. Ndege',  status: 'Assessment',  badge: 'bg-amber-50 text-amber-700'    },
-        { name: 'P. Mwangi', status: 'Enquiry',     badge: 'bg-slate-100 text-slate-600'   },
+        { name: 'John Kamau',    sub: 'Year 7 · Applied 14 May · Guardian: R. Kamau',         status: 'Enrolled',   badge: 'bg-emerald-50 text-emerald-700' },
+        { name: 'Amara Osei',   sub: 'Year 8 · Applied 18 May · Offer letter sent 20 May',    status: 'Offer Sent', badge: 'bg-indigo-50 text-indigo-700'  },
+        { name: 'M. Ndege',     sub: 'Year 7 · Applied 19 May · Interview: 23 May 10:00am',   status: 'Assessment', badge: 'bg-amber-50 text-amber-700'    },
+        { name: 'Priya Mwangi', sub: 'Year 9 · Applied 21 May · Awaiting documents',          status: 'Enquiry',    badge: 'bg-slate-100 text-slate-600'   },
       ],
     },
   },
   {
     id: 'academic',
     phase: '02 Academics',
-    title: 'Curriculum, grades, and timetable — connected.',
-    desc: 'The enrolled student appears in their assigned class. Teachers enter grades. The timetable auto-schedules subjects. Attendance is tracked against each lesson.',
+    title: 'Multi-curriculum grading with full teacher attribution.',
+    desc: 'The enrolled student appears in their assigned class immediately. Teachers enter grades across all subjects. Every mark is attributed, timestamped, and versioned — no silent overwrites, no lost data.',
     color: 'from-indigo-500 to-violet-500',
     iconBg: 'bg-indigo-50 text-indigo-600',
     Icon: GraduationCap,
     ui: {
-      header: 'Grade Entry — Year 7A',
+      header: 'Grade Entry · Mathematics · Year 7A · Term 2',
+      stats: 'Mr. Kariuki · 28 students enrolled · Class avg: 83.4% · Submitted: 19 / 28',
       items: [
-        { name: 'Mathematics',  status: '87 / A',  badge: 'bg-indigo-50 text-indigo-700'  },
-        { name: 'English',      status: '79 / B+', badge: 'bg-violet-50 text-violet-700'  },
-        { name: 'Science',      status: '91 / A+', badge: 'bg-emerald-50 text-emerald-700'},
-        { name: 'History',      status: '73 / B',  badge: 'bg-slate-100 text-slate-600'   },
+        { name: 'J. Kamau',   sub: 'Exam: 72  |  Coursework: 15  |  Total: 87 / 100', status: 'A · Excellent',    badge: 'bg-indigo-50 text-indigo-700'   },
+        { name: 'A. Osei',    sub: 'Exam: 65  |  Coursework: 14  |  Total: 79 / 100', status: 'B+ · Good',        badge: 'bg-violet-50 text-violet-700'   },
+        { name: 'S. Mendes',  sub: 'Exam: 78  |  Coursework: 13  |  Total: 91 / 100', status: 'A+ · Outstanding', badge: 'bg-emerald-50 text-emerald-700' },
+        { name: 'D. Liu',     sub: 'Exam: 55  |  Coursework: 10  |  Total: 65 / 100', status: 'C · Average',      badge: 'bg-amber-50 text-amber-700'     },
       ],
     },
   },
   {
     id: 'reports',
     phase: '03 Reports',
-    title: 'Multi-stage approval before any report is published.',
-    desc: 'Teacher grades flow through HOD review, moderation, and principal approval. The report card is only published when every stage is signed off. Every action logged.',
+    title: 'Governed publishing workflow. No report leaves without sign-off.',
+    desc: 'Grades flow through a locked multi-stage approval chain. Teacher → HOD → Moderation → Principal → Published. Each stage records who approved, when, and what was reviewed. No report is published until every gate is cleared.',
     color: 'from-violet-500 to-purple-600',
     iconBg: 'bg-violet-50 text-violet-600',
     Icon: FileText,
     ui: {
-      header: 'Report Workflow — Term 2',
+      header: 'Report Card Workflow · Year 7 · Term 2 · 2025–26',
+      stats: '28 reports · Initiated 14 May · Target publish: 23 May · 0 disputes',
       items: [
-        { name: 'Teacher entry',      status: '✓ Complete',  badge: 'bg-emerald-50 text-emerald-700' },
-        { name: 'HOD review',         status: '✓ Approved',  badge: 'bg-emerald-50 text-emerald-700' },
-        { name: 'Principal sign-off', status: '⟳ Pending',   badge: 'bg-amber-50 text-amber-700'    },
-        { name: 'Publication',        status: 'Queued',       badge: 'bg-slate-100 text-slate-500'   },
+        { name: 'Grade submission',   sub: 'All 8 subjects · Mr. Kariuki · Completed 14 May 16:04', status: '✓ Complete', badge: 'bg-emerald-50 text-emerald-700' },
+        { name: 'HOD sign-off',       sub: 'Mrs. Wanjiku · Reviewed 28 reports · Approved 15 May',  status: '✓ Approved', badge: 'bg-emerald-50 text-emerald-700' },
+        { name: 'Moderation',         sub: 'Deputy Ochieng · 2 grades flagged and resolved 16 May',  status: '✓ Complete', badge: 'bg-emerald-50 text-emerald-700' },
+        { name: 'Principal approval', sub: 'Principal Mwangi · Awaiting final sign-off · Sent today', status: '⟳ Pending',  badge: 'bg-amber-50 text-amber-700'    },
       ],
     },
   },
   {
     id: 'finance',
     phase: '04 Finance',
-    title: 'Fee structures, invoices, and payments in one view.',
-    desc: 'Term fees are auto-invoiced at enrolment. Payments recorded in real time. Outstanding balances visible to finance staff. No spreadsheets, no manual reconciliation.',
+    title: 'Fee lifecycle from invoice to reconciled payment.',
+    desc: 'Term fees are auto-generated at enrolment. Payments are recorded in real time with receipt numbers. Outstanding balances, partial payments, and overdue accounts are instantly visible — no spreadsheets, no reconciliation weekend.',
     color: 'from-amber-500 to-orange-500',
     iconBg: 'bg-amber-50 text-amber-600',
     Icon: DollarSign,
     ui: {
-      header: 'Fee Statement — J. Kamau',
+      header: 'Term 3 Fee Register · Greenwood Academy',
+      stats: 'KSh 2.41M collected of 3.10M · 23 outstanding · 4 overdue · 91% collection rate',
       items: [
-        { name: 'Tuition Fee',    status: 'KSh 18,000 ✓', badge: 'bg-emerald-50 text-emerald-700' },
-        { name: 'Activity Levy', status: 'KSh 2,500 ✓',  badge: 'bg-emerald-50 text-emerald-700' },
-        { name: 'Transport',     status: 'KSh 4,000 ✗',  badge: 'bg-red-50 text-red-600'         },
-        { name: 'Balance Due',   status: 'KSh 4,000',    badge: 'bg-amber-50 text-amber-700'     },
+        { name: 'J. Kamau · Year 7A', sub: 'KSh 24,500 paid in full · 2 May · Receipt #3847',  status: '✓ Cleared', badge: 'bg-emerald-50 text-emerald-700' },
+        { name: 'A. Osei · Year 8B',  sub: 'KSh 18,000 paid · Balance: KSh 6,500 outstanding', status: 'Partial',   badge: 'bg-amber-50 text-amber-700'    },
+        { name: 'M. Ndege · Year 9A', sub: 'KSh 0 received · 45 days overdue · Parent notified',status: 'Overdue',   badge: 'bg-red-50 text-red-600'         },
+        { name: 'P. Liu · Year 7B',   sub: 'KSh 24,500 paid in full · 8 May · Receipt #3851',  status: '✓ Cleared', badge: 'bg-emerald-50 text-emerald-700' },
       ],
     },
   },
   {
     id: 'analytics',
     phase: '05 Analytics',
-    title: 'All operations surface on the director\'s dashboard.',
-    desc: 'Attendance trends, academic performance, financial health, and HR data converge in one real-time institutional overview. Leadership decisions grounded in current data.',
+    title: 'The entire institution visible in one director dashboard.',
+    desc: 'Attendance, academic performance, financial health, and staff operations converge in a single live view. Leadership no longer waits for weekly summaries — they see what is happening right now, with the context to act.',
     color: 'from-teal-500 to-cyan-500',
     iconBg: 'bg-teal-50 text-teal-600',
     Icon: BarChart3,
     ui: {
-      header: 'Institutional Dashboard',
+      header: 'Director Dashboard · Greenwood Academy',
+      stats: 'Live · Last updated 2 minutes ago · Term 3 · Week 6 of 12',
       items: [
-        { name: 'Avg. Attendance',  status: '94.2% ↑',     badge: 'bg-emerald-50 text-emerald-700' },
-        { name: 'Academic Avg.',    status: '82% ↑',       badge: 'bg-indigo-50 text-indigo-700'   },
-        { name: 'Fee Collection',  status: '78% this term',badge: 'bg-amber-50 text-amber-700'     },
-        { name: 'Reports Published',status: '3 / 4 terms', badge: 'bg-violet-50 text-violet-700'   },
+        { name: 'Attendance Today',   sub: '1,172 present of 1,247 enrolled · 3 absences escalated', status: '94.2% ↑', badge: 'bg-emerald-50 text-emerald-700' },
+        { name: 'Academic Avg.',      sub: 'Year group average · Term 2 · ↑ 3.2% vs Term 1',         status: '82.1% ↑', badge: 'bg-indigo-50 text-indigo-700'   },
+        { name: 'Fee Collection',     sub: 'KSh 2.41M of 3.10M · 23 invoices outstanding',           status: '78% rate',badge: 'bg-amber-50 text-amber-700'     },
+        { name: 'Report Cards',       sub: '3 year groups published · Year 9 pending principal',      status: '3 / 4 ✓', badge: 'bg-violet-50 text-violet-700'   },
       ],
     },
   },
@@ -445,16 +450,31 @@ const WORKFLOW_STEPS = [
 
 function WorkflowUI({ ui }) {
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden">
+    <div className="bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden">
+      {/* Browser chrome */}
       <div className="bg-slate-900 px-4 py-2.5 flex items-center gap-2">
-        <div className="flex gap-1"><div className="w-2 h-2 rounded-full bg-red-400/70" /><div className="w-2 h-2 rounded-full bg-yellow-400/70" /><div className="w-2 h-2 rounded-full bg-green-400/70" /></div>
-        <span className="text-[10px] text-slate-500 ml-2 font-mono">{ui.header}</span>
+        <div className="flex gap-1">
+          <div className="w-2 h-2 rounded-full bg-red-400/70" />
+          <div className="w-2 h-2 rounded-full bg-yellow-400/70" />
+          <div className="w-2 h-2 rounded-full bg-green-400/70" />
+        </div>
+        <span className="text-[10px] text-slate-400 ml-2 font-mono truncate">{ui.header}</span>
       </div>
-      <div className="p-4 space-y-2">
+      {/* Context stats bar */}
+      {ui.stats && (
+        <div className="px-4 py-2 bg-slate-50 border-b border-slate-100">
+          <p className="text-[10px] text-slate-500 font-medium">{ui.stats}</p>
+        </div>
+      )}
+      {/* Rows */}
+      <div className="p-3 space-y-1.5">
         {ui.items.map((item, i) => (
-          <div key={i} className="flex items-center justify-between py-2 px-3 rounded-lg bg-slate-50 hover:bg-slate-100 transition">
-            <span className="text-[11px] font-medium text-slate-700">{item.name}</span>
-            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${item.badge}`}>{item.status}</span>
+          <div key={i} className="flex items-center justify-between py-2.5 px-3 rounded-lg bg-slate-50/80 hover:bg-slate-100/80 transition gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-semibold text-slate-800 leading-tight">{item.name}</p>
+              {item.sub && <p className="text-[10px] text-slate-400 mt-0.5 truncate">{item.sub}</p>}
+            </div>
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${item.badge}`}>{item.status}</span>
           </div>
         ))}
       </div>
@@ -543,59 +563,187 @@ function WorkflowStorySection() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   OPERATIONAL MODULE STORIES
-   Each module = a mini institutional operational story
+   OPERATIONAL MODULE STORIES — all 12 platform modules
+   Each: real pain → institutional transformation → concrete outcomes
 ═══════════════════════════════════════════════════════════════ */
 const MODULE_STORIES = [
   {
+    label: 'Students',
+    Icon: Users,
+    accent: 'text-indigo-600', bg: 'bg-indigo-50',
+    pain: 'Student records spread across spreadsheets, paper files, and disconnected systems. No single source of truth.',
+    transform: 'Centralize every learner\'s complete institutional record — enrolment, academics, fees, attendance, behaviour, and communications — in one searchable, role-governed profile.',
+    outcomes: ['Single student record accessible school-wide', 'Full history: academic, financial, behavioural', 'Role-based visibility — parents see their child only'],
+  },
+  {
     label: 'Academics',
     Icon: GraduationCap,
-    accent: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100',
-    pain: 'Most schools still grade in spreadsheets with no audit trail.',
-    transform: 'Msingi structures subject management, multi-curriculum grading, and academic history into one accountable system.',
-    outcomes: ['CBC, Cambridge, IB, custom frameworks', 'Grade entry with teacher attribution', 'Full academic history per student'],
+    accent: 'text-violet-600', bg: 'bg-violet-50',
+    pain: 'Grades entered in Excel with no attribution, no version control, and no protection against silent edits.',
+    transform: 'Structure subject management and multi-curriculum grading (CBC, Cambridge, IB, custom) into one accountable academic infrastructure — every mark attributed, timestamped, and immutable.',
+    outcomes: ['CBC, Cambridge, IB, and custom grade frameworks', 'Attributed grade entry with edit audit trail', 'Year group and class academic history by term'],
+  },
+  {
+    label: 'Attendance',
+    Icon: CheckCircle,
+    accent: 'text-emerald-600', bg: 'bg-emerald-50',
+    pain: 'Attendance taken on paper registers. Summaries compiled hours later — by which time a missing student is already a risk.',
+    transform: 'Synchronize daily attendance tracking per class and lesson — connected to the timetable, flagging low-attendance students automatically and surfacing trends on the director dashboard in real time.',
+    outcomes: ['Per-lesson attendance against timetable', 'Auto-flagging of attendance below threshold', 'Real-time summary on director dashboard'],
+  },
+  {
+    label: 'Behaviour',
+    Icon: ShieldCheck,
+    accent: 'text-orange-600', bg: 'bg-orange-50',
+    pain: 'Behaviour records kept informally — verbal warnings forgotten, merit awards unrecorded, patterns invisible until a serious incident.',
+    transform: 'Replace informal behaviour tracking with a structured merit and demerit system (BPS) — each incident logged with category, context, witness, and outcome. Patterns surface automatically.',
+    outcomes: ['Merit and demerit point tracking per student', 'Behaviour categories and incident logging', 'Behaviour trends visible on student profile'],
   },
   {
     label: 'Finance',
     Icon: DollarSign,
-    accent: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100',
-    pain: 'Fee tracking happens in Excel. Reconciliation is manual. Balances are always out of date.',
-    transform: 'Auto-invoicing, real-time payment recording, and financial dashboards give finance teams and directors instant clarity.',
-    outcomes: ['Auto-invoiced at enrolment', 'Payment recording + receipting', 'Real-time outstanding balances'],
-  },
-  {
-    label: 'Timetable',
-    Icon: Calendar,
-    accent: 'text-sky-600', bg: 'bg-sky-50', border: 'border-sky-100',
-    pain: 'Scheduling is done manually across disconnected systems. Conflicts discovered too late.',
-    transform: 'Msingi synchronizes teachers, rooms, and subjects into one timetable infrastructure — connected to attendance and academics.',
-    outcomes: ['Teacher and room conflict detection', 'Timetable syncs to attendance', 'Class schedules visible school-wide'],
+    accent: 'text-amber-600', bg: 'bg-amber-50',
+    pain: 'Fee tracking in Excel. Reconciliation is a weekly ritual. Outstanding balances are always stale by the time leadership sees them.',
+    transform: 'Automate the complete fee lifecycle — from invoice generation at enrolment through payment recording, receipting, and financial reporting — with real-time visibility for finance staff and directors.',
+    outcomes: ['Auto-invoiced fee structures at enrolment', 'Real-time payment recording with receipts', 'Outstanding balance and overdue tracking'],
   },
   {
     label: 'Admissions',
     Icon: ClipboardList,
-    accent: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-100',
-    pain: 'Enquiries arrive by WhatsApp and email. Admission stages tracked in a notebook.',
-    transform: 'A structured pipeline from enquiry to enrolment — with automatic student record creation the moment an offer is accepted.',
-    outcomes: ['Enquiry → Assessment → Offer → Enrolled', 'Auto-creates student record', 'Admissions analytics by term'],
+    accent: 'text-pink-600', bg: 'bg-pink-50',
+    pain: 'Enquiries arrive by WhatsApp. Application stages tracked in a notebook. Enrolment creates a new spreadsheet row.',
+    transform: 'Structure intake from first enquiry through assessment, offer, and enrolment — with automatic student record, class placement, and fee account created the moment an offer is accepted.',
+    outcomes: ['Enquiry → Assessment → Offer → Enrolled pipeline', 'Automatic student record on acceptance', 'Admissions analytics and conversion tracking'],
+  },
+  {
+    label: 'Timetable',
+    Icon: Calendar,
+    accent: 'text-sky-600', bg: 'bg-sky-50',
+    pain: 'Scheduling done manually in Excel across disconnected sheets. Teacher and room conflicts discovered on the first day of term.',
+    transform: 'Synchronize teachers, rooms, sections, and subjects through one centralized scheduling infrastructure — directly connected to attendance tracking and academic records.',
+    outcomes: ['Teacher and room conflict detection', 'Timetable feeds attendance automatically', 'Class schedules visible to teachers and staff'],
   },
   {
     label: 'Communication',
     Icon: MessageSquare,
-    accent: 'text-pink-600', bg: 'bg-pink-50', border: 'border-pink-100',
-    pain: 'School communication scattered across WhatsApp, SMS, and notice boards. No accountability trail.',
-    transform: 'Role-based messaging, announcements, and notifications through one auditable institutional channel.',
-    outcomes: ['Staff, parent, and student channels', 'Announcement broadcasting', 'Message accountability log'],
+    accent: 'text-blue-600', bg: 'bg-blue-50',
+    pain: 'School-parent communication fragmented across personal WhatsApp groups, SMS blasts, and physical notice boards — unaccountable and unarchived.',
+    transform: 'Route all institutional messaging — staff-to-parent, staff-to-student, and internal school communications — through one governed, role-based channel with a permanent audit trail.',
+    outcomes: ['Role-based channels: staff, parents, students', 'Institutional announcements and broadcasts', 'Full message history and accountability log'],
+  },
+  {
+    label: 'Report Cards',
+    Icon: FileText,
+    accent: 'text-purple-600', bg: 'bg-purple-50',
+    pain: 'Report cards assembled manually by the academic registrar. Published without governance — no approval chain, no version control, no audit trail.',
+    transform: 'Govern the entire report publishing workflow — teacher entry → HOD review → moderation → principal approval → publication — enforced by the platform, with every action permanently logged.',
+    outcomes: ['Multi-stage approval: Teacher → HOD → Principal', 'Publication blocked until all stages clear', 'Immutable audit trail per report card'],
+  },
+  {
+    label: 'HR & Staff',
+    Icon: UserCheck,
+    accent: 'text-teal-600', bg: 'bg-teal-50',
+    pain: 'Staff records in filing cabinets. Payroll computed in Excel. Contracts and leave tracked informally with no institutional record.',
+    transform: 'Consolidate staff profiles, contracts, department assignments, leave management, and payroll computation into one HR infrastructure — visible to principals and directors with governance controls.',
+    outcomes: ['Staff profiles, contracts, and department records', 'Leave application and approval workflow', 'Payroll computation and export by pay period'],
+  },
+  {
+    label: 'Events',
+    Icon: Bell,
+    accent: 'text-rose-600', bg: 'bg-rose-50',
+    pain: 'School events communicated via notice boards and WhatsApp groups. Scheduling conflicts missed. Parents informed late.',
+    transform: 'Centralize the institutional calendar — school events, academic milestones, parent meetings, and term dates — published to staff, students, and parents through one coordinated channel.',
+    outcomes: ['Centralized institutional event calendar', 'Role-based visibility: staff, parents, students', 'Events linked to academic and communication modules'],
   },
   {
     label: 'Analytics',
     Icon: TrendingUp,
-    accent: 'text-rose-600', bg: 'bg-rose-50', border: 'border-rose-100',
-    pain: "Leadership makes decisions based on weekly paper summaries — days old by the time they're read.",
-    transform: 'Real-time dashboards for attendance, academics, finance, and HR. Directors see the institution as it operates, right now.',
-    outcomes: ['Live attendance trends', 'Academic performance by class/year', 'Financial health at a glance'],
+    accent: 'text-cyan-600', bg: 'bg-cyan-50',
+    pain: "Leadership makes decisions based on weekly paper summaries — compiled by hand, days old by the time they reach a director's desk.",
+    transform: 'Converge attendance, academic performance, financial health, and HR operations into one live director dashboard — so institutional leadership always operates on current institutional reality.',
+    outcomes: ['Live attendance trends by class and year group', 'Academic performance tracking across terms', 'Financial health and fee collection KPIs'],
   },
 ];
+
+/* ═══════════════════════════════════════════════════════════════
+   ECOSYSTEM FLOW — visual chain showing how modules connect
+═══════════════════════════════════════════════════════════════ */
+const ECOSYSTEM_CHAIN = [
+  { label: 'Admissions',  Icon: ClipboardList, color: 'bg-pink-500',   desc: 'Enquiry → enrolled student' },
+  { label: 'Student Record', Icon: Users,      color: 'bg-indigo-500', desc: 'One institutional profile' },
+  { label: 'Timetable',   Icon: Calendar,      color: 'bg-sky-500',    desc: 'Scheduled across subjects' },
+  { label: 'Attendance',  Icon: CheckCircle,   color: 'bg-emerald-500',desc: 'Tracked per lesson' },
+  { label: 'Grades',      Icon: GraduationCap, color: 'bg-violet-500', desc: 'Attributed and immutable' },
+  { label: 'Behaviour',   Icon: ShieldCheck,   color: 'bg-orange-500', desc: 'Merits and demerits' },
+  { label: 'Reports',     Icon: FileText,      color: 'bg-purple-500', desc: 'Governed and published' },
+  { label: 'Finance',     Icon: DollarSign,    color: 'bg-amber-500',  desc: 'Invoiced and collected' },
+  { label: 'Analytics',   Icon: BarChart3,     color: 'bg-teal-500',   desc: 'Director visibility' },
+];
+
+function EcosystemFlowSection() {
+  return (
+    <section className="py-20 bg-slate-950 border-t border-slate-800/50 overflow-hidden">
+      <div className="max-w-7xl mx-auto px-6 lg:px-8">
+        <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()} className="text-center mb-14">
+          <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-4">Ecosystem Architecture</motion.p>
+          <motion.h2 variants={fadeUp} className="text-2xl sm:text-3xl font-bold tracking-tight text-white mb-3 leading-tight">
+            Every module is connected.<br /><span className="text-slate-500">That connectedness is the advantage.</span>
+          </motion.h2>
+          <motion.p variants={fadeUp} className="text-sm text-slate-500 max-w-xl mx-auto">
+            Msingi is not a collection of modules. It is one operational system where each workflow feeds the next — automatically, without manual handoffs.
+          </motion.p>
+        </motion.div>
+
+        {/* Flow chain */}
+        <div className="overflow-x-auto pb-4">
+          <div className="flex items-center gap-0 min-w-max mx-auto w-fit">
+            {ECOSYSTEM_CHAIN.map((node, i) => (
+              <div key={node.label} className="flex items-center">
+                {/* Node */}
+                <motion.div
+                  initial={{ opacity: 0, y: 16 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: i * 0.07, duration: 0.4, ease: EASE }}
+                  className="flex flex-col items-center gap-2 w-[88px]"
+                >
+                  <div className={`w-10 h-10 rounded-xl ${node.color} flex items-center justify-center shadow-lg`}>
+                    <node.Icon size={16} className="text-white" />
+                  </div>
+                  <p className="text-[10px] font-bold text-slate-300 text-center leading-tight">{node.label}</p>
+                  <p className="text-[9px] text-slate-600 text-center leading-tight">{node.desc}</p>
+                </motion.div>
+
+                {/* Connector arrow */}
+                {i < ECOSYSTEM_CHAIN.length - 1 && (
+                  <motion.div
+                    initial={{ opacity: 0, scaleX: 0 }}
+                    whileInView={{ opacity: 1, scaleX: 1 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: i * 0.07 + 0.2, duration: 0.3 }}
+                    className="flex items-center mx-1 origin-left"
+                  >
+                    <div className="w-6 h-px bg-gradient-to-r from-slate-600 to-slate-700" />
+                    <div className="w-0 h-0 border-t-[3px] border-b-[3px] border-l-[4px] border-t-transparent border-b-transparent border-l-slate-600" />
+                  </motion.div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Tagline */}
+        <motion.p
+          initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }}
+          transition={{ delay: 0.6 }}
+          className="text-center text-xs text-slate-600 mt-10"
+        >
+          One student. One record. Nine connected operational layers. No data re-entry. No manual reconciliation.
+        </motion.p>
+      </div>
+    </section>
+  );
+}
 
 function ModuleStoryCard({ story, index }) {
   const [open, setOpen] = useState(false);
@@ -855,7 +1003,7 @@ export default function Landing() {
           className="flex justify-center mb-8">
           <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 backdrop-blur-sm px-3.5 py-1.5 text-xs font-medium text-slate-600 shadow-sm">
             <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-            Institutional Operational Infrastructure for Modern Schools
+            Operational infrastructure for modern institutions
           </div>
         </motion.div>
 
@@ -868,8 +1016,9 @@ export default function Landing() {
           </motion.h1>
 
           <motion.p variants={fadeUp} className="text-lg sm:text-xl text-slate-500 max-w-2xl mx-auto leading-relaxed mb-3">
-            Msingi unifies academics, finance, communication, reporting, and institutional
-            workflows into one scalable platform — so schools operate with clarity, not chaos.
+            Admissions, academics, attendance, behaviour, finance, timetabling, reports, HR,
+            and communications — connected in one operational platform so institutions run
+            with clarity, accountability, and operational calm.
           </motion.p>
 
           <motion.p variants={fadeUp} className="text-base text-slate-400 italic mb-10">
@@ -965,6 +1114,11 @@ export default function Landing() {
       <WorkflowStorySection />
 
       {/* ══════════════════════════════════════════
+          ECOSYSTEM FLOW
+      ══════════════════════════════════════════ */}
+      <EcosystemFlowSection />
+
+      {/* ══════════════════════════════════════════
           TRUST BAND
       ══════════════════════════════════════════ */}
       <section className="py-14 bg-white border-b border-slate-100">
@@ -987,15 +1141,18 @@ export default function Landing() {
         <div className="max-w-7xl mx-auto px-6 lg:px-8">
           <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
             <motion.div variants={fadeUp}>
-              <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-4">Platform</p>
+              <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-4">Platform — 12 Modules</p>
               <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 max-w-xl mb-4 leading-tight">
-                Every dimension of school<br />operations. In one platform.
+                Every operational dimension<br />of a modern school.
               </h2>
-              <p className="text-sm text-slate-500 mb-12 max-w-lg">Click any module to see the operational transformation it delivers.</p>
+              <p className="text-sm text-slate-500 mb-12 max-w-xl leading-relaxed">
+                Each module solves a specific institutional problem. Together they eliminate the operational chaos that comes from running a school on disconnected systems.
+                <span className="text-slate-400 italic ml-1">Click any module to see the transformation.</span>
+              </p>
             </motion.div>
 
-            <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger(0.07)}
-              className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger(0.05)}
+              className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {MODULE_STORIES.map((story, i) => <ModuleStoryCard key={i} story={story} index={i} />)}
             </motion.div>
           </motion.div>
@@ -1046,21 +1203,28 @@ export default function Landing() {
       <section className="py-24 sm:py-32 bg-slate-950">
         <div className="max-w-7xl mx-auto px-6 lg:px-8">
           <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-            <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-4">Infrastructure</motion.p>
+            <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-4">Trust Architecture</motion.p>
             <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-bold tracking-tight text-white mb-4 leading-tight">
-              Enterprise-grade infrastructure.<br /><span className="text-slate-500">Not a startup experiment.</span>
+              Built for institutional trust.<br /><span className="text-slate-500">Not a startup experiment.</span>
             </motion.h2>
-            <motion.p variants={fadeUp} className="text-base text-slate-400 max-w-2xl mb-16 leading-relaxed">
-              Msingi is built to carry the operational weight of real institutions — with the security, isolation, and reliability that school owners and directors require before trusting their data to any platform.
+            <motion.p variants={fadeUp} className="text-base text-slate-400 max-w-2xl mb-4 leading-relaxed">
+              School directors and owners are asked to trust a platform with their most sensitive operational and academic data. Msingi is engineered specifically for that responsibility — with the governance, isolation, and auditability that institutional trust requires.
             </motion.p>
+            <motion.div variants={fadeUp} className="flex flex-wrap gap-3 mb-14">
+              {['99.9% uptime SLA', 'Automated daily backups', 'Full audit log on all actions', 'Tenant data isolation', 'RBAC at API layer', 'Immutable academic records'].map(t => (
+                <span key={t} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-700 text-xs text-slate-400 font-medium">
+                  <CheckCircle2 size={10} className="text-emerald-500" />{t}
+                </span>
+              ))}
+            </motion.div>
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger(0.07)} className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {[
-                { Icon: Layers,      title: 'Full tenant isolation',           desc: "Every school's data is completely isolated. No cross-tenant access, no data bleed — ever." },
-                { Icon: ShieldCheck, title: 'Role-based access control',       desc: 'Granular, per-module permissions enforced at the API layer — not just hidden in the UI.' },
-                { Icon: Lock,        title: 'Immutable audit logs',            desc: 'Every login, grade entry, payment, and deletion is permanently logged and traceable.' },
-                { Icon: Cpu,         title: 'Cloud infrastructure',            desc: 'Hosted on enterprise cloud with automated backups, zero-downtime deployments, and global uptime.' },
-                { Icon: Zap,         title: 'Built to scale',                  desc: 'From 100 to 5,000 students — Msingi scales without reconfiguration or migration.' },
-                { Icon: Globe,       title: 'Multi-curriculum, multi-context', desc: 'CBC, Cambridge, IB, British, American, and fully custom grading frameworks — all supported natively.' },
+                { Icon: Layers,      title: 'Complete tenant isolation',        desc: "Every school's data is architecturally isolated. No cross-tenant reads, no data bleed — guaranteed at the database layer." },
+                { Icon: ShieldCheck, title: 'Role-based governance',            desc: 'Granular, per-module permissions enforced server-side. Teachers see their classes. Parents see their children. No exceptions.' },
+                { Icon: Lock,        title: 'Permanent audit trail',            desc: 'Every login, grade entry, payment, approval, and deletion is permanently logged with attribution, timestamp, and context.' },
+                { Icon: RefreshCcw,  title: 'Automated backups',               desc: 'Daily automated backups with point-in-time recovery. Your institutional data is never at risk from a single failure.' },
+                { Icon: Zap,         title: 'Institutional scale',              desc: 'From 100 to 5,000+ students — Msingi scales without reconfiguration, database migration, or data restructuring.' },
+                { Icon: Globe,       title: 'Multi-curriculum natively',        desc: 'CBC, Cambridge, IB, British, American, and fully custom frameworks. Not bolted on — built into the academic engine from day one.' },
               ].map(({ Icon, title, desc }, i) => (
                 <motion.div key={i} variants={fadeUp}
                   className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 hover:border-slate-700 hover:bg-slate-900 transition-all duration-300">
@@ -1080,13 +1244,16 @@ export default function Landing() {
       <section className="py-24 sm:py-32 bg-white">
         <div className="max-w-3xl mx-auto px-6 lg:px-8 text-center">
           <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-            <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-6">Ready to transform?</motion.p>
+            <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-6">The next step</motion.p>
             <motion.h2 variants={fadeUp}
               className="text-4xl sm:text-5xl lg:text-[56px] font-bold tracking-tighter text-slate-900 leading-[1.05] mb-6">
-              Build a smarter school<br />infrastructure.
+              Replace the chaos with<br />operational calm.
             </motion.h2>
-            <motion.p variants={fadeUp} className="text-lg text-slate-500 max-w-xl mx-auto mb-10 leading-relaxed">
-              Move beyond fragmented systems. Manage your institution from one connected operational platform — with the clarity, accountability, and trust that modern schools require.
+            <motion.p variants={fadeUp} className="text-lg text-slate-500 max-w-xl mx-auto mb-4 leading-relaxed">
+              Principals who adopt Msingi describe the same shift: they stop managing information and start leading institutions. The scattered spreadsheets, the manual reconciliation, the approval chains via WhatsApp — they disappear.
+            </motion.p>
+            <motion.p variants={fadeUp} className="text-base text-slate-400 italic max-w-md mx-auto mb-10">
+              "This platform finally understands how modern schools actually operate."
             </motion.p>
             <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center gap-3">
               <Link to="/contact"
