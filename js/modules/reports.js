@@ -398,7 +398,7 @@ const Reports = (() => {
     const blob = new Blob([csv], { type:'text/csv' });
     const a    = document.createElement('a');
     a.href     = URL.createObjectURL(blob);
-    a.download = `InnoLearn-report-${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `Msingi-report-${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     showToast('Report exported as CSV.', 'success');
   }

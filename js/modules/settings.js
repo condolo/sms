@@ -213,8 +213,8 @@ const Settings = (() => {
         </div>
       </div>
       <div class="settings-section">
-        <div class="settings-section-title">About InnoLearn</div>
-        <div class="settings-row"><div class="settings-row-info"><h4>Version</h4><p>InnoLearn v1.0.0</p></div><span class="badge badge-success">Up to date</span></div>
+        <div class="settings-section-title">About Msingi</div>
+        <div class="settings-row"><div class="settings-row-info"><h4>Version</h4><p>Msingi v1.0.0</p></div><span class="badge badge-success">Up to date</span></div>
         <div class="settings-row"><div class="settings-row-info"><h4>Build</h4><p>2025 · Nairobi, Kenya</p></div></div>
       </div>
     </div>`;
@@ -358,7 +358,7 @@ const Settings = (() => {
     const theme      = school?.theme || {};
     const primary    = theme.primary   || '#2563EB';
     const sidebarBg  = theme.sidebarBg || '#0F172A';
-    const appName    = school?.appName  || 'InnoLearn';
+    const appName    = school?.appName  || 'Msingi';
     const lp         = school?.loginPage || {};
 
     return `
@@ -416,10 +416,10 @@ const Settings = (() => {
       <div style="max-width:380px">
         <div class="form-field">
           <label>Name shown in sidebar &amp; browser title</label>
-          <input id="brand-appname" value="${appName}" placeholder="InnoLearn"
+          <input id="brand-appname" value="${appName}" placeholder="Msingi"
             oninput="Settings.previewTheme()">
         </div>
-        <p style="font-size:12px;color:var(--gray-400);margin-top:4px">Replaces "InnoLearn" everywhere in the UI. Save with the button below.</p>
+        <p style="font-size:12px;color:var(--gray-400);margin-top:4px">Replaces "Msingi" everywhere in the UI. Save with the button below.</p>
       </div>
     </div>
 
@@ -558,7 +558,7 @@ const Settings = (() => {
         </div>
         <div class="form-field">
           <label>Welcome Subtitle <span style="font-size:11px;color:var(--gray-400)">(right panel)</span></label>
-          <input id="lp-welcome-sub" value="${lp.welcomeSub||'Sign in to your InnoLearn portal'}" placeholder="Sign in to your portal">
+          <input id="lp-welcome-sub" value="${lp.welcomeSub||'Sign in to your Msingi portal'}" placeholder="Sign in to your portal">
         </div>
       </div>
       <div class="form-field mb-12" style="max-width:720px">
@@ -567,7 +567,7 @@ const Settings = (() => {
       </div>
       <div class="form-field mb-12" style="max-width:720px">
         <label>Footer Text <span style="font-size:11px;color:var(--gray-400)">(bottom of left panel)</span></label>
-        <input id="lp-footer-text" value="${lp.footerText||'© 2025 InnoLearn · InnoLearn International School, Nairobi'}">
+        <input id="lp-footer-text" value="${lp.footerText||'© 2025 Msingi'}">
       </div>
 
       <div style="margin-top:16px">
@@ -703,7 +703,7 @@ const Settings = (() => {
   function previewTheme() {
     const primary   = document.getElementById('brand-primary')?.value   || '#2563EB';
     const sidebarBg = document.getElementById('brand-sidebar')?.value   || '#0F172A';
-    const appName   = document.getElementById('brand-appname')?.value   || 'InnoLearn';
+    const appName   = document.getElementById('brand-appname')?.value   || 'Msingi';
 
     const set = (id, prop, val) => { const el = document.getElementById(id); if (el) el.style[prop] = val; };
     const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
@@ -722,7 +722,7 @@ const Settings = (() => {
     if (!Auth.isSuperAdmin()) return showToast('Permission denied.', 'error');
     const primary   = document.getElementById('brand-primary')?.value   || '#2563EB';
     const sidebarBg = document.getElementById('brand-sidebar')?.value   || '#0F172A';
-    const appName   = (document.getElementById('brand-appname')?.value || 'InnoLearn').trim();
+    const appName   = (document.getElementById('brand-appname')?.value || 'Msingi').trim();
     const school    = DB.get('schools')[0];
     DB.update('schools', school.id, { theme: { primary, sidebarBg }, appName });
     App.applyBranding();
@@ -731,7 +731,7 @@ const Settings = (() => {
   }
 
   function resetBranding() {
-    confirmAction('Reset all branding to InnoLearn defaults?', () => {
+    confirmAction('Reset all branding to Msingi defaults?', () => {
       const school = DB.get('schools')[0];
       DB.update('schools', school.id, { theme: null, logo: null, favicon: null, appName: null });
       App.applyBranding();
@@ -773,7 +773,7 @@ const Settings = (() => {
       effect:       document.getElementById('login-fx-value')?.value       || 'none',
       effectColor:  document.getElementById('login-fx-color')?.value       || '#2563EB',
       welcomeTitle: document.getElementById('lp-welcome-title')?.value     || 'Welcome back 👋',
-      welcomeSub:   document.getElementById('lp-welcome-sub')?.value       || 'Sign in to your InnoLearn portal',
+      welcomeSub:   document.getElementById('lp-welcome-sub')?.value       || 'Sign in to your Msingi portal',
       tagline:      document.getElementById('lp-tagline')?.value           || '',
       footerText:   document.getElementById('lp-footer-text')?.value       || '',
       features,
@@ -880,7 +880,7 @@ const Settings = (() => {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `InnoLearn-backup-${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `Msingi-backup-${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     showToast(`Full backup exported (${keys.length} collections).`, 'success');
   }

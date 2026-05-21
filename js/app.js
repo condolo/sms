@@ -391,7 +391,7 @@ const App = (() => {
     const umHeader = document.getElementById('um-header-name');
     if (umHeader) umHeader.textContent = user.name;
     const school = Auth.currentSchool;
-    document.getElementById('sidebar-school-name').textContent = school ? school.shortName : 'InnoLearn';
+    document.getElementById('sidebar-school-name').textContent = school ? school.shortName : 'Msingi';
     // Navigate: if no hash set, go to dashboard; otherwise render current hash
     const hash = location.hash.replace('#', '').split('/')[0];
     if (!hash) {
@@ -445,10 +445,10 @@ const App = (() => {
     }
 
     // 2. App name in sidebar + browser title
-    const appName = school.appName || 'InnoLearn';
+    const appName = school.appName || 'Msingi';
     const appNameEl = document.getElementById('sidebar-app-name');
     if (appNameEl) appNameEl.textContent = appName;
-    document.title = appName + ' — School Management System';
+    document.title = appName + ' — School Management Platform';
 
     // 3. Favicon
     if (school.favicon) {
@@ -497,7 +497,7 @@ const App = (() => {
   function _applyLoginPage(school) {
     if (!school) return;
     const lp      = school.loginPage || {};
-    const appName = school.appName || 'InnoLearn';
+    const appName = school.appName || 'Msingi';
 
     // Brand h1 — split at last space or midpoint
     const brandH1 = document.getElementById('login-brand-h1');
@@ -520,11 +520,11 @@ const App = (() => {
     const wtEl = document.getElementById('login-welcome-title');
     if (wtEl) wtEl.textContent = lp.welcomeTitle || 'Welcome back 👋';
     const wsEl = document.getElementById('login-welcome-sub');
-    if (wsEl) wsEl.textContent = lp.welcomeSub || 'Sign in to your InnoLearn portal';
+    if (wsEl) wsEl.textContent = lp.welcomeSub || 'Sign in to your Msingi portal';
 
     // Footer
     const ftEl = document.getElementById('login-footer-text');
-    if (ftEl) ftEl.textContent = lp.footerText || '© 2025 InnoLearn · InnoLearn International School, Nairobi';
+    if (ftEl) ftEl.textContent = lp.footerText || '© 2025 Msingi';
 
     // Feature list
     const featEl = document.getElementById('login-features-list');

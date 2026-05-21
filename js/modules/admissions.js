@@ -1177,7 +1177,7 @@ const Admissions = (() => {
     const blob = new Blob([csv], {type:'text/csv'});
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
-    a.href = url; a.download = 'InnoLearn_Admissions_Template.csv';
+    a.href = url; a.download = 'Msingi_Admissions_Template.csv';
     a.click(); URL.revokeObjectURL(url);
     showToast('Template downloaded.','success');
   }
@@ -1520,7 +1520,7 @@ const Admissions = (() => {
           <p style="color:var(--gray-500)">Thank you. We will review your application and contact you shortly.</p>
         </div>
       </div>
-      <div class="adm-public-footer">Powered by InnoLearn · ${DB.get('schools')[0]?.name}</div>
+      <div class="adm-public-footer">Powered by Msingi · ${DB.get('schools')[0]?.name}</div>
     </div>`;
 
     if (container) { container.innerHTML = formHTML; }

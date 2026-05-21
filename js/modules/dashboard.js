@@ -230,7 +230,7 @@ const Dashboard = (() => {
         <div class="setup-progress-bar">
           <div class="setup-progress-fill" style="width:${pct}%;background:${pct===100?'#22c55e':'#4f46e5'}"></div>
         </div>
-        <p class="setup-sub">${allDone ? '🎉 Your school is fully set up! You can now hide this panel.' : `${steps.length - doneCount} step${steps.length-doneCount!==1?'s':''} remaining — complete them to unlock the full power of InnoLearn.`}</p>
+        <p class="setup-sub">${allDone ? '🎉 Your school is fully set up! You can now hide this panel.' : `${steps.length - doneCount} step${steps.length-doneCount!==1?'s':''} remaining — complete them to unlock the full power of Msingi.`}</p>
         <div class="setup-steps">
           ${steps.map(s => `
             <div class="setup-step ${s.done ? 'done' : ''}" onclick="${s.done ? '' : s.action}">

@@ -829,7 +829,7 @@ const HR = (() => {
     </div>
     <div class="modal-body">
       <div style="background:linear-gradient(135deg,#1e3a5f,#2563EB);color:#fff;border-radius:8px;padding:16px;margin-bottom:16px">
-        <div style="font-size:16px;font-weight:700">InnoLearn International School</div>
+        <div style="font-size:16px;font-weight:700">${school?.name || 'My School'}</div>
         <div style="font-size:12px;opacity:.8">Staff Payslip — ${_formatPeriod(p.payPeriod)}</div>
         <div style="margin-top:12px;font-size:15px;font-weight:600">${tch.firstName} ${tch.lastName}</div>
         <div style="font-size:12px;opacity:.8">${tch.staffId} · ${tch.contractType}</div>

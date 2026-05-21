@@ -194,7 +194,7 @@ const Birthday = (() => {
         Happy Birthday, ${person.name.split(' ')[0]}!
       </h2>
       <p style="font-size:15px;color:var(--gray-500);line-height:1.7;margin-bottom:20px">
-        InnoLearn &amp; the entire <strong>InnoLearn team</strong> wishes you a<br>
+        Msingi &amp; the entire <strong>Msingi team</strong> wishes you a<br>
         wonderful <strong>${person.turningAge}${_ordinal(person.turningAge)} birthday</strong>! 🌟
       </p>
       <div style="background:linear-gradient(135deg,#fdf2f8,#ede9fe);border-radius:14px;padding:16px 20px;margin-bottom:24px">

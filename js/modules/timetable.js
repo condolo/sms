@@ -133,7 +133,7 @@ const Timetable = (() => {
     <div class="page-header">
       <div class="page-title">
         <h1><i class="fas fa-calendar-alt" style="color:var(--primary);margin-right:10px;font-size:20px"></i>Timetable</h1>
-        <p>${termLabel ? termLabel + ' · ' : ''}${school?.name || 'InnoLearn International School'}</p>
+        <p>${termLabel ? termLabel + ' · ' : ''}${school?.name || 'Msingi'}</p>
       </div>
       <div class="page-actions">
         ${isTT ? `
@@ -1843,7 +1843,7 @@ const Timetable = (() => {
     .ph h1{font-size:20px;font-weight:800}.ph p{font-size:12px;color:#64748b;margin-top:4px}
     .pbtn{margin-top:8px;padding:7px 16px;background:#2563EB;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px}
     @media print{body{padding:0}.pbtn{display:none}}</style></head><body>
-    <div class="ph"><div><h1>📅 ${title}</h1><p>${school?.name||'InnoLearn International School'} · Term 2, 2024–2025</p></div>
+    <div class="ph"><div><h1>📅 ${title}</h1><p>${school?.name||'Msingi'} · Term 2, 2024–2025</p></div>
     <div style="text-align:right;font-size:11px;color:#94a3b8"><p>Generated: ${new Date().toLocaleDateString('en-KE',{day:'2-digit',month:'short',year:'numeric'})}</p>
     <button class="pbtn" onclick="window.print()">🖨 Print</button></div></div>${tableHtml}</body></html>`);
     win.document.close();

@@ -117,7 +117,7 @@ const Plans = (() => {
         </div>
 
         <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
-          <a href="mailto:sales@InnoLearn.co.ke?subject=Upgrade to ${neededLabel} — ${school?.name || ''}"
+          <a href="mailto:sales@msingi.io?subject=Upgrade to ${neededLabel} — ${school?.name || ''}"
              class="btn" style="background:var(--primary);color:#fff;padding:12px 28px">
             <i class="fas fa-arrow-up"></i> Upgrade to ${neededLabel}
           </a>
@@ -127,7 +127,7 @@ const Plans = (() => {
         </div>
 
         <p style="margin-top:20px;font-size:12px;color:var(--gray-400)">
-          Contact us at <a href="mailto:sales@InnoLearn.co.ke" style="color:var(--primary)">sales@InnoLearn.co.ke</a>
+          Contact us at <a href="mailto:sales@msingi.io" style="color:var(--primary)">sales@msingi.io</a>
           or call <strong>+254 700 000 000</strong>
         </p>
       </div>

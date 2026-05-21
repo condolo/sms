@@ -26,7 +26,7 @@ const Help = (() => {
       roles: [],
       tags: 'login password sign in demo credentials forgot',
       content: `
-        <p>Open InnoLearn in your browser. Enter your school email address and password, then click <strong>Sign In</strong>.</p>
+        <p>Open Msingi in your browser. Enter your school email address and password, then click <strong>Sign In</strong>.</p>
         <p><strong>Demo access:</strong> The login screen shows quick-access role pills. Click any pill (e.g. <em>Admin</em>, <em>Teacher</em>, <em>Parent</em>) to pre-fill the demo credentials for that role — no typing required.</p>
         <p><strong>Forgot password:</strong> Contact your school administrator to have your password reset. There is no self-service password reset in this version.</p>
         <div class="help-tip"><i class="fas fa-lightbulb"></i> <strong>Tip:</strong> Your role determines which modules appear in your sidebar. If you cannot see a module you expect, contact your admin to check your permissions.</div>
@@ -42,7 +42,7 @@ const Help = (() => {
         <ul>
           <li>Click any item in the <strong>left sidebar</strong> to open that module.</li>
           <li>The <strong>topbar search</strong> finds students by name or admission number. Start typing at least 2 characters — if there is exactly one match, you are taken directly to that student's profile.</li>
-          <li>The <strong>back button</strong> in your browser works normally. InnoLearn uses URL hash routing, so every view has a shareable URL.</li>
+          <li>The <strong>back button</strong> in your browser works normally. Msingi uses URL hash routing, so every view has a shareable URL.</li>
           <li>The <strong>bell icon</strong> (top-right) shows your latest notifications. Click <em>Mark all read</em> to clear the badge.</li>
           <li>Click your <strong>avatar</strong> (top-right) to open the user menu where you can sign out.</li>
         </ul>
@@ -121,7 +121,7 @@ const Help = (() => {
       roles: ['superadmin','admin'],
       tags: 'class add edit delete homeroom teacher section KG primary secondary',
       content: `
-        <p>InnoLearn supports four sections: <strong>KG, Primary, Secondary, and A-Level</strong>. Each section contains classes (e.g. Grade 7A).</p>
+        <p>Msingi supports four sections: <strong>KG, Primary, Secondary, and A-Level</strong>. Each section contains classes (e.g. Grade 7A).</p>
         <p><strong>To add a class:</strong> Click <strong>+ Add Class</strong>, specify the name, section, and homeroom teacher. Room assignment and capacity are optional but recommended.</p>
         <p>The <strong>homeroom teacher</strong> assigned to a class will see all class students in the Attendance and Behaviour modules.</p>
       `
@@ -521,7 +521,7 @@ const Help = (() => {
       roles: ['superadmin','admin'],
       tags: 'audit log changes history student payment appeal permission academic year security',
       content: `
-        <p>InnoLearn automatically records every critical data change in an internal <strong>audit log</strong>. This happens silently in the background — staff do not need to do anything.</p>
+        <p>Msingi automatically records every critical data change in an internal <strong>audit log</strong>. This happens silently in the background — staff do not need to do anything.</p>
         <p><strong>What is logged:</strong></p>
         <ul>
           <li>Student profile edits (including class moves, status changes, house changes)</li>
@@ -545,10 +545,10 @@ const Help = (() => {
         <p>Navigate to <strong>Settings → System → Export All Data</strong>. A full JSON backup of every data collection is downloaded to your device.</p>
         <ul>
           <li>The export includes <em>all</em> collections automatically — students, classes, behaviour records, finance, admissions, etc.</li>
-          <li>The file is named <code>InnoLearn-backup-YYYY-MM-DD.json</code>.</li>
+          <li>The file is named <code>Msingi-backup-YYYY-MM-DD.json</code>.</li>
           <li>Keep a regular backup especially before any major configuration change or before advancing to a new academic year.</li>
         </ul>
-        <div class="help-tip"><i class="fas fa-lightbulb"></i> <strong>Important:</strong> InnoLearn stores all data in your browser. Clearing browser data or switching computers will remove all records — the exported JSON is your only backup.</div>
+        <div class="help-tip"><i class="fas fa-lightbulb"></i> <strong>Important:</strong> Msingi stores all data in your browser. Clearing browser data or switching computers will remove all records — the exported JSON is your only backup.</div>
       `
     },
     {
@@ -558,7 +558,7 @@ const Help = (() => {
       roles: ['superadmin','admin'],
       tags: 'delete blocked guard subject user class student timetable error',
       content: `
-        <p>InnoLearn prevents you from deleting records that other data depends on. This protects data integrity across the system.</p>
+        <p>Msingi prevents you from deleting records that other data depends on. This protects data integrity across the system.</p>
         <p><strong>Common blocks and how to resolve them:</strong></p>
         <ul>
           <li><strong>Cannot delete a subject</strong> — the subject is used in the timetable, assigned to a class, or has grade records. Remove timetable slots and class assignments first, then delete grade records if needed.</li>
