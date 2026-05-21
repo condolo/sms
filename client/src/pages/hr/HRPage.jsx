@@ -8,12 +8,15 @@ import { motion } from 'framer-motion';
 import {
   Users, UserCheck, Clock, Wallet, Plus, Check, X,
   ChevronDown, AlertCircle, FileText, Calendar,
+  FolderOpen, Trash2, Edit2, Save,
 } from 'lucide-react';
 import { hr as hrApi, teachers as teachersApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 
 /* ── Constants ──────────────────────────────────────────── */
 const HR_ROLES    = ['superadmin','admin','hr'];
+const DOC_TYPES   = { contract:'Contract', appraisal:'Appraisal', certificate:'Certificate', id_copy:'ID / Document', other:'Other' };
+const DOC_COLORS  = { contract:'bg-blue-100 text-blue-700', appraisal:'bg-purple-100 text-purple-700', certificate:'bg-emerald-100 text-emerald-700', id_copy:'bg-amber-100 text-amber-700', other:'bg-slate-100 text-slate-600' };
 const LEAVE_TYPES = { annual:'Annual Leave', sick:'Sick Leave', emergency:'Emergency', maternity:'Maternity', paternity:'Paternity', unpaid:'Unpaid Leave' };
 const LEAVE_COLORS = { annual:'bg-blue-100 text-blue-700', sick:'bg-amber-100 text-amber-700', emergency:'bg-red-100 text-red-700', maternity:'bg-pink-100 text-pink-700', paternity:'bg-purple-100 text-purple-700', unpaid:'bg-slate-100 text-slate-600' };
 const STATUS_COLORS = { pending:'bg-amber-100 text-amber-700', approved:'bg-emerald-100 text-emerald-700', rejected:'bg-red-100 text-red-600' };
@@ -98,6 +101,68 @@ function LeaveForm({ onClose, onSubmit }) {
   );
 }
 
+/* ── Document form ──────────────────────────────────────── */
+function DocForm({ teachers, onClose, onSubmit, saving }) {
+  const [form, setForm] = useState({ staffId:'', staffName:'', name:'', type:'contract', issuedDate:'', expiryDate:'', notes:'', status:'active' });
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+  function pickStaff(id) {
+    const t = teachers.find(x => (x._id ?? x.id) === id);
+    setForm(f => ({ ...f, staffId: id, staffName: t ? (t.name ?? `${t.firstName} ${t.lastName}`) : '' }));
+  }
+  const fCls = 'w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40';
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-100">
+          <h2 className="font-bold text-slate-900">Add Staff Document</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-1"><X size={16} /></button>
+        </div>
+        <form onSubmit={e => { e.preventDefault(); onSubmit(form); }} className="p-5 space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Staff Member *</label>
+            <select required value={form.staffId} onChange={e => pickStaff(e.target.value)} className={fCls}>
+              <option value="">Select staff…</option>
+              {teachers.map(t => (
+                <option key={t._id ?? t.id} value={t._id ?? t.id}>{t.name ?? `${t.firstName} ${t.lastName}`}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Document Name *</label>
+            <input required value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Employment Contract 2025" className={fCls} />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Document Type *</label>
+            <select value={form.type} onChange={e => set('type', e.target.value)} className={fCls}>
+              {Object.entries(DOC_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Issue Date</label>
+              <input type="date" value={form.issuedDate} onChange={e => set('issuedDate', e.target.value)} className={fCls} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Expiry Date</label>
+              <input type="date" value={form.expiryDate} onChange={e => set('expiryDate', e.target.value)} className={fCls} />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Notes</label>
+            <textarea rows={2} value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Any additional notes…" className={`${fCls} resize-none`} />
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose} disabled={saving} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+            <button type="submit" disabled={saving} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 flex items-center gap-1.5 disabled:opacity-50">
+              {saving ? <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Saving…</> : <><Save size={13} /> Save Document</>}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 /* ══════════════════════════════════════════════════════════
    MAIN COMPONENT
    ══════════════════════════════════════════════════════════ */
@@ -108,9 +173,11 @@ export default function HRPage() {
   const sym      = school?.currencySymbol ?? 'KSh';
   const isHR     = HR_ROLES.includes(user?.role);
 
-  const [tab, setTab]           = useState('staff');
+  const [tab, setTab]              = useState('staff');
   const [showLeaveForm, setLeaveForm] = useState(false);
   const [payPeriod, setPayPeriod]    = useState(() => new Date().toISOString().slice(0,7));
+  const [showDocForm, setDocForm]    = useState(false);
+  const [docStaffFilter, setDocStaff]= useState('');
 
   /* ── Queries ── */
   const { data: summaryData } = useQuery({
@@ -135,6 +202,13 @@ export default function HRPage() {
     enabled:  isHR,
   });
 
+  const { data: docsData, isLoading: docsLoading } = useQuery({
+    queryKey: ['hr','documents', docStaffFilter],
+    queryFn:  () => hrApi.documents.list(docStaffFilter ? { staffId: docStaffFilter } : {}),
+    enabled:  tab === 'documents' && isHR,
+    staleTime: 60_000,
+  });
+
   const teachers    = teachersData?.teachers ?? teachersData?.data ?? [];
   const leaves      = leaveData?.requests    ?? [];
   const payrollRecs = payrollData?.records   ?? [];
@@ -148,15 +222,28 @@ export default function HRPage() {
     onSuccess:  () => { qc.invalidateQueries({ queryKey: ['hr','leave'] }); setLeaveForm(false); },
   });
 
+  const createDoc = useMutation({
+    mutationFn: hrApi.documents.create,
+    onSuccess:  () => { qc.invalidateQueries({ queryKey: ['hr','documents'] }); setDocForm(false); },
+  });
+
+  const removeDoc = useMutation({
+    mutationFn: id => hrApi.documents.remove(id),
+    onSuccess:  () => qc.invalidateQueries({ queryKey: ['hr','documents'] }),
+  });
+
   const resolveLeave = useMutation({
     mutationFn: ({ id, status }) => hrApi.leave.resolve(id, { status }),
     onSuccess:  () => qc.invalidateQueries({ queryKey: ['hr','leave'] }),
   });
 
+  const docs = docsData?.documents ?? [];
+
   const TABS = [
-    { id:'staff',   label:'Staff',   Icon: Users     },
-    { id:'leave',   label:`Leave${pendingLeaves.length ? ` (${pendingLeaves.length})` : ''}`, Icon: Calendar },
-    ...(isHR ? [{ id:'payroll', label:'Payroll', Icon: Wallet }] : []),
+    { id:'staff',     label:'Staff',     Icon: Users      },
+    { id:'leave',     label:`Leave${pendingLeaves.length ? ` (${pendingLeaves.length})` : ''}`, Icon: Calendar },
+    ...(isHR ? [{ id:'payroll',   label:'Payroll',   Icon: Wallet     }] : []),
+    ...(isHR ? [{ id:'documents', label:'Documents', Icon: FolderOpen }] : []),
   ];
 
   return (
@@ -167,9 +254,16 @@ export default function HRPage() {
           <h1 className="text-xl font-bold text-slate-900">HR & Staff</h1>
           <p className="text-slate-500 text-sm mt-0.5">Leave management, payroll, and staff overview.</p>
         </div>
-        <button onClick={() => setLeaveForm(true)} className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2 text-sm font-semibold text-white hover:bg-violet-700 transition">
-          <Plus size={14} /> Request Leave
-        </button>
+        <div className="flex items-center gap-2">
+          {tab === 'documents' && isHR && (
+            <button onClick={() => setDocForm(true)} className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition">
+              <Plus size={14} /> Add Document
+            </button>
+          )}
+          <button onClick={() => setLeaveForm(true)} className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2 text-sm font-semibold text-white hover:bg-violet-700 transition">
+            <Plus size={14} /> Request Leave
+          </button>
+        </div>
       </div>
 
       {/* Stats (HR/admin only) */}
@@ -314,11 +408,88 @@ export default function HRPage() {
         </div>
       )}
 
+      {/* ── DOCUMENTS TAB ── */}
+      {tab === 'documents' && isHR && (
+        <div className="space-y-4">
+          {/* Filter by staff */}
+          <div className="flex items-center gap-3">
+            <label className="text-sm font-medium text-slate-700">Filter by staff:</label>
+            <select
+              value={docStaffFilter}
+              onChange={e => setDocStaff(e.target.value)}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40"
+            >
+              <option value="">All staff</option>
+              {teachers.map(t => (
+                <option key={t._id ?? t.id} value={t._id ?? t.id}>
+                  {t.name ?? `${t.firstName} ${t.lastName}`}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {docsLoading ? (
+            <div className="grid md:grid-cols-2 gap-3">
+              {[...Array(4)].map((_, i) => <div key={i} className="h-24 bg-white rounded-xl border border-slate-200 animate-pulse" />)}
+            </div>
+          ) : docs.length === 0 ? (
+            <div className="text-center py-16">
+              <FolderOpen size={32} className="mx-auto text-slate-300 mb-3" />
+              <p className="text-slate-500 text-sm">No documents recorded yet.</p>
+              <button onClick={() => setDocForm(true)} className="mt-3 text-violet-600 text-sm hover:underline">Add first document</button>
+            </div>
+          ) : (
+            <div className="grid md:grid-cols-2 gap-3">
+              {docs.map((d, i) => {
+                const isExpired = d.expiryDate && new Date(d.expiryDate) < new Date();
+                return (
+                  <motion.div key={d.id ?? d._id} initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} transition={{ delay: i * 0.04 }}
+                    className="bg-white rounded-xl border border-slate-200 p-4 group">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Badge cls={DOC_COLORS[d.type] ?? DOC_COLORS.other} text={DOC_TYPES[d.type] ?? d.type} />
+                          {isExpired && <Badge cls="bg-red-100 text-red-600" text="Expired" />}
+                        </div>
+                        <p className="font-semibold text-slate-900 text-sm truncate">{d.name}</p>
+                        <p className="text-xs text-slate-500 mt-0.5">{d.staffName || 'Unknown staff'}</p>
+                        <div className="flex gap-3 mt-2 text-xs text-slate-400">
+                          {d.issuedDate && <span>Issued: {fmtDate(d.issuedDate)}</span>}
+                          {d.expiryDate && <span className={isExpired ? 'text-red-500 font-medium' : ''}>Expires: {fmtDate(d.expiryDate)}</span>}
+                        </div>
+                        {d.notes && <p className="text-xs text-slate-500 mt-1.5 italic truncate">"{d.notes}"</p>}
+                      </div>
+                      <button
+                        onClick={() => { if (confirm(`Remove "${d.name}"?`)) removeDoc.mutate(d.id ?? d._id); }}
+                        className="shrink-0 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition opacity-0 group-hover:opacity-100"
+                        title="Remove document"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Leave form modal */}
       {showLeaveForm && (
         <LeaveForm
           onClose={() => setLeaveForm(false)}
           onSubmit={form => submitLeave.mutate(form)}
+        />
+      )}
+
+      {/* Document form modal */}
+      {showDocForm && (
+        <DocForm
+          teachers={teachers}
+          onClose={() => setDocForm(false)}
+          onSubmit={data => createDoc.mutate(data)}
+          saving={createDoc.isPending}
         />
       )}
     </div>

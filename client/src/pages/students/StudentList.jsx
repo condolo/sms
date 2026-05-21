@@ -385,6 +385,7 @@ export default function StudentList() {
                   <th className="text-left py-3 px-4 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden sm:table-cell">Admission No.</th>
                   <th className="text-left py-3 px-4 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">Class</th>
                   <th className="text-left py-3 px-4 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden lg:table-cell">Gender</th>
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden xl:table-cell">House</th>
                   <th className="text-left py-3 px-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
                   <th className="py-3 px-4" />
                 </tr>
@@ -415,6 +416,7 @@ export default function StudentList() {
                       <td className="py-3.5 px-4 hidden lg:table-cell text-sm text-slate-600 capitalize">
                         {s.gender === 'prefer_not_to_say' ? 'Not stated' : s.gender ?? '—'}
                       </td>
+                      <td className="py-3.5 px-4 hidden xl:table-cell text-sm text-slate-600">{s.house ?? '—'}</td>
                       <td className="py-3.5 px-4">
                         <span className={`inline-flex items-center text-xs font-medium px-2.5 py-1 rounded-full capitalize ${sts}`}>
                           {s.status}

@@ -345,6 +345,12 @@ export const hr = {
     list:   (params)   => _get('/hr/payroll', params),
     save:   (data)     => _post('/hr/payroll', data),
   },
+  documents: {
+    list:   (params)   => _get('/hr/documents', params),
+    create: (data)     => _post('/hr/documents', data),
+    update: (id, data) => _put(`/hr/documents/${id}`, data),
+    remove: (id)       => _delete(`/hr/documents/${id}`),
+  },
 };
 
 export const messages = {

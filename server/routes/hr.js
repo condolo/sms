@@ -145,6 +145,79 @@ router.post('/payroll', async (req, res) => {
   }
 });
 
+/* ══════════════════════════════════════════════════════════════
+   STAFF DOCUMENTS
+   ══════════════════════════════════════════════════════════════ */
+
+const DOC_TYPES = ['contract','appraisal','certificate','id_copy','other'];
+
+/* GET /api/hr/documents */
+router.get('/documents', async (req, res) => {
+  try {
+    const { schoolId, role } = req.jwtUser;
+    const { staffId } = req.query;
+    const Docs = _model('staff_documents');
+    const filter = { schoolId };
+    if (staffId) filter.staffId = staffId;
+    if (!HR_ROLES.includes(role) && !staffId) filter.staffId = req.jwtUser.userId;
+    const docs = await Docs.find(filter).sort({ createdAt: -1 }).lean();
+    res.json({ documents: docs });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* POST /api/hr/documents */
+router.post('/documents', async (req, res) => {
+  try {
+    const { schoolId, role } = req.jwtUser;
+    if (!HR_ROLES.includes(role)) return res.status(403).json({ error: 'HR/Admin only' });
+    const { staffId, staffName, name, type, issuedDate, expiryDate, notes, status } = req.body;
+    if (!staffId || !name || !type) return res.status(400).json({ error: 'staffId, name and type are required' });
+    if (!DOC_TYPES.includes(type)) return res.status(400).json({ error: `type must be one of: ${DOC_TYPES.join(', ')}` });
+    const doc = await _model('staff_documents').create({
+      id: `doc_${uuidv4().slice(0,8)}`,
+      schoolId, staffId, staffName: staffName || '',
+      name, type, issuedDate: issuedDate || null, expiryDate: expiryDate || null,
+      notes: notes || '', status: status || 'active',
+      createdAt: new Date().toISOString(),
+    });
+    res.status(201).json({ document: doc });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* PUT /api/hr/documents/:id */
+router.put('/documents/:id', async (req, res) => {
+  try {
+    const { schoolId, role } = req.jwtUser;
+    if (!HR_ROLES.includes(role)) return res.status(403).json({ error: 'HR/Admin only' });
+    const doc = await _model('staff_documents').findOneAndUpdate(
+      { id: req.params.id, schoolId },
+      { $set: { ...req.body, updatedAt: new Date().toISOString() } },
+      { new: true }
+    ).lean();
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    res.json({ document: doc });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* DELETE /api/hr/documents/:id */
+router.delete('/documents/:id', async (req, res) => {
+  try {
+    const { schoolId, role } = req.jwtUser;
+    if (!HR_ROLES.includes(role)) return res.status(403).json({ error: 'HR/Admin only' });
+    const doc = await _model('staff_documents').findOneAndDelete({ id: req.params.id, schoolId }).lean();
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* GET /api/hr/summary — headcount stats for the HR dashboard */
 router.get('/summary', async (req, res) => {
   try {
