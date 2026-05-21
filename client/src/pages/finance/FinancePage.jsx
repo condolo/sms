@@ -104,7 +104,7 @@ export default function FinancePage() {
 
       <div className="max-w-screen-2xl mx-auto px-6 py-5">
         {tab === 'summary'  && <SummaryTab  fmtCurrency={fmtCurrency} />}
-        {tab === 'invoices' && <InvoicesTab fmtCurrency={fmtCurrency} page={page} onPage={setPage} canCreate={canCreate} />}
+        {tab === 'invoices' && <InvoicesTab fmtCurrency={fmtCurrency} page={page} onPage={setPage} canCreate={canCreate} school={school} />}
         {tab === 'overdue'  && <OverdueTab  fmtCurrency={fmtCurrency} />}
         {tab === 'payments' && <PaymentsTab fmtCurrency={fmtCurrency} page={page} onPage={setPage} school={school} />}
         {tab === 'feestr'   && <FeeStructureTab fmtCurrency={fmtCurrency} canCreate={canCreate} currency={currency} />}
@@ -396,12 +396,61 @@ function OverdueTab({ fmtCurrency }) {
 /* ══════════════════════════════════════════════════════════
    INVOICES TAB
    ══════════════════════════════════════════════════════════ */
-function InvoicesTab({ fmtCurrency, page, onPage, canCreate }) {
+function InvoicesTab({ fmtCurrency, page, onPage, canCreate, school }) {
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [debSearch, setDebSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const timer = useState(null);
+
+  function printInvoice(inv) {
+    const schoolName = school?.name ?? 'School';
+    const invNo   = inv.invoiceNumber ?? `INV-${(inv._id ?? inv.id ?? '').slice(-6).toUpperCase()}`;
+    const dueDate = inv.dueDate ? new Date(inv.dueDate).toLocaleDateString('en-GB', { day:'numeric', month:'long', year:'numeric' }) : '—';
+    const itemRows = (inv.items ?? []).map(item =>
+      `<tr><td style="padding:7px 12px;border-bottom:1px solid #f1f5f9">${item.description}</td>
+       <td style="padding:7px 12px;border-bottom:1px solid #f1f5f9;text-align:center">${item.quantity ?? 1}</td>
+       <td style="padding:7px 12px;border-bottom:1px solid #f1f5f9;text-align:right">${fmtCurrency(item.unitPrice)}</td>
+       <td style="padding:7px 12px;border-bottom:1px solid #f1f5f9;text-align:right">${fmtCurrency((item.quantity ?? 1) * (item.unitPrice ?? 0))}</td></tr>`
+    ).join('');
+    const statusColor = inv.status === 'paid' ? '#059669' : inv.status === 'overdue' ? '#dc2626' : '#d97706';
+    const html = `<!DOCTYPE html><html><head><title>Invoice ${invNo}</title>
+<style>
+  body{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:40px;color:#1e293b;max-width:640px;margin:auto}
+  .hdr{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #e2e8f0;padding-bottom:20px;margin-bottom:24px}
+  .hdr h1{margin:0 0 4px;font-size:22px}.hdr p{margin:0;font-size:12px;color:#64748b}
+  .status{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700;color:white;background:${statusColor};text-transform:capitalize}
+  .meta{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px;font-size:13px}
+  .meta .k{color:#64748b;margin-bottom:2px}.meta .v{font-weight:600}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px}
+  thead th{background:#f8fafc;padding:9px 12px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#64748b;border-bottom:2px solid #e2e8f0}
+  .total-row td{padding:12px;font-weight:700;border-top:2px solid #e2e8f0;font-size:15px}
+  .footer{margin-top:32px;text-align:center;font-size:11px;color:#94a3b8}
+  @media print{body{padding:20px}}
+</style></head><body>
+<div class="hdr">
+  <div><h1>${schoolName}</h1><p>Invoice</p></div>
+  <div style="text-align:right">
+    <div style="font-size:18px;font-weight:700;margin-bottom:6px">${invNo}</div>
+    <div class="status">${inv.status ?? 'unpaid'}</div>
+  </div>
+</div>
+<div class="meta">
+  <div><div class="k">Student</div><div class="v">${inv.studentName ?? '—'}</div></div>
+  <div><div class="k">Due Date</div><div class="v">${dueDate}</div></div>
+  <div><div class="k">Total</div><div class="v">${fmtCurrency(inv.total)}</div></div>
+  <div><div class="k">Balance Due</div><div class="v" style="color:${inv.balance > 0 ? '#d97706' : '#059669'}">${fmtCurrency(inv.balance)}</div></div>
+</div>
+${itemRows ? `<table><thead><tr><th>Description</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Amount</th></tr></thead><tbody>${itemRows}</tbody>
+<tr class="total-row"><td colspan="3">Total</td><td style="text-align:right">${fmtCurrency(inv.total)}</td></tr></table>` : ''}
+<div class="footer">${schoolName} · Thank you for your payment.</div>
+</body></html>`;
+    const win = window.open('', '_blank', 'width=700,height=860');
+    if (!win) return;
+    win.document.write(html);
+    win.document.close();
+    setTimeout(() => win.print(), 400);
+  }
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['finance', 'invoices', { page, search: debSearch, status: statusFilter }],
@@ -497,15 +546,24 @@ function InvoicesTab({ fmtCurrency, page, onPage, canCreate }) {
                       {inv.dueDate ? new Date(inv.dueDate).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' }) : '—'}
                     </td>
                     <td className="py-3.5 px-4">
-                      {canCreate && inv.status !== 'void' && inv.status !== 'paid' && (
+                      <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition">
                         <button
-                          onClick={() => confirm('Void this invoice? This cannot be undone.') && voidInvoice(id)}
-                          className="opacity-0 group-hover:opacity-100 transition p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg"
-                          title="Void invoice"
+                          onClick={() => printInvoice(inv)}
+                          className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition"
+                          title="Print invoice"
                         >
-                          <Ban size={14} />
+                          <Printer size={13} />
                         </button>
-                      )}
+                        {canCreate && inv.status !== 'void' && inv.status !== 'paid' && (
+                          <button
+                            onClick={() => confirm('Void this invoice? This cannot be undone.') && voidInvoice(id)}
+                            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                            title="Void invoice"
+                          >
+                            <Ban size={14} />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
