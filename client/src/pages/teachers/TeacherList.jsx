@@ -9,9 +9,9 @@ import {
   Search, X, UserPlus, Trash2, Eye, Loader2,
   CheckCircle2, AlertTriangle, Phone, Mail,
   BookOpen, Briefcase, Users, Edit2, Save, Calendar,
-  MapPin, Award, ChevronRight,
+  MapPin, Award, ChevronRight, Download,
 } from 'lucide-react';
-import { teachers as teachersApi } from '@/api/client.js';
+import { teachers as teachersApi, importExport } from '@/api/client.js';
 import { Pagination } from '@/components/ui/Pagination.jsx';
 import useAuthStore from '@/store/auth.js';
 
@@ -49,7 +49,15 @@ export default function TeacherList() {
   const [page,     setPage]     = useState(1);
   const [showAdd,  setShowAdd]  = useState(false);
   const [selected, setSelected] = useState(null);
+  const [exporting, setExporting] = useState(false);
   const timer = useRef(null);
+
+  async function handleExport() {
+    setExporting(true);
+    try { await importExport.exportCSV('teachers'); }
+    catch (e) { alert(e?.message ?? 'Export failed'); }
+    finally { setExporting(false); }
+  }
 
   function onSearch(v) {
     setSearch(v);
@@ -86,15 +94,26 @@ export default function TeacherList() {
               {isLoading ? 'Loading…' : `${(pagination.total ?? 0).toLocaleString()} staff members`}
             </p>
           </div>
-          {canCreate && (
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setShowAdd(true)}
-              className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+              onClick={handleExport}
+              disabled={exporting}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 text-slate-600 hover:border-slate-400 hover:text-slate-800 disabled:opacity-50 transition-colors"
+              title="Export all teachers to CSV"
             >
-              <UserPlus size={15} />
-              Add Teacher
+              {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              Export
             </button>
-          )}
+            {canCreate && (
+              <button
+                onClick={() => setShowAdd(true)}
+                className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+              >
+                <UserPlus size={15} />
+                Add Teacher
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
