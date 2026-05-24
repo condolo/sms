@@ -67,22 +67,32 @@ const CLASSES = [
   { id:'cls_demo_f4a', name:'Form 4A',     year:'Form 4',     sectionId:SEC_SEC, sectionKey:'secondary', order:7, status:'active' },
 ];
 
-/* ── Subjects ── */
+/* ── Departments ── */
+const DEPARTMENTS = [
+  { id:'dept_demo_lang', name:'Languages',                    code:'LANG', color:'#0EA5E9', order:1, hodName:'Ms. Agnes Otieno',    description:'English Language and Kiswahili' },
+  { id:'dept_demo_math', name:'Mathematics',                  code:'MATH', color:'#6366F1', order:2, hodName:'Mr. Peter Kamau',     description:'Pure and applied mathematics' },
+  { id:'dept_demo_sci',  name:'Sciences',                     code:'SCI',  color:'#10B981', order:3, hodName:'Ms. Judith Njoroge',  description:'Physics, Chemistry, Biology and integrated Science' },
+  { id:'dept_demo_hum',  name:'Humanities',                   code:'HUM',  color:'#F59E0B', order:4, hodName:'Ms. Dorothy Chebet',  description:'History, Geography, Social Studies and Religious Education' },
+  { id:'dept_demo_tbs',  name:'Technical & Business Studies', code:'TBS',  color:'#F97316', order:5, hodName:'Mr. Samuel Maina',    description:'Business Studies and ICT' },
+  { id:'dept_demo_pe',   name:'Physical Education',           code:'PE',   color:'#EC4899', order:6, hodName:'Mr. Joseph Kipchoge', description:'PE, Sports and Games' },
+];
+
+/* ── Subjects (with departmentId, sections array, isCompulsory) ── */
 const SUBJECTS = [
-  { id:'subj_demo_math', name:'Mathematics',          code:'MATH', section:'all'       },
-  { id:'subj_demo_eng',  name:'English Language',     code:'ENG',  section:'all'       },
-  { id:'subj_demo_kisw', name:'Kiswahili',            code:'KSW',  section:'all'       },
-  { id:'subj_demo_sci',  name:'Science',              code:'SCI',  section:'primary'   },
-  { id:'subj_demo_ss',   name:'Social Studies',       code:'SS',   section:'primary'   },
-  { id:'subj_demo_cre',  name:'CRE',                  code:'CRE',  section:'all'       },
-  { id:'subj_demo_phy',  name:'Physics',              code:'PHY',  section:'secondary' },
-  { id:'subj_demo_chem', name:'Chemistry',            code:'CHEM', section:'secondary' },
-  { id:'subj_demo_bio',  name:'Biology',              code:'BIO',  section:'secondary' },
-  { id:'subj_demo_hist', name:'History & Government', code:'HIST', section:'secondary' },
-  { id:'subj_demo_geo',  name:'Geography',            code:'GEO',  section:'secondary' },
-  { id:'subj_demo_bs',   name:'Business Studies',     code:'BS',   section:'secondary' },
-  { id:'subj_demo_pe',   name:'PE & Sports',          code:'PE',   section:'all'       },
-  { id:'subj_demo_ict',  name:'ICT',                  code:'ICT',  section:'all'       },
+  { id:'subj_demo_math', name:'Mathematics',          code:'MATH', departmentId:'dept_demo_math', sections:['all'],       isCompulsory:true  },
+  { id:'subj_demo_eng',  name:'English Language',     code:'ENG',  departmentId:'dept_demo_lang', sections:['all'],       isCompulsory:true  },
+  { id:'subj_demo_kisw', name:'Kiswahili',            code:'KSW',  departmentId:'dept_demo_lang', sections:['all'],       isCompulsory:true  },
+  { id:'subj_demo_sci',  name:'Science',              code:'SCI',  departmentId:'dept_demo_sci',  sections:['primary'],   isCompulsory:true  },
+  { id:'subj_demo_ss',   name:'Social Studies',       code:'SS',   departmentId:'dept_demo_hum',  sections:['primary'],   isCompulsory:false },
+  { id:'subj_demo_cre',  name:'CRE',                  code:'CRE',  departmentId:'dept_demo_hum',  sections:['all'],       isCompulsory:false },
+  { id:'subj_demo_phy',  name:'Physics',              code:'PHY',  departmentId:'dept_demo_sci',  sections:['secondary'], isCompulsory:false },
+  { id:'subj_demo_chem', name:'Chemistry',            code:'CHEM', departmentId:'dept_demo_sci',  sections:['secondary'], isCompulsory:false },
+  { id:'subj_demo_bio',  name:'Biology',              code:'BIO',  departmentId:'dept_demo_sci',  sections:['secondary'], isCompulsory:false },
+  { id:'subj_demo_hist', name:'History & Government', code:'HIST', departmentId:'dept_demo_hum',  sections:['secondary'], isCompulsory:false },
+  { id:'subj_demo_geo',  name:'Geography',            code:'GEO',  departmentId:'dept_demo_hum',  sections:['secondary'], isCompulsory:false },
+  { id:'subj_demo_bs',   name:'Business Studies',     code:'BS',   departmentId:'dept_demo_tbs',  sections:['secondary'], isCompulsory:false },
+  { id:'subj_demo_pe',   name:'PE & Sports',          code:'PE',   departmentId:'dept_demo_pe',   sections:['all'],       isCompulsory:false },
+  { id:'subj_demo_ict',  name:'ICT',                  code:'ICT',  departmentId:'dept_demo_tbs',  sections:['all'],       isCompulsory:false },
 ];
 
 /* ── Additional teachers (9 — u_demo_teacher already exists) ── */
@@ -287,9 +297,22 @@ async function seedDemoData() {
       { $set: { status: 'active' } }
     );
 
-    /* 2. Subjects */
+    /* 2. Departments */
+    const Dept = _model('departments');
+    await Promise.all(DEPARTMENTS.map(d =>
+      upsert(Dept, d.id, { ...d, isActive: true, createdBy: ADMIN_ID, updatedBy: ADMIN_ID })
+    ));
+
+    /* 2b. Subjects (with departmentId, sections, isCompulsory) */
     await Promise.all(SUBJECTS.map(s =>
       upsert(Subject, s.id, { ...s, isActive: true, createdBy: ADMIN_ID })
+    ));
+    // Patch existing subjects seeded without departmentId/sections/isCompulsory
+    await Promise.all(SUBJECTS.map(s =>
+      Subject.updateOne(
+        { id: s.id, schoolId: SCHOOL_ID, $or: [{ departmentId: { $exists: false } }, { sections: { $exists: false } }] },
+        { $set: { departmentId: s.departmentId, sections: s.sections, isCompulsory: s.isCompulsory } }
+      )
     ));
 
     /* 3. Extra teachers (users) */
@@ -456,7 +479,7 @@ async function seedDemoData() {
     ];
     await Promise.all(LEAVES.map(l => upsert(Leave, l.id, l)));
 
-    console.log('[seed-demo-data] ✓ 7 classes · 14 subjects · 10 teacher profiles · 9 teacher users · 20 students · 25 behaviour · 20 invoices · 14 payments · 60 timetable slots · 8 admissions · 10 events · 10 payroll · 4 leave requests');
+    console.log('[seed-demo-data] ✓ 7 classes · 6 departments · 14 subjects · 10 teacher profiles · 9 teacher users · 20 students · 25 behaviour · 20 invoices · 14 payments · 60 timetable slots · 8 admissions · 10 events · 10 payroll · 4 leave requests');
 
   } catch (err) {
     console.warn('[seed-demo-data] Warning:', err.message);
