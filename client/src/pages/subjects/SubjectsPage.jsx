@@ -281,18 +281,21 @@ function EnrollSlideOver({ subject, onClose, flash }) {
   const { data: enrollments = [], isLoading: loadingEnrolled, refetch } = useQuery({
     queryKey: ['subject-enrollments', subject.id],
     queryFn:  () => enrollApi.list({ subjectId: subject.id }),
+    select:   r => r?.data ?? (Array.isArray(r) ? r : []),
     staleTime: 0,
   });
 
   const { data: classes = [] } = useQuery({
     queryKey: ['classes'],
     queryFn:  () => classesApi.list({ limit: 200 }),
+    select:   r => r?.data ?? (Array.isArray(r) ? r : []),
     staleTime: 60_000,
   });
 
   const { data: allStudents = [] } = useQuery({
     queryKey: ['students-search-pool'],
     queryFn:  () => studentsApi.list({ limit: 2000, status: 'active' }),
+    select:   r => r?.data ?? (Array.isArray(r) ? r : []),
     staleTime: 60_000,
   });
 
@@ -668,18 +671,21 @@ export default function SubjectsPage() {
   const { data: depts = [], isPending: deptsLoading } = useQuery({
     queryKey: ['departments'],
     queryFn:  () => deptsApi.list(),
+    select:   r => r?.data ?? (Array.isArray(r) ? r : []),
     staleTime: 60_000,
   });
 
   const { data: allSubjects = [], isPending: subsLoading } = useQuery({
     queryKey: ['subjects'],
     queryFn:  () => subsApi.list(),
+    select:   r => r?.data ?? (Array.isArray(r) ? r : []),
     staleTime: 60_000,
   });
 
   const { data: enrollCounts = {} } = useQuery({
     queryKey: ['student-subjects-counts'],
     queryFn:  () => enrollApi.counts(),
+    select:   r => r?.data ?? r ?? {},
     staleTime: 30_000,
   });
 
