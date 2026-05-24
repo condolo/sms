@@ -1,3 +1,4 @@
+const crypto     = require('crypto');
 const { verify } = require('../utils/jwt');
 
 /* Standard error envelope — matches { success, error: { code, message } } used everywhere */
@@ -18,10 +19,14 @@ function authMiddleware(req, res, next) {
   next();
 }
 
-/* Platform admin check — uses PLATFORM_ADMIN_KEY header */
+/* Platform admin check — uses PLATFORM_ADMIN_KEY header (timing-safe) */
 function platformAdmin(req, res, next) {
-  const key = req.headers['x-platform-key'];
-  if (!key || key !== process.env.PLATFORM_ADMIN_KEY) {
+  const key    = req.headers['x-platform-key'] || '';
+  const secret = process.env.PLATFORM_ADMIN_KEY || '';
+  const valid  = secret.length > 0 &&
+                 key.length === secret.length &&
+                 crypto.timingSafeEqual(Buffer.from(key), Buffer.from(secret));
+  if (!valid) {
     return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Platform admin access only' } });
   }
   next();

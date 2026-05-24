@@ -512,21 +512,22 @@ const SHOWCASE_TABS = [
 /* ═══════════════════════════════════════════════════════════════
    PLANS DATA
 ═══════════════════════════════════════════════════════════════ */
+// Aligned with server/middleware/plan.js — core/standard/premium tiers
 const PLAN_FEATURES = [
-  { label: 'Student Profiles & Records'    },
-  { label: 'Admissions Pipeline'           },
-  { label: 'Attendance Tracking'           },
-  { label: 'Finance & Fee Ledger'          },
-  { label: 'Parent Communication'          },
-  { label: 'Events & School Calendar'      },
-  { label: 'Academics & Grading'           },
-  { label: 'Behaviour Tracking (BPS)'      },
-  { label: 'Timetable Management'          },
-  { label: 'Report Card Publishing'        },
-  { label: 'HR & Staff Management'         },
-  { label: 'Analytics Director Dashboard'  },
-  { label: 'Multi-Curriculum Support'      },
-  { label: 'Custom Roles & Permissions'    },
+  { label: 'Student Profiles & Records'    },  // 0  core
+  { label: 'Admissions Pipeline'           },  // 1  core
+  { label: 'Attendance Tracking'           },  // 2  core
+  { label: 'Parent Communication'          },  // 3  core
+  { label: 'Events & School Calendar'      },  // 4  core
+  { label: 'Academics & Grading'           },  // 5  core
+  { label: 'Finance & Fee Ledger'          },  // 6  standard
+  { label: 'Behaviour Tracking (BPS)'      },  // 7  standard
+  { label: 'Timetable Management'          },  // 8  standard
+  { label: 'Report Card Publishing'        },  // 9  standard
+  { label: 'HR & Staff Management'         },  // 10 standard
+  { label: 'Analytics Director Dashboard'  },  // 11 premium
+  { label: 'Multi-Curriculum Support'      },  // 12 premium
+  { label: 'Custom Roles & Permissions'    },  // 13 premium
 ];
 
 const PLANS = [
@@ -536,7 +537,7 @@ const PLANS = [
     badge: null,
     studentCap: 'Up to 500 students',
     included: [true, true, true, true, true, true, false, false, false, false, false, false, false, false],
-    highlights: ['Student & fee management', 'Attendance & communication', 'Admissions pipeline'],
+    highlights: ['Student records & admissions', 'Attendance & communication', 'Academic grades & events'],
     cta: 'Get Started',
   },
   {
@@ -545,7 +546,7 @@ const PLANS = [
     badge: 'Most Popular',
     studentCap: 'Up to 2,000 students',
     included: [true, true, true, true, true, true, true, true, true, true, true, false, false, false],
-    highlights: ['Everything in Core', 'Grades, reports & timetable', 'Behaviour management & HR'],
+    highlights: ['Everything in Core', 'Finance, timetable & reports', 'Behaviour management & HR'],
     cta: 'Get Standard',
   },
   {

@@ -37,11 +37,14 @@ const FEATURE_PLAN = {
   sections:           'standard',
   assessment:         'standard',   // CA/HW/MT/ET system (was implicitly gated via 'grades')
 
+  /* ── Standard (continued) ── */
+  finance:            'standard',   // fee management is core African school need
+  report_cards:       'standard',   // aligned with landing page promise
+
   /* ── Premium ── */
-  finance:            'premium',
   reports:            'premium',
-  report_cards:       'premium',
   custom_roles:       'premium',
+  hr:                 'premium',
 
   /* ── Enterprise ── */
   api_access:         'enterprise',

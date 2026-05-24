@@ -13,17 +13,19 @@ import {
   Globe, MapPin, Shield, UserPlus, Home, Palette,
   Eye, EyeOff, Lock, ShieldCheck, Database, Download,
   RefreshCcw, Info, Server, Check, Minus, ChevronDown,
+  CreditCard, Smartphone, Zap, ArrowRight,
 } from 'lucide-react';
 import { settings as settingsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 
 /* ── Tab config ─────────────────────────────────────────────── */
 const TABS = [
-  { id: 'school',  label: 'School',             Icon: Building2,  adminOnly: false },
-  { id: 'users',   label: 'Users',              Icon: Users,       adminOnly: true  },
-  { id: 'roles',   label: 'Roles & Permissions',Icon: ShieldCheck, adminOnly: true  },
-  { id: 'system',  label: 'System',             Icon: Database,    adminOnly: true  },
-  { id: 'account', label: 'Account',            Icon: User,        adminOnly: false },
+  { id: 'school',       label: 'School',              Icon: Building2,  adminOnly: false },
+  { id: 'subscription', label: 'Subscription',        Icon: CreditCard, adminOnly: true  },
+  { id: 'users',        label: 'Users',               Icon: Users,       adminOnly: true  },
+  { id: 'roles',        label: 'Roles & Permissions', Icon: ShieldCheck, adminOnly: true  },
+  { id: 'system',       label: 'System',              Icon: Database,    adminOnly: true  },
+  { id: 'account',      label: 'Account',             Icon: User,        adminOnly: false },
 ];
 
 /* ── Role pills ─────────────────────────────────────────────── */
@@ -1162,6 +1164,174 @@ function RolesTab() {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   SUBSCRIPTION TAB — pay Msingi platform subscription via M-Pesa
+   ══════════════════════════════════════════════════════════════ */
+const PLAN_META = {
+  core:       { label: 'Core',       price: 5000,  students: '500',       color: 'text-slate-600',  bg: 'bg-slate-50',   border: 'border-slate-200' },
+  standard:   { label: 'Standard',   price: 12000, students: '2,000',     color: 'text-indigo-600', bg: 'bg-indigo-50',  border: 'border-indigo-200', popular: true },
+  premium:    { label: 'Premium',    price: 25000, students: 'Unlimited',  color: 'text-violet-600', bg: 'bg-violet-50',  border: 'border-violet-200' },
+  enterprise: { label: 'Enterprise', price: null,  students: 'Unlimited',  color: 'text-amber-600',  bg: 'bg-amber-50',   border: 'border-amber-200' },
+};
+
+function SubscriptionTab() {
+  const school   = useAuthStore(s => s.session?.school);
+  const user     = useAuthStore(s => s.session?.user);
+  const [phone,   setPhone]   = useState(user?.phone || '');
+  const [selPlan, setSelPlan] = useState(school?.plan || 'standard');
+  const [loading, setLoading] = useState(false);
+  const [result,  setResult]  = useState(null);
+  const [error,   setError]   = useState('');
+
+  const currentPlan = school?.plan || 'core';
+  const expiry = school?.planExpiresAt ? new Date(school.planExpiresAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : null;
+
+  async function handlePay() {
+    if (!phone.trim()) { setError('Enter the M-Pesa number to charge.'); return; }
+    setLoading(true); setError(''); setResult(null);
+    try {
+      const res = await fetch('/api/mpesa/subscription', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token}`,
+        },
+        body: JSON.stringify({ phone: phone.trim(), plan: selPlan }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error?.message || 'Payment initiation failed.');
+      setResult(json);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-6">
+      {/* Current plan status */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-9 h-9 rounded-lg bg-indigo-50 flex items-center justify-center">
+            <CreditCard size={16} className="text-indigo-600" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800">Current Plan</h3>
+            <p className="text-xs text-slate-400">Msingi platform subscription</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold capitalize ${PLAN_META[currentPlan]?.bg ?? 'bg-slate-50'} ${PLAN_META[currentPlan]?.color ?? 'text-slate-600'} border ${PLAN_META[currentPlan]?.border ?? 'border-slate-200'}`}>
+            <Zap size={12} />
+            {PLAN_META[currentPlan]?.label ?? currentPlan}
+          </span>
+          {expiry && (
+            <span className="text-xs text-slate-400">Active until {expiry}</span>
+          )}
+          {!expiry && (
+            <span className="text-xs text-amber-600 font-medium">No active subscription — limited access</span>
+          )}
+        </div>
+      </div>
+
+      {/* Plan selector */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+        <h3 className="text-sm font-semibold text-slate-700">Choose a Plan</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {Object.entries(PLAN_META).filter(([k]) => k !== 'enterprise').map(([key, meta]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setSelPlan(key)}
+              className={`relative text-left p-4 rounded-xl border-2 transition-all ${selPlan === key ? `${meta.border} ${meta.bg}` : 'border-slate-200 hover:border-slate-300'}`}
+            >
+              {meta.popular && (
+                <span className="absolute -top-2.5 left-3 bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">Most Popular</span>
+              )}
+              <p className={`text-sm font-semibold ${meta.color}`}>{meta.label}</p>
+              <p className="text-xl font-bold text-slate-800 mt-1">
+                KES {(meta.price || 0).toLocaleString()}<span className="text-xs font-normal text-slate-400">/mo</span>
+              </p>
+              <p className="text-xs text-slate-400 mt-1">Up to {meta.students} students</p>
+            </button>
+          ))}
+        </div>
+
+        {/* Enterprise CTA */}
+        <div className="flex items-center gap-3 p-4 rounded-xl bg-amber-50 border border-amber-200">
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-amber-800">Enterprise Plan</p>
+            <p className="text-xs text-amber-600 mt-0.5">Unlimited students, custom SLAs, white-label, dedicated support.</p>
+          </div>
+          <a href="mailto:sales@msingi.io" className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 hover:text-amber-900 whitespace-nowrap">
+            Contact sales <ArrowRight size={12} />
+          </a>
+        </div>
+      </div>
+
+      {/* Payment */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <Smartphone size={14} className="text-emerald-500" />
+          <h3 className="text-sm font-semibold text-slate-700">Pay via M-Pesa STK Push</h3>
+          <span className="ml-auto text-[10px] font-semibold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200">Instant</span>
+        </div>
+        <p className="text-xs text-slate-400">
+          Enter your M-Pesa number. An STK push will be sent — enter your PIN to complete payment.
+          Your plan activates immediately after confirmation.
+        </p>
+
+        {error && (
+          <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2.5 text-sm text-red-700 flex items-center gap-2">
+            <AlertTriangle size={14} className="shrink-0" />
+            {error}
+          </div>
+        )}
+
+        {result && (
+          <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2.5 text-sm text-emerald-700 flex items-start gap-2">
+            <CheckCircle2 size={14} className="shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold">STK push sent!</p>
+              <p className="text-xs mt-0.5">{result.message}</p>
+            </div>
+          </div>
+        )}
+
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <label className="block text-xs font-medium text-slate-600 mb-1">M-Pesa Number</label>
+            <input
+              type="tel"
+              value={phone}
+              onChange={e => { setPhone(e.target.value); setError(''); }}
+              placeholder="0712 345 678 or +254..."
+              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            />
+          </div>
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={handlePay}
+              disabled={loading || !phone.trim()}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+            >
+              {loading ? <Loader2 size={14} className="animate-spin" /> : <Smartphone size={14} />}
+              Pay KES {(PLAN_META[selPlan]?.price || 0).toLocaleString()}
+            </button>
+          </div>
+        </div>
+
+        <p className="text-[10px] text-slate-400 flex items-center gap-1">
+          <Lock size={10} />
+          Payment is processed directly by Safaricom. Msingi does not store M-Pesa PINs.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
    SYSTEM TAB — system info + data management
    ══════════════════════════════════════════════════════════════ */
 function SystemTab() {
@@ -1343,11 +1513,12 @@ export default function SettingsPage() {
             exit={{ opacity: 0, y: -6 }}
             transition={{ duration: 0.15 }}
           >
-            {tab === 'school'  && <SchoolTab />}
-            {tab === 'users'   && <UsersTab />}
-            {tab === 'roles'   && <RolesTab />}
-            {tab === 'system'  && <SystemTab />}
-            {tab === 'account' && <AccountTab />}
+            {tab === 'school'        && <SchoolTab />}
+            {tab === 'subscription'  && <SubscriptionTab />}
+            {tab === 'users'         && <UsersTab />}
+            {tab === 'roles'         && <RolesTab />}
+            {tab === 'system'        && <SystemTab />}
+            {tab === 'account'       && <AccountTab />}
           </motion.div>
         </AnimatePresence>
       </div>

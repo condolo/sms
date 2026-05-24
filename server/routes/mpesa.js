@@ -1,14 +1,17 @@
 /* ============================================================
    Msingi — M-Pesa Integration Routes
-   POST /api/mpesa/stk-push           — initiate STK push (auth)
-   GET  /api/mpesa/status/:id         — query push status (auth)
-   POST /api/mpesa/callback           — Safaricom STK callback (public)
-   POST /api/mpesa/c2b/register       — register C2B URLs (admin)
-   POST /api/mpesa/c2b/validation     — C2B validation (public, Safaricom)
-   POST /api/mpesa/c2b/confirmation   — C2B confirmation (public, Safaricom)
-   GET  /api/mpesa/transactions       — list M-Pesa transactions (auth)
+   POST /api/mpesa/stk-push             — initiate STK push (auth)
+   GET  /api/mpesa/status/:id           — query push status (auth)
+   POST /api/mpesa/callback             — Safaricom STK callback (public)
+   POST /api/mpesa/c2b/register         — register C2B URLs (admin)
+   POST /api/mpesa/c2b/validation       — C2B validation (public, Safaricom)
+   POST /api/mpesa/c2b/confirmation     — C2B confirmation (public, Safaricom)
+   GET  /api/mpesa/transactions         — list M-Pesa transactions (auth)
+   POST /api/mpesa/subscription         — pay Msingi subscription via M-Pesa (admin)
+   POST /api/mpesa/subscription/callback — Safaricom callback for subscription STK (public)
    ============================================================ */
 const express = require('express');
+const crypto  = require('crypto');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
 const { nextReceiptNumber } = require('../utils/counters');
@@ -33,6 +36,34 @@ function _isAdmin(req) {
   const r  = req.jwtUser?.role  || '';
   const rs = req.jwtUser?.roles || [];
   return r === 'superadmin' || r === 'admin' || rs.includes('superadmin') || rs.includes('admin');
+}
+
+function _isPrincipalOrAdmin(req) {
+  const r  = req.jwtUser?.role  || '';
+  const rs = req.jwtUser?.roles || [];
+  const all = [r, ...rs];
+  return all.some(x => ['superadmin', 'admin', 'deputy', 'principal'].includes(x));
+}
+
+/* ── Safaricom IP allowlist (production callback security) ──────
+   Safaricom publishes their IP ranges; we whitelist them.
+   MPESA_SKIP_IP_CHECK=true disables this (useful in sandbox/dev). */
+const SAFARICOM_IPS = new Set([
+  '196.201.214.200', '196.201.214.206', '196.201.213.100', '196.201.214.207',
+  '196.201.214.208', '196.201.213.169', '196.201.213.170', '196.201.213.171',
+  '196.201.213.172', '196.201.213.173', '196.201.214.201', '196.201.214.202',
+  '196.201.214.203', '196.201.214.204', '196.201.214.205', '196.201.214.209',
+  '196.201.214.210', '196.201.214.211', '196.201.214.212', '196.201.214.213',
+]);
+
+function _assertSafaricomIP(req, res) {
+  if (process.env.MPESA_SKIP_IP_CHECK === 'true') return true;
+  if (process.env.NODE_ENV !== 'production') return true;
+  const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || '';
+  if (SAFARICOM_IPS.has(ip)) return true;
+  console.warn(`[mpesa] Callback rejected — unknown IP: ${ip}`);
+  res.status(403).json({ ResultCode: 1, ResultDesc: 'Forbidden' });
+  return false;
 }
 
 /** Recalculate invoice paid/balance/status and persist */
@@ -187,6 +218,7 @@ router.get('/status/:checkoutRequestId', authMiddleware, async (req, res) => {
    Always respond 200 immediately — Safaricom retries on non-200.
    ══════════════════════════════════════════════════════════════ */
 router.post('/callback', async (req, res) => {
+  if (!_assertSafaricomIP(req, res)) return;
   res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
 
   try {
@@ -298,6 +330,7 @@ router.post('/c2b/validation', (req, res) => {
 
 /* Safaricom C2B confirmation — called when payment is confirmed */
 router.post('/c2b/confirmation', async (req, res) => {
+  if (!_assertSafaricomIP(req, res)) return;
   res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
 
   try {
@@ -390,6 +423,183 @@ router.get('/transactions', authMiddleware, async (req, res) => {
     console.error('[mpesa] GET /transactions error:', err);
     res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to fetch transactions.' } });
   }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   MSINGI SUBSCRIPTION PAYMENT
+   Schools pay their Msingi platform subscription via M-Pesa.
+   Uses the platform's own Daraja credentials (env vars), NOT
+   the school's own M-Pesa credentials.
+   Restricted to admin / principal / deputy only.
+   ══════════════════════════════════════════════════════════════ */
+
+const SUBSCRIPTION_PRICES = {
+  core:       5000,    // KES/month
+  standard:  12000,
+  premium:   25000,
+  enterprise: null,    // negotiated — contact sales
+};
+
+/* POST /api/mpesa/subscription — initiate subscription payment */
+router.post('/subscription', authMiddleware, async (req, res) => {
+  try {
+    if (!_isPrincipalOrAdmin(req)) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Only school admin or principal can initiate subscription payments.' } });
+    }
+
+    const { schoolId } = req.jwtUser;
+    const { phone, plan } = req.body;
+
+    if (!phone) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'phone is required.' } });
+    }
+
+    // Validate plan
+    const targetPlan = (plan || 'standard').toLowerCase();
+    const amount = SUBSCRIPTION_PRICES[targetPlan];
+    if (!amount) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Enterprise plans require direct sales contact. Valid plans: ${Object.keys(SUBSCRIPTION_PRICES).filter(p => SUBSCRIPTION_PRICES[p]).join(', ')}` } });
+    }
+
+    // Platform M-Pesa credentials (separate from school's own credentials)
+    const consumerKey    = process.env.MSINGI_MPESA_CONSUMER_KEY;
+    const consumerSecret = process.env.MSINGI_MPESA_CONSUMER_SECRET;
+    const shortCode      = process.env.MSINGI_MPESA_SHORTCODE;
+    const passkey        = process.env.MSINGI_MPESA_PASSKEY;
+    const env            = process.env.MSINGI_MPESA_ENV || 'sandbox';
+    const base           = process.env.PUBLIC_URL || '';
+
+    if (!consumerKey || !consumerSecret || !shortCode || !passkey) {
+      console.error('[mpesa/subscription] Platform M-Pesa credentials not configured');
+      return res.status(503).json({ success: false, error: { code: 'NOT_CONFIGURED', message: 'Subscription payments are not yet enabled. Contact support.' } });
+    }
+
+    const Schools = _model('schools');
+    const school  = await Schools.findOne({ id: schoolId }).lean();
+
+    const normalizedPhone = mpesa.normalizePhone(phone);
+    const callbackUrl     = `${base}/api/mpesa/subscription/callback`;
+
+    let result;
+    try {
+      result = await mpesa.stkPush({
+        consumerKey, consumerSecret, shortCode, passkey,
+        phone:      normalizedPhone,
+        amount,
+        accountRef: school?.shortName || school?.slug || schoolId.slice(-8),
+        description: `Msingi ${targetPlan} plan`,
+        callbackUrl,
+        env,
+      });
+    } catch (mpesaErr) {
+      console.error('[mpesa/subscription] stkPush error:', mpesaErr.message);
+      return res.status(502).json({ success: false, error: { code: 'MPESA_API_ERROR', message: mpesaErr.message } });
+    }
+
+    if (result.ResponseCode !== '0') {
+      return res.status(502).json({ success: false, error: { code: 'MPESA_ERROR', message: result.ResponseDescription || 'M-Pesa request failed.' } });
+    }
+
+    // Record pending subscription transaction
+    const Transactions = _model('mpesa_transactions');
+    const txnId = _uid();
+    await Transactions.create({
+      id:                txnId,
+      schoolId,
+      type:              'subscription',
+      plan:              targetPlan,
+      merchantRequestId: result.MerchantRequestID,
+      checkoutRequestId: result.CheckoutRequestID,
+      phone:             normalizedPhone,
+      amount,
+      status:            'pending',
+      createdAt:         new Date().toISOString(),
+      updatedAt:         new Date().toISOString(),
+    });
+
+    return res.json({
+      success:           true,
+      checkoutRequestId: result.CheckoutRequestID,
+      txnId,
+      amount,
+      plan:              targetPlan,
+      message:           `STK push sent for KES ${amount.toLocaleString()}. Enter your M-Pesa PIN to complete the ${targetPlan} plan subscription.`,
+    });
+  } catch (err) {
+    console.error('[mpesa] POST /subscription error:', err);
+    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to initiate subscription payment.' } });
+  }
+});
+
+/* POST /api/mpesa/subscription/callback — Safaricom posts result (public) */
+router.post('/subscription/callback', async (req, res) => {
+  if (!_assertSafaricomIP(req, res)) return;
+  res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
+
+  try {
+    const body = req.body?.Body?.stkCallback;
+    if (!body) return;
+
+    const checkoutRequestId = body.CheckoutRequestID;
+    const resultCode        = Number(body.ResultCode);
+    const now               = new Date().toISOString();
+
+    const Transactions = _model('mpesa_transactions');
+    const txn = await Transactions.findOne({ checkoutRequestId, type: 'subscription' }).lean();
+    if (!txn) {
+      console.warn('[mpesa/subscription] callback: unknown checkoutRequestId', checkoutRequestId);
+      return;
+    }
+
+    if (resultCode !== 0) {
+      await Transactions.updateOne({ checkoutRequestId }, {
+        $set: { status: 'failed', resultCode, resultDesc: body.ResultDesc, updatedAt: now },
+      });
+      console.log(`[mpesa/subscription] STK failed — ${checkoutRequestId} — ${body.ResultDesc}`);
+      return;
+    }
+
+    const items = body.CallbackMetadata?.Item || [];
+    const meta  = {};
+    items.forEach(({ Name, Value }) => { meta[Name] = Value; });
+
+    const paidAmount = Number(meta.Amount);
+    const mpesaCode  = String(meta.MpesaReceiptNumber || '');
+
+    await Transactions.updateOne({ checkoutRequestId }, {
+      $set: { status: 'completed', mpesaReceiptNumber: mpesaCode, amount: paidAmount, paidAt: now, updatedAt: now },
+    });
+
+    // Activate the school's plan for 30 days
+    const Schools = _model('schools');
+    const planExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    await Schools.updateOne({ id: txn.schoolId }, {
+      $set: {
+        plan:              txn.plan,
+        planExpiresAt:     planExpiry,
+        planPaidAt:        now,
+        planMpesaCode:     mpesaCode,
+        updatedAt:         now,
+      },
+    });
+
+    console.log(`[mpesa/subscription] ✓ Plan activated — school ${txn.schoolId} → ${txn.plan} until ${planExpiry} · ${mpesaCode} · KES ${paidAmount}`);
+  } catch (err) {
+    console.error('[mpesa/subscription] callback processing error:', err);
+  }
+});
+
+/* GET /api/mpesa/subscription/plans — public pricing info */
+router.get('/subscription/plans', (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      core:       { price: SUBSCRIPTION_PRICES.core,     currency: 'KES', period: 'month', students: 500 },
+      standard:   { price: SUBSCRIPTION_PRICES.standard, currency: 'KES', period: 'month', students: 2000 },
+      premium:    { price: SUBSCRIPTION_PRICES.premium,  currency: 'KES', period: 'month', students: 'unlimited' },
+      enterprise: { price: null, currency: 'KES', period: 'month', students: 'unlimited', note: 'Contact sales' },
+    },
+  });
 });
 
 module.exports = router;

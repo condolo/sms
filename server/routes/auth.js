@@ -1,17 +1,18 @@
-﻿const express   = require('express');
-const bcrypt    = require('bcryptjs');
-const { sign }  = require('../utils/jwt');
+﻿const express    = require('express');
+const bcrypt     = require('bcryptjs');
+const crypto     = require('crypto');
+const { sign }   = require('../utils/jwt');
 const { _model } = require('../utils/model');
 const { tenantMiddleware } = require('../middleware/tenant');
 const { authMiddleware }   = require('../middleware/auth');
-const rateLimit = require('express-rate-limit');
-const email     = require('../utils/email');
+const rateLimit  = require('express-rate-limit');
+const email      = require('../utils/email');
 
 const router = express.Router();
 
-/* ── OTP helper ─────────────────────────────────────────── */
+/* ── OTP helper — cryptographically secure ──────────────── */
 function _genOTP() {
-  return String(Math.floor(100000 + Math.random() * 900000)); // 6-digit
+  return String(crypto.randomInt(100000, 999999)); // 6-digit CSPRNG
 }
 
 /**
@@ -111,10 +112,9 @@ router.post('/login', loginLimiter, tenantMiddleware, async (req, res) => {
       return res.status(403).json({ error: 'Account inactive. Please contact your school administrator.' });
     }
 
-    // Support both bcrypt hashes and plain-text (migration period)
-    const match = user.password.startsWith('$2')
+    const match = user.password?.startsWith('$2')
       ? await bcrypt.compare(password, user.password)
-      : password === user.password;
+      : false; // reject any account that lacks a bcrypt hash
 
     if (!match) return res.status(401).json({ error: 'Invalid email or password' });
 
@@ -334,6 +334,231 @@ async function _checkTrialAndNotify(school) {
   });
 }
 
+/* ══════════════════════════════════════════════════════════════
+   GOOGLE OAUTH 2.0 (no passport.js — native fetch)
+   Flow: GET /google?slug=xxx → Google → /google/callback → JWT
+   Required env vars:
+     GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, PUBLIC_URL
+   ══════════════════════════════════════════════════════════════ */
+
+router.get('/google', (req, res) => {
+  const clientId    = process.env.GOOGLE_CLIENT_ID;
+  const publicUrl   = process.env.PUBLIC_URL || '';
+  if (!clientId) return res.status(503).json({ error: 'Google login is not configured on this server.' });
+
+  const redirectUri = `${publicUrl}/api/auth/google/callback`;
+  const scope       = 'openid email profile';
+  const state       = Buffer.from(JSON.stringify({ slug: req.query.slug || '' })).toString('base64url');
+
+  const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  url.searchParams.set('client_id',     clientId);
+  url.searchParams.set('redirect_uri',  redirectUri);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope',         scope);
+  url.searchParams.set('state',         state);
+  url.searchParams.set('access_type',   'online');
+  url.searchParams.set('prompt',        'select_account');
+
+  res.redirect(url.toString());
+});
+
+router.get('/google/callback', async (req, res) => {
+  const clientId     = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const publicUrl    = process.env.PUBLIC_URL || '';
+
+  if (!clientId || !clientSecret) {
+    return res.redirect(`${publicUrl}/login?error=google_not_configured`);
+  }
+
+  const { code, state, error: oauthError } = req.query;
+  if (oauthError || !code) {
+    return res.redirect(`${publicUrl}/login?error=google_denied`);
+  }
+
+  let stateData = {};
+  try { stateData = JSON.parse(Buffer.from(state || '', 'base64url').toString()); } catch {}
+
+  try {
+    // Exchange code for tokens
+    const redirectUri = `${publicUrl}/api/auth/google/callback`;
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code, client_id: clientId, client_secret: clientSecret,
+        redirect_uri: redirectUri, grant_type: 'authorization_code',
+      }),
+    });
+    const tokens = await tokenRes.json();
+    if (!tokens.access_token) throw new Error('No access token from Google');
+
+    // Fetch user profile
+    const profileRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    const profile = await profileRes.json();
+    const { email, name, sub: googleId } = profile;
+    if (!email) throw new Error('No email in Google profile');
+
+    // Resolve school from state slug or tenant middleware fallback
+    const slug = stateData.slug;
+    const Schools = _model('schools');
+    const school  = slug
+      ? await Schools.findOne({ slug: { $regex: new RegExp(`^${slug}$`, 'i') }, isActive: true }).lean()
+      : null;
+    if (!school) {
+      return res.redirect(`${publicUrl}/login?error=school_not_found&hint=${encodeURIComponent('Include your school slug in the login URL')}`);
+    }
+
+    // Find or create user
+    const User = _model('users');
+    let user = await User.findOne({ email: email.toLowerCase(), schoolId: school.id }).lean();
+
+    if (!user) {
+      // Auto-provision Google-auth users as teachers (admin must upgrade role)
+      const now = new Date().toISOString();
+      const newUser = {
+        id:            `goo_${Date.now().toString(36)}`,
+        schoolId:      school.id,
+        name:          name || email.split('@')[0],
+        email:         email.toLowerCase(),
+        role:          'teacher',
+        roles:         ['teacher'],
+        googleId,
+        authProvider:  'google',
+        isActive:      true,
+        mustChangePassword: false,
+        createdAt:     now,
+        updatedAt:     now,
+      };
+      await User.create(newUser);
+      user = newUser;
+    } else {
+      // Update Google ID if first time using OAuth
+      if (!user.googleId) {
+        await User.updateOne({ id: user.id }, { $set: { googleId, authProvider: 'google', lastLogin: new Date().toISOString() } });
+      } else {
+        await User.updateOne({ id: user.id }, { $set: { lastLogin: new Date().toISOString() } });
+      }
+    }
+
+    if (!user.isActive) {
+      return res.redirect(`${publicUrl}/login?error=account_inactive`);
+    }
+
+    const token = sign(_buildTokenPayload(user, school.id));
+    // Redirect to frontend with token — SPA reads it from URL and stores in auth store
+    res.redirect(`${publicUrl}/login?token=${encodeURIComponent(token)}&school=${encodeURIComponent(school.slug)}&provider=google`);
+  } catch (err) {
+    console.error('[auth/google/callback]', err);
+    res.redirect(`${publicUrl}/login?error=google_failed`);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   MICROSOFT OAUTH 2.0 (Azure AD / personal accounts)
+   Required env vars:
+     MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, PUBLIC_URL
+   ══════════════════════════════════════════════════════════════ */
+
+router.get('/microsoft', (req, res) => {
+  const clientId  = process.env.MICROSOFT_CLIENT_ID;
+  const publicUrl = process.env.PUBLIC_URL || '';
+  if (!clientId) return res.status(503).json({ error: 'Microsoft login is not configured on this server.' });
+
+  const redirectUri = `${publicUrl}/api/auth/microsoft/callback`;
+  const state       = Buffer.from(JSON.stringify({ slug: req.query.slug || '' })).toString('base64url');
+
+  const url = new URL('https://login.microsoftonline.com/common/oauth2/v2.0/authorize');
+  url.searchParams.set('client_id',     clientId);
+  url.searchParams.set('redirect_uri',  redirectUri);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope',         'openid email profile User.Read');
+  url.searchParams.set('state',         state);
+  url.searchParams.set('prompt',        'select_account');
+
+  res.redirect(url.toString());
+});
+
+router.get('/microsoft/callback', async (req, res) => {
+  const clientId     = process.env.MICROSOFT_CLIENT_ID;
+  const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
+  const publicUrl    = process.env.PUBLIC_URL || '';
+
+  if (!clientId || !clientSecret) {
+    return res.redirect(`${publicUrl}/login?error=microsoft_not_configured`);
+  }
+
+  const { code, state, error: oauthError } = req.query;
+  if (oauthError || !code) return res.redirect(`${publicUrl}/login?error=microsoft_denied`);
+
+  let stateData = {};
+  try { stateData = JSON.parse(Buffer.from(state || '', 'base64url').toString()); } catch {}
+
+  try {
+    const redirectUri = `${publicUrl}/api/auth/microsoft/callback`;
+    const tokenRes = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code, client_id: clientId, client_secret: clientSecret,
+        redirect_uri: redirectUri, grant_type: 'authorization_code',
+        scope: 'openid email profile User.Read',
+      }),
+    });
+    const tokens = await tokenRes.json();
+    if (!tokens.access_token) throw new Error('No access token from Microsoft');
+
+    const profileRes = await fetch('https://graph.microsoft.com/v1.0/me', {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    const profile = await profileRes.json();
+    const email = (profile.mail || profile.userPrincipalName || '').toLowerCase();
+    const name  = profile.displayName || email.split('@')[0];
+    const msId  = profile.id;
+    if (!email) throw new Error('No email in Microsoft profile');
+
+    const Schools = _model('schools');
+    const school  = stateData.slug
+      ? await Schools.findOne({ slug: { $regex: new RegExp(`^${stateData.slug}$`, 'i') }, isActive: true }).lean()
+      : null;
+    if (!school) return res.redirect(`${publicUrl}/login?error=school_not_found`);
+
+    const User = _model('users');
+    let user = await User.findOne({ email, schoolId: school.id }).lean();
+
+    if (!user) {
+      const now = new Date().toISOString();
+      const newUser = {
+        id:           `ms_${Date.now().toString(36)}`,
+        schoolId:     school.id,
+        name, email,
+        role:         'teacher',
+        roles:        ['teacher'],
+        microsoftId:  msId,
+        authProvider: 'microsoft',
+        isActive:     true,
+        mustChangePassword: false,
+        createdAt:    now,
+        updatedAt:    now,
+      };
+      await User.create(newUser);
+      user = newUser;
+    } else {
+      await User.updateOne({ id: user.id }, { $set: { microsoftId: msId, lastLogin: new Date().toISOString() } });
+    }
+
+    if (!user.isActive) return res.redirect(`${publicUrl}/login?error=account_inactive`);
+
+    const token = sign(_buildTokenPayload(user, school.id));
+    res.redirect(`${publicUrl}/login?token=${encodeURIComponent(token)}&school=${encodeURIComponent(school.slug)}&provider=microsoft`);
+  } catch (err) {
+    console.error('[auth/microsoft/callback]', err);
+    res.redirect(`${publicUrl}/login?error=microsoft_failed`);
+  }
+});
+
 /* GET /api/auth/me — verify token + return current user */
 router.get('/me', authMiddleware, async (req, res) => {
   try {
@@ -361,9 +586,9 @@ router.post('/change-password', authMiddleware, async (req, res) => {
     const user = await User.findOne({ id: req.jwtUser.userId }).lean();
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const match = user.password.startsWith('$2')
+    const match = user.password?.startsWith('$2')
       ? await bcrypt.compare(currentPassword, user.password)
-      : currentPassword === user.password;
+      : false;
     if (!match) return res.status(401).json({ error: 'Current password incorrect' });
 
     const hashed = await bcrypt.hash(newPassword, 12);
