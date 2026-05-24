@@ -335,11 +335,12 @@ export const subjects = {
 };
 
 export const events = {
-  list:   (params)     => _get('/events', params),
-  get:    (id)         => _get(`/events/${id}`),
-  create: (data)       => _post('/events', data),
-  update: (id, data)   => _put(`/events/${id}`, data),
-  remove: (id)         => _delete(`/events/${id}`),
+  list:      (params)   => _get('/events', params),
+  get:       (id)       => _get(`/events/${id}`),
+  create:    (data)     => _post('/events', data),
+  update:    (id, data) => _put(`/events/${id}`, data),
+  remove:    (id)       => _delete(`/events/${id}`),
+  birthdays: (params)   => _get('/events/birthdays', params),
 };
 
 export const hr = {

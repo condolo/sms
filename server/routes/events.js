@@ -44,6 +44,49 @@ router.get('/', async (req, res) => {
   }
 });
 
+/* GET /api/events/birthdays?month=5&year=2026 — list birthdays for given month */
+router.get('/birthdays', async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const month    = parseInt(req.query.month) || (new Date().getMonth() + 1);
+    const monthStr = String(month).padStart(2, '0');
+    const pattern  = new RegExp(`^\\d{4}-${monthStr}-`);
+
+    const Student = _model('students');
+    const Teacher = _model('teachers');
+
+    const [students, teachers] = await Promise.all([
+      Student.find({ schoolId, dateOfBirth: { $regex: pattern } }).lean(),
+      Teacher.find({ schoolId, dateOfBirth: { $regex: pattern } }).lean(),
+    ]);
+
+    const birthdays = [
+      ...students.map(s => ({
+        id:          s.id,
+        name:        [s.firstName, s.lastName].filter(Boolean).join(' '),
+        dateOfBirth: s.dateOfBirth,
+        day:         parseInt(s.dateOfBirth?.split('-')[2] ?? 0, 10),
+        type:        'student',
+        meta:        s.className || s.class || s.stream || null,
+        photoUrl:    s.photoUrl  || null,
+      })),
+      ...teachers.map(t => ({
+        id:          t.id,
+        name:        [t.title, t.firstName, t.lastName].filter(Boolean).join(' '),
+        dateOfBirth: t.dateOfBirth,
+        day:         parseInt(t.dateOfBirth?.split('-')[2] ?? 0, 10),
+        type:        'staff',
+        meta:        'Teacher',
+        photoUrl:    null,
+      })),
+    ].filter(b => b.day > 0).sort((a, b) => a.day - b.day);
+
+    res.json({ birthdays });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* GET /api/events/:id */
 router.get('/:id', async (req, res) => {
   try {
