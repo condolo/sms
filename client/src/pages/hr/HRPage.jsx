@@ -8,7 +8,7 @@ import { motion } from 'framer-motion';
 import {
   Users, UserCheck, Clock, Wallet, Plus, Check, X,
   ChevronDown, AlertCircle, FileText, Calendar,
-  FolderOpen, Trash2, Edit2, Save, Download,
+  FolderOpen, Trash2, Edit2, Save, Download, ExternalLink,
 } from 'lucide-react';
 import { hr as hrApi, teachers as teachersApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
@@ -103,7 +103,7 @@ function LeaveForm({ onClose, onSubmit }) {
 
 /* ── Document form ──────────────────────────────────────── */
 function DocForm({ teachers, onClose, onSubmit, saving }) {
-  const [form, setForm] = useState({ staffId:'', staffName:'', name:'', type:'contract', issuedDate:'', expiryDate:'', notes:'', status:'active' });
+  const [form, setForm] = useState({ staffId:'', staffName:'', name:'', type:'contract', issuedDate:'', expiryDate:'', notes:'', fileUrl:'', status:'active' });
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
   function pickStaff(id) {
     const t = teachers.find(x => (x._id ?? x.id) === id);
@@ -146,6 +146,17 @@ function DocForm({ teachers, onClose, onSubmit, saving }) {
               <label className="block text-xs font-semibold text-slate-600 mb-1">Expiry Date</label>
               <input type="date" value={form.expiryDate} onChange={e => set('expiryDate', e.target.value)} className={fCls} />
             </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Document Link <span className="font-normal text-slate-400">(optional)</span></label>
+            <input
+              type="url"
+              value={form.fileUrl}
+              onChange={e => set('fileUrl', e.target.value)}
+              placeholder="https://drive.google.com/… or OneDrive / Dropbox link"
+              className={fCls}
+            />
+            <p className="text-[11px] text-slate-400 mt-1">Paste a shareable link to the document stored in Google Drive, OneDrive, or Dropbox.</p>
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">Notes</label>
@@ -492,6 +503,12 @@ export default function HRPage() {
                           {d.expiryDate && <span className={isExpired ? 'text-red-500 font-medium' : ''}>Expires: {fmtDate(d.expiryDate)}</span>}
                         </div>
                         {d.notes && <p className="text-xs text-slate-500 mt-1.5 italic truncate">"{d.notes}"</p>}
+                        {d.fileUrl && (
+                          <a href={d.fileUrl} target="_blank" rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 mt-2 text-xs font-medium text-violet-600 hover:text-violet-700 hover:underline">
+                            <ExternalLink size={11} /> View Document
+                          </a>
+                        )}
                       </div>
                       <button
                         onClick={() => { if (confirm(`Remove "${d.name}"?`)) removeDoc.mutate(d.id ?? d._id); }}

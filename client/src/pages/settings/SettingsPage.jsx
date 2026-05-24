@@ -407,6 +407,22 @@ function SchoolTab() {
    ══════════════════════════════════════════════════════════════ */
 const INVITE_ROLES = ['teacher', 'deputy', 'admin', 'parent', 'student'];
 
+const USER_ROLE_GROUPS = [
+  { value: '',                   label: 'All roles' },
+  { value: 'admin',              label: 'Admin' },
+  { value: 'superadmin',         label: 'Super Admin' },
+  { value: 'teacher',            label: 'Teachers' },
+  { value: 'section_head',       label: 'Section Heads' },
+  { value: 'deputy_principal',   label: 'Deputy Principals' },
+  { value: 'hr',                 label: 'HR' },
+  { value: 'finance',            label: 'Finance' },
+  { value: 'admissions_officer', label: 'Admissions' },
+  { value: 'exams_officer',      label: 'Exams Officers' },
+  { value: 'timetabler',         label: 'Timetablers' },
+  { value: 'parent',             label: 'Parents' },
+  { value: 'student',            label: 'Students' },
+];
+
 function UsersTab() {
   const qc = useQueryClient();
   const can        = useAuthStore(s => s.can.bind(s));
@@ -414,13 +430,20 @@ function UsersTab() {
   const canManage  = can('settings') || sessionRole === 'admin' || sessionRole === 'superadmin';
   const [showInvite, setShowInvite] = useState(false);
   const [toast, setToast] = useState(null);
+  const [roleFilter, setRoleFilter] = useState('');
+  const [search, setSearch] = useState('');
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['settings', 'users'],
     queryFn:  () => settingsApi.users.list(),
     staleTime: 60_000,
   });
-  const users = data?.data ?? [];
+  const allUsers = data?.data ?? [];
+  const users = allUsers.filter(u => {
+    const matchRole   = !roleFilter || u.role === roleFilter;
+    const matchSearch = !search || (u.name ?? '').toLowerCase().includes(search.toLowerCase()) || (u.email ?? '').toLowerCase().includes(search.toLowerCase());
+    return matchRole && matchSearch;
+  });
 
   const { mutate: removeUser } = useMutation({
     mutationFn: id => settingsApi.users.remove(id),
@@ -445,19 +468,48 @@ function UsersTab() {
         </AnimatePresence>
       </div>
 
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-500">
-          {isLoading ? 'Loading…' : `${users.length} user${users.length !== 1 ? 's' : ''}`}
-        </p>
-        {canManage && (
-          <button
-            onClick={() => setShowInvite(true)}
-            className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-3 py-2 rounded-lg transition"
+      {/* Header + filters */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-slate-500">
+            {isLoading ? 'Loading…' : `${users.length} of ${allUsers.length} user${allUsers.length !== 1 ? 's' : ''}`}
+          </p>
+          {canManage && (
+            <button
+              onClick={() => setShowInvite(true)}
+              className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-3 py-2 rounded-lg transition"
+            >
+              <UserPlus size={13} /> Invite user
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {/* Search */}
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search name or email…"
+            className="flex-1 min-w-[180px] rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40 focus:border-violet-400"
+          />
+          {/* Role filter */}
+          <select
+            value={roleFilter}
+            onChange={e => setRoleFilter(e.target.value)}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40 focus:border-violet-400"
           >
-            <UserPlus size={13} /> Invite user
-          </button>
-        )}
+            {USER_ROLE_GROUPS.map(g => (
+              <option key={g.value} value={g.value}>{g.label}</option>
+            ))}
+          </select>
+          {(roleFilter || search) && (
+            <button
+              onClick={() => { setRoleFilter(''); setSearch(''); }}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-50 transition"
+            >
+              Clear
+            </button>
+          )}
+        </div>
       </div>
 
       {isLoading ? (
