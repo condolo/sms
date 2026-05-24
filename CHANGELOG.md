@@ -6,6 +6,60 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.10.0] — 2026-05-24  Security Hardening + Google/Microsoft OAuth + M-Pesa Subscription
+
+### Security — Critical fixes
+
+**`server/routes/auth.js`**
+- Removed plain-text password fallback (`password === user.password`). All accounts must have a bcrypt hash — legacy plaintext accounts can no longer sign in.
+- Replaced `Math.random()` OTP generation with `crypto.randomInt` (Node.js CSPRNG).
+
+**`server/middleware/auth.js`**
+- Platform admin key now compared using `crypto.timingSafeEqual` — prevents timing-side-channel attacks on the `X-Platform-Key` header.
+
+**`server/routes/mpesa.js`**
+- All Safaricom callback endpoints now enforce an IP allowlist (`SAFARICOM_IPS`) in production. Requests from unknown IPs receive `403 Forbidden` — blocks fake payment injection attacks.
+- Set `MPESA_SKIP_IP_CHECK=true` in sandbox/dev environments to bypass.
+
+### New — Google OAuth 2.0 (`server/routes/auth.js`)
+- `GET /api/auth/google?slug=<school>` — redirects to Google OAuth consent screen.
+- `GET /api/auth/google/callback` — exchanges code, fetches profile, finds or creates user, issues JWT. New users provisioned as `teacher` role; admin upgrades role.
+- State parameter carries school slug for tenant resolution.
+- Required env vars: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `PUBLIC_URL`.
+
+### New — Microsoft OAuth 2.0 (`server/routes/auth.js`)
+- `GET /api/auth/microsoft?slug=<school>` — redirects to Microsoft identity platform.
+- `GET /api/auth/microsoft/callback` — same flow as Google.
+- Required env vars: `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `PUBLIC_URL`.
+
+### New — Social login buttons (`client/src/pages/Login.jsx`)
+- Google and Microsoft sign-in buttons below the password form.
+- OAuth token read-back on redirect return — reads `?token=` from URL, calls `/api/auth/me`, sets session.
+- Error handling for all failure cases (denied, not configured, school not found, account inactive).
+
+### New — M-Pesa subscription payments (`server/routes/mpesa.js`)
+- `POST /api/mpesa/subscription` — admin/principal only; initiates STK Push to pay Msingi platform subscription. Uses platform Daraja credentials (`MSINGI_MPESA_*` env vars), not school's own credentials.
+- `POST /api/mpesa/subscription/callback` — Safaricom callback; activates school plan for 30 days on successful payment.
+- `GET /api/mpesa/subscription/plans` — public pricing endpoint.
+- Subscription prices: Core KES 5,000 · Standard KES 12,000 · Premium KES 25,000.
+
+### New — Subscription tab (`client/src/pages/settings/SettingsPage.jsx`)
+- New **Subscription** tab in Settings (admin-only) between School and Users.
+- Shows current plan + expiry, plan selector grid, STK Push payment form.
+- Enterprise plan routes to `sales@msingi.io`.
+
+### Changed — Plan tier alignment
+**`server/middleware/plan.js`**
+- `finance`: `premium` → `standard` (fee management is a core East African school need; aligns with landing page).
+- `report_cards`: `premium` → `standard` (aligns with landing page promise).
+- `hr`: new entry at `premium`.
+
+**`client/src/pages/Landing.jsx`**
+- Plans feature matrix updated to match backend — Finance & Fee Ledger now shown starting at Standard (not Core); all 14 features correctly gated per tier.
+- Finance moved after core communication features in the table order.
+
+---
+
 ## [4.9.19] — 2026-05-20  Subjects & Departments Registry
 
 ### New — `server/routes/departments.js`
