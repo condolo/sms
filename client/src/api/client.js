@@ -235,7 +235,10 @@ export const timetable = {
     markAbsent:  (data)     => _post('/timetable/substitutions/absent', data),
     update:      (id, data) => _put(`/timetable/substitutions/${id}`, data),
     remove:      (id)       => _delete(`/timetable/substitutions/${id}`),
+    autoAssign:  (data)     => _post('/timetable/substitutions/auto-assign', data),
   },
+  // Free teachers at a given period on a date (ranked for cover suggestions)
+  availableTeachers: (params) => _get('/timetable/available-teachers', params),
   // Portal views
   my:          ()           => _get('/timetable/my'),
   myChildren:  ()           => _get('/timetable/my-children'),

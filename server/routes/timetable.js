@@ -683,12 +683,117 @@ router.post('/substitutions/absent', authMiddleware, PLAN, async (req, res) => {
   } catch (err) { console.error('[substitutions POST /absent]', err); return E.serverError(res); }
 });
 
+/* POST /api/timetable/substitutions/auto-assign
+   For every uncovered substitution record on a given date, finds the best
+   available teacher (same dept → fewest lessons) and assigns them.
+   Tracks assignments within this call to avoid double-booking at same period. */
+router.post('/substitutions/auto-assign', authMiddleware, PLAN, async (req, res) => {
+  try {
+    if (!_canEdit(req)) return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied' } });
+    const { schoolId, userId } = req.jwtUser;
+    const { date } = req.body;
+    if (!date) return res.status(400).json({ error: { code: 'MISSING_PARAMS', message: 'date is required' } });
+
+    const DOW = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+    const day = DOW[new Date(date + 'T12:00:00').getDay()];
+
+    const Sub = _model('substitutions');
+
+    const [uncovered, allTeachers, weeklySlots] = await Promise.all([
+      Sub.find({ schoolId, date, status: 'uncovered' }).lean(),
+      _model('teachers').find({ schoolId, status: 'active' }).lean(),
+      _model('timetable').find({ schoolId, isActive: true }).select('teacherId').lean(),
+    ]);
+
+    if (!uncovered.length) return ok(res, { assigned: 0, message: 'No uncovered lessons to assign.' });
+
+    const weeklyLoad = {};
+    weeklySlots.forEach(s => {
+      if (s.teacherId) {
+        const k = String(s.teacherId);
+        weeklyLoad[k] = (weeklyLoad[k] || 0) + 1;
+      }
+    });
+
+    // All absent teacher IDs — they cannot be assigned as substitutes
+    const absentIds = new Set(uncovered.map(s => String(s.originalTeacherId)));
+
+    let assigned = 0;
+    // Track per-period assignments made THIS call so we don't double-book
+    const thisRunByPeriod = {}; // period -> Set<teacherId>
+
+    // Process in period order so earlier periods get first pick
+    const sorted = uncovered.slice().sort((a, b) => String(a.period).localeCompare(String(b.period)));
+
+    for (const record of sorted) {
+      const p = String(record.period);
+      if (!thisRunByPeriod[p]) thisRunByPeriod[p] = new Set();
+
+      // Teachers already teaching at this period on this weekday
+      const busySlots = await _model('timetable')
+        .find({ schoolId, day, period: p, isActive: true })
+        .select('teacherId').lean();
+      const busyIds = new Set(busySlots.map(s => String(s.teacherId)).filter(Boolean));
+
+      // Substitutes already covering this period today (DB + this run)
+      const dbCovered = await Sub.find({
+        schoolId, date, period: p, substituteTeacherId: { $exists: true, $ne: null },
+      }).select('substituteTeacherId').lean();
+      const coveredIds = new Set([
+        ...dbCovered.map(s => String(s.substituteTeacherId)).filter(Boolean),
+        ...thisRunByPeriod[p],
+      ]);
+
+      const subjLower = (record.subject || '').toLowerCase().trim();
+
+      const candidate = allTeachers
+        .map(t => {
+          const tid  = String(t.id ?? t._id ?? '');
+          const dept = (t.department || '').toLowerCase();
+          const sameDept = !!(subjLower && dept && (
+            dept.includes(subjLower.substring(0, 3)) ||
+            subjLower.includes(dept.substring(0, 3))
+          ));
+          return { id: tid, t, load: weeklyLoad[tid] ?? 0, sameDept };
+        })
+        .filter(({ id }) => id && !absentIds.has(id) && !busyIds.has(id) && !coveredIds.has(id))
+        .sort((a, b) => {
+          if (a.sameDept && !b.sameDept) return -1;
+          if (!a.sameDept && b.sameDept) return  1;
+          return a.load - b.load;
+        })[0];
+
+      if (candidate) {
+        const t       = candidate.t;
+        const subName = [t.title, t.firstName, t.lastName].filter(Boolean).join(' ');
+        await Sub.findOneAndUpdate(
+          { id: record.id, schoolId },
+          { $set: {
+            substituteTeacherId:   candidate.id,
+            substituteTeacherName: subName,
+            status:                'covered',
+            updatedBy:             userId,
+            updatedAt:             new Date().toISOString(),
+          }},
+        );
+        thisRunByPeriod[p].add(candidate.id);
+        assigned++;
+      }
+    }
+
+    return ok(res, { assigned, total: uncovered.length });
+  } catch (err) {
+    console.error('[substitutions POST /auto-assign]', err);
+    return E.serverError(res);
+  }
+});
+
 /* PUT /api/timetable/substitutions/:id — assign substitute or update status */
 router.put('/substitutions/:id', authMiddleware, PLAN, async (req, res) => {
   try {
     if (!_canEdit(req)) return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied' } });
     const { schoolId, userId } = req.jwtUser;
-    const { substituteTeacherId, notes, status } = req.body;
+    const { substituteTeacherId, notes, status, type } = req.body;
 
     const update = { updatedBy: userId, updatedAt: new Date().toISOString() };
 
@@ -707,6 +812,7 @@ router.put('/substitutions/:id', authMiddleware, PLAN, async (req, res) => {
       }
     }
     if (notes  !== undefined) update.notes  = notes;
+    if (type   !== undefined) update.type   = type;
     if (status !== undefined && substituteTeacherId === undefined) update.status = status;
 
     const doc = await _model('substitutions').findOneAndUpdate(
@@ -739,6 +845,95 @@ router.get('/versions', authMiddleware, async (req, res) => {
       .find({ schoolId }).sort({ publishedAt: -1 }).limit(20).lean();
     return ok(res, { versions });
   } catch (err) { console.error('[timetable GET /versions]', err); return E.serverError(res); }
+});
+
+/* GET /api/timetable/available-teachers?date=YYYY-MM-DD&period=5&subject=MAT
+   Returns active teachers who are free at the given period on the date's weekday.
+   Excludes: teachers scheduled in master timetable at that period, teachers
+   marked absent today, substitutes already covering another slot at that period.
+   Sorted: same-department first, then fewest weekly lessons (most available). */
+router.get('/available-teachers', authMiddleware, PLAN, async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const { date, period, subject = '' } = req.query;
+    if (!date || !period) {
+      return res.status(400).json({ error: { code: 'MISSING_PARAMS', message: 'date and period are required' } });
+    }
+
+    const DOW = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+    const day = DOW[new Date(date + 'T12:00:00').getDay()];
+
+    // Run all lookups in parallel
+    const [busySlots, absentSubs, coveredSubs, allTeachers, weeklySlots] = await Promise.all([
+      // Teachers scheduled at this period on this weekday (master timetable)
+      _model('timetable').find({ schoolId, day, period: String(period), isActive: true })
+        .select('teacherId').lean(),
+      // Teachers already marked absent today
+      _model('substitutions').find({ schoolId, date })
+        .select('originalTeacherId').lean(),
+      // Substitutes already covering another slot at this exact period today
+      _model('substitutions').find({
+        schoolId, date, period: String(period),
+        substituteTeacherId: { $exists: true, $ne: null },
+      }).select('substituteTeacherId').lean(),
+      // All active teachers for this school
+      _model('teachers').find({ schoolId, status: 'active' }).lean(),
+      // All slots (for weekly load count)
+      _model('timetable').find({ schoolId, isActive: true }).select('teacherId').lean(),
+    ]);
+
+    const busyIds    = new Set(busySlots.map(s => String(s.teacherId)).filter(Boolean));
+    const absentIds  = new Set(absentSubs.map(s => String(s.originalTeacherId)).filter(Boolean));
+    const coveredIds = new Set(coveredSubs.map(s => String(s.substituteTeacherId)).filter(Boolean));
+
+    const weeklyLoad = {};
+    weeklySlots.forEach(s => {
+      if (s.teacherId) {
+        const k = String(s.teacherId);
+        weeklyLoad[k] = (weeklyLoad[k] || 0) + 1;
+      }
+    });
+
+    const subjLower = subject.toLowerCase().trim();
+
+    const available = allTeachers
+      .filter(t => {
+        const tid = String(t.id ?? t._id ?? '');
+        return tid && !busyIds.has(tid) && !absentIds.has(tid) && !coveredIds.has(tid);
+      })
+      .map(t => {
+        const tid  = String(t.id ?? t._id ?? '');
+        const dept = (t.department || '').toLowerCase();
+        // Subject similarity: compare first 3 chars of subject against department name
+        const sameDepartment = !!(subjLower && dept && (
+          dept.includes(subjLower.substring(0, 3)) ||
+          subjLower.includes(dept.substring(0, 3))
+        ));
+        return {
+          id:             tid,
+          firstName:      t.firstName ?? '',
+          lastName:       t.lastName  ?? '',
+          name:           [t.title, t.firstName, t.lastName].filter(Boolean).join(' '),
+          department:     t.department ?? null,
+          weeklyLoad:     weeklyLoad[tid] ?? 0,
+          sameDepartment,
+          suggested:      false,
+        };
+      })
+      .sort((a, b) => {
+        // Same dept first, then ascending weekly load (most free at top)
+        if (a.sameDepartment && !b.sameDepartment) return -1;
+        if (!a.sameDepartment && b.sameDepartment) return  1;
+        return a.weeklyLoad - b.weeklyLoad;
+      });
+
+    if (available.length) available[0].suggested = true;
+
+    return ok(res, { available, period, day, date });
+  } catch (err) {
+    console.error('[timetable GET /available-teachers]', err);
+    return E.serverError(res);
+  }
 });
 
 /* ── GET /api/timetable/:id ───────────────────────────────────── */
