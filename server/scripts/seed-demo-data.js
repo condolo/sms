@@ -58,13 +58,13 @@ async function _hash() {
 
 /* ── Classes ── */
 const CLASSES = [
-  { id:'cls_demo_4a',  name:'Standard 4A', year:'Standard 4', sectionId:SEC_PRI, sectionKey:'primary',   order:1 },
-  { id:'cls_demo_5a',  name:'Standard 5A', year:'Standard 5', sectionId:SEC_PRI, sectionKey:'primary',   order:2 },
-  { id:'cls_demo_6a',  name:'Standard 6A', year:'Standard 6', sectionId:SEC_PRI, sectionKey:'primary',   order:3 },
-  { id:'cls_demo_f1a', name:'Form 1A',     year:'Form 1',     sectionId:SEC_SEC, sectionKey:'secondary', order:4 },
-  { id:'cls_demo_f2a', name:'Form 2A',     year:'Form 2',     sectionId:SEC_SEC, sectionKey:'secondary', order:5 },
-  { id:'cls_demo_f3a', name:'Form 3A',     year:'Form 3',     sectionId:SEC_SEC, sectionKey:'secondary', order:6 },
-  { id:'cls_demo_f4a', name:'Form 4A',     year:'Form 4',     sectionId:SEC_SEC, sectionKey:'secondary', order:7 },
+  { id:'cls_demo_4a',  name:'Standard 4A', year:'Standard 4', sectionId:SEC_PRI, sectionKey:'primary',   order:1, status:'active' },
+  { id:'cls_demo_5a',  name:'Standard 5A', year:'Standard 5', sectionId:SEC_PRI, sectionKey:'primary',   order:2, status:'active' },
+  { id:'cls_demo_6a',  name:'Standard 6A', year:'Standard 6', sectionId:SEC_PRI, sectionKey:'primary',   order:3, status:'active' },
+  { id:'cls_demo_f1a', name:'Form 1A',     year:'Form 1',     sectionId:SEC_SEC, sectionKey:'secondary', order:4, status:'active' },
+  { id:'cls_demo_f2a', name:'Form 2A',     year:'Form 2',     sectionId:SEC_SEC, sectionKey:'secondary', order:5, status:'active' },
+  { id:'cls_demo_f3a', name:'Form 3A',     year:'Form 3',     sectionId:SEC_SEC, sectionKey:'secondary', order:6, status:'active' },
+  { id:'cls_demo_f4a', name:'Form 4A',     year:'Form 4',     sectionId:SEC_SEC, sectionKey:'secondary', order:7, status:'active' },
 ];
 
 /* ── Subjects ── */
@@ -96,6 +96,20 @@ const EXTRA_TEACHERS = [
   { id:'u_demo_t8',  name:'Mr. Samuel Maina',     email:'smaina@demo.msingi.io',    subjects:['subj_demo_bs','subj_demo_cre']   },
   { id:'u_demo_t9',  name:'Ms. Lilian Wairimu',   email:'lwairimu@demo.msingi.io',  subjects:['subj_demo_ict','subj_demo_math'] },
   { id:'u_demo_t10', name:'Mr. Joseph Kipchoge',  email:'jkipchoge@demo.msingi.io', subjects:['subj_demo_pe','subj_demo_ss']    },
+];
+
+/* ── Teacher profiles for the teachers collection ── */
+const TEACHER_PROFILES = [
+  { id:'tch_demo_1',  userId:'u_demo_teacher', firstName:'Demo',    lastName:'Teacher',  title:'Mr.',  email:'teacher@demo.msingi.io', gender:'male',   staffId:'TCH-001', subjects:['subj_demo_math'], contractType:'full_time', status:'active', joinDate:'2024-01-15' },
+  { id:'tch_demo_2',  userId:'u_demo_t2',      firstName:'Peter',   lastName:'Kamau',    title:'Mr.',  email:'pkamau@demo.msingi.io',   gender:'male',   staffId:'TCH-002', subjects:['subj_demo_math','subj_demo_sci'],        contractType:'full_time', status:'active', joinDate:'2023-09-01' },
+  { id:'tch_demo_3',  userId:'u_demo_t3',      firstName:'Agnes',   lastName:'Otieno',   title:'Ms.',  email:'aotieno@demo.msingi.io',  gender:'female', staffId:'TCH-003', subjects:['subj_demo_eng','subj_demo_cre'],         contractType:'full_time', status:'active', joinDate:'2022-01-10' },
+  { id:'tch_demo_4',  userId:'u_demo_t4',      firstName:'Collins', lastName:'Waweru',   title:'Mr.',  email:'cwaweru@demo.msingi.io',  gender:'male',   staffId:'TCH-004', subjects:['subj_demo_kisw','subj_demo_ss'],         contractType:'full_time', status:'active', joinDate:'2023-01-05' },
+  { id:'tch_demo_5',  userId:'u_demo_t5',      firstName:'Judith',  lastName:'Njoroge',  title:'Ms.',  email:'jnjoroge@demo.msingi.io', gender:'female', staffId:'TCH-005', subjects:['subj_demo_phy','subj_demo_chem'],        contractType:'full_time', status:'active', joinDate:'2021-08-20' },
+  { id:'tch_demo_6',  userId:'u_demo_t6',      firstName:'Francis', lastName:'Ochieng',  title:'Mr.',  email:'fochieng@demo.msingi.io', gender:'male',   staffId:'TCH-006', subjects:['subj_demo_bio','subj_demo_sci'],         contractType:'full_time', status:'active', joinDate:'2022-09-01' },
+  { id:'tch_demo_7',  userId:'u_demo_t7',      firstName:'Dorothy', lastName:'Chebet',   title:'Ms.',  email:'dchebet@demo.msingi.io',  gender:'female', staffId:'TCH-008', subjects:['subj_demo_hist','subj_demo_geo'],        contractType:'full_time', status:'on_leave', joinDate:'2020-03-01' },
+  { id:'tch_demo_8',  userId:'u_demo_t8',      firstName:'Samuel',  lastName:'Maina',    title:'Mr.',  email:'smaina@demo.msingi.io',   gender:'male',   staffId:'TCH-009', subjects:['subj_demo_bs','subj_demo_cre'],          contractType:'full_time', status:'active', joinDate:'2023-04-10' },
+  { id:'tch_demo_9',  userId:'u_demo_t9',      firstName:'Lilian',  lastName:'Wairimu',  title:'Ms.',  email:'lwairimu@demo.msingi.io', gender:'female', staffId:'TCH-010', subjects:['subj_demo_ict','subj_demo_math'],        contractType:'full_time', status:'active', joinDate:'2024-02-01' },
+  { id:'tch_demo_10', userId:'u_demo_t10',     firstName:'Joseph',  lastName:'Kipchoge', title:'Mr.',  email:'jkipchoge@demo.msingi.io',gender:'male',   staffId:'TCH-011', subjects:['subj_demo_pe','subj_demo_ss'],           contractType:'full_time', status:'active', joinDate:'2021-09-01' },
 ];
 
 /* ── Students (20) ── */
@@ -263,10 +277,15 @@ async function seedDemoData() {
     const hash = await _hash();
     const nowISO = new Date().toISOString();
 
-    /* 1. Classes */
+    /* 1. Classes — upsert + ensure status field is set on existing docs */
     await Promise.all(CLASSES.map(c =>
       upsert(Class, c.id, { ...c, academicYearId: AY_ID, createdBy: ADMIN_ID, updatedBy: ADMIN_ID })
     ));
+    // Patch existing classes that were seeded before status field was added
+    await Class.updateMany(
+      { schoolId: SCHOOL_ID, id: { $in: CLASSES.map(c => c.id) }, status: { $exists: false } },
+      { $set: { status: 'active' } }
+    );
 
     /* 2. Subjects */
     await Promise.all(SUBJECTS.map(s =>
@@ -283,6 +302,12 @@ async function seedDemoData() {
           passwordChangedAt: nowISO, createdAt: nowISO,
         }
       }, { upsert: true })
+    ));
+
+    /* 3b. Teacher profiles (teachers collection) */
+    const Teacher = _model('teachers');
+    await Promise.all(TEACHER_PROFILES.map(t =>
+      upsert(Teacher, t.id, { ...t, schoolId: SCHOOL_ID, createdBy: ADMIN_ID, updatedBy: ADMIN_ID, createdAt: nowISO, updatedAt: nowISO })
     ));
 
     /* 4. Students */
@@ -431,7 +456,7 @@ async function seedDemoData() {
     ];
     await Promise.all(LEAVES.map(l => upsert(Leave, l.id, l)));
 
-    console.log('[seed-demo-data] ✓ 7 classes · 14 subjects · 9 teachers · 20 students · 25 behaviour · 20 invoices · 14 payments · 60 timetable slots · 8 admissions · 10 events · 10 payroll · 4 leave requests');
+    console.log('[seed-demo-data] ✓ 7 classes · 14 subjects · 10 teacher profiles · 9 teacher users · 20 students · 25 behaviour · 20 invoices · 14 payments · 60 timetable slots · 8 admissions · 10 events · 10 payroll · 4 leave requests');
 
   } catch (err) {
     console.warn('[seed-demo-data] Warning:', err.message);
