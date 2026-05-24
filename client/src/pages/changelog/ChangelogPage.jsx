@@ -6,6 +6,74 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.11.1',
+    date: '2026-05-24',
+    label: 'Smart Cover Sheet & Substitution Engine',
+    changes: [
+      { type: 'new',  text: 'Substitution table matches aSc format: Absent | Lesson | Reason | Subject | Class | Type | Substitutes | Signature' },
+      { type: 'new',  text: 'Smart substitute picker: free teachers ranked same-department first, then fewest weekly lessons; top pick flagged with ⭐' },
+      { type: 'new',  text: 'Auto-assign all: fills every uncovered lesson in one click using best available teacher, period-by-period double-booking prevention' },
+      { type: 'new',  text: 'Type selector per lesson row: Supervision / Cover / Teaching' },
+      { type: 'new',  text: 'Summary header: "Mr. Godfrey (5, 7) and Ms. Beatrice (2)" generated from live absence data' },
+      { type: 'new',  text: 'Print-ready cover sheet: signature column, timestamp footer, interactive elements hidden' },
+    ],
+  },
+  {
+    version: '4.11.0',
+    date: '2026-05-24',
+    label: 'Events Birthdays · HR Document Links · Users Filter',
+    changes: [
+      { type: 'new',  text: 'Events: Birthdays view — browse all student and staff birthdays by month with avatar cards, class/role meta, and today\'s birthday banner' },
+      { type: 'new',  text: 'Events: calendar cells show birthday count overlay; clicking switches to birthdays view for that month' },
+      { type: 'new',  text: 'HR Documents: document link field — paste a Google Drive / OneDrive / Dropbox URL; "View Document" link appears on the card' },
+      { type: 'new',  text: 'Settings › Users: filter by role (13 roles) + name/email search with "X of Y users" count display' },
+    ],
+  },
+  {
+    version: '4.10.2',
+    date: '2026-05-24',
+    label: 'Timetable Cover / Subs Tab + Publish History',
+    changes: [
+      { type: 'new',  text: 'Cover / Subs tab: daily cover sheet for absent teachers — visible to admin, deputy, and timetabler roles only' },
+      { type: 'new',  text: 'Mark teacher absent: auto-pulls all their lessons for that weekday from the master timetable' },
+      { type: 'new',  text: 'Substitution records stored separately — master timetable is never modified' },
+      { type: 'new',  text: 'Publish history: every timetable publish creates a version snapshot (term label, slot count, timestamp)' },
+    ],
+  },
+  {
+    version: '4.10.1',
+    date: '2026-05-24',
+    label: 'Legacy App Removal + Reference Fixes',
+    changes: [
+      { type: 'fix',  text: 'Deleted 29,000+ lines of legacy vanilla-JS frontend — React SPA is the only served app' },
+      { type: 'fix',  text: 'Demo login links, onboarding URLs, and platform.html all updated to correct /login route and demo slug' },
+      { type: 'sec',  text: 'DB name safety: added warning comment; MONGODB_DB_NAME env var is now the override path' },
+    ],
+  },
+  {
+    version: '4.10.0',
+    date: '2026-05-24',
+    label: 'Security Hardening + Google & Microsoft OAuth + M-Pesa',
+    changes: [
+      { type: 'sec',  text: 'Removed plain-text password fallback — all accounts must have a bcrypt hash' },
+      { type: 'sec',  text: 'OTP generation upgraded to Node.js CSPRNG (crypto.randomInt); M-Pesa callbacks enforce Safaricom IP allowlist' },
+      { type: 'new',  text: 'Google OAuth 2.0 sign-in: one-click login with Google account' },
+      { type: 'new',  text: 'Microsoft OAuth 2.0 sign-in: one-click login with Microsoft / school account' },
+      { type: 'new',  text: 'Settings › Subscription tab: M-Pesa STK Push for platform plan payments (Core / Standard / Premium)' },
+    ],
+  },
+  {
+    version: '4.9.19',
+    date: '2026-05-20',
+    label: 'Subjects & Departments Registry',
+    changes: [
+      { type: 'new',  text: 'Subjects & Departments page: department cards with collapsible subject lists, colour badges, and HoD names' },
+      { type: 'new',  text: 'Full CRUD for departments (name, code, colour, HoD) and subjects (code, short name, sections, compulsory flag)' },
+      { type: 'new',  text: 'HoD field auto-completes from the teacher roster' },
+      { type: 'fix',  text: 'Department delete blocked when active subjects still exist' },
+    ],
+  },
+  {
     version: '4.9.13',
     date: '2026-05-21',
     label: 'Settings & Timetable Rebuild',
