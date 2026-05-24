@@ -455,14 +455,28 @@ router.post('/publish', authMiddleware, async (req, res) => {
     if (!_canEdit(req)) return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Admin access required to publish timetable' } });
     const { termLabel = '' } = req.body;
     const now = new Date().toISOString();
-    await _model('schools').updateOne({ id: req.jwtUser.schoolId }, {
+    const { schoolId, userId } = req.jwtUser;
+
+    await _model('schools').updateOne({ id: schoolId }, {
       $set: {
         'timetableStatus.published':   true,
         'timetableStatus.publishedAt': now,
-        'timetableStatus.publishedBy': req.jwtUser.userId,
+        'timetableStatus.publishedBy': userId,
         'timetableStatus.termLabel':   termLabel.trim(),
       },
     });
+
+    // Snapshot version metadata on every publish
+    const slotCount = await _model('timetable').countDocuments({ schoolId, isActive: true });
+    await _model('timetable_versions').create({
+      id:          uuidv4(),
+      schoolId,
+      termLabel:   termLabel.trim(),
+      publishedAt: now,
+      publishedBy: userId,
+      slotCount,
+    });
+
     return ok(res, { published: true, publishedAt: now, termLabel: termLabel.trim() });
   } catch (err) { console.error('[timetable POST /publish]', err); return E.serverError(res); }
 });
@@ -563,6 +577,168 @@ router.get('/my-children', authMiddleware, async (req, res) => {
 
     return ok(res, { children, termLabel: school.timetableStatus?.termLabel ?? '' });
   } catch (err) { console.error('[timetable GET /my-children]', err); return E.serverError(res); }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   SUBSTITUTION ROUTES
+   Date-specific overrides of the master timetable.
+   Substitutions NEVER modify timetable_slots — they are always
+   date-specific records stored separately.
+   ══════════════════════════════════════════════════════════════ */
+
+/* GET /api/timetable/substitutions?date=YYYY-MM-DD */
+router.get('/substitutions', authMiddleware, PLAN, async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const { date, from, to } = req.query;
+    const filter = { schoolId };
+    if (date) {
+      filter.date = date;
+    } else if (from || to) {
+      filter.date = {};
+      if (from) filter.date.$gte = from;
+      if (to)   filter.date.$lte = to;
+    }
+    const substitutions = await _model('substitutions')
+      .find(filter).sort({ date: 1, period: 1 }).limit(500).lean();
+    return ok(res, { substitutions });
+  } catch (err) { console.error('[substitutions GET]', err); return E.serverError(res); }
+});
+
+/* POST /api/timetable/substitutions/absent
+   Given a teacherId + date, fetches all their slots for that day
+   and creates substitution records (status: uncovered) for each.
+   Idempotent — skips periods that already have records.           */
+router.post('/substitutions/absent', authMiddleware, PLAN, async (req, res) => {
+  try {
+    if (!_canEdit(req)) return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied' } });
+    const { schoolId, userId } = req.jwtUser;
+    const { teacherId, date, reason = 'sick', notes = '' } = req.body;
+
+    if (!teacherId || !date) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION', message: 'teacherId and date are required' } });
+    }
+
+    const DAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+    const dayOfWeek = DAY_NAMES[new Date(date + 'T00:00:00').getDay()];
+    if (!['monday','tuesday','wednesday','thursday','friday'].includes(dayOfWeek)) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION', message: 'Substitutions only apply on school days (Mon–Fri)' } });
+    }
+
+    // All slots for this teacher on that weekday
+    const slots = await _model('timetable').find({
+      schoolId, teacherId, day: dayOfWeek, isActive: true,
+      type: { $in: ['lesson', 'assembly', 'registration'] },
+    }).lean();
+
+    if (!slots.length) {
+      return ok(res, { substitutions: [], message: 'No lessons found for this teacher on that day.' });
+    }
+
+    const teacher = await _model('teachers').findOne({ id: teacherId, schoolId }).lean();
+    const teacherName = teacher
+      ? `${teacher.title ?? ''} ${teacher.firstName} ${teacher.lastName}`.trim()
+      : teacherId;
+
+    // Skip periods already recorded for this teacher + date
+    const existing = await _model('substitutions')
+      .find({ schoolId, originalTeacherId: teacherId, date }).lean();
+    const existingPeriods = new Set(existing.map(s => s.period));
+
+    const toCreate = slots
+      .filter(s => !existingPeriods.has(s.period))
+      .map(s => ({
+        id:                    uuidv4(),
+        schoolId,
+        date,
+        dayOfWeek,
+        period:                s.period,
+        startTime:             s.startTime ?? null,
+        endTime:               s.endTime   ?? null,
+        classId:               s.classId,
+        className:             s.className ?? s.classId,
+        subject:               s.subject   ?? '',
+        room:                  s.room      ?? '',
+        originalTeacherId:     teacherId,
+        originalTeacherName:   teacherName,
+        substituteTeacherId:   null,
+        substituteTeacherName: null,
+        reason,
+        notes,
+        status:    'uncovered',
+        createdBy: userId,
+        createdAt: new Date().toISOString(),
+      }));
+
+    const created = toCreate.length
+      ? await _model('substitutions').insertMany(toCreate)
+      : [];
+
+    const all = [
+      ...existing,
+      ...created.map(d => d.toObject ? d.toObject() : d),
+    ].sort((a, b) => String(a.period).localeCompare(String(b.period)));
+
+    return ok(res, { substitutions: all, created: created.length, alreadyExisted: existing.length });
+  } catch (err) { console.error('[substitutions POST /absent]', err); return E.serverError(res); }
+});
+
+/* PUT /api/timetable/substitutions/:id — assign substitute or update status */
+router.put('/substitutions/:id', authMiddleware, PLAN, async (req, res) => {
+  try {
+    if (!_canEdit(req)) return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied' } });
+    const { schoolId, userId } = req.jwtUser;
+    const { substituteTeacherId, notes, status } = req.body;
+
+    const update = { updatedBy: userId, updatedAt: new Date().toISOString() };
+
+    if (substituteTeacherId !== undefined) {
+      if (substituteTeacherId) {
+        const sub = await _model('teachers').findOne({ id: substituteTeacherId, schoolId }).lean();
+        update.substituteTeacherId   = substituteTeacherId;
+        update.substituteTeacherName = sub
+          ? `${sub.title ?? ''} ${sub.firstName} ${sub.lastName}`.trim()
+          : substituteTeacherId;
+        update.status = 'covered';
+      } else {
+        update.substituteTeacherId   = null;
+        update.substituteTeacherName = null;
+        update.status = 'uncovered';
+      }
+    }
+    if (notes  !== undefined) update.notes  = notes;
+    if (status !== undefined && substituteTeacherId === undefined) update.status = status;
+
+    const doc = await _model('substitutions').findOneAndUpdate(
+      { id: req.params.id, schoolId },
+      { $set: update },
+      { new: true }
+    ).lean();
+
+    if (!doc) return E.notFound(res, 'Substitution record not found');
+    return ok(res, doc);
+  } catch (err) { console.error('[substitutions PUT /:id]', err); return E.serverError(res); }
+});
+
+/* DELETE /api/timetable/substitutions/:id */
+router.delete('/substitutions/:id', authMiddleware, PLAN, async (req, res) => {
+  try {
+    if (!_canEdit(req)) return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied' } });
+    const { schoolId } = req.jwtUser;
+    const doc = await _model('substitutions').findOneAndDelete({ id: req.params.id, schoolId });
+    if (!doc) return E.notFound(res, 'Substitution record not found');
+    return ok(res, { id: req.params.id, deleted: true });
+  } catch (err) { console.error('[substitutions DELETE /:id]', err); return E.serverError(res); }
+});
+
+/* ── GET /api/timetable/versions — publish history ─────────── */
+router.get('/versions', authMiddleware, async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const versions = await _model('timetable_versions')
+      .find({ schoolId }).sort({ publishedAt: -1 }).limit(20).lean();
+    return ok(res, { versions });
+  } catch (err) { console.error('[timetable GET /versions]', err); return E.serverError(res); }
 });
 
 /* ── GET /api/timetable/:id ───────────────────────────────────── */

@@ -224,10 +224,18 @@ export const timetable = {
   update:      (id, data)   => _put(`/timetable/${id}`, data),
   remove:      (id)         => _delete(`/timetable/${id}`),
   bulkSet:     (data)       => _post('/timetable/bulk', data),
-  // Publishing
+  // Publishing + version history
   status:      ()           => _get('/timetable/status'),
   publish:     (data)       => _post('/timetable/publish', data),
   unpublish:   ()           => _post('/timetable/unpublish'),
+  versions:    ()           => _get('/timetable/versions'),
+  // Substitution system
+  substitutions: {
+    list:        (params)   => _get('/timetable/substitutions', params),
+    markAbsent:  (data)     => _post('/timetable/substitutions/absent', data),
+    update:      (id, data) => _put(`/timetable/substitutions/${id}`, data),
+    remove:      (id)       => _delete(`/timetable/substitutions/${id}`),
+  },
   // Portal views
   my:          ()           => _get('/timetable/my'),
   myChildren:  ()           => _get('/timetable/my-children'),

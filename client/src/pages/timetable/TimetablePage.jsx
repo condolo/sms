@@ -12,6 +12,7 @@ import {
   CalendarDays, Plus, X, Loader2, AlertTriangle, CheckCircle2,
   Trash2, User, LayoutGrid, Globe, BarChart3, ChevronRight,
   BookOpen, Clock, Home, Save, AlertCircle, Users, Zap,
+  UserX, ClipboardList, Printer, History,
 } from 'lucide-react';
 import {
   timetable    as ttApi,
@@ -877,10 +878,325 @@ function BellScheduleSlideOver({ onClose }) {
 /* ══════════════════════════════════════════════════════════════
    MAIN PAGE
    ══════════════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════════
+   COVER TAB — Daily substitution management
+   Reads from substitutions collection, never touches timetable_slots.
+   ══════════════════════════════════════════════════════════════ */
+const ABSENCE_REASONS = [
+  { v: 'sick',      l: 'Sick Leave'    },
+  { v: 'personal',  l: 'Personal'      },
+  { v: 'training',  l: 'Training'      },
+  { v: 'emergency', l: 'Emergency'     },
+  { v: 'official',  l: 'Official Duty' },
+  { v: 'other',     l: 'Other'         },
+];
+
+function CoverTab({ teachers }) {
+  const qc = useQueryClient();
+  const [date, setDate]               = useState(() => new Date().toISOString().slice(0, 10));
+  const [absentId, setAbsentId]       = useState('');
+  const [reason, setReason]           = useState('sick');
+  const [coverToast, setCoverToast]   = useState(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  function showT(msg, type = 'success') {
+    setCoverToast({ msg, type });
+    setTimeout(() => setCoverToast(null), 4000);
+  }
+
+  /* ── Substitutions for selected date ── */
+  const { data: subsData, isLoading: subsLoading } = useQuery({
+    queryKey: ['substitutions', date],
+    queryFn:  () => ttApi.substitutions.list({ date }),
+    staleTime: 30_000,
+  });
+  const subs = subsData?.data?.substitutions ?? [];
+
+  /* ── Version history ── */
+  const { data: versionsData } = useQuery({
+    queryKey: ['timetable', 'versions'],
+    queryFn:  ttApi.versions,
+    enabled:  historyOpen,
+    staleTime: 60_000,
+  });
+  const versions = versionsData?.data?.versions ?? [];
+
+  /* ── Mutations ── */
+  const markAbsent = useMutation({
+    mutationFn: () => ttApi.substitutions.markAbsent({ teacherId: absentId, date, reason }),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['substitutions', date] });
+      setAbsentId('');
+      const created = data?.data?.created ?? 0;
+      const existed = data?.data?.alreadyExisted ?? 0;
+      if (created === 0 && existed === 0) showT('No lessons found for that teacher on this day.', 'error');
+      else if (created === 0) showT('Absence already recorded for this teacher.');
+      else showT(`${created} lesson${created !== 1 ? 's' : ''} added to cover sheet.`);
+    },
+    onError: err => showT(err?.message ?? 'Failed to mark absent.', 'error'),
+  });
+
+  const assignSub = useMutation({
+    mutationFn: ({ id, substituteTeacherId }) =>
+      ttApi.substitutions.update(id, { substituteTeacherId: substituteTeacherId || null }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['substitutions', date] }),
+    onError:   err => showT(err?.message ?? 'Failed to assign substitute.', 'error'),
+  });
+
+  const removeRecord = useMutation({
+    mutationFn: (id) => ttApi.substitutions.remove(id),
+    onSuccess:  () => qc.invalidateQueries({ queryKey: ['substitutions', date] }),
+    onError:    err => showT(err?.message ?? 'Failed to remove.', 'error'),
+  });
+
+  /* Group subs by absent teacher */
+  const byTeacher = {};
+  subs.forEach(s => {
+    if (!byTeacher[s.originalTeacherId]) {
+      byTeacher[s.originalTeacherId] = { name: s.originalTeacherName, slots: [] };
+    }
+    byTeacher[s.originalTeacherId].slots.push(s);
+  });
+
+  const coveredCount   = subs.filter(s => s.status === 'covered').length;
+  const uncoveredCount = subs.filter(s => s.status === 'uncovered').length;
+
+  return (
+    <div className="space-y-5">
+
+      {/* Toast */}
+      <AnimatePresence>
+        {coverToast && (
+          <Toast msg={coverToast.msg} type={coverToast.type} onDismiss={() => setCoverToast(null)} />
+        )}
+      </AnimatePresence>
+
+      {/* ── Mark absent form ── */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5">
+        <h3 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
+          <UserX size={14} className="text-red-400" /> Mark Teacher Absent
+        </h3>
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">Date</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)}
+              className="text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-800"
+              style={{ width: '160px' }} />
+          </div>
+          <div style={{ minWidth: '200px', flex: 1 }}>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">Absent Teacher *</label>
+            <select value={absentId} onChange={e => setAbsentId(e.target.value)}
+              className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-800">
+              <option value="">Select teacher…</option>
+              {teachers.map(t => (
+                <option key={t.id ?? t._id} value={t.id ?? t._id}>
+                  {t.firstName} {t.lastName}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div style={{ width: '160px' }}>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">Reason</label>
+            <select value={reason} onChange={e => setReason(e.target.value)}
+              className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-800">
+              {ABSENCE_REASONS.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
+            </select>
+          </div>
+          <button
+            disabled={!absentId || markAbsent.isPending}
+            onClick={() => markAbsent.mutate()}
+            className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+          >
+            {markAbsent.isPending ? <Loader2 size={13} className="animate-spin" /> : <UserX size={13} />}
+            {markAbsent.isPending ? 'Marking…' : 'Mark Absent'}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Daily cover sheet ── */}
+      {subsLoading ? (
+        <div className="bg-white border border-slate-200 rounded-xl p-8 animate-pulse space-y-3">
+          {[...Array(4)].map((_, i) => <div key={i} className="h-12 bg-slate-100 rounded" />)}
+        </div>
+      ) : subs.length === 0 ? (
+        <div className="bg-white border border-slate-200 rounded-xl p-10 text-center">
+          <ClipboardList size={28} className="mx-auto text-slate-300 mb-2" />
+          <p className="text-sm font-medium text-slate-500">No cover arrangements for {date}</p>
+          <p className="text-xs text-slate-400 mt-1">Mark a teacher absent above to generate the cover sheet.</p>
+        </div>
+      ) : (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          {/* Cover sheet header */}
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
+            <div className="flex items-center gap-3">
+              <ClipboardList size={14} className="text-slate-400" />
+              <span className="text-sm font-semibold text-slate-900">Daily Cover Sheet</span>
+              <span className="text-xs text-slate-400 bg-slate-100 rounded px-1.5 py-0.5">{date}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="flex items-center gap-1.5 text-xs text-emerald-600">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
+                {coveredCount} covered
+              </span>
+              <span className="flex items-center gap-1.5 text-xs text-amber-600">
+                <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
+                {uncoveredCount} uncovered
+              </span>
+              <button
+                onClick={() => window.print()}
+                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition print:hidden"
+              >
+                <Printer size={12} /> Print
+              </button>
+            </div>
+          </div>
+
+          {/* Rows grouped by absent teacher */}
+          <div className="divide-y divide-slate-100">
+            {Object.entries(byTeacher).map(([tid, { name, slots }]) => (
+              <div key={tid}>
+                {/* Absent teacher header */}
+                <div className="px-5 py-2 bg-red-50/60 flex items-center gap-2">
+                  <UserX size={12} className="text-red-400 shrink-0" />
+                  <span className="text-xs font-semibold text-red-700">{name}</span>
+                  <span className="text-xs text-red-400">absent</span>
+                  <span className="text-xs text-slate-400 ml-1">
+                    ({ABSENCE_REASONS.find(r => r.v === slots[0]?.reason)?.l ?? slots[0]?.reason})
+                  </span>
+                  <button
+                    onClick={() => {
+                      if (!window.confirm(`Clear all cover records for ${name} on ${date}?`)) return;
+                      slots.forEach(s => removeRecord.mutate(s.id));
+                    }}
+                    className="ml-auto text-[10px] text-red-400 hover:text-red-600 hover:underline print:hidden"
+                  >
+                    Clear all
+                  </button>
+                </div>
+
+                {/* Lesson rows */}
+                {slots
+                  .slice()
+                  .sort((a, b) => String(a.period).localeCompare(String(b.period)))
+                  .map(s => (
+                    <div key={s.id} className="px-5 py-3 flex items-center gap-4 hover:bg-slate-50/40 transition">
+                      {/* Period badge */}
+                      <div className="flex items-center gap-1.5 w-24 shrink-0">
+                        <span className="text-[11px] font-bold text-slate-800 bg-slate-100 rounded px-1.5 py-0.5 tabular-nums">
+                          P{s.period}
+                        </span>
+                        {s.startTime && (
+                          <span className="text-[10px] text-slate-400">{s.startTime}</span>
+                        )}
+                      </div>
+
+                      {/* Lesson info */}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-slate-800 truncate">
+                          {s.className || s.classId}
+                          {s.subject ? ` · ${s.subject}` : ''}
+                        </p>
+                        {s.room && (
+                          <p className="text-[10px] text-slate-400">Room: {s.room}</p>
+                        )}
+                      </div>
+
+                      {/* Substitute picker */}
+                      <div className="flex items-center gap-2 shrink-0 print:hidden">
+                        <select
+                          value={s.substituteTeacherId ?? ''}
+                          onChange={e => assignSub.mutate({ id: s.id, substituteTeacherId: e.target.value })}
+                          className="text-xs rounded-lg border border-slate-200 px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                          style={{ maxWidth: '200px' }}
+                        >
+                          <option value="">Assign substitute…</option>
+                          {teachers
+                            .filter(t => (t.id ?? t._id) !== s.originalTeacherId)
+                            .map(t => (
+                              <option key={t.id ?? t._id} value={t.id ?? t._id}>
+                                {t.firstName} {t.lastName}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+
+                      {/* Substitute name (print) + status badge */}
+                      {s.substituteTeacherName && (
+                        <span className="text-xs text-slate-600 hidden print:inline">
+                          {s.substituteTeacherName}
+                        </span>
+                      )}
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0 ${
+                        s.status === 'covered'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-amber-100 text-amber-700'
+                      }`}>
+                        {s.status === 'covered'
+                          ? <><CheckCircle2 size={10} /> Covered</>
+                          : <><AlertCircle size={10} /> Uncovered</>}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Version History ── */}
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <button
+          onClick={() => setHistoryOpen(o => !o)}
+          className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-slate-50 transition"
+        >
+          <div className="flex items-center gap-2">
+            <History size={13} className="text-slate-400" />
+            <span className="text-sm font-semibold text-slate-900">Publish History</span>
+          </div>
+          <ChevronRight size={14} className={`text-slate-400 transition-transform ${historyOpen ? 'rotate-90' : ''}`} />
+        </button>
+
+        <AnimatePresence>
+          {historyOpen && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden border-t border-slate-100"
+            >
+              {versions.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-6">No publish history yet.</p>
+              ) : (
+                <div className="divide-y divide-slate-50">
+                  {versions.map((v, i) => (
+                    <div key={v.id} className="px-5 py-3 flex items-center gap-4">
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${i === 0 ? 'bg-emerald-400' : 'bg-slate-200'}`} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-slate-800">
+                          {v.termLabel || 'Untitled version'}
+                          {i === 0 && <span className="ml-2 text-[10px] text-emerald-600 font-semibold">Current</span>}
+                        </p>
+                        <p className="text-[10px] text-slate-400">
+                          {new Date(v.publishedAt).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })}
+                          {' · '}{v.slotCount} slots
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+    </div>
+  );
+}
+
 const VIEWS = [
-  { id: 'class',    label: 'Class Grid',    Icon: LayoutGrid },
-  { id: 'teacher',  label: 'Teacher View',  Icon: User       },
-  { id: 'overview', label: 'Institution',   Icon: Globe      },
+  { id: 'class',    label: 'Class Grid',    Icon: LayoutGrid  },
+  { id: 'teacher',  label: 'Teacher View',  Icon: User        },
+  { id: 'overview', label: 'Institution',   Icon: Globe       },
+  { id: 'cover',    label: 'Cover / Subs',  Icon: UserX, adminOnly: true },
 ];
 
 export default function TimetablePage() {
@@ -1116,7 +1432,7 @@ export default function TimetablePage() {
 
           {/* View tabs */}
           <div className="flex gap-1 mt-4">
-            {VIEWS.map(v => (
+            {VIEWS.filter(v => !v.adminOnly || canEdit).map(v => (
               <button
                 key={v.id}
                 onClick={() => setActiveView(v.id)}
@@ -1251,6 +1567,12 @@ export default function TimetablePage() {
               Institution-wide scheduling overview · {classList.length} classes
             </span>
           )}
+
+          {activeView === 'cover' && (
+            <span className="text-xs text-slate-500">
+              Daily cover arrangements · substitution management
+            </span>
+          )}
         </div>
       </div>
 
@@ -1326,6 +1648,11 @@ export default function TimetablePage() {
         {/* Institution Overview */}
         {activeView === 'overview' && (
           <OverviewView classList={classList} />
+        )}
+
+        {/* Cover / Substitutions View */}
+        {activeView === 'cover' && (
+          <CoverTab teachers={teacherList} />
         )}
       </div>
 
