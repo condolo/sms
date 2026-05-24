@@ -35,6 +35,7 @@ const ReportsPage       = lazy(() => import('@/pages/reports/ReportsPage.jsx'));
 const HRPage            = lazy(() => import('@/pages/hr/HRPage.jsx'));
 const ChangelogPage     = lazy(() => import('@/pages/changelog/ChangelogPage.jsx'));
 const HelpPage          = lazy(() => import('@/pages/help/HelpPage.jsx'));
+const ProfilePage       = lazy(() => import('@/pages/profile/ProfilePage.jsx'));
 
 function SuspenseWrapper({ children }) {
   return (
@@ -143,6 +144,9 @@ export const router = createBrowserRouter([
 
       // Help Centre
       { path: 'help',                  element: <SuspenseWrapper><HelpPage /></SuspenseWrapper> },
+
+      // Profile
+      { path: 'profile',               element: <SuspenseWrapper><ProfilePage /></SuspenseWrapper> },
 
       // Fallback
       { path: '*',                     element: <SuspenseWrapper><NotFound /></SuspenseWrapper> },

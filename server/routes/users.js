@@ -233,4 +233,126 @@ router.post('/:id/role-change', authMiddleware, async (req, res) => {
   }
 });
 
+/* ══════════════════════════════════════════════════════════════
+   SELF-SERVICE PROFILE ENDPOINTS
+   GET  /api/users/me         — fetch own profile (+ photoUrl)
+   PUT  /api/users/me         — update own name / phone / bio
+   PUT  /api/users/me/photo   — upload / replace profile photo (non-students)
+   DELETE /api/users/me/photo — remove profile photo
+   GET  /api/users/:id/photo  — serve photo as image/* (tenant-scoped)
+   ══════════════════════════════════════════════════════════════ */
+
+/* GET /api/users/me */
+router.get('/me', authMiddleware, async (req, res) => {
+  try {
+    const User   = _model('users');
+    const Photos = _model('user_photos');
+    const user   = await User.findOne({ id: req.jwtUser.userId, schoolId: req.jwtUser.schoolId }).lean();
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const photo   = await Photos.findOne({ userId: user.id }).lean();
+    const safeUser = { ...user, password: undefined, mfaOtp: undefined, mfaExpiry: undefined };
+    safeUser.photoUrl = photo ? `/api/users/${user.id}/photo` : null;
+
+    res.json({ user: safeUser });
+  } catch (err) {
+    console.error('[users/me GET]', err);
+    res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
+
+/* PUT /api/users/me — update name, phone, bio */
+router.put('/me', authMiddleware, async (req, res) => {
+  try {
+    const allowed = ['name', 'phone', 'bio'];
+    const updates = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) updates[key] = String(req.body[key]).trim();
+    }
+    if (updates.name && !updates.name) return res.status(400).json({ error: 'Name cannot be empty' });
+    if (!Object.keys(updates).length) return res.status(400).json({ error: 'No valid fields to update' });
+
+    updates.updatedAt = new Date().toISOString();
+    const User = _model('users');
+    await User.updateOne({ id: req.jwtUser.userId, schoolId: req.jwtUser.schoolId }, { $set: updates });
+
+    const Photos  = _model('user_photos');
+    const user    = await User.findOne({ id: req.jwtUser.userId }).lean();
+    const photo   = await Photos.findOne({ userId: req.jwtUser.userId }).lean();
+    const safeUser = { ...user, password: undefined, mfaOtp: undefined, mfaExpiry: undefined };
+    safeUser.photoUrl = photo ? `/api/users/${user.id}/photo` : null;
+
+    res.json({ success: true, user: safeUser });
+  } catch (err) {
+    console.error('[users/me PUT]', err);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+/* PUT /api/users/me/photo — upload profile photo (non-students only) */
+router.put('/me/photo', authMiddleware, async (req, res) => {
+  try {
+    const role = req.jwtUser.role || '';
+    if (role === 'student') {
+      return res.status(403).json({ error: 'Student photos are managed through student records.' });
+    }
+
+    const { photoBase64 } = req.body;
+    if (!photoBase64) return res.status(400).json({ error: 'photoBase64 is required' });
+
+    if (!/^data:image\/(jpeg|jpg|png|webp);base64,/.test(photoBase64)) {
+      return res.status(400).json({ error: 'Invalid image. Use JPEG, PNG, or WebP.' });
+    }
+
+    const base64Data = photoBase64.split(',')[1] || '';
+    const sizeBytes  = Math.ceil(base64Data.length * 0.75);
+    if (sizeBytes > 300 * 1024) {
+      return res.status(400).json({ error: 'Image too large. Please upload under 300 KB after resizing.' });
+    }
+
+    const Photos = _model('user_photos');
+    await Photos.updateOne(
+      { userId: req.jwtUser.userId },
+      { $set: { userId: req.jwtUser.userId, schoolId: req.jwtUser.schoolId, photoBase64, updatedAt: new Date().toISOString() } },
+      { upsert: true }
+    );
+
+    res.json({ success: true, photoUrl: `/api/users/${req.jwtUser.userId}/photo` });
+  } catch (err) {
+    console.error('[users/me/photo PUT]', err);
+    res.status(500).json({ error: 'Failed to upload photo' });
+  }
+});
+
+/* DELETE /api/users/me/photo */
+router.delete('/me/photo', authMiddleware, async (req, res) => {
+  try {
+    const Photos = _model('user_photos');
+    await Photos.deleteOne({ userId: req.jwtUser.userId, schoolId: req.jwtUser.schoolId });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to remove photo' });
+  }
+});
+
+/* GET /api/users/:id/photo — serve photo as binary image (tenant-scoped) */
+router.get('/:id/photo', authMiddleware, async (req, res) => {
+  try {
+    const Photos = _model('user_photos');
+    const photo  = await Photos.findOne({ userId: req.params.id, schoolId: req.jwtUser.schoolId }).lean();
+
+    if (!photo?.photoBase64) return res.status(404).json({ error: 'No photo' });
+
+    const [header, data] = photo.photoBase64.split(',');
+    const mimeMatch = header?.match(/data:(image\/[\w+]+);base64/);
+    const mime = mimeMatch?.[1] || 'image/jpeg';
+
+    res.set('Content-Type', mime);
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.send(Buffer.from(data, 'base64'));
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to serve photo' });
+  }
+});
+
 module.exports = router;

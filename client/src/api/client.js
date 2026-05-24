@@ -110,6 +110,14 @@ export const auth = {
   refresh:         ()             => _post('/auth/refresh'),
 };
 
+export const profile = {
+  get:         ()       => _get('/users/me'),
+  update:      (data)   => _put('/users/me', data),
+  uploadPhoto: (data)   => _put('/users/me/photo', data),
+  removePhoto: ()       => _delete('/users/me/photo'),
+  photoUrl:    (userId) => `/api/users/${userId}/photo`,
+};
+
 export const students = {
   ..._resource('students'),
   stats:      ()           => _get('/students/stats'),
