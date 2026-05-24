@@ -21,7 +21,6 @@ const ClassList      = lazy(() => import('@/pages/classes/ClassList.jsx'));
 const AttendancePage = lazy(() => import('@/pages/attendance/AttendancePage.jsx'));
 const FinancePage    = lazy(() => import('@/pages/finance/FinancePage.jsx'));
 const BehaviourPage  = lazy(() => import('@/pages/behaviour/BehaviourPage.jsx'));
-const ExamsPage      = lazy(() => import('@/pages/exams/ExamsPage.jsx'));
 const AdmissionsPage = lazy(() => import('@/pages/admissions/AdmissionsPage.jsx'));
 const TimetablePage  = lazy(() => import('@/pages/timetable/TimetablePage.jsx'));
 const SettingsPage      = lazy(() => import('@/pages/settings/SettingsPage.jsx'));
@@ -104,8 +103,8 @@ export const router = createBrowserRouter([
       // Behaviour
       { path: 'behaviour',             element: <SuspenseWrapper><BehaviourPage /></SuspenseWrapper> },
 
-      // Exams & Grades
-      { path: 'exams',                 element: <SuspenseWrapper><ExamsPage /></SuspenseWrapper> },
+      // Exams → redirect to unified module
+      { path: 'exams',                 element: <Navigate to="/grades" replace /> },
 
       // Grades & Assessment (CA/HW/MT/ET system)
       { path: 'grades',                element: <SuspenseWrapper><GradesPage /></SuspenseWrapper> },
