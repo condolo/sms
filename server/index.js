@@ -217,8 +217,8 @@ app.get('*', (req, res) => {
   if (reactBuilt) {
     return res.sendFile(path.join(REACT_DIST, 'index.html'));
   }
-  // Legacy vanilla-JS app (only when React build is absent)
-  res.sendFile(path.join(ROOT_DIR, 'index.html'));
+  // No build available (dev mode without running `npm run build`)
+  res.status(503).send('<h2>Msingi is starting up — run <code>cd client && npm run build</code> first, or use <code>npm run dev:react</code> for development.</h2>');
 });
 
 /* ── Error handler ──────────────────────────────────────────── */

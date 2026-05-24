@@ -96,7 +96,7 @@ const ROLE_DEFAULTS = [
 ];
 
 async function main() {
-  await mongoose.connect(process.env.MONGODB_URI, { dbName: 'innolearn' });
+  await mongoose.connect(process.env.MONGODB_URI, { dbName: process.env.MONGODB_DB_NAME || 'innolearn' });
   const db = mongoose.connection.db;
 
   const schools = await db.collection('schools').find({}).project({ id: 1, _id: 1, slug: 1 }).toArray();

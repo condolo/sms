@@ -74,7 +74,7 @@ const loginLimiter = rateLimit({
 
 /* POST /api/auth/login
    Body: { email, password }
-   Header: X-School-Slug: InnoLearn   (or resolved from subdomain by tenant middleware)
+   Header: X-School-Slug: demo         (or resolved from subdomain by tenant middleware)
    Returns: { token, user, school }
 */
 router.post('/login', loginLimiter, tenantMiddleware, async (req, res) => {

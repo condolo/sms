@@ -319,7 +319,7 @@ function _provisionOffline(data, res) {
     tempPassword,  // shown in success screen so user knows their credentials
     user: { ...user, password: undefined },
     offline: true,
-    loginUrl: `/index.html`
+    loginUrl: `/login`
   });
 }
 

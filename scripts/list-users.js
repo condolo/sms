@@ -3,10 +3,10 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 async function main() {
-  await mongoose.connect(process.env.MONGODB_URI, { dbName: 'innolearn' });
+  await mongoose.connect(process.env.MONGODB_URI, { dbName: process.env.MONGODB_DB_NAME || 'innolearn' });
   const db = mongoose.connection.db;
   const users = await db.collection('users')
-    .find({ schoolId: 'sch_innolearn_001' })
+    .find({})
     .project({ email: 1, role: 1, name: 1, isActive: 1, password: 1 })
     .toArray();
 
