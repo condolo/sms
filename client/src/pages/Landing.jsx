@@ -510,6 +510,189 @@ const SHOWCASE_TABS = [
 ];
 
 /* ═══════════════════════════════════════════════════════════════
+   PLANS DATA
+═══════════════════════════════════════════════════════════════ */
+const PLAN_FEATURES = [
+  { label: 'Student Profiles & Records'    },
+  { label: 'Admissions Pipeline'           },
+  { label: 'Attendance Tracking'           },
+  { label: 'Finance & Fee Ledger'          },
+  { label: 'Parent Communication'          },
+  { label: 'Events & School Calendar'      },
+  { label: 'Academics & Grading'           },
+  { label: 'Behaviour Tracking (BPS)'      },
+  { label: 'Timetable Management'          },
+  { label: 'Report Card Publishing'        },
+  { label: 'HR & Staff Management'         },
+  { label: 'Analytics Director Dashboard'  },
+  { label: 'Multi-Curriculum Support'      },
+  { label: 'Custom Roles & Permissions'    },
+];
+
+const PLANS = [
+  {
+    name: 'Core',
+    tagline: 'Essential operations for growing schools',
+    badge: null,
+    studentCap: 'Up to 500 students',
+    included: [true, true, true, true, true, true, false, false, false, false, false, false, false, false],
+    highlights: ['Student & fee management', 'Attendance & communication', 'Admissions pipeline'],
+    cta: 'Get Started',
+  },
+  {
+    name: 'Standard',
+    tagline: 'Full academic and operational management',
+    badge: 'Most Popular',
+    studentCap: 'Up to 2,000 students',
+    included: [true, true, true, true, true, true, true, true, true, true, true, false, false, false],
+    highlights: ['Everything in Core', 'Grades, reports & timetable', 'Behaviour management & HR'],
+    cta: 'Get Standard',
+  },
+  {
+    name: 'Premium',
+    tagline: 'Complete institutional accountability infrastructure',
+    badge: null,
+    studentCap: 'Unlimited students',
+    included: [true, true, true, true, true, true, true, true, true, true, true, true, true, true],
+    highlights: ['Everything in Standard', 'Live analytics dashboard', 'Multi-curriculum & custom RBAC'],
+    cta: 'Get Premium',
+  },
+];
+
+function PlansSection() {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <section id="plans" className="py-24 sm:py-32 bg-slate-50 border-y border-slate-100">
+      <div className="max-w-7xl mx-auto px-6 lg:px-8">
+
+        <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()} className="text-center mb-14">
+          <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Plans</motion.p>
+          <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 mb-4 leading-tight">
+            Start with what you need.<br />
+            <span className="text-slate-400">Scale as your institution grows.</span>
+          </motion.h2>
+          <motion.p variants={fadeUp} className="text-base text-slate-500 max-w-xl mx-auto">
+            Every plan includes onboarding support, tenant isolation, and full audit infrastructure.
+            Pricing is customised per school — talk to us.
+          </motion.p>
+        </motion.div>
+
+        {/* Plan cards */}
+        <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger(0.1)}
+          className="grid md:grid-cols-3 gap-5 mb-8">
+          {PLANS.map((plan) => (
+            <motion.div key={plan.name} variants={fadeUp}
+              className={`relative rounded-2xl p-7 flex flex-col ${
+                plan.badge
+                  ? 'bg-slate-900 text-white ring-2 ring-indigo-500 shadow-xl shadow-indigo-500/10'
+                  : 'bg-white border border-slate-200 shadow-sm'
+              }`}>
+
+              {plan.badge && (
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                  <span className="bg-indigo-500 text-white text-[10px] font-bold px-3 py-1 rounded-full tracking-wide uppercase">
+                    {plan.badge}
+                  </span>
+                </div>
+              )}
+
+              <div className="mb-6">
+                <h3 className={`text-xl font-bold mb-1 ${plan.badge ? 'text-white' : 'text-slate-900'}`}>{plan.name}</h3>
+                <p className={`text-sm leading-snug ${plan.badge ? 'text-slate-400' : 'text-slate-500'}`}>{plan.tagline}</p>
+              </div>
+
+              <div className={`text-xs font-semibold mb-5 px-2.5 py-1.5 rounded-lg inline-block w-fit ${
+                plan.badge ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-600'
+              }`}>
+                {plan.studentCap}
+              </div>
+
+              {/* Key highlights */}
+              <ul className="space-y-2 mb-6 flex-1">
+                {plan.highlights.map((h, i) => (
+                  <li key={i} className="flex items-center gap-2.5">
+                    <div className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
+                      plan.badge ? 'bg-indigo-500' : 'bg-slate-900'
+                    }`}>
+                      <CheckCircle size={9} className="text-white" />
+                    </div>
+                    <span className={`text-sm ${plan.badge ? 'text-slate-300' : 'text-slate-600'}`}>{h}</span>
+                  </li>
+                ))}
+              </ul>
+
+              <Link to="/contact"
+                className={`w-full text-center rounded-xl py-3 text-sm font-semibold transition-all ${
+                  plan.badge
+                    ? 'bg-indigo-500 text-white hover:bg-indigo-400'
+                    : 'bg-slate-900 text-white hover:bg-slate-700'
+                }`}>
+                {plan.cta} →
+              </Link>
+            </motion.div>
+          ))}
+        </motion.div>
+
+        {/* Feature comparison toggle */}
+        <div className="text-center mb-6">
+          <button onClick={() => setExpanded(p => !p)}
+            className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-800 transition-colors">
+            <ChevronRight size={15} className={`transition-transform duration-300 ${expanded ? 'rotate-90' : ''}`} />
+            {expanded ? 'Hide' : 'Compare all features across plans'}
+          </button>
+        </div>
+
+        {/* Full feature comparison table */}
+        <AnimatePresence>
+          {expanded && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.35 }}
+              className="overflow-hidden"
+            >
+              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                {/* Table header */}
+                <div className="grid grid-cols-[1fr_repeat(3,_100px)] sm:grid-cols-[1fr_repeat(3,_120px)] bg-slate-50 border-b border-slate-100">
+                  <div className="px-5 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-widest">Module</div>
+                  {PLANS.map(p => (
+                    <div key={p.name} className={`px-3 py-3.5 text-center text-xs font-bold uppercase tracking-wide ${
+                      p.badge ? 'text-indigo-600' : 'text-slate-600'
+                    }`}>{p.name}</div>
+                  ))}
+                </div>
+                {/* Rows */}
+                {PLAN_FEATURES.map(({ label }, fi) => (
+                  <div key={label} className={`grid grid-cols-[1fr_repeat(3,_100px)] sm:grid-cols-[1fr_repeat(3,_120px)] items-center border-b border-slate-50 ${fi % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
+                    <div className="px-5 py-3 text-sm text-slate-700 font-medium">{label}</div>
+                    {PLANS.map(p => (
+                      <div key={p.name} className="py-3 flex justify-center">
+                        {p.included[fi]
+                          ? <CheckCircle2 size={16} className="text-emerald-500" />
+                          : <div className="w-4 h-px bg-slate-200" />
+                        }
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <motion.p initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }}
+          transition={{ delay: 0.5 }}
+          className="text-center text-xs text-slate-400 mt-8">
+          All plans include onboarding support · tenant data isolation · role-based access control · full audit trail
+        </motion.p>
+      </div>
+    </section>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
    FLOATING ACTIONS
 ═══════════════════════════════════════════════════════════════ */
 function FloatingActions() {
@@ -630,7 +813,7 @@ export default function Landing() {
       >
         <div className="max-w-7xl mx-auto px-6 lg:px-8 h-16 flex items-center justify-between">
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-2.5">
+          <Link to="/" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center text-white text-[10px] font-bold shadow-sm">M</div>
             <span className="text-sm font-bold text-slate-900 tracking-tight">Msingi</span>
           </Link>
@@ -640,6 +823,7 @@ export default function Landing() {
             {[
               { label: 'Platform',        href: '#ecosystem'  },
               { label: 'Solutions',       href: '#showcase'   },
+              { label: 'Plans',           href: '#plans'      },
               { label: 'Infrastructure',  href: '#trust'      },
             ].map(({ label, href }) => (
               <a key={label} href={href}
@@ -909,7 +1093,12 @@ export default function Landing() {
       </section>
 
       {/* ══════════════════════════════════════════
-          5. TRUST / INFRASTRUCTURE
+          5. PLANS
+      ══════════════════════════════════════════ */}
+      <PlansSection />
+
+      {/* ══════════════════════════════════════════
+          6. TRUST / INFRASTRUCTURE
       ══════════════════════════════════════════ */}
       <section id="trust" className="py-24 sm:py-32 bg-slate-950">
         <div className="max-w-7xl mx-auto px-6 lg:px-8">
@@ -954,7 +1143,7 @@ export default function Landing() {
       </section>
 
       {/* ══════════════════════════════════════════
-          6. FINAL CTA
+          7. FINAL CTA
       ══════════════════════════════════════════ */}
       <section className="py-24 sm:py-32 bg-white">
         <div className="max-w-3xl mx-auto px-6 lg:px-8 text-center">
