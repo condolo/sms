@@ -68,6 +68,15 @@ router.get('/', async (req, res) => {
       .limit(parseInt(limit))
       .lean();
 
+    // Enrich senderName for legacy messages that were stored without it
+    const missingNameIds = [...new Set(msgs.filter(m => !m.senderName && m.senderId).map(m => m.senderId))];
+    if (missingNameIds.length) {
+      const User = _model('users');
+      const users = await User.find({ id: { $in: missingNameIds }, schoolId }).select('id name').lean();
+      const nameMap = Object.fromEntries(users.map(u => [u.id, u.name]));
+      msgs.forEach(m => { if (!m.senderName && m.senderId) m.senderName = nameMap[m.senderId] ?? null; });
+    }
+
     res.json({
       data: msgs,
       pagination: { total, page: parseInt(page), limit: parseInt(limit), pages: Math.ceil(total / parseInt(limit)) }

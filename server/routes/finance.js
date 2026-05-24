@@ -478,7 +478,7 @@ router.get('/summary', authMiddleware, PLAN, rbac('finance', 'read'), async (req
         { $match: filter },
         { $group: {
           _id:          null,
-          totalInvoiced: { $sum: '$total' },
+          totalInvoiced: { $sum: '$amount' },
           totalPaid:    { $sum: '$amountPaid' },
           totalBalance: { $sum: '$balance' },
           countInvoices: { $sum: 1 },

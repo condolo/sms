@@ -97,13 +97,14 @@ export default function ReportsPage() {
   const sym            = school?.currencySymbol ?? 'KSh';
 
   /* ── Data fetches ── */
-  const { data: studStats }  = useQuery({ queryKey: ['students','stats'],    queryFn: () => studentsApi.stats() });
-  const { data: finSummary } = useQuery({ queryKey: ['finance','summary'],   queryFn: () => financeApi.summary({}) });
-  const { data: attSummary } = useQuery({ queryKey: ['attendance','summary'],queryFn: () => attendanceApi.summary({}) });
-  const { data: behSummary } = useQuery({ queryKey: ['behaviour','summary'], queryFn: () => behaviourApi.incidents.summary({}) });
+  const { data: studStats }  = useQuery({ queryKey: ['students','stats'],    queryFn: () => studentsApi.stats(),                select: r => r?.data ?? r });
+  const { data: finSummary } = useQuery({ queryKey: ['finance','summary'],   queryFn: () => financeApi.summary({}),             select: r => r?.data ?? r });
+  const { data: attSummary } = useQuery({ queryKey: ['attendance','summary'],queryFn: () => attendanceApi.summary({}),          select: r => r?.data ?? r });
+  const { data: behSummary } = useQuery({ queryKey: ['behaviour','summary'], queryFn: () => behaviourApi.incidents.summary({}), select: r => r?.data ?? r });
   const { data: marksSummary, isLoading: marksLoading } = useQuery({
     queryKey: ['assessment', 'marks-summary-report'],
     queryFn:  () => assessmentApi.marksSummary({ limit: 200 }),
+    select:   r => r?.data ?? r,
     enabled:  tab === 'academic',
     staleTime: 5 * 60_000,
   });
@@ -111,46 +112,46 @@ export default function ReportsPage() {
   const { data: recentStudents, isLoading: recentLoading } = useQuery({
     queryKey: ['students', 'recent-enrollments'],
     queryFn:  () => studentsApi.list({ limit: 15, sort: 'enrollmentDate', order: 'desc' }),
+    select:   r => r?.data ?? r,
     enabled:  tab === 'enrollment',
     staleTime: 5 * 60_000,
   });
 
-  const totalStudents  = studStats?.total   ?? 0;
-  const activeStudents = studStats?.active  ?? 0;
-  const totalCollected = finSummary?.totalPaid       ?? 0;
-  const totalInvoiced  = finSummary?.totalAmount     ?? 0;
-  const outstanding    = (totalInvoiced - totalCollected) || 0;
-  const collectionRate = totalInvoiced > 0 ? Math.round((totalCollected / totalInvoiced) * 100) : 0;
+  // finSummary shape: { invoices: { totalInvoiced, totalPaid, ... }, paymentsByMethod: [...] }
+  const _fin            = finSummary?.invoices ?? finSummary ?? {};
+  const totalStudents   = studStats?.total   ?? 0;
+  const activeStudents  = studStats?.active  ?? 0;
+  const totalCollected  = _fin.totalPaid      ?? 0;
+  const totalInvoiced   = _fin.totalInvoiced  ?? 0;
+  const outstanding     = (totalInvoiced - totalCollected) || 0;
+  const collectionRate  = totalInvoiced > 0 ? Math.round((totalCollected / totalInvoiced) * 100) : 0;
 
-  const totalMerits   = behSummary?.totalMerits   ?? 0;
-  const totalDemerits = behSummary?.totalDemerits ?? 0;
+  // behSummary is an array of per-student records: [{merits, demerits, ...}]
+  const _beh        = Array.isArray(behSummary) ? behSummary : [];
+  const totalMerits   = _beh.reduce((s, r) => s + (r.merits   ?? 0), 0);
+  const totalDemerits = _beh.reduce((s, r) => s + (r.demerits ?? 0), 0);
 
   /* ── Gender breakdown for pie ── */
-  const genderData = studStats?.byGender
-    ? Object.entries(studStats.byGender).map(([name, value]) => ({ name: name.charAt(0).toUpperCase() + name.slice(1), value }))
+  // byGender is [{_id: 'female', count: 10}, ...] from aggregation
+  const genderData = Array.isArray(studStats?.byGender)
+    ? studStats.byGender.map(g => ({ name: (g._id || 'Unknown').charAt(0).toUpperCase() + (g._id || 'unknown').slice(1), value: g.count }))
     : [];
 
   /* ── Class size bar data ── */
-  const classSizeData = studStats?.byClass
-    ? Object.entries(studStats.byClass).map(([name, value]) => ({ name, students: value })).sort((a, b) => b.students - a.students)
+  // byClass is [{_id: 'cls_demo_f1a', className: 'Form 1A', count: 3}, ...]
+  const classSizeData = Array.isArray(studStats?.byClass)
+    ? studStats.byClass.map(c => ({ name: c.className || c._id || 'Unknown', students: c.count })).sort((a, b) => b.students - a.students)
     : [];
 
   /* ── Finance status pie ── */
-  const finStatusData = finSummary?.byStatus
-    ? Object.entries(finSummary.byStatus).map(([name, value]) => ({
-        name: name.charAt(0).toUpperCase() + name.slice(1),
-        value,
-      }))
-    : [
-        { name: 'Paid',    value: finSummary?.countPaid    ?? 0 },
-        { name: 'Partial', value: finSummary?.countPartial ?? 0 },
-        { name: 'Unpaid',  value: finSummary?.countUnpaid  ?? 0 },
-      ];
+  const finStatusData = [
+    { name: 'Paid',    value: _fin.countPaid    ?? 0 },
+    { name: 'Partial', value: _fin.countPartial ?? 0 },
+    { name: 'Unpaid',  value: _fin.countUnpaid  ?? 0 },
+  ];
 
   /* ── Academic: aggregate marks by subject ── */
-  const _marks = Array.isArray(marksSummary?.data) ? marksSummary.data
-               : Array.isArray(marksSummary) ? marksSummary
-               : [];
+  const _marks = Array.isArray(marksSummary) ? marksSummary : [];
   const _bySubject = {};
   _marks.forEach(m => {
     const key = m.subjectName || m.subject?.name || String(m.subjectId || 'Unknown');
@@ -522,7 +523,7 @@ export default function ReportsPage() {
               <div className="space-y-2">
                 {[...Array(5)].map((_, i) => <div key={i} className="h-8 bg-slate-100 rounded animate-pulse" />)}
               </div>
-            ) : !recentStudents?.data?.length ? (
+            ) : !recentStudents?.length ? (
               <p className="text-center text-slate-400 text-sm py-8">No enrollment data available.</p>
             ) : (
               <table className="w-full text-sm">
@@ -535,7 +536,7 @@ export default function ReportsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {recentStudents.data.map((s, i) => (
+                  {recentStudents.map((s, i) => (
                     <tr key={s._id ?? s.id} className={`border-b border-slate-50 ${i % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
                       <td className="py-2.5 px-3 font-medium text-slate-800">{s.firstName} {s.lastName}</td>
                       <td className="py-2.5 px-3 text-slate-600 hidden sm:table-cell">{s.className ?? '—'}</td>
