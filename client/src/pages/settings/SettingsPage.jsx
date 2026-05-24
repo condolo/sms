@@ -303,6 +303,83 @@ function SchoolTab() {
         </div>
       </div>
 
+      {/* M-Pesa Integration */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+        <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+          <Shield size={14} className="text-emerald-500" />
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">M-Pesa Integration</h3>
+          <span className="ml-auto text-[10px] font-semibold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200">Daraja API</span>
+        </div>
+        <p className="text-xs text-slate-400 leading-relaxed">
+          Connect your Safaricom Daraja account to enable M-Pesa STK Push payments and automatic C2B reconciliation.
+          Credentials are stored encrypted per school — never shared across tenants.
+        </p>
+
+        <div className="grid grid-cols-2 gap-3">
+          <FField label="Consumer Key">
+            <input
+              value={f.mpesa?.consumerKey ?? ''}
+              onChange={e => set('mpesa', { ...(f.mpesa ?? {}), consumerKey: e.target.value })}
+              className={iCls()} placeholder="From Daraja developer portal"
+            />
+          </FField>
+          <FField label="Consumer Secret">
+            <input
+              type="password"
+              value={f.mpesa?.consumerSecret ?? ''}
+              onChange={e => set('mpesa', { ...(f.mpesa ?? {}), consumerSecret: e.target.value })}
+              className={iCls()} placeholder="••••••••"
+            />
+          </FField>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <FField label="Paybill / Till Number">
+            <input
+              value={f.mpesa?.shortCode ?? ''}
+              onChange={e => set('mpesa', { ...(f.mpesa ?? {}), shortCode: e.target.value })}
+              className={iCls()} placeholder="e.g. 174379"
+            />
+          </FField>
+          <FField label="STK Push Passkey">
+            <input
+              type="password"
+              value={f.mpesa?.passkey ?? ''}
+              onChange={e => set('mpesa', { ...(f.mpesa ?? {}), passkey: e.target.value })}
+              className={iCls()} placeholder="Lipa Na M-Pesa passkey"
+            />
+          </FField>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <FField label="Environment">
+            <select
+              value={f.mpesa?.env ?? 'sandbox'}
+              onChange={e => set('mpesa', { ...(f.mpesa ?? {}), env: e.target.value })}
+              className={iCls()}
+            >
+              <option value="sandbox">Sandbox (testing)</option>
+              <option value="production">Production (live)</option>
+            </select>
+          </FField>
+          <FField label="Public Callback Base URL">
+            <input
+              value={f.mpesa?.callbackBaseUrl ?? ''}
+              onChange={e => set('mpesa', { ...(f.mpesa ?? {}), callbackBaseUrl: e.target.value })}
+              className={iCls()} placeholder="https://your-domain.msingi.io"
+            />
+          </FField>
+        </div>
+
+        <div className="flex items-start gap-2 bg-slate-50 rounded-lg p-3 border border-slate-100">
+          <Info size={13} className="text-slate-400 mt-0.5 shrink-0" />
+          <p className="text-[11px] text-slate-400 leading-relaxed">
+            Register your C2B callback URLs with Safaricom from Finance → Settings → M-Pesa after saving.
+            Callback URL: <code className="bg-slate-100 px-1 rounded text-slate-600">/api/mpesa/callback</code>
+          </p>
+        </div>
+      </div>
+
       {/* Save */}
       <div className="flex items-center gap-3 pt-1">
         <button

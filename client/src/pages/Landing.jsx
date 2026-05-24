@@ -427,10 +427,10 @@ function FeeRegisterMockup() {
 
       <div className="p-4 space-y-1.5">
         {[
-          { name: 'J. Kamau', cls: 'Year 7A', sub: 'KSh 24,500 paid in full · 2 May · Receipt #3847',  status: '✓ Cleared', badge: 'bg-emerald-50 text-emerald-700' },
-          { name: 'A. Osei',  cls: 'Year 8B', sub: 'KSh 18,000 paid · Balance KSh 6,500 due 30 May',   status: 'Partial',   badge: 'bg-amber-50 text-amber-700'    },
-          { name: 'M. Ndege', cls: 'Year 9A', sub: 'KSh 0 received · 45 days overdue · Notice sent',   status: 'Overdue',   badge: 'bg-red-50 text-red-600'         },
-          { name: 'P. Liu',   cls: 'Year 7B', sub: 'KSh 24,500 paid in full · 8 May · Receipt #3851',  status: '✓ Cleared', badge: 'bg-emerald-50 text-emerald-700' },
+          { name: 'J. Kamau', cls: 'Year 7A', sub: 'KSh 24,500 · M-Pesa QKL78F2B · 2 May · Receipt #3847',  status: '✓ Cleared', badge: 'bg-emerald-50 text-emerald-700' },
+          { name: 'A. Osei',  cls: 'Year 8B', sub: 'KSh 18,000 paid · Balance KSh 6,500 due 30 May',          status: 'Partial',   badge: 'bg-amber-50 text-amber-700'    },
+          { name: 'M. Ndege', cls: 'Year 9A', sub: 'KSh 0 received · 45 days overdue · SMS reminder sent',    status: 'Overdue',   badge: 'bg-red-50 text-red-600'         },
+          { name: 'P. Liu',   cls: 'Year 7B', sub: 'KSh 24,500 · M-Pesa QKL90R7P · 8 May · Receipt #3851',   status: '✓ Cleared', badge: 'bg-emerald-50 text-emerald-700' },
         ].map(({ name, cls, sub, status, badge }) => (
           <div key={name} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-slate-50/80">
             <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-bold flex items-center justify-center shrink-0">
@@ -501,9 +501,9 @@ const SHOWCASE_TABS = [
     Icon: DollarSign,
     headline: "Fee collection without the spreadsheets.",
     bullets: [
-      "Auto-invoiced at enrolment. Every payment recorded with a receipt number",
-      "Outstanding balances visible in real time — no reconciliation weekend",
-      "Overdue accounts surface automatically with parent notification log",
+      "M-Pesa STK Push triggers payment to parent phones — auto-reconciled on receipt",
+      "Paybill · bank transfer · cash — all recorded with receipt numbers in one live register",
+      "Overdue accounts surface automatically with SMS reminders and a full notification log",
     ],
     Mockup: FeeRegisterMockup,
   },
@@ -1115,7 +1115,7 @@ export default function Landing() {
 
             {/* Signal pills */}
             <motion.div variants={fadeUp} className="flex flex-wrap gap-2.5 mb-14">
-              {['99.9% uptime SLA', 'Automated daily backups', 'Full audit log on all actions', 'Tenant data isolation', 'RBAC at API layer', 'Immutable academic records'].map(t => (
+              {['99.9% uptime SLA', 'Automated daily backups', 'Full audit log on all actions', 'Tenant data isolation', 'RBAC at API layer', 'Immutable academic records', 'M-Pesa STK Push & Paybill'].map(t => (
                 <span key={t} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-700 text-xs text-slate-400 font-medium">
                   <CheckCircle2 size={10} className="text-emerald-500" />{t}
                 </span>

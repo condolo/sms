@@ -47,6 +47,7 @@ const SCHOOL_UPDATABLE = [
   'name', 'tagline', 'email', 'phone', 'address', 'website',
   'country', 'currency', 'timezone', 'academicYear', 'termsPerYear',
   'houses', 'shortName', 'primaryColor', 'logoUrl', 'modulePermissions',
+  'mpesa',
 ];
 
 /* ══════════════════════════════════════════════════════════════

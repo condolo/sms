@@ -68,7 +68,8 @@ const InvoiceCreateSchema = z.object({
 const PaymentCreateSchema = z.object({
   invoiceId:    z.string().min(1),
   amount:       z.number().positive(),
-  method:       z.enum(['cash', 'bank_transfer', 'card', 'cheque', 'online', 'other']),
+  method:       z.enum(['cash', 'bank_transfer', 'card', 'cheque', 'mpesa', 'online', 'other']),
+  mpesaCode:    z.string().max(20).optional(),
   paidAt:       z.string().optional(),   // ISO date; defaults to now
   reference:    z.string().max(100).optional(),
   notes:        z.string().max(500).optional(),
