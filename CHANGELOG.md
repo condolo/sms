@@ -6,6 +6,48 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.10.1] — 2026-05-24  Global Cleanup — Dead Legacy App Removed
+
+### Removed — Legacy vanilla-JS application (29,000+ lines deleted)
+
+The original vanilla-JS frontend that predated the React SPA has been fully deleted. It had no active users — the React build at `client/dist/` is the only served frontend — but its presence created version-switching risk.
+
+**Deleted files:**
+- `index.html` — legacy app shell
+- `css/styles.css` — legacy stylesheet
+- `js/api.js`, `js/app.js`, `js/cache.js`, `js/data.js`, `js/tests.js`, `js/validators.js`
+- `js/modules/` — 21 module files (academics, admissions, attendance, auth, behaviour, birthday, changelog, classes, communication, dashboard, events, exams, finance, help, hr, plans, reports, settings, students, subjects, timetable)
+- `server/utils/seedSchool.js` — superseded by `scripts/seed-demo.js`
+
+**`server/index.js`**
+- Legacy catch-all that served the deleted `index.html` replaced with a `503` response instructing developers to run the React build. Prevents silent fallback to a non-existent file.
+
+### Fixed — Stale InnoLearn / legacy references
+
+**`onboard.html`**
+- Demo login link: `/?demo=innolearn` → `/login?school=demo` (correct school slug).
+- "Go to My Portal" button: `href="index.html"` → `href="/login"`.
+
+**`server/routes/onboard.js`**
+- `loginUrl` in welcome email: `/index.html` → `/login`.
+
+**`platform.html`**
+- Demo school label: `slug: innolearn` → `slug: demo`.
+- Subscription pricing corrected: Core KES 5,000 · Standard KES 12,000 · Premium KES 25,000 (was 15K / 35K / 65K).
+
+**`server/routes/auth.js`**
+- Internal comment example header updated: `X-School-Slug: InnoLearn` → `X-School-Slug: demo`.
+
+### Fixed — Database name safety (`server/config/db.js`)
+- Added prominent warning comment: `dbName: 'innolearn'` is the **live Atlas database name** — changing this fallback without a migration would silently point to an empty database.
+- `MONGODB_DB_NAME` env var now the override path.
+
+### Fixed — Scripts use env var for DB name
+- `scripts/fix-provisioned-users.js`, `fix-school-ids.js`, `list-users.js`, `seed-role-permissions.js` — all now read `process.env.MONGODB_DB_NAME || 'innolearn'` instead of the hardcoded string.
+- `scripts/list-users.js` — removed hardcoded `schoolId: 'sch_innolearn_001'` filter (was silently returning 0 results for all other schools).
+
+---
+
 ## [4.10.0] — 2026-05-24  Security Hardening + Google/Microsoft OAuth + M-Pesa Subscription
 
 ### Security — Critical fixes
