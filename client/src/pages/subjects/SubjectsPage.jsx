@@ -4,7 +4,7 @@
    Each subject shows enrollment count; admins can manage
    which students are enrolled (individual or by class).
    ============================================================ */
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -19,6 +19,7 @@ import {
   classes as classesApi,
   students as studentsApi,
   studentSubjects as enrollApi,
+  teachers as teachersApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 
@@ -73,11 +74,52 @@ function DeptForm({ initial, onSave, onClose, saving }) {
     code:        initial?.code        ?? '',
     color:       initial?.color       ?? DEPT_COLORS[0],
     hodName:     initial?.hodName     ?? '',
+    hodId:       initial?.hodId       ?? '',
     description: initial?.description ?? '',
     order:       initial?.order       ?? 0,
   });
+  const [hodSearch, setHodSearch] = useState(initial?.hodName ?? '');
+  const [hodOpen, setHodOpen]     = useState(false);
+  const hodRef = useRef(null);
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
+  const { data: teachersList = [] } = useQuery({
+    queryKey: ['teachers-autocomplete'],
+    queryFn:  () => teachersApi.list({ limit: 200, status: 'active' }),
+    select:   r => r?.data ?? (Array.isArray(r) ? r : []),
+    staleTime: 120_000,
+  });
+
+  const searchQ = hodSearch.trim().toLowerCase();
+  const matchedTeachers = searchQ.length >= 1
+    ? teachersList.filter(t => {
+        const full = `${t.title ?? ''} ${t.firstName ?? ''} ${t.lastName ?? ''}`.trim().toLowerCase();
+        return full.includes(searchQ);
+      }).slice(0, 6)
+    : teachersList.slice(0, 6);
+
+  function selectTeacher(t) {
+    const name = [t.title, t.firstName, t.lastName].filter(Boolean).join(' ');
+    set('hodName', name);
+    set('hodId', t.id);
+    setHodSearch(name);
+    setHodOpen(false);
+  }
+
+  function clearHod() {
+    set('hodName', '');
+    set('hodId', '');
+    setHodSearch('');
+  }
+
+  useEffect(() => {
+    function handle(e) {
+      if (hodRef.current && !hodRef.current.contains(e.target)) setHodOpen(false);
+    }
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, []);
 
   return (
     <div className="flex flex-col h-full">
@@ -120,12 +162,58 @@ function DeptForm({ initial, onSave, onClose, saving }) {
               className="h-7 w-7 cursor-pointer rounded-full border border-slate-300 p-0.5" title="Custom colour" />
           </div>
         </div>
-        <div>
+
+        {/* HoD autocomplete */}
+        <div ref={hodRef} className="relative">
           <label className="block text-sm font-medium text-slate-700 mb-1">Head of Department (HoD)</label>
-          <input value={form.hodName} onChange={e => set('hodName', e.target.value)}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
-            placeholder="Name of department head" />
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input
+              value={hodSearch}
+              onChange={e => { setHodSearch(e.target.value); set('hodName', e.target.value); set('hodId', ''); setHodOpen(true); }}
+              onFocus={() => setHodOpen(true)}
+              placeholder="Search by teacher name…"
+              className="w-full rounded-lg border border-slate-300 pl-8 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+            />
+            {hodSearch && (
+              <button type="button" onClick={clearHod}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700">
+                <X size={13} />
+              </button>
+            )}
+          </div>
+
+          {hodOpen && matchedTeachers.length > 0 && (
+            <div className="absolute z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg overflow-hidden">
+              {matchedTeachers.map(t => {
+                const name = [t.title, t.firstName, t.lastName].filter(Boolean).join(' ');
+                const dept = t.subjects?.length ? t.subjects.join(', ') : null;
+                return (
+                  <button key={t.id} type="button" onMouseDown={() => selectTeacher(t)}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-violet-50 transition">
+                    <div className="h-7 w-7 shrink-0 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 text-xs font-semibold">
+                      {(t.firstName?.[0] ?? '?').toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-800 truncate">{name}</p>
+                      {dept && <p className="text-[11px] text-slate-400 truncate">{dept}</p>}
+                    </div>
+                  </button>
+                );
+              })}
+              {teachersList.length === 0 && (
+                <p className="px-3 py-3 text-sm text-slate-400 text-center">No teachers found</p>
+              )}
+            </div>
+          )}
+
+          {hodOpen && searchQ.length >= 1 && matchedTeachers.length === 0 && (
+            <div className="absolute z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg px-3 py-3">
+              <p className="text-sm text-slate-400 text-center">No matching teachers</p>
+            </div>
+          )}
         </div>
+
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
           <textarea value={form.description} onChange={e => set('description', e.target.value)}

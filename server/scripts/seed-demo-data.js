@@ -327,10 +327,17 @@ async function seedDemoData() {
       }, { upsert: true })
     ));
 
-    /* 3b. Teacher profiles (teachers collection) */
+    /* 3b. Teacher profiles (teachers collection) — always write to repair stale docs */
     const Teacher = _model('teachers');
     await Promise.all(TEACHER_PROFILES.map(t =>
-      upsert(Teacher, t.id, { ...t, schoolId: SCHOOL_ID, createdBy: ADMIN_ID, updatedBy: ADMIN_ID, createdAt: nowISO, updatedAt: nowISO })
+      Teacher.updateOne(
+        { id: t.id, schoolId: SCHOOL_ID },
+        {
+          $set:         { ...t, schoolId: SCHOOL_ID, updatedBy: ADMIN_ID, updatedAt: nowISO },
+          $setOnInsert: { createdBy: ADMIN_ID, createdAt: nowISO },
+        },
+        { upsert: true }
+      )
     ));
 
     /* 4. Students */
