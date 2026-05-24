@@ -6,6 +6,93 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.11.1] — 2026-05-24  Timetable: Smart Cover Sheet & Substitution Engine
+
+### New — Available-teachers API (`server/routes/timetable.js`)
+
+- `GET /api/timetable/available-teachers?date=YYYY-MM-DD&period=5&subject=MAT`  
+  Returns active teachers who are **free** at the given period on the date's weekday.  
+  Excludes: teachers with a lesson at that period (master timetable), teachers already marked absent today, substitutes already covering another lesson at the same period.  
+  Sorted: **same-department first** (matched on subject prefix), then **fewest weekly lessons** (most available teacher rises to top).  
+  First result flagged `suggested: true`.
+
+### New — Auto-assign endpoint (`server/routes/timetable.js`)
+
+- `POST /api/timetable/substitutions/auto-assign` — body: `{ date }`  
+  For every uncovered substitution record on a given date, finds the best available teacher and assigns them in one call.  
+  Processes records in period order; tracks assignments made within the call so no teacher is double-booked at the same period.  
+  Returns `{ assigned, total }`.
+
+### Changed — Substitution update accepts `type` field
+
+- `PUT /api/timetable/substitutions/:id` now accepts `type: 'supervision' | 'cover' | 'teaching'` (independent of substitute assignment — can be updated separately).
+
+### New — `SubstituteCell` component (`TimetablePage.jsx`)
+
+Per-row React component that fires its own `useQuery(['tt-avail', date, period, subject])` to fetch the available-teacher list for that specific period. React Query deduplicates — two absent teachers with lessons at the same period share one HTTP request.
+
+- Dropdown shows: `⭐ Ms. Sylvia (dept) · 12 lessons` (top suggestion), then other available teachers ranked by load.
+- Teachers who are busy, absent, or already covering at that period are excluded automatically.
+- Print mode: dropdown hidden, assigned name shown inline.
+
+### Changed — Cover / Subs tab complete redesign (`TimetablePage.jsx`)
+
+Cover sheet now matches the **aSc Substitutions** format exactly:
+
+| Absent | Lesson | Reason | Subject | Class | Type | Substitutes | Signature |
+|--------|--------|--------|---------|-------|------|-------------|-----------|
+
+- **Absent teacher column** uses `rowSpan` across all their lessons — same visual grouping as aSc output.
+- **Type column** — per-row dropdown: Supervision / Cover / Teaching (screen only; hidden in print).
+- **Substitutes column** — `SubstituteCell` with smart ranked picker per period.
+- **Signature column** — shown only in print view.
+- **Summary header** — `"Unfortunately, the following teachers will not teach today: Mr. Godfrey (5, 7) and Ms. Beatrice (2)"` — generated dynamically from the day's absent records.
+- **Auto-assign all** button — fills every uncovered row in one click using the best available teacher; shows result count in toast.
+- **Print footer** — timestamp and page marker matching aSc style.
+
+### Changed — Client API (`client/src/api/client.js`)
+
+```js
+timetable.availableTeachers(params)           // GET /timetable/available-teachers
+timetable.substitutions.autoAssign(data)      // POST /timetable/substitutions/auto-assign
+```
+
+---
+
+## [4.11.0] — 2026-05-24  Events Birthdays · HR Document Links · Settings Users Filter
+
+### New — Birthdays view in Events (`server/routes/events.js`, `EventsPage.jsx`)
+
+- `GET /api/events/birthdays?month=5&year=2026`  
+  Queries both `students` and `teachers` collections using a regex on the `dateOfBirth` field (format `YYYY-MM-DD`).  
+  Returns sorted list of birthdays for the selected month with `{ id, name, type, day, dateOfBirth, meta, photoUrl }`.  
+  Route placed **before** `GET /:id` to prevent Express matching "birthdays" as an ID param.
+
+- **Events page** (`EventsPage.jsx`) — three-view toggle: **Month** (calendar grid) | **List** (upcoming events) | **Birthdays** (🎂 cake icon).
+  - `BirthdayCard` — avatar with initials fallback, Student / Staff badge, class or "Teacher" meta, date display.
+  - Calendar cells show birthday count overlay; clicking switches to the birthdays view for that month.
+  - Stats row in birthdays view: total / students / staff counts.
+  - Today's birthday banner in month and list views (rose/pink highlight).
+  - Month navigator shared across all three views.
+  - `birthday` added to `CATEGORIES` constant with rose colour.
+
+### Changed — HR Documents — document link field (`HRPage.jsx`)
+
+- Added `fileUrl` field to the document creation form.
+- URL input with placeholder `https://drive.google.com/… or OneDrive / Dropbox link` and helper text explaining external storage.
+- Document cards: **View Document** external link appears when `fileUrl` is set (opens in new tab).
+- No server-side file storage required — links to Google Drive / OneDrive / Dropbox are stored as a URL string.
+
+### Changed — Settings Users — role filter + search (`SettingsPage.jsx`)
+
+- Added `roleFilter` state and `search` state to the `UsersTab` component.
+- **Filter bar**: text search (name or email) + role dropdown covering all 13 system roles.
+- **Clear** button resets both filters.
+- Counter shows `X of Y users` when a filter is active.
+- All filtering is client-side on the already-fetched user list — no additional API calls.
+
+---
+
 ## [4.10.1] — 2026-05-24  Global Cleanup — Dead Legacy App Removed
 
 ### Removed — Legacy vanilla-JS application (29,000+ lines deleted)
