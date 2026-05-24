@@ -416,7 +416,9 @@ router.get('/google/callback', async (req, res) => {
     let user = await User.findOne({ email: email.toLowerCase(), schoolId: school.id }).lean();
 
     if (!user) {
-      // Auto-provision Google-auth users as teachers (admin must upgrade role)
+      // Auto-provision Google-auth users as inactive teachers — admin must activate before they can sign in.
+      // isActive: false prevents open registration: anyone with a Google account knowing the school slug
+      // could otherwise gain immediate teacher access.
       const now = new Date().toISOString();
       const newUser = {
         id:            `goo_${Date.now().toString(36)}`,
@@ -427,7 +429,7 @@ router.get('/google/callback', async (req, res) => {
         roles:         ['teacher'],
         googleId,
         authProvider:  'google',
-        isActive:      true,
+        isActive:      false,
         mustChangePassword: false,
         createdAt:     now,
         updatedAt:     now,
@@ -529,6 +531,7 @@ router.get('/microsoft/callback', async (req, res) => {
     let user = await User.findOne({ email, schoolId: school.id }).lean();
 
     if (!user) {
+      // Same as Google: provision inactive — admin must activate before first sign-in.
       const now = new Date().toISOString();
       const newUser = {
         id:           `ms_${Date.now().toString(36)}`,
@@ -538,7 +541,7 @@ router.get('/microsoft/callback', async (req, res) => {
         roles:        ['teacher'],
         microsoftId:  msId,
         authProvider: 'microsoft',
-        isActive:     true,
+        isActive:     false,
         mustChangePassword: false,
         createdAt:    now,
         updatedAt:    now,
