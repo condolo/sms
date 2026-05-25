@@ -6,6 +6,14 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.15.0',
+    date: '2026-05-25',
+    label: 'Frontend Decomposition — AdmissionsPage',
+    changes: [
+      { type: 'new', text: 'AdmissionsPage.jsx (1115 lines) split into 8 focused files: constants.js (PIPELINE, TERMINAL, ALL_STAGES, PRIORITY_CONFIG, EMPTY_FORM, stageMeta, initials, formatDate, avatarColor, exportAdmissionsCSV), AdmissionsPrimitives.jsx (StatChip, Section, Field, inputCls, CardSkeleton, EmptyCol, DetailSection, DetailRow), KanbanBoard.jsx (KanbanBoard + KanbanColumn + ApplicantCard), ListView.jsx, AddSlideOver.jsx, StageModal.jsx, DetailPanel.jsx (with internal PrintLetterModal) — main shell reduced to ~120 lines' },
+    ],
+  },
+  {
     version: '4.14.0',
     date: '2026-05-25',
     label: 'Frontend Decomposition — BehaviourPage',
