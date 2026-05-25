@@ -6,6 +6,15 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.13.0',
+    date: '2026-05-25',
+    label: 'Frontend Decomposition — FinancePage + StudentList bug fix',
+    changes: [
+      { type: 'new', text: 'FinancePage.jsx (1355 lines) split into 11 focused files: constants.js, FinancePrimitives.jsx, SummaryTab, OverdueTab, InvoicesTab, PaymentsTab, FeeStructureTab, CreateInvoiceSlideOver (+button), RecordPaymentSlideOver (+button), FeeStructureSlideOver (+button) — main shell reduced to 77 lines' },
+      { type: 'fix', text: '"View Students" on class cards now correctly pre-filters the student list by class: StudentList.jsx reads ?classId= URL param via useSearchParams (lazy initialiser + useEffect sync), auto-opens filter panel, and shows a dismissible class pill in the header' },
+    ],
+  },
+  {
     version: '4.12.0',
     date: '2026-05-25',
     label: 'Frontend Decomposition — GradesPage',
