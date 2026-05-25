@@ -388,6 +388,27 @@ export const studentSubjects = {
   unenroll: (id)     => _delete(`/student-subjects/${id}`),
 };
 
+export const classSubjects = {
+  /** { [classId]: count } */
+  counts:   ()                   => _get('/class-subjects/counts'),
+  /** GET ?classId=X or ?subjectId=X */
+  list:     (params)             => _get('/class-subjects', params),
+  /** GET /enrollment-warnings?classId=X  (or no param for school-wide) */
+  warnings: (params)             => _get('/class-subjects/enrollment-warnings', params),
+  assign:   (data)               => _post('/class-subjects', data),
+  bulk:     (data)               => _post('/class-subjects/bulk', data),
+  update:   (id, data)           => _put(`/class-subjects/${id}`, data),
+  remove:   (id)                 => _delete(`/class-subjects/${id}`),
+};
+
+export const subjectRules = {
+  list:   ()         => _get('/subject-rules'),
+  get:    (id)       => _get(`/subject-rules/${id}`),
+  create: (data)     => _post('/subject-rules', data),
+  update: (id, data) => _put(`/subject-rules/${id}`, data),
+  remove: (id)       => _delete(`/subject-rules/${id}`),
+};
+
 export const bellSchedule = {
   /** Fetch a section's schedule. Falls back: section → 'all' → hardcoded default. */
   get:      (section = 'all') => _get('/bell-schedule', { section }),
@@ -419,6 +440,8 @@ const api = {
   departments,
   subjects,
   studentSubjects,
+  classSubjects,
+  subjectRules,
   messages,
   events,
   hr,
