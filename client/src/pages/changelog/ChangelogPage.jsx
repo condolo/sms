@@ -6,6 +6,14 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.14.0',
+    date: '2026-05-25',
+    label: 'Frontend Decomposition — BehaviourPage',
+    changes: [
+      { type: 'new', text: 'BehaviourPage.jsx (1268 lines) split into 9 focused files: BehaviourPrimitives.jsx (StageBadge, MilestoneBadge, TypeBadge, StatCard, PaginationBar, EmptyMsg, ErrState, FField, iCls), OverviewTab, AwardTab (4-step wizard), IncidentsTab, AppealsTab, HousesTab, CategoriesTab — main shell reduced to 71 lines; bpsConstants.js retained as-is' },
+    ],
+  },
+  {
     version: '4.13.0',
     date: '2026-05-25',
     label: 'Frontend Decomposition — FinancePage + StudentList bug fix',
