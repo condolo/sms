@@ -1,18 +1,14 @@
 /* ============================================================
-   Msingi — Institutional Scheduling Engine
-   v4.9.14: Multi-view timetable with global conflict detection,
-   teacher workload engine, and true period-grid layout.
-
-   Views: Class Grid | Teacher Schedule | Institution Overview
+   TimetablePage — orchestration shell
+   Handles auth guard, top-level state, shared queries, and
+   view routing. All UI lives in ./components/.
    ============================================================ */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AnimatePresence } from 'framer-motion';
 import {
-  CalendarDays, Plus, X, Loader2, AlertTriangle, CheckCircle2,
-  Trash2, User, LayoutGrid, Globe, BarChart3, ChevronRight,
-  BookOpen, Clock, Home, Save, AlertCircle, Users, Zap,
-  UserX, ClipboardList, Printer, History,
+  CalendarDays, Plus, AlertCircle, CheckCircle2, BarChart3,
+  Clock, User, LayoutGrid, Globe, UserX, Zap,
 } from 'lucide-react';
 import {
   timetable    as ttApi,
@@ -21,1358 +17,59 @@ import {
   bellSchedule as bellApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
-import TimetablePortal from './TimetablePortal.jsx';
 
-/* ── Days & Bell schedule ────────────────────────────────────── */
-const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
-const DAY_SHORT = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri' };
-const DAY_FULL  = { monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday' };
-
-const DEFAULT_BELL = [
-  { p: '1', start: '07:30', end: '08:30', label: 'Period 1', isBreak: false },
-  { p: '2', start: '08:30', end: '09:30', label: 'Period 2', isBreak: false },
-  { p: '3', start: '09:30', end: '10:30', label: 'Period 3', isBreak: false },
-  { p: 'B', start: '10:30', end: '11:00', label: 'Short Break', isBreak: true },
-  { p: '4', start: '11:00', end: '12:00', label: 'Period 4', isBreak: false },
-  { p: '5', start: '12:00', end: '13:00', label: 'Period 5', isBreak: false },
-  { p: 'L', start: '13:00', end: '14:00', label: 'Lunch',    isBreak: true },
-  { p: '6', start: '14:00', end: '15:00', label: 'Period 6', isBreak: false },
-  { p: '7', start: '15:00', end: '16:00', label: 'Period 7', isBreak: false },
-  { p: '8', start: '16:00', end: '17:00', label: 'Period 8', isBreak: false },
-];
-
-/* ── Slot colours (deterministic by subject) ─────────────────── */
-const PALETTE = [
-  { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', sub: 'text-violet-500' },
-  { bg: 'bg-blue-50',   border: 'border-blue-200',   text: 'text-blue-700',   sub: 'text-blue-500'   },
-  { bg: 'bg-emerald-50',border: 'border-emerald-200',text: 'text-emerald-700',sub: 'text-emerald-500' },
-  { bg: 'bg-amber-50',  border: 'border-amber-200',  text: 'text-amber-700',  sub: 'text-amber-500'  },
-  { bg: 'bg-rose-50',   border: 'border-rose-200',   text: 'text-rose-700',   sub: 'text-rose-500'   },
-  { bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-700', sub: 'text-indigo-500' },
-  { bg: 'bg-teal-50',   border: 'border-teal-200',   text: 'text-teal-700',   sub: 'text-teal-500'   },
-  { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', sub: 'text-orange-500' },
-];
-function slotColor(subject = '') {
-  return PALETTE[(subject.charCodeAt(0) || 0) % PALETTE.length];
-}
-
-/* ── Section inference from class name ───────────────────────── */
-function inferSection(name = '') {
-  const n = name.toLowerCase();
-  if (/kinder|^kg|^pp\s?[12]|nursery|playgroup/i.test(n)) return 'kg';
-  if (/grade [1-6]|std [1-6]|class [1-6]|primary|year [1-6]/i.test(n)) return 'primary';
-  if (/form [1-4]|grade [7-9]|year [7-9]|junior sec/i.test(n)) return 'secondary';
-  if (/form [5-6]|year 1[0-3]|a.?level|sixth/i.test(n)) return 'alevel';
-  return 'other';
-}
-
-const SECTIONS = [
-  { id: 'all',       label: 'All Sections' },
-  { id: 'kg',        label: 'Kindergarten' },
-  { id: 'primary',   label: 'Primary'      },
-  { id: 'secondary', label: 'Secondary'    },
-  { id: 'alevel',    label: 'A-Level'      },
-  { id: 'other',     label: 'Other'        },
-];
-
-/* ── Slot lookup map ─────────────────────────────────────────── */
-function buildSlotMap(slots = []) {
-  const m = {};
-  slots.forEach(s => {
-    const d = (s.day || '').toLowerCase();
-    const p = String(s.period);
-    if (!m[d]) m[d] = {};
-    m[d][p] = s;
-  });
-  return m;
-}
-
-/* ── Shared input class ──────────────────────────────────────── */
-const iCls = (err) =>
-  `w-full text-sm px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-800 placeholder-slate-400 transition bg-white ${
-    err ? 'border-red-300' : 'border-slate-200 focus:border-slate-400'
-  }`;
-
-/* ══════════════════════════════════════════════════════════════
-   SHARED PRIMITIVES
-   ══════════════════════════════════════════════════════════════ */
-
-function FField({ label, children, error }) {
-  return (
-    <div className="space-y-1.5">
-      <label className="block text-xs font-medium text-slate-600">{label}</label>
-      {children}
-      {error && <p className="text-[11px] text-red-500">{error}</p>}
-    </div>
-  );
-}
-
-function Toast({ msg, type = 'success', onDismiss }) {
-  const isErr = type === 'error';
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
-      className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border shadow-sm ${
-        isErr ? 'bg-red-50 text-red-700 border-red-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-      }`}
-    >
-      {isErr ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}
-      {msg}
-      <button onClick={onDismiss} className="ml-1 opacity-60 hover:opacity-100"><X size={11} /></button>
-    </motion.div>
-  );
-}
-
-/* ── Slot card ───────────────────────────────────────────────── */
-function SlotCard({ slot, onDelete, canEdit }) {
-  const col = slotColor(slot.subject ?? '');
-  return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
-      className={`h-full rounded-lg border px-2 py-1.5 group relative ${col.bg} ${col.border}`}
-    >
-      {canEdit && (
-        <button
-          onClick={() => onDelete(slot.id ?? slot._id)}
-          className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-white/80 text-slate-400 hover:text-red-500 transition"
-        >
-          <Trash2 size={10} />
-        </button>
-      )}
-      <p className={`text-[11px] font-semibold leading-tight truncate pr-4 ${col.text}`}>
-        {slot.subject || '—'}
-      </p>
-      {slot.teacherName && (
-        <p className={`text-[10px] mt-0.5 truncate ${col.sub} opacity-80`}>{slot.teacherName}</p>
-      )}
-      {slot.room && (
-        <p className={`text-[10px] truncate ${col.sub} opacity-60`}>{slot.room}</p>
-      )}
-    </motion.div>
-  );
-}
-
-/* ── Empty cell (add trigger) ────────────────────────────────── */
-function EmptyCell({ onAdd, canEdit }) {
-  if (!canEdit) return <div className="h-full min-h-[64px]" />;
-  return (
-    <button
-      onClick={onAdd}
-      className="w-full h-full min-h-[64px] rounded-lg border border-dashed border-slate-150 flex items-center justify-center opacity-30 hover:opacity-80 hover:border-slate-300 hover:bg-slate-50 transition"
-    >
-      <Plus size={12} className="text-slate-400" />
-    </button>
-  );
-}
-
-/* ── Break row ───────────────────────────────────────────────── */
-function BreakRow({ bell }) {
-  return (
-    <div className="flex border-b border-slate-100 bg-slate-50/40" style={{ minHeight: '28px' }}>
-      <div className="flex items-center px-2 border-r border-slate-100" style={{ width: '88px', minWidth: '88px' }}>
-        <span className="text-[9px] text-slate-400">{bell.start}</span>
-      </div>
-      <div className="flex-1 flex items-center px-3 gap-2">
-        <div className="h-px flex-1 bg-slate-200" />
-        <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">{bell.label}</span>
-        <div className="h-px flex-1 bg-slate-200" />
-      </div>
-    </div>
-  );
-}
-
-/* ── Period row ──────────────────────────────────────────────── */
-function PeriodRow({ bell, slotMap, onDelete, onAdd, canEdit }) {
-  return (
-    <div className="flex border-b border-slate-100" style={{ minHeight: '72px' }}>
-      {/* Time label */}
-      <div
-        className="flex flex-col justify-center px-2 border-r border-slate-100 shrink-0"
-        style={{ width: '88px', minWidth: '88px' }}
-      >
-        <span className="text-[10px] font-bold text-slate-500">P{bell.p}</span>
-        <span className="text-[9px] text-slate-400">{bell.start}</span>
-        <span className="text-[9px] text-slate-400">–{bell.end}</span>
-      </div>
-
-      {/* Day cells */}
-      {DAYS.map((day, i) => {
-        const slot = slotMap[day]?.[bell.p];
-        const isLast = i === DAYS.length - 1;
-        return (
-          <div
-            key={day}
-            className={`flex-1 p-1.5 ${isLast ? '' : 'border-r border-slate-100'}`}
-            style={{ minWidth: 0 }}
-          >
-            {slot
-              ? <SlotCard slot={slot} onDelete={onDelete} canEdit={canEdit} />
-              : <EmptyCell onAdd={() => onAdd(day, bell.p)} canEdit={canEdit} />
-            }
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/* ── Timetable grid ──────────────────────────────────────────── */
-function TimetableGrid({ slots, onDelete, onAdd, canEdit, bell = DEFAULT_BELL }) {
-  const slotMap = buildSlotMap(slots);
-
-  return (
-    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-      {/* Day header row */}
-      <div className="flex bg-slate-50 border-b border-slate-200">
-        <div className="shrink-0 border-r border-slate-200" style={{ width: '88px', minWidth: '88px' }} />
-        {DAYS.map((day, i) => (
-          <div
-            key={day}
-            className={`flex-1 py-2.5 text-center text-xs font-semibold text-slate-700 ${
-              i < DAYS.length - 1 ? 'border-r border-slate-200' : ''
-            }`}
-          >
-            <span className="hidden sm:inline">{DAY_FULL[day]}</span>
-            <span className="sm:hidden">{DAY_SHORT[day]}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Period rows */}
-      <div className="overflow-x-auto">
-        <div style={{ minWidth: '600px' }}>
-          {bell.map(b =>
-            b.isBreak
-              ? <BreakRow key={b.p} bell={b} />
-              : (
-                <PeriodRow
-                  key={b.p}
-                  bell={b}
-                  slotMap={slotMap}
-                  onDelete={onDelete}
-                  onAdd={onAdd}
-                  canEdit={canEdit}
-                />
-              )
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── Workload panel (right sidebar) ──────────────────────────── */
-function WorkloadPanel({ onClose }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['timetable', 'workload'],
-    queryFn:  () => ttApi.workload(),
-    staleTime: 60_000,
-  });
-  const teachers = data?.data ?? [];
-  const maxLoad  = teachers[0]?.total ?? 1;
-
-  return (
-    <motion.div
-      initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
-      transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-      className="fixed right-0 top-0 h-full w-72 bg-white border-l border-slate-200 shadow-xl z-30 flex flex-col"
-    >
-      <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-        <div className="flex items-center gap-2">
-          <BarChart3 size={15} className="text-slate-500" />
-          <span className="text-sm font-semibold text-slate-900">Teacher Workload</span>
-        </div>
-        <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-100 transition">
-          <X size={16} />
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {isLoading ? (
-          [...Array(5)].map((_, i) => (
-            <div key={i} className="animate-pulse">
-              <div className="h-3 bg-slate-100 rounded w-32 mb-1.5" />
-              <div className="h-2 bg-slate-100 rounded w-full" />
-            </div>
-          ))
-        ) : teachers.length === 0 ? (
-          <p className="text-xs text-slate-400 text-center py-6">No lesson assignments yet.</p>
-        ) : (
-          teachers.map(t => {
-            const pct  = Math.round((t.total / maxLoad) * 100);
-            const over = t.total >= 30;
-            const low  = t.total <= 10;
-            return (
-              <div key={t.teacherId}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-medium text-slate-700 truncate mr-2">
-                    {t.teacherName || t.teacherId}
-                  </span>
-                  <span className={`text-[11px] font-semibold shrink-0 ${
-                    over ? 'text-red-600' : low ? 'text-amber-500' : 'text-emerald-600'
-                  }`}>
-                    {t.total} lessons
-                  </span>
-                </div>
-                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all ${
-                      over ? 'bg-red-400' : low ? 'bg-amber-400' : 'bg-emerald-400'
-                    }`}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-
-      <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/50">
-        <div className="flex items-center gap-3 text-[10px] text-slate-500">
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" /> Normal (11–29)</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /> Light (&le;10)</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400 inline-block" /> Heavy (&ge;30)</span>
-        </div>
-      </div>
-    </motion.div>
-  );
-}
-
-/* ── Conflicts panel ─────────────────────────────────────────── */
-function ConflictsPanel({ conflicts, onClose }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-40 flex items-start justify-center pt-20 px-4"
-    >
-      <div className="absolute inset-0 bg-slate-900/30 backdrop-blur-sm" onClick={onClose} />
-      <motion.div
-        initial={{ scale: 0.96, y: -8 }} animate={{ scale: 1, y: 0 }}
-        className="relative bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-md z-50"
-      >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-          <div className="flex items-center gap-2">
-            <AlertCircle size={15} className="text-red-500" />
-            <span className="text-sm font-semibold text-slate-900">
-              {conflicts.length} Scheduling Conflict{conflicts.length !== 1 ? 's' : ''}
-            </span>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
-        </div>
-        <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
-          {conflicts.map((c, i) => (
-            <div key={i} className="px-5 py-3">
-              {c.type === 'teacher_double_booked' ? (
-                <>
-                  <p className="text-xs font-medium text-red-600">Teacher double-booked</p>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    {c.teacherName} — {DAY_FULL[c.day] ?? c.day}, Period {c.period}
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p className="text-xs font-medium text-amber-600">Room double-booked</p>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Room: {c.room} — {DAY_FULL[c.day] ?? c.day}, Period {c.period}
-                  </p>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-        <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 rounded-b-xl">
-          <p className="text-[11px] text-slate-500">
-            Resolve conflicts by removing and reassigning the affected slots.
-          </p>
-        </div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-/* ── Institution overview table ──────────────────────────────── */
-function OverviewView({ classList }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['timetable', 'overview'],
-    queryFn:  () => ttApi.overview(),
-    staleTime: 60_000,
-  });
-  const overviewClasses = data?.data?.classes ?? [];
-  const totalSlots      = data?.data?.totalSlots ?? 0;
-
-  const classMap = {};
-  classList.forEach(c => { classMap[c._id ?? c.id] = c.name; });
-
-  const rows = overviewClasses.map(oc => ({
-    classId: oc.classId,
-    name:    classMap[oc.classId] ?? oc.classId,
-    total:   oc.total,
-    byDay:   oc.byDay,
-  })).sort((a, b) => a.name.localeCompare(b.name));
-
-  if (isLoading) {
-    return (
-      <div className="bg-white border border-slate-200 rounded-xl p-8 animate-pulse space-y-3">
-        {[...Array(6)].map((_, i) => <div key={i} className="h-8 bg-slate-100 rounded" />)}
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-      <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
-        <span className="text-sm font-semibold text-slate-900">All Classes</span>
-        <span className="text-xs text-slate-400">{totalSlots} total lesson slots</span>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-slate-50 border-b border-slate-100">
-              <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-600">Class</th>
-              {DAYS.map(d => (
-                <th key={d} className="text-center px-3 py-2.5 text-xs font-semibold text-slate-600">
-                  {DAY_SHORT[d]}
-                </th>
-              ))}
-              <th className="text-center px-3 py-2.5 text-xs font-semibold text-slate-600">Total</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {rows.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="text-center py-10 text-sm text-slate-400">
-                  No timetable data yet.
-                </td>
-              </tr>
-            ) : rows.map(row => (
-              <tr key={row.classId} className="hover:bg-slate-50/50 transition">
-                <td className="px-4 py-2.5 text-xs font-medium text-slate-800">{row.name}</td>
-                {DAYS.map(d => (
-                  <td key={d} className="px-3 py-2.5 text-center">
-                    <span className={`text-xs font-medium ${
-                      (row.byDay[d] ?? 0) === 0
-                        ? 'text-slate-300'
-                        : 'text-slate-700'
-                    }`}>
-                      {row.byDay[d] ?? 0}
-                    </span>
-                  </td>
-                ))}
-                <td className="px-3 py-2.5 text-center">
-                  <span className="text-xs font-semibold text-slate-900">{row.total}</span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-/* ══════════════════════════════════════════════════════════════
-   ADD SLOT SLIDE-OVER
-   ══════════════════════════════════════════════════════════════ */
-const EMPTY_FORM = { day: 'monday', period: '1', subject: '', teacherId: '', teacherName: '', room: '', type: 'lesson' };
-
-function AddSlotSlideOver({ classId, defaults, onClose, onCreated, lessonPeriods = DEFAULT_BELL.filter(b => !b.isBreak) }) {
-  const [form, setForm]     = useState({ ...EMPTY_FORM, ...defaults });
-  const [errors, setErrors] = useState({});
-
-  useEffect(() => {
-    setForm(f => ({ ...f, ...defaults }));
-  }, [defaults]);
-
-  function set(k, v) {
-    setForm(f => ({ ...f, [k]: v }));
-    setErrors(e => { const n = { ...e }; delete n[k]; delete n._server; return n; });
-  }
-
-  /* Teachers dropdown */
-  const { data: teachersData } = useQuery({
-    queryKey: ['teachers', 'picker'],
-    queryFn:  () => teachersApi.list({ limit: 200, status: 'active' }),
-    staleTime: 5 * 60_000,
-  });
-  const teachers = teachersData?.data ?? [];
-
-  const { mutate, isPending } = useMutation({
-    mutationFn: () => ttApi.create({
-      classId,
-      day:         form.day,
-      period:      form.period,
-      subject:     form.subject.trim() || undefined,
-      teacherId:   form.teacherId || undefined,
-      teacherName: form.teacherName.trim() || undefined,
-      room:        form.room.trim() || undefined,
-      type:        form.type,
-    }),
-    onSuccess: onCreated,
-    onError:   err => setErrors({ _server: err?.message ?? 'Failed to add slot.' }),
-  });
-
-  function submit(e) {
-    e.preventDefault();
-    const errs = {};
-    if (!form.subject.trim()) errs.subject = 'Subject is required.';
-    if (Object.keys(errs).length) { setErrors(errs); return; }
-    mutate();
-  }
-
-  return (
-    <>
-      <motion.div
-        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-40"
-        onClick={onClose}
-      />
-      <motion.div
-        initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
-        transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-        className="fixed right-0 top-0 h-full w-full max-w-sm bg-white shadow-2xl z-50 flex flex-col"
-      >
-        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
-          <div>
-            <h2 className="text-base font-semibold text-slate-900">Add Lesson Slot</h2>
-            <p className="text-xs text-slate-400 mt-0.5">Assign a lesson to the schedule</p>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-100 transition">
-            <X size={18} />
-          </button>
-        </div>
-
-        <form onSubmit={submit} className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
-          {errors._server && (
-            <div className="flex items-start gap-2 bg-red-50 text-red-700 text-xs px-3 py-2.5 rounded-lg border border-red-200">
-              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-              <span>{errors._server}</span>
-            </div>
-          )}
-
-          <FField label="Subject *" error={errors.subject}>
-            <input
-              value={form.subject}
-              onChange={e => set('subject', e.target.value)}
-              placeholder="e.g. Mathematics"
-              className={iCls(errors.subject)}
-              autoFocus
-            />
-          </FField>
-
-          <div className="grid grid-cols-2 gap-3">
-            <FField label="Day">
-              <select value={form.day} onChange={e => set('day', e.target.value)} className={iCls()}>
-                {DAYS.map(d => <option key={d} value={d}>{DAY_FULL[d]}</option>)}
-              </select>
-            </FField>
-            <FField label="Period">
-              <select value={form.period} onChange={e => set('period', e.target.value)} className={iCls()}>
-                {lessonPeriods.map(b => (
-                  <option key={b.p} value={b.p}>P{b.p} · {b.start}</option>
-                ))}
-              </select>
-            </FField>
-          </div>
-
-          <FField label="Teacher">
-            <select
-              value={form.teacherId}
-              onChange={e => {
-                const t = teachers.find(t => (t._id ?? t.id) === e.target.value);
-                set('teacherId', e.target.value);
-                set('teacherName', t ? `${t.firstName ?? ''} ${t.lastName ?? ''}`.trim() : '');
-              }}
-              className={iCls()}
-            >
-              <option value="">No teacher assigned</option>
-              {teachers.map(t => (
-                <option key={t._id ?? t.id} value={t._id ?? t.id}>
-                  {t.firstName} {t.lastName}
-                </option>
-              ))}
-            </select>
-          </FField>
-
-          <FField label="Room">
-            <input
-              value={form.room}
-              onChange={e => set('room', e.target.value)}
-              placeholder="e.g. Lab 2, Hall A"
-              className={iCls()}
-            />
-          </FField>
-
-          <FField label="Slot type">
-            <select value={form.type} onChange={e => set('type', e.target.value)} className={iCls()}>
-              <option value="lesson">Lesson</option>
-              <option value="assembly">Assembly</option>
-              <option value="registration">Registration</option>
-              <option value="free">Free period</option>
-            </select>
-          </FField>
-        </form>
-
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
-          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 transition">
-            Cancel
-          </button>
-          <button
-            onClick={submit}
-            disabled={isPending}
-            className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded-lg transition"
-          >
-            {isPending ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-            {isPending ? 'Adding…' : 'Add slot'}
-          </button>
-        </div>
-      </motion.div>
-    </>
-  );
-}
-
-/* ══════════════════════════════════════════════════════════════
-   BELL SCHEDULE SLIDE-OVER (admin only)
-   Per-section tabs: School Default | KG | Primary | Secondary | A-Level
-   Each section can have its own start/end times and period count.
-   A section without its own schedule inherits from the school default.
-   Connected to the cross-section teacher conflict detection engine —
-   a teacher assigned across sections is checked for actual time overlap.
-   ══════════════════════════════════════════════════════════════ */
-const BELL_SECTIONS = [
-  { id: 'all',       label: 'School Default', desc: 'Used by all sections without a custom schedule' },
-  { id: 'kg',        label: 'Kindergarten',   desc: 'Early years — typically shorter periods' },
-  { id: 'primary',   label: 'Primary',        desc: 'Grades 1–6 or equivalent' },
-  { id: 'secondary', label: 'Secondary',      desc: 'Form 1–4 or Grades 7–9' },
-  { id: 'alevel',    label: 'A-Level',        desc: 'Form 5–6 / Year 10–13' },
-];
-
-function BellScheduleSlideOver({ onClose }) {
-  const qc = useQueryClient();
-  const [activeSection, setActiveSection] = useState('all');
-  const [rows,  setRows]  = useState(null);   // null until data loads
-  const [dirty, setDirty] = useState(false);
-  const [toast, setToast] = useState(null);
-
-  /* Overview of which sections have custom schedules */
-  const { data: sectionsData } = useQuery({
-    queryKey: ['bell-schedule', 'sections'],
-    queryFn:  () => bellApi.sections(),
-    staleTime: 60_000,
-  });
-  const configuredSet = new Set(
-    (sectionsData?.data ?? []).filter(s => s.configured).map(s => s.section),
-  );
-
-  /* Fetch the active section's schedule */
-  const { data: bellData, isLoading } = useQuery({
-    queryKey: ['bell-schedule', activeSection],
-    queryFn:  () => bellApi.get(activeSection),
-    staleTime: 60_000,
-  });
-  const effectivePeriods = bellData?.data?.periods ?? DEFAULT_BELL;
-  const isCustom = bellData?.data?.section === activeSection; // has own schedule (not inherited)
-
-  /* Seed edit rows when data arrives */
-  useEffect(() => {
-    setRows(effectivePeriods.map(p => ({ ...p })));
-    setDirty(false);
-  }, [bellData, activeSection]);
-
-  function setRow(idx, key, val) {
-    setRows(r => r.map((p, i) => i === idx ? { ...p, [key]: val } : p));
-    setDirty(true);
-  }
-  function removeRow(idx) {
-    setRows(r => r.filter((_, i) => i !== idx));
-    setDirty(true);
-  }
-  function addBreak() {
-    setRows(r => [...r, { p: `B${r.filter(x => x.isBreak).length + 1}`, start: '10:30', end: '11:00', label: 'Break', isBreak: true }]);
-    setDirty(true);
-  }
-  function addPeriod() {
-    const lessons = rows.filter(r => !r.isBreak);
-    const nextNum = lessons.length + 1;
-    setRows(r => [...r, { p: String(nextNum), start: '14:00', end: '15:00', label: `Period ${nextNum}`, isBreak: false }]);
-    setDirty(true);
-  }
-
-  const { mutate: save, isPending: saving } = useMutation({
-    mutationFn: () => bellApi.update({ section: activeSection, periods: rows }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['bell-schedule'] });
-      setDirty(false);
-      setToast({ msg: `${BELL_SECTIONS.find(s => s.id === activeSection)?.label} schedule saved.`, type: 'success' });
-      setTimeout(() => setToast(null), 3000);
-    },
-    onError: err => setToast({ msg: err?.message ?? 'Failed to save.', type: 'error' }),
-  });
-
-  const { mutate: revert, isPending: reverting } = useMutation({
-    mutationFn: () => bellApi.remove(activeSection),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['bell-schedule'] });
-      setDirty(false);
-      setToast({ msg: 'Reverted to school default.', type: 'success' });
-      setTimeout(() => setToast(null), 3000);
-    },
-    onError: err => setToast({ msg: err?.message ?? 'Failed to revert.', type: 'error' }),
-  });
-
-  const iCls2 = 'text-xs px-2 py-1.5 rounded border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-800 w-full';
-
-  return (
-    <>
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-40" onClick={onClose} />
-      <motion.div
-        initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
-        transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-        className="fixed right-0 top-0 h-full w-full max-w-lg bg-white shadow-2xl z-50 flex flex-col"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
-          <div>
-            <h2 className="text-base font-semibold text-slate-900">Bell Schedules</h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Per-section times · teachers checked for real time-overlap across sections
-            </p>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-100 transition"><X size={18} /></button>
-        </div>
-
-        {/* Section tabs */}
-        <div className="flex gap-1 px-4 py-2.5 border-b border-slate-100 overflow-x-auto">
-          {BELL_SECTIONS.map(s => {
-            const hasCustom = configuredSet.has(s.id);
-            return (
-              <button
-                key={s.id}
-                onClick={() => setActiveSection(s.id)}
-                className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-                  activeSection === s.id
-                    ? 'bg-slate-900 text-white'
-                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
-                }`}
-              >
-                {s.label}
-                {s.id !== 'all' && hasCustom && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="Custom schedule" />
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Inherited notice for non-'all' sections without a custom schedule */}
-        {activeSection !== 'all' && !isCustom && !isLoading && (
-          <div className="mx-4 mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700">
-            <AlertTriangle size={12} className="shrink-0" />
-            <span>Using school default. Edit below and save to create a custom schedule for this section.</span>
-          </div>
-        )}
-
-        {/* Toast */}
-        {toast && (
-          <div className={`mx-4 mt-2 flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border ${
-            toast.type === 'error' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-          }`}>
-            {toast.type === 'error' ? <AlertTriangle size={12} /> : <CheckCircle2 size={12} />}
-            {toast.msg}
-          </div>
-        )}
-
-        {/* Editor */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-2">
-          {isLoading || !rows ? (
-            <div className="space-y-2 animate-pulse">
-              {[...Array(8)].map((_, i) => <div key={i} className="h-8 bg-slate-100 rounded-lg" />)}
-            </div>
-          ) : (
-            <>
-              {/* Column headers */}
-              <div className="grid grid-cols-[40px_80px_80px_1fr_28px] gap-2 pb-1 border-b border-slate-100">
-                <span className="text-[10px] font-semibold text-slate-400 uppercase">Key</span>
-                <span className="text-[10px] font-semibold text-slate-400 uppercase">Start</span>
-                <span className="text-[10px] font-semibold text-slate-400 uppercase">End</span>
-                <span className="text-[10px] font-semibold text-slate-400 uppercase">Label</span>
-                <span />
-              </div>
-
-              {rows.map((row, idx) => (
-                <div
-                  key={idx}
-                  className={`grid grid-cols-[40px_80px_80px_1fr_28px] gap-2 items-center rounded-lg px-2 py-1.5 ${
-                    row.isBreak ? 'bg-slate-50 border border-dashed border-slate-200' : 'bg-white border border-slate-200'
-                  }`}
-                >
-                  <input value={row.p} onChange={e => setRow(idx, 'p', e.target.value)}
-                    className={iCls2 + ' font-mono'} maxLength={6} title="Period key" />
-                  <input type="time" value={row.start} onChange={e => setRow(idx, 'start', e.target.value)}
-                    className={iCls2} />
-                  <input type="time" value={row.end} onChange={e => setRow(idx, 'end', e.target.value)}
-                    className={iCls2} />
-                  <input value={row.label} onChange={e => setRow(idx, 'label', e.target.value)}
-                    className={iCls2} maxLength={40} />
-                  <button onClick={() => removeRow(idx)}
-                    className="p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition">
-                    <X size={12} />
-                  </button>
-                </div>
-              ))}
-
-              <div className="flex gap-2 pt-2">
-                <button onClick={addPeriod}
-                  className="flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition">
-                  <Plus size={12} /> Add Period
-                </button>
-                <button onClick={addBreak}
-                  className="flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-lg border border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-500 transition">
-                  <Plus size={12} /> Add Break
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              {rows && (
-                <span className="text-[11px] text-slate-400">
-                  {rows.filter(r => !r.isBreak).length} periods · {rows.filter(r => r.isBreak).length} breaks
-                </span>
-              )}
-              {activeSection !== 'all' && isCustom && (
-                <button
-                  onClick={() => { if (window.confirm('Revert this section to the school default schedule?')) revert(); }}
-                  disabled={reverting}
-                  className="text-[11px] text-slate-400 hover:text-red-500 underline underline-offset-2 transition ml-2"
-                >
-                  {reverting ? 'Reverting…' : 'Revert to default'}
-                </button>
-              )}
-            </div>
-            <div className="flex items-center gap-3">
-              <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 transition">
-                Close
-              </button>
-              <button
-                onClick={() => save()}
-                disabled={saving || !dirty || !rows?.length}
-                className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-medium px-5 py-2 rounded-lg transition"
-              >
-                {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-                {saving ? 'Saving…' : 'Save'}
-              </button>
-            </div>
-          </div>
-        </div>
-      </motion.div>
-    </>
-  );
-}
-
-/* ══════════════════════════════════════════════════════════════
-   MAIN PAGE
-   ══════════════════════════════════════════════════════════════ */
-/* ══════════════════════════════════════════════════════════════
-   COVER TAB — Daily substitution management
-   Reads from substitutions collection, never touches timetable_slots.
-   ══════════════════════════════════════════════════════════════ */
-const ABSENCE_REASONS = [
-  { v: 'sick',      l: 'Sick Leave'    },
-  { v: 'personal',  l: 'Personal'      },
-  { v: 'training',  l: 'Training'      },
-  { v: 'emergency', l: 'Emergency'     },
-  { v: 'official',  l: 'Official Duty' },
-  { v: 'other',     l: 'Other'         },
-];
-
-/* ── Available-teacher picker (per substitution row)
-   Calls /available-teachers for the specific period+subject.
-   React Query deduplicates — two rows at the same period share one request. ── */
-function SubstituteCell({ sub, date, onAssign }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['tt-avail', date, String(sub.period), sub.subject ?? ''],
-    queryFn:  () => ttApi.availableTeachers({ date, period: sub.period, subject: sub.subject }),
-    staleTime: 60_000,
-    enabled:  !!date && sub.period !== undefined,
-  });
-  const available = data?.data?.available ?? [];
-  const suggested = available.find(a => a.suggested);
-
-  return (
-    <>
-      {/* Interactive dropdown — hidden during print */}
-      <div className="print:hidden">
-        {isLoading ? (
-          <div className="h-6 w-40 bg-slate-100 rounded animate-pulse" />
-        ) : (
-          <select
-            value={sub.substituteTeacherId ?? ''}
-            onChange={e => onAssign(sub.id, e.target.value || null)}
-            className="text-xs rounded border border-slate-200 bg-white px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-slate-900/20 text-slate-800 min-w-[180px] max-w-[260px]"
-          >
-            <option value="">— assign substitute —</option>
-            {suggested && (
-              <option value={suggested.id}>
-                ⭐ {suggested.name}{suggested.sameDepartment ? ' (dept)' : ''} · {suggested.weeklyLoad} lessons
-              </option>
-            )}
-            {available.filter(t => !t.suggested).map(t => (
-              <option key={t.id} value={t.id}>
-                {t.name}{t.sameDepartment ? ' ★' : ''} · {t.weeklyLoad} lessons
-              </option>
-            ))}
-            {available.length === 0 && (
-              <option disabled value="">No teachers available at this period</option>
-            )}
-          </select>
-        )}
-      </div>
-      {/* Print: just show the assigned name */}
-      <span className="hidden print:inline text-sm font-medium">
-        {sub.substituteTeacherName ?? '—'}
-      </span>
-    </>
-  );
-}
-
-function CoverTab({ teachers }) {
-  const qc = useQueryClient();
-  const [date, setDate]               = useState(() => new Date().toISOString().slice(0, 10));
-  const [absentId, setAbsentId]       = useState('');
-  const [reason, setReason]           = useState('sick');
-  const [coverToast, setCoverToast]   = useState(null);
-  const [historyOpen, setHistoryOpen] = useState(false);
-
-  function showT(msg, type = 'success') {
-    setCoverToast({ msg, type });
-    setTimeout(() => setCoverToast(null), 4500);
-  }
-
-  /* ── Substitutions for selected date ── */
-  const { data: subsData, isLoading: subsLoading } = useQuery({
-    queryKey: ['substitutions', date],
-    queryFn:  () => ttApi.substitutions.list({ date }),
-    staleTime: 30_000,
-  });
-  const subs = subsData?.data?.substitutions ?? [];
-
-  /* ── Publish history ── */
-  const { data: versionsData } = useQuery({
-    queryKey: ['timetable', 'versions'],
-    queryFn:  ttApi.versions,
-    enabled:  historyOpen,
-    staleTime: 60_000,
-  });
-  const versions = versionsData?.data?.versions ?? [];
-
-  /* ── Mark teacher absent ── */
-  const markAbsent = useMutation({
-    mutationFn: () => ttApi.substitutions.markAbsent({ teacherId: absentId, date, reason }),
-    onSuccess: (res) => {
-      qc.invalidateQueries({ queryKey: ['substitutions', date] });
-      qc.invalidateQueries({ queryKey: ['tt-avail', date] });
-      setAbsentId('');
-      const created = res?.data?.created ?? 0;
-      const existed = res?.data?.alreadyExisted ?? 0;
-      if (!created && !existed) showT('No lessons found for that teacher on this day.', 'error');
-      else if (!created)        showT('Absence already recorded for this teacher.');
-      else showT(`${created} lesson${created !== 1 ? 's' : ''} added to cover sheet.`);
-    },
-    onError: err => showT(err?.message ?? 'Failed to mark absent.', 'error'),
-  });
-
-  /* ── Assign substitute or update type ── */
-  const assignSub = useMutation({
-    mutationFn: ({ id, substituteTeacherId, type }) =>
-      ttApi.substitutions.update(id, {
-        ...(substituteTeacherId !== undefined ? { substituteTeacherId: substituteTeacherId || null } : {}),
-        ...(type !== undefined ? { type } : {}),
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['substitutions', date] });
-      qc.invalidateQueries({ queryKey: ['tt-avail', date] });
-    },
-    onError: err => showT(err?.message ?? 'Failed to update.', 'error'),
-  });
-
-  /* ── Auto-assign all uncovered ── */
-  const autoAssign = useMutation({
-    mutationFn: () => ttApi.substitutions.autoAssign({ date }),
-    onSuccess: (res) => {
-      qc.invalidateQueries({ queryKey: ['substitutions', date] });
-      qc.invalidateQueries({ queryKey: ['tt-avail', date] });
-      const n = res?.data?.assigned ?? 0;
-      showT(n > 0 ? `Auto-assigned ${n} substitute${n !== 1 ? 's' : ''}.` : 'No uncovered lessons to assign.');
-    },
-    onError: err => showT(err?.message ?? 'Auto-assign failed.', 'error'),
-  });
-
-  /* ── Remove a record ── */
-  const removeRecord = useMutation({
-    mutationFn: (id) => ttApi.substitutions.remove(id),
-    onSuccess:  () => {
-      qc.invalidateQueries({ queryKey: ['substitutions', date] });
-      qc.invalidateQueries({ queryKey: ['tt-avail', date] });
-    },
-    onError: err => showT(err?.message ?? 'Failed to remove.', 'error'),
-  });
-
-  /* ── Group subs by absent teacher ── */
-  const byTeacher = {};
-  subs.forEach(s => {
-    if (!byTeacher[s.originalTeacherId]) {
-      byTeacher[s.originalTeacherId] = { name: s.originalTeacherName, slots: [] };
-    }
-    byTeacher[s.originalTeacherId].slots.push(s);
-  });
-  const absentGroups   = Object.entries(byTeacher);
-  const coveredCount   = subs.filter(s => s.status === 'covered').length;
-  const uncoveredCount = subs.filter(s => s.status === 'uncovered').length;
-
-  /* Header summary: "Mr. Godfrey (5, 7) and Ms. Beatrice (2)" */
-  const summaryLine = absentGroups
-    .map(([, { name, slots }]) => {
-      const ps = [...new Set(slots.map(s => s.period))]
-        .sort((a, b) => String(a).localeCompare(String(b)))
-        .join(', ');
-      return `${name} (${ps})`;
-    })
-    .join(' and ');
-
-  const dateLabel = (() => {
-    try {
-      return new Date(date + 'T12:00:00').toLocaleDateString('en-GB', {
-        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-      });
-    } catch { return date; }
-  })();
-
-  const selCls = 'text-xs rounded border border-slate-200 bg-white px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-slate-900/20 text-slate-800';
-
-  return (
-    <div className="space-y-4">
-
-      {/* Toast */}
-      <AnimatePresence>
-        {coverToast && (
-          <Toast msg={coverToast.msg} type={coverToast.type} onDismiss={() => setCoverToast(null)} />
-        )}
-      </AnimatePresence>
-
-      {/* ── Mark Absent form ── */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5">
-        <h3 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
-          <UserX size={14} className="text-red-400" /> Mark Teacher Absent
-        </h3>
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1.5">Date</label>
-            <input
-              type="date" value={date} onChange={e => setDate(e.target.value)}
-              className="text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-800"
-              style={{ width: '160px' }}
-            />
-          </div>
-          <div style={{ minWidth: '200px', flex: 1 }}>
-            <label className="block text-xs font-medium text-slate-600 mb-1.5">Absent Teacher *</label>
-            <select
-              value={absentId} onChange={e => setAbsentId(e.target.value)}
-              className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-800"
-            >
-              <option value="">Select teacher…</option>
-              {teachers.map(t => (
-                <option key={t.id ?? t._id} value={t.id ?? t._id}>
-                  {t.firstName} {t.lastName}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div style={{ width: '160px' }}>
-            <label className="block text-xs font-medium text-slate-600 mb-1.5">Reason</label>
-            <select
-              value={reason} onChange={e => setReason(e.target.value)}
-              className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-800"
-            >
-              {ABSENCE_REASONS.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
-            </select>
-          </div>
-          <button
-            disabled={!absentId || markAbsent.isPending}
-            onClick={() => markAbsent.mutate()}
-            className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
-          >
-            {markAbsent.isPending ? <Loader2 size={13} className="animate-spin" /> : <UserX size={13} />}
-            {markAbsent.isPending ? 'Marking…' : 'Mark Absent'}
-          </button>
-        </div>
-      </div>
-
-      {/* ── Cover Sheet ── */}
-      {subsLoading ? (
-        <div className="bg-white border border-slate-200 rounded-xl p-8 animate-pulse space-y-3">
-          {[...Array(4)].map((_, i) => <div key={i} className="h-10 bg-slate-100 rounded" />)}
-        </div>
-      ) : subs.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-xl p-10 text-center">
-          <ClipboardList size={28} className="mx-auto text-slate-300 mb-2" />
-          <p className="text-sm font-medium text-slate-500">No cover arrangements for {date}</p>
-          <p className="text-xs text-slate-400 mt-1">Mark a teacher absent above to generate the cover sheet.</p>
-        </div>
-      ) : (
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-
-          {/* ── Sheet title (matches aSc format) ── */}
-          <div className="px-6 pt-5 pb-4 border-b border-slate-100 text-center">
-            <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Substitution</h2>
-            <p className="text-sm text-slate-600 mt-0.5">{dateLabel}</p>
-            {summaryLine && (
-              <p className="text-xs text-slate-500 mt-2 max-w-2xl mx-auto leading-relaxed">
-                Unfortunately, the following teachers will not teach today:&nbsp;
-                <strong className="text-slate-700">{summaryLine}</strong>
-              </p>
-            )}
-          </div>
-
-          {/* ── Action bar (hidden in print) ── */}
-          <div className="px-5 py-2.5 border-b border-slate-100 flex items-center justify-between print:hidden bg-slate-50/60">
-            <div className="flex items-center gap-4 text-xs font-medium">
-              <span className="flex items-center gap-1.5 text-emerald-600">
-                <CheckCircle2 size={12} /> {coveredCount} covered
-              </span>
-              <span className="flex items-center gap-1.5 text-amber-600">
-                <AlertCircle size={12} /> {uncoveredCount} uncovered
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              {uncoveredCount > 0 && (
-                <button
-                  onClick={() => autoAssign.mutate()}
-                  disabled={autoAssign.isPending}
-                  className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white transition"
-                >
-                  {autoAssign.isPending ? <Loader2 size={11} className="animate-spin" /> : <Zap size={11} />}
-                  {autoAssign.isPending ? 'Assigning…' : 'Auto-assign all'}
-                </button>
-              )}
-              <button
-                onClick={() => window.print()}
-                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition"
-              >
-                <Printer size={11} /> Print
-              </button>
-            </div>
-          </div>
-
-          {/* ── Substitution table (aSc-style) ── */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse" style={{ minWidth: '820px' }}>
-              <thead>
-                <tr className="border-b-2 border-slate-300 bg-slate-50 text-left">
-                  <th className="px-4 py-3 text-xs font-bold text-slate-700 uppercase tracking-wide w-36">Absent</th>
-                  <th className="px-3 py-3 text-xs font-bold text-slate-700 uppercase tracking-wide w-20 text-center">Lesson</th>
-                  <th className="px-3 py-3 text-xs font-bold text-slate-700 uppercase tracking-wide w-28">Reason</th>
-                  <th className="px-3 py-3 text-xs font-bold text-slate-700 uppercase tracking-wide w-24">Subject</th>
-                  <th className="px-3 py-3 text-xs font-bold text-slate-700 uppercase tracking-wide w-24">Class</th>
-                  <th className="px-3 py-3 text-xs font-bold text-slate-700 uppercase tracking-wide w-28 print:hidden">Type</th>
-                  <th className="px-3 py-3 text-xs font-bold text-slate-700 uppercase tracking-wide">Substitutes</th>
-                  <th className="px-3 py-3 text-xs font-bold text-slate-700 uppercase tracking-wide w-36 hidden print:table-cell">Signature</th>
-                </tr>
-              </thead>
-              <tbody>
-                {absentGroups.map(([tid, { name, slots }]) => {
-                  const sorted = slots.slice().sort((a, b) => String(a.period).localeCompare(String(b.period)));
-                  return sorted.map((s, idx) => (
-                    <tr key={s.id} className="border-b border-slate-100 hover:bg-slate-50/30 transition">
-
-                      {/* Absent teacher — rowspan on first row only */}
-                      {idx === 0 && (
-                        <td rowSpan={sorted.length} className="px-4 py-3 align-top border-r border-slate-100 bg-red-50/30">
-                          <span className="text-sm font-semibold text-slate-900 block">{name}</span>
-                          <button
-                            onClick={() => {
-                              if (!window.confirm(`Remove all cover records for ${name} on ${date}?`)) return;
-                              sorted.forEach(r => removeRecord.mutate(r.id));
-                            }}
-                            className="mt-1.5 text-[10px] text-red-400 hover:text-red-600 hover:underline print:hidden"
-                          >
-                            Clear all
-                          </button>
-                        </td>
-                      )}
-
-                      {/* Lesson number */}
-                      <td className="px-3 py-3 text-center">
-                        <span className="text-base font-bold text-slate-800">{s.period}</span>
-                        {s.startTime && (
-                          <span className="block text-[10px] text-slate-400 leading-tight">{s.startTime}</span>
-                        )}
-                      </td>
-
-                      {/* Reason */}
-                      <td className="px-3 py-3 text-xs text-slate-500">
-                        {ABSENCE_REASONS.find(r => r.v === s.reason)?.l ?? s.reason}
-                      </td>
-
-                      {/* Subject */}
-                      <td className="px-3 py-3">
-                        <span className="text-sm font-bold text-slate-800">{s.subject || '—'}</span>
-                      </td>
-
-                      {/* Class */}
-                      <td className="px-3 py-3 text-xs font-medium text-slate-700">
-                        {s.className || s.classId || '—'}
-                      </td>
-
-                      {/* Type — screen only */}
-                      <td className="px-3 py-3 print:hidden">
-                        <select
-                          value={s.type ?? 'supervision'}
-                          onChange={e => assignSub.mutate({ id: s.id, type: e.target.value })}
-                          className={selCls}
-                        >
-                          <option value="supervision">Supervision</option>
-                          <option value="cover">Cover</option>
-                          <option value="teaching">Teaching</option>
-                        </select>
-                      </td>
-
-                      {/* Substitute — smart picker + status badge */}
-                      <td className="px-3 py-3">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <SubstituteCell
-                            sub={s}
-                            date={date}
-                            onAssign={(id, subId) =>
-                              assignSub.mutate({ id, substituteTeacherId: subId || null })
-                            }
-                          />
-                          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0 print:hidden ${
-                            s.status === 'covered'
-                              ? 'bg-emerald-100 text-emerald-700'
-                              : 'bg-amber-100 text-amber-700'
-                          }`}>
-                            {s.status === 'covered'
-                              ? <><CheckCircle2 size={9} /> Covered</>
-                              : <><AlertCircle  size={9} /> Uncovered</>}
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* Signature line — print only */}
-                      <td className="px-3 py-3 hidden print:table-cell text-slate-300 text-sm">
-                        ______________
-                      </td>
-                    </tr>
-                  ));
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Print footer */}
-          <div className="hidden print:block px-6 py-3 border-t border-slate-200 text-[10px] text-slate-400">
-            Page printed: {new Date().toLocaleDateString('en-GB')} {new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-          </div>
-
-        </div>
-      )}
-
-      {/* ── Publish History ── */}
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        <button
-          onClick={() => setHistoryOpen(o => !o)}
-          className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-slate-50 transition"
-        >
-          <div className="flex items-center gap-2">
-            <History size={13} className="text-slate-400" />
-            <span className="text-sm font-semibold text-slate-900">Publish History</span>
-          </div>
-          <ChevronRight size={14} className={`text-slate-400 transition-transform ${historyOpen ? 'rotate-90' : ''}`} />
-        </button>
-        <AnimatePresence>
-          {historyOpen && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-              className="overflow-hidden border-t border-slate-100"
-            >
-              {versions.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-6">No publish history yet.</p>
-              ) : (
-                <div className="divide-y divide-slate-50">
-                  {versions.map((v, i) => (
-                    <div key={v.id} className="px-5 py-3 flex items-center gap-4">
-                      <div className={`w-2 h-2 rounded-full shrink-0 ${i === 0 ? 'bg-emerald-400' : 'bg-slate-200'}`} />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium text-slate-800">
-                          {v.termLabel || 'Untitled version'}
-                          {i === 0 && <span className="ml-2 text-[10px] text-emerald-600 font-semibold">Current</span>}
-                        </p>
-                        <p className="text-[10px] text-slate-400">
-                          {new Date(v.publishedAt).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })}
-                          {' · '}{v.slotCount} slots
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-    </div>
-  );
-}
+import TimetablePortal       from './TimetablePortal.jsx';
+import { DAYS, DAY_SHORT, SECTIONS, DEFAULT_BELL, inferSection } from './constants.js';
+import TimetableGrid          from './components/TimetableGrid.jsx';
+import WorkloadPanel          from './components/WorkloadPanel.jsx';
+import ConflictsPanel         from './components/ConflictsPanel.jsx';
+import AddSlotSlideOver       from './components/AddSlotSlideOver.jsx';
+import BellScheduleSlideOver  from './components/BellScheduleSlideOver.jsx';
+import OverviewView           from './components/OverviewView.jsx';
+import CoverTab               from './components/CoverTab.jsx';
+import PublishModal           from './components/PublishModal.jsx';
+import { Toast }              from './components/TimetablePrimitives.jsx';
 
 const VIEWS = [
-  { id: 'class',    label: 'Class Grid',    Icon: LayoutGrid  },
-  { id: 'teacher',  label: 'Teacher View',  Icon: User        },
-  { id: 'overview', label: 'Institution',   Icon: Globe       },
-  { id: 'cover',    label: 'Cover / Subs',  Icon: UserX, adminOnly: true },
+  { id: 'class',    label: 'Class Grid',   Icon: LayoutGrid           },
+  { id: 'teacher',  label: 'Teacher View', Icon: User                 },
+  { id: 'overview', label: 'Institution',  Icon: Globe                },
+  { id: 'cover',    label: 'Cover / Subs', Icon: UserX, adminOnly: true },
 ];
 
-export default function TimetablePage() {
-  const qc   = useQueryClient();
-  const can  = useAuthStore(s => s.can.bind(s));
-  const role  = useAuthStore(s => s.session?.user?.role ?? '');
-  const roles = useAuthStore(s => s.session?.user?.roles ?? []);
-  const canEdit = can('timetable') || ['admin', 'superadmin', 'deputy', 'timetabler'].includes(role);
+const ADMIN_ROLES = new Set(['admin', 'superadmin', 'deputy', 'timetabler']);
 
-  // Non-admin roles get the read-only portal view
-  const ADMIN_ROLES = new Set(['admin', 'superadmin', 'deputy', 'timetabler']);
+export default function TimetablePage() {
+  const qc    = useQueryClient();
+  const can   = useAuthStore(s => s.can.bind(s));
+  const role  = useAuthStore(s => s.session?.user?.role  ?? '');
+  const roles = useAuthStore(s => s.session?.user?.roles ?? []);
+
+  const canEdit    = can('timetable') || ADMIN_ROLES.has(role);
   const isAdminRole = ADMIN_ROLES.has(role) || roles.some(r => ADMIN_ROLES.has(r));
+
+  // Non-admin roles see the read-only portal
   if (!isAdminRole) return <TimetablePortal />;
 
-  /* ── Publish state ── */
-  const [showPublishModal, setShowPublishModal] = useState(false);
-  const [termLabelInput,   setTermLabelInput]   = useState('');
+  /* ── UI state ────────────────────────────────────────────── */
+  const [activeView,      setActiveView]      = useState('class');
+  const [classId,         setClassId]         = useState('');
+  const [section,         setSection]         = useState('all');
+  const [teacherId,       setTeacherId]       = useState('');
+  const [showAdd,         setShowAdd]         = useState(false);
+  const [addDefaults,     setAddDefaults]     = useState({ day: 'monday', period: '1' });
+  const [showWorkload,    setShowWorkload]     = useState(false);
+  const [showConflicts,   setShowConflicts]   = useState(false);
+  const [showBell,        setShowBell]        = useState(false);
+  const [showPublishModal,setShowPublishModal] = useState(false);
+  const [toast,           setToast]           = useState(null);
 
-  const { data: statusData, refetch: refetchStatus } = useQuery({
-    queryKey: ['timetable', 'status'],
-    queryFn:  () => ttApi.status(),
-    staleTime: 30_000,
-  });
-  const publishStatus = statusData?.data ?? { published: false };
+  function showToast(msg, type = 'success') {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 4000);
+  }
 
-  const [activeView,   setActiveView]   = useState('class');
-  const [classId,      setClassId]      = useState('');
-  const [section,      setSection]      = useState('all');
-  const [teacherId,    setTeacherId]    = useState('');
-  const [showAdd,      setShowAdd]      = useState(false);
-  const [addDefaults,  setAddDefaults]  = useState({ day: 'monday', period: '1' });
-  const [showWorkload, setShowWorkload] = useState(false);
-  const [showConflicts,setShowConflicts]= useState(false);
-  const [showBell,     setShowBell]     = useState(false);
-  const [toast,        setToast]        = useState(null);
-
-  /* ── Classes (fetched early so classSection can be derived) ── */
+  /* ── Shared data queries ─────────────────────────────────── */
   const { data: classesData } = useQuery({
     queryKey: ['classes', 'list'],
     queryFn:  () => classesApi.list({ limit: 200, status: 'active' }),
@@ -1383,14 +80,9 @@ export default function TimetablePage() {
   const filteredClasses = section === 'all'
     ? classList
     : classList.filter(c => inferSection(c.name) === section);
-
   const selectedClass = classList.find(c => (c._id ?? c.id) === classId);
 
-  /* ── Bell schedule — section-aware ──────────────────────────
-     When a class is selected, fetch the schedule for that class's
-     section (KG / Primary / Secondary / A-Level).
-     Falls back to 'all' school default if no custom schedule set.
-  ─────────────────────────────────────────────────────────────── */
+  /* Bell schedule — resolved for the selected class's section */
   const classSection = selectedClass ? inferSection(selectedClass.name) : 'all';
   const { data: bellData } = useQuery({
     queryKey: ['bell-schedule', classSection],
@@ -1400,24 +92,6 @@ export default function TimetablePage() {
   const bell          = bellData?.data?.periods ?? DEFAULT_BELL;
   const lessonPeriods = bell.filter(b => !b.isBreak);
 
-  function showToast(msg, type = 'success') {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 4000);
-  }
-
-  /* ── Publish / Unpublish mutations ── */
-  const { mutate: doPublish, isPending: publishing } = useMutation({
-    mutationFn: () => ttApi.publish({ termLabel: termLabelInput }),
-    onSuccess:  () => { refetchStatus(); setShowPublishModal(false); showToast('Timetable published — now visible to staff and parents.'); },
-    onError:    err => showToast(err?.message ?? 'Failed to publish.', 'error'),
-  });
-  const { mutate: doUnpublish, isPending: unpublishing } = useMutation({
-    mutationFn: () => ttApi.unpublish(),
-    onSuccess:  () => { refetchStatus(); showToast('Timetable unpublished — hidden from portal users.'); },
-    onError:    err => showToast(err?.message ?? 'Failed to unpublish.', 'error'),
-  });
-
-  /* ── Teachers ── */
   const { data: teachersData } = useQuery({
     queryKey: ['teachers', 'picker'],
     queryFn:  () => teachersApi.list({ limit: 200, status: 'active' }),
@@ -1425,7 +99,7 @@ export default function TimetablePage() {
   });
   const teacherList = teachersData?.data ?? [];
 
-  /* ── Class timetable ── */
+  /* ── View-specific queries ───────────────────────────────── */
   const { data: classData, isLoading: classLoading, isError: classError } = useQuery({
     queryKey: ['timetable', 'class', classId],
     queryFn:  () => ttApi.byClass(classId),
@@ -1436,7 +110,6 @@ export default function TimetablePage() {
     ? classData.data
     : (classData?.data?.slots ?? []);
 
-  /* ── Teacher timetable ── */
   const { data: teacherData, isLoading: teacherLoading } = useQuery({
     queryKey: ['timetable', 'teacher', teacherId],
     queryFn:  () => ttApi.byTeacher(teacherId),
@@ -1447,14 +120,11 @@ export default function TimetablePage() {
     ? teacherData.data
     : (teacherData?.data?.slots ?? []);
 
-  /* Teacher workload stats */
   const teacherLessonCount = teacherSlots.filter(s => !s.type || s.type === 'lesson').length;
   const teacherByDay = DAYS.map(d => ({
-    day: d,
-    count: teacherSlots.filter(s => (s.day || '').toLowerCase() === d).length,
+    day: d, count: teacherSlots.filter(s => (s.day || '').toLowerCase() === d).length,
   }));
 
-  /* ── Conflicts ── */
   const { data: conflictData } = useQuery({
     queryKey: ['timetable', 'conflicts'],
     queryFn:  () => ttApi.conflicts(),
@@ -1463,21 +133,41 @@ export default function TimetablePage() {
   const conflicts     = conflictData?.data?.conflicts ?? [];
   const conflictCount = conflicts.length;
 
-  /* ── Delete slot ── */
+  const { data: statusData, refetch: refetchStatus } = useQuery({
+    queryKey: ['timetable', 'status'],
+    queryFn:  () => ttApi.status(),
+    staleTime: 30_000,
+  });
+  const publishStatus = statusData?.data ?? { published: false };
+
+  /* ── Mutations ───────────────────────────────────────────── */
+  const invalidateTT = () => {
+    qc.invalidateQueries({ queryKey: ['timetable', 'class',   classId] });
+    qc.invalidateQueries({ queryKey: ['timetable', 'teacher', teacherId] });
+    qc.invalidateQueries({ queryKey: ['timetable', 'conflicts'] });
+    qc.invalidateQueries({ queryKey: ['timetable', 'overview'] });
+    qc.invalidateQueries({ queryKey: ['timetable', 'workload'] });
+  };
+
   const { mutate: removeSlot } = useMutation({
     mutationFn: id => ttApi.remove(id),
-    onSuccess: (_, id) => {
-      qc.invalidateQueries({ queryKey: ['timetable', 'class',   classId] });
-      qc.invalidateQueries({ queryKey: ['timetable', 'teacher', teacherId] });
-      qc.invalidateQueries({ queryKey: ['timetable', 'conflicts'] });
-      qc.invalidateQueries({ queryKey: ['timetable', 'overview'] });
-      qc.invalidateQueries({ queryKey: ['timetable', 'workload'] });
-      showToast('Slot removed.');
-    },
-    onError: err => showToast(err?.message ?? 'Failed to remove slot.', 'error'),
+    onSuccess:  () => { invalidateTT(); showToast('Slot removed.'); },
+    onError:    err => showToast(err?.message ?? 'Failed to remove slot.', 'error'),
   });
 
-  /* ── Open add with pre-filled day+period ── */
+  const { mutate: doPublish, isPending: publishing } = useMutation({
+    mutationFn: (termLabel) => ttApi.publish({ termLabel }),
+    onSuccess:  () => { refetchStatus(); setShowPublishModal(false); showToast('Timetable published — now visible to staff and parents.'); },
+    onError:    err => showToast(err?.message ?? 'Failed to publish.', 'error'),
+  });
+
+  const { mutate: doUnpublish, isPending: unpublishing } = useMutation({
+    mutationFn: () => ttApi.unpublish(),
+    onSuccess:  () => { refetchStatus(); showToast('Timetable unpublished — hidden from portal users.'); },
+    onError:    err => showToast(err?.message ?? 'Failed to unpublish.', 'error'),
+  });
+
+  /* ── Handlers ────────────────────────────────────────────── */
   const openAdd = useCallback((day, period) => {
     setAddDefaults({ day, period });
     setShowAdd(true);
@@ -1485,36 +175,29 @@ export default function TimetablePage() {
 
   function onSlotCreated() {
     setShowAdd(false);
-    qc.invalidateQueries({ queryKey: ['timetable', 'class',   classId] });
-    qc.invalidateQueries({ queryKey: ['timetable', 'teacher', teacherId] });
-    qc.invalidateQueries({ queryKey: ['timetable', 'conflicts'] });
-    qc.invalidateQueries({ queryKey: ['timetable', 'overview'] });
-    qc.invalidateQueries({ queryKey: ['timetable', 'workload'] });
+    invalidateTT();
     showToast('Lesson slot added.');
   }
 
-  /* ── Derived ── */
   const selectedTeacher = teacherList.find(t => (t._id ?? t.id) === teacherId);
 
-  /* ══════════════════════════════════════════════════════════════
+  /* ══════════════════════════════════════════════════════════
      RENDER
-     ══════════════════════════════════════════════════════════════ */
+     ══════════════════════════════════════════════════════════ */
   return (
     <div className="min-h-screen bg-slate-50">
 
       {/* ── Page header ── */}
       <div className="bg-white border-b border-slate-200 px-6 py-4">
         <div className="max-w-screen-2xl mx-auto">
+
+          {/* Title + header actions */}
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <CalendarDays size={18} className="text-slate-400" />
               <div>
-                <h1 className="text-base font-semibold text-slate-900 leading-tight">
-                  Scheduling Engine
-                </h1>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Institutional timetable & coordination
-                </p>
+                <h1 className="text-base font-semibold text-slate-900 leading-tight">Scheduling Engine</h1>
+                <p className="text-xs text-slate-400 mt-0.5">Institutional timetable &amp; coordination</p>
               </div>
             </div>
 
@@ -1546,12 +229,11 @@ export default function TimetablePage() {
                 <BarChart3 size={12} /> Workload
               </button>
 
-              {/* Bell schedule config (admin only) */}
+              {/* Bell schedule (admin only) */}
               {canEdit && (
                 <button
                   onClick={() => setShowBell(true)}
                   className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 transition"
-                  title="Configure bell schedule"
                 >
                   <Clock size={12} /> Bell
                 </button>
@@ -1591,9 +273,7 @@ export default function TimetablePage() {
       {/* ── Publish banner ── */}
       {canEdit && (
         <div className={`px-6 py-2.5 border-b flex items-center justify-between gap-4 text-xs ${
-          publishStatus.published
-            ? 'bg-emerald-50 border-emerald-200'
-            : 'bg-amber-50 border-amber-200'
+          publishStatus.published ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'
         }`}>
           <div className="flex items-center gap-2">
             {publishStatus.published ? (
@@ -1601,8 +281,10 @@ export default function TimetablePage() {
                 <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
                 <span className="font-medium text-emerald-700">
                   Published
-                  {publishStatus.termLabel ? ` · ${publishStatus.termLabel}` : ''}
-                  {publishStatus.publishedAt ? ` · ${new Date(publishStatus.publishedAt).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' })}` : ''}
+                  {publishStatus.termLabel  ? ` · ${publishStatus.termLabel}`  : ''}
+                  {publishStatus.publishedAt
+                    ? ` · ${new Date(publishStatus.publishedAt).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' })}`
+                    : ''}
                 </span>
                 <span className="text-emerald-600 hidden sm:inline">— visible to teachers, parents, and section heads</span>
               </>
@@ -1621,7 +303,6 @@ export default function TimetablePage() {
                 disabled={unpublishing}
                 className="flex items-center gap-1 px-3 py-1 rounded-md border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-100 transition font-medium"
               >
-                {unpublishing ? <Loader2 size={11} className="animate-spin" /> : null}
                 {unpublishing ? 'Unpublishing…' : 'Unpublish'}
               </button>
             ) : (
@@ -1636,22 +317,18 @@ export default function TimetablePage() {
         </div>
       )}
 
-      {/* ── Toolbar (context-sensitive) ── */}
+      {/* ── Context toolbar ── */}
       <div className="bg-white border-b border-slate-100 px-6 py-3">
         <div className="max-w-screen-2xl mx-auto flex items-center gap-3 flex-wrap">
-
           {activeView === 'class' && (
             <>
-              {/* Section filter */}
               <div className="flex items-center gap-1.5">
                 {SECTIONS.map(s => (
                   <button
                     key={s.id}
                     onClick={() => { setSection(s.id); setClassId(''); }}
                     className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
-                      section === s.id
-                        ? 'bg-slate-900 text-white'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      section === s.id ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                     }`}
                   >
                     {s.label}
@@ -1659,7 +336,6 @@ export default function TimetablePage() {
                 ))}
               </div>
               <div className="h-4 border-r border-slate-200" />
-              {/* Class picker */}
               <select
                 value={classId}
                 onChange={e => setClassId(e.target.value)}
@@ -1685,9 +361,7 @@ export default function TimetablePage() {
               >
                 <option value="">Select teacher…</option>
                 {teacherList.map(t => (
-                  <option key={t._id ?? t.id} value={t._id ?? t.id}>
-                    {t.firstName} {t.lastName}
-                  </option>
+                  <option key={t._id ?? t.id} value={t._id ?? t.id}>{t.firstName} {t.lastName}</option>
                 ))}
               </select>
               {selectedTeacher && (
@@ -1708,9 +382,7 @@ export default function TimetablePage() {
           )}
 
           {activeView === 'cover' && (
-            <span className="text-xs text-slate-500">
-              Daily cover arrangements · substitution management
-            </span>
+            <span className="text-xs text-slate-500">Daily cover arrangements · substitution management</span>
           )}
         </div>
       </div>
@@ -1718,14 +390,12 @@ export default function TimetablePage() {
       {/* ── Main content ── */}
       <div className={`max-w-screen-2xl mx-auto px-6 py-5 ${showWorkload ? 'pr-80' : ''} transition-all`}>
 
-        {/* Toast */}
         <div className="h-9 mb-3 flex items-center">
           <AnimatePresence>
             {toast && <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}
           </AnimatePresence>
         </div>
 
-        {/* Class Grid View */}
         {activeView === 'class' && (
           !classId ? (
             <div className="bg-white border border-slate-200 rounded-xl p-14 flex flex-col items-center gap-3">
@@ -1743,21 +413,14 @@ export default function TimetablePage() {
             </div>
           ) : classError ? (
             <div className="bg-white border border-red-200 rounded-xl p-8 flex flex-col items-center gap-2">
-              <AlertTriangle size={20} className="text-red-400" />
+              <AlertCircle size={20} className="text-red-400" />
               <p className="text-sm text-slate-600">Failed to load timetable.</p>
             </div>
           ) : (
-            <TimetableGrid
-              slots={classSlots}
-              onDelete={removeSlot}
-              onAdd={openAdd}
-              canEdit={canEdit}
-              bell={bell}
-            />
+            <TimetableGrid slots={classSlots} onDelete={removeSlot} onAdd={openAdd} canEdit={canEdit} bell={bell} />
           )
         )}
 
-        {/* Teacher Schedule View */}
         {activeView === 'teacher' && (
           !teacherId ? (
             <div className="bg-white border border-slate-200 rounded-xl p-14 flex flex-col items-center gap-3">
@@ -1774,43 +437,25 @@ export default function TimetablePage() {
               ))}
             </div>
           ) : (
-            <TimetableGrid
-              slots={teacherSlots}
-              onDelete={removeSlot}
-              onAdd={() => {}}
-              canEdit={false}
-              bell={bell}
-            />
+            <TimetableGrid slots={teacherSlots} onDelete={removeSlot} onAdd={() => {}} canEdit={false} bell={bell} />
           )
         )}
 
-        {/* Institution Overview */}
-        {activeView === 'overview' && (
-          <OverviewView classList={classList} />
-        )}
-
-        {/* Cover / Substitutions View */}
-        {activeView === 'cover' && (
-          <CoverTab teachers={teacherList} />
-        )}
+        {activeView === 'overview' && <OverviewView classList={classList} />}
+        {activeView === 'cover'    && <CoverTab teachers={teacherList} />}
       </div>
 
-      {/* ── Workload sidebar ── */}
+      {/* ── Panels & modals ── */}
       <AnimatePresence>
-        {showWorkload && <WorkloadPanel onClose={() => setShowWorkload(false)} />}
+        {showWorkload  && <WorkloadPanel onClose={() => setShowWorkload(false)} />}
       </AnimatePresence>
 
-      {/* ── Conflicts panel ── */}
       <AnimatePresence>
         {showConflicts && (
-          <ConflictsPanel
-            conflicts={conflicts}
-            onClose={() => setShowConflicts(false)}
-          />
+          <ConflictsPanel conflicts={conflicts} onClose={() => setShowConflicts(false)} />
         )}
       </AnimatePresence>
 
-      {/* ── Add slot slide-over ── */}
       <AnimatePresence>
         {showAdd && classId && (
           <AddSlotSlideOver
@@ -1823,61 +468,20 @@ export default function TimetablePage() {
         )}
       </AnimatePresence>
 
-      {/* ── Bell schedule slide-over ── */}
       <AnimatePresence>
-        {showBell && (
-          <BellScheduleSlideOver
-            onClose={() => setShowBell(false)}
+        {showBell && <BellScheduleSlideOver onClose={() => setShowBell(false)} />}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showPublishModal && (
+          <PublishModal
+            publishing={publishing}
+            onPublish={(termLabel) => doPublish(termLabel)}
+            onClose={() => setShowPublishModal(false)}
           />
         )}
       </AnimatePresence>
 
-      {/* ── Publish modal ── */}
-      <AnimatePresence>
-        {showPublishModal && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center px-4"
-          >
-            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setShowPublishModal(false)} />
-            <motion.div
-              initial={{ scale: 0.95, y: -8 }} animate={{ scale: 1, y: 0 }}
-              className="relative bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-sm z-50 p-6 space-y-4"
-            >
-              <div>
-                <h2 className="text-sm font-semibold text-slate-900">Publish Timetable</h2>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Once published, teachers, parents, and section heads can view their timetable in the portal.
-                </p>
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-600">Term label <span className="text-slate-400">(optional)</span></label>
-                <input
-                  value={termLabelInput}
-                  onChange={e => setTermLabelInput(e.target.value)}
-                  placeholder="e.g. Term 1, 2026"
-                  className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-800"
-                  autoFocus
-                />
-                <p className="text-[11px] text-slate-400">Shown on the portal header and print pages.</p>
-              </div>
-              <div className="flex items-center justify-end gap-3 pt-1">
-                <button onClick={() => setShowPublishModal(false)} className="text-sm font-medium text-slate-600 hover:text-slate-800 transition">
-                  Cancel
-                </button>
-                <button
-                  onClick={() => doPublish()}
-                  disabled={publishing}
-                  className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded-lg transition"
-                >
-                  {publishing ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
-                  {publishing ? 'Publishing…' : 'Publish Now'}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
