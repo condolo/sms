@@ -6,6 +6,36 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.11.2] — 2026-05-25  Timetable Seed Fix + Substitution Engine Bug Fixes
+
+### Fixed — Seed data collection mismatch (Critical)
+
+- `seed-demo-data.js` was writing timetable slots to the wrong MongoDB collection (`timetable_slots`) while all API routes read from `timetable`.  
+  All 60 seeded timetable slots were completely invisible to the API — this caused "No lessons found" on every mark-absent request and empty class grids.  
+  Fixed: seed now writes to the correct `timetable` collection.
+
+### Fixed — Teacher ID format mismatch in substitution engine
+
+- `POST /substitutions/absent`: Teacher profile IDs (`tch_demo_2`) and user IDs (`u_demo_t2`) are two different formats stored across collections.  
+  The frontend sends the teacher profile's `id` field, but timetable slots store `teacherId` as user IDs.  
+  Fixed: route now resolves the teacher profile via `$or: [{ id }, { userId }]`, builds a `slotIds` array with both formats, and queries timetable slots using `$in`.  
+  `originalTeacherId` is now stored as the canonical `userId` so exclusions match slot format downstream.
+
+- `GET /available-teachers`: `busyIds`, `absentIds`, `coveredIds` sets are built from user IDs (`u_demo_t2`) in timetable slot data.  
+  The teacher filter was comparing against teacher profile IDs (`tch_demo_2`) — no teacher was ever excluded.  
+  Fixed: now checks both `t.userId` and `t.id` against each exclusion set; weekly load uses `userId` as the primary key.
+
+- `POST /substitutions/auto-assign`: Same dual-ID fix applied; load calculation and exclusion filter both use `userId` as the canonical identifier.
+
+### New — Full timetable seed for all 7 classes
+
+- Added weekly timetable data for the 5 previously empty classes:  
+  Standard 5A (25 slots), Standard 6A (25 slots), Form 2A (30 slots), Form 3A (30 slots), Form 4A (30 slots).  
+  Total seeded slots increased from 60 to **205** (all 7 classes, full week, Mon–Fri).
+- All timetable slots now include `subject` (display string) and `className` fields so substitution records show meaningful data in the Cover Sheet.
+
+---
+
 ## [4.11.1] — 2026-05-24  Timetable: Smart Cover Sheet & Substitution Engine
 
 ### New — Available-teachers API (`server/routes/timetable.js`)

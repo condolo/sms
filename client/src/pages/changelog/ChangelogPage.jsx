@@ -6,6 +6,18 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.11.2',
+    date: '2026-05-25',
+    label: 'Timetable Seed Fix + Substitution Engine Bug Fixes',
+    changes: [
+      { type: 'fix',  text: 'Critical: seed-demo-data.js was writing timetable slots to wrong MongoDB collection (timetable_slots instead of timetable) — all 60 slots were invisible to the API, causing empty class grids and "No lessons found" errors' },
+      { type: 'fix',  text: 'Teacher ID mismatch in substitution engine: mark-absent now resolves teacher by both profile id and userId via $or lookup, queries slots with $in to match either format' },
+      { type: 'fix',  text: 'Available-teachers and auto-assign now check both t.userId and t.id against busy/absent/covered sets so no teacher is silently excluded or shown as available when busy' },
+      { type: 'new',  text: 'Full timetable seed for all 7 classes: Standard 5A, 6A, Form 2A, 3A, 4A added (25–30 slots each) — total 205 slots up from 60' },
+      { type: 'new',  text: 'All timetable slots now include subject display string and className — substitution cover sheet shows meaningful names instead of IDs' },
+    ],
+  },
+  {
     version: '4.11.1',
     date: '2026-05-24',
     label: 'Smart Cover Sheet & Substitution Engine',
