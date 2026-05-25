@@ -35,16 +35,28 @@ export default function ConflictsPanel({ conflicts, onClose }) {
               {c.type === 'teacher_double_booked' ? (
                 <>
                   <p className="text-xs font-medium text-red-600">Teacher double-booked</p>
+                  <p className="text-xs text-slate-600 mt-0.5 font-medium">{c.teacherName}</p>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    {c.teacherName} — {DAY_FULL[c.day] ?? c.day}, Period {c.period}
+                    {DAY_FULL[c.day] ?? c.day}, Period {c.period}
                   </p>
+                  {c.classNames?.length > 0 && (
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {c.classNames.join(' vs ')}
+                    </p>
+                  )}
                 </>
               ) : (
                 <>
                   <p className="text-xs font-medium text-amber-600">Room double-booked</p>
+                  <p className="text-xs text-slate-600 mt-0.5 font-medium">Room: {c.room}</p>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Room: {c.room} — {DAY_FULL[c.day] ?? c.day}, Period {c.period}
+                    {DAY_FULL[c.day] ?? c.day}, Period {c.period}
                   </p>
+                  {c.classNames?.length > 0 && (
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {c.classNames.join(' vs ')}
+                    </p>
+                  )}
                 </>
               )}
             </div>

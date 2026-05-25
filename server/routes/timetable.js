@@ -284,6 +284,10 @@ router.get('/conflicts', authMiddleware, PLAN, rbac('timetable', 'read'), async 
       .limit(10000)
       .lean();
 
+    // Build a quick id→slot lookup so we can resolve classIds per conflict later
+    const slotById = {};
+    slots.forEach(s => { slotById[s.id || String(s._id)] = s; });
+
     const conflicts = [];
 
     // Group by teacher+day and room+day — then check pairwise for overlap
@@ -317,7 +321,7 @@ router.get('/conflicts', authMiddleware, PLAN, rbac('timetable', 'read'), async 
             conflicts.push({
               type:        'teacher_double_booked',
               teacherId:   a.teacherId,
-              teacherName: a.teacherName || a.teacherId,
+              teacherName: a.teacherName || a.teacherId,   // resolved below
               day:         a.day,
               // Show times if available, else period keys
               period:      (a.startTime && b.startTime)
@@ -325,6 +329,7 @@ router.get('/conflicts', authMiddleware, PLAN, rbac('timetable', 'read'), async 
                 : a.period,
               sectionsInvolved: [...new Set([a.section, b.section].filter(Boolean))],
               slotIds:     [a._slotId, b._slotId],
+              classIds:    [a.classId, b.classId].filter(Boolean),
             });
           }
         }
@@ -349,10 +354,56 @@ router.get('/conflicts', authMiddleware, PLAN, rbac('timetable', 'read'), async 
                 : a.period,
               sectionsInvolved: [...new Set([a.section, b.section].filter(Boolean))],
               slotIds: [a._slotId, b._slotId],
+              classIds: [a.classId, b.classId].filter(Boolean),
             });
           }
         }
       }
+    });
+
+    // ── Enrich: resolve real teacher names + class names ──────────
+    // 1. Teacher names — look up any teacherId that was used as a fallback name
+    const unresolvedTeacherIds = [...new Set(
+      conflicts
+        .filter(c => c.type === 'teacher_double_booked' && c.teacherName === c.teacherId)
+        .map(c => c.teacherId),
+    )];
+    const teacherNameMap = {};
+    if (unresolvedTeacherIds.length) {
+      const teachers = await _model('teachers').find({
+        schoolId,
+        $or: [{ userId: { $in: unresolvedTeacherIds } }, { id: { $in: unresolvedTeacherIds } }],
+      }).select('userId id firstName lastName title').lean();
+      teachers.forEach(t => {
+        const name = [t.title, t.firstName, t.lastName].filter(Boolean).join(' ');
+        if (t.userId) teacherNameMap[t.userId] = name;
+        if (t.id)     teacherNameMap[t.id]     = name;
+      });
+    }
+
+    // 2. Class names — batch look up from classes collection
+    const allClassIds = [...new Set(conflicts.flatMap(c => c.classIds ?? []))];
+    const classNameMap = {};
+    if (allClassIds.length) {
+      const classes = await _model('classes').find({
+        schoolId,
+        $or: [{ id: { $in: allClassIds } }, { _id: { $in: allClassIds } }],
+      }).select('id name').lean();
+      classes.forEach(c => {
+        if (c.id)  classNameMap[c.id]          = c.name;
+        classNameMap[String(c._id)]             = c.name;
+      });
+    }
+
+    // 3. Apply enrichment to each conflict
+    conflicts.forEach(c => {
+      if (c.type === 'teacher_double_booked' && teacherNameMap[c.teacherId]) {
+        c.teacherName = teacherNameMap[c.teacherId];
+      }
+      c.classNames = (c.classIds ?? [])
+        .map(cid => classNameMap[cid] ?? cid)
+        .filter(Boolean);
+      delete c.classIds;  // classNames supersedes this
     });
 
     return ok(res, { conflicts, count: conflicts.length });

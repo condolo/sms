@@ -6,6 +6,16 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.15.1',
+    date: '2026-05-25',
+    label: 'Timetable — Conflict & Overview Display Fixes',
+    changes: [
+      { type: 'fix', text: 'ConflictsPanel now shows the teacher\'s real full name (resolved from teachers collection) instead of raw userId like "u_demo_t3"' },
+      { type: 'fix', text: 'ConflictsPanel now shows the names of both clashing classes (e.g. "Form 1A vs Standard 4A") for each teacher/room conflict' },
+      { type: 'fix', text: 'Institution Overview now correctly resolves class names (was keying classMap by MongoDB _id instead of the string id field, so all names fell back to raw classId)' },
+    ],
+  },
+  {
     version: '4.15.0',
     date: '2026-05-25',
     label: 'Frontend Decomposition — AdmissionsPage',

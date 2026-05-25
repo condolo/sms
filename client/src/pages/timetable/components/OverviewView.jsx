@@ -15,8 +15,13 @@ export default function OverviewView({ classList }) {
   const overviewClasses = data?.data?.classes ?? [];
   const totalSlots      = data?.data?.totalSlots ?? 0;
 
+  // Index by BOTH the string `id` field (e.g. "cls_demo_4a") and the MongoDB _id so
+  // lookups work regardless of which format the timetable slots store their classId in.
   const classMap = {};
-  classList.forEach(c => { classMap[c._id ?? c.id] = c.name; });
+  classList.forEach(c => {
+    if (c.id)  classMap[c.id]          = c.name;
+    if (c._id) classMap[String(c._id)] = c.name;
+  });
 
   const rows = overviewClasses
     .map(oc => ({
