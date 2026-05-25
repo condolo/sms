@@ -783,6 +783,16 @@ async function seedDemoData() {
       });
     }));
 
+    /* 11b. HR — payroll for current month (May 2026) so the UI shows data by default */
+    const PAYROLL_PERIOD_CUR = `${YEAR}-05`;
+    await Promise.all(PAYROLL_STAFF.map(p => {
+      const grossSalary = p.basicSalary + p.allowances;
+      const netSalary   = grossSalary - p.deductions;
+      return upsert(Payroll, `pay_${p.staffId}_${PAYROLL_PERIOD_CUR}`, {
+        ...p, payPeriod: PAYROLL_PERIOD_CUR, grossSalary, netSalary,
+      });
+    }));
+
     /* 12. HR — leave requests */
     const Leave = _model('leave_requests');
     const LEAVES = [
@@ -838,7 +848,7 @@ async function seedDemoData() {
       )
     ));
 
-    console.log('[seed-demo-data] ✓ 9 classes · 6 departments · 18 subjects · 10 teacher profiles · 9 teacher users · 20 students · 25 behaviour · 20 invoices · 14 payments · 205 timetable slots (7 classes) · 8 admissions · 10 events · 10 payroll · 4 leave · 96 class-subjects · ' + enrollmentDocs.length + ' enrollments · 4 subject-rules');
+    console.log('[seed-demo-data] ✓ 9 classes · 6 departments · 18 subjects · 10 teacher profiles · 9 teacher users · 20 students · 25 behaviour · 20 invoices · 14 payments · 205 timetable slots (7 classes) · 8 admissions · 10 events · 20 payroll (Apr+May) · 4 leave · 96 class-subjects · ' + enrollmentDocs.length + ' enrollments · 4 subject-rules');
 
   } catch (err) {
     console.warn('[seed-demo-data] Warning:', err.message);

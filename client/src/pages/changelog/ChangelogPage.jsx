@@ -6,6 +6,34 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.11.7',
+    date: '2026-05-25',
+    label: 'Phase 5 — HR Payroll Monthly Management',
+    changes: [
+      { type: 'new',  text: 'Payroll tab: "Add Entry" button opens a modal with staff selector, pay period, basic salary, allowances, deductions, and a live gross/net summary panel' },
+      { type: 'new',  text: 'Inline edit per row: hover reveals edit (pencil) and delete (trash) icons — edit pre-fills the modal with existing values, staff and period are locked in edit mode' },
+      { type: 'new',  text: 'Copy from previous period: one-click button copies all payroll records from the previous month into the current period, skipping already-existing entries' },
+      { type: 'new',  text: 'POST /api/hr/payroll now uses $set + $setOnInsert pattern — ensures a stable id is assigned on creation while still allowing salary updates via upsert' },
+      { type: 'new',  text: 'POST /api/hr/payroll/copy: copy endpoint for period-to-period salary migration (HR/Admin only)' },
+      { type: 'new',  text: 'DELETE /api/hr/payroll?staffId=X&period=YYYY-MM: removes a specific payroll record per staff per period' },
+      { type: 'new',  text: 'Seed: May 2026 payroll added alongside April 2026 — UI shows 10 records on first load (no more empty state on current month)' },
+      { type: 'fix',  text: 'Empty payroll state now shows a clear CTA ("Add Entry") with a hint about the copy feature instead of a bare "No records" message' },
+    ],
+  },
+  {
+    version: '4.11.6',
+    date: '2026-05-25',
+    label: 'Phase 4 — Subjects Page Rebuild (4 Tabs)',
+    changes: [
+      { type: 'new',  text: 'SubjectsPage rebuilt as a tabbed shell with 4 tabs: Catalog, Curriculum, Enrollment, Warnings — shared toast hoisted to parent' },
+      { type: 'new',  text: 'Curriculum tab: two-column editor — left shows class curriculum with compulsory toggle and remove-with-enrollment-guard; right shows available subjects filtered by sectionKey compatibility' },
+      { type: 'new',  text: 'Curriculum tab: section compatibility filter (subject.sections includes "all" or the class sectionKey) and department pill filters; "Add all compatible" bulk assign' },
+      { type: 'new',  text: 'Enrollment tab: class + subject selectors (curriculum-aware), bulk "Enroll class" button, individual student search (min 2 chars), enrolled list with unenroll per student' },
+      { type: 'new',  text: 'Warnings tab: expandable class cards with belowMin/aboveMax summary badges, expandable per-student breakdown; school-wide and per-class views; Refresh button + stats strip' },
+      { type: 'new',  text: 'API client: classSubjects (counts, list, warnings, assign, bulk, update, remove) and subjectRules (list, get, create, update, remove) exported' },
+    ],
+  },
+  {
     version: '4.11.5',
     date: '2026-05-25',
     label: 'Phase 3 — Subject Enrollment Warnings Engine',

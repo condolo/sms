@@ -362,8 +362,10 @@ export const hr = {
     resolve: (id, data)=> _patch(`/hr/leave/${id}/resolve`, data),
   },
   payroll: {
-    list:   (params)   => _get('/hr/payroll', params),
-    save:   (data)     => _post('/hr/payroll', data),
+    list:   (params)              => _get('/hr/payroll', params),
+    save:   (data)                => _post('/hr/payroll', data),
+    remove: ({ staffId, period }) => _delete(`/hr/payroll?staffId=${encodeURIComponent(staffId)}&period=${encodeURIComponent(period)}`),
+    copy:   (data)                => _post('/hr/payroll/copy', data),
   },
   documents: {
     list:   (params)   => _get('/hr/documents', params),

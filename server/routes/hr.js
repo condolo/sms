@@ -133,13 +133,71 @@ router.post('/payroll', async (req, res) => {
     }
     const grossSalary = (basicSalary || 0) + (allowances || 0);
     const netSalary   = grossSalary - (deductions || 0);
+    const now         = new Date().toISOString();
 
     const record = await _model('payroll').findOneAndUpdate(
       { schoolId, staffId, payPeriod },
-      { $set: { schoolId, staffId, staffName, payPeriod, basicSalary, allowances: allowances || 0, deductions: deductions || 0, grossSalary, netSalary, updatedAt: new Date().toISOString() } },
+      {
+        $set:         { staffName, basicSalary, allowances: allowances || 0, deductions: deductions || 0, grossSalary, netSalary, updatedAt: now },
+        $setOnInsert: { id: `pay_${uuidv4().slice(0,8)}`, schoolId, staffId, payPeriod, createdAt: now },
+      },
       { upsert: true, new: true }
     ).lean();
     res.json({ record });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* POST /api/hr/payroll/copy — copy records from one period to another (skip existing) */
+router.post('/payroll/copy', async (req, res) => {
+  try {
+    const { schoolId, role } = req.jwtUser;
+    if (!HR_ROLES.includes(role)) return res.status(403).json({ error: 'HR/Admin only' });
+    const { sourcePeriod, targetPeriod } = req.body;
+    if (!sourcePeriod || !targetPeriod)    return res.status(400).json({ error: 'sourcePeriod and targetPeriod are required' });
+    if (sourcePeriod === targetPeriod)      return res.status(400).json({ error: 'sourcePeriod and targetPeriod must differ' });
+
+    const Payroll = _model('payroll');
+    const source  = await Payroll.find({ schoolId, payPeriod: sourcePeriod }).lean();
+    if (!source.length) return res.json({ copied: 0, message: `No payroll records found for ${sourcePeriod}` });
+
+    let copied = 0;
+    const now   = new Date().toISOString();
+    await Promise.all(source.map(async p => {
+      const exists = await Payroll.findOne({ schoolId, staffId: p.staffId, payPeriod: targetPeriod }).lean();
+      if (exists) return;
+      const gross = (p.basicSalary || 0) + (p.allowances || 0);
+      const net   = gross - (p.deductions || 0);
+      await Payroll.create({
+        id: `pay_${uuidv4().slice(0,8)}`,
+        schoolId, staffId: p.staffId, staffName: p.staffName,
+        payPeriod: targetPeriod,
+        basicSalary: p.basicSalary || 0,
+        allowances:  p.allowances  || 0,
+        deductions:  p.deductions  || 0,
+        grossSalary: gross, netSalary: net,
+        createdAt: now, updatedAt: now,
+      });
+      copied++;
+    }));
+
+    res.json({ copied, message: `${copied} record${copied !== 1 ? 's' : ''} copied to ${targetPeriod}` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* DELETE /api/hr/payroll?staffId=X&period=YYYY-MM — remove one payroll record */
+router.delete('/payroll', async (req, res) => {
+  try {
+    const { schoolId, role } = req.jwtUser;
+    if (!HR_ROLES.includes(role)) return res.status(403).json({ error: 'HR/Admin only' });
+    const { staffId, period } = req.query;
+    if (!staffId || !period) return res.status(400).json({ error: 'staffId and period query params required' });
+    const result = await _model('payroll').findOneAndDelete({ schoolId, staffId, payPeriod: period }).lean();
+    if (!result) return res.status(404).json({ error: 'Payroll record not found' });
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
