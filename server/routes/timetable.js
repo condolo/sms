@@ -625,9 +625,18 @@ router.post('/substitutions/absent', authMiddleware, PLAN, async (req, res) => {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION', message: 'Substitutions only apply on school days (Mon–Fri)' } });
     }
 
+    // Resolve teacher profile — accept either teacher profile id (tch_demo_2) OR user id (u_demo_t2)
+    const teacher = await _model('teachers').findOne({
+      schoolId,
+      $or: [{ id: teacherId }, { userId: teacherId }],
+    }).lean();
+
+    // Timetable slots may store teacher by userId OR by profile id — search both
+    const slotIds = [...new Set([teacherId, teacher?.userId, teacher?.id].filter(Boolean))];
+
     // All slots for this teacher on that weekday
     const slots = await _model('timetable').find({
-      schoolId, teacherId, day: dayOfWeek, isActive: true,
+      schoolId, teacherId: { $in: slotIds }, day: dayOfWeek, isActive: true,
       type: { $in: ['lesson', 'assembly', 'registration'] },
     }).lean();
 
@@ -635,14 +644,15 @@ router.post('/substitutions/absent', authMiddleware, PLAN, async (req, res) => {
       return ok(res, { substitutions: [], message: 'No lessons found for this teacher on that day.' });
     }
 
-    const teacher = await _model('teachers').findOne({ id: teacherId, schoolId }).lean();
+    // Use userId as the canonical originalTeacherId so it matches slot format
+    const canonicalTeacherId = teacher?.userId ?? teacherId;
     const teacherName = teacher
       ? `${teacher.title ?? ''} ${teacher.firstName} ${teacher.lastName}`.trim()
       : teacherId;
 
-    // Skip periods already recorded for this teacher + date
+    // Skip periods already recorded for this teacher + date (check all possible ID formats)
     const existing = await _model('substitutions')
-      .find({ schoolId, originalTeacherId: teacherId, date }).lean();
+      .find({ schoolId, originalTeacherId: { $in: slotIds }, date }).lean();
     const existingPeriods = new Set(existing.map(s => s.period));
 
     const toCreate = slots
@@ -659,7 +669,7 @@ router.post('/substitutions/absent', authMiddleware, PLAN, async (req, res) => {
         className:             s.className ?? s.classId,
         subject:               s.subject   ?? '',
         room:                  s.room      ?? '',
-        originalTeacherId:     teacherId,
+        originalTeacherId:     canonicalTeacherId,
         originalTeacherName:   teacherName,
         substituteTeacherId:   null,
         substituteTeacherName: null,
@@ -748,15 +758,24 @@ router.post('/substitutions/auto-assign', authMiddleware, PLAN, async (req, res)
 
       const candidate = allTeachers
         .map(t => {
-          const tid  = String(t.id ?? t._id ?? '');
+          // Use userId as canonical id to match slot teacherId format
+          const uid  = String(t.userId ?? '');
+          const pid  = String(t.id ?? t._id ?? '');
+          const tid  = uid || pid;
           const dept = (t.department || '').toLowerCase();
           const sameDept = !!(subjLower && dept && (
             dept.includes(subjLower.substring(0, 3)) ||
             subjLower.includes(dept.substring(0, 3))
           ));
-          return { id: tid, t, load: weeklyLoad[tid] ?? 0, sameDept };
+          const load = (weeklyLoad[uid] ?? 0) + (uid !== pid ? (weeklyLoad[pid] ?? 0) : 0);
+          return { id: tid, uid, pid, t, load, sameDept };
         })
-        .filter(({ id }) => id && !absentIds.has(id) && !busyIds.has(id) && !coveredIds.has(id))
+        .filter(({ uid, pid }) => {
+          const isBusy    = (uid && busyIds.has(uid))    || (pid && busyIds.has(pid));
+          const isAbsent  = (uid && absentIds.has(uid))  || (pid && absentIds.has(pid));
+          const isCovered = (uid && coveredIds.has(uid)) || (pid && coveredIds.has(pid));
+          return (uid || pid) && !isBusy && !isAbsent && !isCovered;
+        })
         .sort((a, b) => {
           if (a.sameDept && !b.sameDept) return -1;
           if (!a.sameDept && b.sameDept) return  1;
@@ -898,24 +917,35 @@ router.get('/available-teachers', authMiddleware, PLAN, async (req, res) => {
 
     const available = allTeachers
       .filter(t => {
-        const tid = String(t.id ?? t._id ?? '');
-        return tid && !busyIds.has(tid) && !absentIds.has(tid) && !coveredIds.has(tid);
+        // Timetable slots store teacherId as userId (u_demo_t2); profiles store userId separately.
+        // Check both profile id and userId so exclusions work regardless of which format the slot uses.
+        const uid  = String(t.userId ?? '');
+        const pid  = String(t.id ?? t._id ?? '');
+        const isBusy    = (uid && busyIds.has(uid))    || (pid && busyIds.has(pid));
+        const isAbsent  = (uid && absentIds.has(uid))  || (pid && absentIds.has(pid));
+        const isCovered = (uid && coveredIds.has(uid)) || (pid && coveredIds.has(pid));
+        return (uid || pid) && !isBusy && !isAbsent && !isCovered;
       })
       .map(t => {
-        const tid  = String(t.id ?? t._id ?? '');
+        // Use userId as the canonical tid so it matches slot teacherId format for weeklyLoad lookup
+        const uid  = String(t.userId ?? '');
+        const pid  = String(t.id ?? t._id ?? '');
+        const tid  = uid || pid;
         const dept = (t.department || '').toLowerCase();
-        // Subject similarity: compare first 3 chars of subject against department name
+        // Subject similarity: compare subject against department name
         const sameDepartment = !!(subjLower && dept && (
           dept.includes(subjLower.substring(0, 3)) ||
           subjLower.includes(dept.substring(0, 3))
         ));
+        // Weekly load: check both userId and profileId keys
+        const load = (weeklyLoad[uid] ?? 0) + (uid !== pid ? (weeklyLoad[pid] ?? 0) : 0);
         return {
           id:             tid,
           firstName:      t.firstName ?? '',
           lastName:       t.lastName  ?? '',
           name:           [t.title, t.firstName, t.lastName].filter(Boolean).join(' '),
           department:     t.department ?? null,
-          weeklyLoad:     weeklyLoad[tid] ?? 0,
+          weeklyLoad:     load,
           sameDepartment,
           suggested:      false,
         };

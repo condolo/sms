@@ -12,7 +12,7 @@
    • 25 behaviour incidents (merits + demerits)
    • 20 fee invoices — Term 2 2026
    • 14 payments  (mix: fully paid, partial, outstanding)
-   • 60 timetable slots (Form 1A + Std 4A, full week)
+   • 205 timetable slots (all 7 classes, full week)
    • 8 admissions at various pipeline stages
    ============================================================ */
 'use strict';
@@ -191,68 +191,228 @@ const PERIODS_PRI = ['1','2','Break','3','4','5'];
 
 const F1A_TIMETABLE = [
   // Monday
-  { day:'monday',    period:'1', periodNumber:1, subjectId:'subj_demo_math', teacherId:'u_demo_t2',  room:'F1A' },
-  { day:'monday',    period:'2', periodNumber:2, subjectId:'subj_demo_eng',  teacherId:'u_demo_t3',  room:'F1A' },
-  { day:'monday',    period:'3', periodNumber:3, subjectId:'subj_demo_kisw', teacherId:'u_demo_t4',  room:'F1A' },
-  { day:'monday',    period:'4', periodNumber:4, subjectId:'subj_demo_bio',  teacherId:'u_demo_t6',  room:'F1A' },
-  { day:'monday',    period:'5', periodNumber:5, subjectId:'subj_demo_hist', teacherId:'u_demo_t7',  room:'F1A' },
-  { day:'monday',    period:'6', periodNumber:6, subjectId:'subj_demo_pe',   teacherId:'u_demo_t10', room:'Field' },
+  { day:'monday',    period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t2',  room:'F1A' },
+  { day:'monday',    period:'2', periodNumber:2, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F1A' },
+  { day:'monday',    period:'3', periodNumber:3, subjectId:'subj_demo_kisw', subject:'Kiswahili',           teacherId:'u_demo_t4',  room:'F1A' },
+  { day:'monday',    period:'4', periodNumber:4, subjectId:'subj_demo_bio',  subject:'Biology',             teacherId:'u_demo_t6',  room:'F1A' },
+  { day:'monday',    period:'5', periodNumber:5, subjectId:'subj_demo_hist', subject:'History & Government',teacherId:'u_demo_t7',  room:'F1A' },
+  { day:'monday',    period:'6', periodNumber:6, subjectId:'subj_demo_pe',   subject:'PE & Sports',         teacherId:'u_demo_t10', room:'Field' },
   // Tuesday
-  { day:'tuesday',   period:'1', periodNumber:1, subjectId:'subj_demo_phy',  teacherId:'u_demo_t5',  room:'Lab 1' },
-  { day:'tuesday',   period:'2', periodNumber:2, subjectId:'subj_demo_math', teacherId:'u_demo_t2',  room:'F1A' },
-  { day:'tuesday',   period:'3', periodNumber:3, subjectId:'subj_demo_eng',  teacherId:'u_demo_t3',  room:'F1A' },
-  { day:'tuesday',   period:'4', periodNumber:4, subjectId:'subj_demo_chem', teacherId:'u_demo_t5',  room:'Lab 1' },
-  { day:'tuesday',   period:'5', periodNumber:5, subjectId:'subj_demo_geo',  teacherId:'u_demo_t7',  room:'F1A' },
-  { day:'tuesday',   period:'6', periodNumber:6, subjectId:'subj_demo_ict',  teacherId:'u_demo_t9',  room:'Computer Lab' },
+  { day:'tuesday',   period:'1', periodNumber:1, subjectId:'subj_demo_phy',  subject:'Physics',             teacherId:'u_demo_t5',  room:'Lab 1' },
+  { day:'tuesday',   period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t2',  room:'F1A' },
+  { day:'tuesday',   period:'3', periodNumber:3, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F1A' },
+  { day:'tuesday',   period:'4', periodNumber:4, subjectId:'subj_demo_chem', subject:'Chemistry',           teacherId:'u_demo_t5',  room:'Lab 1' },
+  { day:'tuesday',   period:'5', periodNumber:5, subjectId:'subj_demo_geo',  subject:'Geography',           teacherId:'u_demo_t7',  room:'F1A' },
+  { day:'tuesday',   period:'6', periodNumber:6, subjectId:'subj_demo_ict',  subject:'ICT',                 teacherId:'u_demo_t9',  room:'Computer Lab' },
   // Wednesday
-  { day:'wednesday', period:'1', periodNumber:1, subjectId:'subj_demo_math', teacherId:'u_demo_t2',  room:'F1A' },
-  { day:'wednesday', period:'2', periodNumber:2, subjectId:'subj_demo_kisw', teacherId:'u_demo_t4',  room:'F1A' },
-  { day:'wednesday', period:'3', periodNumber:3, subjectId:'subj_demo_bio',  teacherId:'u_demo_t6',  room:'Lab 2' },
-  { day:'wednesday', period:'4', periodNumber:4, subjectId:'subj_demo_eng',  teacherId:'u_demo_t3',  room:'F1A' },
-  { day:'wednesday', period:'5', periodNumber:5, subjectId:'subj_demo_bs',   teacherId:'u_demo_t8',  room:'F1A' },
-  { day:'wednesday', period:'6', periodNumber:6, subjectId:'subj_demo_cre',  teacherId:'u_demo_t3',  room:'F1A' },
+  { day:'wednesday', period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t2',  room:'F1A' },
+  { day:'wednesday', period:'2', periodNumber:2, subjectId:'subj_demo_kisw', subject:'Kiswahili',           teacherId:'u_demo_t4',  room:'F1A' },
+  { day:'wednesday', period:'3', periodNumber:3, subjectId:'subj_demo_bio',  subject:'Biology',             teacherId:'u_demo_t6',  room:'Lab 2' },
+  { day:'wednesday', period:'4', periodNumber:4, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F1A' },
+  { day:'wednesday', period:'5', periodNumber:5, subjectId:'subj_demo_bs',   subject:'Business Studies',    teacherId:'u_demo_t8',  room:'F1A' },
+  { day:'wednesday', period:'6', periodNumber:6, subjectId:'subj_demo_cre',  subject:'CRE',                 teacherId:'u_demo_t3',  room:'F1A' },
   // Thursday
-  { day:'thursday',  period:'1', periodNumber:1, subjectId:'subj_demo_phy',  teacherId:'u_demo_t5',  room:'Lab 1' },
-  { day:'thursday',  period:'2', periodNumber:2, subjectId:'subj_demo_math', teacherId:'u_demo_t2',  room:'F1A' },
-  { day:'thursday',  period:'3', periodNumber:3, subjectId:'subj_demo_hist', teacherId:'u_demo_t7',  room:'F1A' },
-  { day:'thursday',  period:'4', periodNumber:4, subjectId:'subj_demo_kisw', teacherId:'u_demo_t4',  room:'F1A' },
-  { day:'thursday',  period:'5', periodNumber:5, subjectId:'subj_demo_ict',  teacherId:'u_demo_t9',  room:'Computer Lab' },
-  { day:'thursday',  period:'6', periodNumber:6, subjectId:'subj_demo_chem', teacherId:'u_demo_t5',  room:'Lab 1' },
+  { day:'thursday',  period:'1', periodNumber:1, subjectId:'subj_demo_phy',  subject:'Physics',             teacherId:'u_demo_t5',  room:'Lab 1' },
+  { day:'thursday',  period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t2',  room:'F1A' },
+  { day:'thursday',  period:'3', periodNumber:3, subjectId:'subj_demo_hist', subject:'History & Government',teacherId:'u_demo_t7',  room:'F1A' },
+  { day:'thursday',  period:'4', periodNumber:4, subjectId:'subj_demo_kisw', subject:'Kiswahili',           teacherId:'u_demo_t4',  room:'F1A' },
+  { day:'thursday',  period:'5', periodNumber:5, subjectId:'subj_demo_ict',  subject:'ICT',                 teacherId:'u_demo_t9',  room:'Computer Lab' },
+  { day:'thursday',  period:'6', periodNumber:6, subjectId:'subj_demo_chem', subject:'Chemistry',           teacherId:'u_demo_t5',  room:'Lab 1' },
   // Friday
-  { day:'friday',    period:'1', periodNumber:1, subjectId:'subj_demo_eng',  teacherId:'u_demo_t3',  room:'F1A' },
-  { day:'friday',    period:'2', periodNumber:2, subjectId:'subj_demo_math', teacherId:'u_demo_t2',  room:'F1A' },
-  { day:'friday',    period:'3', periodNumber:3, subjectId:'subj_demo_geo',  teacherId:'u_demo_t7',  room:'F1A' },
-  { day:'friday',    period:'4', periodNumber:4, subjectId:'subj_demo_bio',  teacherId:'u_demo_t6',  room:'Lab 2' },
-  { day:'friday',    period:'5', periodNumber:5, subjectId:'subj_demo_bs',   teacherId:'u_demo_t8',  room:'F1A' },
-  { day:'friday',    period:'6', periodNumber:6, subjectId:'subj_demo_pe',   teacherId:'u_demo_t10', room:'Field' },
+  { day:'friday',    period:'1', periodNumber:1, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F1A' },
+  { day:'friday',    period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t2',  room:'F1A' },
+  { day:'friday',    period:'3', periodNumber:3, subjectId:'subj_demo_geo',  subject:'Geography',           teacherId:'u_demo_t7',  room:'F1A' },
+  { day:'friday',    period:'4', periodNumber:4, subjectId:'subj_demo_bio',  subject:'Biology',             teacherId:'u_demo_t6',  room:'Lab 2' },
+  { day:'friday',    period:'5', periodNumber:5, subjectId:'subj_demo_bs',   subject:'Business Studies',    teacherId:'u_demo_t8',  room:'F1A' },
+  { day:'friday',    period:'6', periodNumber:6, subjectId:'subj_demo_pe',   subject:'PE & Sports',         teacherId:'u_demo_t10', room:'Field' },
 ];
 
 const STD4A_TIMETABLE = [
-  { day:'monday',    period:'1', periodNumber:1, subjectId:'subj_demo_math', teacherId:'u_demo_t2',  room:'P4A' },
-  { day:'monday',    period:'2', periodNumber:2, subjectId:'subj_demo_eng',  teacherId:'u_demo_t3',  room:'P4A' },
-  { day:'monday',    period:'3', periodNumber:3, subjectId:'subj_demo_sci',  teacherId:'u_demo_t6',  room:'P4A' },
-  { day:'monday',    period:'4', periodNumber:4, subjectId:'subj_demo_kisw', teacherId:'u_demo_t4',  room:'P4A' },
-  { day:'monday',    period:'5', periodNumber:5, subjectId:'subj_demo_pe',   teacherId:'u_demo_t10', room:'Field' },
-  { day:'tuesday',   period:'1', periodNumber:1, subjectId:'subj_demo_eng',  teacherId:'u_demo_t3',  room:'P4A' },
-  { day:'tuesday',   period:'2', periodNumber:2, subjectId:'subj_demo_math', teacherId:'u_demo_t2',  room:'P4A' },
-  { day:'tuesday',   period:'3', periodNumber:3, subjectId:'subj_demo_ss',   teacherId:'u_demo_t10', room:'P4A' },
-  { day:'tuesday',   period:'4', periodNumber:4, subjectId:'subj_demo_sci',  teacherId:'u_demo_t6',  room:'P4A' },
-  { day:'tuesday',   period:'5', periodNumber:5, subjectId:'subj_demo_ict',  teacherId:'u_demo_t9',  room:'Computer Lab' },
-  { day:'wednesday', period:'1', periodNumber:1, subjectId:'subj_demo_math', teacherId:'u_demo_t2',  room:'P4A' },
-  { day:'wednesday', period:'2', periodNumber:2, subjectId:'subj_demo_kisw', teacherId:'u_demo_t4',  room:'P4A' },
-  { day:'wednesday', period:'3', periodNumber:3, subjectId:'subj_demo_eng',  teacherId:'u_demo_t3',  room:'P4A' },
-  { day:'wednesday', period:'4', periodNumber:4, subjectId:'subj_demo_cre',  teacherId:'u_demo_t3',  room:'P4A' },
-  { day:'wednesday', period:'5', periodNumber:5, subjectId:'subj_demo_ss',   teacherId:'u_demo_t10', room:'P4A' },
-  { day:'thursday',  period:'1', periodNumber:1, subjectId:'subj_demo_sci',  teacherId:'u_demo_t6',  room:'P4A' },
-  { day:'thursday',  period:'2', periodNumber:2, subjectId:'subj_demo_math', teacherId:'u_demo_t2',  room:'P4A' },
-  { day:'thursday',  period:'3', periodNumber:3, subjectId:'subj_demo_eng',  teacherId:'u_demo_t3',  room:'P4A' },
-  { day:'thursday',  period:'4', periodNumber:4, subjectId:'subj_demo_kisw', teacherId:'u_demo_t4',  room:'P4A' },
-  { day:'thursday',  period:'5', periodNumber:5, subjectId:'subj_demo_pe',   teacherId:'u_demo_t10', room:'Field' },
-  { day:'friday',    period:'1', periodNumber:1, subjectId:'subj_demo_eng',  teacherId:'u_demo_t3',  room:'P4A' },
-  { day:'friday',    period:'2', periodNumber:2, subjectId:'subj_demo_math', teacherId:'u_demo_t2',  room:'P4A' },
-  { day:'friday',    period:'3', periodNumber:3, subjectId:'subj_demo_ss',   teacherId:'u_demo_t10', room:'P4A' },
-  { day:'friday',    period:'4', periodNumber:4, subjectId:'subj_demo_sci',  teacherId:'u_demo_t6',  room:'P4A' },
-  { day:'friday',    period:'5', periodNumber:5, subjectId:'subj_demo_cre',  teacherId:'u_demo_t3',  room:'P4A' },
+  { day:'monday',    period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_t2',  room:'P4A' },
+  { day:'monday',    period:'2', periodNumber:2, subjectId:'subj_demo_eng',  subject:'English Language', teacherId:'u_demo_t3',  room:'P4A' },
+  { day:'monday',    period:'3', periodNumber:3, subjectId:'subj_demo_sci',  subject:'Science',          teacherId:'u_demo_t6',  room:'P4A' },
+  { day:'monday',    period:'4', periodNumber:4, subjectId:'subj_demo_kisw', subject:'Kiswahili',        teacherId:'u_demo_t4',  room:'P4A' },
+  { day:'monday',    period:'5', periodNumber:5, subjectId:'subj_demo_pe',   subject:'PE & Sports',      teacherId:'u_demo_t10', room:'Field' },
+  { day:'tuesday',   period:'1', periodNumber:1, subjectId:'subj_demo_eng',  subject:'English Language', teacherId:'u_demo_t3',  room:'P4A' },
+  { day:'tuesday',   period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_t2',  room:'P4A' },
+  { day:'tuesday',   period:'3', periodNumber:3, subjectId:'subj_demo_ss',   subject:'Social Studies',   teacherId:'u_demo_t10', room:'P4A' },
+  { day:'tuesday',   period:'4', periodNumber:4, subjectId:'subj_demo_sci',  subject:'Science',          teacherId:'u_demo_t6',  room:'P4A' },
+  { day:'tuesday',   period:'5', periodNumber:5, subjectId:'subj_demo_ict',  subject:'ICT',              teacherId:'u_demo_t9',  room:'Computer Lab' },
+  { day:'wednesday', period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_t2',  room:'P4A' },
+  { day:'wednesday', period:'2', periodNumber:2, subjectId:'subj_demo_kisw', subject:'Kiswahili',        teacherId:'u_demo_t4',  room:'P4A' },
+  { day:'wednesday', period:'3', periodNumber:3, subjectId:'subj_demo_eng',  subject:'English Language', teacherId:'u_demo_t3',  room:'P4A' },
+  { day:'wednesday', period:'4', periodNumber:4, subjectId:'subj_demo_cre',  subject:'CRE',              teacherId:'u_demo_t3',  room:'P4A' },
+  { day:'wednesday', period:'5', periodNumber:5, subjectId:'subj_demo_ss',   subject:'Social Studies',   teacherId:'u_demo_t10', room:'P4A' },
+  { day:'thursday',  period:'1', periodNumber:1, subjectId:'subj_demo_sci',  subject:'Science',          teacherId:'u_demo_t6',  room:'P4A' },
+  { day:'thursday',  period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_t2',  room:'P4A' },
+  { day:'thursday',  period:'3', periodNumber:3, subjectId:'subj_demo_eng',  subject:'English Language', teacherId:'u_demo_t3',  room:'P4A' },
+  { day:'thursday',  period:'4', periodNumber:4, subjectId:'subj_demo_kisw', subject:'Kiswahili',        teacherId:'u_demo_t4',  room:'P4A' },
+  { day:'thursday',  period:'5', periodNumber:5, subjectId:'subj_demo_pe',   subject:'PE & Sports',      teacherId:'u_demo_t10', room:'Field' },
+  { day:'friday',    period:'1', periodNumber:1, subjectId:'subj_demo_eng',  subject:'English Language', teacherId:'u_demo_t3',  room:'P4A' },
+  { day:'friday',    period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_t2',  room:'P4A' },
+  { day:'friday',    period:'3', periodNumber:3, subjectId:'subj_demo_ss',   subject:'Social Studies',   teacherId:'u_demo_t10', room:'P4A' },
+  { day:'friday',    period:'4', periodNumber:4, subjectId:'subj_demo_sci',  subject:'Science',          teacherId:'u_demo_t6',  room:'P4A' },
+  { day:'friday',    period:'5', periodNumber:5, subjectId:'subj_demo_cre',  subject:'CRE',              teacherId:'u_demo_t3',  room:'P4A' },
+];
+
+/* ── Timetable — Standard 5A (primary, 5 lesson periods/day) ── */
+const STD5A_TIMETABLE = [
+  { day:'monday',    period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_t2',  room:'P5A' },
+  { day:'monday',    period:'2', periodNumber:2, subjectId:'subj_demo_eng',  subject:'English Language', teacherId:'u_demo_t3',  room:'P5A' },
+  { day:'monday',    period:'3', periodNumber:3, subjectId:'subj_demo_sci',  subject:'Science',          teacherId:'u_demo_t6',  room:'P5A' },
+  { day:'monday',    period:'4', periodNumber:4, subjectId:'subj_demo_kisw', subject:'Kiswahili',        teacherId:'u_demo_t4',  room:'P5A' },
+  { day:'monday',    period:'5', periodNumber:5, subjectId:'subj_demo_pe',   subject:'PE & Sports',      teacherId:'u_demo_t10', room:'Field' },
+  { day:'tuesday',   period:'1', periodNumber:1, subjectId:'subj_demo_eng',  subject:'English Language', teacherId:'u_demo_t3',  room:'P5A' },
+  { day:'tuesday',   period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_t2',  room:'P5A' },
+  { day:'tuesday',   period:'3', periodNumber:3, subjectId:'subj_demo_ss',   subject:'Social Studies',   teacherId:'u_demo_t10', room:'P5A' },
+  { day:'tuesday',   period:'4', periodNumber:4, subjectId:'subj_demo_sci',  subject:'Science',          teacherId:'u_demo_t6',  room:'P5A' },
+  { day:'tuesday',   period:'5', periodNumber:5, subjectId:'subj_demo_ict',  subject:'ICT',              teacherId:'u_demo_t9',  room:'Computer Lab' },
+  { day:'wednesday', period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_t9',  room:'P5A' },
+  { day:'wednesday', period:'2', periodNumber:2, subjectId:'subj_demo_kisw', subject:'Kiswahili',        teacherId:'u_demo_t4',  room:'P5A' },
+  { day:'wednesday', period:'3', periodNumber:3, subjectId:'subj_demo_eng',  subject:'English Language', teacherId:'u_demo_t3',  room:'P5A' },
+  { day:'wednesday', period:'4', periodNumber:4, subjectId:'subj_demo_cre',  subject:'CRE',              teacherId:'u_demo_t8',  room:'P5A' },
+  { day:'wednesday', period:'5', periodNumber:5, subjectId:'subj_demo_ss',   subject:'Social Studies',   teacherId:'u_demo_t10', room:'P5A' },
+  { day:'thursday',  period:'1', periodNumber:1, subjectId:'subj_demo_sci',  subject:'Science',          teacherId:'u_demo_t6',  room:'P5A' },
+  { day:'thursday',  period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_t2',  room:'P5A' },
+  { day:'thursday',  period:'3', periodNumber:3, subjectId:'subj_demo_eng',  subject:'English Language', teacherId:'u_demo_t3',  room:'P5A' },
+  { day:'thursday',  period:'4', periodNumber:4, subjectId:'subj_demo_kisw', subject:'Kiswahili',        teacherId:'u_demo_t4',  room:'P5A' },
+  { day:'thursday',  period:'5', periodNumber:5, subjectId:'subj_demo_pe',   subject:'PE & Sports',      teacherId:'u_demo_t10', room:'Field' },
+  { day:'friday',    period:'1', periodNumber:1, subjectId:'subj_demo_eng',  subject:'English Language', teacherId:'u_demo_t3',  room:'P5A' },
+  { day:'friday',    period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_t2',  room:'P5A' },
+  { day:'friday',    period:'3', periodNumber:3, subjectId:'subj_demo_ss',   subject:'Social Studies',   teacherId:'u_demo_t10', room:'P5A' },
+  { day:'friday',    period:'4', periodNumber:4, subjectId:'subj_demo_sci',  subject:'Science',          teacherId:'u_demo_t6',  room:'P5A' },
+  { day:'friday',    period:'5', periodNumber:5, subjectId:'subj_demo_cre',  subject:'CRE',              teacherId:'u_demo_t8',  room:'P5A' },
+];
+
+/* ── Timetable — Standard 6A (primary, 5 lesson periods/day) ── */
+const STD6A_TIMETABLE = [
+  { day:'monday',    period:'1', periodNumber:1, subjectId:'subj_demo_eng',  subject:'English Language', teacherId:'u_demo_t3',  room:'P6A' },
+  { day:'monday',    period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_t9',  room:'P6A' },
+  { day:'monday',    period:'3', periodNumber:3, subjectId:'subj_demo_kisw', subject:'Kiswahili',        teacherId:'u_demo_t4',  room:'P6A' },
+  { day:'monday',    period:'4', periodNumber:4, subjectId:'subj_demo_sci',  subject:'Science',          teacherId:'u_demo_t6',  room:'P6A' },
+  { day:'monday',    period:'5', periodNumber:5, subjectId:'subj_demo_pe',   subject:'PE & Sports',      teacherId:'u_demo_t10', room:'Field' },
+  { day:'tuesday',   period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_t9',  room:'P6A' },
+  { day:'tuesday',   period:'2', periodNumber:2, subjectId:'subj_demo_eng',  subject:'English Language', teacherId:'u_demo_t3',  room:'P6A' },
+  { day:'tuesday',   period:'3', periodNumber:3, subjectId:'subj_demo_sci',  subject:'Science',          teacherId:'u_demo_t6',  room:'P6A' },
+  { day:'tuesday',   period:'4', periodNumber:4, subjectId:'subj_demo_ss',   subject:'Social Studies',   teacherId:'u_demo_t10', room:'P6A' },
+  { day:'tuesday',   period:'5', periodNumber:5, subjectId:'subj_demo_ict',  subject:'ICT',              teacherId:'u_demo_t9',  room:'Computer Lab' },
+  { day:'wednesday', period:'1', periodNumber:1, subjectId:'subj_demo_kisw', subject:'Kiswahili',        teacherId:'u_demo_t4',  room:'P6A' },
+  { day:'wednesday', period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_t2',  room:'P6A' },
+  { day:'wednesday', period:'3', periodNumber:3, subjectId:'subj_demo_eng',  subject:'English Language', teacherId:'u_demo_t3',  room:'P6A' },
+  { day:'wednesday', period:'4', periodNumber:4, subjectId:'subj_demo_ss',   subject:'Social Studies',   teacherId:'u_demo_t10', room:'P6A' },
+  { day:'wednesday', period:'5', periodNumber:5, subjectId:'subj_demo_cre',  subject:'CRE',              teacherId:'u_demo_t8',  room:'P6A' },
+  { day:'thursday',  period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_t2',  room:'P6A' },
+  { day:'thursday',  period:'2', periodNumber:2, subjectId:'subj_demo_sci',  subject:'Science',          teacherId:'u_demo_t6',  room:'P6A' },
+  { day:'thursday',  period:'3', periodNumber:3, subjectId:'subj_demo_eng',  subject:'English Language', teacherId:'u_demo_t3',  room:'P6A' },
+  { day:'thursday',  period:'4', periodNumber:4, subjectId:'subj_demo_kisw', subject:'Kiswahili',        teacherId:'u_demo_t4',  room:'P6A' },
+  { day:'thursday',  period:'5', periodNumber:5, subjectId:'subj_demo_pe',   subject:'PE & Sports',      teacherId:'u_demo_t10', room:'Field' },
+  { day:'friday',    period:'1', periodNumber:1, subjectId:'subj_demo_sci',  subject:'Science',          teacherId:'u_demo_t6',  room:'P6A' },
+  { day:'friday',    period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',      teacherId:'u_demo_t2',  room:'P6A' },
+  { day:'friday',    period:'3', periodNumber:3, subjectId:'subj_demo_eng',  subject:'English Language', teacherId:'u_demo_t3',  room:'P6A' },
+  { day:'friday',    period:'4', periodNumber:4, subjectId:'subj_demo_kisw', subject:'Kiswahili',        teacherId:'u_demo_t4',  room:'P6A' },
+  { day:'friday',    period:'5', periodNumber:5, subjectId:'subj_demo_ict',  subject:'ICT',              teacherId:'u_demo_t9',  room:'Computer Lab' },
+];
+
+/* ── Timetable — Form 2A (secondary, 6 lesson periods/day) ── */
+const F2A_TIMETABLE = [
+  { day:'monday',    period:'1', periodNumber:1, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F2A' },
+  { day:'monday',    period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t9',  room:'F2A' },
+  { day:'monday',    period:'3', periodNumber:3, subjectId:'subj_demo_kisw', subject:'Kiswahili',           teacherId:'u_demo_t4',  room:'F2A' },
+  { day:'monday',    period:'4', periodNumber:4, subjectId:'subj_demo_chem', subject:'Chemistry',           teacherId:'u_demo_t5',  room:'Lab 1' },
+  { day:'monday',    period:'5', periodNumber:5, subjectId:'subj_demo_hist', subject:'History & Government',teacherId:'u_demo_t7',  room:'F2A' },
+  { day:'monday',    period:'6', periodNumber:6, subjectId:'subj_demo_pe',   subject:'PE & Sports',         teacherId:'u_demo_t10', room:'Field' },
+  { day:'tuesday',   period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t9',  room:'F2A' },
+  { day:'tuesday',   period:'2', periodNumber:2, subjectId:'subj_demo_phy',  subject:'Physics',             teacherId:'u_demo_t5',  room:'Lab 1' },
+  { day:'tuesday',   period:'3', periodNumber:3, subjectId:'subj_demo_bio',  subject:'Biology',             teacherId:'u_demo_t6',  room:'Lab 2' },
+  { day:'tuesday',   period:'4', periodNumber:4, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F2A' },
+  { day:'tuesday',   period:'5', periodNumber:5, subjectId:'subj_demo_ict',  subject:'ICT',                 teacherId:'u_demo_t9',  room:'Computer Lab' },
+  { day:'tuesday',   period:'6', periodNumber:6, subjectId:'subj_demo_bs',   subject:'Business Studies',    teacherId:'u_demo_t8',  room:'F2A' },
+  { day:'wednesday', period:'1', periodNumber:1, subjectId:'subj_demo_kisw', subject:'Kiswahili',           teacherId:'u_demo_t4',  room:'F2A' },
+  { day:'wednesday', period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t9',  room:'F2A' },
+  { day:'wednesday', period:'3', periodNumber:3, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F2A' },
+  { day:'wednesday', period:'4', periodNumber:4, subjectId:'subj_demo_hist', subject:'History & Government',teacherId:'u_demo_t7',  room:'F2A' },
+  { day:'wednesday', period:'5', periodNumber:5, subjectId:'subj_demo_geo',  subject:'Geography',           teacherId:'u_demo_t7',  room:'F2A' },
+  { day:'wednesday', period:'6', periodNumber:6, subjectId:'subj_demo_cre',  subject:'CRE',                 teacherId:'u_demo_t8',  room:'F2A' },
+  { day:'thursday',  period:'1', periodNumber:1, subjectId:'subj_demo_bio',  subject:'Biology',             teacherId:'u_demo_t6',  room:'Lab 2' },
+  { day:'thursday',  period:'2', periodNumber:2, subjectId:'subj_demo_phy',  subject:'Physics',             teacherId:'u_demo_t5',  room:'Lab 1' },
+  { day:'thursday',  period:'3', periodNumber:3, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t9',  room:'F2A' },
+  { day:'thursday',  period:'4', periodNumber:4, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F2A' },
+  { day:'thursday',  period:'5', periodNumber:5, subjectId:'subj_demo_bs',   subject:'Business Studies',    teacherId:'u_demo_t8',  room:'F2A' },
+  { day:'thursday',  period:'6', periodNumber:6, subjectId:'subj_demo_chem', subject:'Chemistry',           teacherId:'u_demo_t5',  room:'Lab 1' },
+  { day:'friday',    period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t9',  room:'F2A' },
+  { day:'friday',    period:'2', periodNumber:2, subjectId:'subj_demo_kisw', subject:'Kiswahili',           teacherId:'u_demo_t4',  room:'F2A' },
+  { day:'friday',    period:'3', periodNumber:3, subjectId:'subj_demo_geo',  subject:'Geography',           teacherId:'u_demo_t7',  room:'F2A' },
+  { day:'friday',    period:'4', periodNumber:4, subjectId:'subj_demo_bio',  subject:'Biology',             teacherId:'u_demo_t6',  room:'Lab 2' },
+  { day:'friday',    period:'5', periodNumber:5, subjectId:'subj_demo_ict',  subject:'ICT',                 teacherId:'u_demo_t9',  room:'Computer Lab' },
+  { day:'friday',    period:'6', periodNumber:6, subjectId:'subj_demo_pe',   subject:'PE & Sports',         teacherId:'u_demo_t10', room:'Field' },
+];
+
+/* ── Timetable — Form 3A (secondary, 6 lesson periods/day) ── */
+const F3A_TIMETABLE = [
+  { day:'monday',    period:'1', periodNumber:1, subjectId:'subj_demo_kisw', subject:'Kiswahili',           teacherId:'u_demo_t4',  room:'F3A' },
+  { day:'monday',    period:'2', periodNumber:2, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F3A' },
+  { day:'monday',    period:'3', periodNumber:3, subjectId:'subj_demo_chem', subject:'Chemistry',           teacherId:'u_demo_t5',  room:'Lab 1' },
+  { day:'monday',    period:'4', periodNumber:4, subjectId:'subj_demo_geo',  subject:'Geography',           teacherId:'u_demo_t7',  room:'F3A' },
+  { day:'monday',    period:'5', periodNumber:5, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t2',  room:'F3A' },
+  { day:'monday',    period:'6', periodNumber:6, subjectId:'subj_demo_pe',   subject:'PE & Sports',         teacherId:'u_demo_t10', room:'Field' },
+  { day:'tuesday',   period:'1', periodNumber:1, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F3A' },
+  { day:'tuesday',   period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t2',  room:'F3A' },
+  { day:'tuesday',   period:'3', periodNumber:3, subjectId:'subj_demo_phy',  subject:'Physics',             teacherId:'u_demo_t5',  room:'Lab 1' },
+  { day:'tuesday',   period:'4', periodNumber:4, subjectId:'subj_demo_bio',  subject:'Biology',             teacherId:'u_demo_t6',  room:'Lab 2' },
+  { day:'tuesday',   period:'5', periodNumber:5, subjectId:'subj_demo_bs',   subject:'Business Studies',    teacherId:'u_demo_t8',  room:'F3A' },
+  { day:'tuesday',   period:'6', periodNumber:6, subjectId:'subj_demo_ict',  subject:'ICT',                 teacherId:'u_demo_t9',  room:'Computer Lab' },
+  { day:'wednesday', period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t2',  room:'F3A' },
+  { day:'wednesday', period:'2', periodNumber:2, subjectId:'subj_demo_bio',  subject:'Biology',             teacherId:'u_demo_t6',  room:'Lab 2' },
+  { day:'wednesday', period:'3', periodNumber:3, subjectId:'subj_demo_kisw', subject:'Kiswahili',           teacherId:'u_demo_t4',  room:'F3A' },
+  { day:'wednesday', period:'4', periodNumber:4, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F3A' },
+  { day:'wednesday', period:'5', periodNumber:5, subjectId:'subj_demo_hist', subject:'History & Government',teacherId:'u_demo_t7',  room:'F3A' },
+  { day:'wednesday', period:'6', periodNumber:6, subjectId:'subj_demo_cre',  subject:'CRE',                 teacherId:'u_demo_t8',  room:'F3A' },
+  { day:'thursday',  period:'1', periodNumber:1, subjectId:'subj_demo_phy',  subject:'Physics',             teacherId:'u_demo_t5',  room:'Lab 1' },
+  { day:'thursday',  period:'2', periodNumber:2, subjectId:'subj_demo_chem', subject:'Chemistry',           teacherId:'u_demo_t5',  room:'Lab 1' },
+  { day:'thursday',  period:'3', periodNumber:3, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F3A' },
+  { day:'thursday',  period:'4', periodNumber:4, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t2',  room:'F3A' },
+  { day:'thursday',  period:'5', periodNumber:5, subjectId:'subj_demo_geo',  subject:'Geography',           teacherId:'u_demo_t7',  room:'F3A' },
+  { day:'thursday',  period:'6', periodNumber:6, subjectId:'subj_demo_bs',   subject:'Business Studies',    teacherId:'u_demo_t8',  room:'F3A' },
+  { day:'friday',    period:'1', periodNumber:1, subjectId:'subj_demo_bio',  subject:'Biology',             teacherId:'u_demo_t6',  room:'Lab 2' },
+  { day:'friday',    period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t2',  room:'F3A' },
+  { day:'friday',    period:'3', periodNumber:3, subjectId:'subj_demo_hist', subject:'History & Government',teacherId:'u_demo_t7',  room:'F3A' },
+  { day:'friday',    period:'4', periodNumber:4, subjectId:'subj_demo_kisw', subject:'Kiswahili',           teacherId:'u_demo_t4',  room:'F3A' },
+  { day:'friday',    period:'5', periodNumber:5, subjectId:'subj_demo_ict',  subject:'ICT',                 teacherId:'u_demo_t9',  room:'Computer Lab' },
+  { day:'friday',    period:'6', periodNumber:6, subjectId:'subj_demo_pe',   subject:'PE & Sports',         teacherId:'u_demo_t10', room:'Field' },
+];
+
+/* ── Timetable — Form 4A (secondary, 6 lesson periods/day) ── */
+const F4A_TIMETABLE = [
+  { day:'monday',    period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t2',  room:'F4A' },
+  { day:'monday',    period:'2', periodNumber:2, subjectId:'subj_demo_chem', subject:'Chemistry',           teacherId:'u_demo_t5',  room:'Lab 1' },
+  { day:'monday',    period:'3', periodNumber:3, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F4A' },
+  { day:'monday',    period:'4', periodNumber:4, subjectId:'subj_demo_hist', subject:'History & Government',teacherId:'u_demo_t7',  room:'F4A' },
+  { day:'monday',    period:'5', periodNumber:5, subjectId:'subj_demo_bio',  subject:'Biology',             teacherId:'u_demo_t6',  room:'Lab 2' },
+  { day:'monday',    period:'6', periodNumber:6, subjectId:'subj_demo_pe',   subject:'PE & Sports',         teacherId:'u_demo_t10', room:'Field' },
+  { day:'tuesday',   period:'1', periodNumber:1, subjectId:'subj_demo_kisw', subject:'Kiswahili',           teacherId:'u_demo_t4',  room:'F4A' },
+  { day:'tuesday',   period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t2',  room:'F4A' },
+  { day:'tuesday',   period:'3', periodNumber:3, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F4A' },
+  { day:'tuesday',   period:'4', periodNumber:4, subjectId:'subj_demo_phy',  subject:'Physics',             teacherId:'u_demo_t5',  room:'Lab 1' },
+  { day:'tuesday',   period:'5', periodNumber:5, subjectId:'subj_demo_geo',  subject:'Geography',           teacherId:'u_demo_t7',  room:'F4A' },
+  { day:'tuesday',   period:'6', periodNumber:6, subjectId:'subj_demo_bs',   subject:'Business Studies',    teacherId:'u_demo_t8',  room:'F4A' },
+  { day:'wednesday', period:'1', periodNumber:1, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F4A' },
+  { day:'wednesday', period:'2', periodNumber:2, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t2',  room:'F4A' },
+  { day:'wednesday', period:'3', periodNumber:3, subjectId:'subj_demo_bio',  subject:'Biology',             teacherId:'u_demo_t6',  room:'Lab 2' },
+  { day:'wednesday', period:'4', periodNumber:4, subjectId:'subj_demo_chem', subject:'Chemistry',           teacherId:'u_demo_t5',  room:'Lab 1' },
+  { day:'wednesday', period:'5', periodNumber:5, subjectId:'subj_demo_ict',  subject:'ICT',                 teacherId:'u_demo_t9',  room:'Computer Lab' },
+  { day:'wednesday', period:'6', periodNumber:6, subjectId:'subj_demo_hist', subject:'History & Government',teacherId:'u_demo_t7',  room:'F4A' },
+  { day:'thursday',  period:'1', periodNumber:1, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t2',  room:'F4A' },
+  { day:'thursday',  period:'2', periodNumber:2, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F4A' },
+  { day:'thursday',  period:'3', periodNumber:3, subjectId:'subj_demo_kisw', subject:'Kiswahili',           teacherId:'u_demo_t4',  room:'F4A' },
+  { day:'thursday',  period:'4', periodNumber:4, subjectId:'subj_demo_geo',  subject:'Geography',           teacherId:'u_demo_t7',  room:'F4A' },
+  { day:'thursday',  period:'5', periodNumber:5, subjectId:'subj_demo_phy',  subject:'Physics',             teacherId:'u_demo_t5',  room:'Lab 1' },
+  { day:'thursday',  period:'6', periodNumber:6, subjectId:'subj_demo_cre',  subject:'CRE',                 teacherId:'u_demo_t8',  room:'F4A' },
+  { day:'friday',    period:'1', periodNumber:1, subjectId:'subj_demo_bs',   subject:'Business Studies',    teacherId:'u_demo_t8',  room:'F4A' },
+  { day:'friday',    period:'2', periodNumber:2, subjectId:'subj_demo_bio',  subject:'Biology',             teacherId:'u_demo_t6',  room:'Lab 2' },
+  { day:'friday',    period:'3', periodNumber:3, subjectId:'subj_demo_math', subject:'Mathematics',         teacherId:'u_demo_t2',  room:'F4A' },
+  { day:'friday',    period:'4', periodNumber:4, subjectId:'subj_demo_eng',  subject:'English Language',    teacherId:'u_demo_t3',  room:'F4A' },
+  { day:'friday',    period:'5', periodNumber:5, subjectId:'subj_demo_chem', subject:'Chemistry',           teacherId:'u_demo_t5',  room:'Lab 1' },
+  { day:'friday',    period:'6', periodNumber:6, subjectId:'subj_demo_pe',   subject:'PE & Sports',         teacherId:'u_demo_t10', room:'Field' },
 ];
 
 /* ── Admissions pipeline (8 applicants in various stages) ── */
@@ -279,7 +439,7 @@ async function seedDemoData() {
     const User      = _model('users');
     const Student   = _model('students');
     const Behaviour = _model('behaviour_incidents');
-    const Timetable = _model('timetable_slots');
+    const Timetable = _model('timetable');
     const Invoice   = _model('invoices');
     const Payment   = _model('payments');
     const Admission = _model('admissions');
@@ -364,7 +524,7 @@ async function seedDemoData() {
     /* 6. Timetable — Form 1A */
     await Promise.all(F1A_TIMETABLE.map((slot, i) =>
       upsert(Timetable, `tt_demo_f1a_${i}`, {
-        ...slot, classId: 'cls_demo_f1a', isActive: true,
+        ...slot, classId: 'cls_demo_f1a', className: 'Form 1A', isActive: true,
         academicYearId: AY_ID, termId: T2_ID,
       })
     ));
@@ -372,10 +532,60 @@ async function seedDemoData() {
     /* 7. Timetable — Standard 4A */
     await Promise.all(STD4A_TIMETABLE.map((slot, i) =>
       upsert(Timetable, `tt_demo_4a_${i}`, {
-        ...slot, classId: 'cls_demo_4a', isActive: true,
+        ...slot, classId: 'cls_demo_4a', className: 'Standard 4A', isActive: true,
         academicYearId: AY_ID, termId: T2_ID,
       })
     ));
+
+    /* 7b. Timetable — Standard 5A */
+    await Promise.all(STD5A_TIMETABLE.map((slot, i) =>
+      upsert(Timetable, `tt_demo_5a_${i}`, {
+        ...slot, classId: 'cls_demo_5a', className: 'Standard 5A', isActive: true,
+        academicYearId: AY_ID, termId: T2_ID,
+      })
+    ));
+
+    /* 7c. Timetable — Standard 6A */
+    await Promise.all(STD6A_TIMETABLE.map((slot, i) =>
+      upsert(Timetable, `tt_demo_6a_${i}`, {
+        ...slot, classId: 'cls_demo_6a', className: 'Standard 6A', isActive: true,
+        academicYearId: AY_ID, termId: T2_ID,
+      })
+    ));
+
+    /* 7d. Timetable — Form 2A */
+    await Promise.all(F2A_TIMETABLE.map((slot, i) =>
+      upsert(Timetable, `tt_demo_f2a_${i}`, {
+        ...slot, classId: 'cls_demo_f2a', className: 'Form 2A', isActive: true,
+        academicYearId: AY_ID, termId: T2_ID,
+      })
+    ));
+
+    /* 7e. Timetable — Form 3A */
+    await Promise.all(F3A_TIMETABLE.map((slot, i) =>
+      upsert(Timetable, `tt_demo_f3a_${i}`, {
+        ...slot, classId: 'cls_demo_f3a', className: 'Form 3A', isActive: true,
+        academicYearId: AY_ID, termId: T2_ID,
+      })
+    ));
+
+    /* 7f. Timetable — Form 4A */
+    await Promise.all(F4A_TIMETABLE.map((slot, i) =>
+      upsert(Timetable, `tt_demo_f4a_${i}`, {
+        ...slot, classId: 'cls_demo_f4a', className: 'Form 4A', isActive: true,
+        academicYearId: AY_ID, termId: T2_ID,
+      })
+    ));
+
+    /* 7g. Patch existing F1A + Std4A slots that lack className/subject fields */
+    await _model('timetable').updateMany(
+      { schoolId: SCHOOL_ID, classId: 'cls_demo_f1a', className: { $exists: false } },
+      { $set: { className: 'Form 1A' } }
+    );
+    await _model('timetable').updateMany(
+      { schoolId: SCHOOL_ID, classId: 'cls_demo_4a', className: { $exists: false } },
+      { $set: { className: 'Standard 4A' } }
+    );
 
     /* 8. Invoices + payments */
     const term  = 'Term 2';
@@ -486,7 +696,7 @@ async function seedDemoData() {
     ];
     await Promise.all(LEAVES.map(l => upsert(Leave, l.id, l)));
 
-    console.log('[seed-demo-data] ✓ 7 classes · 6 departments · 14 subjects · 10 teacher profiles · 9 teacher users · 20 students · 25 behaviour · 20 invoices · 14 payments · 60 timetable slots · 8 admissions · 10 events · 10 payroll · 4 leave requests');
+    console.log('[seed-demo-data] ✓ 7 classes · 6 departments · 14 subjects · 10 teacher profiles · 9 teacher users · 20 students · 25 behaviour · 20 invoices · 14 payments · 205 timetable slots (all 7 classes) · 8 admissions · 10 events · 10 payroll · 4 leave requests');
 
   } catch (err) {
     console.warn('[seed-demo-data] Warning:', err.message);
