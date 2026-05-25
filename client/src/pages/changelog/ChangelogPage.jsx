@@ -6,6 +6,29 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.11.5',
+    date: '2026-05-25',
+    label: 'Phase 3 — Subject Enrollment Warnings Engine',
+    changes: [
+      { type: 'new',  text: 'GET /api/class-subjects/enrollment-warnings: school-wide or per-class report — students flagged as below_min, above_max, or ok based on subject_rules' },
+      { type: 'new',  text: 'Rule resolution: classPattern (regex) takes priority over section match — enables KCSE Form 3-4 overrides over the general secondary rule' },
+      { type: 'new',  text: 'School-wide mode (no classId param): returns only classes that have at least one violation — zero-noise dashboard feed for the timetabler' },
+      { type: 'new',  text: 'Per-student breakdown: subjectCount, status (ok/below_min/above_max/no_rule), and summary counts per class' },
+    ],
+  },
+  {
+    version: '4.11.4',
+    date: '2026-05-25',
+    label: 'Phase 2 — Class Curriculum & Subject Rules APIs',
+    changes: [
+      { type: 'new',  text: 'GET/POST/PUT/DELETE /api/class-subjects: assign subjects to a class, manage compulsory flag, remove with enrollment guard' },
+      { type: 'new',  text: 'GET /api/class-subjects/counts: { classId: subjectCount } for class cards and dropdowns' },
+      { type: 'new',  text: 'POST /api/class-subjects/bulk: assign multiple subjects to a class in one call (idempotent — skips already-assigned)' },
+      { type: 'new',  text: 'GET/POST/PUT/DELETE /api/subject-rules: min/max subject count rules per section or classPattern (timetable:update gated)' },
+      { type: 'new',  text: 'GET /api/subjects?withClassCurriculum=classId: attaches inCurriculum, isCompulsoryForClass, classSubjectId per subject for the curriculum editor' },
+    ],
+  },
+  {
     version: '4.11.3',
     date: '2026-05-25',
     label: 'Phase 1 — A-Level Classes · Subject Curriculum · Enrollments',

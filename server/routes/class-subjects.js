@@ -41,6 +41,146 @@ router.get('/counts', authMiddleware, async (req, res) => {
   }
 });
 
+/* ── GET /api/class-subjects/enrollment-warnings ────────────────
+   Subject count warnings based on subject_rules.
+   ?classId=X  → single-class report (students below min / above max)
+   (no params)  → school-wide summary: all classes with any violations
+
+   Rule resolution per class (most specific wins):
+     1. classPattern rule — regex matched against classId (e.g. "f[34]")
+     2. section rule      — matched against class.sectionKey (e.g. "alevel")
+     3. no rule           → class is flagged as unconfigured
+
+   Returns:
+   {
+     classes: [{
+       classId, className, sectionKey,
+       rule: { minSubjects, maxSubjects } | null,
+       students: [{
+         id, firstName, lastName, admissionNumber,
+         subjectCount, status: 'ok'|'below_min'|'above_max'
+       }],
+       summary: { ok, belowMin, aboveMax, total }
+     }]
+   }
+*/
+router.get('/enrollment-warnings', authMiddleware, async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const { classId: qClassId } = req.query;
+
+    /* 1. Load all subject rules for this school */
+    const allRules = await _model('subject_rules')
+      .find({ schoolId })
+      .lean();
+
+    /* Helper: find the best-matching rule for a given class */
+    function resolveRule(classId, sectionKey) {
+      // Priority 1: classPattern match
+      for (const r of allRules) {
+        if (r.classPattern) {
+          try {
+            if (new RegExp(r.classPattern, 'i').test(classId)) return r;
+          } catch (_) { /* skip invalid pattern */ }
+        }
+      }
+      // Priority 2: section match
+      for (const r of allRules) {
+        if (!r.classPattern && r.section && r.section === sectionKey) return r;
+      }
+      return null;
+    }
+
+    /* 2. Determine which classes to analyse */
+    const classFilter = { schoolId, status: { $ne: 'inactive' } };
+    if (qClassId) classFilter.id = qClassId;
+
+    const classes = await _model('classes')
+      .find(classFilter)
+      .sort({ order: 1 })
+      .select('id name sectionKey order')
+      .lean();
+
+    if (classes.length === 0) {
+      return ok(res, { classes: [] });
+    }
+
+    const classIds = classes.map(c => c.id);
+
+    /* 3. Load all active students in the relevant classes */
+    const students = await _model('students')
+      .find({ schoolId, classId: { $in: classIds }, status: { $ne: 'inactive' } })
+      .select('id firstName lastName admissionNumber classId')
+      .lean();
+
+    /* 4. Count enrollments per student via aggregation */
+    const enrollAgg = await _model('student_subjects').aggregate([
+      { $match: { schoolId, classId: { $in: classIds } } },
+      { $group: { _id: '$studentId', count: { $sum: 1 } } },
+    ]);
+    const enrollMap = Object.fromEntries(enrollAgg.map(e => [e._id, e.count]));
+
+    /* 5. Group students by class and evaluate against rules */
+    const classBuckets = {};
+    for (const c of classes) {
+      classBuckets[c.id] = { ...c, rule: resolveRule(c.id, c.sectionKey), studentRows: [] };
+    }
+    for (const s of students) {
+      const bucket = classBuckets[s.classId];
+      if (!bucket) continue;
+      const count  = enrollMap[s.id] ?? 0;
+      const rule   = bucket.rule;
+      let status   = 'no_rule';
+      if (rule) {
+        if (count < rule.minSubjects)      status = 'below_min';
+        else if (count > rule.maxSubjects) status = 'above_max';
+        else                               status = 'ok';
+      }
+      bucket.studentRows.push({
+        id:               s.id,
+        firstName:        s.firstName,
+        lastName:         s.lastName,
+        admissionNumber:  s.admissionNumber,
+        subjectCount:     count,
+        status,
+      });
+    }
+
+    /* 6. Build result — school-wide mode only returns classes that have violations */
+    const result = [];
+    for (const c of classes) {
+      const b   = classBuckets[c.id];
+      const rows = b.studentRows;
+      const summary = {
+        ok:        rows.filter(r => r.status === 'ok').length,
+        belowMin:  rows.filter(r => r.status === 'below_min').length,
+        aboveMax:  rows.filter(r => r.status === 'above_max').length,
+        noRule:    rows.filter(r => r.status === 'no_rule').length,
+        total:     rows.length,
+      };
+
+      // School-wide mode: only include classes with at least one warning
+      if (!qClassId && summary.belowMin === 0 && summary.aboveMax === 0) continue;
+
+      result.push({
+        classId:    c.id,
+        className:  c.name,
+        sectionKey: c.sectionKey,
+        rule:       b.rule
+          ? { minSubjects: b.rule.minSubjects, maxSubjects: b.rule.maxSubjects, notes: b.rule.notes }
+          : null,
+        students:   rows,
+        summary,
+      });
+    }
+
+    return ok(res, { classes: result });
+  } catch (err) {
+    console.error('[class-subjects GET /enrollment-warnings]', err);
+    return E.serverError(res);
+  }
+});
+
 /* ── GET /api/class-subjects ─────────────────────────────────────
    ?classId=X   → curriculum for a class (includes full subject + dept details)
    ?subjectId=X → all classes that offer a given subject (includes class meta)

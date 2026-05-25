@@ -6,6 +6,47 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.11.5] — 2026-05-25  Phase 3 — Subject Enrollment Warnings Engine
+
+### New — `GET /api/class-subjects/enrollment-warnings`
+
+Rule resolution per class (most specific wins):
+- **classPattern** match: regex tested against `classId` — e.g. `f[34]` catches Form 3A and Form 4A before the general secondary rule fires
+- **section** match: fallback using `class.sectionKey` (primary / secondary / alevel)
+- **No rule**: student rows get `status: 'no_rule'`; class excluded from school-wide warning list
+
+Modes:
+- `?classId=X` — full per-student breakdown for one class
+- *(no params)* — school-wide: only classes with ≥1 `below_min` or `above_max` student are returned, keeping the timetabler dashboard noise-free
+
+Per-student fields: `id`, `firstName`, `lastName`, `admissionNumber`, `subjectCount`, `status`  
+Per-class summary: `ok`, `belowMin`, `aboveMax`, `noRule`, `total`
+
+---
+
+## [4.11.4] — 2026-05-25  Phase 2 — Class Curriculum & Subject Rules APIs
+
+### New — `/api/class-subjects`
+
+- `GET ?classId=X` — full curriculum for a class with subject + department details
+- `GET ?subjectId=X` — all classes that offer a given subject
+- `GET /counts` — `{ classId: subjectCount }` for class cards
+- `POST /` — assign a single subject to a class (validates both entities exist)
+- `POST /bulk` — assign multiple subjects at once; idempotent, skips already-assigned
+- `PUT /:id` — toggle `isCompulsoryForClass` flag
+- `DELETE /:id` — guarded: blocked if students are still enrolled in the subject for that class
+
+### New — `/api/subject-rules`
+
+Full CRUD for min/max subject count rules.  
+Gated to `timetable:update` (same permission as bell schedule editing).
+
+### Updated — `GET /api/subjects`
+
+New `?withClassCurriculum=classId` param: attaches `inCurriculum`, `isCompulsoryForClass`, `classSubjectId` to each subject row — one request powers the entire curriculum editor list.
+
+---
+
 ## [4.11.3] — 2026-05-25  Phase 1 Seed Foundation — A-Level Classes, Subject Curriculum & Enrollment
 
 ### New — A-Level support
