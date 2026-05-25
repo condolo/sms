@@ -2,8 +2,8 @@
    Students — Premium List with Stats, Charts & Add Slide-Over
    /platform-audit: RBAC-gated, correct API shapes, no raw emojis
    ============================================================ */
-import { useState, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useRef, useEffect } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
@@ -74,15 +74,27 @@ export default function StudentList() {
   const canCreate = can('students') || role === 'admin' || role === 'superadmin';
   const canDelete = can('students') || role === 'admin' || role === 'superadmin';
 
-  /* Filters */
-  const [search,   setSearch]   = useState('');
-  const [debSearch,setDebSearch]= useState('');
-  const [classId,  setClassId]  = useState('');
-  const [gender,   setGender]   = useState('');
-  const [status,   setStatus]   = useState('active');
-  const [page,     setPage]     = useState(1);
-  const [showAdd,  setShowAdd]  = useState(false);
-  const [showFilter,setShowFilter]= useState(false);
+  /* Read ?classId= from URL so "View students" on class cards pre-filters the list */
+  const [searchParams] = useSearchParams();
+
+  /* Filters — classId seeded from URL param if present */
+  const [search,    setSearch]    = useState('');
+  const [debSearch, setDebSearch] = useState('');
+  const [classId,   setClassId]   = useState(() => searchParams.get('classId') ?? '');
+  const [gender,    setGender]    = useState('');
+  const [status,    setStatus]    = useState('active');
+  const [page,      setPage]      = useState(1);
+  const [showAdd,   setShowAdd]   = useState(false);
+  /* Auto-open filter panel when arriving via a class link so the active filter is visible */
+  const [showFilter, setShowFilter] = useState(() => !!searchParams.get('classId'));
+
+  /* React to URL param changes (e.g. navigating from one class card to another
+     while already on the students page — component stays mounted)            */
+  useEffect(() => {
+    const cid = searchParams.get('classId') ?? '';
+    setClassId(cid);
+    if (cid) { setShowFilter(true); setPage(1); }
+  }, [searchParams.get('classId')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const timer = useRef(null);
   function onSearch(v) {
@@ -157,6 +169,11 @@ export default function StudentList() {
     finally { setExporting(false); }
   }
 
+  /* Resolve the active class name for the filter breadcrumb */
+  const activeClassName = classId
+    ? (classList.find(c => (c._id ?? c.id) === classId)?.name ?? null)
+    : null;
+
   return (
     <div className="min-h-screen bg-slate-50">
 
@@ -164,7 +181,22 @@ export default function StudentList() {
       <div className="bg-white border-b border-slate-200 px-6 py-5">
         <div className="max-w-screen-2xl mx-auto flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-xl font-semibold text-slate-900 tracking-tight">Students</h1>
+            <div className="flex items-center gap-3 flex-wrap">
+              <h1 className="text-xl font-semibold text-slate-900 tracking-tight">Students</h1>
+              {activeClassName && (
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium bg-violet-50 text-violet-700 border border-violet-200 rounded-full px-2.5 py-1">
+                  <GraduationCap size={11} />
+                  {activeClassName}
+                  <button
+                    onClick={() => { setClassId(''); setPage(1); }}
+                    className="ml-0.5 text-violet-400 hover:text-violet-700 transition"
+                    title="Clear class filter"
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              )}
+            </div>
             <p className="text-sm text-slate-500 mt-0.5">
               {statsLoading ? 'Loading…' : `${(statsObj.total ?? 0).toLocaleString()} total · ${(statsObj.active ?? 0).toLocaleString()} active`}
             </p>
