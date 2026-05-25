@@ -6,6 +6,20 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.11.3',
+    date: '2026-05-25',
+    label: 'Phase 1 — A-Level Classes · Subject Curriculum · Enrollments',
+    changes: [
+      { type: 'new',  text: 'A-Level section: Form 5A and Form 6A classes added (sectionKey: alevel); 4 new subjects — Pure Mathematics, Mechanics, Statistics & Probability, Economics' },
+      { type: 'new',  text: 'Class curriculum (class_subjects): 96 subject-to-class links seeded across all 9 classes — primary compulsory core, secondary KCSE model, A-Level all-elective' },
+      { type: 'new',  text: 'Student subject enrollments (student_subjects): 163 individual records for all 20 demo students, reflecting science/humanities/primary curriculum tracks' },
+      { type: 'new',  text: 'Subject enrollment rules (subject_rules): min/max subjects per section — Primary 6-8, Form 1-2: 7-10, KCSE Form 3-4: 7-9, A-Level: 3-4' },
+      { type: 'new',  text: 'Teacher profiles enriched: staffType, departmentId, subjects[], extraRoles (hod/class_teacher/exam_officer/timetabler), formClassId — all 10 profiles updated' },
+      { type: 'fix',  text: 'Departments now store hodId + hodUserId (teacher profile and user ID foreign keys) — patched via $set on every re-seed so legacy docs are upgraded' },
+      { type: 'fix',  text: 'Subject sections always updated on re-seed — fixes docs seeded before A-Level section existed (e.g. Physics was [secondary], now [secondary, alevel])' },
+    ],
+  },
+  {
     version: '4.11.2',
     date: '2026-05-25',
     label: 'Timetable Seed Fix + Substitution Engine Bug Fixes',

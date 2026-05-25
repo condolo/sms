@@ -6,6 +6,47 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.11.3] — 2026-05-25  Phase 1 Seed Foundation — A-Level Classes, Subject Curriculum & Enrollment
+
+### New — A-Level support
+
+- Added Form 5A and Form 6A classes with `sectionKey: 'alevel'` and their own section record (`sec_alevel_sch_demo`).
+- Added 4 new A-Level-only subjects: **Pure Mathematics** (PMATH), **Mechanics** (MECH), **Statistics & Probability** (STAT), **Economics** (ECO) — all under their respective departments (Mathematics / TBS).
+- Subjects that span secondary and A-Level (Physics, Chemistry, Biology, History, Geography, Business Studies) now have `sections: ['secondary', 'alevel']`; always patched on re-seed.
+
+### New — Class curriculum assignments (`class_subjects` collection)
+
+- 96 class-subject links seeded across all 9 classes:
+  - Primary (Std 4A–6A): 7 compulsory subjects + ICT elective.
+  - Form 1A–2A: 8 compulsory core + 4 electives.
+  - Form 3A–4A: 3 compulsory + 9 electives (KCSE model).
+  - Form 5A–6A: 12 all-elective A-Level subjects.
+
+### New — Student subject enrollments (`student_subjects` collection)
+
+- 163 individual enrollment records generated from ENROLLMENTS groups for all 20 demo students.
+- Enrollment reflects realistic curriculum choices: science track, humanities track, KCSE subjects, full primary curriculum.
+
+### New — Subject enrollment rules (`subject_rules` collection)
+
+- 4 rules seeded (min/max subjects per section, like bell schedule settings):
+  - Primary: min 6, max 8.
+  - Secondary Form 1-2: min 7, max 10.
+  - KCSE Form 3-4: min 7, max 9 (pattern `f[34]`).
+  - A-Level: min 3, max 4.
+
+### New — Teacher profiles enriched
+
+- All 10 teacher profiles now include `staffType: 'teacher'`, `departmentId`, `subjects[]`, `extraRoles[]`, and `formClassId` where applicable.
+- Extra academic roles seeded: `hod` (6 teachers), `class_teacher` (1), `exam_officer` (1), `timetabler` (1).
+
+### Fixed — Department HOD foreign-key links
+
+- Departments now store `hodId` (teacher profile ID) and `hodUserId` (user ID) alongside `hodName`.
+  Patched on every re-seed via `$set` so legacy docs are upgraded automatically.
+
+---
+
 ## [4.11.2] — 2026-05-25  Timetable Seed Fix + Substitution Engine Bug Fixes
 
 ### Fixed — Seed data collection mismatch (Critical)

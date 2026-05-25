@@ -5,15 +5,18 @@
 
    DATA SCOPE (insert-only — never overwrites existing records):
    ─────────────────────────────────────────────────────────────
-   • 7 classes  (3 Primary: Std 4A-6A, 4 Secondary: Form 1A-4A)
-   • 14 subjects
+   • 9 classes  (3 Primary: Std 4A-6A, 4 Secondary: Form 1A-4A, 2 A-Level: Form 5A-6A)
+   • 18 subjects (14 core + 4 A-Level: Pure Maths, Mechanics, Stats, Economics)
    • 9 additional teachers (+ the existing u_demo_teacher)
    • 20 students distributed across all classes
    • 25 behaviour incidents (merits + demerits)
    • 20 fee invoices — Term 2 2026
    • 14 payments  (mix: fully paid, partial, outstanding)
-   • 205 timetable slots (all 7 classes, full week)
+   • 205 timetable slots (7 classes, full week)
    • 8 admissions at various pipeline stages
+   • 96 class-subject links (curriculum per class)
+   • ~163 student-subject enrollments
+   • 4 subject enrollment rules (min/max per section)
    ============================================================ */
 'use strict';
 
@@ -26,6 +29,7 @@ const AY_ID     = `ay_${SCHOOL_ID}_${YEAR}`;
 const T2_ID     = 't2_demo';
 const SEC_PRI   = `sec_primary_${SCHOOL_ID}`;
 const SEC_SEC   = `sec_secondary_${SCHOOL_ID}`;
+const SEC_AL    = `sec_alevel_${SCHOOL_ID}`;
 const ADMIN_ID  = 'u_demo_admin';
 
 function _model(col) {
@@ -65,34 +69,44 @@ const CLASSES = [
   { id:'cls_demo_f2a', name:'Form 2A',     year:'Form 2',     sectionId:SEC_SEC, sectionKey:'secondary', order:5, status:'active' },
   { id:'cls_demo_f3a', name:'Form 3A',     year:'Form 3',     sectionId:SEC_SEC, sectionKey:'secondary', order:6, status:'active' },
   { id:'cls_demo_f4a', name:'Form 4A',     year:'Form 4',     sectionId:SEC_SEC, sectionKey:'secondary', order:7, status:'active' },
+  { id:'cls_demo_f5a', name:'Form 5A',     year:'Form 5',     sectionId:SEC_AL,  sectionKey:'alevel',    order:8, status:'active' },
+  { id:'cls_demo_f6a', name:'Form 6A',     year:'Form 6',     sectionId:SEC_AL,  sectionKey:'alevel',    order:9, status:'active' },
 ];
 
 /* ── Departments ── */
 const DEPARTMENTS = [
-  { id:'dept_demo_lang', name:'Languages',                    code:'LANG', color:'#0EA5E9', order:1, hodName:'Ms. Agnes Otieno',    description:'English Language and Kiswahili' },
-  { id:'dept_demo_math', name:'Mathematics',                  code:'MATH', color:'#6366F1', order:2, hodName:'Mr. Peter Kamau',     description:'Pure and applied mathematics' },
-  { id:'dept_demo_sci',  name:'Sciences',                     code:'SCI',  color:'#10B981', order:3, hodName:'Ms. Judith Njoroge',  description:'Physics, Chemistry, Biology and integrated Science' },
-  { id:'dept_demo_hum',  name:'Humanities',                   code:'HUM',  color:'#F59E0B', order:4, hodName:'Ms. Dorothy Chebet',  description:'History, Geography, Social Studies and Religious Education' },
-  { id:'dept_demo_tbs',  name:'Technical & Business Studies', code:'TBS',  color:'#F97316', order:5, hodName:'Mr. Samuel Maina',    description:'Business Studies and ICT' },
-  { id:'dept_demo_pe',   name:'Physical Education',           code:'PE',   color:'#EC4899', order:6, hodName:'Mr. Joseph Kipchoge', description:'PE, Sports and Games' },
+  { id:'dept_demo_lang', name:'Languages',                    code:'LANG', color:'#0EA5E9', order:1, hodName:'Ms. Agnes Otieno',    hodId:'tch_demo_3',  hodUserId:'u_demo_t3',  description:'English Language and Kiswahili' },
+  { id:'dept_demo_math', name:'Mathematics',                  code:'MATH', color:'#6366F1', order:2, hodName:'Mr. Peter Kamau',     hodId:'tch_demo_2',  hodUserId:'u_demo_t2',  description:'Pure and applied mathematics' },
+  { id:'dept_demo_sci',  name:'Sciences',                     code:'SCI',  color:'#10B981', order:3, hodName:'Ms. Judith Njoroge',  hodId:'tch_demo_5',  hodUserId:'u_demo_t5',  description:'Physics, Chemistry, Biology and integrated Science' },
+  { id:'dept_demo_hum',  name:'Humanities',                   code:'HUM',  color:'#F59E0B', order:4, hodName:'Ms. Dorothy Chebet',  hodId:'tch_demo_7',  hodUserId:'u_demo_t7',  description:'History, Geography, Social Studies and Religious Education' },
+  { id:'dept_demo_tbs',  name:'Technical & Business Studies', code:'TBS',  color:'#F97316', order:5, hodName:'Mr. Samuel Maina',    hodId:'tch_demo_8',  hodUserId:'u_demo_t8',  description:'Business Studies and ICT' },
+  { id:'dept_demo_pe',   name:'Physical Education',           code:'PE',   color:'#EC4899', order:6, hodName:'Mr. Joseph Kipchoge', hodId:'tch_demo_10', hodUserId:'u_demo_t10', description:'PE, Sports and Games' },
 ];
 
 /* ── Subjects (with departmentId, sections array, isCompulsory) ── */
 const SUBJECTS = [
-  { id:'subj_demo_math', name:'Mathematics',          code:'MATH', departmentId:'dept_demo_math', sections:['all'],       isCompulsory:true  },
-  { id:'subj_demo_eng',  name:'English Language',     code:'ENG',  departmentId:'dept_demo_lang', sections:['all'],       isCompulsory:true  },
-  { id:'subj_demo_kisw', name:'Kiswahili',            code:'KSW',  departmentId:'dept_demo_lang', sections:['all'],       isCompulsory:true  },
-  { id:'subj_demo_sci',  name:'Science',              code:'SCI',  departmentId:'dept_demo_sci',  sections:['primary'],   isCompulsory:true  },
-  { id:'subj_demo_ss',   name:'Social Studies',       code:'SS',   departmentId:'dept_demo_hum',  sections:['primary'],   isCompulsory:false },
-  { id:'subj_demo_cre',  name:'CRE',                  code:'CRE',  departmentId:'dept_demo_hum',  sections:['all'],       isCompulsory:false },
-  { id:'subj_demo_phy',  name:'Physics',              code:'PHY',  departmentId:'dept_demo_sci',  sections:['secondary'], isCompulsory:false },
-  { id:'subj_demo_chem', name:'Chemistry',            code:'CHEM', departmentId:'dept_demo_sci',  sections:['secondary'], isCompulsory:false },
-  { id:'subj_demo_bio',  name:'Biology',              code:'BIO',  departmentId:'dept_demo_sci',  sections:['secondary'], isCompulsory:false },
-  { id:'subj_demo_hist', name:'History & Government', code:'HIST', departmentId:'dept_demo_hum',  sections:['secondary'], isCompulsory:false },
-  { id:'subj_demo_geo',  name:'Geography',            code:'GEO',  departmentId:'dept_demo_hum',  sections:['secondary'], isCompulsory:false },
-  { id:'subj_demo_bs',   name:'Business Studies',     code:'BS',   departmentId:'dept_demo_tbs',  sections:['secondary'], isCompulsory:false },
-  { id:'subj_demo_pe',   name:'PE & Sports',          code:'PE',   departmentId:'dept_demo_pe',   sections:['all'],       isCompulsory:false },
-  { id:'subj_demo_ict',  name:'ICT',                  code:'ICT',  departmentId:'dept_demo_tbs',  sections:['all'],       isCompulsory:false },
+  /* ── Offered at all levels ─────────────────────────────────── */
+  { id:'subj_demo_math', name:'Mathematics',              code:'MATH',  departmentId:'dept_demo_math', sections:['all'],                      isCompulsory:true  },
+  { id:'subj_demo_eng',  name:'English Language',         code:'ENG',   departmentId:'dept_demo_lang', sections:['all'],                      isCompulsory:true  },
+  { id:'subj_demo_kisw', name:'Kiswahili',                code:'KSW',   departmentId:'dept_demo_lang', sections:['all'],                      isCompulsory:true  },
+  { id:'subj_demo_cre',  name:'CRE',                      code:'CRE',   departmentId:'dept_demo_hum',  sections:['all'],                      isCompulsory:false },
+  { id:'subj_demo_pe',   name:'PE & Sports',              code:'PE',    departmentId:'dept_demo_pe',   sections:['all'],                      isCompulsory:false },
+  { id:'subj_demo_ict',  name:'ICT',                      code:'ICT',   departmentId:'dept_demo_tbs',  sections:['all'],                      isCompulsory:false },
+  /* ── Primary only ──────────────────────────────────────────── */
+  { id:'subj_demo_sci',  name:'Science',                  code:'SCI',   departmentId:'dept_demo_sci',  sections:['primary'],                  isCompulsory:true  },
+  { id:'subj_demo_ss',   name:'Social Studies',           code:'SS',    departmentId:'dept_demo_hum',  sections:['primary'],                  isCompulsory:false },
+  /* ── Secondary + A-Level ───────────────────────────────────── */
+  { id:'subj_demo_phy',  name:'Physics',                  code:'PHY',   departmentId:'dept_demo_sci',  sections:['secondary','alevel'],       isCompulsory:false },
+  { id:'subj_demo_chem', name:'Chemistry',                code:'CHEM',  departmentId:'dept_demo_sci',  sections:['secondary','alevel'],       isCompulsory:false },
+  { id:'subj_demo_bio',  name:'Biology',                  code:'BIO',   departmentId:'dept_demo_sci',  sections:['secondary','alevel'],       isCompulsory:false },
+  { id:'subj_demo_hist', name:'History & Government',     code:'HIST',  departmentId:'dept_demo_hum',  sections:['secondary','alevel'],       isCompulsory:false },
+  { id:'subj_demo_geo',  name:'Geography',                code:'GEO',   departmentId:'dept_demo_hum',  sections:['secondary','alevel'],       isCompulsory:false },
+  { id:'subj_demo_bs',   name:'Business Studies',         code:'BS',    departmentId:'dept_demo_tbs',  sections:['secondary','alevel'],       isCompulsory:false },
+  /* ── A-Level only ──────────────────────────────────────────── */
+  { id:'subj_demo_pmath',name:'Pure Mathematics',         code:'PMATH', departmentId:'dept_demo_math', sections:['alevel'],                   isCompulsory:false },
+  { id:'subj_demo_mech', name:'Mechanics',                code:'MECH',  departmentId:'dept_demo_math', sections:['alevel'],                   isCompulsory:false },
+  { id:'subj_demo_stat', name:'Statistics & Probability', code:'STAT',  departmentId:'dept_demo_math', sections:['alevel'],                   isCompulsory:false },
+  { id:'subj_demo_eco',  name:'Economics',                code:'ECO',   departmentId:'dept_demo_tbs',  sections:['alevel'],                   isCompulsory:false },
 ];
 
 /* ── Additional teachers (9 — u_demo_teacher already exists) ── */
@@ -110,16 +124,16 @@ const EXTRA_TEACHERS = [
 
 /* ── Teacher profiles for the teachers collection ── */
 const TEACHER_PROFILES = [
-  { id:'tch_demo_1',  userId:'u_demo_teacher', firstName:'Demo',    lastName:'Teacher',  title:'Mr.',  email:'teacher@demo.msingi.io', gender:'male',   staffId:'TCH-001', subjects:['subj_demo_math'], contractType:'full_time', status:'active', joinDate:'2024-01-15' },
-  { id:'tch_demo_2',  userId:'u_demo_t2',      firstName:'Peter',   lastName:'Kamau',    title:'Mr.',  email:'pkamau@demo.msingi.io',   gender:'male',   staffId:'TCH-002', subjects:['subj_demo_math','subj_demo_sci'],        contractType:'full_time', status:'active', joinDate:'2023-09-01' },
-  { id:'tch_demo_3',  userId:'u_demo_t3',      firstName:'Agnes',   lastName:'Otieno',   title:'Ms.',  email:'aotieno@demo.msingi.io',  gender:'female', staffId:'TCH-003', subjects:['subj_demo_eng','subj_demo_cre'],         contractType:'full_time', status:'active', joinDate:'2022-01-10' },
-  { id:'tch_demo_4',  userId:'u_demo_t4',      firstName:'Collins', lastName:'Waweru',   title:'Mr.',  email:'cwaweru@demo.msingi.io',  gender:'male',   staffId:'TCH-004', subjects:['subj_demo_kisw','subj_demo_ss'],         contractType:'full_time', status:'active', joinDate:'2023-01-05' },
-  { id:'tch_demo_5',  userId:'u_demo_t5',      firstName:'Judith',  lastName:'Njoroge',  title:'Ms.',  email:'jnjoroge@demo.msingi.io', gender:'female', staffId:'TCH-005', subjects:['subj_demo_phy','subj_demo_chem'],        contractType:'full_time', status:'active', joinDate:'2021-08-20' },
-  { id:'tch_demo_6',  userId:'u_demo_t6',      firstName:'Francis', lastName:'Ochieng',  title:'Mr.',  email:'fochieng@demo.msingi.io', gender:'male',   staffId:'TCH-006', subjects:['subj_demo_bio','subj_demo_sci'],         contractType:'full_time', status:'active', joinDate:'2022-09-01' },
-  { id:'tch_demo_7',  userId:'u_demo_t7',      firstName:'Dorothy', lastName:'Chebet',   title:'Ms.',  email:'dchebet@demo.msingi.io',  gender:'female', staffId:'TCH-008', subjects:['subj_demo_hist','subj_demo_geo'],        contractType:'full_time', status:'on_leave', joinDate:'2020-03-01' },
-  { id:'tch_demo_8',  userId:'u_demo_t8',      firstName:'Samuel',  lastName:'Maina',    title:'Mr.',  email:'smaina@demo.msingi.io',   gender:'male',   staffId:'TCH-009', subjects:['subj_demo_bs','subj_demo_cre'],          contractType:'full_time', status:'active', joinDate:'2023-04-10' },
-  { id:'tch_demo_9',  userId:'u_demo_t9',      firstName:'Lilian',  lastName:'Wairimu',  title:'Ms.',  email:'lwairimu@demo.msingi.io', gender:'female', staffId:'TCH-010', subjects:['subj_demo_ict','subj_demo_math'],        contractType:'full_time', status:'active', joinDate:'2024-02-01' },
-  { id:'tch_demo_10', userId:'u_demo_t10',     firstName:'Joseph',  lastName:'Kipchoge', title:'Mr.',  email:'jkipchoge@demo.msingi.io',gender:'male',   staffId:'TCH-011', subjects:['subj_demo_pe','subj_demo_ss'],           contractType:'full_time', status:'active', joinDate:'2021-09-01' },
+  { id:'tch_demo_1',  userId:'u_demo_teacher', firstName:'Demo',    lastName:'Teacher',  title:'Mr.',  email:'teacher@demo.msingi.io', gender:'male',   staffId:'TCH-001', staffType:'teacher', departmentId:'dept_demo_math', subjects:['subj_demo_math'],                                      contractType:'full_time', status:'active',   joinDate:'2024-01-15', extraRoles:[] },
+  { id:'tch_demo_2',  userId:'u_demo_t2',      firstName:'Peter',   lastName:'Kamau',    title:'Mr.',  email:'pkamau@demo.msingi.io',   gender:'male',   staffId:'TCH-002', staffType:'teacher', departmentId:'dept_demo_math', subjects:['subj_demo_math','subj_demo_pmath','subj_demo_mech','subj_demo_stat'], contractType:'full_time', status:'active',   joinDate:'2023-09-01', extraRoles:['hod'] },
+  { id:'tch_demo_3',  userId:'u_demo_t3',      firstName:'Agnes',   lastName:'Otieno',   title:'Ms.',  email:'aotieno@demo.msingi.io',  gender:'female', staffId:'TCH-003', staffType:'teacher', departmentId:'dept_demo_lang', subjects:['subj_demo_eng','subj_demo_cre'],                         contractType:'full_time', status:'active',   joinDate:'2022-01-10', extraRoles:['hod','class_teacher'], formClassId:'cls_demo_f1a' },
+  { id:'tch_demo_4',  userId:'u_demo_t4',      firstName:'Collins', lastName:'Waweru',   title:'Mr.',  email:'cwaweru@demo.msingi.io',  gender:'male',   staffId:'TCH-004', staffType:'teacher', departmentId:'dept_demo_lang', subjects:['subj_demo_kisw','subj_demo_ss'],                         contractType:'full_time', status:'active',   joinDate:'2023-01-05', extraRoles:[] },
+  { id:'tch_demo_5',  userId:'u_demo_t5',      firstName:'Judith',  lastName:'Njoroge',  title:'Ms.',  email:'jnjoroge@demo.msingi.io', gender:'female', staffId:'TCH-005', staffType:'teacher', departmentId:'dept_demo_sci',  subjects:['subj_demo_phy','subj_demo_chem'],                        contractType:'full_time', status:'active',   joinDate:'2021-08-20', extraRoles:['hod','exam_officer'] },
+  { id:'tch_demo_6',  userId:'u_demo_t6',      firstName:'Francis', lastName:'Ochieng',  title:'Mr.',  email:'fochieng@demo.msingi.io', gender:'male',   staffId:'TCH-006', staffType:'teacher', departmentId:'dept_demo_sci',  subjects:['subj_demo_bio','subj_demo_sci'],                         contractType:'full_time', status:'active',   joinDate:'2022-09-01', extraRoles:[] },
+  { id:'tch_demo_7',  userId:'u_demo_t7',      firstName:'Dorothy', lastName:'Chebet',   title:'Ms.',  email:'dchebet@demo.msingi.io',  gender:'female', staffId:'TCH-007', staffType:'teacher', departmentId:'dept_demo_hum',  subjects:['subj_demo_hist','subj_demo_geo'],                        contractType:'full_time', status:'on_leave', joinDate:'2020-03-01', extraRoles:['hod','timetabler'] },
+  { id:'tch_demo_8',  userId:'u_demo_t8',      firstName:'Samuel',  lastName:'Maina',    title:'Mr.',  email:'smaina@demo.msingi.io',   gender:'male',   staffId:'TCH-008', staffType:'teacher', departmentId:'dept_demo_tbs',  subjects:['subj_demo_bs','subj_demo_cre','subj_demo_eco'],          contractType:'full_time', status:'active',   joinDate:'2023-04-10', extraRoles:['hod'] },
+  { id:'tch_demo_9',  userId:'u_demo_t9',      firstName:'Lilian',  lastName:'Wairimu',  title:'Ms.',  email:'lwairimu@demo.msingi.io', gender:'female', staffId:'TCH-009', staffType:'teacher', departmentId:'dept_demo_tbs',  subjects:['subj_demo_ict','subj_demo_math'],                        contractType:'full_time', status:'active',   joinDate:'2024-02-01', extraRoles:[] },
+  { id:'tch_demo_10', userId:'u_demo_t10',     firstName:'Joseph',  lastName:'Kipchoge', title:'Mr.',  email:'jkipchoge@demo.msingi.io',gender:'male',   staffId:'TCH-010', staffType:'teacher', departmentId:'dept_demo_pe',   subjects:['subj_demo_pe','subj_demo_ss'],                           contractType:'full_time', status:'active',   joinDate:'2021-09-01', extraRoles:['hod'] },
 ];
 
 /* ── Students (20) ── */
@@ -427,6 +441,89 @@ const ADMISSIONS = [
   { id:'adm_demo_8', firstName:'Daniel',  lastName:'Barasa',   stage:'enquiry',     applyingForClass:'Form 4A', ref:'APP-2026-008', notes:'Initial enquiry — brochure sent by email.', stageDate:d(2), phone:'+254 711 100 008', email:'daniel.barasa@gmail.com', priority:false },
 ];
 
+/* ── Class-curriculum: which subjects each class offers ────────
+   isCompulsoryForClass = all students in this class must take it.
+   Elective = false: visible for enrollment but not auto-assigned.
+   ────────────────────────────────────────────────────────────── */
+const _cs = (classId, subjectId, isCompulsoryForClass) => ({ classId, subjectId, isCompulsoryForClass });
+
+const CLASS_SUBJECTS = [
+  /* Primary — Standard 4A, 5A, 6A (identical curriculum) */
+  ...['cls_demo_4a','cls_demo_5a','cls_demo_6a'].flatMap(c => [
+    _cs(c,'subj_demo_math',true),  _cs(c,'subj_demo_eng',true),
+    _cs(c,'subj_demo_kisw',true),  _cs(c,'subj_demo_sci',true),
+    _cs(c,'subj_demo_ss',  true),  _cs(c,'subj_demo_cre',true),
+    _cs(c,'subj_demo_pe',  true),  _cs(c,'subj_demo_ict',false),
+  ]),
+  /* Secondary — Form 1A, 2A (compulsory core + electives) */
+  ...['cls_demo_f1a','cls_demo_f2a'].flatMap(c => [
+    _cs(c,'subj_demo_math',true),  _cs(c,'subj_demo_eng',true),
+    _cs(c,'subj_demo_kisw',true),  _cs(c,'subj_demo_phy',true),
+    _cs(c,'subj_demo_chem',true),  _cs(c,'subj_demo_bio',true),
+    _cs(c,'subj_demo_hist',true),  _cs(c,'subj_demo_cre',true),
+    _cs(c,'subj_demo_geo', false), _cs(c,'subj_demo_bs', false),
+    _cs(c,'subj_demo_ict', false), _cs(c,'subj_demo_pe', false),
+  ]),
+  /* Secondary — Form 3A, 4A (KCSE: 3 compulsory + electives → 8 total) */
+  ...['cls_demo_f3a','cls_demo_f4a'].flatMap(c => [
+    _cs(c,'subj_demo_math',true),  _cs(c,'subj_demo_eng',true),
+    _cs(c,'subj_demo_kisw',true),  _cs(c,'subj_demo_phy', false),
+    _cs(c,'subj_demo_chem',false), _cs(c,'subj_demo_bio', false),
+    _cs(c,'subj_demo_hist',false), _cs(c,'subj_demo_geo', false),
+    _cs(c,'subj_demo_bs',  false), _cs(c,'subj_demo_cre', false),
+    _cs(c,'subj_demo_ict', false), _cs(c,'subj_demo_pe',  false),
+  ]),
+  /* A-Level — Form 5A, 6A (all elective; rules min 3 max 4) */
+  ...['cls_demo_f5a','cls_demo_f6a'].flatMap(c => [
+    _cs(c,'subj_demo_pmath',false), _cs(c,'subj_demo_mech', false),
+    _cs(c,'subj_demo_stat', false), _cs(c,'subj_demo_eco',  false),
+    _cs(c,'subj_demo_phy',  false), _cs(c,'subj_demo_chem', false),
+    _cs(c,'subj_demo_bio',  false), _cs(c,'subj_demo_hist', false),
+    _cs(c,'subj_demo_geo',  false), _cs(c,'subj_demo_bs',   false),
+    _cs(c,'subj_demo_eng',  false), _cs(c,'subj_demo_ict',  false),
+  ]),
+];
+
+/* ── Subject enrollment rules — min/max per section (like bell schedule) ── */
+const SUBJECT_RULES = [
+  { id:'sr_demo_primary',    section:'primary',    minSubjects:6, maxSubjects:8,  notes:'CBC Primary — compulsory core is 7; ICT optional' },
+  { id:'sr_demo_secondary1', section:'secondary',  minSubjects:7, maxSubjects:10, notes:'Form 1-2: all 8 compulsory + optional extras' },
+  { id:'sr_demo_kcse',       classPattern:'f[34]', minSubjects:7, maxSubjects:9,  notes:'KCSE Form 3-4: 3 core + min 4 electives = 7 min, 9 max' },
+  { id:'sr_demo_alevel',     section:'alevel',     minSubjects:3, maxSubjects:4,  notes:'A-Level: minimum 3, maximum 4 subjects per student' },
+];
+
+/* ── Student subject enrollments (existing 20 demo students) ────
+   Format: { students[], classId, subjects[] }
+   Compulsory subjects + realistic elective choices.
+   ─────────────────────────────────────────────────────────────── */
+const ENROLLMENTS = [
+  /* Form 1A — full compulsory block */
+  { students:['std_demo_1','std_demo_2','std_demo_3'], classId:'cls_demo_f1a',
+    subjects:['subj_demo_math','subj_demo_eng','subj_demo_kisw','subj_demo_phy','subj_demo_chem','subj_demo_bio','subj_demo_hist','subj_demo_cre'] },
+  /* Form 2A — full compulsory block + Geography elective */
+  { students:['std_demo_4','std_demo_5'], classId:'cls_demo_f2a',
+    subjects:['subj_demo_math','subj_demo_eng','subj_demo_kisw','subj_demo_phy','subj_demo_chem','subj_demo_bio','subj_demo_hist','subj_demo_cre','subj_demo_geo'] },
+  { students:['std_demo_6'], classId:'cls_demo_f2a',
+    subjects:['subj_demo_math','subj_demo_eng','subj_demo_kisw','subj_demo_phy','subj_demo_chem','subj_demo_bio','subj_demo_hist','subj_demo_cre','subj_demo_bs'] },
+  /* Form 3A — 3 core + 5 electives = 8 (KCSE sciences track) */
+  { students:['std_demo_7','std_demo_8'], classId:'cls_demo_f3a',
+    subjects:['subj_demo_math','subj_demo_eng','subj_demo_kisw','subj_demo_phy','subj_demo_chem','subj_demo_bio','subj_demo_hist','subj_demo_geo'] },
+  { students:['std_demo_9'], classId:'cls_demo_f3a',
+    subjects:['subj_demo_math','subj_demo_eng','subj_demo_kisw','subj_demo_phy','subj_demo_chem','subj_demo_bio','subj_demo_bs','subj_demo_cre'] },
+  /* Form 4A — 8 KCSE subjects */
+  { students:['std_demo_10','std_demo_11'], classId:'cls_demo_f4a',
+    subjects:['subj_demo_math','subj_demo_eng','subj_demo_kisw','subj_demo_phy','subj_demo_chem','subj_demo_bio','subj_demo_geo','subj_demo_hist'] },
+  /* Primary Std 4A — 7 compulsory + ICT */
+  { students:['std_demo_12','std_demo_13','std_demo_14'], classId:'cls_demo_4a',
+    subjects:['subj_demo_math','subj_demo_eng','subj_demo_kisw','subj_demo_sci','subj_demo_ss','subj_demo_cre','subj_demo_pe','subj_demo_ict'] },
+  /* Primary Std 5A — same */
+  { students:['std_demo_15','std_demo_16','std_demo_17'], classId:'cls_demo_5a',
+    subjects:['subj_demo_math','subj_demo_eng','subj_demo_kisw','subj_demo_sci','subj_demo_ss','subj_demo_cre','subj_demo_pe','subj_demo_ict'] },
+  /* Primary Std 6A — same */
+  { students:['std_demo_18','std_demo_19','std_demo_20'], classId:'cls_demo_6a',
+    subjects:['subj_demo_math','subj_demo_eng','subj_demo_kisw','subj_demo_sci','subj_demo_ss','subj_demo_cre','subj_demo_pe','subj_demo_ict'] },
+];
+
 /* ════════════════════════════════════════════════════════════════
    MAIN EXPORT
 ════════════════════════════════════════════════════════════════ */
@@ -696,7 +793,52 @@ async function seedDemoData() {
     ];
     await Promise.all(LEAVES.map(l => upsert(Leave, l.id, l)));
 
-    console.log('[seed-demo-data] ✓ 7 classes · 6 departments · 14 subjects · 10 teacher profiles · 9 teacher users · 20 students · 25 behaviour · 20 invoices · 14 payments · 205 timetable slots (all 7 classes) · 8 admissions · 10 events · 10 payroll · 4 leave requests');
+    /* 13. Class subjects — curriculum per class (which subjects each class offers) */
+    const ClassSubject = _model('class_subjects');
+    await Promise.all(CLASS_SUBJECTS.map(cs => {
+      const csId = `cs_${cs.classId.replace('cls_demo_', '')}_${cs.subjectId.replace('subj_demo_', '')}`;
+      return upsert(ClassSubject, csId, {
+        ...cs, academicYearId: AY_ID, isActive: true, createdBy: ADMIN_ID,
+      });
+    }));
+
+    /* 14. Student subject enrollments — flatten ENROLLMENTS groups into individual records */
+    const StudentSubject = _model('student_subjects');
+    const enrollmentDocs = ENROLLMENTS.flatMap(group =>
+      group.students.flatMap(studentId =>
+        group.subjects.map(subjectId => ({
+          studentId, subjectId, classId: group.classId,
+          academicYearId: AY_ID, enrolledAt: nowISO, enrolledBy: ADMIN_ID,
+        }))
+      )
+    );
+    await Promise.all(enrollmentDocs.map((e, i) =>
+      upsert(StudentSubject, `ss_demo_${i}`, e)
+    ));
+
+    /* 15. Subject enrollment rules (min/max subjects per section — like bell schedule) */
+    const SubjectRule = _model('subject_rules');
+    await Promise.all(SUBJECT_RULES.map(r =>
+      upsert(SubjectRule, r.id, { ...r, createdBy: ADMIN_ID })
+    ));
+
+    /* 16. Patch departments — always write hodId/hodUserId so legacy docs are repaired */
+    await Promise.all(DEPARTMENTS.map(d =>
+      Dept.updateOne(
+        { id: d.id, schoolId: SCHOOL_ID },
+        { $set: { hodId: d.hodId, hodUserId: d.hodUserId } }
+      )
+    ));
+
+    /* 17. Always-update subject sections — fixes docs seeded before alevel section existed */
+    await Promise.all(SUBJECTS.map(s =>
+      Subject.updateOne(
+        { id: s.id, schoolId: SCHOOL_ID },
+        { $set: { sections: s.sections } }
+      )
+    ));
+
+    console.log('[seed-demo-data] ✓ 9 classes · 6 departments · 18 subjects · 10 teacher profiles · 9 teacher users · 20 students · 25 behaviour · 20 invoices · 14 payments · 205 timetable slots (7 classes) · 8 admissions · 10 events · 10 payroll · 4 leave · 96 class-subjects · ' + enrollmentDocs.length + ' enrollments · 4 subject-rules');
 
   } catch (err) {
     console.warn('[seed-demo-data] Warning:', err.message);
