@@ -124,6 +124,8 @@ app.use('/api/settings',       require('./routes/settings'));
 app.use('/api/bell-schedule',  require('./routes/bell-schedule'));
 app.use('/api/departments',       require('./routes/departments'));
 app.use('/api/subjects',          require('./routes/subjects'));
+app.use('/api/class-subjects',    require('./routes/class-subjects'));
+app.use('/api/subject-rules',     require('./routes/subject-rules'));
 app.use('/api/student-subjects',  require('./routes/student-subjects'));
 app.use('/api/events',            require('./routes/events'));
 app.use('/api/hr',                require('./routes/hr'));

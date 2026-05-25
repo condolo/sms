@@ -50,6 +50,23 @@ router.get('/', authMiddleware, async (req, res) => {
       .select('-__v')
       .lean();
 
+    // ?withClassCurriculum=classId — attach whether each subject is in the class curriculum
+    // Used by the curriculum editor to show "in curriculum / not in curriculum" state per subject.
+    if (req.query.withClassCurriculum) {
+      const classId = req.query.withClassCurriculum;
+      const links = await _model('class_subjects')
+        .find({ schoolId, classId, isActive: { $ne: false } })
+        .select('subjectId isCompulsoryForClass id')
+        .lean();
+      const linkMap = Object.fromEntries(links.map(l => [l.subjectId, l]));
+      return ok(res, docs.map(d => ({
+        ...d,
+        inCurriculum:         !!linkMap[d.id],
+        isCompulsoryForClass: linkMap[d.id]?.isCompulsoryForClass ?? false,
+        classSubjectId:       linkMap[d.id]?.id ?? null,
+      })));
+    }
+
     return ok(res, docs);
   } catch (err) { console.error('[subjects GET /]', err); return E.serverError(res); }
 });
