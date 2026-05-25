@@ -6,6 +6,15 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.11.9',
+    date: '2026-05-25',
+    label: 'Phase 7 — Behaviour Module Bug Fixes',
+    changes: [
+      { type: 'fix', text: '"Validation failed" on Award Points confirm/submit: frontend was not sending the required `title` field — now maps item.label to title (required by IncidentSchema)' },
+      { type: 'fix', text: 'Teacher notes on incidents were silently discarded: `note` field was stripped by Zod because it was absent from IncidentSchema — added note: z.string().max(1000).optional() to backend schema so notes are now persisted' },
+    ],
+  },
+  {
     version: '4.11.8',
     date: '2026-05-25',
     label: 'Phase 6 — HR Staff Tab Rebuild',

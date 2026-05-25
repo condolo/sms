@@ -389,6 +389,7 @@ function AwardTab() {
     mutation.mutate({
       studentId:   sid,
       type,
+      title:       item.label,
       category:    MATRIX[catIdx]?.category,
       description: item.label,
       points:      pts,

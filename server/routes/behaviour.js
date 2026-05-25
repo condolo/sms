@@ -34,6 +34,7 @@ const IncidentSchema = z.object({
   location:     z.string().max(100).optional(),
   witnesses:    z.array(z.string()).optional(),  // userIds
   action:       z.string().max(1000).optional(), // action taken
+  note:         z.string().max(1000).optional(), // teacher note on incident
   detention:    z.boolean().default(false),
   detentionDate: z.string().optional(),
   parentNotified: z.boolean().default(false),
