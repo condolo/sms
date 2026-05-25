@@ -8,10 +8,12 @@ import { motion } from 'framer-motion';
 import {
   Users, UserCheck, Clock, Wallet, Plus, Check, X,
   AlertCircle, Calendar, FolderOpen, Trash2, Edit2, Save,
-  Download, ExternalLink, Loader2, Copy,
+  Download, ExternalLink, Loader2, Copy, Search, ChevronRight,
 } from 'lucide-react';
-import { hr as hrApi, teachers as teachersApi } from '@/api/client.js';
+import { hr as hrApi, teachers as teachersApi, departments as deptsApi, subjects as subjectsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
+import StaffFormModal   from './StaffFormModal.jsx';
+import StaffDetailPanel from './StaffDetailPanel.jsx';
 
 /* ── Constants ──────────────────────────────────────────── */
 const HR_ROLES    = ['superadmin','admin','hr'];
@@ -307,8 +309,11 @@ export default function HRPage() {
   const [payPeriod, setPayPeriod]     = useState(() => new Date().toISOString().slice(0, 7));
   const [showDocForm, setDocForm]     = useState(false);
   const [docStaffFilter, setDocStaff] = useState('');
-  const [payrollModal, setPayrollModal] = useState(null); // null | { mode:'add'|'edit', record:null|{...} }
-  const [deletingPayroll, setDeletingPayroll] = useState(null); // null | { staffId, period }
+  const [payrollModal, setPayrollModal]     = useState(null);  // null | { mode:'add'|'edit', record:null|{...} }
+  const [deletingPayroll, setDeletingPayroll] = useState(null);  // null | { staffId, period }
+  const [staffModal, setStaffModal]           = useState(null);  // null | { mode:'add'|'edit' }
+  const [selectedStaff, setSelectedStaff]     = useState(null);  // null | teacher doc (for detail panel)
+  const [staffSearch, setStaffSearch]         = useState('');
 
   /* ── Queries ── */
   const { data: summaryData } = useQuery({
@@ -341,10 +346,27 @@ export default function HRPage() {
     staleTime: 60_000,
   });
 
+  const { data: deptsData } = useQuery({
+    queryKey: ['departments'],
+    queryFn:  () => deptsApi.list(),
+    select:   r => r?.data ?? (Array.isArray(r) ? r : []),
+    staleTime: 60_000,
+  });
+
+  const { data: subjectsListData } = useQuery({
+    queryKey: ['subjects-flat'],
+    queryFn:  () => subjectsApi.list({ limit: 100 }),
+    select:   r => r?.data ?? (Array.isArray(r) ? r : []),
+    enabled:  !!staffModal,
+    staleTime: 120_000,
+  });
+
   const teachers    = teachersData?.teachers ?? teachersData?.data ?? [];
   const leaves      = leaveData?.requests    ?? [];
   const payrollRecs = payrollData?.records   ?? [];
   const summary     = summaryData ?? {};
+  const departments = deptsData   ?? [];
+  const subjectsList= subjectsListData ?? [];
 
   const pendingLeaves = leaves.filter(l => l.status === 'pending');
 
@@ -393,6 +415,27 @@ export default function HRPage() {
     onSuccess:  () => {
       qc.invalidateQueries({ queryKey: ['hr','payroll'] });
       qc.invalidateQueries({ queryKey: ['hr','summary'] });
+    },
+  });
+
+  const createTeacher = useMutation({
+    mutationFn: teachersApi.create,
+    onSuccess:  () => {
+      qc.invalidateQueries({ queryKey: ['teachers'] });
+      qc.invalidateQueries({ queryKey: ['hr','summary'] });
+      setStaffModal(null);
+    },
+  });
+
+  const updateTeacher = useMutation({
+    mutationFn: ({ id, data }) => teachersApi.update(id, data),
+    onSuccess:  updated => {
+      qc.invalidateQueries({ queryKey: ['teachers'] });
+      // Refresh the detail panel if we just edited the viewed teacher
+      if (selectedStaff?.id === (updated?.id ?? updated?.data?.id)) {
+        setSelectedStaff(updated?.data ?? updated);
+      }
+      setStaffModal(null);
     },
   });
 
@@ -477,22 +520,129 @@ export default function HRPage() {
 
       {/* ── STAFF TAB ── */}
       {tab === 'staff' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {teachers.length === 0 ? (
-            <p className="col-span-3 text-center text-slate-400 text-sm py-16">No staff records found.</p>
-          ) : teachers.map((t, i) => (
-            <motion.div key={t.id ?? t._id} initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} transition={{ delay: i * 0.03 }}
-              className="bg-white rounded-xl border border-slate-200 p-4 flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700 font-bold text-sm">
-                {initials(t.name ?? `${t.firstName} ${t.lastName}`)}
+        <div>
+          {/* Toolbar */}
+          <div className="flex items-center gap-3 mb-5 flex-wrap">
+            <div className="relative flex-1 min-w-[200px] max-w-sm">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input
+                value={staffSearch}
+                onChange={e => setStaffSearch(e.target.value)}
+                placeholder="Search staff by name…"
+                className="w-full pl-9 pr-4 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40"
+              />
+            </div>
+            {isHR && (
+              <button
+                onClick={() => setStaffModal({ mode: 'add' })}
+                className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2 text-sm font-semibold text-white hover:bg-violet-700 transition">
+                <Plus size={14} /> Add Staff
+              </button>
+            )}
+            <span className="text-xs text-slate-400 ml-auto">
+              {teachers.length} staff member{teachers.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+
+          {/* Grid */}
+          {(() => {
+            const q = staffSearch.trim().toLowerCase();
+            const filtered = q
+              ? teachers.filter(t =>
+                  `${t.firstName} ${t.lastName}`.toLowerCase().includes(q) ||
+                  (t.email ?? '').toLowerCase().includes(q) ||
+                  (t.staffId ?? '').toLowerCase().includes(q)
+                )
+              : teachers;
+
+            const STAFF_TYPE_COLORS = {
+              teacher:'bg-violet-100 text-violet-700', administrator:'bg-blue-100 text-blue-700',
+              librarian:'bg-emerald-100 text-emerald-700', counselor:'bg-pink-100 text-pink-700',
+              finance:'bg-amber-100 text-amber-700', hr:'bg-orange-100 text-orange-700',
+              it:'bg-cyan-100 text-cyan-700', security:'bg-red-100 text-red-700',
+              other:'bg-slate-100 text-slate-500',
+            };
+            const STAFF_TYPE_LABELS = {
+              teacher:'Teacher', administrator:'Administrator', librarian:'Librarian',
+              counselor:'Counselor', finance:'Finance', hr:'HR', it:'IT',
+              security:'Security', other:'Other',
+            };
+            const EXTRA_ROLES_LABELS = {
+              hod:'HOD', class_teacher:'Class Teacher', timetabler:'Timetabler',
+              exam_officer:'Exam Officer', deputy:'Deputy Principal', principal:'Principal',
+            };
+            const STATUS_COLORS = {
+              active:'bg-emerald-100 text-emerald-700', on_leave:'bg-amber-100 text-amber-700',
+              inactive:'bg-slate-100 text-slate-500', terminated:'bg-red-100 text-red-600',
+            };
+
+            if (filtered.length === 0) return (
+              <div className="text-center py-16">
+                <Users size={32} className="mx-auto text-slate-300 mb-3" />
+                <p className="text-slate-500 text-sm">{q ? `No staff match "${q}"` : 'No staff records found.'}</p>
+                {!q && isHR && (
+                  <button onClick={() => setStaffModal({ mode:'add' })}
+                    className="mt-3 text-violet-600 text-sm hover:underline">Add the first staff member</button>
+                )}
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-slate-900 text-sm truncate">{t.name ?? `${t.firstName} ${t.lastName}`}</p>
-                <p className="text-xs text-slate-500 truncate">{t.specialization || t.email}</p>
-                <Badge cls={t.status === 'active' ? 'bg-emerald-100 text-emerald-700 mt-1' : 'bg-slate-100 text-slate-600 mt-1'} text={t.status ?? 'active'} />
+            );
+
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filtered.map((t, i) => {
+                  const dept = departments.find(d => d.id === t.departmentId);
+                  const displayName = [t.title, t.firstName, t.lastName].filter(Boolean).join(' ');
+                  return (
+                    <motion.div
+                      key={t.id ?? t._id}
+                      initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} transition={{ delay: i * 0.025 }}
+                      onClick={() => setSelectedStaff(t)}
+                      className="bg-white rounded-xl border border-slate-200 p-4 cursor-pointer hover:border-violet-300 hover:shadow-sm transition group"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700 font-bold text-sm">
+                          {initials(displayName)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-slate-900 text-sm truncate">{displayName}</p>
+                          <p className="text-xs text-slate-400 truncate mt-0.5">{t.specialization || t.email}</p>
+                          {/* Type + status */}
+                          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                            {t.staffType && (
+                              <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${STAFF_TYPE_COLORS[t.staffType] ?? 'bg-slate-100 text-slate-500'}`}>
+                                {STAFF_TYPE_LABELS[t.staffType] ?? t.staffType}
+                              </span>
+                            )}
+                            <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${STATUS_COLORS[t.status] ?? 'bg-slate-100 text-slate-500'}`}>
+                              {t.status ?? 'active'}
+                            </span>
+                          </div>
+                        </div>
+                        <ChevronRight size={14} className="text-slate-300 group-hover:text-violet-400 shrink-0 mt-1 transition" />
+                      </div>
+
+                      {/* Department + extra roles */}
+                      {(dept || (t.extraRoles ?? []).length > 0) && (
+                        <div className="mt-2.5 pt-2.5 border-t border-slate-50 flex items-center gap-2 flex-wrap">
+                          {dept && (
+                            <span className="text-[10px] text-slate-500 truncate">{dept.name}</span>
+                          )}
+                          {(t.extraRoles ?? []).slice(0, 2).map(r => (
+                            <span key={r} className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+                              {EXTRA_ROLES_LABELS[r] ?? r}
+                            </span>
+                          ))}
+                          {(t.extraRoles ?? []).length > 2 && (
+                            <span className="text-[10px] text-slate-400">+{(t.extraRoles ?? []).length - 2}</span>
+                          )}
+                        </div>
+                      )}
+                    </motion.div>
+                  );
+                })}
               </div>
-            </motion.div>
-          ))}
+            );
+          })()}
         </div>
       )}
 
@@ -776,6 +926,49 @@ export default function HRPage() {
           onSave={data => savePayroll.mutate(data)}
           saving={savePayroll.isPending}
         />
+      )}
+
+      {/* ── Add / Edit Staff modal ── */}
+      {staffModal && (
+        <StaffFormModal
+          mode={staffModal.mode}
+          teacher={staffModal.mode === 'edit' ? selectedStaff : null}
+          departments={departments}
+          subjects={subjectsList}
+          isHR={isHR}
+          onClose={() => setStaffModal(null)}
+          saving={createTeacher.isPending || updateTeacher.isPending}
+          onSave={data => {
+            if (staffModal.mode === 'edit' && selectedStaff?.id) {
+              updateTeacher.mutate({ id: selectedStaff.id, data });
+            } else {
+              createTeacher.mutate(data);
+            }
+          }}
+        />
+      )}
+
+      {/* ── Staff detail slide-over ── */}
+      {selectedStaff && (
+        <div className="fixed inset-0 z-40 flex" onClick={e => e.target === e.currentTarget && setSelectedStaff(null)}>
+          {/* Backdrop */}
+          <div className="flex-1 bg-black/20" onClick={() => setSelectedStaff(null)} />
+          {/* Panel */}
+          <motion.div
+            initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+            transition={{ type:'tween', duration: 0.22 }}
+            className="w-full max-w-md bg-white shadow-2xl border-l border-slate-200 overflow-hidden flex flex-col"
+          >
+            <StaffDetailPanel
+              teacher={selectedStaff}
+              departments={departments}
+              subjects={subjectsList}
+              isHR={isHR}
+              onClose={() => setSelectedStaff(null)}
+              onEdit={() => setStaffModal({ mode: 'edit' })}
+            />
+          </motion.div>
+        </div>
       )}
     </div>
   );

@@ -6,6 +6,20 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.11.8',
+    date: '2026-05-25',
+    label: 'Phase 6 — HR Staff Tab Rebuild',
+    changes: [
+      { type: 'new',  text: 'Staff cards rebuilt: staffType chip, status badge, department name, extra roles pills, chevron — click any card to open the detail panel' },
+      { type: 'new',  text: 'StaffDetailPanel slide-over: 3 tabs — Profile (contact/personal), Employment (roles, subjects, contract), HR Records (national ID, NSSF, SHA, KRA PIN, next of kin)' },
+      { type: 'new',  text: 'Add Staff button (HR/Admin only): opens StaffFormModal with 4 sections — Personal Details, Employment, Roles & Responsibilities, HR Records' },
+      { type: 'new',  text: 'Edit Staff: HR Records tab in detail panel has an "Edit" button — opens pre-filled modal for updating any profile field including sensitive HR data' },
+      { type: 'new',  text: 'Staff search bar: live filter by name, email, or staff ID — no server round-trip' },
+      { type: 'new',  text: 'Teaching subjects multi-select in form (visible when staffType = teacher); subjects list fetched lazily only when form is open' },
+      { type: 'new',  text: 'Backend: teachers Zod schema extended with staffType, departmentId, extraRoles, formClassId, specialization, nationalId, nssfNo, shaNo, kraPinNo, nextOfKin' },
+    ],
+  },
+  {
     version: '4.11.7',
     date: '2026-05-25',
     label: 'Phase 5 — HR Payroll Monthly Management',

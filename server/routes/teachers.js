@@ -28,6 +28,7 @@ const TeacherCreateSchema = z.object({
   gender:         z.enum(['male', 'female', 'other', 'prefer_not_to_say']).optional(),
   title:          z.string().max(20).optional(),           // Mr, Mrs, Dr, etc.
   qualifications: z.string().max(500).optional(),
+  specialization: z.string().max(200).optional(),
   subjects:       z.array(z.string()).optional(),          // subject IDs
   classes:        z.array(z.string()).optional(),          // class IDs assigned
   houseId:        z.string().optional(),                   // house tutor
@@ -37,6 +38,21 @@ const TeacherCreateSchema = z.object({
   contractType:   z.enum(['full_time', 'part_time', 'supply', 'volunteer']).optional(),
   status:         z.enum(['active', 'inactive', 'on_leave', 'terminated']).default('active'),
   customFields:   z.record(z.unknown()).optional(),
+  // Employment / HR classification
+  staffType:    z.enum(['teacher','administrator','librarian','counselor','finance','hr','it','security','other']).optional(),
+  departmentId: z.string().optional(),
+  formClassId:  z.string().optional(),
+  extraRoles:   z.array(z.enum(['hod','class_teacher','timetabler','exam_officer','deputy','principal'])).optional(),
+  // Sensitive HR fields (stored on profile, visible to HR/Admin only)
+  nationalId:   z.string().max(50).optional(),
+  nssfNo:       z.string().max(50).optional(),
+  shaNo:        z.string().max(50).optional(),
+  kraPinNo:     z.string().max(50).optional(),
+  nextOfKin:    z.object({
+    name:         z.string().max(100).optional(),
+    phone:        z.string().max(30).optional(),
+    relationship: z.string().max(50).optional(),
+  }).optional(),
 });
 
 const TeacherUpdateSchema = TeacherCreateSchema.partial().omit({ email: true }).extend({
