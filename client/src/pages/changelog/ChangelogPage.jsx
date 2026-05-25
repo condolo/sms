@@ -6,6 +6,15 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.12.0',
+    date: '2026-05-25',
+    label: 'Frontend Decomposition — GradesPage',
+    changes: [
+      { type: 'new', text: 'GradesPage.jsx (1432 lines) split into 11 focused files: constants.js, GradesPrimitives.jsx, ExamsListTab, ExamResultsTab, CreateExamSlideOver, MarkEntryTab, ReportCardsTab, StudentReportCard, ConfigTab, RemindersTab — main shell reduced to 72 lines' },
+      { type: 'new', text: 'TimetablePage.jsx (1883 lines) previously split into 11 files — constants.js, TimetablePrimitives, TimetableGrid, WorkloadPanel, ConflictsPanel, AddSlotSlideOver, BellScheduleSlideOver, OverviewView, CoverTab, PublishModal — main shell at 487 lines' },
+    ],
+  },
+  {
     version: '4.11.9',
     date: '2026-05-25',
     label: 'Phase 7 — Behaviour Module Bug Fixes',
