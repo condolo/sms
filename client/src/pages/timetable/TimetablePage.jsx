@@ -8,7 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence } from 'framer-motion';
 import {
   CalendarDays, Plus, AlertCircle, CheckCircle2, BarChart3,
-  Clock, User, LayoutGrid, Globe, UserX, Zap,
+  Clock, User, LayoutGrid, Globe, UserX, Zap, Download, Printer,
 } from 'lucide-react';
 import {
   timetable    as ttApi,
@@ -58,6 +58,7 @@ export default function TimetablePage() {
   const [teacherId,       setTeacherId]       = useState('');
   const [showAdd,         setShowAdd]         = useState(false);
   const [addDefaults,     setAddDefaults]     = useState({ day: 'monday', period: '1' });
+  const [editSlot,        setEditSlot]        = useState(null);   // slot obj → edit mode
   const [showWorkload,    setShowWorkload]     = useState(false);
   const [showConflicts,   setShowConflicts]   = useState(false);
   const [showBell,        setShowBell]        = useState(false);
@@ -80,7 +81,9 @@ export default function TimetablePage() {
   const filteredClasses = section === 'all'
     ? classList
     : classList.filter(c => inferSection(c.name) === section);
-  const selectedClass = classList.find(c => (c._id ?? c.id) === classId);
+  // Use string `id` field (e.g. "cls_demo_4a") not MongoDB _id — timetable slots
+  // store classId as the string id, so the fetch must use the same format.
+  const selectedClass = classList.find(c => (c.id ?? String(c._id)) === classId);
 
   /* Bell schedule — resolved for the selected class's section */
   const classSection = selectedClass ? inferSection(selectedClass.name) : 'all';
@@ -169,14 +172,109 @@ export default function TimetablePage() {
 
   /* ── Handlers ────────────────────────────────────────────── */
   const openAdd = useCallback((day, period) => {
+    setEditSlot(null);
     setAddDefaults({ day, period });
     setShowAdd(true);
   }, []);
 
+  function openEdit(slot) {
+    setEditSlot(slot);
+    setShowAdd(true);
+  }
+
   function onSlotCreated() {
     setShowAdd(false);
+    setEditSlot(null);
     invalidateTT();
-    showToast('Lesson slot added.');
+    showToast(editSlot ? 'Lesson slot updated.' : 'Lesson slot added.');
+  }
+
+  /* ── Export helpers ─────────────────────────────────────────── */
+  const school = useAuthStore(s => s.session?.school);
+
+  function exportClassCSV() {
+    if (!classSlots.length || !selectedClass) return;
+    const DAY_LIST = ['monday','tuesday','wednesday','thursday','friday'];
+    const header = ['Period','Time',...DAY_LIST.map(d => d.charAt(0).toUpperCase() + d.slice(1))];
+    const rows = bell.filter(b => !b.isBreak).map(b => {
+      const row = [`P${b.p}`, `${b.start}–${b.end}`];
+      DAY_LIST.forEach(day => {
+        const slot = classSlots.find(s => String(s.period) === String(b.p) && s.day === day);
+        if (slot) {
+          const parts = [slot.subject];
+          if (slot.teacherName) parts.push(slot.teacherName);
+          if (slot.room)        parts.push(slot.room);
+          row.push(parts.join(' · '));
+        } else {
+          row.push('');
+        }
+      });
+      return row;
+    });
+    const csv = [header, ...rows]
+      .map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const el   = document.createElement('a');
+    el.href     = url;
+    el.download = `timetable_${selectedClass.name.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.csv`;
+    el.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function printClassTimetable() {
+    if (!selectedClass) return;
+    const DAY_LIST = ['monday','tuesday','wednesday','thursday','friday'];
+    const schoolName = school?.name ?? 'Msingi School';
+    const periods = bell.filter(b => !b.isBreak);
+
+    const tableRows = periods.map(b => {
+      const cells = DAY_LIST.map(day => {
+        const slot = classSlots.find(s => String(s.period) === String(b.p) && s.day === day);
+        if (!slot) return '<td class="empty">—</td>';
+        return `<td>
+          <div class="subj">${slot.subject || '—'}</div>
+          ${slot.teacherName ? `<div class="meta">${slot.teacherName}</div>` : ''}
+          ${slot.room        ? `<div class="meta">${slot.room}</div>`        : ''}
+        </td>`;
+      }).join('');
+      return `<tr><td class="period"><b>P${b.p}</b><br/><span>${b.start}–${b.end}</span></td>${cells}</tr>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html><html><head>
+      <title>${selectedClass.name} — Timetable</title>
+      <style>
+        body { font-family: Arial, sans-serif; font-size: 11px; margin: 20px; color: #111; }
+        h2 { margin: 0 0 2px; font-size: 16px; }
+        .sub { font-size: 11px; color: #666; margin-bottom: 14px; }
+        table { border-collapse: collapse; width: 100%; }
+        th { background: #f1f5f9; padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1; font-size: 11px; }
+        td { padding: 6px 8px; border: 1px solid #e2e8f0; vertical-align: top; min-width: 80px; }
+        td.period { background: #f8fafc; text-align: center; white-space: nowrap; width: 70px; }
+        td.period span { font-size: 9px; color: #94a3b8; display: block; }
+        td.empty { color: #cbd5e1; text-align: center; }
+        .subj { font-weight: 600; font-size: 11px; }
+        .meta { font-size: 9px; color: #64748b; margin-top: 2px; }
+        @media print { @page { margin: 15mm; } }
+      </style>
+    </head><body>
+      <h2>${schoolName}</h2>
+      <div class="sub">${selectedClass.name} — Weekly Timetable · Printed ${new Date().toLocaleDateString('en-GB', { day:'numeric', month:'long', year:'numeric' })}</div>
+      <table>
+        <thead><tr>
+          <th>Period</th>
+          ${DAY_LIST.map(d => `<th>${d.charAt(0).toUpperCase() + d.slice(1)}</th>`).join('')}
+        </tr></thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </body></html>`;
+
+    const win = window.open('', '_blank', 'width=900,height=700');
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 500);
   }
 
   const selectedTeacher = teacherList.find(t => (t._id ?? t.id) === teacherId);
@@ -343,11 +441,34 @@ export default function TimetablePage() {
               >
                 <option value="">Select class…</option>
                 {filteredClasses.map(c => (
-                  <option key={c._id ?? c.id} value={c._id ?? c.id}>{c.name}</option>
+                  // Use string id (e.g. "cls_demo_4a"), NOT MongoDB _id —
+                  // timetable slots store classId in this format
+                  <option key={c.id ?? String(c._id)} value={c.id ?? String(c._id)}>{c.name}</option>
                 ))}
               </select>
               {selectedClass && (
-                <span className="text-xs text-slate-400">{classSlots.length} lessons scheduled</span>
+                <span className="text-xs text-slate-400">{classSlots.length} lesson{classSlots.length !== 1 ? 's' : ''} scheduled</span>
+              )}
+              {/* Export buttons — visible when a class is selected */}
+              {selectedClass && classSlots.length > 0 && (
+                <>
+                  <div className="ml-auto flex items-center gap-1.5">
+                    <button
+                      onClick={exportClassCSV}
+                      className="flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 transition"
+                      title="Download timetable as CSV"
+                    >
+                      <Download size={12} /> CSV
+                    </button>
+                    <button
+                      onClick={printClassTimetable}
+                      className="flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 transition"
+                      title="Print timetable"
+                    >
+                      <Printer size={12} /> Print
+                    </button>
+                  </div>
+                </>
               )}
             </>
           )}
@@ -417,7 +538,7 @@ export default function TimetablePage() {
               <p className="text-sm text-slate-600">Failed to load timetable.</p>
             </div>
           ) : (
-            <TimetableGrid slots={classSlots} onDelete={removeSlot} onAdd={openAdd} canEdit={canEdit} bell={bell} />
+            <TimetableGrid slots={classSlots} onDelete={removeSlot} onEdit={openEdit} onAdd={openAdd} canEdit={canEdit} bell={bell} />
           )
         )}
 
@@ -457,11 +578,12 @@ export default function TimetablePage() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {showAdd && classId && (
+        {showAdd && (classId || editSlot) && (
           <AddSlotSlideOver
-            classId={classId}
+            classId={editSlot ? (editSlot.classId ?? classId) : classId}
+            editSlot={editSlot}
             defaults={addDefaults}
-            onClose={() => setShowAdd(false)}
+            onClose={() => { setShowAdd(false); setEditSlot(null); }}
             onCreated={onSlotCreated}
             lessonPeriods={lessonPeriods}
           />

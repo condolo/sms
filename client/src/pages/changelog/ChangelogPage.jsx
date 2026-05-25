@@ -6,6 +6,17 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.15.2',
+    date: '2026-05-25',
+    label: 'Timetable — Edit Slots + Export + Class Grid Bug Fix',
+    changes: [
+      { type: 'fix', text: 'Class grid was always empty: class dropdown was storing MongoDB _id instead of the string id field (e.g. "cls_demo_4a"); GET /timetable/class/:classId therefore never matched any slots — fixed to use c.id ?? String(c._id)' },
+      { type: 'new', text: 'Click any slot card on the class grid to edit it inline — pre-filled slide-over with subject, day, period, teacher, room, type; saves via PUT /api/timetable/:id' },
+      { type: 'new', text: 'Export class timetable as CSV (Download button) or formatted print view (Print button) — appear in the toolbar once a class with lessons is selected' },
+      { type: 'fix', text: 'AddSlotSlideOver teacher picker now stores userId (format used by timetable slots) instead of MongoDB ObjectId — fixes teacher display and conflict detection for newly created slots' },
+    ],
+  },
+  {
     version: '4.15.1',
     date: '2026-05-25',
     label: 'Timetable — Conflict & Overview Display Fixes',

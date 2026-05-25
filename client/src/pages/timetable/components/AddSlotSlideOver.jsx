@@ -1,15 +1,16 @@
 /* ============================================================
-   AddSlotSlideOver — slide-over form to add a lesson slot
+   AddSlotSlideOver — add OR edit a lesson slot
    Props:
-     classId        string
-     defaults       { day, period }  — pre-fills from grid click
+     classId        string          — required for create mode
+     editSlot       object|null     — if set, operates in edit mode
+     defaults       { day, period } — pre-fills on create
      onClose        fn
-     onCreated      fn — called on successful save
-     lessonPeriods  []  — non-break periods from the active bell schedule
+     onCreated      fn              — called after successful save (both modes)
+     lessonPeriods  []              — non-break periods from the active bell schedule
    ============================================================ */
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Loader2, Save, AlertTriangle, X } from 'lucide-react';
+import { Loader2, Save, AlertTriangle, X, Edit2 } from 'lucide-react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { timetable as ttApi, teachers as teachersApi } from '@/api/client.js';
 import { DAYS, DAY_FULL, DEFAULT_BELL } from '../constants.js';
@@ -22,17 +23,38 @@ const EMPTY_FORM = {
 
 export default function AddSlotSlideOver({
   classId,
+  editSlot   = null,
   defaults,
   onClose,
   onCreated,
   lessonPeriods = DEFAULT_BELL.filter(b => !b.isBreak),
 }) {
-  const [form,   setFormState] = useState({ ...EMPTY_FORM, ...defaults });
+  const isEdit = !!editSlot;
+
+  function buildForm() {
+    if (isEdit) {
+      return {
+        day:         editSlot.day         ?? 'monday',
+        period:      String(editSlot.period ?? '1'),
+        subject:     editSlot.subject     ?? '',
+        teacherId:   editSlot.teacherId   ?? '',
+        teacherName: editSlot.teacherName ?? '',
+        room:        editSlot.room        ?? '',
+        type:        editSlot.type        ?? 'lesson',
+      };
+    }
+    return { ...EMPTY_FORM, ...defaults };
+  }
+
+  const [form,   setFormState] = useState(buildForm);
   const [errors, setErrors]    = useState({});
 
+  // Re-init if editSlot changes (e.g. user clicks a different slot)
   useEffect(() => {
-    setFormState(f => ({ ...f, ...defaults }));
-  }, [defaults]);
+    setFormState(buildForm());
+    setErrors({});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editSlot?.id ?? editSlot?._id, defaults?.day, defaults?.period]);
 
   function set(k, v) {
     setFormState(f => ({ ...f, [k]: v }));
@@ -46,19 +68,30 @@ export default function AddSlotSlideOver({
   });
   const teachers = teachersData?.data ?? [];
 
+  // Key: use userId (the format timetable slots use for teacherId)
+  // so conflict detection and workload queries match correctly.
+  function teacherKey(t) {
+    return t.userId ?? t.id ?? String(t._id);
+  }
+
   const { mutate, isPending } = useMutation({
-    mutationFn: () => ttApi.create({
-      classId,
-      day:         form.day,
-      period:      form.period,
-      subject:     form.subject.trim() || undefined,
-      teacherId:   form.teacherId   || undefined,
-      teacherName: form.teacherName.trim() || undefined,
-      room:        form.room.trim() || undefined,
-      type:        form.type,
-    }),
+    mutationFn: () => {
+      const payload = {
+        day:         form.day,
+        period:      form.period,
+        subject:     form.subject.trim()     || undefined,
+        teacherId:   form.teacherId          || undefined,
+        teacherName: form.teacherName.trim() || undefined,
+        room:        form.room.trim()        || undefined,
+        type:        form.type,
+      };
+      if (isEdit) {
+        return ttApi.update(editSlot.id ?? editSlot._id, payload);
+      }
+      return ttApi.create({ ...payload, classId });
+    },
     onSuccess: onCreated,
-    onError:   err => setErrors({ _server: err?.message ?? 'Failed to add slot.' }),
+    onError:   err => setErrors({ _server: err?.message ?? `Failed to ${isEdit ? 'update' : 'add'} slot.` }),
   });
 
   function submit(e) {
@@ -83,8 +116,15 @@ export default function AddSlotSlideOver({
       >
         <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
           <div>
-            <h2 className="text-base font-semibold text-slate-900">Add Lesson Slot</h2>
-            <p className="text-xs text-slate-400 mt-0.5">Assign a lesson to the schedule</p>
+            <h2 className="text-base font-semibold text-slate-900 flex items-center gap-2">
+              {isEdit && <Edit2 size={14} className="text-slate-400" />}
+              {isEdit ? 'Edit Lesson Slot' : 'Add Lesson Slot'}
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {isEdit
+                ? `${editSlot.subject || 'Slot'} · ${DAY_FULL[editSlot.day] ?? editSlot.day} P${editSlot.period}`
+                : 'Assign a lesson to the schedule'}
+            </p>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-100 transition">
             <X size={18} />
@@ -118,7 +158,7 @@ export default function AddSlotSlideOver({
             <FField label="Period">
               <select value={form.period} onChange={e => set('period', e.target.value)} className={iCls()}>
                 {lessonPeriods.map(b => (
-                  <option key={b.p} value={b.p}>P{b.p} · {b.start}</option>
+                  <option key={b.p} value={String(b.p)}>P{b.p} · {b.start}</option>
                 ))}
               </select>
             </FField>
@@ -128,16 +168,17 @@ export default function AddSlotSlideOver({
             <select
               value={form.teacherId}
               onChange={e => {
-                const t = teachers.find(t => (t._id ?? t.id) === e.target.value);
+                const t = teachers.find(t => teacherKey(t) === e.target.value);
                 set('teacherId',   e.target.value);
-                set('teacherName', t ? `${t.firstName ?? ''} ${t.lastName ?? ''}`.trim() : '');
+                set('teacherName', t ? `${t.title ?? ''} ${t.firstName ?? ''} ${t.lastName ?? ''}`.trim() : '');
               }}
               className={iCls()}
             >
               <option value="">No teacher assigned</option>
               {teachers.map(t => (
-                <option key={t._id ?? t.id} value={t._id ?? t.id}>
+                <option key={teacherKey(t)} value={teacherKey(t)}>
                   {t.firstName} {t.lastName}
+                  {t.department ? ` · ${t.department}` : ''}
                 </option>
               ))}
             </select>
@@ -172,7 +213,7 @@ export default function AddSlotSlideOver({
             className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded-lg transition"
           >
             {isPending ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-            {isPending ? 'Adding…' : 'Add slot'}
+            {isPending ? (isEdit ? 'Saving…' : 'Adding…') : (isEdit ? 'Save changes' : 'Add slot')}
           </button>
         </div>
       </motion.div>

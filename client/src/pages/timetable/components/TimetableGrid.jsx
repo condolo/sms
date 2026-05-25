@@ -12,17 +12,19 @@ import { Plus, Trash2 } from 'lucide-react';
 import { DAYS, DAY_FULL, DAY_SHORT, DEFAULT_BELL, buildSlotMap, slotColor } from '../constants.js';
 
 /* ── Slot card ───────────────────────────────────────────────── */
-function SlotCard({ slot, onDelete, canEdit }) {
+function SlotCard({ slot, onDelete, onEdit, canEdit }) {
   const col = slotColor(slot.subject ?? '');
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
-      className={`h-full rounded-lg border px-2 py-1.5 group relative ${col.bg} ${col.border}`}
+      onClick={() => canEdit && onEdit && onEdit(slot)}
+      className={`h-full rounded-lg border px-2 py-1.5 group relative ${col.bg} ${col.border} ${canEdit ? 'cursor-pointer hover:shadow-sm hover:brightness-95 transition' : ''}`}
     >
       {canEdit && (
         <button
-          onClick={() => onDelete(slot.id ?? slot._id)}
+          onClick={e => { e.stopPropagation(); onDelete(slot.id ?? slot._id); }}
           className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-white/80 text-slate-400 hover:text-red-500 transition"
+          title="Delete slot"
         >
           <Trash2 size={10} />
         </button>
@@ -70,7 +72,7 @@ function BreakRow({ bell }) {
 }
 
 /* ── Period row ──────────────────────────────────────────────── */
-function PeriodRow({ bell, slotMap, onDelete, onAdd, canEdit }) {
+function PeriodRow({ bell, slotMap, onDelete, onEdit, onAdd, canEdit }) {
   return (
     <div className="flex border-b border-slate-100" style={{ minHeight: '72px' }}>
       <div
@@ -91,7 +93,7 @@ function PeriodRow({ bell, slotMap, onDelete, onAdd, canEdit }) {
             style={{ minWidth: 0 }}
           >
             {slot
-              ? <SlotCard slot={slot} onDelete={onDelete} canEdit={canEdit} />
+              ? <SlotCard slot={slot} onDelete={onDelete} onEdit={onEdit} canEdit={canEdit} />
               : <EmptyCell onAdd={() => onAdd(day, bell.p)} canEdit={canEdit} />
             }
           </div>
@@ -102,7 +104,7 @@ function PeriodRow({ bell, slotMap, onDelete, onAdd, canEdit }) {
 }
 
 /* ── Timetable grid (public export) ─────────────────────────── */
-export default function TimetableGrid({ slots, onDelete, onAdd, canEdit, bell = DEFAULT_BELL }) {
+export default function TimetableGrid({ slots, onDelete, onEdit, onAdd, canEdit, bell = DEFAULT_BELL }) {
   const slotMap = buildSlotMap(slots);
 
   return (
@@ -135,6 +137,7 @@ export default function TimetableGrid({ slots, onDelete, onAdd, canEdit, bell = 
                   bell={b}
                   slotMap={slotMap}
                   onDelete={onDelete}
+                  onEdit={onEdit}
                   onAdd={onAdd}
                   canEdit={canEdit}
                 />
