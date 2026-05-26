@@ -10,9 +10,10 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import {
   Search, X, UserPlus, ChevronRight, Filter,
   GraduationCap, Users, AlertTriangle, Eye, Trash2,
-  Loader2, CheckCircle2, Phone, Mail, Calendar, Download,
+  Loader2, CheckCircle2, Phone, Mail, Calendar, Download, Upload,
 } from 'lucide-react';
 import { students as studentsApi, classes as classesApi, importExport } from '@/api/client.js';
+import BulkImportSlideOver from '@/components/import/BulkImportSlideOver.jsx';
 import { Pagination } from '@/components/ui/Pagination.jsx';
 import useAuthStore from '@/store/auth.js';
 
@@ -161,7 +162,8 @@ export default function StudentList() {
   const hasFilters = classId || gender || (status && status !== 'active');
   function clearFilters() { setClassId(''); setGender(''); setStatus('active'); setPage(1); }
 
-  const [exporting, setExporting] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [exporting,  setExporting]  = useState(false);
   async function handleExport() {
     setExporting(true);
     try { await importExport.exportCSV('students'); }
@@ -209,6 +211,14 @@ export default function StudentList() {
               <Filter size={14} />
               Filters
               {hasFilters && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
+            </button>
+            <button
+              onClick={() => setShowImport(true)}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 text-slate-600 hover:border-slate-400 hover:text-slate-800 transition-colors"
+              title="Import students from CSV"
+            >
+              <Upload size={14} />
+              Import
             </button>
             <button
               onClick={handleExport}
@@ -501,6 +511,19 @@ export default function StudentList() {
             classList={classList}
             onClose={() => setShowAdd(false)}
             onCreated={() => { setShowAdd(false); qc.invalidateQueries({ queryKey: ['students'] }); }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── Bulk Import Slide-Over ───────────────────────── */}
+      <AnimatePresence>
+        {showImport && (
+          <BulkImportSlideOver
+            type="students"
+            label="Students"
+            showExport
+            onClose={() => setShowImport(false)}
+            onImported={() => qc.invalidateQueries({ queryKey: ['students'] })}
           />
         )}
       </AnimatePresence>

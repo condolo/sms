@@ -43,7 +43,7 @@ const SECTIONS = [
       },
       {
         q: 'How do I import students from a spreadsheet?',
-        a: 'Go to Import & Export → select "Students" → download the template CSV → fill it in → upload the file. The system will create all students in bulk.',
+        a: 'Go to Students → click the Import button → download the template CSV → fill it in → upload the file. The system will create all students in bulk.',
       },
       {
         q: 'Can I move a student to a different class?',
@@ -195,11 +195,11 @@ const SECTIONS = [
     articles: [
       {
         q: 'What file format does Msingi import?',
-        a: 'Msingi imports CSV files. Download the template from Import & Export to see the exact column headers required.',
+        a: 'Msingi imports CSV files. Download the template from the Import button inside each module (Students, Teachers, Classes, Timetable, or Finance) to see the exact column headers required.',
       },
       {
         q: 'Can I export my data?',
-        a: 'Yes. Go to Import & Export → select a data type → click Export CSV. All records for that type are downloaded as a spreadsheet.',
+        a: 'Yes. Each module (Students, Teachers, Classes, Timetable) has an Export button in the toolbar. Click it to download all records for that type as a CSV spreadsheet.',
       },
       {
         q: 'What happens if my import has errors?',

@@ -5,17 +5,20 @@
    ============================================================ */
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, FileText, Search, X, Ban, Printer } from 'lucide-react';
+import { AnimatePresence } from 'framer-motion';
+import { AlertTriangle, FileText, Search, X, Ban, Printer, Upload } from 'lucide-react';
 import { finance as financeApi } from '@/api/client.js';
 import { Pagination } from '@/components/ui/Pagination.jsx';
 import { RowSkeleton, EmptyOrError } from './FinancePrimitives.jsx';
 import { LIMIT, INV_STATUS_BADGE } from '../constants.js';
+import BulkImportSlideOver from '@/components/import/BulkImportSlideOver.jsx';
 
 export default function InvoicesTab({ fmtCurrency, page, onPage, canCreate, school }) {
   const qc = useQueryClient();
   const [search,       setSearch]       = useState('');
   const [debSearch,    setDebSearch]    = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [showImport,   setShowImport]   = useState(false);
   const timer = useState(null);
 
   function printInvoice(inv) {
@@ -97,7 +100,7 @@ ${itemRows ? `<table><thead><tr><th>Description</th><th style="text-align:center
 
   return (
     <div className="space-y-4">
-      {/* Search + filter */}
+      {/* Toolbar — search, filter, import */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 max-w-sm">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -125,6 +128,16 @@ ${itemRows ? `<table><thead><tr><th>Description</th><th style="text-align:center
           <option value="overdue">Overdue</option>
           <option value="void">Void</option>
         </select>
+        {canCreate && (
+          <button
+            onClick={() => setShowImport(true)}
+            className="flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium rounded-xl border border-slate-200 bg-white text-slate-600 hover:border-slate-400 hover:text-slate-800 transition-colors"
+            title="Bulk import invoices from CSV"
+          >
+            <Upload size={14} />
+            Import
+          </button>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -199,6 +212,17 @@ ${itemRows ? `<table><thead><tr><th>Description</th><th style="text-align:center
         )}
       </div>
       <Pagination page={page} totalPages={pagination.pages ?? 1} total={pagination.total ?? 0} limit={LIMIT} onPage={onPage} />
+
+      <AnimatePresence>
+        {showImport && (
+          <BulkImportSlideOver
+            type="finance"
+            label="Invoices"
+            onClose={() => setShowImport(false)}
+            onImported={() => qc.invalidateQueries({ queryKey: ['invoices'] })}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

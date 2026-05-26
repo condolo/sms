@@ -22,7 +22,6 @@ const BREADCRUMB_MAP = {
   '/events':        'Events',
   '/reports':       'Reports',
   '/hr':            'HR',
-  '/import-export': 'Import / Export',
   '/profile':       'My Profile',
 };
 

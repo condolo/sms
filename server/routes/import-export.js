@@ -23,7 +23,7 @@ const { authMiddleware }      = require('../middleware/auth');
 const { rbac }                = require('../middleware/rbac');
 const { planGate }            = require('../middleware/plan');
 const { _model }              = require('../utils/model');
-const { nextAdmissionNumber, nextStaffId } = require('../utils/counters');
+const { nextAdmissionNumber, nextStaffId, nextInvoiceNumber } = require('../utils/counters');
 const { ok, fail, E }         = require('../utils/response');
 
 const router = express.Router();
@@ -91,6 +91,12 @@ function toCSV(headers, rows) {
     ...rows.map(row => headers.map(h => esc(row[h])).join(','))
   ];
   return '﻿' + lines.join('\n'); // BOM for Excel compatibility
+}
+
+/* ── Inline totals calc (mirrors finance.js) ──────────────────── */
+function _round(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
+function _lineTotal(lineItems) {
+  return _round(lineItems.reduce((s, i) => s + _round((i.unitPrice || 0) * (i.quantity || 1)), 0));
 }
 
 /* ── Template definitions ────────────────────────────────────── */
@@ -181,7 +187,87 @@ const TEMPLATES = {
       '#   Maximum 500 teachers per import file.',
       '#',
     ]
-  }
+  },
+
+  classes: {
+    plan:    'classes',
+    rbacRes: 'classes',
+    headers: ['name', 'sectionKey', 'year', 'capacity'],
+    examples: [
+      { name: 'Standard 4A', sectionKey: 'primary',   year: 'Standard 4', capacity: '35' },
+      { name: 'Form 1A',     sectionKey: 'secondary', year: 'Form 1',     capacity: '40' },
+      { name: 'Form 5A',     sectionKey: 'alevel',    year: 'Form 5',     capacity: '25' },
+      { name: 'PP2 Red',     sectionKey: 'kg',        year: 'PP2',        capacity: '20' },
+    ],
+    notes: [
+      '# CLASS IMPORT TEMPLATE — Msingi School Management',
+      '# Instructions:',
+      '#   name        — REQUIRED, e.g. "Form 3A" or "Grade 5B"',
+      '#   sectionKey  — REQUIRED: primary | secondary | alevel | kg',
+      '#   year        — optional display label, e.g. "Form 3" or "Grade 5"',
+      '#   capacity    — optional max student count',
+      '#',
+      '#   Classes whose name already exists in Msingi are skipped (not updated).',
+      '#   Rows beginning with # are ignored.',
+      '#   Maximum 500 rows per import file.',
+      '#',
+    ]
+  },
+
+  timetable: {
+    plan:    'timetable',
+    rbacRes: 'timetable',
+    headers: ['className', 'day', 'period', 'subject', 'teacherName', 'room', 'type'],
+    examples: [
+      { className: 'Form 4A', day: 'monday',    period: '1', subject: 'Mathematics', teacherName: 'Grace Akinyi', room: 'Room 101', type: 'lesson' },
+      { className: 'Form 4A', day: 'monday',    period: '2', subject: 'Physics',     teacherName: 'Brian Kamau',  room: 'Lab 1',    type: 'lesson' },
+      { className: 'Form 3B', day: 'tuesday',   period: '1', subject: 'English',     teacherName: 'Agnes Mwangi', room: 'Room 202', type: 'lesson' },
+      { className: 'Form 4A', day: 'wednesday', period: '3', subject: 'Assembly',    teacherName: '',             room: 'Hall',     type: 'assembly' },
+    ],
+    notes: [
+      '# TIMETABLE IMPORT TEMPLATE — Msingi School Management',
+      '# Instructions:',
+      '#   className   — REQUIRED, exact class name as shown in your Classes list',
+      '#   day         — REQUIRED: monday | tuesday | wednesday | thursday | friday',
+      '#   period      — REQUIRED: lesson period number, e.g. 1, 2, 3',
+      '#   subject     — subject name, e.g. Mathematics (optional)',
+      '#   teacherName — teacher first + last name, e.g. Grace Akinyi (matched to active staff)',
+      '#   room        — room name, e.g. Lab 1 or Room 202 (optional)',
+      '#   type        — lesson | assembly | registration | free  (default: lesson)',
+      '#',
+      '#   Existing slots for the same class/day/period are UPDATED (upsert behaviour).',
+      '#   To start fresh: clear your timetable in the Timetable module first, then import.',
+      '#   Maximum 500 rows per import file.',
+      '#',
+    ]
+  },
+
+  finance: {
+    plan:    'finance',
+    rbacRes: 'finance',
+    headers: ['admissionNumber', 'title', 'description', 'amount', 'dueDate'],
+    examples: [
+      { admissionNumber: 'ADM-2026-001', title: 'Term 1 Fees', description: 'Tuition Fee', amount: '15000', dueDate: '2026-03-31' },
+      { admissionNumber: 'ADM-2026-002', title: 'Term 1 Fees', description: 'Tuition Fee', amount: '15000', dueDate: '2026-03-31' },
+      { admissionNumber: 'ADM-2026-001', title: 'Term 1 Fees', description: 'Transport',   amount: '3000',  dueDate: '2026-03-31' },
+    ],
+    notes: [
+      '# FINANCE IMPORT TEMPLATE — Msingi School Management',
+      '# Instructions:',
+      '#   admissionNumber — REQUIRED, student admission number as shown in Msingi',
+      '#   title           — REQUIRED, invoice title e.g. "Term 1 School Fees"',
+      '#   description     — REQUIRED, line item description e.g. "Tuition Fee"',
+      '#   amount          — REQUIRED, numeric amount, e.g. 15000',
+      '#   dueDate         — format YYYY-MM-DD (optional)',
+      '#',
+      '#   Each row creates ONE invoice with ONE line item for the given student.',
+      '#   To create an invoice with multiple line items, create separate rows',
+      '#   (each row = separate invoice).',
+      '#   Rows beginning with # are ignored.',
+      '#   Maximum 500 rows per import file.',
+      '#',
+    ]
+  },
 };
 
 /* ── Middleware to accept raw CSV body ───────────────────────── */
@@ -195,6 +281,23 @@ async function _buildClassMap(schoolId) {
   const map     = {};
   for (const c of docs) {
     map[c.name.toLowerCase().trim()] = c.id;
+  }
+  return map;
+}
+
+/* ── Helper: resolve teacher name → { teacherId, teacherName } ── */
+async function _buildTeacherMap(schoolId) {
+  const docs = await _model('teachers')
+    .find({ schoolId, status: 'active' })
+    .select('userId id firstName lastName')
+    .lean();
+  const map = {};
+  for (const t of docs) {
+    const key = `${t.firstName} ${t.lastName}`.toLowerCase().trim();
+    map[key] = {
+      teacherId:   t.userId ?? String(t._id),
+      teacherName: `${t.firstName} ${t.lastName}`.trim(),
+    };
   }
   return map;
 }
@@ -415,6 +518,272 @@ async function _importTeachers(rows, schoolId, userId) {
   return results;
 }
 
+/* ── Classes import handler ────────────────────────────────── */
+async function _importClasses(rows, schoolId, userId) {
+  const Classes  = _model('classes');
+  const existing = await Classes.find({ schoolId }).select('name').lean();
+  const knownNames = new Set(existing.map(c => c.name.toLowerCase().trim()));
+
+  const VALID_SECTION = new Set(['primary', 'secondary', 'alevel', 'kg']);
+
+  const results  = { created: 0, skipped: 0, errors: [] };
+  const toInsert = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const r   = rows[i];
+    const row = i + 1;
+
+    if (r.name?.startsWith('#')) continue;
+
+    if (!r.name?.trim()) {
+      results.errors.push({ row, field: 'name', message: 'Class name is required' });
+      results.skipped++; continue;
+    }
+
+    const sectionKey = r.sectionKey?.trim().toLowerCase();
+    if (!sectionKey || !VALID_SECTION.has(sectionKey)) {
+      results.errors.push({ row, field: 'sectionKey', message: `sectionKey must be one of: primary, secondary, alevel, kg. Got: '${r.sectionKey || ''}'` });
+      results.skipped++; continue;
+    }
+
+    const nameKey = r.name.trim().toLowerCase();
+    if (knownNames.has(nameKey)) {
+      results.skipped++;
+      continue; // silent skip for duplicates — expected behaviour
+    }
+    knownNames.add(nameKey); // prevent within-batch duplicates
+
+    const capacity = r.capacity ? parseInt(r.capacity, 10) : undefined;
+    if (r.capacity && (isNaN(capacity) || capacity < 1)) {
+      results.errors.push({ row, field: 'capacity', message: `Capacity must be a positive number. Got: '${r.capacity}'` });
+      results.skipped++; continue;
+    }
+
+    toInsert.push({
+      id:         uuidv4(),
+      schoolId,
+      name:       r.name.trim(),
+      sectionKey,
+      year:       r.year?.trim() || undefined,
+      capacity:   capacity || undefined,
+      status:     'active',
+      createdBy:  userId,
+      updatedBy:  userId,
+    });
+  }
+
+  if (toInsert.length > 0) {
+    try {
+      await Classes.insertMany(toInsert, { ordered: false });
+      results.created = toInsert.length;
+    } catch (err) {
+      if (err.writeErrors) {
+        const failed = err.writeErrors.length;
+        results.created = toInsert.length - failed;
+        err.writeErrors.forEach(we => {
+          results.errors.push({ row: we.index + 1, message: we.errmsg || 'Duplicate or invalid record' });
+          results.skipped++;
+        });
+      } else throw err;
+    }
+  }
+
+  return results;
+}
+
+/* ── Timetable import handler ──────────────────────────────── */
+async function _importTimetable(rows, schoolId, userId) {
+  const [classMap, teacherMap] = await Promise.all([
+    _buildClassMap(schoolId),
+    _buildTeacherMap(schoolId),
+  ]);
+
+  const Timetable  = _model('timetable');
+  const VALID_DAYS = new Set(['monday', 'tuesday', 'wednesday', 'thursday', 'friday']);
+  const VALID_TYPE = new Set(['lesson', 'assembly', 'registration', 'free']);
+
+  const results = { created: 0, skipped: 0, errors: [] };
+  let upserted  = 0;
+  let inserted  = 0;
+
+  for (let i = 0; i < rows.length; i++) {
+    const r   = rows[i];
+    const row = i + 1;
+
+    if (r.className?.startsWith('#')) continue;
+
+    // Required fields
+    if (!r.className?.trim()) { results.errors.push({ row, field: 'className', message: 'className is required' }); results.skipped++; continue; }
+    if (!r.day?.trim())       { results.errors.push({ row, field: 'day',       message: 'day is required' });       results.skipped++; continue; }
+    if (!r.period?.trim())    { results.errors.push({ row, field: 'period',    message: 'period is required' });    results.skipped++; continue; }
+
+    const day = r.day.trim().toLowerCase();
+    if (!VALID_DAYS.has(day)) {
+      results.errors.push({ row, field: 'day', message: `day must be monday–friday. Got: '${r.day}'` });
+      results.skipped++; continue;
+    }
+
+    const period = String(parseInt(r.period, 10));
+    if (isNaN(Number(period)) || Number(period) < 1) {
+      results.errors.push({ row, field: 'period', message: `period must be a positive integer. Got: '${r.period}'` });
+      results.skipped++; continue;
+    }
+
+    const classId = classMap[r.className.trim().toLowerCase()];
+    if (!classId) {
+      results.errors.push({ row, field: 'className', message: `Class '${r.className}' not found. Create it first in Classes, then re-import.` });
+      results.skipped++; continue;
+    }
+
+    const type = r.type?.trim().toLowerCase() || 'lesson';
+    if (!VALID_TYPE.has(type)) {
+      results.errors.push({ row, field: 'type', message: `type must be: lesson, assembly, registration, or free. Got: '${r.type}'` });
+      results.skipped++; continue;
+    }
+
+    // Resolve teacher name → FK (best-effort; not required)
+    let teacherId   = undefined;
+    let teacherName = r.teacherName?.trim() || undefined;
+    if (teacherName) {
+      const match = teacherMap[teacherName.toLowerCase()];
+      if (match) {
+        teacherId   = match.teacherId;
+        teacherName = match.teacherName;
+      }
+      // If no match — keep the raw name string so data is not silently lost
+    }
+
+    try {
+      const filter = { schoolId, classId, day, period };
+      const update = {
+        $set: {
+          subject:     r.subject?.trim() || undefined,
+          teacherId:   teacherId   || undefined,
+          teacherName: teacherName || undefined,
+          room:        r.room?.trim() || undefined,
+          type,
+          isActive:    true,
+          updatedBy:   userId,
+        },
+        $setOnInsert: {
+          id:        uuidv4(),
+          createdBy: userId,
+        },
+      };
+      const result = await Timetable.findOneAndUpdate(filter, update, {
+        upsert: true,
+        new:    true,
+        rawResult: true,
+      });
+      if (result.lastErrorObject?.updatedExisting) {
+        upserted++;
+      } else {
+        inserted++;
+      }
+    } catch (err) {
+      results.errors.push({ row, message: err.message || 'Failed to upsert slot' });
+      results.skipped++;
+    }
+  }
+
+  results.created = inserted + upserted; // total written (both new and updated)
+  return { ...results, inserted, updated: upserted };
+}
+
+/* ── Finance import handler ────────────────────────────────── */
+async function _importFinance(rows, schoolId, userId) {
+  const Students = _model('students');
+  const Invoices = _model('invoices');
+
+  // Build admission number → studentId map
+  const studentDocs = await Students.find({ schoolId }).select('id admissionNumber firstName lastName').lean();
+  const studentMap  = {};
+  for (const s of studentDocs) {
+    if (s.admissionNumber) {
+      studentMap[s.admissionNumber.trim().toLowerCase()] = {
+        studentId:   s.id,
+        studentName: `${s.firstName} ${s.lastName}`.trim(),
+      };
+    }
+  }
+
+  const results  = { created: 0, skipped: 0, errors: [] };
+  const toInsert = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const r   = rows[i];
+    const row = i + 1;
+
+    if (r.admissionNumber?.startsWith('#')) continue;
+
+    // Required fields
+    if (!r.admissionNumber?.trim()) { results.errors.push({ row, field: 'admissionNumber', message: 'admissionNumber is required' }); results.skipped++; continue; }
+    if (!r.title?.trim())           { results.errors.push({ row, field: 'title',           message: 'title is required' });           results.skipped++; continue; }
+    if (!r.description?.trim())     { results.errors.push({ row, field: 'description',     message: 'description is required' });     results.skipped++; continue; }
+    if (!r.amount?.trim())          { results.errors.push({ row, field: 'amount',           message: 'amount is required' });          results.skipped++; continue; }
+
+    const amount = parseFloat(r.amount);
+    if (isNaN(amount) || amount < 0) {
+      results.errors.push({ row, field: 'amount', message: `amount must be a positive number. Got: '${r.amount}'` });
+      results.skipped++; continue;
+    }
+    const unitPrice = _round(amount);
+
+    const student = studentMap[r.admissionNumber.trim().toLowerCase()];
+    if (!student) {
+      results.errors.push({ row, field: 'admissionNumber', message: `Student '${r.admissionNumber}' not found in this school` });
+      results.skipped++; continue;
+    }
+
+    const invoiceNumber = await nextInvoiceNumber(schoolId);
+    const subtotal      = unitPrice; // one line item, qty 1
+    const total         = subtotal;
+
+    toInsert.push({
+      id:            uuidv4(),
+      schoolId,
+      invoiceNumber,
+      studentId:     student.studentId,
+      studentName:   student.studentName,
+      title:         r.title.trim(),
+      lineItems: [{
+        description: r.description.trim(),
+        quantity:    1,
+        unitPrice,
+        total:       unitPrice,
+      }],
+      subtotal,
+      discount:    0,
+      tax:         0,
+      total,
+      amountPaid:  0,
+      balance:     total,
+      status:      'unpaid',
+      dueDate:     r.dueDate?.trim() || undefined,
+      createdBy:   userId,
+      updatedBy:   userId,
+    });
+  }
+
+  if (toInsert.length > 0) {
+    try {
+      await Invoices.insertMany(toInsert, { ordered: false });
+      results.created = toInsert.length;
+    } catch (err) {
+      if (err.writeErrors) {
+        const failed = err.writeErrors.length;
+        results.created = toInsert.length - failed;
+        err.writeErrors.forEach(we => {
+          results.errors.push({ row: we.index + 1, message: we.errmsg || 'Failed to create invoice' });
+          results.skipped++;
+        });
+      } else throw err;
+    }
+  }
+
+  return results;
+}
+
 /* ── POST /api/import-export/:type ──────────────────────────── */
 router.post('/:type', authMiddleware, rawText, async (req, res) => {
   const { type }              = req.params;
@@ -452,8 +821,13 @@ router.post('/:type', authMiddleware, rawText, async (req, res) => {
 
   try {
     let results;
-    if (type === 'students') results = await _importStudents(rows, schoolId, userId);
-    if (type === 'teachers') results = await _importTeachers(rows, schoolId, userId);
+    if (type === 'students')  results = await _importStudents(rows, schoolId, userId);
+    if (type === 'teachers')  results = await _importTeachers(rows, schoolId, userId);
+    if (type === 'classes')   results = await _importClasses(rows, schoolId, userId);
+    if (type === 'timetable') results = await _importTimetable(rows, schoolId, userId);
+    if (type === 'finance')   results = await _importFinance(rows, schoolId, userId);
+
+    if (!results) return E.notFound(res, `No handler for type '${type}'`);
 
     const status = results.errors.length > 0 && results.created === 0 ? 422
       : results.errors.length > 0 ? 207  // partial success
@@ -462,10 +836,12 @@ router.post('/:type', authMiddleware, rawText, async (req, res) => {
     return res.status(status).json({
       success: results.created > 0,
       data: {
-        created: results.created,
-        skipped: results.skipped,
-        total:   rows.length,
-        errors:  results.errors
+        created:  results.created,
+        skipped:  results.skipped,
+        total:    rows.length,
+        errors:   results.errors,
+        // timetable-specific: break down new vs updated
+        ...(type === 'timetable' ? { inserted: results.inserted, updated: results.updated } : {}),
       }
     });
   } catch (err) {
@@ -572,8 +948,56 @@ router.get('/export/:type', authMiddleware, async (req, res) => {
       csv = toCSV(headers, rows);
       res.setHeader('Content-Disposition', `attachment; filename="msingi_classes_${_dateStamp()}.csv"`);
 
+    } else if (type === 'timetable') {
+      const [slots, classes] = await Promise.all([
+        _model('timetable').find({ schoolId, isActive: true }).sort({ classId: 1, day: 1, period: 1 }).lean(),
+        _model('classes').find({ schoolId }).select('id name').lean()
+      ]);
+
+      const classById = {};
+      for (const c of classes) classById[c.id] = c.name;
+
+      const headers = ['className', 'day', 'period', 'subject', 'teacherName', 'room', 'type'];
+      const rows    = slots.map(s => ({
+        className:   s.classId ? (classById[s.classId] || s.classId) : '',
+        day:         s.day || '',
+        period:      s.period || '',
+        subject:     s.subject || '',
+        teacherName: s.teacherName || '',
+        room:        s.room || '',
+        type:        s.type || 'lesson',
+      }));
+
+      csv = toCSV(headers, rows);
+      res.setHeader('Content-Disposition', `attachment; filename="msingi_timetable_${_dateStamp()}.csv"`);
+
+    } else if (type === 'finance') {
+      const Invoices = _model('invoices');
+      const docs     = await Invoices.find({ schoolId }).sort({ createdAt: -1 }).lean();
+
+      const headers = ['invoiceNumber', 'studentName', 'title', 'description', 'amount', 'total', 'amountPaid', 'balance', 'status', 'dueDate', 'createdAt'];
+      const rows    = docs.map(d => {
+        const firstLine = d.lineItems?.[0] || {};
+        return {
+          invoiceNumber: d.invoiceNumber || '',
+          studentName:   d.studentName || '',
+          title:         d.title || '',
+          description:   firstLine.description || '',
+          amount:        firstLine.unitPrice ?? '',
+          total:         d.total ?? '',
+          amountPaid:    d.amountPaid ?? '',
+          balance:       d.balance ?? '',
+          status:        d.status || '',
+          dueDate:       d.dueDate || '',
+          createdAt:     d.createdAt ? new Date(d.createdAt).toISOString().slice(0, 10) : '',
+        };
+      });
+
+      csv = toCSV(headers, rows);
+      res.setHeader('Content-Disposition', `attachment; filename="msingi_finance_${_dateStamp()}.csv"`);
+
     } else {
-      return E.notFound(res, `Unsupported export type '${type}'. Valid types: students, teachers, classes`);
+      return E.notFound(res, `Unsupported export type '${type}'. Valid types: students, teachers, classes, timetable, finance`);
     }
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');

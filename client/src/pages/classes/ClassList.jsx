@@ -8,9 +8,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   BookOpen, Users, UserCheck, Plus, X, Loader2,
-  CheckCircle2, AlertTriangle, Trash2, Hash, Home,
+  CheckCircle2, AlertTriangle, Trash2, Hash, Home, Upload, Download,
 } from 'lucide-react';
-import { classes as classesApi, teachers as teachersApi } from '@/api/client.js';
+import { classes as classesApi, teachers as teachersApi, importExport } from '@/api/client.js';
+import BulkImportSlideOver from '@/components/import/BulkImportSlideOver.jsx';
 import useAuthStore from '@/store/auth.js';
 
 const CLASS_COLORS = [
@@ -28,7 +29,16 @@ export default function ClassList() {
   const role    = useAuthStore(s => s.session?.user?.role ?? '');
   const canCreate = can('classes') || role === 'admin' || role === 'superadmin';
   const canDelete = can('classes') || role === 'admin' || role === 'superadmin';
-  const [showAdd, setShowAdd] = useState(false);
+  const [showAdd,    setShowAdd]    = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [exporting,  setExporting]  = useState(false);
+
+  async function handleExport() {
+    setExporting(true);
+    try { await importExport.exportCSV('classes'); }
+    catch (e) { alert(e?.message ?? 'Export failed'); }
+    finally { setExporting(false); }
+  }
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['classes', 'list'],
@@ -58,15 +68,34 @@ export default function ClassList() {
               {isLoading ? 'Loading…' : `${rows.length} class${rows.length !== 1 ? 'es' : ''}`}
             </p>
           </div>
-          {canCreate && (
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setShowAdd(true)}
-              className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+              onClick={() => setShowImport(true)}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 text-slate-600 hover:border-slate-400 hover:text-slate-800 transition-colors"
+              title="Import classes from CSV"
             >
-              <Plus size={15} />
-              Add Class
+              <Upload size={14} />
+              Import
             </button>
-          )}
+            <button
+              onClick={handleExport}
+              disabled={exporting}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 text-slate-600 hover:border-slate-400 hover:text-slate-800 disabled:opacity-50 transition-colors"
+              title="Export classes to CSV"
+            >
+              {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              Export
+            </button>
+            {canCreate && (
+              <button
+                onClick={() => setShowAdd(true)}
+                className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+              >
+                <Plus size={15} />
+                Add Class
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -195,6 +224,15 @@ export default function ClassList() {
           <AddClassSlideOver
             onClose={() => setShowAdd(false)}
             onCreated={() => { setShowAdd(false); qc.invalidateQueries({ queryKey: ['classes'] }); }}
+          />
+        )}
+        {showImport && (
+          <BulkImportSlideOver
+            type="classes"
+            label="Classes"
+            showExport
+            onClose={() => setShowImport(false)}
+            onImported={() => qc.invalidateQueries({ queryKey: ['classes'] })}
           />
         )}
       </AnimatePresence>

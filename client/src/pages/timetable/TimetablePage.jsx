@@ -9,7 +9,7 @@ import { AnimatePresence } from 'framer-motion';
 import {
   CalendarDays, Plus, AlertCircle, CheckCircle2, BarChart3,
   Clock, User, LayoutGrid, Globe, UserX, Zap, Download, Printer,
-  DoorOpen,
+  DoorOpen, Upload,
 } from 'lucide-react';
 import {
   timetable    as ttApi,
@@ -18,6 +18,7 @@ import {
   bellSchedule as bellApi,
   rooms        as roomsApi,
 } from '@/api/client.js';
+import BulkImportSlideOver from '@/components/import/BulkImportSlideOver.jsx';
 import useAuthStore from '@/store/auth.js';
 
 import TimetablePortal       from './TimetablePortal.jsx';
@@ -68,6 +69,7 @@ export default function TimetablePage() {
   const [showConflicts,   setShowConflicts]   = useState(false);
   const [showBell,        setShowBell]        = useState(false);
   const [showPublishModal,setShowPublishModal] = useState(false);
+  const [showImport,      setShowImport]      = useState(false);
   const [toast,           setToast]           = useState(null);
 
   function showToast(msg, type = 'success') {
@@ -359,6 +361,17 @@ export default function TimetablePage() {
                 </button>
               )}
 
+              {/* Import timetable CSV (admin only) */}
+              {canEdit && (
+                <button
+                  onClick={() => setShowImport(true)}
+                  className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 transition"
+                  title="Import timetable from CSV"
+                >
+                  <Upload size={12} /> Import
+                </button>
+              )}
+
               {/* Add slot (class view only) */}
               {canEdit && activeView === 'class' && classId && (
                 <button
@@ -641,6 +654,21 @@ export default function TimetablePage() {
             publishing={publishing}
             onPublish={(termLabel) => doPublish(termLabel)}
             onClose={() => setShowPublishModal(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showImport && (
+          <BulkImportSlideOver
+            type="timetable"
+            label="Timetable"
+            showExport
+            onClose={() => setShowImport(false)}
+            onImported={() => {
+              qc.invalidateQueries({ queryKey: ['timetable'] });
+              showToast('Timetable import complete', 'success');
+            }}
           />
         )}
       </AnimatePresence>

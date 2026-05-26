@@ -6,7 +6,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, GraduationCap, Users, BookOpen, Calendar,
   CheckSquare, FileText, BarChart3, ClipboardList, Scale,
-  Wallet, Download, Settings, LogOut, Building2, Library,
+  Wallet, Settings, LogOut, Building2, Library,
   MessageSquare, UserCog, TrendingUp, Tag, HelpCircle,
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -52,7 +52,6 @@ const NAV_SECTIONS = [
   {
     label: 'System',
     items: [
-      { to: '/import-export', Icon: Download,     label: 'Import & Export' },
       { to: '/settings',      Icon: Settings,     label: 'Settings'        },
       { to: '/changelog',     Icon: Tag,          label: 'Changelog'       },
       { to: '/help',          Icon: HelpCircle,   label: 'Help Centre'     },

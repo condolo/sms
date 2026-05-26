@@ -6,6 +6,73 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.18.0] — 2026-05-26  Import/Export Dissolution — Bulk import embedded in each module
+
+### Changed — Removed standalone Import & Export page
+
+The `/import-export` route, sidebar link, and `ImportExportPage.jsx` have been dissolved.
+Import and export functionality now lives directly inside each relevant module.
+
+### New — Bulk import in Students module
+
+- Import button added to the Students list toolbar
+- Opens `BulkImportSlideOver` with `type="students"`, template download, and export
+- Server handler `_importStudents` already existed; wired to the new slide-over
+
+### New — Bulk import in Teachers (HR) module
+
+- Import button added to the Teachers list toolbar alongside the existing Export button
+- Opens `BulkImportSlideOver` with `type="teachers"`, template download, and export
+
+### New — Import + Export in Classes module
+
+- Import and Export buttons added to the Classes header toolbar
+- `_importClasses`: inserts new classes; skips duplicates by name silently
+- CSV fields: `name`, `sectionKey`, `year`, `capacity`
+- Export added to `/api/import-export/export/classes`
+
+### New — Timetable CSV import
+
+- Import button added to the Timetable page toolbar (admin/timetabler only)
+- `_importTimetable`: upsert by `schoolId + classId + day + period` — existing slots updated, new slots created
+- Resolves `className → classId` and `teacherName → teacherId` automatically
+- Export added to `/api/import-export/export/timetable`
+
+### New — Finance bulk invoice import
+
+- Import button added to the Invoices tab toolbar (finance admins only)
+- `_importFinance`: one CSV row → one invoice with one line item
+- Resolves `admissionNumber → studentId` automatically
+- Each invoice generated with a sequential `invoiceNumber`
+- Export added to `/api/import-export/export/finance`
+
+### New — Shared `BulkImportSlideOver` component
+
+`client/src/components/import/BulkImportSlideOver.jsx`
+
+- Motion slide-over panel (backdrop + right-panel)
+- Drag-and-drop upload zone + file picker; parses and previews row count
+- Template download + optional Export button
+- Import result summary: created count, skip count, per-row error table
+- Type-specific tips section (timetable upsert note, classes skip note, finance note)
+
+### Backend additions (`server/routes/import-export.js`)
+
+- `_buildTeacherMap(schoolId)` — name → `{ teacherId, teacherName }` lookup
+- `_importClasses`, `_importTimetable`, `_importFinance` handler functions
+- POST dispatcher extended to route all 5 types
+- Export handler extended for `timetable` and `finance`
+
+### Navigation cleanup
+
+- Sidebar: removed `Import & Export` link
+- TopBar breadcrumb map: removed `/import-export` entry
+- App.jsx: removed lazy import and route for `ImportExportPage`
+- SettingsPage: updated import/export note to point users to respective modules
+- HelpPage: updated 3 answers to reflect new locations
+
+---
+
 ## [4.17.0] — 2026-05-26  Rooms Registry + Teaching Assignments + Timetable Auto-fill
 
 ### New — Room Registry (`/api/rooms`)

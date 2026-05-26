@@ -1468,13 +1468,9 @@ function SystemTab() {
             }}
           />
           <div className="pt-1">
-            <a
-              href="/import-export"
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-violet-600 hover:text-violet-800 transition"
-            >
-              <RefreshCcw size={12} />
-              Full Import / Export page →
-            </a>
+            <p className="text-xs text-slate-400">
+              Import and export are now available directly in each module: Students, Teachers, Classes, Timetable, and Finance.
+            </p>
           </div>
         </div>
       </div>

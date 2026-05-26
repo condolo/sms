@@ -25,7 +25,7 @@ const AdmissionsPage = lazy(() => import('@/pages/admissions/AdmissionsPage.jsx'
 const TimetablePage  = lazy(() => import('@/pages/timetable/TimetablePage.jsx'));
 const SettingsPage      = lazy(() => import('@/pages/settings/SettingsPage.jsx'));
 const GradesPage        = lazy(() => import('@/pages/grades/GradesPage.jsx'));
-const ImportExportPage  = lazy(() => import('@/pages/import-export/ImportExportPage.jsx'));
+// ImportExportPage dissolved into individual modules (v4.18.0)
 const SubjectsPage      = lazy(() => import('@/pages/subjects/SubjectsPage.jsx'));
 const MessagesPage      = lazy(() => import('@/pages/messages/MessagesPage.jsx'));
 const NotFound          = lazy(() => import('@/pages/NotFound.jsx'));
@@ -121,9 +121,6 @@ export const router = createBrowserRouter([
 
       // Messages
       { path: 'messages',              element: <SuspenseWrapper><MessagesPage /></SuspenseWrapper> },
-
-      // Import / Export
-      { path: 'import-export',         element: <SuspenseWrapper><ImportExportPage /></SuspenseWrapper> },
 
       // Settings
       { path: 'settings',              element: <SuspenseWrapper><SettingsPage /></SuspenseWrapper> },

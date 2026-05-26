@@ -9,7 +9,7 @@ import {
   Search, X, UserPlus, Trash2, Eye, Loader2,
   CheckCircle2, AlertTriangle, Phone, Mail,
   BookOpen, Briefcase, Users, Edit2, Save, Calendar,
-  MapPin, Award, ChevronRight, Download, ClipboardList, Plus,
+  MapPin, Award, ChevronRight, Download, Upload, ClipboardList, Plus,
 } from 'lucide-react';
 import {
   teachers as teachersApi,
@@ -20,6 +20,7 @@ import {
   importExport,
 } from '@/api/client.js';
 import { Pagination } from '@/components/ui/Pagination.jsx';
+import BulkImportSlideOver from '@/components/import/BulkImportSlideOver.jsx';
 import useAuthStore from '@/store/auth.js';
 
 const LIMIT = 25;
@@ -56,7 +57,8 @@ export default function TeacherList() {
   const [page,     setPage]     = useState(1);
   const [showAdd,  setShowAdd]  = useState(false);
   const [selected, setSelected] = useState(null);
-  const [exporting, setExporting] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [exporting,  setExporting]  = useState(false);
   const timer = useRef(null);
 
   async function handleExport() {
@@ -102,6 +104,14 @@ export default function TeacherList() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowImport(true)}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 text-slate-600 hover:border-slate-400 hover:text-slate-800 transition-colors"
+              title="Import teachers from CSV"
+            >
+              <Upload size={14} />
+              Import
+            </button>
             <button
               onClick={handleExport}
               disabled={exporting}
@@ -275,6 +285,15 @@ export default function TeacherList() {
             }}
             onRemove={t => { setSelected(null); confirmRemove(t); }}
             canDelete={canDelete}
+          />
+        )}
+        {showImport && (
+          <BulkImportSlideOver
+            type="teachers"
+            label="Teachers"
+            showExport
+            onClose={() => setShowImport(false)}
+            onImported={() => qc.invalidateQueries({ queryKey: ['teachers'] })}
           />
         )}
       </AnimatePresence>
