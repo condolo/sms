@@ -6,6 +6,15 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.16.0',
+    date: '2026-05-26',
+    label: 'Engineering — Phase 0 Dependency Blueprint + Phase A Audit Script',
+    changes: [
+      { type: 'new', text: 'docs/DEPENDENCY_MAP.md: comprehensive Phase 0 dependency blueprint mapping all 23 server modules — collections owned, cross-module FK contracts, shared utility dependencies, blast-radius analysis, and 12 identified audit gaps' },
+      { type: 'new', text: 'server/scripts/audit.js: Phase A read-only integrity audit script — runs 11 data integrity checks (orphaned FKs across all modules, teacher userId format drift, timetable double-booking, role permission gaps, class/student enrollment consistency); exits 0=clean, 1=issues, 2=error; outputs full JSON report to stdout; run as: node server/scripts/audit.js [--schoolId=xxx] [--verbose]' },
+    ],
+  },
+  {
     version: '4.15.2',
     date: '2026-05-25',
     label: 'Timetable — Edit Slots + Export + Class Grid Bug Fix',
