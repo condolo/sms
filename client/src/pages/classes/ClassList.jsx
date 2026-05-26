@@ -124,25 +124,28 @@ export default function ClassList() {
 
       <div className="max-w-screen-2xl mx-auto px-6 py-5">
 
-        {/* Section filter tabs — dynamic from school's configured sections */}
-        {!isLoading && !isError && rows.length > 0 && (
+        {/* Section filter tabs — all configured sections always shown (even if count=0)
+            This matches timetable behaviour: section appears as soon as admin creates it
+            so classes can be assigned to it. Dependency chain: Settings → Classes → Timetable */}
+        {!isLoading && !isError && (
           <div className="flex items-center gap-1 mb-5 overflow-x-auto pb-1">
             {sectionTabs.map(({ id, label, color }) => {
               const count = id === 'all' ? rows.length : rows.filter(r => r.sectionKey === id).length;
-              if (id !== 'all' && count === 0) return null;
               const isActive = sectionFilter === id;
+              const isEmpty  = id !== 'all' && count === 0;
               return (
                 <button
                   key={id}
                   onClick={() => setSectionFilter(id)}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-colors ${
-                    isActive ? 'text-white' : 'text-slate-600 hover:bg-slate-100'
+                    isActive ? 'text-white' : isEmpty ? 'text-slate-400 hover:bg-slate-100' : 'text-slate-600 hover:bg-slate-100'
                   }`}
                   style={isActive ? { backgroundColor: id === 'all' ? '#0f172a' : color } : {}}
+                  title={isEmpty ? `No classes in ${label} yet` : undefined}
                 >
                   {label}
                   <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                    isActive ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-500'
+                    isActive ? 'bg-white/25 text-white' : isEmpty ? 'bg-slate-100 text-slate-400' : 'bg-slate-100 text-slate-500'
                   }`}>
                     {count}
                   </span>
