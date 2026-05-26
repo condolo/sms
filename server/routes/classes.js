@@ -11,6 +11,7 @@ const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
+const { applyOptimisticLock } = require('../utils/optimistic-lock');
 
 const router = express.Router();
 const PLAN   = planGate('classes');
@@ -133,16 +134,18 @@ router.put('/:id', authMiddleware, PLAN, rbac('classes', 'update'), async (req, 
     const { data, error } = _validate(ClassSchema.partial(), req.body);
     if (error) return E.validation(res, error);
 
-    delete data.schoolId; delete data.id;
+    const clientVersion = data._v;
+    delete data.schoolId; delete data.id; delete data._v;
 
-    const Classes = _model('classes');
-    const doc = await Classes.findOneAndUpdate(
+    const { doc, conflict } = await applyOptimisticLock(
+      _model('classes'),
       { id: req.params.id, schoolId },
       { ...data, updatedBy: userId },
-      { new: true, runValidators: false }
-    ).lean();
+      clientVersion
+    );
 
-    if (!doc) return E.notFound(res, 'Class not found');
+    if (conflict) return E.conflict(res, 'This class record was edited by someone else. Please refresh and try again.');
+    if (!doc)     return E.notFound(res, 'Class not found');
     return ok(res, doc);
   } catch (err) {
     console.error('[classes PUT/:id]', err);

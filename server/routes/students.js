@@ -14,6 +14,7 @@ const { planGate }              = require('../middleware/plan');
 const { _model }                = require('../utils/model');
 const { nextAdmissionNumber }   = require('../utils/counters');
 const { ok, created, fail, paginate, parsePagination, E } = require('../utils/response');
+const { applyOptimisticLock } = require('../utils/optimistic-lock');
 
 const router = express.Router();
 const PLAN   = planGate('students');
@@ -176,19 +177,22 @@ router.put('/:id', authMiddleware, PLAN, rbac('students', 'update'), async (req,
     const { data, error } = _validate(StudentUpdateSchema, req.body);
     if (error) return E.validation(res, error);
 
-    // Never allow overwriting the server-generated admission number
+    // Immutable server-generated fields
+    const clientVersion = data._v;
     delete data.admissionNumber;
     delete data.schoolId;
     delete data.id;
+    delete data._v;
 
-    const Students = _model('students');
-    const doc = await Students.findOneAndUpdate(
+    const { doc, conflict } = await applyOptimisticLock(
+      _model('students'),
       { id: req.params.id, schoolId },
       { ...data, updatedBy: userId },
-      { new: true, runValidators: false }
-    ).lean();
+      clientVersion
+    );
 
-    if (!doc) return E.notFound(res, 'Student not found');
+    if (conflict) return E.conflict(res, 'This student record was edited by someone else. Please refresh and try again.');
+    if (!doc)     return E.notFound(res, 'Student not found');
     return ok(res, doc);
   } catch (err) {
     console.error('[students PUT/:id]', err);

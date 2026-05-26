@@ -92,11 +92,73 @@ async function nextReceiptNumber(schoolId) {
   return `RCP-${year}-${String(seq).padStart(6, '0')}`;
 }
 
+/**
+ * Atomically reserve a contiguous range of N sequence numbers in a single DB round-trip.
+ * Returns the FIRST number in the range; caller uses start, start+1, ... start+n-1.
+ *
+ * Example: reserveRange('admission_sch_abc_2026', 500)
+ *   → counter goes from 0 → 500 in one $inc, returns 1
+ *   → caller generates ADM-2026-00001 … ADM-2026-00500
+ *
+ * @param {string} name   Counter name
+ * @param {number} count  Number of IDs to reserve (must be >= 1)
+ * @returns {Promise<number>} First sequence number in the range
+ */
+async function reserveRange(name, count) {
+  if (!count || count < 1) count = 1;
+  const Counter = _getModel();
+  // $inc by count → new seq = end of range; first = newSeq - count + 1
+  const doc = await Counter.findOneAndUpdate(
+    { _id: name },
+    { $inc: { seq: count } },
+    { upsert: true, new: true }
+  );
+  return doc.seq - count + 1;
+}
+
+/**
+ * Reserve a batch of formatted admission numbers in one DB call.
+ * Returns an array of { admissionNumber } objects — one per row.
+ */
+async function reserveAdmissionNumbers(schoolId, count) {
+  const year  = new Date().getFullYear();
+  const start = await reserveRange(`admission_${schoolId}_${year}`, count);
+  return Array.from({ length: count }, (_, i) =>
+    `ADM-${year}-${String(start + i).padStart(5, '0')}`
+  );
+}
+
+/**
+ * Reserve a batch of formatted staff IDs in one DB call.
+ */
+async function reserveStaffIds(schoolId, count) {
+  const year  = new Date().getFullYear();
+  const start = await reserveRange(`staff_${schoolId}_${year}`, count);
+  return Array.from({ length: count }, (_, i) =>
+    `STF-${year}-${String(start + i).padStart(5, '0')}`
+  );
+}
+
+/**
+ * Reserve a batch of formatted invoice numbers in one DB call.
+ */
+async function reserveInvoiceNumbers(schoolId, count) {
+  const year  = new Date().getFullYear();
+  const start = await reserveRange(`invoice_${schoolId}_${year}`, count);
+  return Array.from({ length: count }, (_, i) =>
+    `INV-${year}-${String(start + i).padStart(6, '0')}`
+  );
+}
+
 module.exports = {
   nextId,
   peekId,
   nextAdmissionNumber,
   nextStaffId,
   nextInvoiceNumber,
-  nextReceiptNumber
+  nextReceiptNumber,
+  reserveRange,
+  reserveAdmissionNumbers,
+  reserveStaffIds,
+  reserveInvoiceNumbers,
 };

@@ -23,7 +23,11 @@ const { authMiddleware }      = require('../middleware/auth');
 const { rbac }                = require('../middleware/rbac');
 const { planGate }            = require('../middleware/plan');
 const { _model }              = require('../utils/model');
-const { nextAdmissionNumber, nextStaffId, nextInvoiceNumber } = require('../utils/counters');
+const {
+  reserveAdmissionNumbers,
+  reserveStaffIds,
+  reserveInvoiceNumbers,
+} = require('../utils/counters');
 const { ok, fail, E }         = require('../utils/response');
 
 const router = express.Router();
@@ -340,8 +344,8 @@ async function _importStudents(rows, schoolId, userId) {
   const VALID_GENDER  = new Set(['male', 'female', 'other', 'prefer_not_to_say']);
   const VALID_STATUS  = new Set(['active', 'inactive', 'suspended', 'graduated', 'transferred']);
 
-  const results = { created: 0, skipped: 0, errors: [] };
-  const toInsert = [];
+  const results  = { created: 0, skipped: 0, errors: [] };
+  const validRows = []; // collect valid rows before touching counters
 
   for (let i = 0; i < rows.length; i++) {
     const r   = rows[i];
@@ -384,29 +388,34 @@ async function _importStudents(rows, schoolId, userId) {
       }
     }
 
-    const admissionNumber = await nextAdmissionNumber(schoolId);
-
-    toInsert.push({
-      id:              uuidv4(),
-      schoolId,
-      admissionNumber,
-      firstName:       r.firstName.trim(),
-      lastName:        r.lastName.trim(),
-      middleName:      r.middleName?.trim() || undefined,
-      dateOfBirth:     r.dateOfBirth?.trim() || undefined,
-      gender:          gender || undefined,
-      classId:         classId || undefined,
-      parentName:      r.parentName?.trim() || undefined,
-      parentEmail:     parentEmail || undefined,
-      parentPhone:     r.parentPhone?.trim() || undefined,
-      address:         r.address?.trim() || undefined,
-      enrollmentDate:  r.enrollmentDate?.trim() || undefined,
-      status,
-      medicalNotes:    r.medicalNotes?.trim() || undefined,
-      createdBy:       userId,
-      updatedBy:       userId,
-    });
+    validRows.push({ r, row, gender, status, parentEmail, classId });
   }
+
+  // Reserve ALL admission numbers in one atomic DB call (was N sequential calls)
+  const admissionNumbers = validRows.length > 0
+    ? await reserveAdmissionNumbers(schoolId, validRows.length)
+    : [];
+
+  const toInsert = validRows.map(({ r, gender, status, parentEmail, classId }, idx) => ({
+    id:              uuidv4(),
+    schoolId,
+    admissionNumber: admissionNumbers[idx],
+    firstName:       r.firstName.trim(),
+    lastName:        r.lastName.trim(),
+    middleName:      r.middleName?.trim() || undefined,
+    dateOfBirth:     r.dateOfBirth?.trim() || undefined,
+    gender:          gender || undefined,
+    classId:         classId || undefined,
+    parentName:      r.parentName?.trim() || undefined,
+    parentEmail:     parentEmail || undefined,
+    parentPhone:     r.parentPhone?.trim() || undefined,
+    address:         r.address?.trim() || undefined,
+    enrollmentDate:  r.enrollmentDate?.trim() || undefined,
+    status,
+    medicalNotes:    r.medicalNotes?.trim() || undefined,
+    createdBy:       userId,
+    updatedBy:       userId,
+  }));
 
   if (toInsert.length > 0) {
     try {
@@ -436,11 +445,11 @@ async function _importTeachers(rows, schoolId, userId) {
   const VALID_STATUS   = new Set(['active', 'inactive', 'on_leave', 'terminated']);
   const VALID_CONTRACT = new Set(['full_time', 'part_time', 'supply', 'volunteer']);
 
-  const results  = { created: 0, skipped: 0, errors: [] };
-  const toInsert = [];
+  const results   = { created: 0, skipped: 0, errors: [] };
+  const validRows = [];
 
   // Pre-fetch existing emails to detect duplicates early
-  const existing = await Teachers.find({ schoolId }).select('email').lean();
+  const existing    = await Teachers.find({ schoolId }).select('email').lean();
   const knownEmails = new Set(existing.map(t => t.email.toLowerCase()));
 
   for (let i = 0; i < rows.length; i++) {
@@ -456,7 +465,7 @@ async function _importTeachers(rows, schoolId, userId) {
     if (!email) { results.errors.push({ row, field: 'email', message: 'Email is required for teachers' }); results.skipped++; continue; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { results.errors.push({ row, field: 'email', message: `Invalid email '${email}'` }); results.skipped++; continue; }
     if (knownEmails.has(email)) { results.errors.push({ row, field: 'email', message: `Email '${email}' already exists in this school` }); results.skipped++; continue; }
-    knownEmails.add(email); // prevent duplicates within the batch
+    knownEmails.add(email);
 
     const gender = r.gender?.trim().toLowerCase();
     if (gender && !VALID_GENDER.has(gender)) {
@@ -476,28 +485,33 @@ async function _importTeachers(rows, schoolId, userId) {
       results.skipped++; continue;
     }
 
-    const staffId = await nextStaffId(schoolId);
-
-    toInsert.push({
-      id:             uuidv4(),
-      schoolId,
-      staffId,
-      firstName:      r.firstName.trim(),
-      lastName:       r.lastName.trim(),
-      middleName:     r.middleName?.trim() || undefined,
-      email,
-      phone:          r.phone?.trim() || undefined,
-      dateOfBirth:    r.dateOfBirth?.trim() || undefined,
-      gender:         gender || undefined,
-      title:          r.title?.trim() || undefined,
-      qualifications: r.qualifications?.trim() || undefined,
-      joinDate:       r.joinDate?.trim() || undefined,
-      contractType:   contractType || undefined,
-      status,
-      createdBy:      userId,
-      updatedBy:      userId,
-    });
+    validRows.push({ r, row, email, gender, contractType, status });
   }
+
+  // Reserve all staff IDs in one atomic DB call
+  const staffIds = validRows.length > 0
+    ? await reserveStaffIds(schoolId, validRows.length)
+    : [];
+
+  const toInsert = validRows.map(({ r, email, gender, contractType, status }, idx) => ({
+    id:             uuidv4(),
+    schoolId,
+    staffId:        staffIds[idx],
+    firstName:      r.firstName.trim(),
+    lastName:       r.lastName.trim(),
+    middleName:     r.middleName?.trim() || undefined,
+    email,
+    phone:          r.phone?.trim() || undefined,
+    dateOfBirth:    r.dateOfBirth?.trim() || undefined,
+    gender:         gender || undefined,
+    title:          r.title?.trim() || undefined,
+    qualifications: r.qualifications?.trim() || undefined,
+    joinDate:       r.joinDate?.trim() || undefined,
+    contractType:   contractType || undefined,
+    status,
+    createdBy:      userId,
+    updatedBy:      userId,
+  }));
 
   if (toInsert.length > 0) {
     try {
@@ -707,8 +721,8 @@ async function _importFinance(rows, schoolId, userId) {
     }
   }
 
-  const results  = { created: 0, skipped: 0, errors: [] };
-  const toInsert = [];
+  const results   = { created: 0, skipped: 0, errors: [] };
+  const validRows = [];
 
   for (let i = 0; i < rows.length; i++) {
     const r   = rows[i];
@@ -716,7 +730,6 @@ async function _importFinance(rows, schoolId, userId) {
 
     if (r.admissionNumber?.startsWith('#')) continue;
 
-    // Required fields
     if (!r.admissionNumber?.trim()) { results.errors.push({ row, field: 'admissionNumber', message: 'admissionNumber is required' }); results.skipped++; continue; }
     if (!r.title?.trim())           { results.errors.push({ row, field: 'title',           message: 'title is required' });           results.skipped++; continue; }
     if (!r.description?.trim())     { results.errors.push({ row, field: 'description',     message: 'description is required' });     results.skipped++; continue; }
@@ -727,7 +740,6 @@ async function _importFinance(rows, schoolId, userId) {
       results.errors.push({ row, field: 'amount', message: `amount must be a positive number. Got: '${r.amount}'` });
       results.skipped++; continue;
     }
-    const unitPrice = _round(amount);
 
     const student = studentMap[r.admissionNumber.trim().toLowerCase()];
     if (!student) {
@@ -735,35 +747,38 @@ async function _importFinance(rows, schoolId, userId) {
       results.skipped++; continue;
     }
 
-    const invoiceNumber = await nextInvoiceNumber(schoolId);
-    const subtotal      = unitPrice; // one line item, qty 1
-    const total         = subtotal;
-
-    toInsert.push({
-      id:            uuidv4(),
-      schoolId,
-      invoiceNumber,
-      studentId:     student.studentId,
-      studentName:   student.studentName,
-      title:         r.title.trim(),
-      lineItems: [{
-        description: r.description.trim(),
-        quantity:    1,
-        unitPrice,
-        total:       unitPrice,
-      }],
-      subtotal,
-      discount:    0,
-      tax:         0,
-      total,
-      amountPaid:  0,
-      balance:     total,
-      status:      'unpaid',
-      dueDate:     r.dueDate?.trim() || undefined,
-      createdBy:   userId,
-      updatedBy:   userId,
-    });
+    validRows.push({ r, unitPrice: _round(amount), student });
   }
+
+  // Reserve all invoice numbers in one atomic DB call
+  const invoiceNumbers = validRows.length > 0
+    ? await reserveInvoiceNumbers(schoolId, validRows.length)
+    : [];
+
+  const toInsert = validRows.map(({ r, unitPrice, student }, idx) => ({
+    id:            uuidv4(),
+    schoolId,
+    invoiceNumber: invoiceNumbers[idx],
+    studentId:     student.studentId,
+    studentName:   student.studentName,
+    title:         r.title.trim(),
+    lineItems: [{
+      description: r.description.trim(),
+      quantity:    1,
+      unitPrice,
+      total:       unitPrice,
+    }],
+    subtotal:    unitPrice,
+    discount:    0,
+    tax:         0,
+    total:       unitPrice,
+    amountPaid:  0,
+    balance:     unitPrice,
+    status:      'unpaid',
+    dueDate:     r.dueDate?.trim() || undefined,
+    createdBy:   userId,
+    updatedBy:   userId,
+  }));
 
   if (toInsert.length > 0) {
     try {

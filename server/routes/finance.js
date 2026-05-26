@@ -14,6 +14,7 @@ const { planGate }                     = require('../middleware/plan');
 const { _model }                       = require('../utils/model');
 const { nextInvoiceNumber, nextReceiptNumber } = require('../utils/counters');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
+const { applyOptimisticLock } = require('../utils/optimistic-lock');
 
 const router = express.Router();
 const PLAN   = planGate('finance');
@@ -187,14 +188,18 @@ router.put('/invoices/:id', authMiddleware, PLAN, rbac('finance', 'update'), asy
     const payments  = await Payments.find({ invoiceId: req.params.id, schoolId }).lean();
     const bal       = _calcBalance(totals.total, payments);
 
-    delete data.invoiceNumber; delete data.schoolId; delete data.id;
+    const clientVersion = data._v;
+    delete data.invoiceNumber; delete data.schoolId; delete data.id; delete data._v;
 
-    const doc = await Invoices.findOneAndUpdate(
+    const { doc, conflict } = await applyOptimisticLock(
+      Invoices,
       { id: req.params.id, schoolId },
       { ...data, ...totals, amountPaid: bal.paid, balance: bal.balance, status: bal.status, updatedBy: userId },
-      { new: true, runValidators: false }
-    ).lean();
+      clientVersion
+    );
 
+    if (conflict) return E.conflict(res, 'This invoice was edited by someone else. Please refresh and try again.');
+    if (!doc)     return E.notFound(res, 'Invoice not found');
     return ok(res, doc);
   } catch (err) {
     console.error('[finance PUT /invoices/:id]', err);
@@ -298,9 +303,21 @@ router.post('/payments', authMiddleware, PLAN, rbac('finance', 'create'), async 
       createdBy:     userId,
     });
 
-    // Server-side: recalculate invoice balance after this payment
-    const allPayments  = await Payments.find({ invoiceId: data.invoiceId, schoolId }).lean();
-    const bal          = _calcBalance(invoice.total, allPayments);
+    // Recalculate from ALL payments (including the one just created).
+    // This is safe against concurrent payment recording: if two payments were
+    // created simultaneously and the combined total exceeds the invoice, the
+    // resulting negative balance is caught here, the new payment is rolled back,
+    // and the caller gets a clear error message.
+    const allPayments = await Payments.find({ invoiceId: data.invoiceId, schoolId }).lean();
+    const bal         = _calcBalance(invoice.total, allPayments);
+
+    if (bal.balance < -0.01) {
+      // Concurrent overpayment detected — delete the just-created payment
+      await Payments.deleteOne({ _id: payment._id });
+      const freshInv = await Invoices.findOne({ id: data.invoiceId, schoolId }).lean();
+      const remaining = _round(freshInv?.balance ?? 0);
+      return E.badRequest(res, `Payment would cause an overpayment. Current outstanding balance is ${remaining}. Please refresh and try again.`);
+    }
 
     await Invoices.findOneAndUpdate(
       { id: data.invoiceId },
@@ -309,8 +326,8 @@ router.post('/payments', authMiddleware, PLAN, rbac('finance', 'create'), async 
 
     return created(res, {
       payment: payment.toObject ? payment.toObject() : payment,
-      invoiceStatus: bal.status,
-      invoiceBalance: bal.balance
+      invoiceStatus:  bal.status,
+      invoiceBalance: bal.balance,
     });
   } catch (err) {
     console.error('[finance POST /payments]', err);

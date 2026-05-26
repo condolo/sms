@@ -327,6 +327,7 @@ function TeacherDetailSlideOver({ teacher: initialTeacher, canEdit, canDelete, o
 
   function startEdit() {
     setForm({
+      _v:           teacher._v          ?? undefined,  // carry version for optimistic lock
       firstName:    teacher.firstName   ?? '',
       lastName:     teacher.lastName    ?? '',
       middleName:   teacher.middleName  ?? '',

@@ -13,6 +13,7 @@ const { planGate }        = require('../middleware/plan');
 const { _model }          = require('../utils/model');
 const { nextStaffId }     = require('../utils/counters');
 const { ok, created, fail, paginate, parsePagination, E } = require('../utils/response');
+const { applyOptimisticLock } = require('../utils/optimistic-lock');
 
 const router = express.Router();
 const PLAN   = planGate('teachers');
@@ -157,25 +158,28 @@ router.put('/:id', authMiddleware, PLAN, rbac('teachers', 'update'), async (req,
     if (error) return E.validation(res, error);
 
     // Immutable fields
+    const clientVersion = data._v;
     delete data.staffId;
     delete data.schoolId;
     delete data.id;
+    delete data._v;
 
     // If email is being changed, check for duplicates
     if (data.email) {
       const Teachers = _model('teachers');
-      const conflict = await Teachers.findOne({ schoolId, email: data.email, id: { $ne: req.params.id } }).lean();
-      if (conflict) return E.conflict(res, `Email '${data.email}' is already used by another teacher`);
+      const existing = await Teachers.findOne({ schoolId, email: data.email, id: { $ne: req.params.id } }).lean();
+      if (existing) return E.conflict(res, `Email '${data.email}' is already used by another teacher`);
     }
 
-    const Teachers = _model('teachers');
-    const doc = await Teachers.findOneAndUpdate(
+    const { doc, conflict } = await applyOptimisticLock(
+      _model('teachers'),
       { id: req.params.id, schoolId },
       { ...data, updatedBy: userId },
-      { new: true, runValidators: false }
-    ).lean();
+      clientVersion
+    );
 
-    if (!doc) return E.notFound(res, 'Teacher not found');
+    if (conflict) return E.conflict(res, 'This teacher record was edited by someone else. Please refresh and try again.');
+    if (!doc)     return E.notFound(res, 'Teacher not found');
     return ok(res, doc);
   } catch (err) {
     console.error('[teachers PUT/:id]', err);
