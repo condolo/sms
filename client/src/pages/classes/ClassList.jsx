@@ -22,6 +22,19 @@ const CLASS_COLORS = [
 ];
 function classColor(name='') { return CLASS_COLORS[(name.charCodeAt(0)||0) % CLASS_COLORS.length]; }
 
+const SECTION_LABELS = {
+  kg:        'Kindergarten',
+  primary:   'Primary',
+  secondary: 'Secondary',
+  alevel:    'A-Level',
+};
+const SECTION_BADGE = {
+  kg:        'bg-emerald-50 text-emerald-700 border-emerald-200',
+  primary:   'bg-blue-50 text-blue-700 border-blue-200',
+  secondary: 'bg-violet-50 text-violet-700 border-violet-200',
+  alevel:    'bg-amber-50 text-amber-700 border-amber-200',
+};
+
 /* ══════════════════════════════════════════════════════════ */
 export default function ClassList() {
   const qc      = useQueryClient();
@@ -29,9 +42,10 @@ export default function ClassList() {
   const role    = useAuthStore(s => s.session?.user?.role ?? '');
   const canCreate = can('classes') || role === 'admin' || role === 'superadmin';
   const canDelete = can('classes') || role === 'admin' || role === 'superadmin';
-  const [showAdd,    setShowAdd]    = useState(false);
-  const [showImport, setShowImport] = useState(false);
-  const [exporting,  setExporting]  = useState(false);
+  const [showAdd,       setShowAdd]       = useState(false);
+  const [showImport,    setShowImport]    = useState(false);
+  const [exporting,     setExporting]     = useState(false);
+  const [sectionFilter, setSectionFilter] = useState('all');
 
   async function handleExport() {
     setExporting(true);
@@ -46,6 +60,22 @@ export default function ClassList() {
     staleTime: 5 * 60_000,
   });
   const rows = data?.data ?? [];
+
+  // Client-side section filter + year/level grouping (streams share the same `year`)
+  const filtered = sectionFilter === 'all'
+    ? rows
+    : rows.filter(c => c.sectionKey === sectionFilter);
+
+  const grouped = {};
+  for (const c of [...filtered].sort((a, b) => a.name.localeCompare(b.name))) {
+    const key = c.year?.trim() || '__';
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(c);
+  }
+  const yearGroups = Object.entries(grouped).sort(([a], [b]) => {
+    if (a === '__') return 1; if (b === '__') return -1;
+    return a.localeCompare(b, undefined, { numeric: true });
+  });
 
   const { mutate: remove } = useMutation({
     mutationFn: id => classesApi.remove(id),
@@ -100,6 +130,39 @@ export default function ClassList() {
       </div>
 
       <div className="max-w-screen-2xl mx-auto px-6 py-5">
+
+        {/* Section filter tabs — hidden during load / error / empty */}
+        {!isLoading && !isError && rows.length > 0 && (
+          <div className="flex items-center gap-1 mb-5 overflow-x-auto pb-1">
+            {[
+              ['all',       'All'],
+              ['kg',        'Kindergarten'],
+              ['primary',   'Primary'],
+              ['secondary', 'Secondary'],
+              ['alevel',    'A-Level'],
+            ].map(([key, label]) => {
+              const count = key === 'all' ? rows.length : rows.filter(r => r.sectionKey === key).length;
+              if (key !== 'all' && count === 0) return null;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setSectionFilter(key)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-colors ${
+                    sectionFilter === key ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {label}
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                    sectionFilter === key ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
+                  }`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {isLoading ? (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {[...Array(8)].map((_, i) => (
@@ -127,94 +190,129 @@ export default function ClassList() {
               </button>
             )}
           </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+            <BookOpen size={28} className="mb-2 opacity-40" />
+            <p className="text-sm font-medium text-slate-600">No classes in this section</p>
+            <button onClick={() => setSectionFilter('all')} className="mt-2 text-xs text-violet-600 hover:text-violet-800 transition">
+              Show all sections
+            </button>
+          </div>
         ) : (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {[...rows].sort((a, b) => a.name.localeCompare(b.name)).map(c => {
-              const id  = c._id ?? c.id;
-              const col = classColor(c.name);
-              const cap = Number(c.capacity) || 0;
-              const cnt = Number(c.studentCount) || 0;
-              const fillPct = cap > 0 ? Math.min(Math.round((cnt / cap) * 100), 100) : 0;
-              const fillColor = fillPct >= 100 ? 'bg-red-500' : fillPct >= 80 ? 'bg-amber-400' : 'bg-emerald-500';
-              return (
-                <motion.div
-                  key={id}
-                  layout
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-white rounded-xl border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all group relative overflow-hidden"
-                >
-                  {/* Top colour bar */}
-                  <div className={`h-1 bg-gradient-to-r ${col}`} />
-
-                  <div className="p-5">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${col} flex items-center justify-center shrink-0`}>
-                        <BookOpen size={16} className="text-white" />
-                      </div>
-                      {canDelete && (
-                        <button
-                          onClick={() => confirmRemove(c)}
-                          className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="mt-3">
-                      <h3 className="font-semibold text-slate-900">{c.name}</h3>
-                      {c.year && <p className="text-xs text-slate-400 mt-0.5">{c.year}</p>}
-                    </div>
-
-                    <div className="mt-4 space-y-1.5">
-                      <div className="flex items-center gap-2 text-xs text-slate-500">
-                        <Users size={12} className="shrink-0" />
-                        <span>{cnt.toLocaleString()} student{cnt !== 1 ? 's' : ''}</span>
-                        {cap > 0 && (
-                          <span className={`ml-auto text-[10px] font-semibold ${fillPct >= 100 ? 'text-red-500' : fillPct >= 80 ? 'text-amber-500' : 'text-emerald-600'}`}>
-                            {fillPct}%
-                          </span>
-                        )}
-                      </div>
-                      {cap > 0 && (
-                        <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                          <div className={`h-1.5 rounded-full transition-all ${fillColor}`} style={{ width: `${fillPct}%` }} />
-                        </div>
-                      )}
-                      {c.teacherName && (
-                        <div className="flex items-center gap-2 text-xs text-slate-500">
-                          <UserCheck size={12} className="shrink-0" />
-                          <span className="truncate">{c.teacherName}</span>
-                        </div>
-                      )}
-                      {c.room && (
-                        <div className="flex items-center gap-2 text-xs text-slate-500">
-                          <Home size={12} className="shrink-0" />
-                          <span>{c.room}</span>
-                        </div>
-                      )}
-                      {cap > 0 && (
-                        <div className="flex items-center gap-2 text-xs text-slate-500">
-                          <Hash size={12} className="shrink-0" />
-                          <span>Capacity: {cap}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="mt-4 pt-3 border-t border-slate-100">
-                      <Link
-                        to={`/students?classId=${id}`}
-                        className="text-xs font-medium text-violet-600 hover:text-violet-800 transition flex items-center gap-1"
-                      >
-                        <Users size={11} />
-                        View students
-                      </Link>
-                    </div>
+          /* ── Grouped by Year / Level — each year group may hold multiple streams ── */
+          <div className="space-y-6">
+            {yearGroups.map(([year, classes]) => (
+              <div key={year}>
+                {/* Year / Level header with stream count badge */}
+                {year !== '__' && (
+                  <div className="flex items-center gap-3 mb-3">
+                    <span className="text-sm font-semibold text-slate-700">{year}</span>
+                    {classes.length > 1 && (
+                      <span className="inline-flex items-center text-[11px] font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                        {classes.length} streams
+                      </span>
+                    )}
+                    <div className="flex-1 h-px bg-slate-200" />
                   </div>
-                </motion.div>
-              );
-            })}
+                )}
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {classes.map(c => {
+                    const id  = c._id ?? c.id;
+                    const col = classColor(c.name);
+                    const cap = Number(c.capacity) || 0;
+                    const cnt = Number(c.studentCount) || 0;
+                    const fillPct   = cap > 0 ? Math.min(Math.round((cnt / cap) * 100), 100) : 0;
+                    const fillColor = fillPct >= 100 ? 'bg-red-500' : fillPct >= 80 ? 'bg-amber-400' : 'bg-emerald-500';
+                    return (
+                      <motion.div
+                        key={id}
+                        layout
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="bg-white rounded-xl border border-slate-200 hover:shadow-md hover:border-slate-300 transition-all group relative overflow-hidden"
+                      >
+                        {/* Top colour bar */}
+                        <div className={`h-1 bg-gradient-to-r ${col}`} />
+
+                        <div className="p-5">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${col} flex items-center justify-center shrink-0`}>
+                              <BookOpen size={16} className="text-white" />
+                            </div>
+                            {canDelete && (
+                              <button
+                                onClick={() => confirmRemove(c)}
+                                className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="mt-3">
+                            <h3 className="font-semibold text-slate-900">{c.name}</h3>
+                            {/* Only show year in the card if the class has no year group header */}
+                            {c.year && year === '__' && (
+                              <p className="text-xs text-slate-400 mt-0.5">{c.year}</p>
+                            )}
+                            {c.sectionKey && (
+                              <span className={`inline-flex mt-1 text-[10px] font-medium px-1.5 py-0.5 rounded border ${SECTION_BADGE[c.sectionKey] ?? 'bg-slate-50 text-slate-500 border-slate-200'}`}>
+                                {SECTION_LABELS[c.sectionKey] ?? c.sectionKey}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="mt-4 space-y-1.5">
+                            <div className="flex items-center gap-2 text-xs text-slate-500">
+                              <Users size={12} className="shrink-0" />
+                              <span>{cnt.toLocaleString()} student{cnt !== 1 ? 's' : ''}</span>
+                              {cap > 0 && (
+                                <span className={`ml-auto text-[10px] font-semibold ${fillPct >= 100 ? 'text-red-500' : fillPct >= 80 ? 'text-amber-500' : 'text-emerald-600'}`}>
+                                  {fillPct}%
+                                </span>
+                              )}
+                            </div>
+                            {cap > 0 && (
+                              <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                                <div className={`h-1.5 rounded-full transition-all ${fillColor}`} style={{ width: `${fillPct}%` }} />
+                              </div>
+                            )}
+                            {c.teacherName && (
+                              <div className="flex items-center gap-2 text-xs text-slate-500">
+                                <UserCheck size={12} className="shrink-0" />
+                                <span className="truncate">{c.teacherName}</span>
+                              </div>
+                            )}
+                            {c.room && (
+                              <div className="flex items-center gap-2 text-xs text-slate-500">
+                                <Home size={12} className="shrink-0" />
+                                <span>{c.room}</span>
+                              </div>
+                            )}
+                            {cap > 0 && (
+                              <div className="flex items-center gap-2 text-xs text-slate-500">
+                                <Hash size={12} className="shrink-0" />
+                                <span>Capacity: {cap}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="mt-4 pt-3 border-t border-slate-100">
+                            <Link
+                              to={`/students?classId=${id}`}
+                              className="text-xs font-medium text-violet-600 hover:text-violet-800 transition flex items-center gap-1"
+                            >
+                              <Users size={11} />
+                              View students
+                            </Link>
+                          </div>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -241,7 +339,7 @@ export default function ClassList() {
 }
 
 /* ── Add Class Slide-Over ─────────────────────────────────── */
-const EMPTY_CLASS = { name:'', year:'', room:'', capacity:'', teacherId:'', description:'', status:'active' };
+const EMPTY_CLASS = { name:'', sectionKey:'', year:'', room:'', capacity:'', teacherId:'', description:'', status:'active' };
 
 function AddClassSlideOver({ onClose, onCreated }) {
   const [form, setForm] = useState(EMPTY_CLASS);
@@ -308,25 +406,40 @@ function AddClassSlideOver({ onClose, onCreated }) {
           <FField2 label="Class Name *" error={errors.name}>
             <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Year 7A, Grade 3, Form 4" className={iCls2(errors.name)} />
           </FField2>
+
+          {/* Section + Year / Level — related fields side-by-side */}
           <div className="grid grid-cols-2 gap-4">
-            <FField2 label="Year / Level">
-              <input value={form.year} onChange={e => set('year', e.target.value)} placeholder="e.g. Year 7" className={iCls2()} />
+            <FField2 label="Section">
+              <select value={form.sectionKey} onChange={e => set('sectionKey', e.target.value)} className={iCls2()}>
+                <option value="">Select section…</option>
+                <option value="kg">Kindergarten</option>
+                <option value="primary">Primary</option>
+                <option value="secondary">Secondary</option>
+                <option value="alevel">A-Level</option>
+              </select>
             </FField2>
+            <FField2 label="Year / Level">
+              <input value={form.year} onChange={e => set('year', e.target.value)} placeholder="e.g. Year 7, Form 1" className={iCls2()} />
+            </FField2>
+          </div>
+
+          {/* Room + Capacity */}
+          <div className="grid grid-cols-2 gap-4">
             <FField2 label="Room">
               <input value={form.room} onChange={e => set('room', e.target.value)} placeholder="e.g. Room 12" className={iCls2()} />
             </FField2>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
             <FField2 label="Capacity">
               <input type="number" min="1" max="200" value={form.capacity} onChange={e => set('capacity', e.target.value)} placeholder="Max students" className={iCls2()} />
             </FField2>
-            <FField2 label="Status">
-              <select value={form.status} onChange={e => set('status', e.target.value)} className={iCls2()}>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-            </FField2>
           </div>
+
+          <FField2 label="Status">
+            <select value={form.status} onChange={e => set('status', e.target.value)} className={iCls2()}>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </FField2>
+
           <FField2 label="Form Tutor / Class Teacher">
             <select value={form.teacherId} onChange={e => set('teacherId', e.target.value)} className={iCls2()}>
               <option value="">No teacher assigned</option>
