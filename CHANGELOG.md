@@ -6,6 +6,32 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.19.0] — 2026-05-26  Collapsible Sidebar + Class Sections & Streams
+
+### New — Collapsible sidebar (desktop)
+
+- Sidebar spring-animates between 256 px (expanded) and 64 px (collapsed) via Framer Motion
+- Collapse state persisted to `localStorage` — survives page refresh and navigation
+- **Collapsed mode**: icons only, perfectly centred in 64 px; native `title` tooltip on hover for every nav item
+- Text labels fade out (0.1 s) before the sidebar width contracts; fade in after a 0.14 s delay on expansion so the width spring leads and text follows
+- Section group labels animate `maxHeight + opacity + margin` to zero simultaneously when collapsing
+- Collapse/expand toggle button lives at the bottom of the nav (above user footer): `ChevronLeft` when expanded, `ChevronRight` when collapsed
+- Footer: stacked avatar + logout icon when collapsed; full name/role/logout row when expanded
+- Mobile overlay drawer is completely unaffected (no `collapsed` prop passed)
+- `AppShell` uses `motion.aside` with `initial={false}` — no animation flash on first load
+
+### New — Class sections & streams
+
+- `sectionKey` field added to `ClassSchema` (Zod validation on POST and PUT): `kg | primary | secondary | alevel`
+- **Add Class form** restructured: Section + Year/Level side-by-side (row 1), Room + Capacity (row 2), Status standalone, then Form Tutor and Description
+- **ClassList** now groups classes by `year` field — classes sharing the same `year` are streams (e.g. Year 7A, 7B, 7C appear under a "Year 7 · 3 streams" header)
+- **Section filter tabs** above the grid: All | Kindergarten | Primary | Secondary | A-Level — tabs only render for sections that have at least one class; counts shown inline
+- **Section colour badge** on each card: blue = Primary, violet = Secondary, amber = A-Level, emerald = Kindergarten
+- Empty-section state when filtering: friendly message + "Show all sections" link instead of blank grid
+- All filtering is client-side (no extra network round-trips — 200 classes already loaded)
+
+---
+
 ## [4.18.0] — 2026-05-26  Import/Export Dissolution — Bulk import embedded in each module
 
 ### Changed — Removed standalone Import & Export page
