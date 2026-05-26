@@ -6,6 +6,65 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.17.0] — 2026-05-26  Rooms Registry + Teaching Assignments + Timetable Auto-fill
+
+### New — Room Registry (`/api/rooms`)
+
+- `GET /` — list registered rooms for the school
+- `GET /:id` — single room detail
+- `POST /` — create room (name, code, type, capacity, notes); duplicate name guard per school
+- `PUT /:id` — update room details
+- `DELETE /:id` — soft-delete (`isActive: false`); timetable slots that reference the room are NOT deleted
+- Room types: `classroom`, `lab`, `hall`, `sports`, `library`, `other`
+- RBAC: admin / superadmin / deputy / principal / timetabler may write; all authenticated users may read
+- Double-booking: allowed (timetable warns but never blocks)
+
+### New — Teaching Assignments (`/api/teaching-assignments`)
+
+One record = "Teacher X delivers Subject Y to Class Z in preferred Room R"
+
+- `GET /` — filterable by `teacherId`, `classId`, `subjectId`, `roomId` — teachers see only own assignments
+- `POST /` — creates assignment; denormalises `teacherName`, `subjectName`, `className`, `preferredRoomName` at write time
+- `PUT /:id` — update `preferredRoomId` and/or `periodsPerWeek` only
+- `DELETE /:id` — hard delete
+- RBAC: admin / principal / deputy — any subject/class; HOD — only subjects in their `departmentId`; timetabler — read-only; teacher — own assignments only
+- Duplicate guard: same `teacherId + subjectId + classId` → 409 Conflict
+
+### New — Teacher Module: Assignments Tab
+
+- Teacher detail slide-over now has two tabs: **Profile** and **Assignments**
+- Assignments tab lists all `teaching_assignments` for the selected teacher
+- Shows: Subject · Class · Preferred Room · Periods/week
+- Add assignment form: class picker → subject picker (filtered from class curriculum) → room picker (from registry) → optional periods/week
+- Subjects are populated from the class's curriculum (`/api/class-subjects?classId=X`) — only subjects already assigned to that class appear
+- Admin / principal / HOD can add/remove assignments; teachers see read-only
+
+### New — Timetable: Rooms Tab
+
+- New **Rooms** view in the Timetable page (admin/timetabler only)
+- Left panel: Room Registry CRUD (via `RoomsTab` component)
+- Right panel: Room occupancy grid — shows Subject · Teacher · Class per cell for the selected room across the full week
+- Double-bookings highlighted in red with conflict count badge
+- Handles unregistered rooms (free-text rooms stored in old slots)
+
+### Enhanced — Slot Editor Auto-fill
+
+- **Subject field**: now a dropdown populated from the class's curriculum; falls back to free text if no curriculum is configured
+- **Room field**: now a dropdown populated from the registered rooms registry; falls back to free text if no rooms registered; shows "unregistered" hint for legacy free-text room values
+- **Auto-fill**: selecting a subject triggers a lookup against `teaching_assignments` for that class+subject combination; if found, teacher and preferred room are automatically populated
+- Status banner: green "Auto-filled" confirmation, amber "No assignment found — fill manually" hint, or loading spinner while lookup is in progress
+- All auto-fill is non-blocking — user can override any field after auto-fill
+
+### Architecture
+
+- `server/routes/rooms.js` — new route module
+- `server/routes/teaching-assignments.js` — new route module
+- `client/src/pages/timetable/components/RoomsTab.jsx` — new component
+- `client/src/pages/timetable/components/RoomView.jsx` — new component
+- `client/src/api/client.js` — `rooms` and `teachingAssignments` API objects added
+
+---
+
 ## [4.11.5] — 2026-05-25  Phase 3 — Subject Enrollment Warnings Engine
 
 ### New — `GET /api/class-subjects/enrollment-warnings`

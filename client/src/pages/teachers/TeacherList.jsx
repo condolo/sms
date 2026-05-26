@@ -9,9 +9,16 @@ import {
   Search, X, UserPlus, Trash2, Eye, Loader2,
   CheckCircle2, AlertTriangle, Phone, Mail,
   BookOpen, Briefcase, Users, Edit2, Save, Calendar,
-  MapPin, Award, ChevronRight, Download,
+  MapPin, Award, ChevronRight, Download, ClipboardList, Plus,
 } from 'lucide-react';
-import { teachers as teachersApi, importExport } from '@/api/client.js';
+import {
+  teachers as teachersApi,
+  teachingAssignments as assignmentsApi,
+  rooms as roomsApi,
+  classes as classesApi,
+  classSubjects,
+  importExport,
+} from '@/api/client.js';
 import { Pagination } from '@/components/ui/Pagination.jsx';
 import useAuthStore from '@/store/auth.js';
 
@@ -278,6 +285,7 @@ export default function TeacherList() {
 /* ── Teacher Detail / Edit Slide-Over ────────────────────── */
 function TeacherDetailSlideOver({ teacher: initialTeacher, canEdit, canDelete, onClose, onUpdated, onRemove }) {
   const qc = useQueryClient();
+  const [activeTab, setActiveTab] = useState('profile'); // 'profile' | 'assignments'
   const [editing, setEditing]   = useState(false);
   const [teacher, setTeacher]   = useState(initialTeacher);
   const [form, setForm]         = useState(null);
@@ -376,9 +384,32 @@ function TeacherDetailSlideOver({ teacher: initialTeacher, canEdit, canDelete, o
           </div>
         </div>
 
+        {/* Tabs */}
+        <div className="flex border-b border-slate-100 px-6 gap-1">
+          {[
+            { id: 'profile',     label: 'Profile',     Icon: Briefcase    },
+            { id: 'assignments', label: 'Assignments', Icon: ClipboardList },
+          ].map(({ id, label, Icon }) => (
+            <button
+              key={id}
+              onClick={() => { setActiveTab(id); setEditing(false); }}
+              className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium border-b-2 -mb-px transition ${
+                activeTab === id
+                  ? 'border-slate-900 text-slate-900'
+                  : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <Icon size={11} />
+              {label}
+            </button>
+          ))}
+        </div>
+
         {/* Body */}
         <div className="flex-1 overflow-y-auto">
-          {!editing ? (
+          {activeTab === 'assignments' ? (
+            <TeacherAssignmentsTab teacher={teacher} canEdit={canEdit} />
+          ) : !editing ? (
             /* View mode */
             <div className="px-6 py-5 space-y-6">
               {/* Contract summary chips */}
@@ -564,7 +595,11 @@ function TeacherDetailSlideOver({ teacher: initialTeacher, canEdit, canDelete, o
 
         {/* Footer */}
         <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
-          {!editing ? (
+          {activeTab === 'assignments' ? (
+            <div className="flex w-full justify-end">
+              <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 transition">Close</button>
+            </div>
+          ) : !editing ? (
             <>
               <div className="flex gap-2">
                 {canDelete && (
@@ -598,6 +633,258 @@ function TeacherDetailSlideOver({ teacher: initialTeacher, canEdit, canDelete, o
         </div>
       </motion.div>
     </>
+  );
+}
+
+/* ── Teaching Assignments Tab ────────────────────────────── */
+function TeacherAssignmentsTab({ teacher, canEdit }) {
+  const qc = useQueryClient();
+  const teacherId = teacher.userId ?? teacher._id ?? teacher.id;
+
+  const [showAdd, setShowAdd] = useState(false);
+  const [af, setAf]           = useState({ classId: '', subjectId: '', preferredRoomId: '', periodsPerWeek: '' });
+  const [afErr, setAfErr]     = useState({});
+
+  /* ── Fetch assignments for this teacher ─── */
+  const { data: aData, isLoading: loadingA } = useQuery({
+    queryKey: ['teaching-assignments', { teacherId }],
+    queryFn:  () => assignmentsApi.list({ teacherId }),
+    staleTime: 60_000,
+  });
+  const assignments = aData?.data ?? [];
+
+  /* ── Fetch class list (only when add form is open) ─── */
+  const { data: clsData } = useQuery({
+    queryKey: ['classes', 'all'],
+    queryFn:  () => classesApi.list({ limit: 200 }),
+    staleTime: 5 * 60_000,
+    enabled: showAdd,
+  });
+  const classList = clsData?.data ?? [];
+
+  /* ── Fetch subjects for the selected class ─── */
+  const { data: sData } = useQuery({
+    queryKey: ['class-subjects', af.classId],
+    queryFn:  () => classSubjects.list({ classId: af.classId }),
+    staleTime: 60_000,
+    enabled: showAdd && !!af.classId,
+  });
+  const subjectList = sData?.data ?? [];
+
+  /* ── Fetch rooms (only when add form is open) ─── */
+  const { data: rData } = useQuery({
+    queryKey: ['rooms'],
+    queryFn:  () => roomsApi.list(),
+    staleTime: 5 * 60_000,
+    enabled: showAdd,
+  });
+  const roomList = rData?.data ?? [];
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['teaching-assignments', { teacherId }] });
+
+  const createMut = useMutation({
+    mutationFn: data => assignmentsApi.create(data),
+    onSuccess:  () => {
+      invalidate();
+      setShowAdd(false);
+      setAf({ classId: '', subjectId: '', preferredRoomId: '', periodsPerWeek: '' });
+      setAfErr({});
+    },
+    onError: err => setAfErr({ _s: err?.message ?? 'Failed to add assignment' }),
+  });
+
+  const removeMut = useMutation({
+    mutationFn: id => assignmentsApi.remove(id),
+    onSuccess:  invalidate,
+    onError:    err => alert(err?.message ?? 'Failed to remove assignment'),
+  });
+
+  function setField(k, v) {
+    setAf(f => {
+      const n = { ...f, [k]: v };
+      if (k === 'classId') n.subjectId = ''; // reset subject when class changes
+      return n;
+    });
+    setAfErr(e => { const n = { ...e }; delete n[k]; delete n._s; return n; });
+  }
+
+  function submitAdd() {
+    const e = {};
+    if (!af.classId)   e.classId   = 'Select a class';
+    if (!af.subjectId) e.subjectId = 'Select a subject';
+    if (Object.keys(e).length) { setAfErr(e); return; }
+    createMut.mutate({
+      teacherId,
+      classId:   af.classId,
+      subjectId: af.subjectId,
+      ...(af.preferredRoomId  ? { preferredRoomId:  af.preferredRoomId }          : {}),
+      ...(af.periodsPerWeek   ? { periodsPerWeek:   Number(af.periodsPerWeek) }   : {}),
+    });
+  }
+
+  const fCls = (err) =>
+    `w-full text-sm px-3 py-2 rounded-lg border ${err ? 'border-red-300' : 'border-slate-200'} bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10`;
+
+  return (
+    <div className="px-6 py-5 space-y-4">
+      {/* Header row */}
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-slate-500">
+          {loadingA ? '…' : `${assignments.length} assignment${assignments.length !== 1 ? 's' : ''}`} configured
+        </p>
+        {canEdit && !showAdd && (
+          <button
+            onClick={() => setShowAdd(true)}
+            className="flex items-center gap-1 text-xs font-medium bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg transition"
+          >
+            <Plus size={11} /> Add assignment
+          </button>
+        )}
+      </div>
+
+      {/* Add form */}
+      <AnimatePresence>
+        {showAdd && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+            className="space-y-3 p-4 bg-slate-50 border border-slate-200 rounded-xl"
+          >
+            {afErr._s && (
+              <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                <AlertTriangle size={11} className="shrink-0" />{afErr._s}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              {/* Class picker */}
+              <div>
+                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Class *</label>
+                <select value={af.classId} onChange={e => setField('classId', e.target.value)} className={`mt-1 ${fCls(afErr.classId)}`}>
+                  <option value="">Select class…</option>
+                  {classList.map(c => (
+                    <option key={c.id ?? c._id} value={c.id ?? c._id}>{c.name}</option>
+                  ))}
+                </select>
+                {afErr.classId && <p className="text-[10px] text-red-500 mt-0.5">{afErr.classId}</p>}
+              </div>
+
+              {/* Subject picker — populated from class curriculum */}
+              <div>
+                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Subject *</label>
+                <select
+                  value={af.subjectId}
+                  onChange={e => setField('subjectId', e.target.value)}
+                  disabled={!af.classId}
+                  className={`mt-1 ${fCls(afErr.subjectId)} disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  <option value="">{af.classId ? 'Select subject…' : 'Choose class first'}</option>
+                  {subjectList.map(cs => (
+                    <option key={cs.subjectId} value={cs.subjectId}>
+                      {cs.subject?.name ?? cs.subjectId}
+                    </option>
+                  ))}
+                </select>
+                {afErr.subjectId && <p className="text-[10px] text-red-500 mt-0.5">{afErr.subjectId}</p>}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              {/* Room picker */}
+              <div>
+                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Preferred Room</label>
+                <select value={af.preferredRoomId} onChange={e => setField('preferredRoomId', e.target.value)} className={`mt-1 ${fCls()}`}>
+                  <option value="">None</option>
+                  {roomList.map(r => (
+                    <option key={r._id ?? r.id} value={r._id ?? r.id}>{r.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Periods per week */}
+              <div>
+                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Periods / Week</label>
+                <input
+                  type="number" min="1" max="40"
+                  value={af.periodsPerWeek}
+                  onChange={e => setField('periodsPerWeek', e.target.value)}
+                  placeholder="e.g. 5"
+                  className={`mt-1 ${fCls()}`}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                onClick={() => { setShowAdd(false); setAfErr({}); }}
+                className="text-xs font-medium text-slate-600 hover:text-slate-800 px-3 py-1.5 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitAdd}
+                disabled={createMut.isPending}
+                className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-medium px-4 py-1.5 rounded-lg transition"
+              >
+                {createMut.isPending ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
+                {createMut.isPending ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Assignments list */}
+      {loadingA ? (
+        <div className="space-y-2">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="h-12 bg-slate-100 rounded-xl animate-pulse" />
+          ))}
+        </div>
+      ) : assignments.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 py-10 text-center">
+          <ClipboardList size={28} className="text-slate-200" />
+          <p className="text-sm font-medium text-slate-400">No assignments configured</p>
+          <p className="text-xs text-slate-400 max-w-[220px] leading-relaxed">
+            Assignments link this teacher to a subject and class so the timetable can auto-fill their details
+          </p>
+        </div>
+      ) : (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-50">
+          {assignments.map(a => (
+            <div key={a._id ?? a.id} className="flex items-center gap-3 px-4 py-3 group hover:bg-slate-50 transition">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-slate-800 truncate">{a.subjectName ?? a.subjectId}</p>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                  <span className="text-[10px] text-slate-500">
+                    <span className="font-medium">Class:</span> {a.className ?? a.classId}
+                  </span>
+                  {a.preferredRoomName && (
+                    <span className="text-[10px] text-slate-400">· Room: {a.preferredRoomName}</span>
+                  )}
+                  {a.periodsPerWeek && (
+                    <span className="text-[10px] text-slate-400">· {a.periodsPerWeek} periods/wk</span>
+                  )}
+                </div>
+              </div>
+              {canEdit && (
+                <button
+                  onClick={() => removeMut.mutate(a._id ?? a.id)}
+                  disabled={removeMut.isPending}
+                  className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition disabled:opacity-30"
+                  title="Remove assignment"
+                >
+                  <Trash2 size={12} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="text-[11px] text-slate-400 leading-relaxed">
+        Assignments tell the timetable who teaches what. When you create a slot for this class + subject, the teacher and preferred room are auto-filled.
+      </p>
+    </div>
   );
 }
 

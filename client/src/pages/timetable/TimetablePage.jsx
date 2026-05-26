@@ -9,12 +9,14 @@ import { AnimatePresence } from 'framer-motion';
 import {
   CalendarDays, Plus, AlertCircle, CheckCircle2, BarChart3,
   Clock, User, LayoutGrid, Globe, UserX, Zap, Download, Printer,
+  DoorOpen,
 } from 'lucide-react';
 import {
   timetable    as ttApi,
   classes      as classesApi,
   teachers     as teachersApi,
   bellSchedule as bellApi,
+  rooms        as roomsApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 
@@ -28,13 +30,16 @@ import BellScheduleSlideOver  from './components/BellScheduleSlideOver.jsx';
 import OverviewView           from './components/OverviewView.jsx';
 import CoverTab               from './components/CoverTab.jsx';
 import PublishModal           from './components/PublishModal.jsx';
+import RoomsTab               from './components/RoomsTab.jsx';
+import RoomView               from './components/RoomView.jsx';
 import { Toast }              from './components/TimetablePrimitives.jsx';
 
 const VIEWS = [
-  { id: 'class',    label: 'Class Grid',   Icon: LayoutGrid           },
-  { id: 'teacher',  label: 'Teacher View', Icon: User                 },
-  { id: 'overview', label: 'Institution',  Icon: Globe                },
-  { id: 'cover',    label: 'Cover / Subs', Icon: UserX, adminOnly: true },
+  { id: 'class',    label: 'Class Grid',   Icon: LayoutGrid                    },
+  { id: 'teacher',  label: 'Teacher View', Icon: User                          },
+  { id: 'overview', label: 'Institution',  Icon: Globe                         },
+  { id: 'rooms',    label: 'Rooms',        Icon: DoorOpen, adminOnly: true      },
+  { id: 'cover',    label: 'Cover / Subs', Icon: UserX,   adminOnly: true      },
 ];
 
 const ADMIN_ROLES = new Set(['admin', 'superadmin', 'deputy', 'timetabler']);
@@ -100,6 +105,23 @@ export default function TimetablePage() {
     queryFn:  () => teachersApi.list({ limit: 200, status: 'active' }),
     staleTime: 5 * 60_000,
   });
+
+  /* Rooms registry — used by Room View + slot editor dropdown */
+  const { data: roomsData } = useQuery({
+    queryKey: ['rooms'],
+    queryFn:  () => roomsApi.list(),
+    staleTime: 5 * 60_000,
+  });
+  const roomList = roomsData?.data ?? [];
+
+  /* All slots school-wide — needed for room occupancy view */
+  const { data: allSlotsData } = useQuery({
+    queryKey: ['timetable', 'all'],
+    queryFn:  () => ttApi.list({ limit: 2000 }),
+    enabled:  activeView === 'rooms',
+    staleTime: 60_000,
+  });
+  const allSlots = allSlotsData?.data ?? [];
   const teacherList = teachersData?.data ?? [];
 
   /* ── View-specific queries ───────────────────────────────── */
@@ -502,6 +524,12 @@ export default function TimetablePage() {
             </span>
           )}
 
+          {activeView === 'rooms' && (
+            <span className="text-xs text-slate-500">
+              {roomList.length} room{roomList.length !== 1 ? 's' : ''} registered · select a room to view its schedule
+            </span>
+          )}
+
           {activeView === 'cover' && (
             <span className="text-xs text-slate-500">Daily cover arrangements · substitution management</span>
           )}
@@ -564,6 +592,19 @@ export default function TimetablePage() {
 
         {activeView === 'overview' && <OverviewView classList={classList} />}
         {activeView === 'cover'    && <CoverTab teachers={teacherList} />}
+
+        {activeView === 'rooms' && (
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            {/* Left: room registry management */}
+            <div className="xl:col-span-1">
+              <RoomsTab canEdit={canEdit} />
+            </div>
+            {/* Right: room occupancy view */}
+            <div className="xl:col-span-2">
+              <RoomView slots={allSlots} rooms={roomList} bell={bell} />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Panels & modals ── */}

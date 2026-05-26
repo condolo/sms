@@ -411,6 +411,28 @@ export const subjectRules = {
   remove: (id)       => _delete(`/subject-rules/${id}`),
 };
 
+export const rooms = {
+  list:   (params)     => _get('/rooms', params),
+  get:    (id)         => _get(`/rooms/${id}`),
+  create: (data)       => _post('/rooms', data),
+  update: (id, data)   => _put(`/rooms/${id}`, data),
+  remove: (id)         => _delete(`/rooms/${id}`),
+};
+
+export const teachingAssignments = {
+  /** List assignments — pass ?teacherId, ?classId, ?subjectId, ?roomId */
+  list:   (params)     => _get('/teaching-assignments', params),
+  /** Create one assignment */
+  create: (data)       => _post('/teaching-assignments', data),
+  /** Update preferred room / periodsPerWeek */
+  update: (id, data)   => _put(`/teaching-assignments/${id}`, data),
+  /** Remove an assignment */
+  remove: (id)         => _delete(`/teaching-assignments/${id}`),
+  /** Convenience: find the teacher assigned to a subject in a class */
+  lookup: (classId, subjectId) =>
+    _get('/teaching-assignments', { classId, subjectId }),
+};
+
 export const bellSchedule = {
   /** Fetch a section's schedule. Falls back: section → 'all' → hardcoded default. */
   get:      (section = 'all') => _get('/bell-schedule', { section }),
@@ -447,6 +469,8 @@ const api = {
   messages,
   events,
   hr,
+  rooms,
+  teachingAssignments,
   importExport,
   APIError,
 };

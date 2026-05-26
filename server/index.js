@@ -130,6 +130,8 @@ app.use('/api/student-subjects',  require('./routes/student-subjects'));
 app.use('/api/events',            require('./routes/events'));
 app.use('/api/hr',                require('./routes/hr'));
 app.use('/api/mpesa',             require('./routes/mpesa'));
+app.use('/api/rooms',                 require('./routes/rooms'));
+app.use('/api/teaching-assignments',  require('./routes/teaching-assignments'));
 
 /* ── School-facing announcement routes (JWT auth, not platform key) ── */
 const { authMiddleware } = require('./middleware/auth');
