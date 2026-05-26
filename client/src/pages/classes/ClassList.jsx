@@ -342,6 +342,9 @@ function AddClassSlideOver({ onClose, onCreated }) {
   const [form, setForm] = useState(EMPTY_CLASS);
   const [errors, setErrors] = useState({});
 
+  // Sections — React Query returns cached data, no extra network request
+  const { sectionTabs } = useSections();
+
   // Load teachers for assignment dropdown
   const { data: teachersData } = useQuery({
     queryKey: ['teachers', { page: 1, search: '' }],
