@@ -260,10 +260,20 @@ router.put('/users/:id', authMiddleware, async (req, res) => {
       update.role  = role;
       update.roles = [role];
     }
-    // Section head: which section they oversee (kg|primary|secondary|alevel|all)
+    // Section head: which section they oversee — validate against school's sections collection
     if (sectionAssigned !== undefined) {
-      const validSections = ['all', 'kg', 'primary', 'secondary', 'alevel'];
-      update.sectionAssigned = validSections.includes(sectionAssigned) ? sectionAssigned : null;
+      if (sectionAssigned === null || sectionAssigned === '') {
+        update.sectionAssigned = null;
+      } else if (typeof sectionAssigned === 'string' && sectionAssigned.length <= 50) {
+        const Sections = _model('sections');
+        const exists = await Sections.findOne(
+          { schoolId: req.jwtUser.schoolId, key: sectionAssigned },
+          { _id: 1 }
+        ).lean();
+        update.sectionAssigned = exists ? sectionAssigned : null;
+      } else {
+        update.sectionAssigned = null;
+      }
     }
     // Parent/guardian: link to student IDs they are responsible for
     if (Array.isArray(guardianOf)) {

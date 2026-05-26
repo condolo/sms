@@ -433,6 +433,17 @@ export const teachingAssignments = {
     _get('/teaching-assignments', { classId, subjectId }),
 };
 
+export const sections = {
+  /** List all sections for this school (auto-seeds defaults on first call). */
+  list:   ()           => _get('/sections'),
+  /** Create a new section. body: { key, name, color, order } */
+  create: (data)       => _post('/sections', data),
+  /** Update name/color/order only — key is immutable. */
+  update: (id, data)   => _put(`/sections/${id}`, data),
+  /** Delete a section (fails if active classes are assigned). */
+  remove: (id)         => _delete(`/sections/${id}`),
+};
+
 export const bellSchedule = {
   /** Fetch a section's schedule. Falls back: section → 'all' → hardcoded default. */
   get:      (section = 'all') => _get('/bell-schedule', { section }),

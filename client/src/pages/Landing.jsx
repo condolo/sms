@@ -182,6 +182,8 @@ const SIDEBAR_NAV = [
   { Icon: Activity,      label: 'Dashboard',  active: true  },
   { Icon: Users,         label: 'Students'   },
   { Icon: GraduationCap, label: 'Academics'  },
+  { Icon: Calendar,      label: 'Timetable'  },
+  { Icon: Layers,        label: 'Subjects'   },
   { Icon: DollarSign,    label: 'Finance'    },
   { Icon: FileText,      label: 'Reports'    },
   { Icon: MessageSquare, label: 'Messages'   },
@@ -452,15 +454,16 @@ function FeeRegisterMockup() {
    DATA — Ecosystem + Showcase + Conviction
 ═══════════════════════════════════════════════════════════════ */
 const ECOSYSTEM_NODES = [
-  { label: 'Admissions',     Icon: ClipboardList, color: 'bg-pink-500',    desc: 'First enquiry in'  },
-  { label: 'Student Record', Icon: Users,         color: 'bg-indigo-500',  desc: 'Profile created'   },
-  { label: 'Timetable',      Icon: Calendar,      color: 'bg-sky-500',     desc: 'Classes assigned'  },
-  { label: 'Attendance',     Icon: CheckCircle,   color: 'bg-emerald-500', desc: 'Daily tracked'     },
-  { label: 'Grades',         Icon: GraduationCap, color: 'bg-violet-500',  desc: 'Marks attributed'  },
-  { label: 'Behaviour',      Icon: ShieldCheck,   color: 'bg-orange-500',  desc: 'Incidents logged'  },
-  { label: 'Reports',        Icon: FileText,      color: 'bg-purple-500',  desc: 'Governed publish'  },
-  { label: 'Finance',        Icon: DollarSign,    color: 'bg-amber-500',   desc: 'Fees collected'    },
-  { label: 'Analytics',      Icon: TrendingUp,    color: 'bg-teal-500',    desc: 'Director insight'  },
+  { label: 'Admissions',     Icon: ClipboardList, color: 'bg-pink-500',    desc: 'First enquiry in'   },
+  { label: 'Student Record', Icon: Users,         color: 'bg-indigo-500',  desc: 'Profile created'    },
+  { label: 'Classes',        Icon: Layers,        color: 'bg-blue-500',    desc: 'Sections & streams' },
+  { label: 'Timetable',      Icon: Calendar,      color: 'bg-sky-500',     desc: 'Lessons scheduled'  },
+  { label: 'Attendance',     Icon: CheckCircle,   color: 'bg-emerald-500', desc: 'Daily tracked'      },
+  { label: 'Grades',         Icon: GraduationCap, color: 'bg-violet-500',  desc: 'Marks attributed'   },
+  { label: 'Behaviour',      Icon: ShieldCheck,   color: 'bg-orange-500',  desc: 'Incidents logged'   },
+  { label: 'Reports',        Icon: FileText,      color: 'bg-purple-500',  desc: 'Governed publish'   },
+  { label: 'Finance',        Icon: DollarSign,    color: 'bg-amber-500',   desc: 'Fees collected'     },
+  { label: 'Analytics',      Icon: TrendingUp,    color: 'bg-teal-500',    desc: 'Director insight'   },
 ];
 
 const CONVICTION_PAIRS = [
@@ -520,14 +523,17 @@ const PLAN_FEATURES = [
   { label: 'Parent Communication'          },  // 3  core
   { label: 'Events & School Calendar'      },  // 4  core
   { label: 'Academics & Grading'           },  // 5  core
-  { label: 'Finance & Fee Ledger'          },  // 6  standard
-  { label: 'Behaviour Tracking (BPS)'      },  // 7  standard
-  { label: 'Timetable Management'          },  // 8  standard
-  { label: 'Report Card Publishing'        },  // 9  standard
-  { label: 'HR & Staff Management'         },  // 10 standard
-  { label: 'Analytics Director Dashboard'  },  // 11 premium
-  { label: 'Multi-Curriculum Support'      },  // 12 premium
-  { label: 'Custom Roles & Permissions'    },  // 13 premium
+  { label: 'Subjects & Curriculum Mgmt'   },  // 6  core
+  { label: 'Class Sections & Streams'      },  // 7  core
+  { label: 'Finance & Fee Ledger'          },  // 8  standard
+  { label: 'Behaviour Tracking (BPS)'      },  // 9  standard
+  { label: 'Timetable Management'          },  // 10 standard
+  { label: 'Report Card Publishing'        },  // 11 standard
+  { label: 'HR & Staff Management'         },  // 12 standard
+  { label: 'CSV Bulk Import / Export'      },  // 13 standard
+  { label: 'Analytics Director Dashboard'  },  // 14 premium
+  { label: 'Multi-Curriculum Support'      },  // 15 premium
+  { label: 'Custom Roles & Permissions'    },  // 16 premium
 ];
 
 const PLANS = [
@@ -536,8 +542,9 @@ const PLANS = [
     tagline: 'Essential operations for growing schools',
     badge: null,
     studentCap: 'Up to 500 students',
-    included: [true, true, true, true, true, true, false, false, false, false, false, false, false, false],
-    highlights: ['Student records & admissions', 'Attendance & communication', 'Academic grades & events'],
+    //                  0     1     2     3     4     5     6     7     8      9      10     11     12     13     14     15     16
+    included: [true, true, true, true, true, true, true, true, false, false, false, false, false, false, false, false, false],
+    highlights: ['Student records, admissions & grading', 'Attendance, events & parent comms', 'Subjects, class sections & streams'],
     cta: 'Get Started',
   },
   {
@@ -545,8 +552,9 @@ const PLANS = [
     tagline: 'Full academic and operational management',
     badge: 'Most Popular',
     studentCap: 'Up to 2,000 students',
-    included: [true, true, true, true, true, true, true, true, true, true, true, false, false, false],
-    highlights: ['Everything in Core', 'Finance, timetable & reports', 'Behaviour management & HR'],
+    //                  0     1     2     3     4     5     6     7    8     9     10    11    12    13    14     15     16
+    included: [true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, false, false],
+    highlights: ['Everything in Core', 'Finance, timetable, HR & reports', 'Behaviour management & bulk CSV import'],
     cta: 'Get Standard',
   },
   {
@@ -554,7 +562,8 @@ const PLANS = [
     tagline: 'Complete institutional accountability infrastructure',
     badge: null,
     studentCap: 'Unlimited students',
-    included: [true, true, true, true, true, true, true, true, true, true, true, true, true, true],
+    //                  0     1     2     3     4     5     6     7    8     9     10    11    12    13    14    15    16
+    included: [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true],
     highlights: ['Everything in Standard', 'Live analytics dashboard', 'Multi-curriculum & custom RBAC'],
     cta: 'Get Premium',
   },

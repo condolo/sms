@@ -6,6 +6,90 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.21.0] — 2026-05-26  Sections as a Managed School Resource
+
+### New — `/api/sections` resource
+
+- Sections (Kindergarten, Primary, Secondary, A-Level) are no longer hardcoded in frontend constants
+- New `server/routes/sections.js` — full CRUD per school: `GET`, `POST`, `PUT /:id`, `DELETE /:id`
+- Auto-seeds the 4 standard sections on first GET per school — no migration script needed
+- `DELETE` is blocked if active classes are assigned to the section (referential integrity)
+- **Key is immutable** after creation (it's the foreign key used by classes and bell schedule); name and colour can always be changed
+- Route registered at `app.use('/api/sections', ...)` in `server/index.js`
+
+### Changed — Classes route
+
+- `sectionKey` validation relaxed from `z.enum(['kg','primary','secondary','alevel'])` to `z.string().max(50)` so any admin-created section key is accepted
+
+### New — Settings → School → Sections panel
+
+- `SectionsPanel` component added to SchoolTab between Houses and M-Pesa
+- Lists all school sections with colour dot, display name, and immutable key badge
+- Inline edit row: change name and colour without leaving the page
+- Add Section form with auto-derived key from name (editable), colour palette + custom picker, live badge preview
+- Delete with confirmation dialog; blocked server-side if classes are in use
+
+### New — `client/src/hooks/useSections.js`
+
+- `useSections()` hook — fetches from `/api/sections` with React Query, `staleTime: 10m`
+- Returns `{ sections, sectionMap, sectionTabs, isLoading }` where:
+  - `sectionMap[key]` → `{ name, color, id }`
+  - `sectionTabs` → `[{ id:'all', label:'All Sections' }, ...]` ready for filter tabs
+
+### Changed — Classes page (`ClassList.jsx`)
+
+- Removed hardcoded `SECTION_LABELS` and `SECTION_BADGE` constants
+- Section filter tabs now built from `sectionTabs` — show school's actual configured sections
+- Active filter tab colour matches the section's configured colour (inline style)
+- Section badge on each class card uses inline hex colour (background tint + border), no Tailwind purge risk
+- **Add Class form** Section dropdown now populated dynamically from `sectionTabs`
+
+### Changed — Timetable page (`TimetablePage.jsx`)
+
+- Removed `SECTIONS` import from constants; replaced with `useSections()` hook
+- Section filter tabs (All Sections | Primary | Secondary …) now reflect school's configured sections
+- Active tab styled with section colour
+- `filteredClasses` now prefers `c.sectionKey` (stored field) over `inferSection(c.name)` (name inference)
+- Bell schedule section lookup also upgraded to use stored `sectionKey` first
+
+### New — `client/src/api/client.js`
+
+- Added `sections` export with `list`, `create`, `update`, `remove` methods
+
+---
+
+## [4.20.0] — 2026-05-26  Settings RBAC Matrix Expansion + Landing Page Refresh
+
+### Changed — Roles & Permissions sub-module matrix expanded
+
+- **Students**: added `Import Students (CSV)` permission sub
+- **Teachers**: added `Import Teachers (CSV)` permission sub
+- **Classes**: added `Export Classes (CSV)`, `Import Classes (CSV)`, and `Manage Sections & Streams` subs
+- **Timetable**: expanded from 2 subs to 7 — added `Manage Rooms`, `Configure Bell Schedule`, `Manage Teaching Assignments`, `Import Timetable (CSV)`, `Export Timetable (CSV)`
+- **Finance**: added `Manage Fee Structures`, `Import Finance Data (CSV)`, and `Configure M-Pesa Integration` subs
+
+### Changed — Default role permission rules updated
+
+- `deputy`: can manage fee structures (edit); blocked from M-Pesa config (sensitive)
+- `teacher`: blocked from all `import` actions across every module; blocked from `classes.section`, `classes.delete`; timetable admin subs (rooms, bell schedule, assignments) granted as view-only
+- `parent`: can view invoices and payments; explicitly denied fee structure management, M-Pesa config, import, and invoice creation/voiding
+
+### Changed — System tab version corrected
+
+- Hardcoded version string updated from `v4.9.13` → `v4.19.0`
+
+### Changed — Landing page updated to reflect current feature set
+
+- `PLAN_FEATURES` expanded from 14 → 17 features:
+  - Added **Subjects & Curriculum Management** (Core tier)
+  - Added **Class Sections & Streams** (Core tier)
+  - Added **CSV Bulk Import / Export** (Standard tier)
+- Plan `included` arrays updated to match — Core now covers 8 features (up from 6)
+- Dashboard mockup sidebar updated: added Timetable and Subjects nav items
+- Ecosystem flow chain updated: **Classes** node inserted between Student Record and Timetable to reflect sections & streams milestone in student journey
+
+---
+
 ## [4.19.0] — 2026-05-26  Collapsible Sidebar + Class Sections & Streams
 
 ### New — Collapsible sidebar (desktop)

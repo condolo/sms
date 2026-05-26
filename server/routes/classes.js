@@ -19,7 +19,7 @@ const PLAN   = planGate('classes');
 /* ── Validation ─────────────────────────────────────────────── */
 const ClassSchema = z.object({
   name:           z.string().min(1).max(100).trim(),
-  sectionKey:     z.enum(['kg', 'primary', 'secondary', 'alevel']).optional(), // curriculum section
+  sectionKey:     z.string().max(50).optional(),  // references sections.key — user-defined per school
   year:           z.string().max(20).optional(),         // e.g. "Year 7", "Form 1" (level/stream group)
   keyStageId:     z.string().optional(),
   teacherId:      z.string().optional(),                 // form tutor

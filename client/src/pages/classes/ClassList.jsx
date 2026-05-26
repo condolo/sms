@@ -13,6 +13,7 @@ import {
 import { classes as classesApi, teachers as teachersApi, importExport } from '@/api/client.js';
 import BulkImportSlideOver from '@/components/import/BulkImportSlideOver.jsx';
 import useAuthStore from '@/store/auth.js';
+import { useSections } from '@/hooks/useSections.js';
 
 const CLASS_COLORS = [
   'from-violet-500 to-purple-600','from-blue-500 to-cyan-500',
@@ -22,18 +23,7 @@ const CLASS_COLORS = [
 ];
 function classColor(name='') { return CLASS_COLORS[(name.charCodeAt(0)||0) % CLASS_COLORS.length]; }
 
-const SECTION_LABELS = {
-  kg:        'Kindergarten',
-  primary:   'Primary',
-  secondary: 'Secondary',
-  alevel:    'A-Level',
-};
-const SECTION_BADGE = {
-  kg:        'bg-emerald-50 text-emerald-700 border-emerald-200',
-  primary:   'bg-blue-50 text-blue-700 border-blue-200',
-  secondary: 'bg-violet-50 text-violet-700 border-violet-200',
-  alevel:    'bg-amber-50 text-amber-700 border-amber-200',
-};
+/* Section colours and labels are now driven by useSections() — see component */
 
 /* ══════════════════════════════════════════════════════════ */
 export default function ClassList() {
@@ -42,6 +32,9 @@ export default function ClassList() {
   const role    = useAuthStore(s => s.session?.user?.role ?? '');
   const canCreate = can('classes') || role === 'admin' || role === 'superadmin';
   const canDelete = can('classes') || role === 'admin' || role === 'superadmin';
+
+  /* Dynamic sections — replaces hardcoded SECTION_LABELS / SECTION_BADGE */
+  const { sectionMap, sectionTabs } = useSections();
   const [showAdd,       setShowAdd]       = useState(false);
   const [showImport,    setShowImport]    = useState(false);
   const [exporting,     setExporting]     = useState(false);
@@ -131,29 +124,25 @@ export default function ClassList() {
 
       <div className="max-w-screen-2xl mx-auto px-6 py-5">
 
-        {/* Section filter tabs — hidden during load / error / empty */}
+        {/* Section filter tabs — dynamic from school's configured sections */}
         {!isLoading && !isError && rows.length > 0 && (
           <div className="flex items-center gap-1 mb-5 overflow-x-auto pb-1">
-            {[
-              ['all',       'All'],
-              ['kg',        'Kindergarten'],
-              ['primary',   'Primary'],
-              ['secondary', 'Secondary'],
-              ['alevel',    'A-Level'],
-            ].map(([key, label]) => {
-              const count = key === 'all' ? rows.length : rows.filter(r => r.sectionKey === key).length;
-              if (key !== 'all' && count === 0) return null;
+            {sectionTabs.map(({ id, label, color }) => {
+              const count = id === 'all' ? rows.length : rows.filter(r => r.sectionKey === id).length;
+              if (id !== 'all' && count === 0) return null;
+              const isActive = sectionFilter === id;
               return (
                 <button
-                  key={key}
-                  onClick={() => setSectionFilter(key)}
+                  key={id}
+                  onClick={() => setSectionFilter(id)}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-colors ${
-                    sectionFilter === key ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+                    isActive ? 'text-white' : 'text-slate-600 hover:bg-slate-100'
                   }`}
+                  style={isActive ? { backgroundColor: id === 'all' ? '#0f172a' : color } : {}}
                 >
                   {label}
                   <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                    sectionFilter === key ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
+                    isActive ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-500'
                   }`}>
                     {count}
                   </span>
@@ -255,11 +244,16 @@ export default function ClassList() {
                             {c.year && year === '__' && (
                               <p className="text-xs text-slate-400 mt-0.5">{c.year}</p>
                             )}
-                            {c.sectionKey && (
-                              <span className={`inline-flex mt-1 text-[10px] font-medium px-1.5 py-0.5 rounded border ${SECTION_BADGE[c.sectionKey] ?? 'bg-slate-50 text-slate-500 border-slate-200'}`}>
-                                {SECTION_LABELS[c.sectionKey] ?? c.sectionKey}
-                              </span>
-                            )}
+                            {c.sectionKey && (() => {
+                              const sec = sectionMap[c.sectionKey];
+                              const col = sec?.color ?? '#6366f1';
+                              return (
+                                <span className="inline-flex mt-1 text-[10px] font-medium px-1.5 py-0.5 rounded border"
+                                  style={{ backgroundColor: col + '18', color: col, borderColor: col + '50' }}>
+                                  {sec?.name ?? c.sectionKey}
+                                </span>
+                              );
+                            })()}
                           </div>
 
                           <div className="mt-4 space-y-1.5">
@@ -412,10 +406,10 @@ function AddClassSlideOver({ onClose, onCreated }) {
             <FField2 label="Section">
               <select value={form.sectionKey} onChange={e => set('sectionKey', e.target.value)} className={iCls2()}>
                 <option value="">Select section…</option>
-                <option value="kg">Kindergarten</option>
-                <option value="primary">Primary</option>
-                <option value="secondary">Secondary</option>
-                <option value="alevel">A-Level</option>
+                {/* Dynamic — populated from school's configured sections */}
+                {sectionTabs.filter(s => s.id !== 'all').map(s => (
+                  <option key={s.id} value={s.id}>{s.label}</option>
+                ))}
               </select>
             </FField2>
             <FField2 label="Year / Level">

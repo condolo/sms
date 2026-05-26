@@ -13,8 +13,9 @@ import {
   Globe, MapPin, Shield, UserPlus, Home, Palette,
   Eye, EyeOff, Lock, ShieldCheck, Database, Download,
   RefreshCcw, Info, Server, Check, Minus, ChevronDown,
-  CreditCard, Smartphone, Zap, ArrowRight,
+  CreditCard, Smartphone, Zap, ArrowRight, Layers, Pencil,
 } from 'lucide-react';
+import { sections as sectionsApi } from '@/api/client.js';
 import { settings as settingsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 
@@ -104,7 +105,212 @@ const TIMEZONES = [
 ];
 
 /* ── House colors ────────────────────────────────────────────── */
-const HOUSE_PALETTE = ['#3b82f6','#ef4444','#22c55e','#f59e0b','#8b5cf6','#ec4899','#14b8a6','#f97316'];
+const HOUSE_PALETTE    = ['#3b82f6','#ef4444','#22c55e','#f59e0b','#8b5cf6','#ec4899','#14b8a6','#f97316'];
+const SECTION_PALETTE  = ['#10b981','#3b82f6','#8b5cf6','#f59e0b','#ef4444','#ec4899','#14b8a6','#f97316'];
+
+/* ══════════════════════════════════════════════════════════════
+   SECTIONS PANEL — standalone component (own React Query state)
+   Placed inside SchoolTab between Houses and M-Pesa sections.
+   ══════════════════════════════════════════════════════════════ */
+function SectionsPanel() {
+  const qc = useQueryClient();
+  const [toast,    setToast]    = useState(null);
+  const [editId,   setEditId]   = useState(null);   // which row is being edited
+  const [editForm, setEditForm] = useState({});      // { name, color }
+  const [addForm,  setAddForm]  = useState({ key: '', name: '', color: SECTION_PALETTE[0] });
+  const [adding,   setAdding]   = useState(false);
+
+  const showT = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500); };
+
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ['sections'],
+    queryFn:  () => sectionsApi.list(),
+    staleTime: 10 * 60_000,
+  });
+  const rows = data?.data ?? [];
+
+  /* Create */
+  const { mutate: createSec, isPending: creating } = useMutation({
+    mutationFn: (d) => sectionsApi.create(d),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sections'] });
+      setAddForm({ key: '', name: '', color: SECTION_PALETTE[0] });
+      setAdding(false);
+      showT('Section added.');
+    },
+    onError: err => showT(err?.message ?? 'Failed to add section.', 'error'),
+  });
+
+  /* Update */
+  const { mutate: updateSec, isPending: updating } = useMutation({
+    mutationFn: ({ id, data }) => sectionsApi.update(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sections'] });
+      setEditId(null);
+      showT('Section updated.');
+    },
+    onError: err => showT(err?.message ?? 'Failed to update section.', 'error'),
+  });
+
+  /* Delete */
+  const { mutate: deleteSec } = useMutation({
+    mutationFn: (id) => sectionsApi.remove(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sections'] });
+      showT('Section deleted.');
+    },
+    onError: err => showT(err?.message ?? 'Cannot delete — classes may be using this section.', 'error'),
+  });
+
+  /* Auto-derive key from name when adding */
+  function handleAddName(name) {
+    const key = name.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/__+/g, '_').replace(/^_|_$/g, '').slice(0, 30);
+    setAddForm(p => ({ ...p, name, key }));
+  }
+
+  if (isLoading) return (
+    <div className="space-y-2">
+      {[1,2,3].map(i => <div key={i} className="h-10 bg-slate-100 rounded-lg animate-pulse" />)}
+    </div>
+  );
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+      {/* Header */}
+      <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+        <Layers size={14} className="text-indigo-500" />
+        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Curriculum Sections</h3>
+        <button
+          type="button"
+          onClick={() => setAdding(p => !p)}
+          className="ml-auto flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg transition"
+        >
+          <Plus size={11} /> Add Section
+        </button>
+      </div>
+
+      <p className="text-xs text-slate-400 leading-relaxed -mt-2">
+        Sections (e.g. Primary, Secondary) are used across Classes, Timetable, Bell Schedule and Reports.
+        The <strong>key</strong> is permanent — rename the <strong>label</strong> freely.
+      </p>
+
+      {/* Toast */}
+      <AnimatePresence>
+        {toast && <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}
+      </AnimatePresence>
+
+      {/* Section rows */}
+      <div className="space-y-1.5">
+        {rows.map(sec => (
+          <div key={sec.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-50 border border-slate-100">
+            {/* Colour dot */}
+            <div className="w-4 h-4 rounded-full shrink-0 ring-2 ring-offset-1" style={{ backgroundColor: sec.color, ringColor: sec.color }} />
+
+            {editId === sec.id ? (
+              /* Inline edit row */
+              <>
+                <input
+                  value={editForm.name ?? ''}
+                  onChange={e => setEditForm(p => ({ ...p, name: e.target.value }))}
+                  className="flex-1 text-sm px-2 py-1 rounded border border-slate-200 focus:outline-none focus:border-indigo-400 bg-white"
+                  placeholder="Section name"
+                  autoFocus
+                />
+                <div className="flex gap-1 items-center">
+                  {SECTION_PALETTE.map(c => (
+                    <button key={c} type="button" onClick={() => setEditForm(p => ({ ...p, color: c }))}
+                      className={`w-4 h-4 rounded-full transition ${editForm.color === c ? 'ring-2 ring-offset-1 ring-slate-700' : ''}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                  <input type="color" value={editForm.color ?? '#6366f1'}
+                    onChange={e => setEditForm(p => ({ ...p, color: e.target.value }))}
+                    className="w-5 h-5 rounded cursor-pointer border-0 p-0" title="Custom colour" />
+                </div>
+                <button type="button" onClick={() => updateSec({ id: sec.id, data: editForm })} disabled={updating}
+                  className="text-xs font-medium text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded-lg transition disabled:opacity-50">
+                  {updating ? <Loader2 size={11} className="animate-spin" /> : 'Save'}
+                </button>
+                <button type="button" onClick={() => setEditId(null)}
+                  className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg transition">
+                  Cancel
+                </button>
+              </>
+            ) : (
+              /* Display row */
+              <>
+                <span className="flex-1 text-sm font-medium text-slate-800">{sec.name}</span>
+                <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{sec.key}</span>
+                <button type="button"
+                  onClick={() => { setEditId(sec.id); setEditForm({ name: sec.name, color: sec.color }); }}
+                  className="text-slate-400 hover:text-slate-700 p-1 rounded transition" title="Rename">
+                  <Pencil size={13} />
+                </button>
+                <button type="button" onClick={() => { if (window.confirm(`Delete section "${sec.name}"?`)) deleteSec(sec.id); }}
+                  className="text-slate-400 hover:text-red-500 p-1 rounded transition" title="Delete">
+                  <Trash2 size={13} />
+                </button>
+              </>
+            )}
+          </div>
+        ))}
+        {rows.length === 0 && (
+          <p className="text-sm text-slate-400 italic py-2">No sections configured yet.</p>
+        )}
+      </div>
+
+      {/* Add new section form */}
+      <AnimatePresence>
+        {adding && (
+          <motion.div initial={{ opacity:0, height:0 }} animate={{ opacity:1, height:'auto' }} exit={{ opacity:0, height:0 }}
+            className="overflow-hidden border-t border-slate-100 pt-4 space-y-3">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">New Section</p>
+            <div className="grid grid-cols-2 gap-3">
+              <FField label="Display Name">
+                <input value={addForm.name} onChange={e => handleAddName(e.target.value)}
+                  placeholder="e.g. Junior Secondary"
+                  className={iCls()} />
+              </FField>
+              <FField label="Key (auto-generated, permanent)">
+                <input value={addForm.key}
+                  onChange={e => setAddForm(p => ({ ...p, key: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g,'').slice(0,30) }))}
+                  placeholder="e.g. junior_secondary"
+                  className={iCls()} />
+              </FField>
+            </div>
+            <FField label="Colour">
+              <div className="flex gap-1.5 items-center">
+                {SECTION_PALETTE.map(c => (
+                  <button key={c} type="button" onClick={() => setAddForm(p => ({ ...p, color: c }))}
+                    className={`w-5 h-5 rounded-full transition ${addForm.color === c ? 'ring-2 ring-offset-1 ring-slate-900' : ''}`}
+                    style={{ backgroundColor: c }} />
+                ))}
+                <input type="color" value={addForm.color} onChange={e => setAddForm(p => ({ ...p, color: e.target.value }))}
+                  className="w-6 h-6 rounded cursor-pointer border-0 p-0" title="Custom colour" />
+                <span className="ml-1 text-xs text-slate-500">Preview:</span>
+                <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: addForm.color + '20', color: addForm.color }}>
+                  {addForm.name || 'Section Name'}
+                </span>
+              </div>
+            </FField>
+            <div className="flex items-center gap-2">
+              <button type="button"
+                onClick={() => createSec({ key: addForm.key, name: addForm.name, color: addForm.color })}
+                disabled={creating || !addForm.key || !addForm.name}
+                className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-xs font-medium px-4 py-2 rounded-lg transition">
+                {creating ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+                {creating ? 'Adding…' : 'Add Section'}
+              </button>
+              <button type="button" onClick={() => setAdding(false)}
+                className="text-xs text-slate-500 hover:text-slate-700 px-3 py-2 rounded-lg transition">
+                Cancel
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
 
 /* ══════════════════════════════════════════════════════════════
    SCHOOL SETTINGS TAB
@@ -304,6 +510,9 @@ function SchoolTab() {
           </button>
         </div>
       </div>
+
+      {/* Curriculum Sections — standalone async panel */}
+      <SectionsPanel />
 
       {/* M-Pesa Integration */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
@@ -808,6 +1017,7 @@ const PERM_MODULES = [
     { key: 'edit',    label: 'Edit Student' },
     { key: 'delete',  label: 'Delete Student' },
     { key: 'export',  label: 'Export Students (CSV)' },
+    { key: 'import',  label: 'Import Students (CSV)' },
   ]},
   { key: 'teachers',   label: 'Teachers', subs: [
     { key: 'list',   label: 'View Teacher List' },
@@ -816,12 +1026,16 @@ const PERM_MODULES = [
     { key: 'edit',   label: 'Edit Teacher' },
     { key: 'delete', label: 'Delete Teacher' },
     { key: 'export', label: 'Export Teachers (CSV)' },
+    { key: 'import', label: 'Import Teachers (CSV)' },
   ]},
   { key: 'classes',    label: 'Classes', subs: [
-    { key: 'view',   label: 'View Classes' },
-    { key: 'create', label: 'Create Class' },
-    { key: 'edit',   label: 'Edit Class' },
-    { key: 'delete', label: 'Delete Class' },
+    { key: 'view',    label: 'View Classes' },
+    { key: 'create',  label: 'Create Class' },
+    { key: 'edit',    label: 'Edit Class' },
+    { key: 'delete',  label: 'Delete Class' },
+    { key: 'export',  label: 'Export Classes (CSV)' },
+    { key: 'import',  label: 'Import Classes (CSV)' },
+    { key: 'section', label: 'Manage Sections & Streams' },
   ]},
   { key: 'attendance', label: 'Attendance', subs: [
     { key: 'view',   label: 'View Register' },
@@ -836,6 +1050,9 @@ const PERM_MODULES = [
     { key: 'payments',       label: 'View Payments' },
     { key: 'record_payment', label: 'Record Payment' },
     { key: 'print',          label: 'Print Receipts / Invoices' },
+    { key: 'fee_structure',  label: 'Manage Fee Structures' },
+    { key: 'import',         label: 'Import Finance Data (CSV)' },
+    { key: 'mpesa',          label: 'Configure M-Pesa Integration' },
   ]},
   { key: 'behaviour',  label: 'Behaviour (BPS)', subs: [
     { key: 'view',   label: 'View Incidents & BPS' },
@@ -883,8 +1100,13 @@ const PERM_MODULES = [
     { key: 'export', label: 'Export Reports (CSV)' },
   ]},
   { key: 'timetable',  label: 'Timetable', subs: [
-    { key: 'view', label: 'View Timetable' },
-    { key: 'edit', label: 'Edit Timetable' },
+    { key: 'view',          label: 'View Timetable' },
+    { key: 'edit',          label: 'Edit Timetable' },
+    { key: 'rooms',         label: 'Manage Rooms' },
+    { key: 'bell_schedule', label: 'Configure Bell Schedule' },
+    { key: 'assignments',   label: 'Manage Teaching Assignments' },
+    { key: 'import',        label: 'Import Timetable (CSV)' },
+    { key: 'export',        label: 'Export Timetable (CSV)' },
   ]},
   { key: 'subjects',   label: 'Subjects', subs: [
     { key: 'view',   label: 'View Subjects' },
@@ -923,7 +1145,8 @@ function _makeDefaultPerms() {
     superadmin: ()      => T,
     admin:      ()      => T,
     deputy: (m, s) => {
-      if (m==='finance'  && ['void_invoice','record_payment','payroll_view','payroll_export'].includes(s)) return N;
+      if (m==='finance'  && ['void_invoice','record_payment','payroll_view','payroll_export','mpesa'].includes(s)) return N;
+      if (m==='finance'  && s==='fee_structure') return E;  // deputy can manage fee structures
       if (m==='hr'       && ['payroll_view','payroll_export','documents'].includes(s)) return N;
       if (m==='settings' && s==='permissions') return N;
       return E;
@@ -934,9 +1157,18 @@ function _makeDefaultPerms() {
       if (m==='grades')     return ['enter_marks','create_exam'].includes(s) ? E : V;
       if (m==='behaviour')  return s==='create' ? E : V;
       if (m==='messages')   return s==='delete' ? N : E;
+      // Block bulk-import and admin-only management for teachers
+      if (s==='import') return N;
+      if (m==='classes'   && ['section','delete'].includes(s)) return N;
+      if (m==='timetable' && ['rooms','bell_schedule','assignments'].includes(s)) return V;
       return V;
     },
-    parent: (m) => ['students','finance','attendance','grades','behaviour','events','messages'].includes(m) ? V : N,
+    parent: (m, s) => {
+      if (!['students','finance','attendance','grades','behaviour','events','messages'].includes(m)) return N;
+      // Parents can view invoices/payments but not manage financial config
+      if (m==='finance' && ['fee_structure','mpesa','import','create_invoice','void_invoice','record_payment'].includes(s)) return N;
+      return V;
+    },
     student:(m) => ['students','timetable','grades','events'].includes(m) ? V : N,
   };
   const perms = { byRole:{}, byUser:{} };
@@ -1426,7 +1658,7 @@ function SystemTab() {
             ['School ID',    school?.id ?? school?.slug ?? '—'],
             ['Platform',     'Msingi School ERP'],
             ['Subscription', <span key="plan" className={`inline-flex px-2 py-0.5 text-[11px] font-semibold rounded-full capitalize ${planBadgeColor[plan] ?? planBadgeColor.premium}`}>{plan}</span>],
-            ['Version',      'v4.9.13'],
+            ['Version',      'v4.19.0'],
             ['Timezone',     school?.timezone ?? 'Africa/Nairobi'],
             ['Currency',     school?.currency ?? 'KES'],
             ['Academic Year',school?.academicYear ?? '—'],

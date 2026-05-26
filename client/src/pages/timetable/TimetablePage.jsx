@@ -22,7 +22,8 @@ import BulkImportSlideOver from '@/components/import/BulkImportSlideOver.jsx';
 import useAuthStore from '@/store/auth.js';
 
 import TimetablePortal       from './TimetablePortal.jsx';
-import { DAYS, DAY_SHORT, SECTIONS, DEFAULT_BELL, inferSection } from './constants.js';
+import { DAYS, DAY_SHORT, DEFAULT_BELL, inferSection } from './constants.js';
+import { useSections } from '@/hooks/useSections.js';
 import TimetableGrid          from './components/TimetableGrid.jsx';
 import WorkloadPanel          from './components/WorkloadPanel.jsx';
 import ConflictsPanel         from './components/ConflictsPanel.jsx';
@@ -58,6 +59,8 @@ export default function TimetablePage() {
   if (!isAdminRole) return <TimetablePortal />;
 
   /* ── UI state ────────────────────────────────────────────── */
+  const { sectionTabs } = useSections();   // dynamic sections from DB
+
   const [activeView,      setActiveView]      = useState('class');
   const [classId,         setClassId]         = useState('');
   const [section,         setSection]         = useState('all');
@@ -85,15 +88,16 @@ export default function TimetablePage() {
   });
   const classList = classesData?.data ?? [];
 
+  // Prefer stored sectionKey over name inference for accurate filtering
   const filteredClasses = section === 'all'
     ? classList
-    : classList.filter(c => inferSection(c.name) === section);
+    : classList.filter(c => (c.sectionKey || inferSection(c.name)) === section);
   // Use string `id` field (e.g. "cls_demo_4a") not MongoDB _id — timetable slots
   // store classId as the string id, so the fetch must use the same format.
   const selectedClass = classList.find(c => (c.id ?? String(c._id)) === classId);
 
-  /* Bell schedule — resolved for the selected class's section */
-  const classSection = selectedClass ? inferSection(selectedClass.name) : 'all';
+  /* Bell schedule — resolved for the selected class's section (prefer stored sectionKey) */
+  const classSection = selectedClass ? (selectedClass.sectionKey || inferSection(selectedClass.name)) : 'all';
   const { data: bellData } = useQuery({
     queryKey: ['bell-schedule', classSection],
     queryFn:  () => bellApi.get(classSection),
@@ -455,18 +459,22 @@ export default function TimetablePage() {
         <div className="max-w-screen-2xl mx-auto flex items-center gap-3 flex-wrap">
           {activeView === 'class' && (
             <>
-              <div className="flex items-center gap-1.5">
-                {SECTIONS.map(s => (
-                  <button
-                    key={s.id}
-                    onClick={() => { setSection(s.id); setClassId(''); }}
-                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
-                      section === s.id ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    {s.label}
-                  </button>
-                ))}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {sectionTabs.map(s => {
+                  const isActive = section === s.id;
+                  return (
+                    <button
+                      key={s.id}
+                      onClick={() => { setSection(s.id); setClassId(''); }}
+                      className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
+                        isActive ? 'text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                      style={isActive ? { backgroundColor: s.id === 'all' ? '#0f172a' : s.color } : {}}
+                    >
+                      {s.label}
+                    </button>
+                  );
+                })}
               </div>
               <div className="h-4 border-r border-slate-200" />
               <select
