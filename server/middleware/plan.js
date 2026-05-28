@@ -41,6 +41,9 @@ const FEATURE_PLAN = {
   finance:            'standard',   // fee management is core African school need
   report_cards:       'standard',   // aligned with landing page promise
 
+  /* ── Standard (continued) ── */
+  growth_profile:     'standard',   // verified learner development portfolio
+
   /* ── Premium ── */
   reports:            'premium',
   custom_roles:       'premium',

@@ -134,6 +134,14 @@ app.use('/api/rooms',                 require('./routes/rooms'));
 app.use('/api/teaching-assignments',  require('./routes/teaching-assignments'));
 app.use('/api/sections',              require('./routes/sections'));
 
+/* ── Growth Profile (v4.22.0) ── */
+app.use('/api/growth-profile',         require('./routes/growth-profile'));
+app.use('/api/growth-records',         require('./routes/growth-records'));
+app.use('/api/growth-projects',        require('./routes/growth-projects'));
+// Recommendations + Aspirations share one route file.
+// Aspirations accessible at /api/growth-recommendations/aspirations/:studentId
+app.use('/api/growth-recommendations', require('./routes/growth-recommendations'));
+
 /* ── School-facing announcement routes (JWT auth, not platform key) ── */
 const { authMiddleware } = require('./middleware/auth');
 const { _model: _m }    = require('./utils/model');

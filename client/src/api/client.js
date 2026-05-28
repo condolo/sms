@@ -444,6 +444,47 @@ export const sections = {
   remove: (id)         => _delete(`/sections/${id}`),
 };
 
+export const growthProfile = {
+  /** Full profile meta + section counts for a student */
+  profile:  (studentId)       => _get(`/growth-profile/${studentId}`),
+  /** Academic section: grades, attendance, recent reports (read-only aggregation) */
+  academic: (studentId)       => _get(`/growth-profile/${studentId}/academic`),
+
+  /** Generic records: leadership | activities | service | awards */
+  records: {
+    list:   (type, params)      => _get(`/growth-records/${type}`, params),
+    get:    (type, id)          => _get(`/growth-records/${type}/${id}`),
+    create: (type, data)        => _post(`/growth-records/${type}`, data),
+    update: (type, id, data)    => _put(`/growth-records/${type}/${id}`, data),
+    remove: (type, id)          => _delete(`/growth-records/${type}/${id}`),
+    verify: (type, id, data)    => _patch(`/growth-records/${type}/${id}/verify`, data),
+  },
+
+  /** Projects (have supervisorId/supervisorName + status + evidenceUrls) */
+  projects: {
+    list:   (params)            => _get('/growth-projects', params),
+    get:    (id)                => _get(`/growth-projects/${id}`),
+    create: (data)              => _post('/growth-projects', data),
+    update: (id, data)          => _put(`/growth-projects/${id}`, data),
+    remove: (id)                => _delete(`/growth-projects/${id}`),
+    verify: (id, data)          => _patch(`/growth-projects/${id}/verify`, data),
+  },
+
+  /** Recommendations — written by staff for a student */
+  recommendations: {
+    list:   (params)            => _get('/growth-recommendations', params),
+    get:    (id)                => _get(`/growth-recommendations/${id}`),
+    create: (data)              => _post('/growth-recommendations', data),
+    remove: (id)                => _delete(`/growth-recommendations/${id}`),
+  },
+
+  /** Aspirations — one document per student (upsert) */
+  aspirations: {
+    get:    (studentId)         => _get(`/growth-recommendations/aspirations/${studentId}`),
+    upsert: (studentId, data)   => _put(`/growth-recommendations/aspirations/${studentId}`, data),
+  },
+};
+
 export const bellSchedule = {
   /** Fetch a section's schedule. Falls back: section → 'all' → hardcoded default. */
   get:      (section = 'all') => _get('/bell-schedule', { section }),
@@ -483,6 +524,7 @@ const api = {
   rooms,
   teachingAssignments,
   importExport,
+  growthProfile,
   APIError,
 };
 

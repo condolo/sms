@@ -6,6 +6,23 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.22.0',
+    date: '2026-05-28',
+    label: 'Growth Profile — Verified Learner Development Portfolio',
+    changes: [
+      { type: 'new', text: 'Growth Profile module (standard plan): 8-section verified learner development portfolio accessible at /growth-profile/:studentId via the "Growth Profile" button on every StudentProfile header' },
+      { type: 'new', text: 'Academic section: read-only aggregation of grades (weighted averages per subject + overall), attendance (present/absent/late/authorised + rate bar), and latest 3 published report card snapshots — never touches existing academic records' },
+      { type: 'new', text: 'Leadership, Activities, Service, Awards: full CRUD + verification workflow with institution_verified / staff_verified / pending_verification / rejected status tiers; generic RecordSection component drives all four' },
+      { type: 'new', text: 'Projects section: CRUD + verification with supervisor reference, status lifecycle (planning → in_progress → completed → published), up to 5 evidence URLs, teacher dropdown with denormalized supervisorName to survive soft-deletes' },
+      { type: 'new', text: 'Recommendations: staff-write, student-read; confidential flag hides entries from student/parent roles at query level; author name denormalized at write time' },
+      { type: 'new', text: 'Aspirations: student self-edit upsert pattern with career interests, university aspirations, intended courses, target countries, personal statement (4 000 chars), future goals; returns empty object (not 404) when unset' },
+      { type: 'new', text: 'VerificationBadge: interactive dropdown for admins/teachers to verify/reject entries with optional notes; institution_verified restricted to admin/superadmin/deputy; non-interactive chip for read-only viewers' },
+      { type: 'new', text: 'Completion strip: verification progress bar showing verified/total entries on the profile header' },
+      { type: 'new', text: '4 new server routes: growth-profile (aggregate + academic read), growth-records (leadership/activities/service/awards), growth-projects, growth-recommendations (+aspirations); 7 new MongoDB collections all tenant-isolated by schoolId' },
+      { type: 'new', text: 'RBAC: growth_profile module added to Settings permissions with 8 sub-actions; teacher, parent, and student default permission sets updated; plan gate registered at standard tier' },
+    ],
+  },
+  {
     version: '4.16.0',
     date: '2026-05-26',
     label: 'Engineering — Phase 0 Dependency Blueprint + Phase A Audit Script',

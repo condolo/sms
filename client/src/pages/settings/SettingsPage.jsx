@@ -1114,6 +1114,16 @@ const PERM_MODULES = [
     { key: 'edit',   label: 'Edit Subject' },
     { key: 'delete', label: 'Delete Subject' },
   ]},
+  { key: 'growth_profile', label: 'Growth Profile', subs: [
+    { key: 'view',             label: 'View Growth Profiles' },
+    { key: 'add_records',      label: 'Add Records (Leadership / Activities / Service / Awards)' },
+    { key: 'edit_records',     label: 'Edit Own Records' },
+    { key: 'delete_records',   label: 'Delete Records' },
+    { key: 'projects',         label: 'Add / Edit Projects' },
+    { key: 'recommendations',  label: 'Write Recommendations' },
+    { key: 'aspirations',      label: 'Edit Aspirations' },
+    { key: 'verify',           label: 'Verify / Approve Records' },
+  ]},
   { key: 'settings',   label: 'Settings', subs: [
     { key: 'school',      label: 'Edit School Settings' },
     { key: 'users',       label: 'Manage Users / Invites' },
@@ -1157,6 +1167,14 @@ function _makeDefaultPerms() {
       if (m==='grades')     return ['enter_marks','create_exam'].includes(s) ? E : V;
       if (m==='behaviour')  return s==='create' ? E : V;
       if (m==='messages')   return s==='delete' ? N : E;
+      if (m==='growth_profile') {
+        // Teachers can view, add, edit, write recommendations, and verify (staff level)
+        // They cannot delete records or manage aspirations
+        if (['delete_records'].includes(s)) return N;
+        if (['aspirations'].includes(s)) return N;
+        if (['verify'].includes(s)) return E;   // staff_verified tier
+        return E;
+      }
       // Block bulk-import and admin-only management for teachers
       if (s==='import') return N;
       if (m==='classes'   && ['section','delete'].includes(s)) return N;
@@ -1164,12 +1182,23 @@ function _makeDefaultPerms() {
       return V;
     },
     parent: (m, s) => {
-      if (!['students','finance','attendance','grades','behaviour','events','messages'].includes(m)) return N;
+      if (!['students','finance','attendance','grades','behaviour','events','messages','growth_profile'].includes(m)) return N;
       // Parents can view invoices/payments but not manage financial config
       if (m==='finance' && ['fee_structure','mpesa','import','create_invoice','void_invoice','record_payment'].includes(s)) return N;
+      // Parents: view growth profile only — cannot add/edit/verify
+      if (m==='growth_profile' && s !== 'view') return N;
       return V;
     },
-    student:(m) => ['students','timetable','grades','events'].includes(m) ? V : N,
+    student:(m, s) => {
+      if (['students','timetable','grades','events'].includes(m)) return V;
+      if (m==='growth_profile') {
+        // Students can view their profile and edit their own aspirations
+        if (s==='view') return V;
+        if (s==='aspirations') return E;  // self-edit aspirations
+        return N;
+      }
+      return N;
+    },
   };
   const perms = { byRole:{}, byUser:{} };
   PERM_ROLES.forEach(role => {

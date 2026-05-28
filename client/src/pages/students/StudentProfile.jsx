@@ -267,6 +267,13 @@ td:last-child{font-weight:500}
               >
                 <Printer size={13} />
               </button>
+              <Link
+                to={`/growth-profile/${studentId}`}
+                className="flex items-center gap-1.5 text-sm font-medium text-violet-600 hover:text-violet-800 border border-violet-200 hover:border-violet-300 bg-violet-50 hover:bg-violet-100 rounded-lg px-3 py-1.5 transition"
+              >
+                <TrendingUp size={13} />
+                Growth Profile
+              </Link>
               {can('students') && !editing && (
                 <button
                   onClick={() => setEditing(true)}

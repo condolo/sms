@@ -35,6 +35,7 @@ const HRPage            = lazy(() => import('@/pages/hr/HRPage.jsx'));
 const ChangelogPage     = lazy(() => import('@/pages/changelog/ChangelogPage.jsx'));
 const HelpPage          = lazy(() => import('@/pages/help/HelpPage.jsx'));
 const ProfilePage       = lazy(() => import('@/pages/profile/ProfilePage.jsx'));
+const GrowthProfilePage = lazy(() => import('@/pages/growth-profile/GrowthProfilePage.jsx'));
 
 function SuspenseWrapper({ children }) {
   return (
@@ -143,6 +144,9 @@ export const router = createBrowserRouter([
 
       // Profile
       { path: 'profile',               element: <SuspenseWrapper><ProfilePage /></SuspenseWrapper> },
+
+      // Growth Profile (v4.22.0)
+      { path: 'growth-profile/:studentId', element: <SuspenseWrapper><GrowthProfilePage /></SuspenseWrapper> },
 
       // Fallback
       { path: '*',                     element: <SuspenseWrapper><NotFound /></SuspenseWrapper> },
