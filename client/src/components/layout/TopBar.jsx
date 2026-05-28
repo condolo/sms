@@ -60,7 +60,7 @@ export default function TopBar({ onMenuClick }) {
   const title      = useBreadcrumb();
   const navigate   = useNavigate();
   const user       = useAuthStore((s) => s.session?.user);
-  const clearSession = useAuthStore((s) => s.clearSession);
+  const logout     = useAuthStore((s) => s.logout);
   const plan       = useAuthStore((s) => s.session?.school?.plan ?? s.session?.user?.plan ?? 'core');
 
   const [open, setOpen] = useState(false);
@@ -76,7 +76,7 @@ export default function TopBar({ onMenuClick }) {
   }, []);
 
   function handleLogout() {
-    clearSession();
+    logout();
     navigate('/login', { replace: true });
   }
 
