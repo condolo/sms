@@ -9,6 +9,7 @@ import {
   Users, UserCheck, Clock, Wallet, Plus, Check, X,
   AlertCircle, Calendar, FolderOpen, Trash2, Edit2, Save,
   Download, ExternalLink, Loader2, Copy, Search, ChevronRight,
+  ShieldCheck, CreditCard,
 } from 'lucide-react';
 import { hr as hrApi, teachers as teachersApi, departments as deptsApi, subjects as subjectsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
@@ -21,7 +22,8 @@ const DOC_TYPES   = { contract:'Contract', appraisal:'Appraisal', certificate:'C
 const DOC_COLORS  = { contract:'bg-blue-100 text-blue-700', appraisal:'bg-purple-100 text-purple-700', certificate:'bg-emerald-100 text-emerald-700', id_copy:'bg-amber-100 text-amber-700', other:'bg-slate-100 text-slate-600' };
 const LEAVE_TYPES = { annual:'Annual Leave', sick:'Sick Leave', emergency:'Emergency', maternity:'Maternity', paternity:'Paternity', unpaid:'Unpaid Leave' };
 const LEAVE_COLORS = { annual:'bg-blue-100 text-blue-700', sick:'bg-amber-100 text-amber-700', emergency:'bg-red-100 text-red-700', maternity:'bg-pink-100 text-pink-700', paternity:'bg-purple-100 text-purple-700', unpaid:'bg-slate-100 text-slate-600' };
-const STATUS_COLORS = { pending:'bg-amber-100 text-amber-700', approved:'bg-emerald-100 text-emerald-700', rejected:'bg-red-100 text-red-600' };
+const STATUS_COLORS   = { pending:'bg-amber-100 text-amber-700', approved:'bg-emerald-100 text-emerald-700', rejected:'bg-red-100 text-red-600' };
+const PAYROLL_STATUS  = { draft:'bg-slate-100 text-slate-600', confirmed:'bg-blue-100 text-blue-700', paid:'bg-emerald-100 text-emerald-700' };
 
 /* ── Helpers ──────────────────────────────────────────────── */
 function fmtDate(iso) {
@@ -310,7 +312,7 @@ export default function HRPage() {
   const [showDocForm, setDocForm]     = useState(false);
   const [docStaffFilter, setDocStaff] = useState('');
   const [payrollModal, setPayrollModal]     = useState(null);  // null | { mode:'add'|'edit', record:null|{...} }
-  const [deletingPayroll, setDeletingPayroll] = useState(null);  // null | { staffId, period }
+  const [deletingPayroll, setDeletingPayroll] = useState(null);  // null | { id }
   const [staffModal, setStaffModal]           = useState(null);  // null | { mode:'add'|'edit' }
   const [selectedStaff, setSelectedStaff]     = useState(null);  // null | teacher doc (for detail panel)
   const [staffSearch, setStaffSearch]         = useState('');
@@ -362,9 +364,9 @@ export default function HRPage() {
   });
 
   const teachers    = teachersData?.teachers ?? teachersData?.data ?? [];
-  const leaves      = leaveData?.requests    ?? [];
-  const payrollRecs = payrollData?.records   ?? [];
-  const summary     = summaryData ?? {};
+  const leaves      = leaveData?.data        ?? leaveData?.requests   ?? [];
+  const payrollRecs = payrollData?.data      ?? payrollData?.records  ?? [];
+  const summary     = summaryData?.data      ?? summaryData           ?? {};
   const departments = deptsData   ?? [];
   const subjectsList= subjectsListData ?? [];
 
@@ -410,6 +412,14 @@ export default function HRPage() {
     onSettled: () => setDeletingPayroll(null),
   });
 
+  const setPayrollStatus = useMutation({
+    mutationFn: ({ id, status }) => hrApi.payroll.setStatus(id, status),
+    onSuccess:  () => {
+      qc.invalidateQueries({ queryKey: ['hr','payroll'] });
+      qc.invalidateQueries({ queryKey: ['hr','summary'] });
+    },
+  });
+
   const copyPayroll = useMutation({
     mutationFn: hrApi.payroll.copy,
     onSuccess:  () => {
@@ -439,7 +449,7 @@ export default function HRPage() {
     },
   });
 
-  const docs = docsData?.documents ?? [];
+  const docs = docsData?.data ?? docsData?.documents ?? [];
 
   const TABS = [
     { id:'staff',     label:'Staff',     Icon: Users      },
@@ -763,6 +773,21 @@ export default function HRPage() {
             </div>
           ) : (
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              {/* Period status summary */}
+              {(() => {
+                const draftCount     = payrollRecs.filter(p => (p.status ?? 'draft') === 'draft').length;
+                const confirmedCount = payrollRecs.filter(p => p.status === 'confirmed').length;
+                const paidCount      = payrollRecs.filter(p => p.status === 'paid').length;
+                return (
+                  <div className="flex items-center gap-3 px-4 py-2.5 bg-slate-50 border-b border-slate-100 text-xs text-slate-500">
+                    <span>{payrollRecs.length} record{payrollRecs.length !== 1 ? 's' : ''}</span>
+                    <span className="text-slate-200">|</span>
+                    {draftCount     > 0 && <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full font-medium">{draftCount} draft</span>}
+                    {confirmedCount > 0 && <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded-full font-medium">{confirmedCount} confirmed</span>}
+                    {paidCount      > 0 && <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded-full font-medium">{paidCount} paid</span>}
+                  </div>
+                );
+              })()}
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -773,37 +798,75 @@ export default function HRPage() {
                       <th className="px-4 py-3 text-right">Gross</th>
                       <th className="px-4 py-3 text-right">Deductions</th>
                       <th className="px-4 py-3 text-right">Net Pay</th>
-                      <th className="px-4 py-3 text-center w-20">Actions</th>
+                      <th className="px-4 py-3 text-center">Status</th>
+                      <th className="px-4 py-3 text-center w-24">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                     {payrollRecs.map(p => {
-                      const isDeleting = deletingPayroll?.staffId === p.staffId && deletingPayroll?.period === p.payPeriod;
+                      const isDeleting   = deletingPayroll?.id === p.id;
+                      const isSettingStatus = setPayrollStatus.isPending && setPayrollStatus.variables?.id === p.id;
+                      const status       = p.status ?? 'draft';
+                      const isDraft      = status === 'draft';
+                      const isConfirmed  = status === 'confirmed';
+                      const isPaid       = status === 'paid';
+                      const canEdit      = isDraft;    // only draft records can be edited
+                      const isAdminUser  = ['superadmin','admin'].includes(user?.role);
+
                       return (
-                        <tr key={p.staffId} className="hover:bg-slate-50/70 transition group">
+                        <tr key={p.id ?? p.staffId} className="hover:bg-slate-50/70 transition group">
                           <td className="px-4 py-3 font-medium text-slate-900">{p.staffName}</td>
                           <td className="px-4 py-3 text-right text-slate-600">{fmtMoney(p.basicSalary, sym)}</td>
                           <td className="px-4 py-3 text-right text-slate-600">{fmtMoney(p.allowances, sym)}</td>
                           <td className="px-4 py-3 text-right text-slate-600">{fmtMoney(p.grossSalary, sym)}</td>
                           <td className="px-4 py-3 text-right text-red-600">− {fmtMoney(p.deductions, sym)}</td>
                           <td className="px-4 py-3 text-right font-bold text-emerald-700">{fmtMoney(p.netSalary, sym)}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize ${PAYROLL_STATUS[status] ?? PAYROLL_STATUS.draft}`}>
+                              {status}
+                            </span>
+                          </td>
                           <td className="px-4 py-3">
-                            <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition">
-                              <button
-                                onClick={() => setPayrollModal({ mode:'edit', record: p })}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition"
-                                title="Edit">
-                                <Edit2 size={13} />
-                              </button>
+                            <div className="flex items-center justify-center gap-1">
+                              {/* Edit — only on draft records */}
+                              {canEdit && (
+                                <button
+                                  onClick={() => setPayrollModal({ mode:'edit', record: p })}
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition opacity-0 group-hover:opacity-100"
+                                  title="Edit">
+                                  <Edit2 size={13} />
+                                </button>
+                              )}
+                              {/* Confirm — draft → confirmed (HR) */}
+                              {isDraft && (
+                                <button
+                                  disabled={isSettingStatus}
+                                  onClick={() => setPayrollStatus.mutate({ id: p.id, status: 'confirmed' })}
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition opacity-0 group-hover:opacity-100 disabled:opacity-40"
+                                  title="Confirm payroll">
+                                  {isSettingStatus ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
+                                </button>
+                              )}
+                              {/* Mark as Paid — confirmed → paid (admin only) */}
+                              {isConfirmed && isAdminUser && (
+                                <button
+                                  disabled={isSettingStatus}
+                                  onClick={() => setPayrollStatus.mutate({ id: p.id, status: 'paid' })}
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition opacity-0 group-hover:opacity-100 disabled:opacity-40"
+                                  title="Mark as paid">
+                                  {isSettingStatus ? <Loader2 size={13} className="animate-spin" /> : <CreditCard size={13} />}
+                                </button>
+                              )}
+                              {/* Delete */}
                               <button
                                 disabled={isDeleting || deletePayroll.isPending}
                                 onClick={() => {
                                   if (confirm(`Remove ${p.staffName}'s payroll for ${fmtPeriodLabel(p.payPeriod)}?`)) {
-                                    setDeletingPayroll({ staffId: p.staffId, period: p.payPeriod });
-                                    deletePayroll.mutate({ staffId: p.staffId, period: p.payPeriod });
+                                    setDeletingPayroll({ id: p.id });
+                                    deletePayroll.mutate(p.id);
                                   }
                                 }}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 disabled:opacity-40 transition"
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 disabled:opacity-40 transition opacity-0 group-hover:opacity-100"
                                 title="Delete">
                                 {isDeleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
                               </button>
@@ -820,7 +883,7 @@ export default function HRPage() {
                       <td className="px-4 py-3 text-right">{fmtMoney(payrollRecs.reduce((s,r) => s+(r.grossSalary||0), 0), sym)}</td>
                       <td className="px-4 py-3 text-right text-red-600">− {fmtMoney(payrollRecs.reduce((s,r) => s+(r.deductions||0), 0), sym)}</td>
                       <td className="px-4 py-3 text-right text-emerald-700">{fmtMoney(payrollRecs.reduce((s,r) => s+(r.netSalary||0), 0), sym)}</td>
-                      <td />
+                      <td colSpan={2} />
                     </tr>
                   </tbody>
                 </table>
