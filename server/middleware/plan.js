@@ -43,12 +43,15 @@ const FEATURE_PLAN = {
 
   /* ── Standard (continued) ── */
   growth_profile:     'standard',   // verified learner development portfolio
+  library:            'standard',   // book catalogue, loans, and fines
+  transport:          'standard',   // route management and student assignments
 
   /* ── Premium ── */
   analytics:          'premium',   // leadership analytics dashboard
   reports:            'premium',
   custom_roles:       'premium',
   hr:                 'premium',
+  hostel:             'premium',   // boarding facility — rooms and residents
 
   /* ── Enterprise ── */
   api_access:         'enterprise',

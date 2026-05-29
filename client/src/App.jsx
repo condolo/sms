@@ -36,6 +36,9 @@ const ChangelogPage     = lazy(() => import('@/pages/changelog/ChangelogPage.jsx
 const HelpPage          = lazy(() => import('@/pages/help/HelpPage.jsx'));
 const ProfilePage       = lazy(() => import('@/pages/profile/ProfilePage.jsx'));
 const GrowthProfilePage = lazy(() => import('@/pages/growth-profile/GrowthProfilePage.jsx'));
+const LibraryPage       = lazy(() => import('@/pages/library/LibraryPage.jsx'));
+const TransportPage     = lazy(() => import('@/pages/transport/TransportPage.jsx'));
+const HostelPage        = lazy(() => import('@/pages/hostel/HostelPage.jsx'));
 
 function SuspenseWrapper({ children }) {
   return (
@@ -147,6 +150,15 @@ export const router = createBrowserRouter([
 
       // Growth Profile (v4.22.0)
       { path: 'growth-profile/:studentId', element: <SuspenseWrapper><GrowthProfilePage /></SuspenseWrapper> },
+
+      // Library (v4.29.0)
+      { path: 'library',                element: <SuspenseWrapper><LibraryPage /></SuspenseWrapper> },
+
+      // Transport (v4.29.0)
+      { path: 'transport',              element: <SuspenseWrapper><TransportPage /></SuspenseWrapper> },
+
+      // Hostel (v4.29.0)
+      { path: 'hostel',                 element: <SuspenseWrapper><HostelPage /></SuspenseWrapper> },
 
       // Fallback
       { path: '*',                     element: <SuspenseWrapper><NotFound /></SuspenseWrapper> },

@@ -261,6 +261,86 @@ const INDEXES = [
       { key: { schoolId: 1, classId: 1, date: 1 },                  name: 'att_class_date' },
     ],
   },
+
+  /* ── library_books ──────────────────────────────────────────
+     Primary: catalogue list by school; text search on title/author/isbn */
+  {
+    col: 'library_books',
+    indexes: [
+      { key: { schoolId: 1, title: 1 },     name: 'lb_school_title' },
+      { key: { schoolId: 1, category: 1 },  name: 'lb_school_category' },
+      { key: { schoolId: 1, isbn: 1 },      name: 'lb_school_isbn', sparse: true },
+      { key: { id: 1 },                     name: 'lb_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── library_loans ──────────────────────────────────────────
+     Primary: active loans per borrower; secondary: all loans for a book */
+  {
+    col: 'library_loans',
+    indexes: [
+      { key: { schoolId: 1, borrowerId: 1, status: 1 },    name: 'll_borrower_status' },
+      { key: { schoolId: 1, bookId: 1, status: 1 },         name: 'll_book_status' },
+      { key: { schoolId: 1, status: 1, dueDate: 1 },        name: 'll_status_due' },
+      { key: { id: 1 },                                     name: 'll_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── transport_routes ───────────────────────────────────────
+     Primary: list routes for a school */
+  {
+    col: 'transport_routes',
+    indexes: [
+      { key: { schoolId: 1, name: 1 },  name: 'tr_school_name' },
+      { key: { id: 1 },                 name: 'tr_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── transport_assignments ──────────────────────────────────
+     Primary: assignments per route; secondary: per student */
+  {
+    col: 'transport_assignments',
+    indexes: [
+      { key: { schoolId: 1, routeId: 1, status: 1 },    name: 'ta_route_status' },
+      { key: { schoolId: 1, studentId: 1, status: 1 },  name: 'ta_student_status' },
+      { key: { id: 1 },                                  name: 'ta_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── hostels ────────────────────────────────────────────────
+     Primary: list hostels for a school */
+  {
+    col: 'hostels',
+    indexes: [
+      { key: { schoolId: 1, name: 1 },    name: 'h_school_name' },
+      { key: { schoolId: 1, gender: 1 },  name: 'h_school_gender' },
+      { key: { id: 1 },                   name: 'h_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── hostel_rooms ───────────────────────────────────────────
+     Primary: list rooms within a hostel; unique room number per hostel.
+     IMPORTANT: this is 'hostel_rooms' — NOT 'rooms' (owned by timetable). */
+  {
+    col: 'hostel_rooms',
+    indexes: [
+      { key: { schoolId: 1, hostelId: 1, roomNumber: 1 },  name: 'hr_hostel_room', unique: true, sparse: true },
+      { key: { schoolId: 1, hostelId: 1 },                 name: 'hr_hostel' },
+      { key: { id: 1 },                                    name: 'hr_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── hostel_assignments ─────────────────────────────────────
+     Primary: active assignments per room; secondary: per student */
+  {
+    col: 'hostel_assignments',
+    indexes: [
+      { key: { schoolId: 1, roomId: 1, status: 1 },     name: 'ha_room_status' },
+      { key: { schoolId: 1, studentId: 1, status: 1 },  name: 'ha_student_status' },
+      { key: { schoolId: 1, hostelId: 1, status: 1 },   name: 'ha_hostel_status' },
+      { key: { id: 1 },                                  name: 'ha_id', unique: true, sparse: true },
+    ],
+  },
 ];
 
 /**

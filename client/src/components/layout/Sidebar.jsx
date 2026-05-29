@@ -18,7 +18,7 @@ import {
   CheckSquare, BarChart3, ClipboardList, Scale,
   Wallet, Settings, LogOut, Library,
   MessageSquare, UserCog, TrendingUp, Tag, HelpCircle,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, BookMarked, Bus, BedDouble,
 } from 'lucide-react';
 import clsx from 'clsx';
 import useAuthStore from '@/store/auth.js';
@@ -53,6 +53,9 @@ const NAV_SECTIONS = [
       { to: '/messages',   Icon: MessageSquare,   label: 'Messages'   },
       { to: '/events',     Icon: Calendar,        label: 'Events'     },
       { to: '/hr',         Icon: UserCog,         label: 'HR & Staff' },
+      { to: '/library',    Icon: BookMarked,      label: 'Library'    },
+      { to: '/transport',  Icon: Bus,             label: 'Transport'  },
+      { to: '/hostel',     Icon: BedDouble,       label: 'Hostel'     },
     ],
   },
   {

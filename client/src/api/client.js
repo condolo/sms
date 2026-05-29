@@ -506,6 +506,63 @@ export const bellSchedule = {
   remove:   (section)         => _delete(`/bell-schedule?section=${section}`),
 };
 
+export const library = {
+  summary: () => _get('/library/summary'),
+  books: {
+    list:   (params)     => _get('/library/books', params),
+    get:    (id)         => _get(`/library/books/${id}`),
+    create: (data)       => _post('/library/books', data),
+    update: (id, data)   => _put(`/library/books/${id}`, data),
+    remove: (id)         => _delete(`/library/books/${id}`),
+  },
+  loans: {
+    list:        (params) => _get('/library/loans', params),
+    issue:       (data)   => _post('/library/loans', data),
+    return:      (id, body) => _patch(`/library/loans/${id}/return`, body ?? {}),
+    syncOverdue: ()       => _post('/library/loans/sync-overdue', {}),
+  },
+};
+
+export const transport = {
+  summary: () => _get('/transport/summary'),
+  routes: {
+    list:   (params)     => _get('/transport/routes', params),
+    get:    (id)         => _get(`/transport/routes/${id}`),
+    create: (data)       => _post('/transport/routes', data),
+    update: (id, data)   => _put(`/transport/routes/${id}`, data),
+    remove: (id)         => _delete(`/transport/routes/${id}`),
+  },
+  assignments: {
+    list:       (params)     => _get('/transport/assignments', params),
+    assign:     (data)       => _post('/transport/assignments', data),
+    update:     (id, data)   => _patch(`/transport/assignments/${id}`, data),
+    remove:     (id)         => _delete(`/transport/assignments/${id}`),
+  },
+};
+
+export const hostel = {
+  summary: () => _get('/hostel/summary'),
+  hostels: {
+    list:   (params)     => _get('/hostel/hostels', params),
+    get:    (id)         => _get(`/hostel/hostels/${id}`),
+    create: (data)       => _post('/hostel/hostels', data),
+    update: (id, data)   => _put(`/hostel/hostels/${id}`, data),
+    remove: (id)         => _delete(`/hostel/hostels/${id}`),
+  },
+  rooms: {
+    list:   (params)     => _get('/hostel/rooms', params),
+    get:    (id)         => _get(`/hostel/rooms/${id}`),
+    create: (data)       => _post('/hostel/rooms', data),
+    update: (id, data)   => _put(`/hostel/rooms/${id}`, data),
+    remove: (id)         => _delete(`/hostel/rooms/${id}`),
+  },
+  assignments: {
+    list:      (params) => _get('/hostel/assignments', params),
+    assign:    (data)   => _post('/hostel/assignments', data),
+    discharge: (id, body) => _patch(`/hostel/assignments/${id}/discharge`, body ?? {}),
+  },
+};
+
 // Default export — single object for convenience
 const api = {
   auth,
@@ -536,6 +593,9 @@ const api = {
   importExport,
   growthProfile,
   analytics,
+  library,
+  transport,
+  hostel,
   APIError,
 };
 

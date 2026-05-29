@@ -135,6 +135,11 @@ app.use('/api/rooms',                 require('./routes/rooms'));
 app.use('/api/teaching-assignments',  require('./routes/teaching-assignments'));
 app.use('/api/sections',              require('./routes/sections'));
 
+/* ── v4.29.0: Library / Transport / Hostel ── */
+app.use('/api/library',   require('./routes/library'));
+app.use('/api/transport', require('./routes/transport'));
+app.use('/api/hostel',    require('./routes/hostel'));
+
 /* ── Growth Profile (v4.22.0) ── */
 app.use('/api/growth-profile',         require('./routes/growth-profile'));
 app.use('/api/growth-records',         require('./routes/growth-records'));
