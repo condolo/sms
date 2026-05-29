@@ -190,7 +190,7 @@ export default function WarningsTab({ flash }) {
 
       {/* Stats strip */}
       {!isLoading && !error && classResults.length > 0 && !classId && (
-        <div className="grid grid-cols-3 gap-4 mb-5">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
           {[
             { label: 'Total violations', value: totalViolations, color: 'text-red-600' },
             { label: 'Below minimum',    value: totalBelow,      color: 'text-red-700' },

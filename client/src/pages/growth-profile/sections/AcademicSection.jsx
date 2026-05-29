@@ -140,7 +140,7 @@ export default function AcademicSection({ studentId }) {
                 style={{ width: `${Math.min(attendance.attendanceRate ?? 0, 100)}%` }}
               />
             </div>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {[
                 { label: 'Present',    value: attendance.present,    color: 'text-emerald-600' },
                 { label: 'Absent',     value: attendance.absent,     color: 'text-red-500'     },

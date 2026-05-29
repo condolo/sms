@@ -57,7 +57,7 @@ export default function OverdueTab({ fmtCurrency }) {
   return (
     <div className="space-y-5">
       {/* KPI strip */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <SummaryCard label="Overdue Invoices"  value={rows.length.toLocaleString()}               accent="red"   icon={<AlertTriangle size={18} />} />
         <SummaryCard label="Total Balance Due"  value={fmtCurrency(totalBalance)}                  accent="amber" icon={<BadgeDollarSign size={18} />} />
         <SummaryCard label="Avg Days Overdue"   value={rows.length ? `${avgDays} days` : '—'}      accent="slate" icon={<FileText size={18} />} />

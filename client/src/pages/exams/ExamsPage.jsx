@@ -488,7 +488,7 @@ function GradesTab() {
         const gAvg = pcts.length ? Math.round(pcts.reduce((a,b)=>a+b,0)/pcts.length) : null;
         const gPass = pcts.length ? Math.round((pcts.filter(v=>v>=50).length/pcts.length)*100) : null;
         return (
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {[
               { label: 'Records', value: rows.length, color: 'text-violet-600 bg-violet-50' },
               { label: 'Class Average', value: gAvg != null ? `${gAvg}%` : '—', color: gAvg >= 50 ? 'text-emerald-600 bg-emerald-50' : 'text-amber-600 bg-amber-50' },

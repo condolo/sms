@@ -43,12 +43,12 @@ export default function AppShell() {
         <div className="fixed inset-0 z-40 flex lg:hidden">
           {/* Backdrop */}
           <div
-            className="fixed inset-0 bg-black/50 transition-opacity"
+            className="fixed inset-0 bg-black/50 animate-fade-in-bg"
             onClick={() => setSidebarOpen(false)}
             aria-hidden="true"
           />
-          {/* Drawer */}
-          <aside className="relative z-50 flex w-64 flex-col animate-slide-in">
+          {/* Drawer — slides in from the left */}
+          <aside className="relative z-50 flex w-64 flex-col animate-drawer-open shadow-xl">
             <Sidebar onClose={() => setSidebarOpen(false)} />
           </aside>
         </div>

@@ -434,7 +434,9 @@ export default function EventsPage() {
 
       {/* ══ MONTH VIEW ══ */}
       {view === 'month' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+          {/* Calendar needs min width to stay readable on mobile */}
+          <div className="min-w-[420px]">
           {/* Day headers */}
           <div className="grid grid-cols-7 border-b border-slate-100">
             {DAYS.map(d => (
@@ -493,6 +495,7 @@ export default function EventsPage() {
               );
             })}
           </div>
+          </div>{/* end min-w wrapper */}
         </div>
       )}
 
@@ -544,7 +547,7 @@ export default function EventsPage() {
       {view === 'birthdays' && (
         <div>
           {/* Stats row */}
-          <div className="grid grid-cols-3 gap-3 mb-5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
             {[
               { value: birthdays.length,                                    label: 'This Month' },
               { value: birthdays.filter(b => b.type === 'student').length,  label: 'Students'   },

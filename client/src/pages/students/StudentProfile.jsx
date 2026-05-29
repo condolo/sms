@@ -616,7 +616,7 @@ function FinanceTab({ data, loading, currency }) {
   return (
     <div className="space-y-4">
       {/* Summary strip */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {[
           { label: 'Total billed',    value: fmt(totalBilled),  color: 'text-slate-800' },
           { label: 'Total paid',      value: fmt(totalPaid),    color: 'text-emerald-600' },
