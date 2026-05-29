@@ -188,7 +188,7 @@ export default function AwardTab() {
                 ) : (
                   <div className="space-y-1.5 mt-1">
                     {stuResults.map(s => {
-                      const id = s._id ?? s.id;
+                      const id = s.id ?? s._id;
                       return (
                         <button
                           key={id}

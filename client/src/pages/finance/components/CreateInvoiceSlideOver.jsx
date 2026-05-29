@@ -73,7 +73,7 @@ export default function CreateInvoiceSlideOver({ fmtCurrency, onClose, onCreated
     if (!items.every(i => i.description.trim())) e.items = 'All line items need a description';
     if (Object.keys(e).length) { setErrors(e); return; }
     mutation.mutate({
-      studentId: selectedStudent._id ?? selectedStudent.id,
+      studentId: selectedStudent.id ?? selectedStudent._id,
       title,
       dueDate: dueDate || undefined,
       lineItems: items,

@@ -792,7 +792,7 @@ function UsersTab() {
 
   function confirmRemove(u) {
     if (!window.confirm(`Remove ${u.name ?? u.email} from this school? They will lose access immediately.`)) return;
-    removeUser(u._id ?? u.id);
+    removeUser(u.id ?? u._id);
   }
 
   return (
@@ -1424,7 +1424,7 @@ function RolesTab() {
       } else {
         /* Per-user: start from current effective value, toggle, store override */
         if (!next.byUser[selUser]) next.byUser[selUser] = {};
-        const u        = users.find(x => (x._id ?? x.id) === selUser);
+        const u        = users.find(x => (x.id ?? x._id) === selUser);
         const roleBase = u ? (next.byRole[u.role]?.[permKey] ?? { v:false,e:false,d:false }) : { v:false,e:false,d:false };
         const override = next.byUser[selUser][permKey];
         const current  = override ? { ...roleBase, ...override } : { ...roleBase };
@@ -1441,7 +1441,7 @@ function RolesTab() {
     if (!perms) return {};
     if (mode === 'role') return perms.byRole[selRole] ?? {};
     if (!selUser) return {};
-    const u = users.find(x => (x._id ?? x.id) === selUser);
+    const u = users.find(x => (x.id ?? x._id) === selUser);
     const base = u ? (perms.byRole[u.role] ?? {}) : {};
     const over = perms.byUser?.[selUser] ?? {};
     return Object.fromEntries(
@@ -1505,7 +1505,7 @@ function RolesTab() {
             <p className="text-xs text-slate-400 px-2 py-4 text-center">No users in school.</p>
           ) : (
             users.map(u => {
-              const uid = u._id ?? u.id;
+              const uid = u.id ?? u._id;
               const sel = selUser === uid;
               return (
                 <button key={uid} onClick={() => setSelUser(uid)}

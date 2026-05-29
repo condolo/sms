@@ -35,14 +35,14 @@ export default function OverviewTab() {
 
   const stageAlerts = useMemo(() => (
     students
-      .map(s => ({ s, stage: studentStage(allLogs, s._id ?? s.id) }))
+      .map(s => ({ s, stage: studentStage(allLogs, s.id ?? s._id) }))
       .filter(x => x.stage)
       .sort((a, b) => b.stage.stage - a.stage.stage)
   ), [allLogs, students]);
 
   const milestoneStudents = useMemo(() => (
     students
-      .map(s => ({ s, ms: studentMilestone(allLogs, s._id ?? s.id), total: meritTotal(allLogs, s._id ?? s.id) }))
+      .map(s => ({ s, ms: studentMilestone(allLogs, s.id ?? s._id), total: meritTotal(allLogs, s.id ?? s._id) }))
       .filter(x => x.ms)
       .sort((a, b) => b.total - a.total)
       .slice(0, 8)
@@ -81,7 +81,7 @@ export default function OverviewTab() {
           ) : (
             <div className="divide-y divide-slate-100">
               {stageAlerts.map(({ s, stage }) => {
-                const sid = s._id ?? s.id;
+                const sid = s.id ?? s._id;
                 const d   = demeritTotal(allLogs, sid);
                 return (
                   <div key={sid} className="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors">
@@ -119,7 +119,7 @@ export default function OverviewTab() {
           ) : (
             <div className="divide-y divide-slate-100">
               {milestoneStudents.map(({ s, ms, total }) => (
-                <div key={s._id ?? s.id} className="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors">
+                <div key={s.id ?? s._id} className="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 text-xs font-bold">
                       {s.firstName?.[0] ?? '?'}

@@ -162,7 +162,7 @@ ${itemRows ? `<table><thead><tr><th>Description</th><th style="text-align:center
             </thead>
             <tbody className="divide-y divide-slate-50">
               {rows.map(inv => {
-                const id       = inv._id ?? inv.id;
+                const id       = inv.id ?? inv._id;
                 const sts      = INV_STATUS_BADGE[inv.status] ?? INV_STATUS_BADGE.unpaid;
                 const isVoiding = voidingId === id;
                 return (

@@ -89,7 +89,7 @@ export default function TeacherList() {
 
   function confirmRemove(t) {
     if (!confirm(`Remove ${t.firstName} ${t.lastName}? This will set their status to inactive.`)) return;
-    remove(t._id ?? t.id);
+    remove(t.id ?? t._id);
   }
 
   return (
@@ -202,7 +202,7 @@ export default function TeacherList() {
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {rows.map(t => {
-                  const id  = t._id ?? t.id;
+                  const id  = t.id ?? t._id;
                   const av  = avatarColor(`${t.firstName}${t.lastName}`);
                   const sts = STATUS_BADGE[t.status] ?? STATUS_BADGE.inactive;
                   const removing = removingId === id;
@@ -315,7 +315,7 @@ function TeacherDetailSlideOver({ teacher: initialTeacher, canEdit, canDelete, o
   const sts = STATUS_BADGE[teacher.status] ?? STATUS_BADGE.inactive;
 
   const updateMutation = useMutation({
-    mutationFn: data => teachersApi.update(teacher._id ?? teacher.id, data),
+    mutationFn: data => teachersApi.update(teacher.id ?? teacher._id, data),
     onSuccess: updated => {
       const merged = { ...teacher, ...updated };
       setTeacher(merged);
@@ -659,7 +659,7 @@ function TeacherDetailSlideOver({ teacher: initialTeacher, canEdit, canDelete, o
 /* ── Teaching Assignments Tab ────────────────────────────── */
 function TeacherAssignmentsTab({ teacher, canEdit }) {
   const qc = useQueryClient();
-  const teacherId = teacher.userId ?? teacher._id ?? teacher.id;
+  const teacherId = teacher.userId ?? teacher.id ?? teacher._id;
 
   const [showAdd, setShowAdd] = useState(false);
   const [af, setAf]           = useState({ classId: '', subjectId: '', preferredRoomId: '', periodsPerWeek: '' });
@@ -888,7 +888,7 @@ function TeacherAssignmentsTab({ teacher, canEdit }) {
               </div>
               {canEdit && (
                 <button
-                  onClick={() => removeMut.mutate(a._id ?? a.id)}
+                  onClick={() => removeMut.mutate(a.id ?? a._id)}
                   disabled={removeMut.isPending}
                   className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition disabled:opacity-30"
                   title="Remove assignment"

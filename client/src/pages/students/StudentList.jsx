@@ -173,7 +173,7 @@ export default function StudentList() {
 
   /* Resolve the active class name for the filter breadcrumb */
   const activeClassName = classId
-    ? (classList.find(c => (c._id ?? c.id) === classId)?.name ?? null)
+    ? (classList.find(c => (c.id ?? c._id) === classId)?.name ?? null)
     : null;
 
   return (

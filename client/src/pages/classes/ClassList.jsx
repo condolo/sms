@@ -77,7 +77,7 @@ export default function ClassList() {
 
   function confirmRemove(c) {
     if (!confirm(`Delete class "${c.name}"? This cannot be undone.`)) return;
-    remove(c._id ?? c.id);
+    remove(c.id ?? c._id);
   }
 
   return (
@@ -209,7 +209,7 @@ export default function ClassList() {
                 )}
                 <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {classes.map(c => {
-                    const id  = c._id ?? c.id;
+                    const id  = c.id ?? c._id;
                     const col = classColor(c.name);
                     const cap = Number(c.capacity) || 0;
                     const cnt = Number(c.studentCount) || 0;
@@ -444,7 +444,7 @@ function AddClassSlideOver({ onClose, onCreated }) {
             <select value={form.teacherId} onChange={e => set('teacherId', e.target.value)} className={iCls2()}>
               <option value="">No teacher assigned</option>
               {teacherList.map(t => (
-                <option key={t._id ?? t.id} value={t._id ?? t.id}>
+                <option key={t.id ?? t._id} value={t.id ?? t._id}>
                   {t.title ? `${t.title} ` : ''}{t.firstName} {t.lastName}
                 </option>
               ))}

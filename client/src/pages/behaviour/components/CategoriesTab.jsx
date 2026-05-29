@@ -151,7 +151,7 @@ export default function CategoriesTab() {
                   )}
                 </div>
                 <button
-                  onClick={() => { if (confirm(`Delete "${c.name}"?`)) removeMut.mutate(c._id ?? c.id); }}
+                  onClick={() => { if (confirm(`Delete "${c.name}"?`)) removeMut.mutate(c.id ?? c._id); }}
                   className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
                 >
                   <X size={13} />

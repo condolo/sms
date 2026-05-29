@@ -54,10 +54,10 @@ export default function ReportCardsTab() {
         <div className="flex flex-wrap gap-3 items-end">
           <SelField label="Class" value={classId}
             onChange={v => { setClassId(v); setStudentId(''); }}
-            options={classesList.map(c => ({ value: c._id ?? c.id, label: c.name }))} placeholder="Select class" />
+            options={classesList.map(c => ({ value: c.id ?? c._id, label: c.name }))} placeholder="Select class" />
           {classId && (
             <SelField label="Student (optional)" value={studentId} onChange={setStudentId}
-              options={studentsList.map(s => ({ value: s._id ?? s.id, label: `${s.firstName} ${s.lastName}` }))}
+              options={studentsList.map(s => ({ value: s.id ?? s._id, label: `${s.firstName} ${s.lastName}` }))}
               placeholder="All students" />
           )}
           <SelField label="Term" value={termNum} onChange={setTermNum}

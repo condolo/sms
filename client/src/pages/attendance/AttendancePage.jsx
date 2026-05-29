@@ -77,8 +77,8 @@ export default function AttendancePage() {
   const recorded = new Set(rows.map(r => r.studentId));
   const merged   = [
     ...rows,
-    ...classStudents.filter(s => !recorded.has(s._id ?? s.id)).map(s => ({
-      studentId:   s._id ?? s.id,
+    ...classStudents.filter(s => !recorded.has(s.id ?? s._id)).map(s => ({
+      studentId:   s.id ?? s._id,
       studentName: `${s.firstName} ${s.lastName}`,
       status:      null,
     })),
@@ -126,7 +126,7 @@ export default function AttendancePage() {
   });
 
   const hasEdits   = Object.keys(edits).length > 0;
-  const selectedClass = classList.find(c => (c._id ?? c.id) === classId);
+  const selectedClass = classList.find(c => (c.id ?? c._id) === classId);
   const registerLoading = isLoading || studentsLoading;
 
   function exportRegisterCSV() {
@@ -238,7 +238,7 @@ export default function AttendancePage() {
               >
                 <option value="">Select class…</option>
                 {classList.map(c => (
-                  <option key={c._id ?? c.id} value={c._id ?? c.id}>{c.name}</option>
+                  <option key={c.id ?? c._id} value={c.id ?? c._id}>{c.name}</option>
                 ))}
               </select>
               <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />

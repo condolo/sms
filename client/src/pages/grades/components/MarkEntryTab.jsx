@@ -71,15 +71,15 @@ export default function MarkEntryTab() {
   const { mutate: submitMarks, isPending: submitting } = useMutation({
     mutationFn: () => api.bulkMarks({
       marks: students
-        .filter(s => scores[s._id ?? s.id] != null)
+        .filter(s => scores[s.id ?? s._id] != null)
         .map(s => ({
-          studentId:      s._id ?? s.id,
+          studentId:      s.id ?? s._id,
           subjectId,
           classId,
           termNumber:     Number(termNumber),
           assessmentType,
           instance:       Number(instance),
-          rawScore:       Number(scores[s._id ?? s.id]),
+          rawScore:       Number(scores[s.id ?? s._id]),
         })),
     }),
     onSuccess: () => {
@@ -107,7 +107,7 @@ export default function MarkEntryTab() {
         <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Select Assessment</p>
         <div className="flex flex-wrap gap-3">
           <SelField label="Class" value={classId} onChange={setClassId}
-            options={classesList.map(c => ({ value: c._id ?? c.id, label: c.name }))} placeholder="Select class" />
+            options={classesList.map(c => ({ value: c.id ?? c._id, label: c.name }))} placeholder="Select class" />
           <div className="flex flex-col gap-1.5 min-w-[160px]">
             <label className="text-xs font-medium text-slate-600">Subject</label>
             <input type="text" value={subjectId} onChange={e => setSubjectId(e.target.value)}
@@ -168,7 +168,7 @@ export default function MarkEntryTab() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {students.map((s, i) => {
-                const sid   = s._id ?? s.id;
+                const sid   = s.id ?? s._id;
                 const score = scores[sid];
                 return (
                   <tr key={sid} className="hover:bg-slate-50 transition">

@@ -9,7 +9,7 @@ export default function StudentReportCard({ student, studentsList, template, hal
   const subjects    = Object.entries(student.subjects ?? {});
   const termsToShow = termNum ? [Number(termNum)] : TERM_NUMBERS;
 
-  const match = studentsList.find(s => (s._id ?? s.id) === student.studentId);
+  const match = studentsList.find(s => (s.id ?? s._id) === student.studentId);
   const name  = match ? `${match.firstName} ${match.lastName}` : (student.studentId ?? '—');
   const admNo = match?.admissionNumber ?? '';
 

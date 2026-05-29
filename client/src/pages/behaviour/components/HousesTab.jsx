@@ -45,7 +45,7 @@ export default function HousesTab() {
   const standings = useMemo(() => (
     houses.map(h => {
       const members   = allStudents.filter(s => (s.house ?? s.houseId) === (h.id ?? h.name));
-      const memberIds = new Set(members.map(s => s._id ?? s.id));
+      const memberIds = new Set(members.map(s => s.id ?? s._id));
       const hLogs     = allLogs.filter(l => memberIds.has(l.studentId));
       const merits    = hLogs.filter(l => l.type === 'merit').reduce((sum, l) => sum + (l.points ?? 0), 0);
       const demerits  = Math.abs(hLogs.filter(l => l.type === 'demerit').reduce((sum, l) => sum + (l.points ?? 0), 0));

@@ -64,7 +64,7 @@ export default function RecordPaymentSlideOver({ fmtCurrency, onClose, onCreated
     if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) e.amount = 'Enter a valid amount';
     if (Object.keys(e).length) { setErrors(e); return; }
     mutation.mutate({
-      invoiceId: selectedInvoice._id ?? selectedInvoice.id,
+      invoiceId: selectedInvoice.id ?? selectedInvoice._id,
       studentId: selectedInvoice.studentId,
       amount: Number(amount),
       method, date, notes,

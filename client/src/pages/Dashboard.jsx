@@ -644,8 +644,8 @@ export default function Dashboard() {
                 {recentStudents.map(s => {
                   const av = avatarColor(`${s.firstName}${s.lastName}`);
                   return (
-                    <li key={s._id ?? s.id}>
-                      <Link to={`/students/${s._id ?? s.id}`} className="flex items-center gap-3 px-5 py-3.5 hover:bg-slate-50 transition group">
+                    <li key={s.id ?? s._id}>
+                      <Link to={`/students/${s.id ?? s._id}`} className="flex items-center gap-3 px-5 py-3.5 hover:bg-slate-50 transition group">
                         <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${av} flex items-center justify-center text-white text-xs font-bold shrink-0`}>
                           {initials(s.firstName, s.lastName)}
                         </div>
@@ -741,7 +741,7 @@ function BirthdayWidget({ todayBirths, upcomingBirths }) {
       ) : (
         <div className="divide-y divide-slate-50">
           {todayBirths.map(s => (
-            <Link key={s._id ?? s.id} to={`/students/${s._id ?? s.id}`}
+            <Link key={s.id ?? s._id} to={`/students/${s.id ?? s._id}`}
               className="flex items-center gap-3 px-4 py-3 hover:bg-violet-50 transition group">
               <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
                 {(s.firstName?.[0] ?? '?')}
@@ -753,7 +753,7 @@ function BirthdayWidget({ todayBirths, upcomingBirths }) {
             </Link>
           ))}
           {upcomingBirths.slice(0, 5).map(s => (
-            <Link key={s._id ?? s.id} to={`/students/${s._id ?? s.id}`}
+            <Link key={s.id ?? s._id} to={`/students/${s.id ?? s._id}`}
               className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition group">
               <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 text-xs font-bold shrink-0">
                 {(s.firstName?.[0] ?? '?')}

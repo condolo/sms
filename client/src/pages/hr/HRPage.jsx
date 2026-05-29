@@ -118,7 +118,7 @@ function DocForm({ teachers, onClose, onSubmit, saving }) {
   const [form, setForm] = useState({ staffId:'', staffName:'', name:'', type:'contract', issuedDate:'', expiryDate:'', notes:'', fileUrl:'', status:'active' });
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
   function pickStaff(id) {
-    const t = teachers.find(x => (x._id ?? x.id) === id);
+    const t = teachers.find(x => (x.id ?? x._id) === id);
     setForm(f => ({ ...f, staffId: id, staffName: t ? (t.name ?? `${t.firstName} ${t.lastName}`) : '' }));
   }
   const fCls = 'w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40';
@@ -135,7 +135,7 @@ function DocForm({ teachers, onClose, onSubmit, saving }) {
             <select required value={form.staffId} onChange={e => pickStaff(e.target.value)} className={fCls}>
               <option value="">Select staff…</option>
               {teachers.map(t => (
-                <option key={t._id ?? t.id} value={t._id ?? t.id}>{t.name ?? `${t.firstName} ${t.lastName}`}</option>
+                <option key={t.id ?? t._id} value={t.id ?? t._id}>{t.name ?? `${t.firstName} ${t.lastName}`}</option>
               ))}
             </select>
           </div>
@@ -198,7 +198,7 @@ function PayrollForm({ teachers, defaultPeriod, record, sym, onClose, onSave, sa
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
   function pickStaff(id) {
-    const t = teachers.find(x => (x.userId ?? x._id ?? x.id) === id);
+    const t = teachers.find(x => (x.userId ?? x.id ?? x._id) === id);
     set('staffId',   id);
     set('staffName', t ? (t.name ?? `${t.firstName} ${t.lastName}`) : '');
   }
@@ -227,7 +227,7 @@ function PayrollForm({ teachers, defaultPeriod, record, sym, onClose, onSave, sa
               <select required value={form.staffId} onChange={e => pickStaff(e.target.value)} className={fCls}>
                 <option value="">Select staff…</option>
                 {teachers.map(t => {
-                  const val = t.userId ?? t._id ?? t.id;
+                  const val = t.userId ?? t.id ?? t._id;
                   return <option key={val} value={val}>{t.name ?? `${t.firstName} ${t.lastName}`}</option>;
                 })}
               </select>

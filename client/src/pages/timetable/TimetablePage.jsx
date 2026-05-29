@@ -305,7 +305,7 @@ export default function TimetablePage() {
     setTimeout(() => win.print(), 500);
   }
 
-  const selectedTeacher = teacherList.find(t => (t._id ?? t.id) === teacherId);
+  const selectedTeacher = teacherList.find(t => (t.id ?? t._id) === teacherId);
 
   /* ══════════════════════════════════════════════════════════
      RENDER

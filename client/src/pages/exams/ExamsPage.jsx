@@ -193,7 +193,7 @@ function ResultsTab() {
     staleTime: 5 * 60_000,
   });
   const examsList    = examsData?.data ?? [];
-  const selectedExam = examsList.find(e => (e._id ?? e.id) === examId);
+  const selectedExam = examsList.find(e => (e.id ?? e._id) === examId);
 
   /* Load existing results for selected exam */
   const { data: resultsData, isLoading: resultsLoading, refetch: refetchResults } = useQuery({
@@ -224,7 +224,7 @@ function ResultsTab() {
     setSaving(true);
     try {
       const records = students.map(s => {
-        const sid  = s._id ?? s.id;
+        const sid  = s.id ?? s._id;
         const edit = edits[sid] ?? {};
         const orig = resultsMap[sid] ?? {};
         return {
@@ -269,7 +269,7 @@ function ResultsTab() {
           >
             <option value="">Choose an exam…</option>
             {examsList.map(e => (
-              <option key={e._id ?? e.id} value={e._id ?? e.id}>{e.title}{e.subject ? ` — ${e.subject}` : ''}{e.className ? ` (${e.className})` : ''}</option>
+              <option key={e.id ?? e._id} value={e.id ?? e._id}>{e.title}{e.subject ? ` — ${e.subject}` : ''}{e.className ? ` (${e.className})` : ''}</option>
             ))}
           </select>
         </div>
@@ -321,7 +321,7 @@ function ResultsTab() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {students.map(s => {
-                const sid    = s._id ?? s.id;
+                const sid    = s.id ?? s._id;
                 const orig   = resultsMap[sid]   ?? {};
                 const edit   = edits[sid]         ?? {};
                 const score  = edit.score  !== undefined ? edit.score  : (orig.score  ?? '');
@@ -461,14 +461,14 @@ function GradesTab() {
           <label className="block text-xs font-medium text-slate-700 mb-1.5">Class</label>
           <select value={classId} onChange={e => setClassId(e.target.value)} className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-800">
             <option value="">All classes</option>
-            {classList.map(c => <option key={c._id ?? c.id} value={c._id ?? c.id}>{c.name}</option>)}
+            {classList.map(c => <option key={c.id ?? c._id} value={c.id ?? c._id}>{c.name}</option>)}
           </select>
         </div>
         <div>
           <label className="block text-xs font-medium text-slate-700 mb-1.5">Exam</label>
           <select value={examId} onChange={e => setExamId(e.target.value)} className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-800">
             <option value="">All exams</option>
-            {examsList.map(e => <option key={e._id ?? e.id} value={e._id ?? e.id}>{e.title}</option>)}
+            {examsList.map(e => <option key={e.id ?? e._id} value={e.id ?? e._id}>{e.title}</option>)}
           </select>
         </div>
         <div>
@@ -640,7 +640,7 @@ function CreateExamSlideOver({ onClose, onCreated }) {
           <FField label="Class">
             <select value={form.classId} onChange={e => set('classId', e.target.value)} className={iCls()}>
               <option value="">No class (all)</option>
-              {classList.map(c => <option key={c._id ?? c.id} value={c._id ?? c.id}>{c.name}</option>)}
+              {classList.map(c => <option key={c.id ?? c._id} value={c.id ?? c._id}>{c.name}</option>)}
             </select>
           </FField>
 
