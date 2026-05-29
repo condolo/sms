@@ -156,7 +156,7 @@ export default function StudentList() {
 
   function confirmRemove(s) {
     if (!confirm(`Remove ${s.firstName} ${s.lastName}? Their record will be set to inactive.`)) return;
-    removeStudent(s._id ?? s.id);
+    removeStudent(s.id ?? s._id);
   }
 
   const hasFilters = classId || gender || (status && status !== 'active');
@@ -451,7 +451,7 @@ export default function StudentList() {
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {rows.map(s => {
-                  const id  = s._id ?? s.id;
+                  const id  = s.id ?? s._id;
                   const av  = avatarColor(`${s.firstName}${s.lastName}`);
                   const sts = STATUS_BADGE[s.status] ?? STATUS_BADGE.inactive;
                   const removing = removingId === id;
