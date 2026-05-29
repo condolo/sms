@@ -134,7 +134,7 @@ router.patch('/:id/verify', authMiddleware, PLAN, async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
 
-    const CAN_VERIFY = ['admin', 'superadmin', 'teacher', 'deputy'];
+    const CAN_VERIFY = ['admin', 'superadmin', 'teacher', 'section_head', 'deputy_principal'];
     if (!CAN_VERIFY.includes(role)) {
       return E.forbidden(res, 'Only admin or teaching staff can verify project records');
     }
@@ -142,8 +142,9 @@ router.patch('/:id/verify', authMiddleware, PLAN, async (req, res) => {
     const { data, error } = _validate(VerifySchema, req.body);
     if (error) return E.validation(res, error);
 
-    if (role === 'teacher' && data.status === 'institution_verified') {
-      return E.forbidden(res, 'Teachers can only set staff verification. Institution verification requires admin or deputy.');
+    const STAFF_TIER = ['teacher', 'section_head'];
+    if (STAFF_TIER.includes(role) && data.status === 'institution_verified') {
+      return E.forbidden(res, 'Teachers can only set staff verification. Institution verification requires admin or deputy principal.');
     }
 
     const now = new Date().toISOString();

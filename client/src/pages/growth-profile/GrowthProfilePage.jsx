@@ -128,8 +128,8 @@ export default function GrowthProfilePage() {
   const [activeSection, setActiveSection] = useState('academic');
 
   const role    = useAuthStore(s => s.session?.user?.role ?? '');
-  const canEdit = ['admin', 'superadmin', 'teacher', 'deputy'].includes(role);
-  const isAdmin = ['admin', 'superadmin', 'deputy'].includes(role);
+  const canEdit   = ['admin', 'superadmin', 'teacher', 'section_head', 'deputy_principal'].includes(role);
+  const isAdmin   = ['admin', 'superadmin', 'deputy_principal'].includes(role);
   const canVerify = canEdit;
 
   /* Profile meta + section counts */

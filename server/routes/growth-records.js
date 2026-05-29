@@ -156,7 +156,7 @@ router.patch('/:type/:id/verify', authMiddleware, PLAN, _typeGuard, async (req, 
     const { schoolId, userId, role } = req.jwtUser;
 
     // Verification requires staff role — separate from read/write RBAC
-    const CAN_VERIFY = ['admin', 'superadmin', 'teacher', 'deputy'];
+    const CAN_VERIFY = ['admin', 'superadmin', 'teacher', 'section_head', 'deputy_principal'];
     if (!CAN_VERIFY.includes(role)) {
       return E.forbidden(res, 'Only admin or teaching staff can verify growth profile records');
     }
@@ -164,9 +164,10 @@ router.patch('/:type/:id/verify', authMiddleware, PLAN, _typeGuard, async (req, 
     const { data, error } = _validate(VerifySchema, req.body);
     if (error) return E.validation(res, error);
 
-    // Teachers may only set staff_verified — institution_verified is admin only
-    if (role === 'teacher' && data.status === 'institution_verified') {
-      return E.forbidden(res, 'Teachers can only set staff verification. Institution verification requires admin or deputy.');
+    // Teacher-level staff may only set staff_verified — institution_verified is admin/leadership only
+    const STAFF_TIER = ['teacher', 'section_head'];
+    if (STAFF_TIER.includes(role) && data.status === 'institution_verified') {
+      return E.forbidden(res, 'Teachers can only set staff verification. Institution verification requires admin or deputy principal.');
     }
 
     const col = TYPE_COLLECTIONS[req.params.type];

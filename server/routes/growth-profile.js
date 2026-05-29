@@ -174,6 +174,13 @@ router.get('/:studentId/academic', authMiddleware, PLAN, rbac('growth_profile', 
 
     const attendance = attendanceAgg[0] ?? null;
 
+    // Batch-resolve subject names so the client never shows raw UUIDs
+    const subjectIds  = gradesAgg.map(r => r._id).filter(Boolean);
+    const subjectDocs = subjectIds.length
+      ? await _model('subjects').find({ schoolId, id: { $in: subjectIds } }, { id: 1, name: 1, code: 1, _id: 0 }).lean()
+      : [];
+    const subjectMap = Object.fromEntries(subjectDocs.map(s => [s.id, s]));
+
     // Overall grade average across all subjects
     const overallAverage = gradesAgg.length
       ? Math.round(gradesAgg.reduce((s, r) => s + (r.weightedAverage ?? 0), 0) / gradesAgg.length * 10) / 10
@@ -182,8 +189,10 @@ router.get('/:studentId/academic', authMiddleware, PLAN, rbac('growth_profile', 
     return ok(res, {
       student,
       grades: {
-        subjects:       gradesAgg.map(r => ({
+        subjects: gradesAgg.map(r => ({
           subjectId:       r._id,
+          subjectName:     subjectMap[r._id]?.name ?? r._id,   // human-readable name, never raw UUID
+          subjectCode:     subjectMap[r._id]?.code ?? null,
           weightedAverage: r.weightedAverage,
           entries:         r.entries,
           latestDate:      r.latestDate,

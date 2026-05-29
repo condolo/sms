@@ -100,7 +100,7 @@ router.post('/', authMiddleware, PLAN, rbac('growth_profile', 'create'), async (
     const { schoolId, userId, role } = req.jwtUser;
 
     // Only staff can write recommendations
-    const CAN_WRITE = ['admin', 'superadmin', 'teacher', 'deputy'];
+    const CAN_WRITE = ['admin', 'superadmin', 'teacher', 'section_head', 'deputy_principal'];
     if (!CAN_WRITE.includes(role)) {
       return E.forbidden(res, 'Only teaching staff can write recommendations');
     }
@@ -141,7 +141,9 @@ router.delete('/:id', authMiddleware, PLAN, rbac('growth_profile', 'delete'), as
 });
 
 /* ══════════════════════════════════════════════════════════════
-   ASPIRATIONS  (registered separately in index.js as /api/growth-aspirations)
+   ASPIRATIONS  — served from /api/growth-recommendations/aspirations/:studentId
+   Note: NOT a separate router mount. Aspirations live on this router
+   under the /aspirations/:studentId sub-path.
    ══════════════════════════════════════════════════════════════ */
 
 /* ── GET /api/growth-aspirations/:studentId ────────────────── */

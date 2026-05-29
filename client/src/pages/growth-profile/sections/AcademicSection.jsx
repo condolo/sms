@@ -94,7 +94,10 @@ export default function AcademicSection({ studentId }) {
                 <div key={s.subjectId} className="flex items-center gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-medium text-slate-700 truncate">{s.subjectId}</span>
+                      <span className="text-xs font-medium text-slate-700 truncate">
+                        {s.subjectName ?? s.subjectId}
+                        {s.subjectCode && <span className="ml-1 text-[10px] text-slate-400">({s.subjectCode})</span>}
+                      </span>
                       <span className={`text-xs font-bold shrink-0 ml-2 ${pctColor(s.weightedAverage)}`}>
                         {s.weightedAverage != null ? `${s.weightedAverage}%` : '—'}
                       </span>

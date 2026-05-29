@@ -126,10 +126,12 @@ function WriteForm({ studentId, onClose }) {
 export default function RecommendationsSection({ studentId, canEdit, isAdmin }) {
   const [showForm, setShowForm]   = useState(false);
   const [deleting, setDeleting]   = useState(null);
-  const qc = useQueryClient();
-  const role = useAuthStore(s => s.session?.user?.role);
+  const qc     = useQueryClient();
+  const user   = useAuthStore(s => s.session?.user);
+  const role   = user?.role ?? '';
+  const userId = user?.id ?? '';
 
-  const canWrite = ['admin', 'superadmin', 'teacher', 'deputy'].includes(role);
+  const canWrite = ['admin', 'superadmin', 'teacher', 'section_head', 'deputy_principal'].includes(role);
 
   const { data, isLoading } = useQuery({
     queryKey: ['growth-recommendations', studentId],
@@ -173,7 +175,7 @@ export default function RecommendationsSection({ studentId, canEdit, isAdmin }) 
             <RecommendationCard
               key={r.id ?? r._id}
               rec={r}
-              canDelete={isAdmin || r.authorId === r.createdBy}
+              canDelete={isAdmin || r.authorId === userId || r.createdBy === userId}
               onDelete={(rec) => deleteRec(rec.id)}
               isDeleting={isDeleting && deleting === r.id}
             />
