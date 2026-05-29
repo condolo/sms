@@ -29,7 +29,8 @@
   },
   "devDependencies": {
     "jest": "^29.7.0",
-    "nodemon": "^3.1.3"
+    "nodemon": "^3.1.3",
+    "supertest": "^7.2.2"
   },
   "jest": {
     "testEnvironment": "node",
@@ -39,7 +40,10 @@
     "collectCoverageFrom": [
       "server/utils/academic-calc.js",
       "server/utils/ranking.js",
-      "server/routes/academic-config.js"
+      "server/routes/academic-config.js",
+      "server/middleware/tenant.js",
+      "server/routes/students.js",
+      "server/routes/auth.js"
     ]
   },
   "engines": {

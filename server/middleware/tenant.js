@@ -1,11 +1,11 @@
-﻿const { _model } = require('../utils/model');
+const { _model } = require('../utils/model');
 
 /* ── Tenant resolution ───────────────────────────────────────────
    Reads the school from one of:
      1. req.jwtUser.schoolId  (most requests — already authenticated)
      2. X-School-Slug header  (login requests — not yet authenticated)
      3. Subdomain             (e.g. greenwood.msingi.io)
-   Attaches req.school = { id, slug, plan, addOns, isActive }
+   Attaches req.school = the full session-safe school shape
 ─────────────────────────────────────────────────────────────────── */
 
 async function tenantMiddleware(req, res, next) {
@@ -50,43 +50,64 @@ async function tenantMiddleware(req, res, next) {
   }
 }
 
-/* Map ISO currency codes → display symbols */
+/* ── Map ISO currency codes → display symbols ────────────────── */
 const CURRENCY_SYMBOLS = {
-  KES: 'KSh', USD: '$', EUR: '€', GBP: '£', UGX: 'USh',
-  TZS: 'TSh', RWF: 'RF', ETB: 'Br', ZAR: 'R', NGN: '₦',
-  GHS: 'GH₵', XOF: 'CFA', XAF: 'FCFA', INR: '₹', AUD: 'A$',
-  CAD: 'C$', JPY: '¥', CNY: '¥',
+  KES: 'KSh', USD: '$',   EUR: '€',    GBP: '£',   UGX: 'USh',
+  TZS: 'TSh', RWF: 'RF',  ETB: 'Br',   ZAR: 'R',   NGN: '₦',
+  GHS: 'GH₵', XOF: 'CFA', XAF: 'FCFA', INR: '₹',   AUD: 'A$',
+  CAD: 'C$',  JPY: '¥',   CNY: '¥',
 };
+
+/**
+ * Map a raw Mongoose school document to the session-safe shape
+ * sent to the client on every login / tenant resolution.
+ *
+ * Exported separately so the shape contract can be unit-tested
+ * without touching MongoDB.
+ *
+ * IMPORTANT: every field that any client module reads from
+ * session.school MUST appear here with an explicit default.
+ * Silent omissions cause runtime fallbacks to wrong values
+ * (e.g. currency showing USD instead of KES).
+ */
+function _mapSchoolDoc(doc) {
+  const currency = doc.currency || 'KES';
+  return {
+    /* ── Identity ── */
+    id:             doc.id || (doc._id ? doc._id.toString() : undefined),
+    slug:           doc.slug,
+    name:           doc.name,
+    shortName:      doc.shortName    || doc.name,
+    logoUrl:        doc.logoUrl      || null,
+    systemEmail:    doc.systemEmail  || null,
+    adminEmail:     doc.adminEmail   || null,
+    /* ── Plan / subscription ── */
+    plan:           doc.plan         || 'core',
+    addOns:         doc.addOns       || [],
+    isActive:       doc.isActive !== false,
+    planExpiresAt:  doc.planExpiresAt || null,
+    /* ── Branding / theme ── */
+    primaryColor:   doc.primaryColor || '#4f46e5',
+    accentColor:    doc.accentColor  || '#7c3aed',
+    themePreset:    doc.themePreset  || null,
+    /* ── Regional / financial ── */
+    currency,
+    currencySymbol: doc.currencySymbol || CURRENCY_SYMBOLS[currency] || currency,
+    timezone:       doc.timezone       || 'Africa/Nairobi',
+    country:        doc.country        || null,
+    /* ── Academic ── */
+    academicYear:   doc.academicYear   || null,
+    termsPerYear:   doc.termsPerYear   || null,
+  };
+}
 
 async function _findSchool(filter) {
   try {
     const Sch = _model('schools');
     const doc = await Sch.findOne(filter).lean();
     if (!doc) return null;
-    const currency = doc.currency || 'KES';
-    return {
-      id:             doc.id || doc._id.toString(),
-      slug:           doc.slug,
-      plan:           doc.plan    || 'core',
-      addOns:         doc.addOns  || [],
-      isActive:       doc.isActive !== false,
-      name:           doc.name,
-      shortName:      doc.shortName    || doc.name,
-      logoUrl:        doc.logoUrl      || null,
-      primaryColor:   doc.primaryColor || '#4f46e5',
-      systemEmail:    doc.systemEmail  || null,
-      /* ── Fields used by client modules ── */
-      currency,
-      currencySymbol: doc.currencySymbol || CURRENCY_SYMBOLS[currency] || currency,
-      themePreset:    doc.themePreset    || null,
-      timezone:       doc.timezone       || 'Africa/Nairobi',
-      country:        doc.country        || null,
-      academicYear:   doc.academicYear   || null,
-      termsPerYear:   doc.termsPerYear   || null,
-      planExpiresAt:  doc.planExpiresAt  || null,
-      adminEmail:     doc.adminEmail     || null,
-    };
+    return _mapSchoolDoc(doc);
   } catch { return null; }
 }
 
-module.exports = { tenantMiddleware };
+module.exports = { tenantMiddleware, _mapSchoolDoc, CURRENCY_SYMBOLS };
