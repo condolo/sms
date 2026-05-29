@@ -145,6 +145,29 @@ function DemoPanel({ onPick }) {
   );
 }
 
+/* ── Keyframes injected directly so they're guaranteed to be available
+   regardless of CSS bundle caching / loading order ──────────────────── */
+const LOGIN_KEYFRAMES = `
+  @keyframes msingiGradientShift {
+    0%   { background-position: 0% 50%; }
+    50%  { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+  @keyframes msingiFloat1 {
+    0%, 100% { transform: translateY(0px) rotate(0deg); }
+    50%       { transform: translateY(-24px) rotate(6deg); }
+  }
+  @keyframes msingiFloat2 {
+    0%, 100% { transform: translateY(0px) rotate(0deg); }
+    50%       { transform: translateY(18px) rotate(-4deg); }
+  }
+  @keyframes msingiFloat3 {
+    0%, 100% { transform: translateY(0px) scale(1); }
+    33%       { transform: translateY(-14px) scale(1.04); }
+    66%       { transform: translateY(10px) scale(0.97); }
+  }
+`;
+
 export default function Login() {
   const navigate           = useNavigate();
   const location           = useLocation();
@@ -479,6 +502,8 @@ export default function Login() {
 
   return (
     <div className="min-h-full flex">
+      {/* Guarantee keyframes are always in the document when this component renders */}
+      <style>{LOGIN_KEYFRAMES}</style>
       <LeftPanel />
 
       {/* Right panel — form */}

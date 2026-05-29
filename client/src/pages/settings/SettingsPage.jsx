@@ -441,6 +441,13 @@ function SchoolTab() {
       </div>
 
       {/* ── Login Appearance ──────────────────────────────────── */}
+      <style>{`
+        @keyframes msingiGradientShift {
+          0%   { background-position: 0% 50%; }
+          50%  { background-position: 100% 50%; }
+          100% { background-position: 0% 50%; }
+        }
+      `}</style>
       <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
         <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
           <Palette size={14} className="text-slate-400" />
