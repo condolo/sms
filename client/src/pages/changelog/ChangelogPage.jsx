@@ -6,6 +6,49 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.29.0',
+    date: '2026-05-29',
+    label: 'Library, Transport & Hostel — Full Module Suite',
+    changes: [
+      { type: 'new', text: 'Library module (standard plan): book catalogue with full CRUD, copy tracking, ISBN/category/shelf location, text search by title/author/ISBN' },
+      { type: 'new', text: 'Library loans: issue books to students or staff, return with automatic fine calculation (KSh 10/overdue day, configurable), overdue sync endpoint to bulk-mark past-due active loans' },
+      { type: 'new', text: 'Library summary dashboard: totalBooks, totalCopies, available, onLoan, activeLoans, overdueLoans, unpaidFines — aggregated in one query' },
+      { type: 'new', text: 'Transport module (standard plan): route management with vehicle type/registration, driver details, departure/arrival times, configurable stops list, fee-per-term' },
+      { type: 'new', text: 'Transport assignments: assign students to routes with pickup stop, direction (to_school / from_school / both), capacity enforcement, active-assignment guard on route deletion' },
+      { type: 'new', text: 'Hostel module (premium plan): boarding house management — hostels, rooms, and resident assignments in three separate collections' },
+      { type: 'new', text: 'Hostel rooms use the hostel_rooms collection (NOT rooms — which is owned by timetable); room occupancy counter maintained atomically on assign/discharge' },
+      { type: 'new', text: 'Hostel discharge workflow: one-click discharge sets endDate, decrements room occupied count, marks assignment as discharged' },
+      { type: 'new', text: '7 new MongoDB indexes across library_books, library_loans, transport_routes, transport_assignments, hostels, hostel_rooms, hostel_assignments' },
+      { type: 'new', text: 'RBAC: librarian role manages library; transport_officer manages transport; hostel_master manages hostel — all gracefully degrade to read-only for non-managers' },
+      { type: 'new', text: 'Sidebar: BookMarked (Library), Bus (Transport), BedDouble (Hostel) nav entries added to Operations section' },
+    ],
+  },
+  {
+    version: '4.28.0',
+    date: '2026-05-29',
+    label: 'Payroll Stabilisation — Lifecycle, Shared Model & Response Envelope',
+    changes: [
+      { type: 'fix', text: 'HR route fully rewritten to use shared _model, planGate("hr"), and ok()/E.* response helpers — previously used local model definitions and raw res.json()' },
+      { type: 'new', text: 'Payroll lifecycle status: draft → confirmed (HR/Admin) → paid (Admin only); PATCH /hr/payroll/:id/status endpoint enforces the state machine' },
+      { type: 'new', text: 'Payroll table gains Status column with colour-coded badges (draft/confirmed/paid), Confirm and Mark Paid action buttons, locked editing on non-draft records' },
+      { type: 'new', text: 'DELETE /hr/payroll/:id: id-based deletion replaces fragile ?staffId=X&period=Y query-param pattern; only admins can delete confirmed/paid records' },
+      { type: 'new', text: 'HR summary aggregation: staff counts, pending leaves, payroll totals (gross, net, headcount) computed in a single parallel Promise.all' },
+      { type: 'fix', text: 'Client data access updated for response envelope: data falls back through ?.data ?? ?.records / ?.requests chains to handle cached responses during rollout' },
+    ],
+  },
+  {
+    version: '4.27.0',
+    date: '2026-05-29',
+    label: 'Mobile Optimisation — Responsive Grids, Drawer Animation & Hamburger Icon',
+    changes: [
+      { type: 'fix', text: 'Hamburger menu icon replaced: bare ☰ character swapped for proper Lucide <Menu size={20} /> at a 44 px touch target with hover/focus states' },
+      { type: 'fix', text: 'Mobile drawer animation: replaced broken -8px slideIn with full translateX(-100%)→0 drawerOpen keyframe (0.25 s cubic-bezier); backdrop uses separate fadeInBg animation' },
+      { type: 'fix', text: 'Events calendar: 7-column grid wrapped in overflow-x-auto + min-w-[420px] so it scrolls horizontally on small screens without breaking the grid structure' },
+      { type: 'fix', text: 'Responsive grid fixes across 6 pages: EventsPage birthday stats, AcademicSection attendance stats, OverdueTab KPI strip, ExamsPage grade KPIs, StudentProfile finance summary, WarningsTab stats strip — all changed from fixed cols to grid-cols-1 sm:grid-cols-N' },
+      { type: 'new', text: 'Tailwind config: two new animations (drawer-open, fade-in-bg) and updated keyframes registered for platform-wide use' },
+    ],
+  },
+  {
     version: '4.22.0',
     date: '2026-05-28',
     label: 'Growth Profile — Verified Learner Development Portfolio',
