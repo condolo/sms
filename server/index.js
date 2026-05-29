@@ -121,6 +121,7 @@ app.use('/api/assessment',      require('./routes/assessment'));
 app.use('/api/report-cards',   require('./routes/report-cards'));
 app.use('/api/import-export',  require('./routes/import-export'));
 app.use('/api/settings',       require('./routes/settings'));
+app.use('/api/analytics',      require('./routes/analytics'));
 app.use('/api/bell-schedule',  require('./routes/bell-schedule'));
 app.use('/api/departments',       require('./routes/departments'));
 app.use('/api/subjects',          require('./routes/subjects'));

@@ -10,6 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  LineChart, Line,
 } from 'recharts';
 import {
   Users, UserCheck, BadgeDollarSign, ClipboardList,
@@ -17,6 +18,8 @@ import {
   ArrowRight, X, Bell, ChevronRight, Sparkles,
   BarChart3, Clock, AlertTriangle, Wallet,
   Cake, CalendarDays, CheckCircle, MapPin, Tag,
+  ShieldAlert, Activity, Zap, TrendingDown, Award,
+  RefreshCw,
 } from 'lucide-react';
 import {
   students as studentsApi,
@@ -25,6 +28,7 @@ import {
   announcements as announcementsApi,
   events as eventsApi,
   attendance as attendanceApi,
+  analytics as analyticsApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 
@@ -142,9 +146,10 @@ export default function Dashboard() {
   }
   function fmt(n) { return n == null ? '—' : new Intl.NumberFormat().format(n); }
 
-  const role           = user?.role ?? '';
-  const canViewFinance = can('finance')    || role === 'admin' || role === 'superadmin';
-  const canViewAdm     = can('admissions') || role === 'admin' || role === 'superadmin';
+  const role              = user?.role ?? '';
+  const canViewFinance    = can('finance')    || role === 'admin' || role === 'superadmin';
+  const canViewAdm        = can('admissions') || role === 'admin' || role === 'superadmin';
+  const canViewLeadership = LEADER_ROLES.has(role);
 
   /* ── Queries ──────────────────────────────────────────── */
   const { data: stuStats, isLoading: stuLoading, isError: stuError } = useQuery({
@@ -711,6 +716,14 @@ export default function Dashboard() {
             </Link>
           </div>
         )}
+
+        {/* ── Leadership Analytics ────────────────────────── */}
+        {canViewLeadership && (
+          <>
+            <div className="border-t border-slate-200 pt-2" />
+            <LeadershipPanel school={school} />
+          </>
+        )}
       </div>
     </div>
   );
@@ -834,6 +847,388 @@ function KpiCard({ icon, label, value, sub, to, accent = 'violet', loading, erro
     </div>
   );
   return to ? <Link to={to} className="block focus:outline-none rounded-xl">{inner}</Link> : inner;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LEADERSHIP ANALYTICS PANEL
+   Visible to: superadmin, admin, deputy_principal, section_head
+   Plan:        premium
+   ══════════════════════════════════════════════════════════ */
+const LEADER_ROLES = new Set(['superadmin', 'admin', 'deputy_principal', 'section_head']);
+
+/* Colour helpers */
+function scoreColor(pct) {
+  if (pct == null) return '#94a3b8';
+  if (pct >= 70)   return '#10b981';
+  if (pct >= 50)   return '#f59e0b';
+  return '#ef4444';
+}
+function riskColor(pct) {
+  if (pct == null) return '#94a3b8';
+  if (pct <= 10)   return '#10b981';
+  if (pct <= 25)   return '#f59e0b';
+  return '#ef4444';
+}
+
+function LeadershipPanel({ school }) {
+  const [days, setDays] = useState(30);
+
+  const { data: raw, isLoading, isError, refetch } = useQuery({
+    queryKey: ['analytics', 'leadership', days],
+    queryFn:  () => analyticsApi.leadership(days),
+    staleTime: 5 * 60_000,
+    retry: false,   // plan upgrade error should surface immediately, not retry
+  });
+
+  const data = raw?.data ?? raw ?? null;
+
+  const currency       = school?.currency       ?? 'KES';
+  const currencySymbol = school?.currencySymbol ?? 'KSh';
+
+  function fmtC(n) {
+    if (n == null) return '—';
+    try { return new Intl.NumberFormat('en-KE', { style: 'currency', currency, maximumFractionDigits: 0 }).format(n); }
+    catch { return `${currencySymbol} ${new Intl.NumberFormat().format(n)}`; }
+  }
+  function fmt(n) { return n == null ? '—' : new Intl.NumberFormat().format(n); }
+
+  /* Derived */
+  const attendance     = data?.attendanceRisk    ?? [];
+  const fee            = data?.feeExposure       ?? null;
+  const behaviour      = data?.behaviourHeatmap  ?? [];
+  const academic       = data?.academicHealth    ?? [];
+
+  const totalAtRisk   = attendance.reduce((s, r) => s + (r.atRiskCount ?? 0), 0);
+  const totalTracked  = attendance.reduce((s, r) => s + (r.totalStudents ?? 0), 0);
+  const schoolAttRate = totalTracked > 0
+    ? Math.round(attendance.reduce((s, r) => s + (r.avgRate ?? 0) * r.totalStudents, 0) / totalTracked)
+    : null;
+
+  const topBehaviourClasses = behaviour.slice(0, 6);
+  const bMax = Math.max(...topBehaviourClasses.map(b => b.total), 1);
+
+  const academicSorted = [...academic].sort((a, b) => (a.avgScore ?? 0) - (b.avgScore ?? 0));
+  const aMax = Math.max(...academicSorted.map(a => a.avgScore ?? 0), 1);
+
+  if (isError) {
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl px-5 py-4 flex items-center gap-3">
+        <AlertTriangle size={16} className="text-amber-400 shrink-0" />
+        <p className="text-sm text-slate-500 flex-1">Leadership analytics unavailable — premium plan required.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Section header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-violet-600 flex items-center justify-center">
+            <Activity size={13} className="text-white" />
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">Leadership Analytics</h2>
+            <p className="text-xs text-slate-400">
+              {data?.meta?.since ? `From ${new Date(data.meta.since).toLocaleDateString('en-GB', { day:'numeric', month:'short' })}` : 'Loading…'}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Period selector */}
+          <div className="flex bg-slate-100 rounded-lg p-0.5 gap-0.5">
+            {[7, 30, 90].map(d => (
+              <button
+                key={d}
+                onClick={() => setDays(d)}
+                className={`px-2.5 py-1 text-xs rounded-md font-medium transition ${
+                  days === d
+                    ? 'bg-white shadow-sm text-slate-800'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                {d}d
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => refetch()}
+            className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 transition"
+            title="Refresh"
+          >
+            <RefreshCw size={12} />
+          </button>
+        </div>
+      </div>
+
+      {/* 4-panel grid */}
+      <div className="grid lg:grid-cols-2 gap-5">
+
+        {/* ── 1. Attendance Risk ─────────────────────────── */}
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <UserCheck size={14} className="text-slate-400" />
+              <span className="text-sm font-semibold text-slate-700">Attendance Risk</span>
+            </div>
+            <Link to="/attendance" className="text-xs text-slate-400 hover:text-slate-700 transition flex items-center gap-1">
+              View <ArrowRight size={11} />
+            </Link>
+          </div>
+          {isLoading ? (
+            <div className="p-5 space-y-2 animate-pulse">
+              {[...Array(5)].map((_, i) => <div key={i} className="h-7 bg-slate-100 rounded" />)}
+            </div>
+          ) : attendance.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10 text-slate-400 gap-2">
+              <CheckCircle size={24} className="opacity-40" />
+              <p className="text-xs">No attendance data for this period</p>
+            </div>
+          ) : (
+            <div className="px-5 py-4 space-y-3">
+              {/* Top KPIs */}
+              <div className="flex items-center gap-4 pb-3 border-b border-slate-50">
+                <div className="text-center">
+                  <p className="text-xl font-bold tabular-nums"
+                    style={{ color: riskColor(totalTracked > 0 ? Math.round(totalAtRisk / totalTracked * 100) : 0) }}>
+                    {totalAtRisk}
+                  </p>
+                  <p className="text-[10px] text-slate-400">at risk</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xl font-bold text-slate-700 tabular-nums">{schoolAttRate != null ? `${schoolAttRate}%` : '—'}</p>
+                  <p className="text-[10px] text-slate-400">avg rate</p>
+                </div>
+                <div className="flex-1 text-right">
+                  <p className="text-xs text-slate-400">{fmt(totalTracked)} students tracked</p>
+                </div>
+              </div>
+              {/* Per-class list */}
+              <div className="space-y-2">
+                {attendance.slice(0, 6).map(cls => (
+                  <div key={cls.classId} className="flex items-center gap-3">
+                    <p className="text-xs text-slate-600 w-24 truncate shrink-0">{cls.className}</p>
+                    <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{ width: `${cls.avgRate ?? 0}%`, background: riskColor(cls.atRiskPct) }}
+                      />
+                    </div>
+                    <div className="text-right shrink-0 w-20">
+                      <span className="text-xs font-semibold tabular-nums text-slate-700">{cls.avgRate ?? 0}%</span>
+                      {cls.atRiskCount > 0 && (
+                        <span className="ml-1.5 text-[10px] font-medium text-red-500">{cls.atRiskCount} at risk</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── 2. Fee Exposure ────────────────────────────── */}
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <Wallet size={14} className="text-slate-400" />
+              <span className="text-sm font-semibold text-slate-700">Fee Exposure</span>
+            </div>
+            <Link to="/finance" className="text-xs text-slate-400 hover:text-slate-700 transition flex items-center gap-1">
+              View <ArrowRight size={11} />
+            </Link>
+          </div>
+          {isLoading ? (
+            <div className="p-5 space-y-2 animate-pulse">
+              {[...Array(4)].map((_, i) => <div key={i} className="h-8 bg-slate-100 rounded" />)}
+            </div>
+          ) : !fee ? (
+            <div className="flex flex-col items-center justify-center py-10 text-slate-400 gap-2">
+              <CheckCircle size={24} className="opacity-40" />
+              <p className="text-xs">No outstanding invoices</p>
+            </div>
+          ) : (
+            <div className="px-5 py-4 space-y-4">
+              {/* KPI row */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-amber-50 rounded-lg px-4 py-3">
+                  <p className="text-lg font-bold text-amber-700 tabular-nums truncate">{fmtC(fee.totalOutstanding)}</p>
+                  <p className="text-[10px] text-amber-600 mt-0.5">Total outstanding</p>
+                </div>
+                <div className="bg-red-50 rounded-lg px-4 py-3">
+                  <p className="text-lg font-bold text-red-600 tabular-nums truncate">{fmtC(fee.overdueAmount)}</p>
+                  <p className="text-[10px] text-red-500 mt-0.5">Overdue ({fee.overdueCount ?? 0} invoices)</p>
+                </div>
+              </div>
+              {/* Collection progress */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs text-slate-500">Collection rate</span>
+                  <span className="text-xs font-semibold text-slate-700">
+                    {fee.collectionRate != null ? `${fee.collectionRate}%` : '—'}
+                  </span>
+                </div>
+                <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-700"
+                    style={{
+                      width: `${fee.collectionRate ?? 0}%`,
+                      background: fee.collectionRate >= 80 ? '#10b981' : fee.collectionRate >= 60 ? '#f59e0b' : '#ef4444',
+                    }}
+                  />
+                </div>
+              </div>
+              {/* Students owing */}
+              <div className="flex items-center justify-between text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
+                <span>Students with outstanding fees</span>
+                <span className="font-semibold text-slate-700">{fmt(fee.studentsOwing)}</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── 3. Behaviour Heatmap ───────────────────────── */}
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <ShieldAlert size={14} className="text-slate-400" />
+              <span className="text-sm font-semibold text-slate-700">Behaviour</span>
+            </div>
+            <Link to="/behaviour" className="text-xs text-slate-400 hover:text-slate-700 transition flex items-center gap-1">
+              View <ArrowRight size={11} />
+            </Link>
+          </div>
+          {isLoading ? (
+            <div className="p-5 space-y-2 animate-pulse">
+              {[...Array(5)].map((_, i) => <div key={i} className="h-7 bg-slate-100 rounded" />)}
+            </div>
+          ) : behaviour.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10 text-slate-400 gap-2">
+              <Award size={24} className="opacity-40" />
+              <p className="text-xs">No incidents recorded this period</p>
+            </div>
+          ) : (
+            <div className="px-5 py-4 space-y-3">
+              {/* Totals row */}
+              <div className="flex items-center gap-4 pb-3 border-b border-slate-50">
+                <div className="text-center">
+                  <p className="text-xl font-bold text-emerald-600 tabular-nums">
+                    {fmt(behaviour.reduce((s, b) => s + (b.merits ?? 0), 0))}
+                  </p>
+                  <p className="text-[10px] text-slate-400">merits</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xl font-bold text-red-500 tabular-nums">
+                    {fmt(behaviour.reduce((s, b) => s + (b.demerits ?? 0), 0))}
+                  </p>
+                  <p className="text-[10px] text-slate-400">demerits</p>
+                </div>
+                {behaviour.some(b => b.high > 0) && (
+                  <div className="flex-1 flex justify-end">
+                    <span className="text-[10px] font-bold text-red-500 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-full">
+                      {behaviour.reduce((s, b) => s + (b.high ?? 0), 0)} high severity
+                    </span>
+                  </div>
+                )}
+              </div>
+              {/* Per-class heatmap bars */}
+              <div className="space-y-2">
+                {topBehaviourClasses.map(cls => {
+                  const dPct = bMax > 0 ? Math.round((cls.demerits ?? 0) / bMax * 100) : 0;
+                  const mPct = bMax > 0 ? Math.round((cls.merits   ?? 0) / bMax * 100) : 0;
+                  return (
+                    <div key={cls.classId ?? cls._id} className="flex items-center gap-3">
+                      <p className="text-xs text-slate-600 w-24 truncate shrink-0">{cls.className}</p>
+                      <div className="flex-1 flex gap-1">
+                        <div className="h-1.5 rounded-full bg-emerald-400 transition-all duration-500" style={{ width: `${mPct}%` }} />
+                        <div className="h-1.5 rounded-full bg-red-400 transition-all duration-500" style={{ width: `${dPct}%` }} />
+                      </div>
+                      <div className="text-right shrink-0 w-24 text-xs tabular-nums text-slate-500">
+                        <span className="text-emerald-600 font-medium">+{cls.merits ?? 0}</span>
+                        {' / '}
+                        <span className="text-red-500 font-medium">−{cls.demerits ?? 0}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── 4. Academic Health ─────────────────────────── */}
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <GraduationCap size={14} className="text-slate-400" />
+              <span className="text-sm font-semibold text-slate-700">Academic Health</span>
+              <span className="text-[10px] text-slate-400">(published grades)</span>
+            </div>
+            <Link to="/grades" className="text-xs text-slate-400 hover:text-slate-700 transition flex items-center gap-1">
+              View <ArrowRight size={11} />
+            </Link>
+          </div>
+          {isLoading ? (
+            <div className="p-5 space-y-2 animate-pulse">
+              {[...Array(5)].map((_, i) => <div key={i} className="h-7 bg-slate-100 rounded" />)}
+            </div>
+          ) : academic.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10 text-slate-400 gap-2">
+              <BookOpen size={24} className="opacity-40" />
+              <p className="text-xs">No published grades yet</p>
+            </div>
+          ) : (
+            <div className="px-5 py-4 space-y-3">
+              {/* Overall average */}
+              {academic.length > 0 && (() => {
+                const overall = Math.round(academic.reduce((s, a) => s + (a.avgScore ?? 0), 0) / academic.length);
+                return (
+                  <div className="flex items-center gap-4 pb-3 border-b border-slate-50">
+                    <div className="text-center">
+                      <p className="text-xl font-bold tabular-nums" style={{ color: scoreColor(overall) }}>{overall}%</p>
+                      <p className="text-[10px] text-slate-400">school avg</p>
+                    </div>
+                    <div className="flex-1">
+                      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${overall}%`, background: scoreColor(overall) }} />
+                      </div>
+                    </div>
+                    {academicSorted[0] && academicSorted[0].avgScore < 50 && (
+                      <span className="text-[10px] font-bold text-red-500 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-full shrink-0">
+                        {academicSorted.filter(a => a.avgScore < 50).length} below 50%
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+              {/* Per-class bars — worst first */}
+              <div className="space-y-2">
+                {academicSorted.slice(0, 6).map(cls => (
+                  <div key={cls.classId} className="flex items-center gap-3">
+                    <p className="text-xs text-slate-600 w-24 truncate shrink-0">{cls.className}</p>
+                    <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{ width: `${cls.avgScore ?? 0}%`, background: scoreColor(cls.avgScore) }}
+                      />
+                    </div>
+                    <div className="text-right shrink-0 w-16">
+                      <span
+                        className="text-xs font-semibold tabular-nums"
+                        style={{ color: scoreColor(cls.avgScore) }}
+                      >
+                        {cls.avgScore ?? 0}%
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /* ── Quick Actions ────────────────────────────────────────── */

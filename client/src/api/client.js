@@ -489,6 +489,11 @@ export const growthProfile = {
   },
 };
 
+export const analytics = {
+  /** Leadership snapshot: attendance risk, fee exposure, behaviour, academic health */
+  leadership: (days = 30) => _get('/analytics/leadership', { days }),
+};
+
 export const bellSchedule = {
   /** Fetch a section's schedule. Falls back: section → 'all' → hardcoded default. */
   get:      (section = 'all') => _get('/bell-schedule', { section }),
@@ -529,6 +534,7 @@ const api = {
   teachingAssignments,
   importExport,
   growthProfile,
+  analytics,
   APIError,
 };
 

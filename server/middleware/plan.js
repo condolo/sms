@@ -45,6 +45,7 @@ const FEATURE_PLAN = {
   growth_profile:     'standard',   // verified learner development portfolio
 
   /* ── Premium ── */
+  analytics:          'premium',   // leadership analytics dashboard
   reports:            'premium',
   custom_roles:       'premium',
   hr:                 'premium',
