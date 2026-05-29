@@ -14,6 +14,7 @@ import {
   Eye, EyeOff, Lock, ShieldCheck, Database, Download,
   RefreshCcw, Info, Server, Check, Minus, ChevronDown,
   CreditCard, Smartphone, Zap, ArrowRight, Layers, Pencil,
+  Bell, MessageSquare, BookOpen, Calendar, Clock,
 } from 'lucide-react';
 import { sections as sectionsApi } from '@/api/client.js';
 import { settings as settingsApi } from '@/api/client.js';
@@ -21,12 +22,13 @@ import useAuthStore from '@/store/auth.js';
 
 /* ── Tab config ─────────────────────────────────────────────── */
 const TABS = [
-  { id: 'school',       label: 'School',              Icon: Building2,  adminOnly: false },
-  { id: 'subscription', label: 'Subscription',        Icon: CreditCard, adminOnly: true  },
-  { id: 'users',        label: 'Users',               Icon: Users,       adminOnly: true  },
-  { id: 'roles',        label: 'Roles & Permissions', Icon: ShieldCheck, adminOnly: true  },
-  { id: 'system',       label: 'System',              Icon: Database,    adminOnly: true  },
-  { id: 'account',      label: 'Account',             Icon: User,        adminOnly: false },
+  { id: 'school',         label: 'School',              Icon: Building2,  adminOnly: false },
+  { id: 'subscription',   label: 'Subscription',        Icon: CreditCard, adminOnly: true  },
+  { id: 'users',          label: 'Users',               Icon: Users,       adminOnly: true  },
+  { id: 'roles',          label: 'Roles & Permissions', Icon: ShieldCheck, adminOnly: true  },
+  { id: 'notifications',  label: 'Notifications',       Icon: Bell,        adminOnly: true  },
+  { id: 'system',         label: 'System',              Icon: Database,    adminOnly: true  },
+  { id: 'account',        label: 'Account',             Icon: User,        adminOnly: false },
 ];
 
 /* ── Role pills ─────────────────────────────────────────────── */
@@ -1903,6 +1905,445 @@ function DataAction({ icon, title, desc, buttonLabel, buttonColor, loading, onCl
 }
 
 /* ══════════════════════════════════════════════════════════════
+   NOTIFICATIONS TAB
+   Per-event, per-channel notification configuration matrix.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Event registry (mirrors server/utils/notif-settings.js) ── */
+const NOTIF_GROUPS = [
+  { key: 'communication', label: 'Communication',      Icon: MessageSquare },
+  { key: 'academic',      label: 'Academic',            Icon: BookOpen      },
+  { key: 'finance',       label: 'Finance',             Icon: CreditCard    },
+  { key: 'attendance',    label: 'Attendance',          Icon: Calendar      },
+  { key: 'account',       label: 'Account & Security',  Icon: Shield        },
+];
+
+const NOTIF_EVENTS = [
+  /* Communication */
+  {
+    key: 'new_message', group: 'communication',
+    label: 'New Message',
+    desc:  'When a user receives a direct or group message',
+    audience: ['staff', 'parents'],
+    channels: ['email', 'inApp'],
+    implemented: true,
+  },
+  {
+    key: 'announcement', group: 'communication',
+    label: 'School Announcement',
+    desc:  'When a school-wide announcement is posted',
+    audience: ['staff', 'parents', 'students'],
+    channels: ['email', 'inApp'],
+    implemented: false,
+  },
+  /* Academic */
+  {
+    key: 'assessment_reminder', group: 'academic',
+    label: 'Assessment Reminder',
+    desc:  'Reminder for upcoming or overdue teacher assessments',
+    audience: ['staff'],
+    channels: ['email', 'inApp'],
+    implemented: true,
+  },
+  {
+    key: 'report_published', group: 'academic',
+    label: 'Report Cards Published',
+    desc:  'When report cards are released for a term',
+    audience: ['parents', 'students'],
+    channels: ['email', 'inApp'],
+    implemented: false,
+  },
+  {
+    key: 'exam_results', group: 'academic',
+    label: 'Exam Results Released',
+    desc:  'When exam results are published for a class',
+    audience: ['parents', 'students'],
+    channels: ['email', 'inApp'],
+    implemented: false,
+  },
+  /* Finance */
+  {
+    key: 'invoice_created', group: 'finance',
+    label: 'Invoice Generated',
+    desc:  'When a new fee invoice is created for a student',
+    audience: ['parents'],
+    channels: ['email', 'inApp'],
+    implemented: false,
+  },
+  {
+    key: 'payment_received', group: 'finance',
+    label: 'Payment Received',
+    desc:  'Payment receipt sent after a fee payment is recorded',
+    audience: ['parents'],
+    channels: ['email', 'inApp'],
+    implemented: false,
+  },
+  {
+    key: 'invoice_overdue', group: 'finance',
+    label: 'Overdue Invoice Reminder',
+    desc:  'Reminder for unpaid invoices past their due date',
+    audience: ['parents'],
+    channels: ['email', 'inApp'],
+    implemented: false,
+  },
+  /* Attendance */
+  {
+    key: 'absence_alert', group: 'attendance',
+    label: 'Absence Alert',
+    desc:  'Sent to parents when a student is marked absent',
+    audience: ['parents'],
+    channels: ['email', 'inApp'],
+    implemented: false,
+  },
+  {
+    key: 'attendance_summary', group: 'attendance',
+    label: 'Daily Attendance Summary',
+    desc:  'End-of-day attendance summary report for administrators',
+    audience: ['staff'],
+    channels: ['email', 'inApp'],
+    implemented: false,
+  },
+  /* Account */
+  {
+    key: 'welcome_user', group: 'account',
+    label: 'Welcome / Account Created',
+    desc:  'Login credentials email sent to newly invited users',
+    audience: ['staff', 'parents'],
+    channels: ['email'],
+    alwaysOn: true,
+    implemented: true,
+  },
+  {
+    key: 'role_changed', group: 'account',
+    label: 'Role or Permission Changed',
+    desc:  'Notifies a user when their role or access level is updated',
+    audience: ['staff'],
+    channels: ['email', 'inApp'],
+    alwaysOn: true,
+    implemented: true,
+  },
+  {
+    key: 'password_expiry', group: 'account',
+    label: 'Password Expiry Warning',
+    desc:  'Security reminder sent before a user\'s password expires',
+    audience: ['staff'],
+    channels: ['email'],
+    alwaysOn: true,
+    implemented: true,
+  },
+];
+
+/* Defaults for events when the school has no saved setting */
+const NOTIF_DEFAULTS = {
+  new_message:          { email: true,  inApp: true  },
+  announcement:         { email: true,  inApp: true  },
+  assessment_reminder:  { email: true,  inApp: false },
+  report_published:     { email: true,  inApp: true  },
+  exam_results:         { email: true,  inApp: true  },
+  invoice_created:      { email: true,  inApp: true  },
+  payment_received:     { email: true,  inApp: true  },
+  invoice_overdue:      { email: true,  inApp: false },
+  absence_alert:        { email: true,  inApp: true  },
+  attendance_summary:   { email: false, inApp: true  },
+  welcome_user:         { email: true,  inApp: false },
+  role_changed:         { email: true,  inApp: true  },
+  password_expiry:      { email: true,  inApp: false },
+};
+
+const AUDIENCE_PILL = {
+  staff:    'bg-violet-50 text-violet-700 border-violet-200',
+  parents:  'bg-emerald-50 text-emerald-700 border-emerald-200',
+  students: 'bg-amber-50 text-amber-700 border-amber-200',
+};
+
+const CHANNEL_META = {
+  email: { label: 'Email', Icon: Mail },
+  inApp: { label: 'In-App', Icon: Bell },
+};
+
+/* ── Toggle switch primitive ─────────────────────────────── */
+function Toggle({ checked, onChange, disabled = false }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => !disabled && onChange(!checked)}
+      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-slate-400
+        ${disabled ? 'opacity-40 cursor-not-allowed' :  'cursor-pointer'}
+        ${checked ? 'bg-slate-800' : 'bg-slate-200'}`}
+    >
+      <span
+        className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform
+          ${checked ? 'translate-x-4.5' : 'translate-x-0.5'}`}
+      />
+    </button>
+  );
+}
+
+function NotificationsTab() {
+  const qc = useQueryClient();
+  const [toast, setToast] = useState(null);
+  const showT = (msg, type = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3500);
+  };
+
+  /* ── Load current settings ─────────────────────────────── */
+  const { data, isLoading } = useQuery({
+    queryKey: ['settings', 'notifications'],
+    queryFn:  () => settingsApi.notifications.get(),
+    staleTime: 30_000,
+  });
+
+  /* ── Local editable state ──────────────────────────────── */
+  const [cfg, setCfg] = useState(null);
+
+  // Initialise local state from server data
+  const serverCfg = data?.data;
+  const [initialised, setInitialised] = useState(false);
+  if (serverCfg && !initialised) {
+    // Merge server data with defaults for any missing keys
+    const merged = {};
+    for (const ev of NOTIF_EVENTS) {
+      merged[ev.key] = { ...NOTIF_DEFAULTS[ev.key], ...(serverCfg[ev.key] ?? {}) };
+    }
+    setCfg(merged);
+    setInitialised(true);
+  }
+
+  /* ── Save mutation ─────────────────────────────────────── */
+  const { mutate: save, isPending: saving } = useMutation({
+    mutationFn: () => settingsApi.notifications.update(cfg),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings', 'notifications'] });
+      showT('Notification settings saved.');
+    },
+    onError: err => showT(err?.message ?? 'Failed to save settings.', 'error'),
+  });
+
+  /* ── Toggle a single channel for an event ──────────────── */
+  function toggle(eventKey, channel, val) {
+    setCfg(prev => ({
+      ...prev,
+      [eventKey]: { ...prev[eventKey], [channel]: val },
+    }));
+  }
+
+  /* ── Dirty check ────────────────────────────────────────── */
+  const isDirty = cfg && serverCfg
+    ? JSON.stringify(cfg) !== JSON.stringify(
+        Object.fromEntries(
+          NOTIF_EVENTS.map(ev => [
+            ev.key,
+            { ...NOTIF_DEFAULTS[ev.key], ...(serverCfg[ev.key] ?? {}) },
+          ])
+        )
+      )
+    : false;
+
+  const activeCfg = cfg ?? NOTIF_DEFAULTS;
+
+  return (
+    <div className="space-y-6">
+      {/* Toast */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+            className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg text-sm font-medium
+              ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-slate-900 text-white'}`}
+          >
+            {toast.type === 'error' ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}
+            {toast.msg}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Page header */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-base font-semibold text-slate-900">Notification Settings</h2>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Control which events trigger notifications and through which channels.
+          </p>
+        </div>
+        <button
+          onClick={() => save()}
+          disabled={!isDirty || saving || isLoading}
+          className="btn-primary btn-sm flex items-center gap-1.5"
+        >
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+          {saving ? 'Saving…' : 'Save changes'}
+        </button>
+      </div>
+
+      {/* Channel legend */}
+      <div className="flex items-center gap-6 px-4 py-3 bg-slate-50 rounded-xl border border-slate-200">
+        <p className="text-xs text-slate-500 font-medium">Channels:</p>
+        {Object.entries(CHANNEL_META).map(([ch, { label, Icon }]) => (
+          <div key={ch} className="flex items-center gap-1.5 text-xs text-slate-600">
+            <Icon size={13} className="text-slate-400" />
+            <span className="font-medium">{label}</span>
+            <span className="text-slate-400">— sent directly to users</span>
+          </div>
+        ))}
+        <div className="ml-auto flex items-center gap-1.5 text-xs text-slate-400">
+          <Lock size={11} />
+          Always on — security events
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-4">
+          {[1,2,3,4,5].map(i => (
+            <div key={i} className="h-32 bg-slate-100 rounded-xl animate-pulse" />
+          ))}
+        </div>
+      ) : (
+        NOTIF_GROUPS.map(group => {
+          const groupEvents = NOTIF_EVENTS.filter(ev => ev.group === group.key);
+          if (!groupEvents.length) return null;
+          const { Icon: GIcon } = group;
+
+          return (
+            <div key={group.key} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              {/* Group header */}
+              <div className="flex items-center gap-2.5 px-5 py-3.5 bg-slate-50 border-b border-slate-200">
+                <GIcon size={14} className="text-slate-500" />
+                <h3 className="text-sm font-semibold text-slate-700">{group.label}</h3>
+              </div>
+
+              {/* Events */}
+              <div className="divide-y divide-slate-100">
+                {groupEvents.map((ev, idx) => {
+                  const evCfg = activeCfg[ev.key] ?? NOTIF_DEFAULTS[ev.key] ?? {};
+
+                  return (
+                    <div
+                      key={ev.key}
+                      className={`flex items-center gap-4 px-5 py-4 transition-colors
+                        ${ev.alwaysOn ? 'bg-slate-50/40' : 'hover:bg-slate-50/50'}`}
+                    >
+                      {/* Left — event info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-medium text-slate-800">{ev.label}</p>
+                          {ev.alwaysOn && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-amber-50 text-amber-700 border-amber-200">
+                              <Lock size={9} />
+                              Always on
+                            </span>
+                          )}
+                          {!ev.implemented && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-sky-50 text-sky-700 border-sky-200">
+                              <Clock size={9} />
+                              Coming soon
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-400 mt-0.5">{ev.desc}</p>
+                        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                          {ev.audience.map(a => (
+                            <span
+                              key={a}
+                              className={`inline-flex text-[10px] font-medium px-1.5 py-0.5 rounded border capitalize ${AUDIENCE_PILL[a] ?? 'bg-slate-100 text-slate-600 border-slate-200'}`}
+                            >
+                              {a}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Right — channel toggles */}
+                      <div className="flex items-center gap-6 shrink-0">
+                        {(['email', 'inApp']).map(ch => {
+                          const { label: chLabel, Icon: ChIcon } = CHANNEL_META[ch];
+                          const hasChannel = ev.channels.includes(ch);
+                          const isOn = ev.alwaysOn ? (ch === 'email') : (evCfg[ch] ?? false);
+
+                          if (!hasChannel) {
+                            return (
+                              <div key={ch} className="w-[72px] flex flex-col items-center gap-1 opacity-20 select-none">
+                                <ChIcon size={13} className="text-slate-400" />
+                                <span className="text-[10px] text-slate-400">{chLabel}</span>
+                                <div className="h-5 w-9 rounded-full bg-slate-100" />
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div key={ch} className="w-[72px] flex flex-col items-center gap-1">
+                              <ChIcon size={13} className={isOn ? 'text-slate-600' : 'text-slate-300'} />
+                              <span className={`text-[10px] font-medium ${isOn ? 'text-slate-600' : 'text-slate-400'}`}>
+                                {chLabel}
+                              </span>
+                              {ev.alwaysOn ? (
+                                <div className="flex items-center gap-1">
+                                  <div className="h-5 w-9 rounded-full bg-slate-800 flex items-center justify-end pr-0.5">
+                                    <span className="inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm" />
+                                  </div>
+                                  <Lock size={9} className="text-slate-400" />
+                                </div>
+                              ) : (
+                                <Toggle
+                                  checked={isOn}
+                                  onChange={val => toggle(ev.key, ch, val)}
+                                  disabled={!ev.implemented && false}
+                                />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })
+      )}
+
+      {/* Bottom save bar — appears when there are unsaved changes */}
+      <AnimatePresence>
+        {isDirty && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 16 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-5 py-3 bg-slate-900 text-white rounded-2xl shadow-2xl text-sm"
+          >
+            <span className="text-slate-300">You have unsaved notification changes</span>
+            <button
+              onClick={() => {
+                const merged = {};
+                for (const ev of NOTIF_EVENTS) {
+                  merged[ev.key] = { ...NOTIF_DEFAULTS[ev.key], ...(serverCfg?.[ev.key] ?? {}) };
+                }
+                setCfg(merged);
+              }}
+              className="text-slate-400 hover:text-white transition text-xs px-2 py-1 rounded-lg hover:bg-slate-800"
+            >
+              Discard
+            </button>
+            <button
+              onClick={() => save()}
+              disabled={saving}
+              className="flex items-center gap-1.5 bg-white text-slate-900 hover:bg-slate-100 transition px-3 py-1.5 rounded-lg text-xs font-semibold"
+            >
+              {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
    MAIN PAGE
    ══════════════════════════════════════════════════════════════ */
 export default function SettingsPage() {
@@ -1949,12 +2390,13 @@ export default function SettingsPage() {
             exit={{ opacity: 0, y: -6 }}
             transition={{ duration: 0.15 }}
           >
-            {tab === 'school'        && <SchoolTab />}
-            {tab === 'subscription'  && <SubscriptionTab />}
-            {tab === 'users'         && <UsersTab />}
-            {tab === 'roles'         && <RolesTab />}
-            {tab === 'system'        && <SystemTab />}
-            {tab === 'account'       && <AccountTab />}
+            {tab === 'school'         && <SchoolTab />}
+            {tab === 'subscription'   && <SubscriptionTab />}
+            {tab === 'users'          && <UsersTab />}
+            {tab === 'roles'          && <RolesTab />}
+            {tab === 'notifications'  && <NotificationsTab />}
+            {tab === 'system'         && <SystemTab />}
+            {tab === 'account'        && <AccountTab />}
           </motion.div>
         </AnimatePresence>
       </div>

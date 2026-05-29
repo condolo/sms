@@ -10,6 +10,7 @@ const { v4: uuidv4 } = require('uuid');
 const { authMiddleware }   = require('../middleware/auth');
 const { tenantMiddleware } = require('../middleware/tenant');
 const email = require('../utils/email');
+const notif = require('../utils/notif-settings');
 
 const router = express.Router();
 router.use(authMiddleware, tenantMiddleware);
@@ -120,6 +121,9 @@ router.post('/', async (req, res) => {
     const isDirect    = type === 'direct';
     const notifyJobs  = [];
 
+    // Check once whether email notifications are enabled for this school
+    const emailEnabled = await notif.isEnabled(schoolId, 'new_message', 'email');
+
     for (const recipient of recipientList) {
       if (recipient === 'all') {
         // Notify all active users in the school (except sender)
@@ -127,7 +131,7 @@ router.post('/', async (req, res) => {
           schoolId, isActive: true, id: { $ne: userId }
         }).lean();
         for (const u of targets) {
-          if (u.email) {
+          if (u.email && emailEnabled) {
             notifyJobs.push(email.sendMessageNotification({
               recipientName:  u.name,
               recipientEmail: u.email,
@@ -150,7 +154,7 @@ router.post('/', async (req, res) => {
           id:   { $ne: userId }
         }).lean();
         for (const u of targets) {
-          if (u.email) {
+          if (u.email && emailEnabled) {
             notifyJobs.push(email.sendMessageNotification({
               recipientName:  u.name,
               recipientEmail: u.email,
@@ -167,7 +171,7 @@ router.post('/', async (req, res) => {
       } else {
         // Direct — single user by ID
         const target = await User.findOne({ id: recipient, schoolId }).lean();
-        if (target?.email) {
+        if (target?.email && emailEnabled) {
           notifyJobs.push(email.sendMessageNotification({
             recipientName:  target.name,
             recipientEmail: target.email,

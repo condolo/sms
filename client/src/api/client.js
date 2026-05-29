@@ -336,6 +336,10 @@ export const settings = {
     update: (id, data) => _put(`/settings/users/${id}`, data),
     remove: (id)       => _delete(`/settings/users/${id}`),
   },
+  notifications: {
+    get:    ()       => _get('/settings/notifications'),
+    update: (data)   => _put('/settings/notifications', data),
+  },
 };
 
 export const departments = _resource('departments');

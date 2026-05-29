@@ -14,6 +14,7 @@ const bcrypt   = require('bcryptjs');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
 const emailUtil          = require('../utils/email');
+const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY } = require('../utils/notif-settings');
 
 const router = express.Router();
 
@@ -319,6 +320,81 @@ router.delete('/users/:id', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('[settings] DELETE /users/:id error:', err);
     res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to remove user' } });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   NOTIFICATION SETTINGS
+   GET  /api/settings/notifications — return per-event channel config
+   PUT  /api/settings/notifications — save per-event channel config
+   ══════════════════════════════════════════════════════════════ */
+
+/* GET /api/settings/notifications */
+router.get('/notifications', authMiddleware, async (req, res) => {
+  try {
+    if (!_isAdmin(req)) {
+      return res.status(403).json({ error: 'Admin access required.' });
+    }
+    const School = _model('schools');
+    const school = await School.findOne(
+      { id: req.jwtUser.schoolId },
+      { notificationSettings: 1 }
+    ).lean();
+
+    // Merge saved settings with defaults so the response always has
+    // the full event list (new events added to registry appear immediately)
+    const saved   = school?.notificationSettings ?? {};
+    const merged  = {};
+    for (const [key, def] of Object.entries(NOTIF_DEFAULTS)) {
+      merged[key] = { ...def, ...(saved[key] ?? {}) };
+    }
+
+    res.json({ data: merged });
+  } catch (err) {
+    console.error('[settings] GET /notifications error:', err);
+    res.status(500).json({ error: 'Failed to load notification settings' });
+  }
+});
+
+/* PUT /api/settings/notifications */
+router.put('/notifications', authMiddleware, async (req, res) => {
+  try {
+    if (!_isAdmin(req)) {
+      return res.status(403).json({ error: 'Admin access required.' });
+    }
+
+    const updates = req.body;
+    if (typeof updates !== 'object' || updates === null) {
+      return res.status(400).json({ error: 'Invalid notification settings payload' });
+    }
+
+    // Validate: only known event keys, only boolean channel values
+    // Always-on events are never stored (always true at runtime)
+    const sanitised = {};
+    for (const [key, channels] of Object.entries(updates)) {
+      if (!EVENT_REGISTRY[key]) continue;          // unknown event → skip
+      if (EVENT_REGISTRY[key].alwaysOn) continue;  // always-on → not stored
+      if (typeof channels !== 'object' || channels === null) continue;
+      const cleanChannels = {};
+      for (const ch of ['email', 'inApp']) {
+        if (typeof channels[ch] === 'boolean') {
+          cleanChannels[ch] = channels[ch];
+        }
+      }
+      if (Object.keys(cleanChannels).length) {
+        sanitised[key] = cleanChannels;
+      }
+    }
+
+    await _model('schools').updateOne(
+      { id: req.jwtUser.schoolId },
+      { $set: { notificationSettings: sanitised, updatedAt: new Date().toISOString() } }
+    );
+
+    res.json({ success: true, data: sanitised });
+  } catch (err) {
+    console.error('[settings] PUT /notifications error:', err);
+    res.status(500).json({ error: 'Failed to save notification settings' });
   }
 });
 
