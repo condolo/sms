@@ -46,7 +46,7 @@ function _genTempPassword() {
 const SCHOOL_UPDATABLE = [
   'name', 'tagline', 'email', 'phone', 'address', 'website',
   'country', 'currency', 'timezone', 'academicYear', 'termsPerYear',
-  'houses', 'shortName', 'primaryColor', 'logoUrl', 'modulePermissions',
+  'houses', 'shortName', 'primaryColor', 'accentColor', 'themePreset', 'logoUrl', 'modulePermissions',
   'mpesa',
 ];
 

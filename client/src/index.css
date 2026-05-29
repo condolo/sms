@@ -84,6 +84,30 @@
   }
 }
 
+/* ── Login page — animated gradient + floating shapes ───────── */
+@keyframes msingiGradientShift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+@keyframes msingiFloat1 {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50%       { transform: translateY(-24px) rotate(6deg); }
+}
+@keyframes msingiFloat2 {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50%       { transform: translateY(18px) rotate(-4deg); }
+}
+@keyframes msingiFloat3 {
+  0%, 100% { transform: translateY(0px) scale(1); }
+  33%       { transform: translateY(-14px) scale(1.04); }
+  66%       { transform: translateY(10px) scale(0.97); }
+}
+@keyframes msingSpin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
 /* ── Print styles — timetable portal ────────────────────────── */
 @media print {
   /* Hide everything except the timetable content */

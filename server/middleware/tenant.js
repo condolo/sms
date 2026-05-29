@@ -78,6 +78,7 @@ async function _findSchool(filter) {
       /* ── Fields used by client modules ── */
       currency,
       currencySymbol: doc.currencySymbol || CURRENCY_SYMBOLS[currency] || currency,
+      themePreset:    doc.themePreset    || null,
       timezone:       doc.timezone       || 'Africa/Nairobi',
       country:        doc.country        || null,
       academicYear:   doc.academicYear   || null,

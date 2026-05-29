@@ -440,6 +440,126 @@ function SchoolTab() {
         </div>
       </div>
 
+      {/* ── Login Appearance ──────────────────────────────────── */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+        <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+          <Palette size={14} className="text-slate-400" />
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Login Page Appearance</h3>
+        </div>
+        <p className="text-xs text-slate-400">
+          Choose a colour theme for your school's login page gradient. Staff and students see this every time they sign in.
+        </p>
+
+        {/* Preset swatches */}
+        <div>
+          <label className="text-xs font-medium text-slate-600 mb-2 block">Theme presets</label>
+          <div className="grid grid-cols-4 gap-2">
+            {[
+              { id: 'violet',   name: 'Violet',    p: '#4f46e5', a: '#7c3aed' },
+              { id: 'ocean',    name: 'Ocean',     p: '#0369a1', a: '#0891b2' },
+              { id: 'forest',   name: 'Forest',    p: '#059669', a: '#0d9488' },
+              { id: 'sunset',   name: 'Sunset',    p: '#ea580c', a: '#ef4444' },
+              { id: 'midnight', name: 'Midnight',  p: '#1e3a5f', a: '#1e1b4b' },
+              { id: 'rose',     name: 'Rose',      p: '#e11d48', a: '#9f1239' },
+              { id: 'gold',     name: 'Gold',      p: '#b45309', a: '#92400e' },
+              { id: 'slate',    name: 'Slate',     p: '#475569', a: '#334155' },
+            ].map(({ id, name, p, a }) => {
+              const isActive = (f.themePreset === id) || (!f.themePreset && id === 'violet');
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => { set('themePreset', id); set('primaryColor', p); set('accentColor', a); }}
+                  className={`relative rounded-xl overflow-hidden h-14 transition-all ${
+                    isActive ? 'ring-2 ring-offset-2 ring-slate-900 scale-105' : 'hover:scale-105 hover:shadow-md'
+                  }`}
+                  title={name}
+                  style={{
+                    background: `linear-gradient(-45deg, ${p}, ${a}, ${p}cc, ${a}99)`,
+                    backgroundSize: '200% 200%',
+                    animation: 'msingiGradientShift 4s ease infinite',
+                  }}
+                >
+                  {isActive && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="w-5 h-5 rounded-full bg-white/80 flex items-center justify-center">
+                        <Check size={10} className="text-slate-800" />
+                      </div>
+                    </div>
+                  )}
+                  <span className="absolute bottom-1.5 left-0 right-0 text-center text-[9px] font-semibold text-white/80 tracking-wide">
+                    {name}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Custom colour pickers */}
+        <div className="grid grid-cols-2 gap-4 pt-1">
+          <div>
+            <label className="text-xs font-medium text-slate-600 mb-1.5 block">Primary colour</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={f.primaryColor ?? '#4f46e5'}
+                onChange={e => { set('primaryColor', e.target.value); set('themePreset', 'custom'); }}
+                className="w-9 h-9 rounded-lg cursor-pointer border border-slate-200 p-0.5"
+              />
+              <input
+                type="text"
+                value={f.primaryColor ?? '#4f46e5'}
+                onChange={e => { if (/^#[0-9A-Fa-f]{0,6}$/.test(e.target.value)) { set('primaryColor', e.target.value); set('themePreset', 'custom'); } }}
+                className="flex-1 text-xs font-mono px-2 py-1.5 rounded-lg border border-slate-200 text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                maxLength={7}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 mb-1.5 block">Accent colour</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={f.accentColor ?? '#7c3aed'}
+                onChange={e => { set('accentColor', e.target.value); set('themePreset', 'custom'); }}
+                className="w-9 h-9 rounded-lg cursor-pointer border border-slate-200 p-0.5"
+              />
+              <input
+                type="text"
+                value={f.accentColor ?? '#7c3aed'}
+                onChange={e => { if (/^#[0-9A-Fa-f]{0,6}$/.test(e.target.value)) { set('accentColor', e.target.value); set('themePreset', 'custom'); } }}
+                className="flex-1 text-xs font-mono px-2 py-1.5 rounded-lg border border-slate-200 text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                maxLength={7}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Live mini-preview */}
+        <div>
+          <label className="text-xs font-medium text-slate-600 mb-1.5 block">Preview</label>
+          <div
+            className="h-16 rounded-xl relative overflow-hidden"
+            style={{
+              background: `linear-gradient(-45deg, ${f.primaryColor ?? '#4f46e5'}, ${f.accentColor ?? '#7c3aed'}, ${f.primaryColor ?? '#4f46e5'}cc, ${f.accentColor ?? '#7c3aed'}99)`,
+              backgroundSize: '400% 400%',
+              animation: 'msingiGradientShift 5s ease infinite',
+            }}
+          >
+            <div className="absolute inset-0 flex items-center gap-3 px-4">
+              <div className="w-8 h-8 rounded-xl bg-white/25 flex items-center justify-center text-white text-xs font-bold shrink-0">
+                {(school.shortName ?? school.name ?? 'S').charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <p className="text-white text-xs font-semibold leading-tight">{school.name ?? 'Your School'}</p>
+                <p className="text-white/60 text-[10px]">Login page gradient preview</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Houses */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
         <div className="flex items-center gap-2 pb-2 border-b border-slate-100">

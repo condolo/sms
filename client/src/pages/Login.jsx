@@ -336,77 +336,134 @@ export default function Login() {
     );
   }
 
-  // ─── Left panel ─────────────────────────────────────────────────────────────
+  // ─── Left panel — animated gradient with floating shapes ───────────────────
   function LeftPanel() {
+    // 4-stop gradient: primary → accent → primary (slightly transparent) → accent (slightly transparent)
+    // This gives the slow-shift illusion from the competitor screenshots
+    const g1 = primary;
+    const g2 = accent;
+    const g3 = primary + 'cc';   // ~80% opacity variant
+    const g4 = accent  + '99';   // ~60% opacity variant
+
     return (
       <div
-        className="hidden lg:flex lg:w-5/12 flex-col justify-between p-10"
-        style={{ background: `linear-gradient(135deg, ${primary}, ${accent})` }}
+        className="hidden lg:flex lg:w-5/12 flex-col relative overflow-hidden"
+        style={{
+          background: `linear-gradient(-45deg, ${g1}, ${g2}, ${g3}, ${g4})`,
+          backgroundSize: '400% 400%',
+          animation: 'msingiGradientShift 12s ease infinite',
+        }}
       >
-        {/* School logo / identity */}
-        <div className="flex items-center gap-4">
-          {logoUrl ? (
-            <img src={logoUrl} alt={shortName} className="h-14 w-14 rounded-2xl object-contain bg-white/10 p-1" />
-          ) : (
-            <div
-              className="flex h-14 w-14 items-center justify-center rounded-2xl text-white font-bold text-xl"
-              style={{ background: 'rgba(255,255,255,0.2)' }}
-            >
-              {initials}
+        {/* ── Floating decorative blobs ───────────────────────── */}
+        <div
+          className="absolute -top-24 -right-24 w-96 h-96 rounded-full bg-white/8 blur-sm pointer-events-none"
+          style={{ animation: 'msingiFloat1 9s ease-in-out infinite' }}
+        />
+        <div
+          className="absolute top-1/3 -left-20 w-64 h-64 rounded-full bg-white/6 pointer-events-none"
+          style={{ animation: 'msingiFloat2 11s ease-in-out infinite' }}
+        />
+        <div
+          className="absolute bottom-24 right-10 w-40 h-40 rounded-full bg-white/10 pointer-events-none"
+          style={{ animation: 'msingiFloat3 7s ease-in-out infinite' }}
+        />
+        <div
+          className="absolute bottom-0 left-1/2 -translate-x-1/2 w-72 h-72 rounded-full bg-white/5 blur-md pointer-events-none"
+          style={{ animation: 'msingiFloat1 14s ease-in-out infinite reverse' }}
+        />
+
+        {/* ── Content ─────────────────────────────────────────── */}
+        <div className="relative flex flex-col justify-between h-full p-10">
+
+          {/* Top — logo + school name */}
+          <div className="flex flex-col items-center text-center pt-4">
+            {/* Logo with soft glow ring */}
+            <div className="relative mb-5">
+              <div
+                className="absolute inset-0 rounded-3xl blur-2xl scale-125 opacity-40 bg-white"
+                aria-hidden="true"
+              />
+              {logoUrl ? (
+                <img
+                  src={logoUrl}
+                  alt={shortName}
+                  className="relative h-28 w-28 rounded-3xl object-contain bg-white/20 p-3 shadow-2xl"
+                />
+              ) : (
+                <div
+                  className="relative h-28 w-28 rounded-3xl bg-white/20 flex items-center justify-center text-white text-4xl font-black shadow-2xl select-none"
+                >
+                  {initials}
+                </div>
+              )}
             </div>
-          )}
-          <div>
-            <p className="text-white font-bold text-xl leading-tight">{schoolName}</p>
-            {slug && <p className="text-white/60 text-sm mt-0.5">Powered by Msingi</p>}
+            <h1 className="text-2xl font-bold text-white tracking-tight leading-tight drop-shadow-sm">
+              {schoolName}
+            </h1>
+            {branding?.tagline && (
+              <p className="text-white/65 text-sm mt-2 italic font-light leading-relaxed max-w-xs">
+                {branding.tagline}
+              </p>
+            )}
           </div>
-        </div>
 
-        {/* Tagline / content */}
-        <div>
-          {slug === 'demo' ? (
-            <>
-              <p className="text-xs font-semibold uppercase tracking-widest text-white/50 mb-4">Interactive Demo</p>
-              <blockquote className="text-2xl font-light text-white/90 leading-relaxed mb-8">
-                "Explore the full Msingi platform — sign in as any role to see the system in action."
+          {/* Middle — contextual content */}
+          <div>
+            {slug === 'demo' ? (
+              <>
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-white/45 mb-4 text-center">
+                  Interactive Demo
+                </p>
+                <blockquote className="text-xl font-light text-white/85 leading-relaxed mb-7 text-center">
+                  "Explore the full Msingi platform — sign in as any role to see the system in action."
+                </blockquote>
+                <div className="space-y-2.5 bg-white/10 rounded-2xl p-4 backdrop-blur-sm">
+                  {DEMO_ACCOUNTS.map(({ role, badge }) => (
+                    <div key={role} className="flex items-center gap-3">
+                      <div className="w-1.5 h-1.5 rounded-full bg-white/50 flex-shrink-0" />
+                      <span className="text-sm text-white/75">{role}</span>
+                      <span className="text-[10px] text-white/40 ml-auto">{badge}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : isSchool ? (
+              <>
+                <blockquote className="text-xl font-light text-white/85 leading-relaxed mb-7 text-center">
+                  "Your school management portal — students, staff, academics, and finance in one place."
+                </blockquote>
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { label: 'Student Records', symbol: 'S' },
+                    { label: 'Grades & Reports', symbol: 'G' },
+                    { label: 'Finance', symbol: 'F' },
+                  ].map(({ label, symbol }) => (
+                    <div
+                      key={label}
+                      className="flex flex-col items-center gap-1.5 bg-white/10 rounded-xl p-3 backdrop-blur-sm"
+                    >
+                      <div className="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center text-white text-xs font-bold">
+                        {symbol}
+                      </div>
+                      <span className="text-[10px] text-white/70 text-center leading-tight">{label}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <blockquote className="text-xl font-light text-white/85 leading-relaxed text-center">
+                "Empowering educators with the tools to inspire, track, and grow every learner."
               </blockquote>
-              <div className="space-y-3">
-                {DEMO_ACCOUNTS.map(({ role, badge }) => (
-                  <div key={role} className="flex items-center gap-3">
-                    <div className="w-1.5 h-1.5 rounded-full bg-white/40 flex-shrink-0" />
-                    <span className="text-sm text-white/70">{role}</span>
-                    <span className="text-xs text-white/40 ml-auto">{badge}</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : isSchool ? (
-            <>
-              <blockquote className="text-2xl font-light text-white/90 leading-relaxed">
-                "Your school management portal — students, staff, academics, and finance in one place."
-              </blockquote>
-              <div className="mt-8 flex gap-8">
-                {[
-                  { label: 'Student Records', icon: '🎓' },
-                  { label: 'Grades & Reports', icon: '📊' },
-                  { label: 'Finance Tracking', icon: '💳' },
-                ].map((f) => (
-                  <div key={f.label} className="flex items-center gap-2">
-                    <span className="text-xl">{f.icon}</span>
-                    <span className="text-sm text-white/80">{f.label}</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <blockquote className="text-2xl font-light text-white/90 leading-relaxed">
-              "Empowering educators with the tools to inspire, track, and grow every learner."
-            </blockquote>
-          )}
-        </div>
+            )}
+          </div>
 
-        <p className="text-xs text-white/40">
-          © {new Date().getFullYear()} {isSchool ? schoolName : 'Msingi'}. All rights reserved.
-        </p>
+          {/* Bottom — powered by */}
+          <p className="text-xs text-white/35 text-center">
+            Powered by{' '}
+            <span className="font-semibold text-white/55">Msingi</span>
+            {' · '}© {new Date().getFullYear()} {isSchool ? schoolName : 'Msingi'}
+          </p>
+        </div>
       </div>
     );
   }

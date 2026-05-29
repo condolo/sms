@@ -49,6 +49,8 @@ router.get('/school-info', async (req, res) => {
       logoUrl:      school.logoUrl       || null,
       primaryColor: school.primaryColor  || '#4f46e5',
       accentColor:  school.accentColor   || '#7c3aed',
+      themePreset:  school.themePreset   || null,
+      tagline:      school.tagline       || null,
       website:      school.website       || null,
       isActive:     school.isActive !== false,
       status:       school.status        || 'active',
