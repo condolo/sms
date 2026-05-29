@@ -50,22 +50,40 @@ async function tenantMiddleware(req, res, next) {
   }
 }
 
+/* Map ISO currency codes → display symbols */
+const CURRENCY_SYMBOLS = {
+  KES: 'KSh', USD: '$', EUR: '€', GBP: '£', UGX: 'USh',
+  TZS: 'TSh', RWF: 'RF', ETB: 'Br', ZAR: 'R', NGN: '₦',
+  GHS: 'GH₵', XOF: 'CFA', XAF: 'FCFA', INR: '₹', AUD: 'A$',
+  CAD: 'C$', JPY: '¥', CNY: '¥',
+};
+
 async function _findSchool(filter) {
   try {
     const Sch = _model('schools');
     const doc = await Sch.findOne(filter).lean();
     if (!doc) return null;
+    const currency = doc.currency || 'KES';
     return {
-      id:           doc.id || doc._id.toString(),
-      slug:         doc.slug,
-      plan:         doc.plan    || 'core',
-      addOns:       doc.addOns  || [],
-      isActive:     doc.isActive !== false,
-      name:         doc.name,
-      shortName:    doc.shortName    || doc.name,
-      logoUrl:      doc.logoUrl      || null,
-      primaryColor: doc.primaryColor || '#4f46e5',
-      systemEmail:  doc.systemEmail  || null,
+      id:             doc.id || doc._id.toString(),
+      slug:           doc.slug,
+      plan:           doc.plan    || 'core',
+      addOns:         doc.addOns  || [],
+      isActive:       doc.isActive !== false,
+      name:           doc.name,
+      shortName:      doc.shortName    || doc.name,
+      logoUrl:        doc.logoUrl      || null,
+      primaryColor:   doc.primaryColor || '#4f46e5',
+      systemEmail:    doc.systemEmail  || null,
+      /* ── Fields used by client modules ── */
+      currency,
+      currencySymbol: doc.currencySymbol || CURRENCY_SYMBOLS[currency] || currency,
+      timezone:       doc.timezone       || 'Africa/Nairobi',
+      country:        doc.country        || null,
+      academicYear:   doc.academicYear   || null,
+      termsPerYear:   doc.termsPerYear   || null,
+      planExpiresAt:  doc.planExpiresAt  || null,
+      adminEmail:     doc.adminEmail     || null,
     };
   } catch { return null; }
 }

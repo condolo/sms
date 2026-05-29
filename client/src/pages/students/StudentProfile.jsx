@@ -90,7 +90,7 @@ export default function StudentProfile() {
   const { studentId } = useParams();
   const qc            = useQueryClient();
   const can           = useAuthStore(s => s.can.bind(s));
-  const currency      = useAuthStore(s => s.session?.school?.currency ?? 'USD');
+  const currency      = useAuthStore(s => s.session?.school?.currency ?? 'KES');
   const [tab, setTab] = useState('overview');
   const [editing, setEditing] = useState(false);
 
