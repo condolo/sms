@@ -3,14 +3,18 @@
    Expanded : 256 px (icons + labels)
    Collapsed: 64 px  (icons only, native tooltips on hover)
 
-   Animation strategy
-   ──────────────────
-   • Width spring is driven by AppShell (motion.aside)
-   • Text labels use inline opacity/transition so each element
-     fades independently without heavy per-label AnimatePresence
-   • Layout-critical divs (footer user info, school name) use
-     conditional rendering to avoid flex-1 vs overflow conflicts
-   • Root div is overflow-hidden so nothing bleeds outside 64 px
+   Collapse / expand UX
+   ────────────────────
+   • Expanded  → X button in the school header collapses (desktop)
+   • Collapsed → hamburger in the TopBar expands (desktop)
+   • Mobile    → standard overlay drawer with ✕ in header
+
+   Module visibility
+   ─────────────────
+   • Admin can toggle / reorder modules in Settings → Modules tab
+   • Config saved as school.moduleConfig in MongoDB
+   • Sidebar reads from auth session (reactive via patchSchool)
+   • Default: all 17 configurable modules shown, original order
    ============================================================ */
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
@@ -18,61 +22,66 @@ import {
   CheckSquare, BarChart3, ClipboardList, Scale,
   Wallet, Settings, LogOut, Library,
   MessageSquare, UserCog, TrendingUp, Tag, HelpCircle,
-  ChevronLeft, ChevronRight, BookMarked, Bus, BedDouble,
+  BookMarked, Bus, BedDouble, X,
 } from 'lucide-react';
 import clsx from 'clsx';
 import useAuthStore from '@/store/auth.js';
 import { auth as authApi } from '@/api/client.js';
 
-/* ── Nav tree ────────────────────────────────────────────────── */
-const NAV_SECTIONS = [
-  {
-    label: null,
-    items: [
-      { to: '/dashboard',  Icon: LayoutDashboard, label: 'Dashboard' },
-    ],
-  },
-  {
-    label: 'Academic',
-    items: [
-      { to: '/students',   Icon: GraduationCap,  label: 'Students'           },
-      { to: '/teachers',   Icon: Users,           label: 'Teachers'           },
-      { to: '/classes',    Icon: BookOpen,         label: 'Classes'            },
-      { to: '/timetable',  Icon: Calendar,        label: 'Timetable'          },
-      { to: '/attendance', Icon: CheckSquare,      label: 'Attendance'         },
-      { to: '/grades',     Icon: BarChart3,        label: 'Exams & Assessment' },
-      { to: '/subjects',   Icon: Library,          label: 'Subjects'           },
-    ],
-  },
-  {
-    label: 'Operations',
-    items: [
-      { to: '/admissions', Icon: ClipboardList,   label: 'Admissions' },
-      { to: '/behaviour',  Icon: Scale,           label: 'Behaviour'  },
-      { to: '/finance',    Icon: Wallet,          label: 'Finance'    },
-      { to: '/messages',   Icon: MessageSquare,   label: 'Messages'   },
-      { to: '/events',     Icon: Calendar,        label: 'Events'     },
-      { to: '/hr',         Icon: UserCog,         label: 'HR & Staff' },
-      { to: '/library',    Icon: BookMarked,      label: 'Library'    },
-      { to: '/transport',  Icon: Bus,             label: 'Transport'  },
-      { to: '/hostel',     Icon: BedDouble,       label: 'Hostel'     },
-    ],
-  },
-  {
-    label: 'Insights',
-    items: [
-      { to: '/reports', Icon: TrendingUp, label: 'Reports & Analytics' },
-    ],
-  },
-  {
-    label: 'System',
-    items: [
-      { to: '/settings',  Icon: Settings,   label: 'Settings'    },
-      { to: '/changelog', Icon: Tag,        label: 'Changelog'   },
-      { to: '/help',      Icon: HelpCircle, label: 'Help Centre' },
-    ],
-  },
+/* ── All configurable modules (master list) ──────────────────── */
+const CONFIGURABLE_MODULES = [
+  { key: 'students',   to: '/students',   Icon: GraduationCap, label: 'Students',            section: 'Academic'   },
+  { key: 'teachers',   to: '/teachers',   Icon: Users,          label: 'Teachers',            section: 'Academic'   },
+  { key: 'classes',    to: '/classes',    Icon: BookOpen,        label: 'Classes',             section: 'Academic'   },
+  { key: 'timetable',  to: '/timetable',  Icon: Calendar,       label: 'Timetable',           section: 'Academic'   },
+  { key: 'attendance', to: '/attendance', Icon: CheckSquare,     label: 'Attendance',          section: 'Academic'   },
+  { key: 'grades',     to: '/grades',     Icon: BarChart3,       label: 'Exams & Assessment',  section: 'Academic'   },
+  { key: 'subjects',   to: '/subjects',   Icon: Library,         label: 'Subjects',            section: 'Academic'   },
+  { key: 'admissions', to: '/admissions', Icon: ClipboardList,  label: 'Admissions',          section: 'Operations' },
+  { key: 'behaviour',  to: '/behaviour',  Icon: Scale,          label: 'Behaviour',           section: 'Operations' },
+  { key: 'finance',    to: '/finance',    Icon: Wallet,         label: 'Finance',             section: 'Operations' },
+  { key: 'messages',   to: '/messages',   Icon: MessageSquare,  label: 'Messages',            section: 'Operations' },
+  { key: 'events',     to: '/events',     Icon: Calendar,       label: 'Events',              section: 'Operations' },
+  { key: 'hr',         to: '/hr',         Icon: UserCog,        label: 'HR & Staff',          section: 'Operations' },
+  { key: 'library',    to: '/library',    Icon: BookMarked,     label: 'Library',             section: 'Operations' },
+  { key: 'transport',  to: '/transport',  Icon: Bus,            label: 'Transport',           section: 'Operations' },
+  { key: 'hostel',     to: '/hostel',     Icon: BedDouble,      label: 'Hostel',              section: 'Operations' },
+  { key: 'reports',    to: '/reports',    Icon: TrendingUp,     label: 'Reports & Analytics', section: 'Insights'   },
 ];
+
+const SECTION_ORDER = ['Academic', 'Operations', 'Insights'];
+
+/* Build nav sections from saved moduleConfig (or defaults if unset) */
+function computeNav(moduleConfig) {
+  const cfgMap = Object.fromEntries(
+    (moduleConfig ?? []).map((m, i) => [m.key, { enabled: m.enabled ?? true, order: m.order ?? i }])
+  );
+
+  const visible = CONFIGURABLE_MODULES
+    .filter(m => (cfgMap[m.key]?.enabled ?? true))
+    .sort((a, b) => (cfgMap[a.key]?.order ?? 999) - (cfgMap[b.key]?.order ?? 999));
+
+  const grouped = {};
+  for (const m of visible) {
+    if (!grouped[m.section]) grouped[m.section] = [];
+    grouped[m.section].push(m);
+  }
+
+  return [
+    { label: null, items: [{ to: '/dashboard', Icon: LayoutDashboard, label: 'Dashboard' }] },
+    ...SECTION_ORDER
+      .filter(sec => grouped[sec]?.length)
+      .map(sec => ({ label: sec, items: grouped[sec] })),
+    {
+      label: 'System',
+      items: [
+        { to: '/settings',  Icon: Settings,   label: 'Settings'    },
+        { to: '/changelog', Icon: Tag,        label: 'Changelog'   },
+        { to: '/help',      Icon: HelpCircle, label: 'Help Centre' },
+      ],
+    },
+  ];
+}
 
 /* ── Label fade — opacity only (root overflow-hidden clips layout) */
 function labelStyle(collapsed) {
@@ -93,6 +102,10 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
   const user     = useAuthStore(s => s.session?.user);
   const school   = useAuthStore(s => s.session?.school);
 
+  /* Dynamic nav — reacts to patchSchool({ moduleConfig }) instantly */
+  const moduleConfig = useAuthStore(s => s.session?.school?.moduleConfig);
+  const navSections  = computeNav(moduleConfig);
+
   const schoolName     = school?.name ?? user?.schoolName ?? 'My School';
   const schoolInitials = schoolName
     .split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
@@ -109,9 +122,8 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
 
       {/* ── School header ──────────────────────────────────────── */}
       {/*
-          Collapsed layout  : [logo] [     gap     ] (toggle/close at right is removed)
-          Expanded layout   : [logo] [name/role flex-1] [toggle/close]
-          overflow-hidden on this div clips the name when collapsing.
+          Collapsed : [logo badge]  (centred)
+          Expanded  : [logo] [school name flex-1] [X collapse or mobile close]
       */}
       <div className={clsx(
         'flex h-16 shrink-0 items-center border-b border-slate-800 overflow-hidden',
@@ -123,7 +135,7 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
           {schoolInitials}
         </div>
 
-        {/* School name + role — opacity-fade, flex-1 shrinks naturally */}
+        {/* School name + role — opacity-fade */}
         <div className="flex-1 min-w-0 leading-none" style={labelStyle(collapsed)}>
           <p className="font-semibold text-white text-sm truncate">{schoolName}</p>
           <p className="text-[11px] text-slate-500 mt-0.5 truncate capitalize">
@@ -131,14 +143,26 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
           </p>
         </div>
 
+        {/* Desktop collapse — X button, visible only when expanded */}
+        {onToggle && !collapsed && (
+          <button
+            onClick={onToggle}
+            title="Collapse sidebar"
+            className="shrink-0 text-slate-500 hover:text-white transition p-1.5 rounded-lg hover:bg-white/10"
+            aria-label="Collapse sidebar"
+          >
+            <X size={16} />
+          </button>
+        )}
+
         {/* Mobile drawer close — only when onClose is provided */}
         {onClose && (
           <button
             onClick={onClose}
-            className="shrink-0 text-slate-500 hover:text-white transition lg:hidden p-1 rounded-lg hover:bg-white/10"
+            className="shrink-0 text-slate-500 hover:text-white transition p-1.5 rounded-lg hover:bg-white/10 lg:hidden"
             aria-label="Close sidebar"
           >
-            ✕
+            <X size={16} />
           </button>
         )}
       </div>
@@ -150,7 +174,7 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
           collapsed ? 'px-1' : 'px-3',
         )}
       >
-        {NAV_SECTIONS.map(section => (
+        {navSections.map(section => (
           <div key={section.label ?? '__top'}>
 
             {/* Section label — height + opacity collapse */}
@@ -197,7 +221,6 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
                           size={16}
                           className={clsx('shrink-0', isActive ? 'text-white' : 'text-slate-500')}
                         />
-                        {/* Label fades out; overflow-hidden on root clips the rest */}
                         <span style={labelStyle(collapsed)}>
                           {label}
                         </span>
@@ -209,32 +232,6 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
             </ul>
           </div>
         ))}
-
-        {/* ── Collapse / Expand toggle — lives inside nav, no header clutter */}
-        {onToggle && (
-          <div className="pt-2 border-t border-slate-800/60">
-            <button
-              onClick={onToggle}
-              title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              className={clsx(
-                'flex items-center rounded-lg transition-colors duration-150 text-slate-500 hover:text-white hover:bg-white/5',
-                collapsed
-                  ? 'justify-center w-10 h-10 mx-auto'
-                  : 'gap-3 px-3 py-2 w-full',
-              )}
-            >
-              {collapsed
-                ? <ChevronRight size={16} className="shrink-0" />
-                : (
-                  <>
-                    <ChevronLeft size={16} className="shrink-0" />
-                    <span style={labelStyle(collapsed)}>Collapse</span>
-                  </>
-                )
-              }
-            </button>
-          </div>
-        )}
       </nav>
 
       {/* ── User footer ────────────────────────────────────────── */}

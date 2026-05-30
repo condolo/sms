@@ -56,6 +56,15 @@ const useAuthStore = create((set, get) => ({
     set({ session: next });
   },
 
+  /** Update school fields in the stored session (e.g. after module config save) */
+  patchSchool(updates) {
+    const { session } = get();
+    if (!session) return;
+    const next = { ...session, school: { ...session.school, ...updates } };
+    saveSession(next);
+    set({ session: next });
+  },
+
   setLoading(isLoading) { set({ isLoading }); },
   setError(error)       { set({ error }); },
   clearError()          { set({ error: null }); },

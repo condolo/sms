@@ -12,7 +12,7 @@ import {
   CheckCircle2, AlertTriangle, Trash2, Mail, Phone,
   Globe, MapPin, Shield, UserPlus, Home, Palette,
   Eye, EyeOff, Lock, ShieldCheck, Database, Download,
-  RefreshCcw, Info, Server, Check, Minus, ChevronDown,
+  RefreshCcw, Info, Server, Check, Minus, ChevronDown, ChevronUp,
   CreditCard, Smartphone, Zap, ArrowRight, Layers, Pencil,
   Bell, MessageSquare, BookOpen, Calendar, Clock,
 } from 'lucide-react';
@@ -26,6 +26,7 @@ const TABS = [
   { id: 'subscription',   label: 'Subscription',        Icon: CreditCard, adminOnly: true  },
   { id: 'users',          label: 'Users',               Icon: Users,       adminOnly: true  },
   { id: 'roles',          label: 'Roles & Permissions', Icon: ShieldCheck, adminOnly: true  },
+  { id: 'modules',        label: 'Modules',             Icon: Layers,      adminOnly: true  },
   { id: 'notifications',  label: 'Notifications',       Icon: Bell,        adminOnly: true  },
   { id: 'system',         label: 'System',              Icon: Database,    adminOnly: true  },
   { id: 'account',        label: 'Account',             Icon: User,        adminOnly: false },
@@ -2344,6 +2345,187 @@ function NotificationsTab() {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   MODULES TAB — admin can toggle and reorder sidebar modules
+   Changes saved to school.moduleConfig and apply to all users
+   ══════════════════════════════════════════════════════════════ */
+
+const MODULES_MASTER = [
+  { key: 'students',   label: 'Students',            section: 'Academic'   },
+  { key: 'teachers',   label: 'Teachers',            section: 'Academic'   },
+  { key: 'classes',    label: 'Classes',             section: 'Academic'   },
+  { key: 'timetable',  label: 'Timetable',           section: 'Academic'   },
+  { key: 'attendance', label: 'Attendance',          section: 'Academic'   },
+  { key: 'grades',     label: 'Exams & Assessment',  section: 'Academic'   },
+  { key: 'subjects',   label: 'Subjects',            section: 'Academic'   },
+  { key: 'admissions', label: 'Admissions',          section: 'Operations' },
+  { key: 'behaviour',  label: 'Behaviour',           section: 'Operations' },
+  { key: 'finance',    label: 'Finance',             section: 'Operations' },
+  { key: 'messages',   label: 'Messages',            section: 'Operations' },
+  { key: 'events',     label: 'Events',              section: 'Operations' },
+  { key: 'hr',         label: 'HR & Staff',          section: 'Operations' },
+  { key: 'library',    label: 'Library',             section: 'Operations' },
+  { key: 'transport',  label: 'Transport',           section: 'Operations' },
+  { key: 'hostel',     label: 'Hostel',              section: 'Operations' },
+  { key: 'reports',    label: 'Reports & Analytics', section: 'Insights'   },
+];
+
+const SEC_BADGE = {
+  Academic:   'bg-blue-50 text-blue-700 border-blue-200',
+  Operations: 'bg-violet-50 text-violet-700 border-violet-200',
+  Insights:   'bg-emerald-50 text-emerald-700 border-emerald-200',
+};
+
+function initModuleList(savedConfig) {
+  const cfgMap = Object.fromEntries(
+    (savedConfig ?? []).map((m, i) => [m.key, { enabled: m.enabled ?? true, order: m.order ?? i }])
+  );
+  return MODULES_MASTER
+    .map((m, i) => ({ ...m, enabled: cfgMap[m.key]?.enabled ?? true, order: cfgMap[m.key]?.order ?? i }))
+    .sort((a, b) => a.order - b.order);
+}
+
+function ModulesTab() {
+  const patchSchool = useAuthStore(s => s.patchSchool);
+  const savedConfig = useAuthStore(s => s.session?.school?.moduleConfig);
+
+  const [modules, setModules] = useState(() => initModuleList(savedConfig));
+  const [toast,   setToast]   = useState(null);
+  const showT = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500); };
+
+  const { mutate: save, isPending: saving } = useMutation({
+    mutationFn: (cfg) => settingsApi.school.update({ moduleConfig: cfg }),
+    onSuccess: (_, cfg) => {
+      patchSchool({ moduleConfig: cfg });
+      showT('Saved — sidebar updated for all users.');
+    },
+    onError: err => showT(err?.message ?? 'Failed to save module settings.', 'error'),
+  });
+
+  function toggle(key) {
+    setModules(prev => prev.map(m => m.key === key ? { ...m, enabled: !m.enabled } : m));
+  }
+
+  function move(index, dir) {
+    setModules(prev => {
+      const next = [...prev];
+      const target = index + dir;
+      if (target < 0 || target >= next.length) return prev;
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
+  function handleSave() {
+    const cfg = modules.map((m, i) => ({ key: m.key, enabled: m.enabled, order: i }));
+    save(cfg);
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header row */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-base font-semibold text-slate-900">Navigation Modules</h2>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Use the arrows to reorder or toggle modules on/off. Changes apply to all staff accounts in your school.
+          </p>
+        </div>
+        <div className="flex items-center gap-3 shrink-0">
+          <AnimatePresence>
+            {toast && <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}
+          </AnimatePresence>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-slate-900 text-white rounded-lg hover:bg-slate-700 disabled:opacity-60 transition"
+          >
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+            Save order
+          </button>
+        </div>
+      </div>
+
+      {/* Fixed modules note */}
+      <div className="flex items-start gap-2 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
+        <Info size={14} className="mt-0.5 shrink-0 text-amber-500" />
+        <span>
+          <strong className="font-semibold">Dashboard · Settings · Changelog · Help Centre</strong>{' '}
+          are always visible and cannot be hidden or reordered.
+        </span>
+      </div>
+
+      {/* Module list */}
+      <div className="rounded-xl border border-slate-200 overflow-hidden divide-y divide-slate-100">
+        {modules.map((mod, index) => (
+          <div
+            key={mod.key}
+            className={`flex items-center gap-3 px-4 py-3 transition-colors ${
+              mod.enabled ? 'bg-white' : 'bg-slate-50'
+            }`}
+          >
+            {/* Up / Down arrows */}
+            <div className="flex flex-col shrink-0">
+              <button
+                onClick={() => move(index, -1)}
+                disabled={index === 0}
+                className="p-0.5 text-slate-400 hover:text-slate-700 disabled:opacity-20 rounded transition"
+                title="Move up"
+              >
+                <ChevronUp size={14} />
+              </button>
+              <button
+                onClick={() => move(index, 1)}
+                disabled={index === modules.length - 1}
+                className="p-0.5 text-slate-400 hover:text-slate-700 disabled:opacity-20 rounded transition"
+                title="Move down"
+              >
+                <ChevronDown size={14} />
+              </button>
+            </div>
+
+            {/* Position badge */}
+            <span className="w-5 text-center text-[11px] text-slate-400 font-mono tabular-nums shrink-0">
+              {index + 1}
+            </span>
+
+            {/* Name */}
+            <span className={`flex-1 text-sm font-medium ${mod.enabled ? 'text-slate-800' : 'text-slate-400 line-through'}`}>
+              {mod.label}
+            </span>
+
+            {/* Section badge */}
+            <span className={`hidden sm:inline-flex px-2 py-0.5 text-[10px] font-semibold rounded border ${SEC_BADGE[mod.section] ?? 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+              {mod.section}
+            </span>
+
+            {/* Toggle switch */}
+            <button
+              onClick={() => toggle(mod.key)}
+              role="switch"
+              aria-checked={mod.enabled}
+              title={mod.enabled ? 'Disable module' : 'Enable module'}
+              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 ${
+                mod.enabled ? 'bg-violet-600' : 'bg-slate-200'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  mod.enabled ? 'translate-x-4' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <p className="text-xs text-slate-400 text-center pb-2">
+        The sidebar refreshes immediately after saving — no page reload needed.
+      </p>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
    MAIN PAGE
    ══════════════════════════════════════════════════════════════ */
 export default function SettingsPage() {
@@ -2394,6 +2576,7 @@ export default function SettingsPage() {
             {tab === 'subscription'   && <SubscriptionTab />}
             {tab === 'users'          && <UsersTab />}
             {tab === 'roles'          && <RolesTab />}
+            {tab === 'modules'        && <ModulesTab />}
             {tab === 'notifications'  && <NotificationsTab />}
             {tab === 'system'         && <SystemTab />}
             {tab === 'account'        && <AccountTab />}

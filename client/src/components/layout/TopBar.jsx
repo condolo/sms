@@ -56,7 +56,7 @@ function Avatar({ user, size = 8 }) {
   );
 }
 
-export default function TopBar({ onMenuClick }) {
+export default function TopBar({ onMenuClick, collapsed = false, onExpand }) {
   const title      = useBreadcrumb();
   const navigate   = useNavigate();
   const user       = useAuthStore((s) => s.session?.user);
@@ -91,6 +91,17 @@ export default function TopBar({ onMenuClick }) {
 
   return (
     <header className="flex h-16 shrink-0 items-center gap-4 bg-white border-b border-surface-border px-4 md:px-6">
+      {/* Desktop expand hamburger — only when sidebar is collapsed */}
+      {collapsed && onExpand && (
+        <button
+          onClick={onExpand}
+          className="hidden lg:flex items-center justify-center -ml-1 p-2.5 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition"
+          aria-label="Expand navigation"
+        >
+          <Menu size={20} />
+        </button>
+      )}
+
       {/* Mobile hamburger — 44px touch target */}
       <button
         onClick={onMenuClick}

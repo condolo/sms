@@ -56,7 +56,7 @@ export default function AppShell() {
 
       {/* ── Main content ───────────────────────────────────────── */}
       <div className="flex flex-1 flex-col min-w-0 h-full">
-        <TopBar onMenuClick={() => setSidebarOpen(true)} />
+        <TopBar onMenuClick={() => setSidebarOpen(true)} collapsed={collapsed} onExpand={toggleCollapse} />
         <main className="flex-1 overflow-y-auto">
           <Outlet />
         </main>
