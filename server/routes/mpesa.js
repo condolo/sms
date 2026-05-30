@@ -433,12 +433,10 @@ router.get('/transactions', authMiddleware, async (req, res) => {
    Restricted to admin / principal / deputy only.
    ══════════════════════════════════════════════════════════════ */
 
-const SUBSCRIPTION_PRICES = {
-  core:       5000,    // KES/month
-  standard:  12000,
-  premium:   25000,
-  enterprise: null,    // negotiated — contact sales
-};
+/* Portal tier rates — single source of truth in pricing.js */
+const { STUDENT_RATE } = require('../config/pricing');
+/* Map legacy plan keys → portal tier keys (backward compat) */
+const _LEGACY_TO_TIER = { core: 'base', standard: 'student', premium: 'family' };
 
 /* POST /api/mpesa/subscription — initiate subscription payment */
 router.post('/subscription', authMiddleware, async (req, res) => {
@@ -448,18 +446,21 @@ router.post('/subscription', authMiddleware, async (req, res) => {
     }
 
     const { schoolId } = req.jwtUser;
-    const { phone, plan } = req.body;
+    const { phone, tier, plan, studentCount } = req.body;
 
     if (!phone) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'phone is required.' } });
     }
 
-    // Validate plan
-    const targetPlan = (plan || 'standard').toLowerCase();
-    const amount = SUBSCRIPTION_PRICES[targetPlan];
-    if (!amount) {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Enterprise plans require direct sales contact. Valid plans: ${Object.keys(SUBSCRIPTION_PRICES).filter(p => SUBSCRIPTION_PRICES[p]).join(', ')}` } });
+    // Accept new 'tier' param or legacy 'plan' param
+    const rawTier    = (tier || _LEGACY_TO_TIER[plan] || 'student').toLowerCase();
+    const targetPlan = rawTier; // stored as tier key going forward
+    const rate       = STUDENT_RATE[rawTier];
+    if (!rate) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Enterprise plans require direct sales contact. Valid tiers: base, student, family.` } });
     }
+    const count  = Math.max(1, parseInt(studentCount, 10) || 1);
+    const amount = rate * count;
 
     // Platform M-Pesa credentials (separate from school's own credentials)
     const consumerKey    = process.env.MSINGI_MPESA_CONSUMER_KEY;
@@ -591,14 +592,18 @@ router.post('/subscription/callback', async (req, res) => {
 
 /* GET /api/mpesa/subscription/plans — public pricing info */
 router.get('/subscription/plans', (req, res) => {
+  const { PORTAL_TIERS } = require('../config/pricing');
   res.json({
     success: true,
-    data: {
-      core:       { price: SUBSCRIPTION_PRICES.core,     currency: 'KES', period: 'month', students: 500 },
-      standard:   { price: SUBSCRIPTION_PRICES.standard, currency: 'KES', period: 'month', students: 2000 },
-      premium:    { price: SUBSCRIPTION_PRICES.premium,  currency: 'KES', period: 'month', students: 'unlimited' },
-      enterprise: { price: null, currency: 'KES', period: 'month', students: 'unlimited', note: 'Contact sales' },
-    },
+    model:   'per_student_per_term',
+    currency: 'KES',
+    data: PORTAL_TIERS.map(t => ({
+      key:         t.key,
+      name:        t.name,
+      ratePerTerm: t.ratePerTerm,
+      description: t.description,
+      portals:     t.portals,
+    })),
   });
 });
 

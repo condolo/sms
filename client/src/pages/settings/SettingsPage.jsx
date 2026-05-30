@@ -1635,27 +1635,39 @@ function RolesTab() {
 /* ══════════════════════════════════════════════════════════════
    SUBSCRIPTION TAB — pay Msingi platform subscription via M-Pesa
    ══════════════════════════════════════════════════════════════ */
-const PLAN_META = {
-  core:       { label: 'Core',       price: 5000,  students: '500',       color: 'text-slate-600',  bg: 'bg-slate-50',   border: 'border-slate-200' },
-  standard:   { label: 'Standard',   price: 12000, students: '2,000',     color: 'text-indigo-600', bg: 'bg-indigo-50',  border: 'border-indigo-200', popular: true },
-  premium:    { label: 'Premium',    price: 25000, students: 'Unlimited',  color: 'text-violet-600', bg: 'bg-violet-50',  border: 'border-violet-200' },
-  enterprise: { label: 'Enterprise', price: null,  students: 'Unlimited',  color: 'text-amber-600',  bg: 'bg-amber-50',   border: 'border-amber-200' },
+/* Portal tiers — mirrors server/config/pricing.js */
+const PORTAL_TIERS_SETTINGS = {
+  base:       { label: 'Base',       rate: 100, tagline: 'Admin & teacher portals',   color: 'text-slate-700',  bg: 'bg-slate-50',   border: 'border-slate-300' },
+  student:    { label: 'Student',    rate: 120, tagline: 'Base + student portal',      color: 'text-indigo-700', bg: 'bg-indigo-50',  border: 'border-indigo-300', popular: true },
+  family:     { label: 'Family',     rate: 160, tagline: 'Student + parent portal',    color: 'text-violet-700', bg: 'bg-violet-50',  border: 'border-violet-300' },
+  enterprise: { label: 'Enterprise', rate: null, tagline: 'Full access · custom SLAs', color: 'text-amber-700',  bg: 'bg-amber-50',   border: 'border-amber-200'  },
 };
+/* Map legacy plan keys → portal tier keys */
+const LEGACY_TO_TIER = { core: 'base', standard: 'student', premium: 'family', base: 'base', student: 'student', family: 'family', enterprise: 'enterprise' };
 
 function SubscriptionTab() {
-  const school   = useAuthStore(s => s.session?.school);
-  const user     = useAuthStore(s => s.session?.user);
-  const [phone,   setPhone]   = useState(user?.phone || '');
-  const [selPlan, setSelPlan] = useState(school?.plan || 'standard');
-  const [loading, setLoading] = useState(false);
-  const [result,  setResult]  = useState(null);
-  const [error,   setError]   = useState('');
+  const school  = useAuthStore(s => s.session?.school);
+  const user    = useAuthStore(s => s.session?.user);
+  const [phone,        setPhone]        = useState(user?.phone || '');
+  const [selTier,      setSelTier]      = useState(() => LEGACY_TO_TIER[school?.plan] || 'student');
+  const [studentCount, setStudentCount] = useState(300);
+  const [loading,      setLoading]      = useState(false);
+  const [result,       setResult]       = useState(null);
+  const [error,        setError]        = useState('');
 
-  const currentPlan = school?.plan || 'core';
-  const expiry = school?.planExpiresAt ? new Date(school.planExpiresAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : null;
+  const currentTierKey  = LEGACY_TO_TIER[school?.plan] || 'student';
+  const currentTierMeta = PORTAL_TIERS_SETTINGS[currentTierKey] ?? PORTAL_TIERS_SETTINGS.student;
+  const isEnterprise    = currentTierKey === 'enterprise';
+  const expiry          = school?.planExpiresAt
+    ? new Date(school.planExpiresAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+    : null;
+
+  const selectedRate = PORTAL_TIERS_SETTINGS[selTier]?.rate || 0;
+  const termAmount   = selectedRate * Math.max(1, studentCount);
 
   async function handlePay() {
-    if (!phone.trim()) { setError('Enter the M-Pesa number to charge.'); return; }
+    if (!phone.trim())     { setError('Enter the M-Pesa number to charge.'); return; }
+    if (studentCount < 1)  { setError('Enter a valid student count.'); return; }
     setLoading(true); setError(''); setResult(null);
     try {
       const res = await fetch('/api/mpesa/subscription', {
@@ -1664,7 +1676,7 @@ function SubscriptionTab() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token}`,
         },
-        body: JSON.stringify({ phone: phone.trim(), plan: selPlan }),
+        body: JSON.stringify({ phone: phone.trim(), tier: selTier, studentCount }),
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error?.message || 'Payment initiation failed.');
@@ -1690,38 +1702,44 @@ function SubscriptionTab() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold capitalize ${PLAN_META[currentPlan]?.bg ?? 'bg-slate-50'} ${PLAN_META[currentPlan]?.color ?? 'text-slate-600'} border ${PLAN_META[currentPlan]?.border ?? 'border-slate-200'}`}>
+          <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold ${currentTierMeta.bg} ${currentTierMeta.color} border ${currentTierMeta.border}`}>
             <Zap size={12} />
-            {PLAN_META[currentPlan]?.label ?? currentPlan}
+            {currentTierMeta.label}
           </span>
           {expiry && (
             <span className="text-xs text-slate-400">Active until {expiry}</span>
           )}
-          {!expiry && (
+          {!expiry && isEnterprise && (
+            <span className="text-xs text-emerald-600 font-medium">Full access · Bootstrap trial</span>
+          )}
+          {!expiry && !isEnterprise && (
             <span className="text-xs text-amber-600 font-medium">No active subscription — limited access</span>
           )}
         </div>
       </div>
 
-      {/* Plan selector */}
+      {/* Portal tier selector */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
-        <h3 className="text-sm font-semibold text-slate-700">Choose a Plan</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {Object.entries(PLAN_META).filter(([k]) => k !== 'enterprise').map(([key, meta]) => (
+        <div>
+          <h3 className="text-sm font-semibold text-slate-700">Choose a Portal Tier</h3>
+          <p className="text-xs text-slate-400 mt-0.5">All tiers include every ERP module. The tier controls which portals students and parents can log in to.</p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {Object.entries(PORTAL_TIERS_SETTINGS).filter(([k]) => k !== 'enterprise').map(([key, meta]) => (
             <button
               key={key}
               type="button"
-              onClick={() => setSelPlan(key)}
-              className={`relative text-left p-4 rounded-xl border-2 transition-all ${selPlan === key ? `${meta.border} ${meta.bg}` : 'border-slate-200 hover:border-slate-300'}`}
+              onClick={() => setSelTier(key)}
+              className={`relative text-left p-4 rounded-xl border-2 transition-all ${selTier === key ? `${meta.border} ${meta.bg}` : 'border-slate-200 hover:border-slate-300'}`}
             >
               {meta.popular && (
-                <span className="absolute -top-2.5 left-3 bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">Most Popular</span>
+                <span className="absolute -top-2.5 left-3 bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">Popular</span>
               )}
               <p className={`text-sm font-semibold ${meta.color}`}>{meta.label}</p>
               <p className="text-xl font-bold text-slate-800 mt-1">
-                KES {(meta.price || 0).toLocaleString()}<span className="text-xs font-normal text-slate-400">/mo</span>
+                KSh {meta.rate}<span className="text-xs font-normal text-slate-400"> /student/term</span>
               </p>
-              <p className="text-xs text-slate-400 mt-1">Up to {meta.students} students</p>
+              <p className="text-xs text-slate-400 mt-1">{meta.tagline}</p>
             </button>
           ))}
         </div>
@@ -1729,8 +1747,8 @@ function SubscriptionTab() {
         {/* Enterprise CTA */}
         <div className="flex items-center gap-3 p-4 rounded-xl bg-amber-50 border border-amber-200">
           <div className="flex-1">
-            <p className="text-sm font-semibold text-amber-800">Enterprise Plan</p>
-            <p className="text-xs text-amber-600 mt-0.5">Unlimited students, custom SLAs, white-label, dedicated support.</p>
+            <p className="text-sm font-semibold text-amber-800">Enterprise</p>
+            <p className="text-xs text-amber-600 mt-0.5">Custom SLAs, white-label, dedicated support. Talk to us.</p>
           </div>
           <a href="mailto:sales@msingi.io" className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 hover:text-amber-900 whitespace-nowrap">
             Contact sales <ArrowRight size={12} />
@@ -1746,9 +1764,29 @@ function SubscriptionTab() {
           <span className="ml-auto text-[10px] font-semibold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200">Instant</span>
         </div>
         <p className="text-xs text-slate-400">
-          Enter your M-Pesa number. An STK push will be sent — enter your PIN to complete payment.
-          Your plan activates immediately after confirmation.
+          Enter your enrolled student count — the term amount is calculated automatically.
+          An STK push will be sent to your M-Pesa number.
         </p>
+
+        {/* Student count + calculated amount */}
+        <div className="flex items-center gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+          <div className="flex-1">
+            <label className="block text-xs font-medium text-slate-600 mb-1">Enrolled students this term</label>
+            <input
+              type="number"
+              min="1"
+              max="9999"
+              value={studentCount}
+              onChange={e => setStudentCount(Math.max(1, parseInt(e.target.value) || 1))}
+              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+            />
+          </div>
+          <div className="text-right shrink-0">
+            <p className="text-xs text-slate-400 mb-1">Term total</p>
+            <p className="text-xl font-bold text-slate-800">KSh {termAmount.toLocaleString()}</p>
+            <p className="text-[10px] text-slate-400">{studentCount} × KSh {selectedRate}</p>
+          </div>
+        </div>
 
         {error && (
           <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2.5 text-sm text-red-700 flex items-center gap-2">
@@ -1786,7 +1824,7 @@ function SubscriptionTab() {
               className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
             >
               {loading ? <Loader2 size={14} className="animate-spin" /> : <Smartphone size={14} />}
-              Pay KES {(PLAN_META[selPlan]?.price || 0).toLocaleString()}
+              Pay KSh {termAmount.toLocaleString()}
             </button>
           </div>
         </div>
