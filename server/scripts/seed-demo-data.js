@@ -17,6 +17,9 @@
    • 96 class-subject links (curriculum per class)
    • ~163 student-subject enrollments
    • 4 subject enrollment rules (min/max per section)
+   • 12 library books + 8 loans (3 active, 2 overdue, 3 returned)   [v4.30.0]
+   • 3 transport routes + 8 student assignments                      [v4.30.0]
+   • 2 hostels + 6 rooms + 6 active residents                        [v4.30.0]
    ============================================================ */
 'use strict';
 
@@ -524,6 +527,89 @@ const ENROLLMENTS = [
     subjects:['subj_demo_math','subj_demo_eng','subj_demo_kisw','subj_demo_sci','subj_demo_ss','subj_demo_cre','subj_demo_pe','subj_demo_ict'] },
 ];
 
+/* ── Library books (12) ──────────────────────────────────────── */
+/* available = copies minus any active/overdue loans */
+const LIBRARY_BOOKS = [
+  { id:'lb_demo_1',  title:'A Grain of Wheat',                  author:'Ngũgĩ wa Thiongʼo',        isbn:'978-0-141-18679-2', category:'Literature',  copies:4, available:3, location:'Shelf A1', publisher:'Heinemann',  publishYear:1967 },
+  { id:'lb_demo_2',  title:'Things Fall Apart',                  author:'Chinua Achebe',              isbn:'978-0-385-47454-2', category:'Literature',  copies:5, available:4, location:'Shelf A1', publisher:'Heinemann',  publishYear:1958 },
+  { id:'lb_demo_3',  title:'Weep Not, Child',                    author:'Ngũgĩ wa Thiongʼo',        isbn:'978-0-141-18681-5', category:'Literature',  copies:3, available:3, location:'Shelf A2', publisher:'Heinemann',  publishYear:1964 },
+  { id:'lb_demo_4',  title:'KCSE Mathematics Revision Guide',    author:'S. K. Mwakisha',             isbn:'',                  category:'Mathematics', copies:8, available:7, location:'Shelf B1', publisher:'EAEP',       publishYear:2022 },
+  { id:'lb_demo_5',  title:'Biology for Secondary Schools',      author:'Nzomo Mutuku',               isbn:'978-9966-47-200-1', category:'Sciences',    copies:6, available:5, location:'Shelf C1', publisher:'EAEP',       publishYear:2021 },
+  { id:'lb_demo_6',  title:'Secondary Chemistry Book 4',         author:'J. Njoroge & M. Weru',       isbn:'978-9966-47-131-8', category:'Sciences',    copies:5, available:4, location:'Shelf C2', publisher:'EAEP',       publishYear:2020 },
+  { id:'lb_demo_7',  title:'The River Between',                  author:'Ngũgĩ wa Thiongʼo',        isbn:'978-0-435-90162-8', category:'Literature',  copies:3, available:3, location:'Shelf A2', publisher:'Heinemann',  publishYear:1965 },
+  { id:'lb_demo_8',  title:'History of East Africa',             author:'B. A. Ogot',                 isbn:'',                  category:'History',     copies:4, available:4, location:'Shelf D1', publisher:'EAEP',       publishYear:2019 },
+  { id:'lb_demo_9',  title:'Physics for High Schools',           author:'J. K. Kariuki',              isbn:'978-9966-47-090-8', category:'Sciences',    copies:6, available:6, location:'Shelf C3', publisher:'EAEP',       publishYear:2021 },
+  { id:'lb_demo_10', title:'Mastering English Grammar',          author:'R. Thomson & A. Martinet',   isbn:'978-0-19-431343-3', category:'Languages',   copies:4, available:4, location:'Shelf E1', publisher:'OUP',        publishYear:1986 },
+  { id:'lb_demo_11', title:'Business Studies Simplified',        author:'P. Kimondo',                 isbn:'978-9966-47-175-2', category:'Business',    copies:5, available:5, location:'Shelf F1', publisher:'EAEP',       publishYear:2022 },
+  { id:'lb_demo_12', title:'Oxford Atlas for East Africa',       author:'Oxford University Press',    isbn:'978-0-19-849870-0', category:'Geography',   copies:3, available:3, location:'Shelf D2', publisher:'OUP',        publishYear:2020 },
+];
+
+/* ── Library loans (8) — 3 active, 2 overdue, 3 returned ──────
+   Active   → lb_demo_1 (std_demo_1), lb_demo_4 (std_demo_4), lb_demo_5 (std_demo_7)
+   Overdue  → lb_demo_2 (std_demo_2, 15 days), lb_demo_6 (std_demo_8, 10 days)
+   Returned → lb_demo_3, lb_demo_7, lb_demo_9
+   ─────────────────────────────────────────────────────────────── */
+const futureDue = (days) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+const pastDue   = (days) => new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+
+const LIBRARY_LOANS = [
+  /* Active */
+  { id:'ll_demo_1', bookId:'lb_demo_1', bookTitle:'A Grain of Wheat',               borrowerId:'std_demo_1',  borrowerType:'student', borrowerName:'Amara Osei',         borrowerClass:'Form 1A',     issuedAt:d(7),  dueDate:futureDue(7),  status:'active',   fineAmount:0,   finePaid:false },
+  { id:'ll_demo_2', bookId:'lb_demo_4', bookTitle:'KCSE Mathematics Revision Guide', borrowerId:'std_demo_4',  borrowerType:'student', borrowerName:'David Mutai',        borrowerClass:'Form 2A',     issuedAt:d(10), dueDate:futureDue(11), status:'active',   fineAmount:0,   finePaid:false },
+  { id:'ll_demo_3', bookId:'lb_demo_5', bookTitle:'Biology for Secondary Schools',   borrowerId:'std_demo_7',  borrowerType:'student', borrowerName:'Naledi Dlamini',     borrowerClass:'Form 3A',     issuedAt:d(5),  dueDate:futureDue(9),  status:'active',   fineAmount:0,   finePaid:false },
+  /* Overdue */
+  { id:'ll_demo_4', bookId:'lb_demo_2', bookTitle:'Things Fall Apart',               borrowerId:'std_demo_2',  borrowerType:'student', borrowerName:'James Mwangi',       borrowerClass:'Form 1A',     issuedAt:d(25), dueDate:pastDue(15),   status:'overdue',  fineAmount:150, finePaid:false },
+  { id:'ll_demo_5', bookId:'lb_demo_6', bookTitle:'Secondary Chemistry Book 4',      borrowerId:'std_demo_8',  borrowerType:'student', borrowerName:'Kevin Kamau',        borrowerClass:'Form 3A',     issuedAt:d(20), dueDate:pastDue(10),   status:'overdue',  fineAmount:100, finePaid:false },
+  /* Returned */
+  { id:'ll_demo_6', bookId:'lb_demo_3', bookTitle:'Weep Not, Child',                 borrowerId:'std_demo_3',  borrowerType:'student', borrowerName:'Fatima Al-Hassan',   borrowerClass:'Form 1A',     issuedAt:d(35), dueDate:pastDue(2),    status:'returned', fineAmount:20,  finePaid:true,  returnedAt:d(1),  daysOverdue:2 },
+  { id:'ll_demo_7', bookId:'lb_demo_7', bookTitle:'The River Between',               borrowerId:'std_demo_5',  borrowerType:'student', borrowerName:'Grace Waweru',       borrowerClass:'Form 2A',     issuedAt:d(30), dueDate:pastDue(6),    status:'returned', fineAmount:60,  finePaid:false, returnedAt:d(4),  daysOverdue:2 },
+  { id:'ll_demo_8', bookId:'lb_demo_9', bookTitle:'Physics for High Schools',        borrowerId:'std_demo_10', borrowerType:'student', borrowerName:'Brian Onyango',      borrowerClass:'Form 4A',     issuedAt:d(21), dueDate:pastDue(1),    status:'returned', fineAmount:0,   finePaid:false, returnedAt:d(2),  daysOverdue:0 },
+];
+
+/* ── Transport routes (3) ────────────────────────────────────── */
+const TRANSPORT_ROUTES = [
+  { id:'tr_demo_1', name:'Westlands Express',       origin:'Westlands Roundabout',   destination:'Msingi Academy', stops:['Sarit Centre','ABC Place','Village Market','Ridgeways'], departureTime:'06:15', arrivalTime:'07:15', vehicleType:'bus',  vehicleReg:'KDH 485Z', driverName:'Mr. John Nderitu',    driverPhone:'+254 712 345 678', capacity:40, feePerTerm:12000, notes:'Morning pickup serving Westlands, Parklands and Ridgeways.' },
+  { id:'tr_demo_2', name:'Eastlands Shuttle',        origin:'Pipeline Stage',         destination:'Msingi Academy', stops:['Embakasi','Donholm','Umoja','Jogoo Road'],               departureTime:'06:30', arrivalTime:'07:20', vehicleType:'bus',  vehicleReg:'KBZ 921F', driverName:'Mr. Peter Muthoni',   driverPhone:'+254 722 567 890', capacity:33, feePerTerm:10000, notes:'Serves Eastlands — Embakasi, Donholm and Umoja zones.' },
+  { id:'tr_demo_3', name:'Karen & Langata Runner',   origin:'Karen Shopping Centre',  destination:'Msingi Academy', stops:['Hardy','Langata Road','Bomas Junction'],                departureTime:'06:45', arrivalTime:'07:30', vehicleType:'van',  vehicleReg:'KCY 033M', driverName:'Mr. David Kiprotich', driverPhone:'+254 733 901 234', capacity:14, feePerTerm:14000, notes:'Premium van service for Karen, Hardy and Langata students.' },
+];
+
+/* ── Transport assignments (8) ───────────────────────────────── */
+const TRANSPORT_ASSIGNMENTS = [
+  { id:'ta_demo_1', routeId:'tr_demo_1', routeName:'Westlands Express',     studentId:'std_demo_1',  studentName:'Amara Osei',          studentClass:'Form 1A',      pickupStop:'Village Market',          direction:'both', status:'active' },
+  { id:'ta_demo_2', routeId:'tr_demo_2', routeName:'Eastlands Shuttle',      studentId:'std_demo_4',  studentName:'David Mutai',         studentClass:'Form 2A',      pickupStop:'Donholm',                 direction:'both', status:'active' },
+  { id:'ta_demo_3', routeId:'tr_demo_3', routeName:'Karen & Langata Runner', studentId:'std_demo_7',  studentName:'Naledi Dlamini',      studentClass:'Form 3A',      pickupStop:'Hardy',                   direction:'both', status:'active' },
+  { id:'ta_demo_4', routeId:'tr_demo_1', routeName:'Westlands Express',     studentId:'std_demo_10', studentName:'Brian Onyango',       studentClass:'Form 4A',      pickupStop:'Ridgeways',               direction:'both', status:'active' },
+  { id:'ta_demo_5', routeId:'tr_demo_1', routeName:'Westlands Express',     studentId:'std_demo_11', studentName:'Miriam Gitau',        studentClass:'Form 4A',      pickupStop:'Sarit Centre',            direction:'both', status:'active' },
+  { id:'ta_demo_6', routeId:'tr_demo_2', routeName:'Eastlands Shuttle',      studentId:'std_demo_15', studentName:'Patience Adhiambo',   studentClass:'Standard 5A',  pickupStop:'Umoja',                   direction:'both', status:'active' },
+  { id:'ta_demo_7', routeId:'tr_demo_3', routeName:'Karen & Langata Runner', studentId:'std_demo_18', studentName:'Joseph Omondi',       studentClass:'Standard 6A',  pickupStop:'Bomas Junction',          direction:'both', status:'active' },
+  { id:'ta_demo_8', routeId:'tr_demo_3', routeName:'Karen & Langata Runner', studentId:'std_demo_19', studentName:'Christine Chebet',    studentClass:'Standard 6A',  pickupStop:'Karen Shopping Centre',   direction:'both', status:'active' },
+];
+
+/* ── Hostels (2) + rooms (6) + assignments (6 active residents) ─ */
+const HOSTELS = [
+  { id:'h_demo_boys',  name:"Boys' Hostel",  gender:'male',   type:'boarding', capacity:120, warden:'Mr. George Ochieng', phone:'+254 722 888 001', location:'North Wing, Block B', feePerTerm:18000, notes:'3 dormitories, common room and study hall.' },
+  { id:'h_demo_girls', name:"Girls' Hostel", gender:'female', type:'boarding', capacity:100, warden:'Ms. Sarah Wanjiku',  phone:'+254 711 888 002', location:'South Wing, Block C', feePerTerm:18000, notes:'2 dormitories and a common room.' },
+];
+
+/* occupied counts must match HOSTEL_ASSIGNMENTS active records */
+const HOSTEL_ROOMS = [
+  { id:'hr_demo_b101', hostelId:'h_demo_boys',  hostelName:"Boys' Hostel",  roomNumber:'B101', floor:'Ground Floor', type:'dormitory',    capacity:20, gender:'male',   occupied:2, notes:'East wing dormitory' },
+  { id:'hr_demo_b102', hostelId:'h_demo_boys',  hostelName:"Boys' Hostel",  roomNumber:'B102', floor:'Ground Floor', type:'dormitory',    capacity:20, gender:'male',   occupied:2, notes:'West wing dormitory' },
+  { id:'hr_demo_b103', hostelId:'h_demo_boys',  hostelName:"Boys' Hostel",  roomNumber:'B103', floor:'First Floor',  type:'dormitory',    capacity:20, gender:'male',   occupied:0, notes:'Upper dormitory' },
+  { id:'hr_demo_g201', hostelId:'h_demo_girls', hostelName:"Girls' Hostel", roomNumber:'G201', floor:'Ground Floor', type:'dormitory',    capacity:20, gender:'female', occupied:2, notes:'Main girls dormitory' },
+  { id:'hr_demo_g202', hostelId:'h_demo_girls', hostelName:"Girls' Hostel", roomNumber:'G202', floor:'Ground Floor', type:'dormitory',    capacity:20, gender:'female', occupied:0, notes:'Second dormitory' },
+  { id:'hr_demo_g203', hostelId:'h_demo_girls', hostelName:"Girls' Hostel", roomNumber:'G203', floor:'First Floor',  type:'semi-private', capacity:4,  gender:'female', occupied:0, notes:'Upper semi-private rooms' },
+];
+
+const HOSTEL_ASSIGNMENTS = [
+  { id:'ha_demo_1', hostelId:'h_demo_boys',  hostelName:"Boys' Hostel",  roomId:'hr_demo_b101', roomNumber:'B101', studentId:'std_demo_10', studentName:'Brian Onyango',   studentClass:'Form 4A',      bedNumber:'B1', status:'active' },
+  { id:'ha_demo_2', hostelId:'h_demo_boys',  hostelName:"Boys' Hostel",  roomId:'hr_demo_b101', roomNumber:'B101', studentId:'std_demo_4',  studentName:'David Mutai',     studentClass:'Form 2A',      bedNumber:'B2', status:'active' },
+  { id:'ha_demo_3', hostelId:'h_demo_boys',  hostelName:"Boys' Hostel",  roomId:'hr_demo_b102', roomNumber:'B102', studentId:'std_demo_6',  studentName:'Samuel Karimi',   studentClass:'Form 2A',      bedNumber:'C1', status:'active' },
+  { id:'ha_demo_4', hostelId:'h_demo_boys',  hostelName:"Boys' Hostel",  roomId:'hr_demo_b102', roomNumber:'B102', studentId:'std_demo_8',  studentName:'Kevin Kamau',     studentClass:'Form 3A',      bedNumber:'C2', status:'active' },
+  { id:'ha_demo_5', hostelId:'h_demo_girls', hostelName:"Girls' Hostel", roomId:'hr_demo_g201', roomNumber:'G201', studentId:'std_demo_7',  studentName:'Naledi Dlamini',  studentClass:'Form 3A',      bedNumber:'G1', status:'active' },
+  { id:'ha_demo_6', hostelId:'h_demo_girls', hostelName:"Girls' Hostel", roomId:'hr_demo_g201', roomNumber:'G201', studentId:'std_demo_11', studentName:'Miriam Gitau',    studentClass:'Form 4A',      bedNumber:'G2', status:'active' },
+];
+
 /* ════════════════════════════════════════════════════════════════
    MAIN EXPORT
 ════════════════════════════════════════════════════════════════ */
@@ -848,7 +934,41 @@ async function seedDemoData() {
       )
     ));
 
-    console.log('[seed-demo-data] ✓ 9 classes · 6 departments · 18 subjects · 10 teacher profiles · 9 teacher users · 20 students · 25 behaviour · 20 invoices · 14 payments · 205 timetable slots (7 classes) · 8 admissions · 10 events · 20 payroll (Apr+May) · 4 leave · 96 class-subjects · ' + enrollmentDocs.length + ' enrollments · 4 subject-rules');
+    /* 18. Library — books + loans */
+    const LibBook = _model('library_books');
+    const LibLoan = _model('library_loans');
+    await Promise.all(LIBRARY_BOOKS.map(b =>
+      upsert(LibBook, b.id, { ...b, createdBy: ADMIN_ID, createdAt: nowISO, updatedAt: nowISO })
+    ));
+    await Promise.all(LIBRARY_LOANS.map(l =>
+      upsert(LibLoan, l.id, { ...l, createdBy: ADMIN_ID, createdAt: nowISO })
+    ));
+
+    /* 19. Transport — routes + assignments */
+    const TrRoute  = _model('transport_routes');
+    const TrAssign = _model('transport_assignments');
+    await Promise.all(TRANSPORT_ROUTES.map(r =>
+      upsert(TrRoute, r.id, { ...r, status:'active', createdBy: ADMIN_ID, createdAt: nowISO, updatedAt: nowISO })
+    ));
+    await Promise.all(TRANSPORT_ASSIGNMENTS.map(a =>
+      upsert(TrAssign, a.id, { ...a, startDate: `${YEAR}-04-28`, createdBy: ADMIN_ID, createdAt: nowISO, updatedAt: nowISO })
+    ));
+
+    /* 20. Hostel — hostels + rooms + assignments */
+    const Hostel     = _model('hostels');
+    const HostelRoom = _model('hostel_rooms');   // NOTE: NOT 'rooms' — that belongs to timetable
+    const HostelAsgn = _model('hostel_assignments');
+    await Promise.all(HOSTELS.map(h =>
+      upsert(Hostel, h.id, { ...h, status:'active', createdBy: ADMIN_ID, createdAt: nowISO, updatedAt: nowISO })
+    ));
+    await Promise.all(HOSTEL_ROOMS.map(r =>
+      upsert(HostelRoom, r.id, { ...r, status:'active', createdBy: ADMIN_ID, createdAt: nowISO, updatedAt: nowISO })
+    ));
+    await Promise.all(HOSTEL_ASSIGNMENTS.map(a =>
+      upsert(HostelAsgn, a.id, { ...a, startDate: `${YEAR}-01-10`, createdBy: ADMIN_ID, createdAt: nowISO, updatedAt: nowISO })
+    ));
+
+    console.log('[seed-demo-data] ✓ 9 classes · 6 departments · 18 subjects · 10 teacher profiles · 9 teacher users · 20 students · 25 behaviour · 20 invoices · 14 payments · 205 timetable slots (7 classes) · 8 admissions · 10 events · 20 payroll (Apr+May) · 4 leave · 96 class-subjects · ' + enrollmentDocs.length + ' enrollments · 4 subject-rules · 12 library books · 8 loans · 3 transport routes · 8 transport assignments · 2 hostels · 6 rooms · 6 hostel residents');
 
   } catch (err) {
     console.warn('[seed-demo-data] Warning:', err.message);

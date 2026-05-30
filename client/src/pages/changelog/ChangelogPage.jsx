@@ -6,6 +6,21 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.30.0',
+    date: '2026-05-30',
+    label: 'Demo Seed Data — Library, Transport & Hostel',
+    changes: [
+      { type: 'new', text: '12 library books seeded across Literature, Mathematics, Sciences, History, Languages, Business and Geography categories — all authored by East African / African authors or KCSE publishers' },
+      { type: 'new', text: '8 library loans seeded: 3 active (due in 7–11 days), 2 overdue with KSh 100–150 fines, 3 returned — book available counts reflect outstanding loans' },
+      { type: 'new', text: '3 transport routes seeded: Westlands Express (bus ×40), Eastlands Shuttle (bus ×33), Karen & Langata Runner (van ×14) with driver details and real Nairobi stop names' },
+      { type: 'new', text: '8 transport assignments linking demo students to their respective routes with pickup stops' },
+      { type: 'new', text: '2 hostels seeded: Boys\' Hostel (120-cap, male) and Girls\' Hostel (100-cap, female) with warden and contact details' },
+      { type: 'new', text: '6 hostel rooms seeded: B101/B102/B103 (boys) and G201/G202/G203 (girls) — occupied counts match active resident assignments atomically' },
+      { type: 'new', text: '6 active hostel resident assignments: 4 boys (B101 × 2, B102 × 2) and 2 girls (G201 × 2) linking real demo student IDs' },
+      { type: 'fix', text: 'Seed file header updated to document the expanded data scope; console.log summary line extended to include the three new module counts' },
+    ],
+  },
+  {
     version: '4.29.0',
     date: '2026-05-29',
     label: 'Library, Transport & Hostel — Full Module Suite',
