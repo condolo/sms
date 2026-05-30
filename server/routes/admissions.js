@@ -153,9 +153,12 @@ router.post('/', authMiddleware, PLAN, rbac('admissions', 'create'), async (req,
     const { data, error } = _validate(ApplicationSchema, req.body);
     if (error) return E.validation(res, error);
 
-    // Generate a unique application reference: ADM-APP-{year}-{random 6}
-    const year = new Date().getFullYear();
-    const ref  = `APP-${year}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    // Generate a unique application reference using school's configured academic year
+    const schoolDoc  = await _model('schools').findOne({ id: schoolId }, { academicYear: 1, academicYearStartMonth: 1 }).lean();
+    const yearLabel  = schoolDoc?.academicYear ?? String(new Date().getFullYear());
+    // Extract leading 4-digit year from label ("2025/2026" → "2025", "2026" → "2026")
+    const yearCode   = yearLabel.match(/\d{4}/)?.[0] ?? String(new Date().getFullYear());
+    const ref        = `APP-${yearCode}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
     const doc = await _model('admissions').create({
       ...data,

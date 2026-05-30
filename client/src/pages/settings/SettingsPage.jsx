@@ -429,17 +429,43 @@ function SchoolTab() {
             </select>
           </FField>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <FField label="Academic year label">
-            <input value={f.academicYear ?? ''} onChange={e => set('academicYear', e.target.value)} className={iCls()} placeholder="e.g. 2024/25" />
-          </FField>
-          <FField label="Terms per year">
-            <select value={f.termsPerYear ?? 3} onChange={e => set('termsPerYear', Number(e.target.value))} className={iCls()}>
-              <option value={2}>2 terms</option>
-              <option value={3}>3 terms</option>
-              <option value={4}>4 terms (quarters)</option>
-            </select>
-          </FField>
+        {/* ── Academic year configuration ──────────────────── */}
+        <div className="space-y-2">
+          <div className="grid grid-cols-3 gap-3">
+            <FField label="Academic year label">
+              <input
+                value={f.academicYear ?? ''}
+                onChange={e => set('academicYear', e.target.value)}
+                className={iCls()}
+                placeholder="e.g. 2025/2026"
+              />
+            </FField>
+            <FField label="Year starts in">
+              <select
+                value={f.academicYearStartMonth ?? 1}
+                onChange={e => set('academicYearStartMonth', Number(e.target.value))}
+                className={iCls()}
+              >
+                {['January','February','March','April','May','June',
+                  'July','August','September','October','November','December'
+                ].map((m, i) => (
+                  <option key={i + 1} value={i + 1}>{m}</option>
+                ))}
+              </select>
+            </FField>
+            <FField label="Terms per year">
+              <select value={f.termsPerYear ?? 3} onChange={e => set('termsPerYear', Number(e.target.value))} className={iCls()}>
+                <option value={2}>2 terms</option>
+                <option value={3}>3 terms</option>
+                <option value={4}>4 terms (quarters)</option>
+              </select>
+            </FField>
+          </div>
+          <p className="text-[11px] text-slate-400 leading-relaxed">
+            The label (e.g. <strong>2025/2026</strong>) appears on fee structures, report cards and admission references.
+            Set the start month so the system knows when your year rolls over — a September start means the year
+            changes in September, not January.
+          </p>
         </div>
       </div>
 

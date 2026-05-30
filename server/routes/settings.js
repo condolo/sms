@@ -46,7 +46,7 @@ function _genTempPassword() {
 /* ── Allowed fields for school update ──────────────────────── */
 const SCHOOL_UPDATABLE = [
   'name', 'tagline', 'email', 'phone', 'address', 'website',
-  'country', 'currency', 'timezone', 'academicYear', 'termsPerYear',
+  'country', 'currency', 'timezone', 'academicYear', 'academicYearStartMonth', 'termsPerYear',
   'houses', 'shortName', 'primaryColor', 'accentColor', 'themePreset', 'logoUrl', 'modulePermissions',
   'moduleConfig',
   'mpesa',

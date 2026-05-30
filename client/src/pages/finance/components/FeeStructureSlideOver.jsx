@@ -8,6 +8,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, X, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { finance as financeApi } from '@/api/client.js';
+import useAuthStore from '@/store/auth.js';
 
 /* ── Header button ─────────────────────────────────────────── */
 export function CreateFeeStructureButton({ fmtCurrency }) {
@@ -36,9 +37,13 @@ export function CreateFeeStructureButton({ fmtCurrency }) {
 
 /* ── Slide-over ────────────────────────────────────────────── */
 export default function FeeStructureSlideOver({ fmtCurrency, onClose, onCreated }) {
+  const school       = useAuthStore(s => s.session?.school);
+  const schoolYear   = school?.academicYear ?? new Date().getFullYear().toString();
+  const termsPerYear = school?.termsPerYear ?? 3;
+
   const [name,    setName]    = useState('');
   const [desc,    setDesc]    = useState('');
-  const [year,    setYear]    = useState(new Date().getFullYear().toString());
+  const [year,    setYear]    = useState(schoolYear);
   const [term,    setTerm]    = useState('');
   const [dueDate, setDueDate] = useState('');
   const [items,   setItems]   = useState([{ description: 'Tuition Fee', quantity: 1, unitPrice: 0 }]);
@@ -143,9 +148,9 @@ export default function FeeStructureSlideOver({ fmtCurrency, onClose, onCreated 
                 className="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10"
               >
                 <option value="">All terms</option>
-                <option value="1">Term 1</option>
-                <option value="2">Term 2</option>
-                <option value="3">Term 3</option>
+                {Array.from({ length: termsPerYear }, (_, i) => (
+                  <option key={i + 1} value={i + 1}>Term {i + 1}</option>
+                ))}
               </select>
             </div>
             <div>
