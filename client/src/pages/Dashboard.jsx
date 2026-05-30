@@ -310,7 +310,10 @@ export default function Dashboard() {
                 ? `🎂 Happy Birthday, ${todayBirths[0].firstName}! Turning ${todayBirths[0].age} today.`
                 : `🎂 ${todayBirths.length} students have birthdays today — ${todayBirths.map(s => s.firstName).join(', ')}`}
             </p>
-            <Link to="/students" className="text-white/80 hover:text-white text-xs font-medium underline shrink-0">View</Link>
+            <Link
+              to={todayBirths.length === 1 ? `/students/${todayBirths[0].id}` : '/students'}
+              className="text-white/80 hover:text-white text-xs font-medium underline shrink-0"
+            >View</Link>
           </motion.div>
         )}
       </AnimatePresence>
