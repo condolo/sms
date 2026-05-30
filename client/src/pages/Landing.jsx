@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import * as THREE from 'three';
 import {
   Activity, AlertCircle, ArrowRight, ArrowUp, BarChart3,
+  BookCheck, BookOpen, Building2, Bus,
   Calendar, CheckCircle, CheckCircle2, ChevronRight, ClipboardList,
   DollarSign, FileText, GraduationCap, Globe, Layers, Lock,
   MessageCircle, MessageSquare, ShieldCheck, TrendingUp, UserCheck,
@@ -454,23 +455,28 @@ function FeeRegisterMockup() {
    DATA — Ecosystem + Showcase + Conviction
 ═══════════════════════════════════════════════════════════════ */
 const ECOSYSTEM_NODES = [
-  { label: 'Admissions',     Icon: ClipboardList, color: 'bg-pink-500',    desc: 'First enquiry in'   },
-  { label: 'Student Record', Icon: Users,         color: 'bg-indigo-500',  desc: 'Profile created'    },
-  { label: 'Classes',        Icon: Layers,        color: 'bg-blue-500',    desc: 'Sections & streams' },
-  { label: 'Timetable',      Icon: Calendar,      color: 'bg-sky-500',     desc: 'Lessons scheduled'  },
-  { label: 'Attendance',     Icon: CheckCircle,   color: 'bg-emerald-500', desc: 'Daily tracked'      },
-  { label: 'Grades',         Icon: GraduationCap, color: 'bg-violet-500',  desc: 'Marks attributed'   },
-  { label: 'Behaviour',      Icon: ShieldCheck,   color: 'bg-orange-500',  desc: 'Incidents logged'   },
-  { label: 'Reports',        Icon: FileText,      color: 'bg-purple-500',  desc: 'Governed publish'   },
-  { label: 'Finance',        Icon: DollarSign,    color: 'bg-amber-500',   desc: 'Fees collected'     },
-  { label: 'Analytics',      Icon: TrendingUp,    color: 'bg-teal-500',    desc: 'Director insight'   },
+  { label: 'Admissions',      Icon: ClipboardList, color: 'bg-pink-500',    desc: 'First enquiry in'      },
+  { label: 'Student Records', Icon: Users,         color: 'bg-indigo-500',  desc: 'Profile created'       },
+  { label: 'Classes',         Icon: Layers,        color: 'bg-blue-500',    desc: 'Sections & streams'    },
+  { label: 'Timetable',       Icon: Calendar,      color: 'bg-sky-500',     desc: 'Lessons scheduled'     },
+  { label: 'Attendance',      Icon: CheckCircle,   color: 'bg-emerald-500', desc: 'Daily tracked'         },
+  { label: 'Lessons',         Icon: BookCheck,     color: 'bg-cyan-500',    desc: 'Curriculum covered'    },
+  { label: 'Grades',          Icon: GraduationCap, color: 'bg-violet-500',  desc: 'Marks attributed'      },
+  { label: 'Behaviour',       Icon: ShieldCheck,   color: 'bg-orange-500',  desc: 'Incidents logged'      },
+  { label: 'Reports',         Icon: FileText,      color: 'bg-purple-500',  desc: 'Governed publish'      },
+  { label: 'Finance',         Icon: DollarSign,    color: 'bg-amber-500',   desc: 'Fees collected'        },
+  { label: 'Library',         Icon: BookOpen,      color: 'bg-lime-600',    desc: 'Resources managed'     },
+  { label: 'Transport',       Icon: Bus,           color: 'bg-rose-500',    desc: 'Routes tracked'        },
+  { label: 'Hostel',          Icon: Building2,     color: 'bg-stone-500',   desc: 'Boarders managed'      },
+  { label: 'Analytics',       Icon: TrendingUp,    color: 'bg-teal-500',    desc: 'Director insight'      },
 ];
 
 const CONVICTION_PAIRS = [
-  { before: 'Fee tracking in Excel, reconciled every Friday',        after: 'Real-time fee ledger — every payment, every receipt, live'     },
-  { before: 'Report cards assembled manually by the registrar',      after: 'Governed publishing: Teacher → HOD → Principal → Portal'       },
-  { before: 'Parent notices via personal WhatsApp groups',           after: 'Structured institutional channels with full audit trail'        },
-  { before: 'Leadership decisions on week-old paper summaries',      after: 'Live director dashboard across attendance, grades, and finance'  },
+  { before: 'Fee tracking in Excel, reconciled every Friday',               after: 'Real-time fee ledger — every payment, every receipt, live'          },
+  { before: 'Report cards assembled manually by the registrar',             after: 'Governed publishing: Teacher → HOD → Principal → Portal' },
+  { before: 'Curriculum coverage tracked in a teacher\'s notebook',         after: 'Syllabus tracker — every topic marked, every subject covered live'    },
+  { before: 'Parent notices via personal WhatsApp groups',                  after: 'Structured institutional channels with full audit trail'              },
+  { before: 'Leadership decisions on week-old paper summaries',             after: 'Live director dashboard across attendance, grades, and finance'       },
 ];
 
 const SHOWCASE_TABS = [
@@ -513,59 +519,57 @@ const SHOWCASE_TABS = [
 ];
 
 /* ═══════════════════════════════════════════════════════════════
-   PLANS DATA
+   PLANS DATA — Portal tiers (server/config/pricing.js)
+   All ERP modules included in every tier.
+   Tier controls who gets a login portal, not which features exist.
 ═══════════════════════════════════════════════════════════════ */
-// Aligned with server/middleware/plan.js — core/standard/premium tiers
-const PLAN_FEATURES = [
-  { label: 'Student Profiles & Records'    },  // 0  core
-  { label: 'Admissions Pipeline'           },  // 1  core
-  { label: 'Attendance Tracking'           },  // 2  core
-  { label: 'Parent Communication'          },  // 3  core
-  { label: 'Events & School Calendar'      },  // 4  core
-  { label: 'Academics & Grading'           },  // 5  core
-  { label: 'Subjects & Curriculum Mgmt'   },  // 6  core
-  { label: 'Class Sections & Streams'      },  // 7  core
-  { label: 'Finance & Fee Ledger'          },  // 8  standard
-  { label: 'Behaviour Tracking (BPS)'      },  // 9  standard
-  { label: 'Timetable Management'          },  // 10 standard
-  { label: 'Report Card Publishing'        },  // 11 standard
-  { label: 'HR & Staff Management'         },  // 12 standard
-  { label: 'CSV Bulk Import / Export'      },  // 13 standard
-  { label: 'Analytics Director Dashboard'  },  // 14 premium
-  { label: 'Multi-Curriculum Support'      },  // 15 premium
-  { label: 'Custom Roles & Permissions'    },  // 16 premium
-];
-
-const PLANS = [
+const PORTAL_TIERS_LANDING = [
   {
-    name: 'Core',
-    tagline: 'Essential operations for growing schools',
-    badge: null,
-    studentCap: 'Up to 500 students',
-    //                  0     1     2     3     4     5     6     7     8      9      10     11     12     13     14     15     16
-    included: [true, true, true, true, true, true, true, true, false, false, false, false, false, false, false, false, false],
-    highlights: ['Student records, admissions & grading', 'Attendance, events & parent comms', 'Subjects, class sections & streams'],
+    name:     'Base',
+    rate:     100,
+    tagline:  'Full school ERP for admin and teaching staff',
+    badge:    null,
+    dark:     false,
+    portals:  ['Admin Portal', 'Teacher Portal'],
+    features: [
+      'All ERP modules — no feature gates',
+      'Admin & teacher dashboards',
+      'Students, attendance, behaviour & finance',
+      'Timetable, exams, HR & lessons tracker',
+      'Library, transport, hostel & admissions',
+    ],
     cta: 'Get Started',
   },
   {
-    name: 'Standard',
-    tagline: 'Full academic and operational management',
-    badge: 'Most Popular',
-    studentCap: 'Up to 2,000 students',
-    //                  0     1     2     3     4     5     6     7    8     9     10    11    12    13    14     15     16
-    included: [true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, false, false],
-    highlights: ['Everything in Core', 'Finance, timetable, HR & reports', 'Behaviour management & bulk CSV import'],
-    cta: 'Get Standard',
+    name:     'Student',
+    rate:     120,
+    tagline:  'Base + dedicated student login and dashboard',
+    badge:    'Popular',
+    dark:     true,
+    portals:  ['Admin Portal', 'Teacher Portal', 'Student Portal'],
+    features: [
+      'Everything in Base',
+      'Student login accounts',
+      'Student dashboard: lessons, timetable, report cards',
+      'Attendance & fee balance view',
+    ],
+    cta: 'Get Student',
   },
   {
-    name: 'Premium',
-    tagline: 'Complete institutional accountability infrastructure',
-    badge: null,
-    studentCap: 'Unlimited students',
-    //                  0     1     2     3     4     5     6     7    8     9     10    11    12    13    14    15    16
-    included: [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true],
-    highlights: ['Everything in Standard', 'Live analytics dashboard', 'Multi-curriculum & custom RBAC'],
-    cta: 'Get Premium',
+    name:     'Family',
+    rate:     160,
+    tagline:  'Student + parent portal with full family visibility',
+    badge:    'Recommended',
+    dark:     false,
+    portals:  ['Admin Portal', 'Teacher Portal', 'Student Portal', 'Parent Portal'],
+    features: [
+      'Everything in Student',
+      'Parent login accounts',
+      'Parent dashboard: child progress, fees & curriculum',
+      'Parent–teacher messaging',
+      'Real-time lesson coverage per subject',
+    ],
+    cta: 'Get Family',
   },
 ];
 
@@ -577,83 +581,101 @@ function PlansSection() {
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
 
         <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()} className="text-center mb-14">
-          <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Plans</motion.p>
+          <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Pricing</motion.p>
           <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 mb-4 leading-tight">
-            Start with what you need.<br />
-            <span className="text-slate-400">Scale as your institution grows.</span>
+            Per student, per term.<br />
+            <span className="text-slate-400">Choose who gets a portal.</span>
           </motion.h2>
           <motion.p variants={fadeUp} className="text-base text-slate-500 max-w-xl mx-auto">
-            Every plan includes onboarding support, tenant isolation, and full audit infrastructure.
-            Pricing is customised per school — talk to us.
+            Every tier unlocks the full ERP — all modules, all data, complete audit trail.
+            The tier only determines which portals your students and parents can log in to.
           </motion.p>
         </motion.div>
 
-        {/* Plan cards */}
+        {/* Portal tier cards */}
         <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger(0.1)}
           className="grid md:grid-cols-3 gap-5 mb-8">
-          {PLANS.map((plan) => (
-            <motion.div key={plan.name} variants={fadeUp}
+          {PORTAL_TIERS_LANDING.map((tier) => (
+            <motion.div key={tier.name} variants={fadeUp}
               className={`relative rounded-2xl p-7 flex flex-col ${
-                plan.badge
+                tier.dark
                   ? 'bg-slate-900 text-white ring-2 ring-indigo-500 shadow-xl shadow-indigo-500/10'
                   : 'bg-white border border-slate-200 shadow-sm'
               }`}>
 
-              {plan.badge && (
+              {tier.badge && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                   <span className="bg-indigo-500 text-white text-[10px] font-bold px-3 py-1 rounded-full tracking-wide uppercase">
-                    {plan.badge}
+                    {tier.badge}
                   </span>
                 </div>
               )}
 
-              <div className="mb-6">
-                <h3 className={`text-xl font-bold mb-1 ${plan.badge ? 'text-white' : 'text-slate-900'}`}>{plan.name}</h3>
-                <p className={`text-sm leading-snug ${plan.badge ? 'text-slate-400' : 'text-slate-500'}`}>{plan.tagline}</p>
+              <div className="mb-4">
+                <h3 className={`text-xl font-bold mb-1 ${tier.dark ? 'text-white' : 'text-slate-900'}`}>{tier.name}</h3>
+                <p className={`text-sm leading-snug ${tier.dark ? 'text-slate-400' : 'text-slate-500'}`}>{tier.tagline}</p>
               </div>
 
-              <div className={`text-xs font-semibold mb-5 px-2.5 py-1.5 rounded-lg inline-block w-fit ${
-                plan.badge ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-600'
-              }`}>
-                {plan.studentCap}
+              <div className="mb-5">
+                <span className={`text-4xl font-bold tracking-tight ${tier.dark ? 'text-white' : 'text-slate-900'}`}>
+                  KSh {tier.rate}
+                </span>
+                <span className={`text-sm ml-1.5 ${tier.dark ? 'text-slate-400' : 'text-slate-500'}`}>/ student / term</span>
               </div>
 
-              {/* Key highlights */}
+              {/* Portal access chips */}
+              <div className="flex flex-wrap gap-1.5 mb-5">
+                {tier.portals.map(p => (
+                  <span key={p} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                    tier.dark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-600'
+                  }`}>{p}</span>
+                ))}
+              </div>
+
+              {/* Features */}
               <ul className="space-y-2 mb-6 flex-1">
-                {plan.highlights.map((h, i) => (
+                {tier.features.map((f, i) => (
                   <li key={i} className="flex items-center gap-2.5">
                     <div className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
-                      plan.badge ? 'bg-indigo-500' : 'bg-slate-900'
+                      tier.dark ? 'bg-indigo-500' : 'bg-slate-900'
                     }`}>
                       <CheckCircle size={9} className="text-white" />
                     </div>
-                    <span className={`text-sm ${plan.badge ? 'text-slate-300' : 'text-slate-600'}`}>{h}</span>
+                    <span className={`text-sm ${tier.dark ? 'text-slate-300' : 'text-slate-600'}`}>{f}</span>
                   </li>
                 ))}
               </ul>
 
               <Link to="/contact"
                 className={`w-full text-center rounded-xl py-3 text-sm font-semibold transition-all ${
-                  plan.badge
+                  tier.dark
                     ? 'bg-indigo-500 text-white hover:bg-indigo-400'
                     : 'bg-slate-900 text-white hover:bg-slate-700'
                 }`}>
-                {plan.cta} →
+                {tier.cta} →
               </Link>
             </motion.div>
           ))}
         </motion.div>
 
-        {/* Feature comparison toggle */}
+        {/* Estimator link */}
+        <div className="text-center mb-5">
+          <Link to="/plans"
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-indigo-600 hover:text-indigo-800 transition-colors">
+            Calculate your school cost with the interactive estimator
+            <ChevronRight size={14} />
+          </Link>
+        </div>
+
+        {/* Setup fee toggle */}
         <div className="text-center mb-6">
           <button onClick={() => setExpanded(p => !p)}
             className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-800 transition-colors">
             <ChevronRight size={15} className={`transition-transform duration-300 ${expanded ? 'rotate-90' : ''}`} />
-            {expanded ? 'Hide' : 'Compare all features across plans'}
+            {expanded ? 'Hide setup fee details' : 'View one-time setup fee bands'}
           </button>
         </div>
 
-        {/* Full feature comparison table */}
         <AnimatePresence>
           {expanded && (
             <motion.div
@@ -663,30 +685,28 @@ function PlansSection() {
               transition={{ duration: 0.35 }}
               className="overflow-hidden"
             >
-              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                {/* Table header */}
-                <div className="grid grid-cols-[1fr_repeat(3,_100px)] sm:grid-cols-[1fr_repeat(3,_120px)] bg-slate-50 border-b border-slate-100">
-                  <div className="px-5 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-widest">Module</div>
-                  {PLANS.map(p => (
-                    <div key={p.name} className={`px-3 py-3.5 text-center text-xs font-bold uppercase tracking-wide ${
-                      p.badge ? 'text-indigo-600' : 'text-slate-600'
-                    }`}>{p.name}</div>
+              <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm max-w-2xl mx-auto">
+                <h4 className="font-bold text-slate-900 mb-2">One-time setup fee: KSh 30,000 – 50,000</h4>
+                <p className="text-sm text-slate-500 mb-4">
+                  Varies by student count and data migration scope.
+                  Final amount agreed during the onboarding call.
+                </p>
+                <div className="grid sm:grid-cols-2 gap-2.5">
+                  {[
+                    { band: 'Up to 200 students',  fee: 'KSh 30,000' },
+                    { band: '201 – 500 students',   fee: 'KSh 35,000' },
+                    { band: '501 – 1,000 students', fee: 'KSh 42,000' },
+                    { band: 'Over 1,000 students',  fee: 'KSh 50,000' },
+                  ].map(({ band, fee }) => (
+                    <div key={band} className="flex justify-between items-center bg-slate-50 rounded-xl px-4 py-3 text-sm">
+                      <span className="text-slate-600">{band}</span>
+                      <span className="font-bold text-slate-900">{fee}</span>
+                    </div>
                   ))}
                 </div>
-                {/* Rows */}
-                {PLAN_FEATURES.map(({ label }, fi) => (
-                  <div key={label} className={`grid grid-cols-[1fr_repeat(3,_100px)] sm:grid-cols-[1fr_repeat(3,_120px)] items-center border-b border-slate-50 ${fi % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
-                    <div className="px-5 py-3 text-sm text-slate-700 font-medium">{label}</div>
-                    {PLANS.map(p => (
-                      <div key={p.name} className="py-3 flex justify-center">
-                        {p.included[fi]
-                          ? <CheckCircle2 size={16} className="text-emerald-500" />
-                          : <div className="w-4 h-px bg-slate-200" />
-                        }
-                      </div>
-                    ))}
-                  </div>
-                ))}
+                <p className="text-xs text-slate-400 mt-4">
+                  Setup includes data migration, staff training, and full onboarding support.
+                </p>
               </div>
             </motion.div>
           )}
@@ -695,7 +715,7 @@ function PlansSection() {
         <motion.p initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }}
           transition={{ delay: 0.5 }}
           className="text-center text-xs text-slate-400 mt-8">
-          All plans include onboarding support · tenant data isolation · role-based access control · full audit trail
+          All tiers include every module · Billed at term start · Tenant data isolation · Role-based access control · Full audit trail
         </motion.p>
       </div>
     </section>
@@ -884,7 +904,7 @@ export default function Landing() {
           </motion.h1>
 
           <motion.p variants={fadeUp} className="text-lg sm:text-xl text-slate-500 max-w-2xl mx-auto leading-relaxed mb-3">
-            Admissions, academics, attendance, finance, reporting, and communications —
+            Admissions, academics, attendance, curriculum, finance, reporting, and communications —
             connected in one operational platform so institutions run with clarity and accountability.
           </motion.p>
 
@@ -976,10 +996,10 @@ export default function Landing() {
           <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()} className="text-center mb-16">
             <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-4">Platform Architecture</motion.p>
             <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-bold tracking-tight text-white mb-4 leading-tight">
-              One student. Nine connected layers.
+              One student. Every operational layer — connected.
             </motion.h2>
             <motion.p variants={fadeUp} className="text-base text-slate-400 max-w-xl mx-auto leading-relaxed">
-              From the first enquiry to the published report card and collected fee —
+              From the first enquiry to the published report card, collected fee, and lesson covered —
               one unbroken data trail across the entire institution.
             </motion.p>
           </motion.div>
