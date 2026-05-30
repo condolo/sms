@@ -100,7 +100,7 @@ router.post('/schools', async (req, res) => {
     // Create school record
     const schoolDoc = {
       id: schoolId, slug, name, shortName: shortName || name,
-      plan: plan || 'core', addOns: [], isActive: true,
+      plan: plan || process.env.BOOTSTRAP_PLAN || 'enterprise', addOns: [], isActive: true,
       currency: currency || 'KES', timezone: timezone || 'Africa/Nairobi',
       createdAt: new Date().toISOString()
     };

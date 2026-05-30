@@ -141,7 +141,13 @@ router.post('/', onboardLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Could not generate a valid URL slug from the school name' });
     }
 
-    const validPlan       = ['core','standard','premium','enterprise'].includes(plan) ? plan : 'standard';
+    // ── Bootstrap mode ───────────────────────────────────────────────────
+    // During the launch / go-to-market phase all onboarding schools receive
+    // the enterprise plan so they experience the full platform.
+    // When billing goes live, set BOOTSTRAP_PLAN=standard (or the chosen
+    // default) in the Render dashboard and redeploy — no code change needed.
+    const BOOTSTRAP_PLAN  = process.env.BOOTSTRAP_PLAN || 'enterprise';
+    const validPlan       = ['core','standard','premium','enterprise'].includes(plan) ? plan : BOOTSTRAP_PLAN;
     const validCurriculum = Array.isArray(curriculum) ? curriculum.filter(c => typeof c === 'string') : [];
     const VALID_SECTIONS  = ['kg','primary','secondary','alevel'];
     const validSections   = Array.isArray(sections)
@@ -202,8 +208,11 @@ async function _provisionInDB(data, res) {
   const userId   = `u_${slug}_superadmin`;
   const now      = new Date().toISOString();
 
-  const trialEnds = new Date();
-  trialEnds.setDate(trialEnds.getDate() + 30);
+  // During bootstrap phase, trial is 12 months (full first year free).
+  // Set TRIAL_DAYS in Render env to override (e.g. TRIAL_DAYS=30 when billing goes live).
+  const TRIAL_DAYS = parseInt(process.env.TRIAL_DAYS || '365', 10);
+  const trialEnds  = new Date();
+  trialEnds.setDate(trialEnds.getDate() + TRIAL_DAYS);
 
   /* Create school — status: pending until platform admin approves */
   const school = await School.create({
