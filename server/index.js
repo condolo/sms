@@ -140,6 +140,9 @@ app.use('/api/library',   require('./routes/library'));
 app.use('/api/transport', require('./routes/transport'));
 app.use('/api/hostel',    require('./routes/hostel'));
 
+/* ── v4.33.0: Lessons / Syllabus Tracker ── */
+app.use('/api/lessons', require('./routes/lessons'));
+
 /* ── Growth Profile (v4.22.0) ── */
 app.use('/api/growth-profile',         require('./routes/growth-profile'));
 app.use('/api/growth-records',         require('./routes/growth-records'));
@@ -265,6 +268,14 @@ async function start() {
 
     seedDemo()
       .catch(err => console.error('[seed-demo] Unhandled top-level error — demo school may not be provisioned correctly:', err));
+
+    // Lesson coverage reminder cron jobs (Friday + Saturday)
+    try {
+      const { startLessonReminders } = require('./utils/lesson-reminders');
+      startLessonReminders();
+    } catch (err) {
+      console.error('[lesson-reminders] Failed to start:', err.message);
+    }
   });
 }
 

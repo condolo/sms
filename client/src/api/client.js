@@ -563,6 +563,30 @@ export const hostel = {
   },
 };
 
+export const lessons = {
+  /* Topics (shared curriculum per subject) */
+  topics: {
+    list:    (params)     => _get('/lessons/topics', params),
+    create:  (data)       => _post('/lessons/topics', data),
+    update:  (id, data)   => _put(`/lessons/topics/${id}`, data),
+    remove:  (id)         => _delete(`/lessons/topics/${id}`),
+    reorder: (data)       => _post('/lessons/topics/reorder', data),
+    copyFrom: (data)      => _post('/lessons/topics/copy-from', data),
+  },
+  /* Coverage (per teacher per class) */
+  coverage: {
+    list:    (params)     => _get('/lessons/coverage', params),
+    mark:    (data)       => _post('/lessons/coverage', data),
+    unmark:  (id)         => _delete(`/lessons/coverage/${id}`),
+    unmarkBulk: (params)  => _req('DELETE', '/lessons/coverage', null, params),
+  },
+  /* Summary views */
+  myClasses:    (params)  => _get('/lessons/my-classes', params),
+  summary:      (params)  => _get('/lessons/summary', params),
+  classSummary: (classId, params) => _get(`/lessons/class-summary/${classId}`, params),
+  pendingTeachers: (params) => _get('/lessons/pending-teachers', params),
+};
+
 // Default export — single object for convenience
 const api = {
   auth,
@@ -596,6 +620,7 @@ const api = {
   library,
   transport,
   hostel,
+  lessons,
   APIError,
 };
 

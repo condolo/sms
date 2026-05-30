@@ -2383,6 +2383,7 @@ const MODULES_MASTER = [
   { key: 'attendance', label: 'Attendance',          section: 'Academic'   },
   { key: 'grades',     label: 'Exams & Assessment',  section: 'Academic'   },
   { key: 'subjects',   label: 'Subjects',            section: 'Academic'   },
+  { key: 'lessons',    label: 'Lessons',             section: 'Academic'   },
   { key: 'admissions', label: 'Admissions',          section: 'Operations' },
   { key: 'behaviour',  label: 'Behaviour',           section: 'Operations' },
   { key: 'finance',    label: 'Finance',             section: 'Operations' },

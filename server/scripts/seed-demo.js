@@ -144,15 +144,15 @@ async function seedDemo() {
 
   const ALL_MODS = ['students','teachers','classes','attendance','finance',
                     'behaviour','exams','grades','admissions','timetable',
-                    'messages','settings','assessment','report_cards'];
+                    'messages','settings','assessment','report_cards','lessons'];
 
   const PERMS = {
     admin:            Object.fromEntries(ALL_MODS.map(m => [m, FULL])),
-    deputy_principal: { students: R, teachers: R, classes: RCU, attendance: RCU, finance: R, behaviour: RCU, exams: RCU, grades: RCU, admissions: R, timetable: RCU, messages: RCU, settings: R, assessment: RCU, report_cards: RCU },
-    teacher:          { students: R, teachers: R, classes: R, attendance: RCU, finance: [], behaviour: RCU, exams: RCU, grades: RCU, admissions: [], timetable: R, messages: RCU, settings: [], assessment: RCU, report_cards: R },
+    deputy_principal: { students: R, teachers: R, classes: RCU, attendance: RCU, finance: R, behaviour: RCU, exams: RCU, grades: RCU, admissions: R, timetable: RCU, messages: RCU, settings: R, assessment: RCU, report_cards: RCU, lessons: FULL },
+    teacher:          { students: R, teachers: R, classes: R, attendance: RCU, finance: [], behaviour: RCU, exams: RCU, grades: RCU, admissions: [], timetable: R, messages: RCU, settings: [], assessment: RCU, report_cards: R, lessons: FULL },
     finance:          { students: R, teachers: [], classes: [], attendance: [], finance: FULL, behaviour: [], exams: [], grades: [], admissions: R, timetable: [], messages: R, settings: [], assessment: [], report_cards: [] },
-    parent:           { students: R, teachers: [], classes: [], attendance: R, finance: R, behaviour: R, exams: [], grades: R, admissions: [], timetable: R, messages: RCU, settings: [], assessment: R, report_cards: R },
-    student:          { students: R, teachers: [], classes: R, attendance: R, finance: R, behaviour: R, exams: R, grades: R, admissions: [], timetable: R, messages: RCU, settings: [], assessment: R, report_cards: R },
+    parent:           { students: R, teachers: [], classes: [], attendance: R, finance: R, behaviour: R, exams: [], grades: R, admissions: [], timetable: R, messages: RCU, settings: [], assessment: R, report_cards: R, lessons: R },
+    student:          { students: R, teachers: [], classes: R, attendance: R, finance: R, behaviour: R, exams: R, grades: R, admissions: [], timetable: R, messages: RCU, settings: [], assessment: R, report_cards: R, lessons: R },
   };
 
   await Promise.all(Object.entries(PERMS).map(([roleKey, permissions]) =>

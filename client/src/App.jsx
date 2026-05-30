@@ -39,6 +39,7 @@ const GrowthProfilePage = lazy(() => import('@/pages/growth-profile/GrowthProfil
 const LibraryPage       = lazy(() => import('@/pages/library/LibraryPage.jsx'));
 const TransportPage     = lazy(() => import('@/pages/transport/TransportPage.jsx'));
 const HostelPage        = lazy(() => import('@/pages/hostel/HostelPage.jsx'));
+const LessonsPage       = lazy(() => import('@/pages/lessons/LessonsPage.jsx'));
 
 function SuspenseWrapper({ children }) {
   return (
@@ -159,6 +160,9 @@ export const router = createBrowserRouter([
 
       // Hostel (v4.29.0)
       { path: 'hostel',                 element: <SuspenseWrapper><HostelPage /></SuspenseWrapper> },
+
+      // Lessons / Syllabus Tracker (v4.33.0)
+      { path: 'lessons',                element: <SuspenseWrapper><LessonsPage /></SuspenseWrapper> },
 
       // Fallback
       { path: '*',                     element: <SuspenseWrapper><NotFound /></SuspenseWrapper> },

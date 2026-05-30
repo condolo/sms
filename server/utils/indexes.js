@@ -341,6 +341,33 @@ const INDEXES = [
       { key: { id: 1 },                                  name: 'ha_id', unique: true, sparse: true },
     ],
   },
+
+  /* ── syllabus_topics ─────────────────────────────────────────
+     Shared curriculum per subject per school per academic year.
+     Primary: list topics for a subject/year.
+     Note: topics are shared — all teachers of a subject see the same list. */
+  {
+    col: 'syllabus_topics',
+    indexes: [
+      { key: { schoolId: 1, subjectId: 1, academicYear: 1, order: 1 },  name: 'st_school_sub_year_order' },
+      { key: { id: 1 },                                                  name: 'st_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── lesson_coverage ─────────────────────────────────────────
+     Per-teacher per-class coverage records.
+     Primary: coverage for a class-subject pair.
+     Unique: prevent duplicate coverage for same class+subject+topic+subtopic.
+     Note: co-teachers sharing a class see the same coverage pool. */
+  {
+    col: 'lesson_coverage',
+    indexes: [
+      { key: { schoolId: 1, classId: 1, subjectId: 1, academicYear: 1, topicId: 1, subtopicId: 1 }, name: 'lc_class_sub_year_topic', sparse: true },
+      { key: { schoolId: 1, teacherId: 1, academicYear: 1 },           name: 'lc_teacher_year' },
+      { key: { schoolId: 1, classId: 1, subjectId: 1, academicYear: 1 }, name: 'lc_class_sub_year' },
+      { key: { id: 1 },                                                 name: 'lc_id', unique: true, sparse: true },
+    ],
+  },
 ];
 
 /**

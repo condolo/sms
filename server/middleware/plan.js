@@ -45,6 +45,7 @@ const FEATURE_PLAN = {
   growth_profile:     'standard',   // verified learner development portfolio
   library:            'standard',   // book catalogue, loans, and fines
   transport:          'standard',   // route management and student assignments
+  lessons:            'standard',   // live syllabus/lesson coverage tracker
 
   /* ── Premium ── */
   analytics:          'premium',   // leadership analytics dashboard

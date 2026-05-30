@@ -6,6 +6,44 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.33.0',
+    date: '2026-05-30',
+    label: 'Lessons — Syllabus & Coverage Tracker',
+    changes: [
+      { type: 'new', text: 'Lessons module (standard plan): live curriculum coverage tracking for teachers, students, parents and admin — syllabus_topics + lesson_coverage collections' },
+      { type: 'new', text: 'Topics are shared per subject: any teacher of Mathematics sees the same topic list; co-teachers of the same class share their coverage pool' },
+      { type: 'new', text: 'Coverage is per class: teachers mark each topic/subtopic as covered with timestamps; admin and HOD see school-wide progress in one overview grid' },
+      { type: 'new', text: 'Full topic management: create topics with subtopics, reorder with ↑/↓, edit descriptions, delete (with coverage cleanup)' },
+      { type: 'new', text: 'Copy topics between academic years: copy curriculum structure from 2024/2025 → 2025/2026 in one click (coverage records are NOT copied)' },
+      { type: 'new', text: 'Lesson reminder cron jobs: Friday 5pm (Kenya) — end-of-day email to teachers with uncovered topics; Saturday 12pm — second reminder; Saturday 4pm — HOD escalation email with pending-staff table' },
+      { type: 'new', text: 'Student and parent API: GET /api/lessons/class-summary/:classId — per-subject coverage rings visible on student/parent dashboards' },
+      { type: 'new', text: 'Role permissions: teachers and deputy_principal get full RCUD on lessons; section_head/HOD get RCU; parent and student get read-only' },
+      { type: 'new', text: '4 new MongoDB indexes across syllabus_topics and lesson_coverage for efficient subject/year/class queries' },
+      { type: 'new', text: 'Lessons nav entry (BookCheck icon) added to Academic section in sidebar and Modules settings' },
+    ],
+  },
+  {
+    version: '4.32.0',
+    date: '2026-05-30',
+    label: 'Academic Year as School-Configured Field',
+    changes: [
+      { type: 'new', text: 'School settings: academic year label, year-start month (Jan–Dec), and terms per year now in a 3-column grid — all saved to the school document' },
+      { type: 'fix', text: 'FeeStructureSlideOver: reads academicYear and termsPerYear from session instead of hardcoding values; term dropdown dynamically sized to school's term count' },
+      { type: 'fix', text: 'Admissions reference numbers: APP-{year}-{code} now derives the year from school.academicYear ("2025/2026" → "2025") instead of the calendar year' },
+      { type: 'new', text: 'patchSchool() auth store helper: settings changes propagate reactively to sidebar and all components reading school from session without page reload' },
+    ],
+  },
+  {
+    version: '4.31.0',
+    date: '2026-05-30',
+    label: 'Module Management & Sidebar Collapse',
+    changes: [
+      { type: 'new', text: 'Settings → Modules tab: admin can toggle any of the 17 configurable modules on/off and reorder them with ↑/↓ arrows; changes saved to school.moduleConfig' },
+      { type: 'new', text: 'Sidebar collapse: X button in header collapses sidebar on desktop; hamburger in TopBar expands it — replaces the old fixed bottom arrow' },
+      { type: 'new', text: 'Sidebar nav dynamically built from school.moduleConfig — disabled modules disappear instantly after admin saves without page reload' },
+    ],
+  },
+  {
     version: '4.30.0',
     date: '2026-05-30',
     label: 'Demo Seed Data — Library, Transport & Hostel',

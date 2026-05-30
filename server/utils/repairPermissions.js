@@ -30,7 +30,7 @@ const RCUD = ['read', 'create', 'update', 'delete'];
 const ALL_MODULES = [
   'students', 'teachers', 'classes', 'attendance', 'finance', 'behaviour',
   'exams', 'grades', 'admissions', 'timetable', 'messages', 'settings',
-  'assessment', 'report_cards',
+  'assessment', 'report_cards', 'lessons',
 ];
 
 const ROLE_DEFAULTS = {
@@ -41,7 +41,7 @@ const ROLE_DEFAULTS = {
     students:     R,    teachers:     R,    classes:      R,
     attendance:   RCU,  grades:       RCU,  assessment:   RCU,
     timetable:    R,    messages:     RCU,  report_cards: R,
-    exams:        R,
+    exams:        R,    lessons:      RCUD,
   },
 
   deputy_principal: {
@@ -49,13 +49,14 @@ const ROLE_DEFAULTS = {
     attendance:   RCUD, grades:       RCUD, assessment:   RCUD,
     exams:        RCUD, behaviour:    RCUD, timetable:    RCUD,
     messages:     RCUD, report_cards: RCU,  admissions:   RCU,
+    lessons:      RCUD,
   },
 
   section_head: {
     students:     R, teachers: R, classes: R,
     attendance:   R, grades:   R, assessment: R,
     exams:        R, timetable: R, report_cards: R,
-    admissions:   R,
+    admissions:   R, lessons:  RCU,
   },
 
   admissions_officer: {
@@ -98,10 +99,12 @@ const ROLE_DEFAULTS = {
   parent: {
     messages:     R,
     report_cards: R,
+    lessons:      R,
   },
 
   student: {
     messages: R,
+    lessons:  R,
   },
 };
 

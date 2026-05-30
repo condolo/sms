@@ -375,7 +375,7 @@ async function _seedBaseData(schoolId, selectedSections = ['primary','secondary'
   const ALL_MODULES  = [
     'students', 'teachers', 'classes', 'attendance', 'finance', 'behaviour',
     'exams', 'grades', 'admissions', 'timetable', 'messages', 'settings',
-    'assessment', 'report_cards'
+    'assessment', 'report_cards', 'lessons'
   ];
 
   const permDocs = roles.map(roleKey => ({
@@ -418,7 +418,7 @@ function _defaultPerms(role) {
         attendance:   RCUD, finance:      RCUD, behaviour:    RCUD,
         exams:        RCUD, grades:       RCUD, admissions:   RCUD,
         timetable:    RCUD, messages:     RCUD, settings:     RCUD,
-        assessment:   RCUD, report_cards: RCUD,
+        assessment:   RCUD, report_cards: RCUD, lessons:      RCUD,
       };
 
     case 'teacher':
@@ -426,7 +426,7 @@ function _defaultPerms(role) {
         students:     R,    teachers:     R,    classes:      R,
         attendance:   RCU,  grades:       RCU,  assessment:   RCU,
         timetable:    R,    messages:     RCU,  report_cards: R,
-        exams:        R,
+        exams:        R,    lessons:      RCUD,
       };
 
     case 'finance':
@@ -471,7 +471,7 @@ function _defaultPerms(role) {
         students:     R,   teachers:     R,   classes:      R,
         attendance:   R,   grades:       R,   assessment:   R,
         exams:        R,   timetable:    R,   report_cards: R,
-        admissions:   R,
+        admissions:   R,   lessons:      RCU,
       };
 
     case 'deputy_principal':
@@ -480,6 +480,7 @@ function _defaultPerms(role) {
         attendance:   RCUD, grades:       RCUD, assessment:   RCUD,
         exams:        RCUD, behaviour:    RCUD, timetable:    RCUD,
         messages:     RCUD, report_cards: RCU,  admissions:   RCU,
+        lessons:      RCUD,
       };
 
     case 'discipline_committee':
@@ -492,11 +493,13 @@ function _defaultPerms(role) {
       return {
         messages:     R,
         report_cards: R,   // read their own child's report cards
+        lessons:      R,   // view curriculum coverage for their child's class
       };
 
     case 'student':
       return {
         messages:     R,
+        lessons:      R,   // view curriculum coverage for their class
       };
 
     default:
