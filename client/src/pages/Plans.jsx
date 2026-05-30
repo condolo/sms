@@ -124,11 +124,11 @@ const FAQS = [
   },
   {
     q: 'What happens if we add more students mid-term?',
-    a: 'Students added mid-term are billed pro-rata at your next term's invoice. We always use the term-start snapshot as the billing count.',
+    a: 'Students added mid-term are billed pro-rata at your next term\'s invoice. We always use the term-start snapshot as the billing count.',
   },
   {
     q: 'Do you offer discounts for large schools?',
-    a: 'Yes. Schools with over 500 students qualify for a negotiated rate. Contact us and we'll prepare a custom quote.',
+    a: 'Yes. Schools with over 500 students qualify for a negotiated rate. Contact us and we\'ll prepare a custom quote.',
   },
 ];
 
@@ -411,7 +411,7 @@ export default function Plans() {
 
         <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger} className="grid grid-cols-1 sm:grid-cols-4 gap-4">
           {[
-            { step: '01', title: 'Book a demo',         desc: 'We walk you through every module and understand your school's needs.' },
+            { step: '01', title: 'Book a demo',         desc: 'We walk you through every module and understand your school\'s needs.' },
             { step: '02', title: 'Setup & onboarding',  desc: 'We configure your school, import data, and train your staff. Setup fee applies.' },
             { step: '03', title: 'Go live',             desc: 'Your school goes live. All staff, students, and parents can log in.' },
             { step: '04', title: 'Billed each term',    desc: 'Pay per student at the start of each term. No surprises.' },

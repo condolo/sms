@@ -28,7 +28,7 @@ const RELEASES = [
     label: 'Academic Year as School-Configured Field',
     changes: [
       { type: 'new', text: 'School settings: academic year label, year-start month (Jan–Dec), and terms per year now in a 3-column grid — all saved to the school document' },
-      { type: 'fix', text: 'FeeStructureSlideOver: reads academicYear and termsPerYear from session instead of hardcoding values; term dropdown dynamically sized to school's term count' },
+      { type: 'fix', text: 'FeeStructureSlideOver: reads academicYear and termsPerYear from session instead of hardcoding values; term dropdown dynamically sized to the school\'s term count' },
       { type: 'fix', text: 'Admissions reference numbers: APP-{year}-{code} now derives the year from school.academicYear ("2025/2026" → "2025") instead of the calendar year' },
       { type: 'new', text: 'patchSchool() auth store helper: settings changes propagate reactively to sidebar and all components reading school from session without page reload' },
     ],
