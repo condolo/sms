@@ -335,13 +335,16 @@ router.delete('/me/photo', authMiddleware, async (req, res) => {
   }
 });
 
-/* GET /api/users/:id/photo — serve photo as binary image (tenant-scoped) */
-router.get('/:id/photo', authMiddleware, async (req, res) => {
+/* GET /api/users/:id/photo — serve photo as binary image (public, no auth)
+   Photos are identified by opaque UUID userId so enumeration is not practical.
+   Auth was previously required here but browser <img> tags cannot send Bearer
+   tokens, causing every photo load to 401 and silently fail. */
+router.get('/:id/photo', async (req, res) => {
   try {
     const Photos = _model('user_photos');
-    const photo  = await Photos.findOne({ userId: req.params.id, schoolId: req.jwtUser.schoolId }).lean();
+    const photo  = await Photos.findOne({ userId: req.params.id }).lean();
 
-    if (!photo?.photoBase64) return res.status(404).json({ error: 'No photo' });
+    if (!photo?.photoBase64) return res.status(404).end();
 
     const [header, data] = photo.photoBase64.split(',');
     const mimeMatch = header?.match(/data:(image\/[\w+]+);base64/);
@@ -350,8 +353,8 @@ router.get('/:id/photo', authMiddleware, async (req, res) => {
     res.set('Content-Type', mime);
     res.set('Cache-Control', 'public, max-age=3600');
     res.send(Buffer.from(data, 'base64'));
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to serve photo' });
+  } catch {
+    res.status(500).end();
   }
 });
 

@@ -19,12 +19,18 @@ function resizeImageToBase64(file, maxPx = 256, quality = 0.82) {
         canvas.getContext('2d').drawImage(img, 0, 0, w, h);
         resolve(canvas.toDataURL('image/jpeg', quality));
       };
-      img.onerror = reject;
+      img.onerror = () => reject(new Error('Could not decode image. Try a different file.'));
       img.src = e.target.result;
     };
-    reader.onerror = reject;
+    reader.onerror = () => reject(new Error('Could not read file.'));
     reader.readAsDataURL(file);
   });
+}
+
+function fmtBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /* ── Inline status banner ──────────────────────────────────────────────────── */
@@ -92,33 +98,34 @@ export default function ProfilePage() {
   async function handlePhotoChange(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setPhotoBanner({ type: 'error', msg: 'Please select an image file (JPEG, PNG, or WebP).' });
+
+    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowed.includes(file.type)) {
+      setPhotoBanner({ type: 'error', msg: 'Unsupported format. Please use JPEG, PNG, or WebP.' });
+      e.target.value = '';
       return;
     }
+
+    // Warn if original file is very large — it will be resized but give feedback
+    const originalSize = fmtBytes(file.size);
+    if (file.size > 10 * 1024 * 1024) {
+      setPhotoBanner({ type: 'error', msg: `File is ${originalSize}. Please use an image under 10 MB.` });
+      e.target.value = '';
+      return;
+    }
+
     setPhotoLoading(true);
     setPhotoBanner({ type: '', msg: '' });
+
     try {
       const base64 = await resizeImageToBase64(file, 256, 0.82);
-      const token  = JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token;
-      const { slug } = (await import('@/utils/schoolDetect.js')).detectSchool();
-      const res = await fetch('/api/users/me/photo', {
-        method:  'PUT',
-        headers: {
-          'Content-Type':  'application/json',
-          'Authorization': `Bearer ${token}`,
-          ...(slug ? { 'X-School-Slug': slug } : {}),
-        },
-        body: JSON.stringify({ photoBase64: base64 }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Upload failed');
+      await authApi.uploadPhoto({ photoBase64: base64 });
       const freshUrl = `/api/users/${user.id}/photo?t=${Date.now()}`;
       setPhotoUrl(freshUrl);
       setSession({ ...session, user: { ...user, photoUrl: freshUrl } });
-      setPhotoBanner({ type: 'success', msg: 'Photo updated.' });
+      setPhotoBanner({ type: 'success', msg: `Photo updated. (Original: ${originalSize} → resized to 256×256)` });
     } catch (err) {
-      setPhotoBanner({ type: 'error', msg: err.message });
+      setPhotoBanner({ type: 'error', msg: err?.message || 'Upload failed. Please try again.' });
     } finally {
       setPhotoLoading(false);
       e.target.value = '';
@@ -129,20 +136,12 @@ export default function ProfilePage() {
     if (!window.confirm('Remove your profile photo?')) return;
     setPhotoLoading(true);
     try {
-      const token = JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token;
-      const { slug } = (await import('@/utils/schoolDetect.js')).detectSchool();
-      await fetch('/api/users/me/photo', {
-        method:  'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          ...(slug ? { 'X-School-Slug': slug } : {}),
-        },
-      });
+      await authApi.removePhoto();
       setPhotoUrl(null);
       setSession({ ...session, user: { ...user, photoUrl: null } });
       setPhotoBanner({ type: 'success', msg: 'Photo removed.' });
-    } catch {
-      setPhotoBanner({ type: 'error', msg: 'Failed to remove photo.' });
+    } catch (err) {
+      setPhotoBanner({ type: 'error', msg: err?.message || 'Failed to remove photo.' });
     } finally {
       setPhotoLoading(false);
     }
@@ -273,7 +272,9 @@ export default function ProfilePage() {
             <Banner type={photoBanner.type} message={photoBanner.msg} onClose={() => setPhotoBanner({ type: '', msg: '' })} />
           </div>
         )}
-        <p className="text-xs text-slate-400 mt-3">JPG, PNG or WebP. Auto-resized to 256×256 px. Max 300 KB.</p>
+        <p className="text-xs text-slate-400 mt-3">
+          JPEG, PNG or WebP · any size (auto-resized to 256×256 px) · max 10 MB original
+        </p>
       </Card>
 
       {/* ── Personal info card ─────────────────────────────────────── */}
