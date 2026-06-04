@@ -2,16 +2,13 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "vite-preview",
+      "name": "vite-dev",
       "runtimeExecutable": "npm",
       "runtimeArgs": [
         "run",
-        "preview",
-        "--",
-        "--port",
-        "4173"
+        "dev"
       ],
-      "port": 4173,
+      "port": 5173,
       "cwd": "client"
     }
   ]

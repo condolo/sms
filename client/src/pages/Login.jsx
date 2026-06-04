@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { Spinner } from '@/components/ui/Spinner.jsx';
 import useAuthStore from '@/store/auth.js';
 import { auth as authApi, publicApi, APIError } from '@/api/client.js';
 import { detectSchool, storeSchoolSlug } from '@/utils/schoolDetect.js';
+import { Loader2 as Loader2Icon, Search } from 'lucide-react';
 
 /* ── School branding hook ──────────────────────────────────────
    Fetches public school info once on mount. Used to brand the
@@ -167,6 +168,124 @@ const LOGIN_KEYFRAMES = `
     66%       { transform: translateY(10px) scale(0.97); }
   }
 `;
+
+/* ══════════════════════════════════════════════════════════════
+   SCHOOL FINDER — shown at msingi.io/login when no school slug
+   is detected. Visitor types their school name/URL → system
+   validates → redirects to the school-branded login.
+   ══════════════════════════════════════════════════════════════ */
+function SchoolFinderPage() {
+  const navigate    = useNavigate();
+  const [query,     setQuery]    = useState('');
+  const [finding,   setFinding]  = useState(false);
+  const [notFound,  setNotFound] = useState(false);
+  const [error,     setError]    = useState('');
+
+  function _parseSlug(raw) {
+    return raw.trim().toLowerCase()
+      .replace(/^https?:\/\//i, '')
+      .replace(/\.msingi\.io.*$/, '')
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9-]/g, '');
+  }
+
+  async function handleFind(e) {
+    e.preventDefault();
+    const slug = _parseSlug(query);
+    if (!slug) { setError('Enter your school name or web address.'); return; }
+    setFinding(true); setError(''); setNotFound(false);
+    try {
+      const res = await fetch(`/api/public/school-info?slug=${slug}`);
+      if (!res.ok) { setNotFound(true); setFinding(false); return; }
+      storeSchoolSlug(slug);
+      navigate(`/login?school=${slug}`, { replace: true });
+    } catch {
+      setError('Could not connect. Please try again.');
+      setFinding(false);
+    }
+  }
+
+  function goDemo() {
+    storeSchoolSlug('demo');
+    navigate('/login?school=demo', { replace: true });
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center px-4 py-12">
+      {/* Msingi wordmark */}
+      <div className="flex items-center gap-2.5 mb-10">
+        <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-black text-base shadow-lg">M</div>
+        <span className="text-xl font-bold text-slate-900 tracking-tight">Msingi</span>
+      </div>
+
+      <div className="w-full max-w-sm bg-white rounded-2xl border border-slate-200 shadow-sm p-8">
+        <div className="mb-6">
+          <h1 className="text-xl font-bold text-slate-900 mb-1.5">Find your school</h1>
+          <p className="text-sm text-slate-500">Enter your school's web address to access your portal.</p>
+        </div>
+
+        <form onSubmit={handleFind} className="space-y-4">
+          {error && (
+            <div className="rounded-xl bg-red-50 border border-red-200 px-3.5 py-2.5 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+
+          {notFound && (
+            <div className="rounded-xl bg-amber-50 border border-amber-200 px-3.5 py-2.5 text-sm text-amber-800 space-y-1">
+              <p className="font-semibold">School not found</p>
+              <p className="text-amber-700 text-xs">Check the spelling, or contact your school administrator for the correct address.</p>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">School name or address</label>
+            <div className="relative">
+              <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={query}
+                onChange={e => { setQuery(e.target.value); setError(''); setNotFound(false); }}
+                className="w-full text-sm border border-slate-200 rounded-xl pl-9 pr-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-slate-50 focus:bg-white transition-colors"
+                placeholder="e.g.  greenwood  or  greenwood.msingi.io"
+                autoFocus
+                disabled={finding}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+            <p className="text-[10px] text-slate-400 mt-1.5 leading-relaxed">
+              Your school was given a unique web address when they joined Msingi.
+            </p>
+          </div>
+
+          <button type="submit" disabled={finding || !query.trim()}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm">
+            {finding
+              ? <><Loader2Icon size={14} className="animate-spin" /> Searching…</>
+              : <><Search size={14} /> Find School</>
+            }
+          </button>
+        </form>
+      </div>
+
+      {/* Quick links */}
+      <div className="mt-6 flex flex-col items-center gap-2.5 text-xs text-slate-400">
+        <button onClick={goDemo}
+          className="text-indigo-600 hover:text-indigo-800 font-medium transition-colors">
+          Explore the demo school →
+        </button>
+        <span>·</span>
+        <Link to="/contact" className="hover:text-slate-600 transition-colors">
+          New school? Contact us →
+        </Link>
+        <Link to="/" className="hover:text-slate-600 transition-colors">
+          ← Back to msingi.io
+        </Link>
+      </div>
+    </div>
+  );
+}
 
 export default function Login() {
   const navigate           = useNavigate();
@@ -499,6 +618,11 @@ export default function Login() {
         </div>
       </div>
     );
+  }
+
+  // No school context — show the school finder instead of the login form
+  if (!isSchool) {
+    return <SchoolFinderPage />;
   }
 
   // Loading skeleton while branding loads
