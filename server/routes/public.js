@@ -47,6 +47,7 @@ router.get('/school-info', async (req, res) => {
       name:         school.name          || 'School Portal',
       shortName:    school.shortName     || school.name || 'School',
       logoUrl:      school.logoUrl       || null,
+      faviconUrl:   school.faviconUrl    || null,
       primaryColor: school.primaryColor  || '#4f46e5',
       accentColor:  school.accentColor   || '#7c3aed',
       themePreset:  school.themePreset   || null,
@@ -95,6 +96,41 @@ router.get('/schools/search', async (req, res) => {
     });
   } catch (err) {
     console.error('[public/schools/search]', err.message);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+/* GET /api/public/school-asset/logo?slug=...
+   GET /api/public/school-asset/favicon?slug=...
+   Serves the school logo or favicon as a binary image — no auth needed
+   so the login page and browser tab can display it before login.
+*/
+router.get('/school-asset/:type', async (req, res) => {
+  try {
+    const { type } = req.params;
+    if (type !== 'logo' && type !== 'favicon') {
+      return res.status(400).json({ error: 'type must be logo or favicon' });
+    }
+
+    const slug = (req.query.slug || '').toLowerCase().trim();
+    if (!slug) return res.status(400).json({ error: 'slug required' });
+
+    const School = _model('schools');
+    const school = await School.findOne({ id: slug }).lean();
+    const field  = type === 'logo' ? 'logoBase64' : 'faviconBase64';
+    const b64    = school?.[field];
+
+    if (!b64) return res.status(404).json({ error: `No ${type} set` });
+
+    const [header, data] = b64.split(',');
+    const mimeMatch = header?.match(/data:(image\/[\w+]+);base64/);
+    const mime = mimeMatch?.[1] || 'image/png';
+
+    res.set('Content-Type', mime);
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.send(Buffer.from(data, 'base64'));
+  } catch (err) {
+    console.error('[public/school-asset]', err.message);
     res.status(500).json({ error: 'Server error' });
   }
 });

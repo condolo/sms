@@ -3,7 +3,7 @@
    /platform-audit: lucide icons, invite slide-over, currency +
    timezone fields, houses config, no old components, no alert()
    ============================================================ */
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect } from 'react';
@@ -15,6 +15,7 @@ import {
   RefreshCcw, Info, Server, Check, Minus, ChevronDown, ChevronUp,
   CreditCard, Smartphone, Zap, ArrowRight, Layers, Pencil,
   Bell, MessageSquare, BookOpen, Calendar, CalendarDays, Clock,
+  Upload, ImageIcon,
 } from 'lucide-react';
 import { sections as sectionsApi } from '@/api/client.js';
 import { settings as settingsApi } from '@/api/client.js';
@@ -315,6 +316,178 @@ function SectionsPanel() {
   );
 }
 
+/* ── Asset uploader — logo or favicon ───────────────────────── */
+function AssetUploader({ label, hint, currentUrl, maxKB, accept, onUpload, onDelete, uploading, square }) {
+  const inputRef  = useRef(null);
+  const [preview, setPreview] = useState(null);
+
+  function pickFile() { inputRef.current?.click(); }
+
+  function handleFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const b64 = ev.target.result;
+      setPreview(b64);
+      onUpload(b64);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  }
+
+  const src = preview || currentUrl;
+
+  return (
+    <div className="flex items-start gap-4">
+      {/* Preview box */}
+      <div
+        className={`flex-shrink-0 flex items-center justify-center bg-slate-100 border-2 border-dashed border-slate-200 rounded-xl overflow-hidden ${square ? 'w-16 h-16' : 'w-24 h-16'}`}
+        style={{ cursor: 'pointer' }}
+        onClick={pickFile}
+      >
+        {src
+          ? <img src={src} alt={label} className="w-full h-full object-contain p-1" />
+          : <ImageIcon size={20} className="text-slate-300" />
+        }
+      </div>
+
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-slate-700 mb-0.5">{label}</p>
+        <p className="text-xs text-slate-400 mb-2">{hint}</p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={pickFile}
+            disabled={uploading}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 disabled:opacity-50 transition-colors"
+          >
+            {uploading
+              ? <Loader2 size={12} className="animate-spin" />
+              : <Upload size={12} />
+            }
+            {src ? 'Replace' : 'Upload'}
+          </button>
+          {src && (
+            <button
+              type="button"
+              onClick={() => { setPreview(null); onDelete(); }}
+              disabled={uploading}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-red-200 bg-red-50 hover:bg-red-100 text-red-600 disabled:opacity-50 transition-colors"
+            >
+              <Trash2 size={12} /> Remove
+            </button>
+          )}
+        </div>
+      </div>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept={accept}
+        className="hidden"
+        onChange={handleFile}
+      />
+    </div>
+  );
+}
+
+/* ── Branding card — logo + favicon ─────────────────────────── */
+function BrandingCard({ schoolId, logoUrl, faviconUrl, onSaved }) {
+  const [logoUploading,    setLogoUploading]    = useState(false);
+  const [faviconUploading, setFaviconUploading] = useState(false);
+  const [toast,            setToast]            = useState(null);
+
+  async function handleLogoUpload(b64) {
+    setLogoUploading(true);
+    try {
+      await settingsApi.school.uploadLogo(b64);
+      setToast({ msg: 'Logo saved.', type: 'success' });
+      onSaved?.();
+    } catch (err) {
+      setToast({ msg: err?.message || 'Failed to upload logo.', type: 'error' });
+    } finally {
+      setLogoUploading(false);
+    }
+  }
+
+  async function handleLogoDelete() {
+    setLogoUploading(true);
+    try {
+      await settingsApi.school.deleteLogo();
+      setToast({ msg: 'Logo removed.', type: 'success' });
+      onSaved?.();
+    } finally {
+      setLogoUploading(false);
+    }
+  }
+
+  async function handleFaviconUpload(b64) {
+    setFaviconUploading(true);
+    try {
+      await settingsApi.school.uploadFavicon(b64);
+      setToast({ msg: 'Favicon saved.', type: 'success' });
+      onSaved?.();
+    } catch (err) {
+      setToast({ msg: err?.message || 'Failed to upload favicon.', type: 'error' });
+    } finally {
+      setFaviconUploading(false);
+    }
+  }
+
+  async function handleFaviconDelete() {
+    setFaviconUploading(true);
+    try {
+      await settingsApi.school.deleteFavicon();
+      setToast({ msg: 'Favicon removed.', type: 'success' });
+      onSaved?.();
+    } finally {
+      setFaviconUploading(false);
+    }
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+      <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+        <ImageIcon size={14} className="text-slate-400" />
+        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Branding</h3>
+      </div>
+
+      <div className="h-6 flex items-center">
+        <AnimatePresence>
+          {toast && <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}
+        </AnimatePresence>
+      </div>
+
+      <AssetUploader
+        label="School Logo"
+        hint={`Displayed in the sidebar and login page. PNG, WebP or SVG recommended. Max 500 KB.`}
+        currentUrl={logoUrl}
+        maxKB={500}
+        accept="image/png,image/jpeg,image/webp,image/svg+xml"
+        onUpload={handleLogoUpload}
+        onDelete={handleLogoDelete}
+        uploading={logoUploading}
+        square={false}
+      />
+
+      <div className="border-t border-slate-100 pt-4">
+        <AssetUploader
+          label="Favicon"
+          hint="Browser tab icon. Must be square (e.g. 32×32 or 64×64). PNG or ICO. Max 150 KB."
+          currentUrl={faviconUrl}
+          maxKB={150}
+          accept="image/png,image/x-icon,image/vnd.microsoft.icon"
+          onUpload={handleFaviconUpload}
+          onDelete={handleFaviconDelete}
+          uploading={faviconUploading}
+          square={true}
+        />
+      </div>
+    </div>
+  );
+}
+
 /* ══════════════════════════════════════════════════════════════
    SCHOOL SETTINGS TAB
    ══════════════════════════════════════════════════════════════ */
@@ -410,6 +583,9 @@ function SchoolTab() {
           <input value={f.country ?? ''} onChange={e => set('country', e.target.value)} className={iCls()} placeholder="e.g. Kenya" />
         </FField>
       </div>
+
+      {/* Branding */}
+      <BrandingCard schoolId={school.id} logoUrl={school.logoUrl} faviconUrl={school.faviconUrl} onSaved={() => qc.invalidateQueries({ queryKey: ['settings', 'school'] })} />
 
       {/* Regional */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">

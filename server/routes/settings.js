@@ -155,6 +155,93 @@ router.put('/school', authMiddleware, async (req, res) => {
   }
 });
 
+/* ── Shared image-upload helper ─────────────────────────────── */
+function _validateBase64Image(b64, maxKB) {
+  if (!/^data:image\/(jpeg|jpg|png|webp|gif|svg\+xml);base64,/.test(b64)) {
+    return 'Invalid image. Use JPEG, PNG, WebP, GIF, or SVG.';
+  }
+  const data = b64.split(',')[1] || '';
+  const sizeBytes = Math.ceil(data.length * 0.75);
+  if (sizeBytes > maxKB * 1024) {
+    return `Image too large. Maximum size is ${maxKB} KB.`;
+  }
+  return null;
+}
+
+/* PUT /api/settings/school/logo — upload school logo (admin only) */
+router.put('/school/logo', authMiddleware, async (req, res) => {
+  try {
+    if (!_isAdmin(req)) return res.status(403).json({ error: 'Admin access required.' });
+    const { logoBase64 } = req.body;
+    if (!logoBase64) return res.status(400).json({ error: 'logoBase64 is required.' });
+    const err = _validateBase64Image(logoBase64, 500);
+    if (err) return res.status(400).json({ error: err });
+
+    const Schools = _model('schools');
+    const logoUrl = `/api/public/school-asset/logo?slug=${req.jwtUser.schoolId}`;
+    await Schools.updateOne(
+      { id: req.jwtUser.schoolId },
+      { $set: { logoBase64, logoUrl, updatedAt: new Date().toISOString() } }
+    );
+    res.json({ success: true, logoUrl });
+  } catch (err) {
+    console.error('[settings] PUT /school/logo:', err);
+    res.status(500).json({ error: 'Failed to upload logo.' });
+  }
+});
+
+/* DELETE /api/settings/school/logo — clear school logo (admin only) */
+router.delete('/school/logo', authMiddleware, async (req, res) => {
+  try {
+    if (!_isAdmin(req)) return res.status(403).json({ error: 'Admin access required.' });
+    const Schools = _model('schools');
+    await Schools.updateOne(
+      { id: req.jwtUser.schoolId },
+      { $unset: { logoBase64: '', logoUrl: '' }, $set: { updatedAt: new Date().toISOString() } }
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to remove logo.' });
+  }
+});
+
+/* PUT /api/settings/school/favicon — upload school favicon (admin only) */
+router.put('/school/favicon', authMiddleware, async (req, res) => {
+  try {
+    if (!_isAdmin(req)) return res.status(403).json({ error: 'Admin access required.' });
+    const { faviconBase64 } = req.body;
+    if (!faviconBase64) return res.status(400).json({ error: 'faviconBase64 is required.' });
+    const err = _validateBase64Image(faviconBase64, 150);
+    if (err) return res.status(400).json({ error: err });
+
+    const Schools = _model('schools');
+    const faviconUrl = `/api/public/school-asset/favicon?slug=${req.jwtUser.schoolId}`;
+    await Schools.updateOne(
+      { id: req.jwtUser.schoolId },
+      { $set: { faviconBase64, faviconUrl, updatedAt: new Date().toISOString() } }
+    );
+    res.json({ success: true, faviconUrl });
+  } catch (err) {
+    console.error('[settings] PUT /school/favicon:', err);
+    res.status(500).json({ error: 'Failed to upload favicon.' });
+  }
+});
+
+/* DELETE /api/settings/school/favicon — clear school favicon (admin only) */
+router.delete('/school/favicon', authMiddleware, async (req, res) => {
+  try {
+    if (!_isAdmin(req)) return res.status(403).json({ error: 'Admin access required.' });
+    const Schools = _model('schools');
+    await Schools.updateOne(
+      { id: req.jwtUser.schoolId },
+      { $unset: { faviconBase64: '', faviconUrl: '' }, $set: { updatedAt: new Date().toISOString() } }
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to remove favicon.' });
+  }
+});
+
 /* ══════════════════════════════════════════════════════════════
    USER MANAGEMENT
    ══════════════════════════════════════════════════════════════ */

@@ -327,8 +327,12 @@ export const settings = {
   get:    ()       => _get('/settings'),
   update: (data)   => _put('/settings', data),
   school: {
-    get:    ()     => _get('/settings/school'),
-    update: (data) => _put('/settings/school', data),
+    get:          ()     => _get('/settings/school'),
+    update:       (data) => _put('/settings/school', data),
+    uploadLogo:   (b64)  => _put('/settings/school/logo',    { logoBase64: b64 }),
+    deleteLogo:   ()     => _delete('/settings/school/logo'),
+    uploadFavicon:(b64)  => _put('/settings/school/favicon', { faviconBase64: b64 }),
+    deleteFavicon:()     => _delete('/settings/school/favicon'),
   },
   users: {
     list:   ()         => _get('/settings/users'),
