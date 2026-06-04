@@ -760,18 +760,25 @@ function YouTubeIcon({ size = 16 }) { return <svg width={size} height={size} vie
 
 /* ═══════════════════════════════════════════════════════════════
    MODULE PREVIEW DATA
-   One entry per ecosystem node — tagline, outcome bullets,
-   mini mockup config, and demo deep-link path.
+   Each entry: tagline, outcome-focused bullets, result box,
+   connected module labels, mini mockup config, demo path.
+   badge field drafted — pending approval before activation.
 ═══════════════════════════════════════════════════════════════ */
 const MODULE_PREVIEWS = {
   'Admissions': {
-    tagline: 'Structured intake from first enquiry to enrolled student.',
+    tagline: 'Every prospective student tracked from first contact to enrolled record.',
     outcomes: [
-      'Capture enquiries with source, notes and contact details',
-      'Move applicants through configurable pipeline stages — Enquiry → Applied → Interview → Offered → Enrolled',
-      'Auto-generate admission references and offer letters',
-      'One-click conversion from approved applicant to student record',
+      'First enquiries captured with source, notes and contact details — no lead is lost',
+      'Applicants move through your defined stages: Enquiry → Applied → Interview → Offered → Enrolled',
+      'Offer letters and admission references generated automatically when a stage is reached',
+      'Approved applicants convert to full student records in one click — no re-entering data',
     ],
+    results: [
+      'No lost enquiries — every lead tracked from first contact to decision',
+      'No duplicate student records — admissions feed directly into Student Records',
+      'Offer letters issued in seconds, not assembled by hand',
+    ],
+    connectedModules: ['Student Records', 'Finance', 'Reports'],
     demoPath: '/admissions',
     mockup: {
       type: 'pipeline',
@@ -785,13 +792,19 @@ const MODULE_PREVIEWS = {
     },
   },
   'Student Records': {
-    tagline: 'A single, permanent record for every student — from admission to graduation.',
+    tagline: 'One permanent record per student — from first admission to final graduation.',
     outcomes: [
-      'Complete profile: personal details, photo, guardian contacts, medical notes',
-      'Academic history: classes, subjects, report cards and grades across all years',
-      'Behaviour, attendance and fee records all accessible in one place',
-      'Immutable audit trail — every edit timestamped and attributed',
+      'Profile, guardian contacts, photo and medical notes in a single view — nothing scattered across spreadsheets',
+      'Academic history, attendance, behaviour and fee records all accessible in one place',
+      'Every edit timestamped and attributed — an immutable audit trail behind every record',
+      'Records preserved permanently after a student leaves, transfers or graduates',
     ],
+    results: [
+      'One record per student — no reconciling data across separate registers',
+      'Complete history available instantly — for parent meetings, legal requests or audits',
+      'No data lost when staff change — institutional memory lives in the system',
+    ],
+    connectedModules: ['Attendance', 'Grades', 'Reports', 'Behaviour', 'Finance'],
     demoPath: '/students',
     mockup: {
       type: 'list',
@@ -805,13 +818,19 @@ const MODULE_PREVIEWS = {
     },
   },
   'Classes': {
-    tagline: 'Sections, streams and key-stage structure that mirror your school exactly.',
+    tagline: 'Sections, streams and curriculum structure that mirror your school exactly.',
     outcomes: [
       'Create classes with any naming convention — Form 1A, Year 7, Grade 4 Stream B',
-      'Assign class teachers and configure subject sets per class',
-      'Multi-curriculum support — CBC, 844, IGCSE, IB side-by-side',
-      'Class enrolment automatically gates attendance, timetable, and report cards',
+      'Supports CBC, 8-4-4, IGCSE and IB without building separate systems',
+      'Assign class teachers and configure subject sets per class in minutes',
+      'Enrolling a student into a class automatically activates their attendance, timetable and report card',
     ],
+    results: [
+      'Multi-curriculum schools need one system, not one per curriculum',
+      'New academic year setup takes minutes — not a week of spreadsheet work',
+      'Timetable, attendance and reports always aligned — no manual class mapping',
+    ],
+    connectedModules: ['Attendance', 'Timetable', 'Grades', 'Reports', 'Finance'],
     demoPath: '/classes',
     mockup: {
       type: 'list',
@@ -825,31 +844,43 @@ const MODULE_PREVIEWS = {
     },
   },
   'Timetable': {
-    tagline: 'A visual schedule for every class, subject and teacher — no conflicts, no gaps.',
+    tagline: 'A complete school schedule with zero conflicts — published instantly to every portal.',
     outcomes: [
-      'Drag-and-drop period builder across days, classes and rooms',
-      'Conflict detection — no teacher or room double-booked automatically',
-      'Students and teachers see their own timetable view after login',
-      'Timetable changes publish instantly across all portals',
+      'Build the full school timetable in a visual grid across days, classes, subjects and rooms',
+      'Conflict detection is automatic — no teacher or room is ever double-booked',
+      'Students and teachers see their own schedule the moment they log in',
+      'Timetable changes publish instantly — no printing and redistributing paper copies',
     ],
+    results: [
+      'Scheduling errors caught before publishing, not discovered in week one of term',
+      'Every teacher sees their current schedule in real time — no WhatsApp reminders',
+      'Timetable changes take effect across all portals immediately',
+    ],
+    connectedModules: ['Attendance', 'Lessons', 'Classes', 'Student Records'],
     demoPath: '/timetable',
     mockup: {
       type: 'timetable',
       periods: [
-        { time: '8:00', subjects: ['Maths', 'English', 'Science', 'Kiswahili'] },
-        { time: '9:00', subjects: ['English', 'Maths', 'History', 'Science'] },
+        { time: '8:00',  subjects: ['Maths', 'English', 'Science', 'Kiswahili'] },
+        { time: '9:00',  subjects: ['English', 'Maths', 'History', 'Science'] },
         { time: '10:00', subjects: ['Science', 'CRE', 'Maths', 'English'] },
       ],
     },
   },
   'Attendance': {
-    tagline: 'Daily register for every class — marked once, visible everywhere.',
+    tagline: 'Daily register marked in seconds — accurate data available instantly across the school.',
     outcomes: [
-      'Teachers mark attendance per class in under 60 seconds',
-      'Present, absent and late states — notes optional per record',
-      'Real-time attendance percentage per student, class and school',
-      'Parents receive automatic alerts on unexplained absences (Family tier)',
+      'Teachers mark attendance for their class in under 60 seconds — present, absent or late',
+      'Notes recorded per entry — illness, authorised absence, bereavement, field trip',
+      'School-wide attendance percentage visible in real time by student, class and date',
+      'Parents on the Family tier receive automatic alerts on unexplained absences',
     ],
+    results: [
+      'No paper registers to scan or transcribe at end of term',
+      'Chronic absenteeism visible in the dashboard before it becomes a pastoral crisis',
+      'Attendance data in reports comes from the same record — no reconciliation',
+    ],
+    connectedModules: ['Reports', 'Analytics', 'Grades', 'Student Records'],
     demoPath: '/attendance',
     mockup: {
       type: 'register',
@@ -863,13 +894,19 @@ const MODULE_PREVIEWS = {
     },
   },
   'Lessons': {
-    tagline: 'Every topic in the syllabus — tracked, covered, and visible to all stakeholders.',
+    tagline: 'Syllabus coverage tracked per class — principals can see what has been taught at any time.',
     outcomes: [
-      'Admin defines the syllabus once; teachers mark topics as covered per class',
-      'Co-teachers of the same class share a single coverage pool — no duplication',
-      'HOD sees every subject\'s coverage progress across all classes at a glance',
-      'Parents and students see real-time curriculum coverage in their portal',
+      'Admin defines the syllabus once — all teachers of a subject work from the same topic list',
+      'Co-teachers of the same class share one coverage pool — no duplication or conflict',
+      'HODs see every subject\'s coverage across all classes in a single dashboard view',
+      'Parents see real-time curriculum progress for their child\'s subjects in their portal',
     ],
+    results: [
+      'Principals confirm syllabus progress at any time — no waiting for end-of-term reports',
+      'No end-of-term scramble to cover missed topics — gaps are visible throughout the term',
+      'Parents informed on curriculum without teachers making individual phone calls',
+    ],
+    connectedModules: ['Reports', 'Analytics', 'Grades', 'Timetable'],
     demoPath: '/lessons',
     mockup: {
       type: 'coverage',
@@ -882,13 +919,19 @@ const MODULE_PREVIEWS = {
     },
   },
   'Grades': {
-    tagline: 'A four-component assessment system — CA, HW, mid-term and end-term in one view.',
+    tagline: 'CA, homework, mid-term and end-term marks entered once — totals calculated automatically.',
     outcomes: [
-      'Record Continuous Assessment, Homework, Mid-Term and End-Term scores per subject',
-      'Weighted totals calculated automatically — no Excel formulas',
-      'Grade boundaries configurable per school or curriculum',
-      'Feeds directly into report cards — zero manual data transfer',
+      'CA, Homework, Mid-Term and End-Term scores recorded per student per subject',
+      'Weighted totals and grade boundaries applied automatically — no Excel formulas',
+      'Grade boundaries configurable per school and curriculum, applied school-wide from one setting',
+      'Marks flow directly into report cards — zero manual transfer between registers and templates',
     ],
+    results: [
+      'No grade entry errors from copying between registers and report templates',
+      'Subject totals, class averages and rank positions calculated in real time',
+      'Teachers spend time on teaching, not on reconciling mark sheets',
+    ],
+    connectedModules: ['Reports', 'Analytics', 'Attendance', 'Lessons'],
     demoPath: '/grades',
     mockup: {
       type: 'list',
@@ -902,13 +945,19 @@ const MODULE_PREVIEWS = {
     },
   },
   'Behaviour': {
-    tagline: 'Behaviour Point System — merit awards and incident logs with escalation tracking.',
+    tagline: 'Merit awards and incident logs — with automatic escalation through defined intervention stages.',
     outcomes: [
-      'Award merits or log demerits with category, notes and teacher attribution',
-      'Student stage progression: Commended → Good Standing → Monitored → At Risk → Intervention',
-      'Milestone achievements — community service, honour roll, leadership badges',
-      'Behaviour history preserved permanently in the student record',
+      'Log incidents or award merits with category, description and teacher attribution in seconds',
+      'Student stage advances automatically: Commended → Good Standing → Monitored → At Risk → Intervention',
+      'Milestone achievements recorded — community service hours, honour roll, leadership recognition',
+      'Full behaviour history preserved in the student record — available for parent meetings and handovers',
     ],
+    results: [
+      'Behavioural trends visible before they escalate — early intervention is possible',
+      'Disciplinary records available for parent meetings, staff transitions and tribunal processes',
+      'Merit culture reinforced alongside accountability — not just a punishment log',
+    ],
+    connectedModules: ['Reports', 'Analytics', 'Student Records'],
     demoPath: '/behaviour',
     mockup: {
       type: 'list',
@@ -922,13 +971,19 @@ const MODULE_PREVIEWS = {
     },
   },
   'Reports': {
-    tagline: 'A five-stage approval pipeline — no report card leaves without the right sign-off.',
+    tagline: 'Five-stage approval pipeline — no report card leaves without every gate cleared.',
     outcomes: [
-      'Teacher enters marks → HOD reviews → Deputy approves → Principal authorises → Published',
-      'Every action timestamped and attributed — permanently auditable chain of custody',
-      'Publication blocked until every gate is cleared for every student in the class',
-      'Parents receive in-portal notifications the moment report cards are published',
+      'Teacher enters marks → HOD reviews → Deputy approves → Principal authorises → Published to parent portal',
+      'Publication blocked until every stage is cleared for every student in the class — no partial releases',
+      'Every action timestamped and attributed — a permanently auditable chain of custody',
+      'Parents receive an in-portal notification the moment their child\'s report card is published',
     ],
+    results: [
+      'Report cards published in hours, not days — approval stages run in parallel, not in sequence',
+      'No unsigned, unreviewed or incorrect report card reaches a parent',
+      'Full audit trail protects the school in the event of a grade dispute',
+    ],
+    connectedModules: ['Grades', 'Analytics', 'Finance', 'Student Records'],
     demoPath: '/reports',
     mockup: {
       type: 'pipeline',
@@ -942,13 +997,19 @@ const MODULE_PREVIEWS = {
     },
   },
   'Finance': {
-    tagline: 'Fee structures, invoices and M-Pesa collections — reconciled automatically.',
+    tagline: 'Fee structures, M-Pesa collections and a live arrears register — reconciled automatically.',
     outcomes: [
-      'Build fee structures by class, term and item — tuition, boarding, transport, activities',
-      'M-Pesa STK Push triggers payment directly to parent phones — confirmed in seconds',
-      'Paybill, bank transfer and cash recorded in the same ledger with receipt numbers',
-      'Overdue accounts flagged automatically; parents notified via SMS and portal',
+      'Build fee structures by class, term and item — tuition, boarding, transport and activities',
+      'M-Pesa STK Push sends a payment prompt to the parent\'s phone — confirmed and reconciled in seconds',
+      'Paybill, bank transfer and cash all recorded in the same ledger with receipt numbers',
+      'Overdue accounts flagged automatically — parents notified without a manual phone call from the bursar',
     ],
+    results: [
+      'Fee arrears visible per student in real time — no end-of-term reconciliation exercise',
+      'Every payment accounted for regardless of method — one audit-ready ledger',
+      'Bursars focus on exceptions, not on manually matching bank statements to registers',
+    ],
+    connectedModules: ['Analytics', 'Reports', 'Student Records', 'Admissions'],
     demoPath: '/finance',
     mockup: {
       type: 'ledger',
@@ -961,19 +1022,25 @@ const MODULE_PREVIEWS = {
     },
   },
   'Library': {
-    tagline: 'Book catalogue, loan tracking and overdue fines — all in one register.',
+    tagline: 'Book catalogue, loan tracking and automated overdue fines — no card system required.',
     outcomes: [
-      'Catalogue books with ISBN, category, shelf location and copy count',
-      'Issue loans to students or staff — due date tracked automatically',
-      'Overdue fines calculated at a configurable daily rate and added to fee account',
-      'Search catalogue by title, author or ISBN in real time',
+      'Books catalogued with title, author, ISBN, shelf location and copy count',
+      'Loans issued to students or staff — due date tracked automatically, no manual card system',
+      'Overdue fines calculated at a configurable daily rate and added directly to the student fee account',
+      'Catalogue searchable by title, author or ISBN in real time from any device',
     ],
+    results: [
+      'No manual fine collection — overdue charges appear on the student fee account automatically',
+      'Book availability accurate at all times — staff check without walking to the shelf',
+      'Loan history preserved permanently for every student',
+    ],
+    connectedModules: ['Student Records', 'Finance'],
     demoPath: '/library',
     mockup: {
       type: 'list',
       headers: ['Title', 'Borrower', 'Due'],
       rows: [
-        ['KCSE Chemistry Revision', 'Amara W.', 'Jun 12'],
+        ['KCSE Chemistry Revision',  'Amara W.', 'Jun 12'],
         ['Blossoms of the Savannah', 'Brian O.',  'Jun 8 ⚠'],
         ['Business Studies Bk 3',    'Chloe K.',  'Jun 15'],
         ['Mathematics Form 4',       'Esther M.', 'Jun 10'],
@@ -981,13 +1048,19 @@ const MODULE_PREVIEWS = {
     },
   },
   'Transport': {
-    tagline: 'School bus routes, stops and student assignments — managed centrally.',
+    tagline: 'Route management, student assignments and capacity enforcement — centrally managed.',
     outcomes: [
-      'Create routes with stops, departure times, vehicle and driver details',
-      'Assign students to routes with their specific pickup stop',
-      'Capacity enforcement — system blocks over-assignment automatically',
-      'Transport fees configurable per route and added to the student fee structure',
+      'Create routes with stops, departure times, vehicle registration and driver contacts',
+      'Assign students to their specific pickup stop — one record updated in real time',
+      'Capacity enforcement built in — the system prevents over-assigning a vehicle',
+      'Transport fees configured per route and collected through the same M-Pesa flow as tuition fees',
     ],
+    results: [
+      'No manual route lists — transport assignments always reflect current enrolment',
+      'Vehicle capacity never exceeded — the safety constraint is enforced by the platform',
+      'Transport fees collected without a separate billing process',
+    ],
+    connectedModules: ['Student Records', 'Finance'],
     demoPath: '/transport',
     mockup: {
       type: 'list',
@@ -1000,41 +1073,53 @@ const MODULE_PREVIEWS = {
     },
   },
   'Hostel': {
-    tagline: 'Boarding houses, room assignments and resident management in one module.',
+    tagline: 'Boarding houses and room assignments — occupancy tracked automatically, fees collected centrally.',
     outcomes: [
-      'Create hostels and rooms with capacity, gender rules and warden contacts',
-      'Assign students to rooms — occupancy count updated automatically',
-      'Discharge workflow marks end date and frees the room immediately',
-      'Hostel fees link directly to the student fee structure',
+      'Create boarding houses and rooms with capacity, gender rules and warden contacts',
+      'Assign students to rooms — occupied count updates automatically, no whiteboard or paper register',
+      'Discharge marks the end date and frees the room for reassignment immediately',
+      'Boarding fees configured per house and linked to the student fee account',
     ],
+    results: [
+      'Room availability accurate at all times — no end-of-day manual count',
+      'Boarding fee collection handled through the same Finance module as tuition',
+      'Warden handovers take minutes — all resident information is in the system',
+    ],
+    connectedModules: ['Student Records', 'Finance', 'Reports'],
     demoPath: '/hostel',
     mockup: {
       type: 'list',
       headers: ['Room', 'Occupied', 'Capacity'],
       rows: [
-        ['Boys B101', '4',  '4 ✓'],
-        ['Boys B102', '3',  '4'  ],
-        ['Girls G201','4',  '4 ✓'],
-        ['Girls G202','2',  '4'  ],
+        ['Boys B101',  '4', '4 ✓'],
+        ['Boys B102',  '3', '4'  ],
+        ['Girls G201', '4', '4 ✓'],
+        ['Girls G202', '2', '4'  ],
       ],
     },
   },
   'Analytics': {
-    tagline: 'Director-level insight across attendance, academics and finance — live.',
+    tagline: 'Director-level visibility across attendance, academic performance and finances — live.',
     outcomes: [
-      'School-wide attendance trends, class-by-class and day-by-day breakdowns',
-      'Grade distribution and performance outliers surfaced automatically',
-      'Fee collection rate, outstanding balances and month-on-month comparison',
-      'No manual compilation — every chart reflects the current state of the institution',
+      'School-wide attendance trends, class-by-class and day-by-day, in one dashboard',
+      'Performance outliers and at-risk students surface automatically — no manual compilation',
+      'Fee collection rate, outstanding balances and month-on-month comparison in real time',
+      'Every chart reflects the current state of the institution — not last week\'s export',
     ],
+    results: [
+      'Directors make decisions on current data, not a week-old paper summary',
+      'No end-of-term report assembly — the dashboard is always ready',
+      'Financial health, academic performance and operational data visible in one view',
+    ],
+    connectedModules: ['Finance', 'Grades', 'Attendance', 'Reports'],
     demoPath: '/reports',
     mockup: {
       type: 'stats',
       items: [
-        { label: 'Attendance',   value: '94%',      trend: '+2%',    up: true  },
+        { label: 'Attendance',    value: '94%',      trend: '+2%',   up: true  },
         { label: 'Fee Collected', value: 'KSh 2.4M', trend: '+18%',  up: true  },
-        { label: 'Avg Grade',    value: 'B+',        trend: '−0.2',  up: false },
-        { label: 'At Risk',      value: '4',         trend: '−2',    up: true  },
+        { label: 'Avg Grade',     value: 'B+',        trend: '−0.2', up: false },
+        { label: 'At Risk',       value: '4',         trend: '−2',   up: true  },
       ],
     },
   },
@@ -1233,8 +1318,16 @@ function ModuleMockup({ mockup, color }) {
   return null;
 }
 
+/* ─── Convert bg-X-500 → text-X-400 for icon colouring inside result checks ─ */
+function _textColor(bgClass) {
+  return bgClass.replace('bg-', 'text-').replace(/-\d{3}$/, '-400');
+}
+function _lightBg(bgClass) {
+  return bgClass.replace(/-\d{3}$/, '-900/30');
+}
+
 /* ─── Module preview panel (right-side on desktop, bottom sheet on mobile) ─ */
-function ModulePreviewPanel({ node, onClose }) {
+function ModulePreviewPanel({ node, onClose, onNavigate }) {
   const preview = MODULE_PREVIEWS[node?.label];
   if (!node || !preview) return null;
 
@@ -1266,13 +1359,13 @@ function ModulePreviewPanel({ node, onClose }) {
 
         {/* Panel — slides from right on sm+, slides from bottom on mobile */}
         <motion.div
-          initial={{ x: '100%', y: 0 }}
-          animate={{ x: 0, y: 0 }}
-          exit={{ x: '100%', y: 0 }}
+          initial={{ x: '100%' }}
+          animate={{ x: 0 }}
+          exit={{ x: '100%' }}
           transition={{ type: 'spring', damping: 32, stiffness: 350 }}
-          className="relative z-10 hidden sm:flex flex-col bg-slate-950 border-l border-slate-800 w-[420px] h-full overflow-y-auto"
+          className="relative z-10 hidden sm:flex flex-col bg-slate-950 border-l border-slate-800 w-[440px] h-full overflow-y-auto"
         >
-          <PanelContent node={node} preview={preview} demoUrl={demoUrl} onClose={onClose} />
+          <PanelContent node={node} preview={preview} demoUrl={demoUrl} onClose={onClose} onNavigate={onNavigate} />
         </motion.div>
 
         {/* Bottom sheet on mobile */}
@@ -1281,48 +1374,57 @@ function ModulePreviewPanel({ node, onClose }) {
           animate={{ y: 0 }}
           exit={{ y: '100%' }}
           transition={{ type: 'spring', damping: 32, stiffness: 350 }}
-          className="relative z-10 sm:hidden flex flex-col bg-slate-950 border-t border-slate-800 w-full max-h-[82vh] rounded-t-3xl overflow-y-auto"
+          className="relative z-10 sm:hidden flex flex-col bg-slate-950 border-t border-slate-800 w-full max-h-[88vh] rounded-t-3xl overflow-y-auto"
         >
-          {/* Drag handle */}
           <div className="flex justify-center pt-3 pb-1 shrink-0">
             <div className="w-10 h-1 rounded-full bg-slate-700" />
           </div>
-          <PanelContent node={node} preview={preview} demoUrl={demoUrl} onClose={onClose} />
+          <PanelContent node={node} preview={preview} demoUrl={demoUrl} onClose={onClose} onNavigate={onNavigate} />
         </motion.div>
       </div>
     </AnimatePresence>
   );
 }
 
-function PanelContent({ node, preview, demoUrl, onClose }) {
+function PanelContent({ node, preview, demoUrl, onClose, onNavigate }) {
   function openDemo(e) {
     e.preventDefault();
     storeSchoolSlug('demo');
     window.open(demoUrl, '_blank', 'noopener,noreferrer');
   }
 
+  // Resolve connected module nodes from the global ECOSYSTEM_NODES array
+  const connectedNodes = (preview.connectedModules || [])
+    .map(label => ECOSYSTEM_NODES.find(n => n.label === label))
+    .filter(Boolean)
+    .slice(0, 5);
+
+  const textColor   = _textColor(node.color);
+  const lightBg     = _lightBg(node.color);
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-800 shrink-0">
-        <div className={`w-10 h-10 rounded-xl ${node.color} flex items-center justify-center shadow-lg shrink-0`}>
+      <div className="flex items-start gap-3 px-5 py-4 border-b border-slate-800 shrink-0">
+        <div className={`w-10 h-10 rounded-xl ${node.color} flex items-center justify-center shadow-lg shrink-0 mt-0.5`}>
           <node.Icon size={20} className="text-white" />
         </div>
         <div className="flex-1 min-w-0">
           <h3 className="text-base font-bold text-white leading-tight">{node.label}</h3>
-          <p className="text-xs text-slate-500 leading-snug mt-0.5 line-clamp-2">{preview.tagline}</p>
+          <p className="text-xs text-slate-400 leading-snug mt-0.5">{preview.tagline}</p>
         </div>
         <button onClick={onClose}
-          className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-400 hover:text-white transition-colors shrink-0">
+          className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-400 hover:text-white transition-colors shrink-0 mt-0.5">
           <X size={14} />
         </button>
       </div>
 
       {/* Scrollable body */}
-      <div className="flex-1 overflow-y-auto p-5 space-y-5">
-        {/* Key outcomes */}
+      <div className="flex-1 overflow-y-auto p-5 space-y-6">
+
+        {/* ── What you get ─────────────────────────────── */}
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-3">What it does</p>
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-3">What you get</p>
           <ul className="space-y-2.5">
             {preview.outcomes.map((outcome, i) => (
               <li key={i} className="flex items-start gap-2.5">
@@ -1335,21 +1437,68 @@ function PanelContent({ node, preview, demoUrl, onClose }) {
           </ul>
         </div>
 
-        {/* Mockup */}
+        {/* ── Result box ───────────────────────────────── */}
+        {preview.results?.length > 0 && (
+          <div className={`rounded-xl border border-slate-800 bg-slate-900/60 p-4`}>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-3">Result</p>
+            <ul className="space-y-2">
+              {preview.results.map((r, i) => (
+                <li key={i} className="flex items-start gap-2.5">
+                  <CheckCircle size={13} className={`shrink-0 mt-0.5 ${textColor}`} />
+                  <span className="text-sm text-slate-300 leading-snug">{r}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* ── Module preview mockup ────────────────────── */}
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-3">Module preview</p>
           <ModuleMockup mockup={preview.mockup} color={node.color} />
         </div>
+
+        {/* ── Connected modules ────────────────────────── */}
+        {connectedNodes.length > 0 && (
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-3">Connected Modules</p>
+            <div className="flex flex-wrap gap-2">
+              {connectedNodes.map(cn => (
+                <button
+                  key={cn.label}
+                  onClick={() => onNavigate && onNavigate(cn)}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 border border-slate-700/60 transition-colors group"
+                >
+                  <div className={`w-5 h-5 rounded-lg ${cn.color} flex items-center justify-center shrink-0`}>
+                    <cn.Icon size={10} className="text-white" />
+                  </div>
+                  <span className="text-[11px] font-semibold text-slate-400 group-hover:text-white transition-colors">
+                    {cn.label}
+                  </span>
+                  <ChevronRight size={10} className="text-slate-600 group-hover:text-slate-400 transition-colors" />
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-slate-600 mt-2">Click any module to explore it</p>
+          </div>
+        )}
+
       </div>
 
-      {/* CTA footer */}
-      <div className="px-5 py-4 border-t border-slate-800 shrink-0 bg-slate-950">
+      {/* ── CTA footer ───────────────────────────────── */}
+      <div className="px-5 py-4 border-t border-slate-800 shrink-0 bg-slate-950 space-y-2.5">
+        {/* Primary — open demo */}
         <button onClick={openDemo}
-          className={`w-full flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold text-white transition-all shadow-lg ${node.color} hover:opacity-90 active:scale-[0.98]`}>
-          Try {node.label} Live
+          className="w-full flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-500 transition-colors shadow-lg shadow-indigo-900/40 active:scale-[0.98]">
+          Open Live Demo
           <ArrowRight size={14} />
         </button>
-        <p className="text-[10px] text-slate-600 text-center mt-2">Opens in the demo school — no sign-up required</p>
+        {/* Secondary — explore deeper */}
+        <a href="/contact"
+          className="w-full flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium text-slate-400 hover:text-white border border-slate-800 hover:border-slate-600 rounded-xl transition-all">
+          Explore {node.label} in depth →
+        </a>
+        <p className="text-[10px] text-slate-600 text-center">Demo opens in your browser — no sign-up required</p>
       </div>
     </div>
   );
@@ -1497,7 +1646,11 @@ export default function Landing() {
 
       {/* Module preview panel — rendered at root so it overlays everything */}
       {activeModule && (
-        <ModulePreviewPanel node={activeModule} onClose={closePanel} />
+        <ModulePreviewPanel
+          node={activeModule}
+          onClose={closePanel}
+          onNavigate={setActiveModule}
+        />
       )}
 
       {/* ══════════════════════════════════════════
