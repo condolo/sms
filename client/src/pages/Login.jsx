@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { Spinner } from '@/components/ui/Spinner.jsx';
 import useAuthStore from '@/store/auth.js';
@@ -171,16 +171,71 @@ const LOGIN_KEYFRAMES = `
 
 /* ══════════════════════════════════════════════════════════════
    SCHOOL FINDER — shown at msingi.io/login when no school slug
-   is detected. Visitor types their school name/URL → system
-   validates → redirects to the school-branded login.
+   is detected. As the visitor types, matching schools appear in
+   a dropdown; clicking one redirects to that school's login.
    ══════════════════════════════════════════════════════════════ */
 function SchoolFinderPage() {
-  const navigate    = useNavigate();
-  const [query,     setQuery]    = useState('');
-  const [finding,   setFinding]  = useState(false);
-  const [notFound,  setNotFound] = useState(false);
-  const [error,     setError]    = useState('');
+  const navigate = useNavigate();
 
+  const [query,       setQuery]       = useState('');
+  const [suggestions, setSuggestions] = useState([]);   // [{slug,name,shortName,logoUrl,primaryColor}]
+  const [searching,   setSearching]   = useState(false);
+  const [showDrop,    setShowDrop]    = useState(false);
+  const [notFound,    setNotFound]    = useState(false);
+  const [error,       setError]       = useState('');
+  const [going,       setGoing]       = useState(false);
+
+  const debounceRef = useRef(null);
+  const inputRef    = useRef(null);
+  const dropRef     = useRef(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function onClickOutside(e) {
+      if (dropRef.current && !dropRef.current.contains(e.target) &&
+          inputRef.current && !inputRef.current.contains(e.target)) {
+        setShowDrop(false);
+      }
+    }
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
+
+  // Debounced search as user types
+  function handleInput(e) {
+    const val = e.target.value;
+    setQuery(val);
+    setNotFound(false);
+    setError('');
+    setSuggestions([]);
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    if (val.trim().length < 2) { setShowDrop(false); return; }
+
+    debounceRef.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res  = await fetch(`/api/public/schools/search?q=${encodeURIComponent(val.trim())}`);
+        const data = await res.json();
+        setSuggestions(data.schools || []);
+        setShowDrop(true);
+        setNotFound((data.schools || []).length === 0);
+      } catch {
+        /* ignore network blips */
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+  }
+
+  function pickSchool(slug) {
+    storeSchoolSlug(slug);
+    setGoing(true);
+    navigate(`/login?school=${slug}`, { replace: true });
+  }
+
+  // Fallback: parse a slug from a typed URL / slug string
   function _parseSlug(raw) {
     return raw.trim().toLowerCase()
       .replace(/^https?:\/\//i, '')
@@ -189,30 +244,28 @@ function SchoolFinderPage() {
       .replace(/[^a-z0-9-]/g, '');
   }
 
-  async function handleFind(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
+    // If there's exactly one suggestion, go straight to it
+    if (suggestions.length === 1) { pickSchool(suggestions[0].slug); return; }
+
     const slug = _parseSlug(query);
     if (!slug) { setError('Enter your school name or web address.'); return; }
-    setFinding(true); setError(''); setNotFound(false);
+    setGoing(true); setError(''); setNotFound(false);
     try {
       const res = await fetch(`/api/public/school-info?slug=${slug}`);
-      if (!res.ok) { setNotFound(true); setFinding(false); return; }
+      if (!res.ok) { setNotFound(true); setGoing(false); return; }
       storeSchoolSlug(slug);
       navigate(`/login?school=${slug}`, { replace: true });
     } catch {
       setError('Could not connect. Please try again.');
-      setFinding(false);
+      setGoing(false);
     }
-  }
-
-  function goDemo() {
-    storeSchoolSlug('demo');
-    navigate('/login?school=demo', { replace: true });
   }
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center px-4 py-12">
-      {/* Msingi wordmark */}
+      {/* Wordmark */}
       <div className="flex items-center gap-2.5 mb-10">
         <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-black text-base shadow-lg">M</div>
         <span className="text-xl font-bold text-slate-900 tracking-tight">Msingi</span>
@@ -221,48 +274,87 @@ function SchoolFinderPage() {
       <div className="w-full max-w-sm bg-white rounded-2xl border border-slate-200 shadow-sm p-8">
         <div className="mb-6">
           <h1 className="text-xl font-bold text-slate-900 mb-1.5">Find your school</h1>
-          <p className="text-sm text-slate-500">Enter your school's web address to access your portal.</p>
+          <p className="text-sm text-slate-500">Start typing your school name and select it from the list.</p>
         </div>
 
-        <form onSubmit={handleFind} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
-            <div className="rounded-xl bg-red-50 border border-red-200 px-3.5 py-2.5 text-sm text-red-700">
-              {error}
-            </div>
+            <div className="rounded-xl bg-red-50 border border-red-200 px-3.5 py-2.5 text-sm text-red-700">{error}</div>
           )}
 
-          {notFound && (
-            <div className="rounded-xl bg-amber-50 border border-amber-200 px-3.5 py-2.5 text-sm text-amber-800 space-y-1">
-              <p className="font-semibold">School not found</p>
-              <p className="text-amber-700 text-xs">Check the spelling, or contact your school administrator for the correct address.</p>
-            </div>
-          )}
+          {/* Search input + dropdown */}
+          <div className="relative">
+            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
+              School name or address
+            </label>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">School name or address</label>
             <div className="relative">
-              <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              {searching
+                ? <Loader2Icon size={14} className="animate-spin absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                : <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              }
               <input
+                ref={inputRef}
                 type="text"
                 value={query}
-                onChange={e => { setQuery(e.target.value); setError(''); setNotFound(false); }}
+                onChange={handleInput}
+                onFocus={() => suggestions.length > 0 && setShowDrop(true)}
                 className="w-full text-sm border border-slate-200 rounded-xl pl-9 pr-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-slate-50 focus:bg-white transition-colors"
-                placeholder="e.g.  greenwood  or  greenwood.msingi.io"
+                placeholder="e.g. Greenwood Academy"
                 autoFocus
-                disabled={finding}
                 autoComplete="off"
                 spellCheck={false}
+                disabled={going}
               />
             </div>
-            <p className="text-[10px] text-slate-400 mt-1.5 leading-relaxed">
-              Your school was given a unique web address when they joined Msingi.
-            </p>
+
+            {/* Autocomplete dropdown */}
+            {showDrop && (
+              <div
+                ref={dropRef}
+                className="absolute z-20 w-full mt-1 bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden"
+              >
+                {suggestions.length > 0 ? (
+                  suggestions.map(s => (
+                    <button
+                      key={s.slug}
+                      type="button"
+                      onMouseDown={() => pickSchool(s.slug)}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-0"
+                    >
+                      {/* Mini logo / initial */}
+                      <div
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                        style={{ background: s.primaryColor || '#4f46e5' }}
+                      >
+                        {s.logoUrl
+                          ? <img src={s.logoUrl} alt="" className="w-8 h-8 rounded-lg object-contain" />
+                          : (s.shortName || s.name || '?')[0].toUpperCase()
+                        }
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-slate-800 truncate">{s.name}</p>
+                        <p className="text-[11px] text-slate-400">{s.slug}.msingi.io</p>
+                      </div>
+                    </button>
+                  ))
+                ) : (
+                  <div className="px-4 py-3 text-sm text-slate-500">
+                    No schools found for <strong>"{query}"</strong>
+                    <p className="text-xs text-slate-400 mt-0.5">Try a shorter name, or contact your administrator.</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          <button type="submit" disabled={finding || !query.trim()}
-            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm">
-            {finding
-              ? <><Loader2Icon size={14} className="animate-spin" /> Searching…</>
+          <button
+            type="submit"
+            disabled={going || !query.trim()}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
+          >
+            {going
+              ? <><Loader2Icon size={14} className="animate-spin" /> Going…</>
               : <><Search size={14} /> Find School</>
             }
           </button>
@@ -271,17 +363,15 @@ function SchoolFinderPage() {
 
       {/* Quick links */}
       <div className="mt-6 flex flex-col items-center gap-2.5 text-xs text-slate-400">
-        <button onClick={goDemo}
-          className="text-indigo-600 hover:text-indigo-800 font-medium transition-colors">
+        <button
+          onClick={() => pickSchool('demo')}
+          className="text-indigo-600 hover:text-indigo-800 font-medium transition-colors"
+        >
           Explore the demo school →
         </button>
         <span>·</span>
-        <Link to="/contact" className="hover:text-slate-600 transition-colors">
-          New school? Contact us →
-        </Link>
-        <Link to="/" className="hover:text-slate-600 transition-colors">
-          ← Back to msingi.io
-        </Link>
+        <Link to="/contact" className="hover:text-slate-600 transition-colors">New school? Contact us →</Link>
+        <Link to="/" className="hover:text-slate-600 transition-colors">← Back to msingi.io</Link>
       </div>
     </div>
   );

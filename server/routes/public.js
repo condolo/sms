@@ -61,6 +61,44 @@ router.get('/school-info', async (req, res) => {
   }
 });
 
+/* GET /api/public/schools/search
+   Query: ?q=greenwood
+   Returns up to 10 schools whose name or slug starts with / contains the
+   query string. Used by the school-finder autocomplete on the login page.
+   Only active schools are returned; only public-safe fields exposed.
+*/
+router.get('/schools/search', async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (!q || q.length < 2) return res.json({ schools: [] });
+
+    const School  = _model('schools');
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex   = new RegExp(escaped, 'i');
+
+    const schools = await School.find({
+      isActive: { $ne: false },
+      $or: [{ name: regex }, { shortName: regex }, { slug: regex }],
+    })
+      .select('slug name shortName logoUrl primaryColor accentColor')
+      .limit(10)
+      .lean();
+
+    res.json({
+      schools: schools.map(s => ({
+        slug:         s.slug,
+        name:         s.name      || 'School Portal',
+        shortName:    s.shortName || s.name || 'School',
+        logoUrl:      s.logoUrl   || null,
+        primaryColor: s.primaryColor || '#4f46e5',
+      })),
+    });
+  } catch (err) {
+    console.error('[public/schools/search]', err.message);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 /* GET /api/public/ping — simple liveness check (no DB) */
 router.get('/ping', (req, res) => res.json({ ok: true }));
 
