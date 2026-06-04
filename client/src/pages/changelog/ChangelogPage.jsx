@@ -6,6 +6,26 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.39.0',
+    date: '2026-05-30',
+    label: 'Landing Page — Module Preview Panels & Ecosystem Responsiveness',
+    changes: [
+      { type: 'new', text: 'Platform Architecture section: click any of the 14 module icons to open a preview panel — guided product tour replacing a decorative diagram' },
+      { type: 'new', text: 'Right-side slide panel on desktop (440px, spring animation), bottom sheet on mobile (88vh, rounded top, drag handle) — Escape key and backdrop click close the panel' },
+      { type: 'new', text: 'Panel content: outcome-focused bullets rewritten for all 14 modules (Problem → Capability → Outcome format, not feature descriptions)' },
+      { type: 'new', text: 'Result Box per module: 3 specific business outcomes in a distinct dark card — connects software to language principals and bursars use' },
+      { type: 'new', text: 'Animated inline mockups per module: 7 types (pipeline bars, list table, attendance register, coverage bars, fee ledger, timetable grid, stats cards) — all animate on scroll' },
+      { type: 'new', text: 'Connected Modules section: 3–5 clickable icon+color chips per module — clicking any chip navigates directly to that module\'s panel; reinforces ecosystem concept' },
+      { type: 'new', text: 'Dual CTA footer: primary "Open Live Demo" (deep-links into demo school at the module\'s route) + secondary "Explore [Module] in depth →" — Understand → Explore → Experience flow' },
+      { type: 'new', text: 'Maturity badges in panel header: Pipeline Tracked · Audit Ready · Multi-Curriculum · Conflict-Free · Real-time · Syllabus Linked · Auto-Calculated · Stage-Based · 5-Stage Approval · M-Pesa Integrated · Fine Automated · Capacity Enforced · Room Managed · Live Dashboard' },
+      { type: 'new', text: '"Click any module to explore its features" hint with animated pulse dot below section heading' },
+      { type: 'fix', text: 'Platform Architecture section: replaced overflow-x-auto horizontal carousel with a fully responsive CSS grid — no horizontal scroll at any screen size' },
+      { type: 'fix', text: 'Responsive grid breakpoints: 2 cols (mobile) → 3 (sm) → 4 (md) → 5 (lg) → 7 (xl) — 14 modules = exactly 2 rows on desktop xl' },
+      { type: 'fix', text: 'Removed directional → arrow connectors (timeline feeling) — grid layout with rounded container panel communicates ecosystem feeling instead' },
+      { type: 'new', text: 'Active module card gets ring-2 ring-white/50 + scale-110 highlight; non-active modules drop to opacity-85 to focus attention on open panel' },
+    ],
+  },
+  {
     version: '4.38.0',
     date: '2026-05-30',
     label: 'Student & Parent Portal Logins',
