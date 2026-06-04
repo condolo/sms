@@ -4,9 +4,10 @@
    Paginated, scoped to schoolId from JWT.
    Server generates admission numbers via atomic counter.
    ============================================================ */
-const express = require('express');
-const { z }   = require('zod');
+const express  = require('express');
+const { z }    = require('zod');
 const { v4: uuidv4 } = require('uuid');
+const bcrypt   = require('bcryptjs');
 
 const { authMiddleware }        = require('../middleware/auth');
 const { rbac }                  = require('../middleware/rbac');
@@ -264,6 +265,212 @@ router.post('/bulk', authMiddleware, PLAN, rbac('students', 'create'), async (re
     return ok(res, results, null, results.errors.length > 0 ? 207 : 201);
   } catch (err) {
     console.error('[students POST /bulk]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── Local temp-password generator (mirrors auth.js) ─────────── */
+function _genTempPassword() {
+  const alpha = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz';
+  const nums  = '23456789';
+  let pwd = '';
+  for (let i = 0; i < 8; i++) pwd += alpha[Math.floor(Math.random() * alpha.length)];
+  pwd += nums[Math.floor(Math.random() * nums.length)] + nums[Math.floor(Math.random() * nums.length)] + '!';
+  return pwd.split('').sort(() => 0.5 - Math.random()).join('');
+}
+
+/* ── Portal tier check helper ───────────────────────────────────
+   Returns true if the school's plan supports the requested portal tier.
+   During bootstrap (enterprise plan) all portals are always allowed. */
+function _portalAllowed(school, portalType) {
+  const plan = school?.plan || 'enterprise';
+  const legacyToTier = { core: 'base', standard: 'student', premium: 'family' };
+  const tier = legacyToTier[plan] || plan;
+  if (tier === 'enterprise') return true;
+  if (portalType === 'student') return ['student', 'family'].includes(tier);
+  if (portalType === 'parent')  return tier === 'family';
+  return false;
+}
+
+/* ── POST /api/students/:id/portal-account ───────────────────────
+   Create or reset a student's portal login account.
+   Restricted to admin / principal / deputy.
+   Returns { username, tempPassword } — shown once, admin gives to student.
+   ──────────────────────────────────────────────────────────────── */
+router.post('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    const allowed = ['superadmin', 'admin', 'principal', 'deputy_principal'];
+    if (!allowed.includes(role)) return E.forbidden(res, 'Only admin or principal can create student portal accounts.');
+
+    const Students = _model('students');
+    const Users    = _model('users');
+    const Schools  = _model('schools');
+
+    const student = await Students.findOne({ id: req.params.id, schoolId }).lean();
+    if (!student) return E.notFound(res, 'Student not found.');
+    if (student.status === 'withdrawn' || student.status === 'graduated') {
+      return E.badRequest(res, 'Cannot create portal account for a withdrawn or graduated student.');
+    }
+
+    const school = await Schools.findOne({ id: schoolId }).lean();
+    if (!_portalAllowed(school, 'student')) {
+      return E.badRequest(res, 'Student portal requires the Student or Family tier. Upgrade your subscription to enable student logins.');
+    }
+
+    // Generate temp password — shown once to admin
+    const tempPassword = _genTempPassword();
+    const hash = await bcrypt.hash(tempPassword, 10);
+
+    const username  = student.admissionNumber.toLowerCase();
+    const name      = `${student.firstName} ${student.lastName}`;
+    const now       = new Date().toISOString();
+
+    // Upsert: update existing account or create new one
+    const existing = await Users.findOne({ studentId: student.id, schoolId }).lean();
+    if (existing) {
+      await Users.updateOne({ id: existing.id }, {
+        $set: { password: hash, mustChangePassword: true, isActive: true, updatedAt: now, updatedBy: userId },
+      });
+    } else {
+      await Users.create({
+        id:                 uuidv4(),
+        schoolId,
+        role:               'student',
+        name,
+        username,
+        email:              null,
+        password:           hash,
+        studentId:          student.id,
+        isActive:           true,
+        mustChangePassword: true,
+        createdAt:          now,
+        updatedAt:          now,
+        createdBy:          userId,
+      });
+    }
+
+    // Mark student record as having a portal account
+    await Students.updateOne({ id: student.id }, { $set: { hasPortalAccount: true, updatedAt: now } });
+
+    console.log(`[students] Portal account ${existing ? 'reset' : 'created'} for student ${student.id} (${name}) by ${userId}`);
+    return ok(res, { username, tempPassword, name, studentId: student.id, action: existing ? 'reset' : 'created' });
+  } catch (err) {
+    console.error('[students POST/:id/portal-account]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── DELETE /api/students/:id/portal-account — deactivate student login ── */
+router.delete('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'update'), async (req, res) => {
+  try {
+    const { schoolId, role } = req.jwtUser;
+    const allowed = ['superadmin', 'admin', 'principal', 'deputy_principal'];
+    if (!allowed.includes(role)) return E.forbidden(res, 'Only admin or principal can manage student portal accounts.');
+
+    const Users = _model('users');
+    const result = await Users.updateOne(
+      { studentId: req.params.id, schoolId, role: 'student' },
+      { $set: { isActive: false, updatedAt: new Date().toISOString() } }
+    );
+    if (result.matchedCount === 0) return E.notFound(res, 'No portal account found for this student.');
+    return ok(res, { deactivated: true });
+  } catch (err) {
+    console.error('[students DELETE/:id/portal-account]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── POST /api/students/:id/parent-account ───────────────────────
+   Create or reset a parent portal login account.
+   Uses student.parentEmail as the login email.
+   If a parent account already exists for this email, adds this student to their studentIds.
+   Sends welcome email with credentials.
+   ──────────────────────────────────────────────────────────────── */
+router.post('/:id/parent-account', authMiddleware, PLAN, rbac('students', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    const allowed = ['superadmin', 'admin', 'principal', 'deputy_principal'];
+    if (!allowed.includes(role)) return E.forbidden(res, 'Only admin or principal can create parent portal accounts.');
+
+    const Students = _model('students');
+    const Users    = _model('users');
+    const Schools  = _model('schools');
+
+    const student = await Students.findOne({ id: req.params.id, schoolId }).lean();
+    if (!student) return E.notFound(res, 'Student not found.');
+    if (!student.parentEmail) return E.badRequest(res, 'Student has no parent email on record. Add a parent email first.');
+
+    const school = await Schools.findOne({ id: schoolId }).lean();
+    if (!_portalAllowed(school, 'parent')) {
+      return E.badRequest(res, 'Parent portal requires the Family tier. Upgrade your subscription to enable parent logins.');
+    }
+
+    const parentEmail = student.parentEmail.toLowerCase().trim();
+    const parentName  = student.parentName || 'Parent';
+    const now         = new Date().toISOString();
+    const tempPassword = _genTempPassword();
+    const hash        = await bcrypt.hash(tempPassword, 10);
+
+    // Check if parent account already exists for this email in this school
+    let existing = await Users.findOne({ email: parentEmail, schoolId, role: 'parent' }).lean();
+
+    if (existing) {
+      // Add this student to their children if not already there
+      const currentIds = Array.isArray(existing.studentIds) ? existing.studentIds : [];
+      if (!currentIds.includes(student.id)) {
+        await Users.updateOne({ id: existing.id }, {
+          $addToSet: { studentIds: student.id, guardianOf: student.id },
+          $set: { updatedAt: now },
+        });
+      }
+      // Reset password and send new credentials
+      await Users.updateOne({ id: existing.id }, {
+        $set: { password: hash, isActive: true, updatedAt: now },
+      });
+    } else {
+      await Users.create({
+        id:         uuidv4(),
+        schoolId,
+        role:       'parent',
+        name:       parentName,
+        email:      parentEmail,
+        password:   hash,
+        studentIds: [student.id],
+        guardianOf: [student.id],
+        isActive:   true,
+        mustChangePassword: false,
+        createdAt:  now,
+        updatedAt:  now,
+        createdBy:  userId,
+      });
+    }
+
+    // Mark student as having a parent portal account
+    await Students.updateOne({ id: student.id }, { $set: { hasParentAccount: true, updatedAt: now } });
+
+    // Send welcome email to parent
+    const emailUtil = require('../utils/email');
+    await emailUtil.sendWelcomeCredentials({
+      name:        parentName,
+      email:       parentEmail,
+      tempPassword,
+      schoolName:  school.name,
+      schoolEmail: school.systemEmail || '',
+      role:        'Parent',
+      loginUrl:    `https://msingi.io/platform`,
+    }).catch(err => console.error('[parent-account] Email send failed:', err.message));
+
+    console.log(`[students] Parent account ${existing ? 'updated' : 'created'} for ${parentEmail} (student: ${student.id}) by ${userId}`);
+    return ok(res, {
+      email:     parentEmail,
+      name:      parentName,
+      studentId: student.id,
+      action:    existing ? 'updated' : 'created',
+      emailSent: true,
+    });
+  } catch (err) {
+    console.error('[students POST/:id/parent-account]', err);
     return E.serverError(res);
   }
 });

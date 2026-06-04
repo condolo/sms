@@ -41,7 +41,7 @@ const DEMO_ACCOUNTS = [
   { role: 'Teacher',         email: 'teacher@demo.msingi.io',   color: '#059669', bg: '#ecfdf5', badge: 'Classroom'     },
   { role: 'Finance Officer', email: 'finance@demo.msingi.io',   color: '#d97706', bg: '#fffbeb', badge: 'Finance'       },
   { role: 'Parent',          email: 'parent@demo.msingi.io',    color: '#7c3aed', bg: '#f5f3ff', badge: 'Guardian view' },
-  { role: 'Student',         email: 'student@demo.msingi.io',   color: '#db2777', bg: '#fdf2f8', badge: 'Student view'  },
+  { role: 'Student',         email: 'demo-student',             color: '#db2777', bg: '#fdf2f8', badge: 'Student view'  },
 ];
 const DEMO_PASSWORD = 'Demo2025!';
 
@@ -174,7 +174,14 @@ export default function Login() {
   const setSession         = useAuthStore((s) => s.setSession);
   const isAuthenticated    = useAuthStore((s) => !!s.session?.token);
 
-  const from = location.state?.from?.pathname ?? '/dashboard';
+  // Role-aware default destination
+  function _defaultDest(role) {
+    if (role === 'student') return '/student-dashboard';
+    if (role === 'parent' || role === 'guardian') return '/parent-dashboard';
+    return '/dashboard';
+  }
+
+  const from = location.state?.from?.pathname ?? null; // null = use role-based default
 
   // Detect school from subdomain / query param
   const { slug, isSchool } = detectSchool();
@@ -182,7 +189,10 @@ export default function Login() {
 
   // Redirect if already logged in
   useEffect(() => {
-    if (isAuthenticated) navigate(from, { replace: true });
+    if (isAuthenticated) {
+      const role = useAuthStore.getState().session?.user?.role;
+      navigate(from || _defaultDest(role), { replace: true });
+    }
   }, [isAuthenticated, from, navigate]);
 
   // ── OAuth redirect handler — reads ?token= from Google/Microsoft callback ──
@@ -218,7 +228,7 @@ export default function Login() {
         .then(res => {
           if (!res.user) throw new Error('No user in response');
           setSession({ token: oauthToken, user: res.user, school: res.school });
-          navigate(from, { replace: true });
+          navigate(from || _defaultDest(res.user?.role), { replace: true });
         })
         .catch(() => {
           setError('OAuth session is invalid. Please try signing in again.');
@@ -266,7 +276,7 @@ export default function Login() {
       if (res?.mfaRequired) { setPendingMfa({ userId: res.userId, schoolId: res.schoolId }); setMode(MODES.OTP); setLoading(false); return; }
       if (res?.passwordExpired) { setPendingPw({ userId: res.userId, schoolId: res.schoolId, reason: res.reason }); setMode(MODES.CHANGE_PASSWORD); setLoading(false); return; }
       setSession({ token: res.token, user: res.user, school: res.school });
-      navigate(from, { replace: true });
+      navigate(from || _defaultDest(res.user?.role), { replace: true });
     } catch (err) {
       setError(err instanceof APIError ? err.message : 'Demo login failed — please try again.');
     } finally {
@@ -280,7 +290,7 @@ export default function Login() {
     if (!email.trim() || !password) return;
     setLoading(true); setError('');
     try {
-      const res = await authApi.login({ email: email.trim().toLowerCase(), password });
+      const res = await authApi.login({ identifier: email.trim().toLowerCase(), password });
 
       // 2FA required
       if (res?.mfaRequired) {
@@ -299,7 +309,7 @@ export default function Login() {
       }
 
       setSession({ token: res.token, user: res.user, school: res.school });
-      navigate(from, { replace: true });
+      navigate(from || _defaultDest(res.user?.role), { replace: true });
     } catch (err) {
       setError(err instanceof APIError ? err.message : 'Unable to sign in. Please try again.');
     } finally {
@@ -319,7 +329,7 @@ export default function Login() {
         otp:      otp.trim(),
       });
       setSession({ token: res.token, user: res.user, school: res.school });
-      navigate(from, { replace: true });
+      navigate(from || _defaultDest(res.user?.role), { replace: true });
     } catch (err) {
       setError(err instanceof APIError ? err.message : 'Invalid code. Please try again.');
     } finally {
@@ -340,7 +350,7 @@ export default function Login() {
         newPassword,
       });
       setSession({ token: res.token, user: res.user, school: res.school });
-      navigate(from, { replace: true });
+      navigate(from || _defaultDest(res.user?.role), { replace: true });
     } catch (err) {
       setError(err instanceof APIError ? err.message : 'Password change failed.');
     } finally {
@@ -537,13 +547,13 @@ export default function Login() {
                 <ErrorBanner />
 
                 <div>
-                  <label htmlFor="email" className="form-label">Email address</label>
+                  <label htmlFor="email" className="form-label">Email or admission number</label>
                   <input
-                    id="email" type="email" autoComplete="email" required
+                    id="email" type="text" autoComplete="username" required
                     value={email}
                     onChange={(e) => { setEmail(e.target.value); clearError(); }}
                     className="form-input"
-                    placeholder="you@school.edu"
+                    placeholder="you@school.edu or admission number"
                     disabled={loading}
                   />
                 </div>

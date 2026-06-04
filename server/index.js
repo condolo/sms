@@ -144,7 +144,11 @@ app.use('/api/hostel',    require('./routes/hostel'));
 app.use('/api/lessons',  require('./routes/lessons'));
 
 /* ── Billing — platform subscription invoicing ── */
-app.use('/api/billing', require('./routes/billing'));
+app.use('/api/billing',        require('./routes/billing'));
+
+/* ── Student & Parent portals ── */
+app.use('/api/student-portal', require('./routes/student-portal'));
+app.use('/api/parent-portal',  require('./routes/parent-portal'));
 
 /* ── Growth Profile (v4.22.0) ── */
 app.use('/api/growth-profile',         require('./routes/growth-profile'));

@@ -8,11 +8,12 @@ import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  User, CalendarCheck, Receipt, Scale, GraduationCap,
+  User, Users, CalendarCheck, Receipt, Scale, GraduationCap,
   ChevronLeft, Edit2, Save, X, Loader2, AlertTriangle,
   Star, ShieldAlert, TrendingUp, TrendingDown, Award,
   Hash, Mail, Phone, MapPin, Shield, BookOpen, Home,
   CheckCircle2, Clock, XCircle, CheckCheck, Heart, Printer,
+  KeyRound, UserX, UserCheck, Copy, RefreshCcw,
 } from 'lucide-react';
 import {
   students  as studentsApi,
@@ -33,6 +34,7 @@ const TABS = [
   { id: 'behaviour',  label: 'Behaviour',   Icon: Scale          },
   { id: 'grades',     label: 'Grades',      Icon: GraduationCap  },
   { id: 'medical',    label: 'Medical',     Icon: Heart          },
+  { id: 'portal',     label: 'Portal',      Icon: KeyRound       },
 ];
 
 /* ── Gradient avatar ─────────────────────────────────────────── */
@@ -338,6 +340,9 @@ td:last-child{font-weight:500}
             )}
             {tab === 'medical' && (
               <MedicalTab student={student} saving={saving} onSave={updateStudent} canEdit={can('students')} />
+            )}
+            {tab === 'portal' && (
+              <PortalTab student={student} canEdit={can('students')} />
             )}
           </motion.div>
         </AnimatePresence>
@@ -1114,4 +1119,203 @@ function pctColor(pct) {
   if (pct >= 70)   return 'text-emerald-600';
   if (pct >= 50)   return 'text-amber-600';
   return 'text-red-500';
+}
+
+/* ══════════════════════════════════════════════════════════════
+   PORTAL TAB — Create / manage student & parent portal accounts
+   ══════════════════════════════════════════════════════════════ */
+function PortalTab({ student, canEdit }) {
+  const token = useAuthStore(s => s.token);
+  const role  = useAuthStore(s => s.session?.user?.role);
+
+  const [studentAccResult, setStudentAccResult] = useState(null);
+  const [parentAccResult,  setParentAccResult]  = useState(null);
+  const [deactivating,     setDeactivating]     = useState(false);
+  const [working,          setWorking]          = useState('');
+  const [error,            setError]            = useState('');
+
+  const isAdmin = ['superadmin','admin','principal','deputy_principal'].includes(role);
+
+  async function _call(method, path, setResult) {
+    setWorking(path); setError('');
+    try {
+      const res  = await fetch(`/api/students/${student.id}${path}`, {
+        method,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error?.message || 'Request failed');
+      setResult(json.data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setWorking('');
+    }
+  }
+
+  async function handleDeactivateStudent() {
+    setDeactivating(true); setError('');
+    try {
+      const res  = await fetch(`/api/students/${student.id}/deactivate`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ reason: 'withdrawn', notes: '' }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error?.message || 'Failed');
+      window.location.reload();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDeactivating(false);
+    }
+  }
+
+  const isWithdrawn = student.status === 'withdrawn' || student.status === 'graduated';
+
+  return (
+    <div className="space-y-5 max-w-2xl">
+      {/* ── Student portal account ──────────────────────── */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5">
+        <div className="flex items-center gap-3 mb-4 pb-3 border-b border-slate-100">
+          <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center">
+            <User size={14} className="text-indigo-600" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800">Student Portal Account</h3>
+            <p className="text-[11px] text-slate-400">Login: admission number · Student tier required</p>
+          </div>
+          <span className={`ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full ${student.hasPortalAccount ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+            {student.hasPortalAccount ? 'Active' : 'Not created'}
+          </span>
+        </div>
+
+        {studentAccResult && (
+          <div className="mb-4 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl">
+            <p className="text-xs font-semibold text-emerald-800 mb-2">Account {studentAccResult.action} — share these credentials with the student:</p>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="bg-white rounded-lg px-3 py-2">
+                <p className="text-[10px] text-slate-400 mb-0.5">Admission number (username)</p>
+                <p className="font-mono font-semibold text-slate-800">{studentAccResult.username}</p>
+              </div>
+              <div className="bg-white rounded-lg px-3 py-2">
+                <p className="text-[10px] text-slate-400 mb-0.5">Temporary password</p>
+                <p className="font-mono font-semibold text-slate-800">{studentAccResult.tempPassword}</p>
+              </div>
+            </div>
+            <p className="text-[10px] text-amber-700 mt-2">Student must change this password on first login.</p>
+          </div>
+        )}
+
+        {isAdmin && !isWithdrawn && (
+          <button
+            onClick={() => _call('POST', '/portal-account', setStudentAccResult)}
+            disabled={!!working}
+            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+          >
+            {working === '/portal-account' ? <Loader2 size={13} className="animate-spin" /> : <KeyRound size={13} />}
+            {student.hasPortalAccount ? 'Reset Student Password' : 'Create Student Account'}
+          </button>
+        )}
+        {isWithdrawn && (
+          <p className="text-xs text-slate-400">Cannot create account for a withdrawn or graduated student.</p>
+        )}
+      </div>
+
+      {/* ── Parent portal account ────────────────────────── */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5">
+        <div className="flex items-center gap-3 mb-4 pb-3 border-b border-slate-100">
+          <div className="w-8 h-8 rounded-lg bg-violet-50 flex items-center justify-center">
+            <Users size={14} className="text-violet-600" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800">Parent Portal Account</h3>
+            <p className="text-[11px] text-slate-400">
+              {student.parentEmail ? `Login: ${student.parentEmail}` : 'No parent email on record — add it in Overview first'}
+              {' · Family tier required'}
+            </p>
+          </div>
+          <span className={`ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full ${student.hasParentAccount ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+            {student.hasParentAccount ? 'Active' : 'Not created'}
+          </span>
+        </div>
+
+        {parentAccResult && (
+          <div className="mb-4 p-3.5 bg-violet-50 border border-violet-200 rounded-xl">
+            <p className="text-xs font-semibold text-violet-800 mb-1">
+              Account {parentAccResult.action} — credentials sent to <span className="font-mono">{parentAccResult.email}</span>
+            </p>
+            <p className="text-[10px] text-slate-500">Parent will receive a welcome email with their login details.</p>
+          </div>
+        )}
+
+        {isAdmin && student.parentEmail && !isWithdrawn && (
+          <button
+            onClick={() => _call('POST', '/parent-account', setParentAccResult)}
+            disabled={!!working}
+            className="flex items-center gap-2 px-4 py-2.5 bg-violet-600 text-white text-sm font-semibold rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors"
+          >
+            {working === '/parent-account' ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />}
+            {student.hasParentAccount ? 'Resend Parent Credentials' : 'Create Parent Account'}
+          </button>
+        )}
+      </div>
+
+      {/* ── Deactivate student ───────────────────────────── */}
+      {isAdmin && !isWithdrawn && (
+        <div className="bg-white border border-red-100 rounded-xl p-5">
+          <div className="flex items-center gap-3 mb-3 pb-3 border-b border-red-50">
+            <div className="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center">
+              <UserX size={14} className="text-red-500" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-slate-800">Deactivate Student</h3>
+              <p className="text-[11px] text-slate-400">Mark as withdrawn. Records are preserved. Excluded from next billing snapshot.</p>
+            </div>
+          </div>
+          {error && <p className="text-xs text-red-600 mb-3">{error}</p>}
+          <button
+            onClick={handleDeactivateStudent}
+            disabled={deactivating}
+            className="flex items-center gap-2 px-4 py-2.5 border border-red-200 text-red-600 text-sm font-semibold rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+          >
+            {deactivating ? <Loader2 size={13} className="animate-spin" /> : <UserX size={13} />}
+            Deactivate Student
+          </button>
+        </div>
+      )}
+
+      {isWithdrawn && isAdmin && (
+        <div className="bg-white border border-slate-200 rounded-xl p-5">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center">
+              <UserCheck size={14} className="text-amber-600" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold text-slate-800">Student is {student.status}</h3>
+              <p className="text-[11px] text-slate-400">Reactivate to restore portal access and re-include in billing.</p>
+            </div>
+            <button
+              onClick={async () => {
+                try {
+                  const token2 = useAuthStore.getState().token;
+                  await fetch(`/api/students/${student.id}/reactivate`, { method: 'PATCH', headers: { Authorization: `Bearer ${token2}` } });
+                  window.location.reload();
+                } catch {}
+              }}
+              className="flex items-center gap-2 px-4 py-2.5 bg-amber-500 text-white text-sm font-semibold rounded-lg hover:bg-amber-600 transition-colors"
+            >
+              <UserCheck size={13} /> Reactivate
+            </button>
+          </div>
+        </div>
+      )}
+
+      {error && !deactivating && (
+        <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2.5">
+          <AlertTriangle size={14} /> {error}
+        </div>
+      )}
+    </div>
+  );
 }

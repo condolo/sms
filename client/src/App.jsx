@@ -39,7 +39,9 @@ const GrowthProfilePage = lazy(() => import('@/pages/growth-profile/GrowthProfil
 const LibraryPage       = lazy(() => import('@/pages/library/LibraryPage.jsx'));
 const TransportPage     = lazy(() => import('@/pages/transport/TransportPage.jsx'));
 const HostelPage        = lazy(() => import('@/pages/hostel/HostelPage.jsx'));
-const LessonsPage       = lazy(() => import('@/pages/lessons/LessonsPage.jsx'));
+const LessonsPage          = lazy(() => import('@/pages/lessons/LessonsPage.jsx'));
+const StudentDashboard     = lazy(() => import('@/pages/student-portal/StudentDashboard.jsx'));
+const ParentDashboard      = lazy(() => import('@/pages/parent-portal/ParentDashboard.jsx'));
 
 function SuspenseWrapper({ children }) {
   return (
@@ -77,6 +79,12 @@ export const router = createBrowserRouter([
 
   // Login — branded when on school subdomain, generic otherwise
   { path: '/login', element: <Login /> },
+
+  // Student portal — accessible after student login (no AppShell)
+  { path: '/student-dashboard', element: <SuspenseWrapper><StudentDashboard /></SuspenseWrapper> },
+
+  // Parent portal — accessible after parent login (no AppShell)
+  { path: '/parent-dashboard', element: <SuspenseWrapper><ParentDashboard /></SuspenseWrapper> },
 
   // Protected shell — only reachable after authentication
   {

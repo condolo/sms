@@ -37,7 +37,7 @@ const DEMO_USERS = [
   { id: 'u_demo_teacher',    name: 'Demo Teacher',        email: 'teacher@demo.msingi.io',    role: 'teacher'          },
   { id: 'u_demo_finance',    name: 'Demo Finance',        email: 'finance@demo.msingi.io',    role: 'finance'          },
   { id: 'u_demo_parent',     name: 'Demo Parent',         email: 'parent@demo.msingi.io',     role: 'parent'           },
-  { id: 'u_demo_student',    name: 'Demo Student',        email: 'student@demo.msingi.io',    role: 'student'          },
+  { id: 'u_demo_student',    name: 'Demo Student',        email: null,                         role: 'student'          },
 ];
 
 async function seedDemo() {
@@ -97,18 +97,21 @@ async function seedDemo() {
   const hashed = await bcrypt.hash(DEMO_PASSWORD, 10);
 
   /* ── 3. Upsert each demo user ── */
-  await Promise.all(DEMO_USERS.map(u =>
-    User.updateOne({ id: u.id }, {
-      $set: {
-        id: u.id, schoolId, name: u.name,
-        email: u.email, password: hashed,
-        role: u.role, primaryRole: u.role, roles: [u.role],
-        isActive: true, mustChangePassword: false,
-        passwordChangedAt: now, updatedAt: now,
-      },
+  await Promise.all(DEMO_USERS.map(u => {
+    const fields = {
+      id: u.id, schoolId, name: u.name,
+      password: hashed,
+      role: u.role, primaryRole: u.role, roles: [u.role],
+      isActive: true, mustChangePassword: false,
+      passwordChangedAt: now, updatedAt: now,
+    };
+    // Only set email if provided — student users log in by username, not email
+    if (u.email) fields.email = u.email;
+    return User.updateOne({ id: u.id }, {
+      $set: fields,
       $setOnInsert: { createdAt: now },
-    }, { upsert: true })
-  ));
+    }, { upsert: true });
+  }));
   console.log(`[seed-demo] ✅ ${DEMO_USERS.length} demo users provisioned`);
 
   /* ── 4. Academic year ── */
@@ -165,6 +168,36 @@ async function seedDemo() {
 
   // Seed realistic demo data (students, teachers, behaviour, finance, timetable, admissions)
   await seedDemoData();
+
+  /* ── Link demo student & parent users to real student records ── */
+  try {
+    const Students = _model('students');
+    const firstStudent = await Students.findOne({ schoolId }).sort({ admissionNumber: 1 }).lean();
+    if (firstStudent) {
+      // Student demo user: add studentId + username (admission number)
+      await User.updateOne({ id: 'u_demo_student' }, {
+        $set: {
+          studentId:  firstStudent.id,
+          username:   firstStudent.admissionNumber?.toLowerCase() || 'demo-student',
+          email:      null,  // student logins use username not email
+        },
+      });
+      // Parent demo user: link to first student
+      await User.updateOne({ id: 'u_demo_parent' }, {
+        $set: {
+          studentIds: [firstStudent.id],
+          guardianOf: [firstStudent.id],
+        },
+      });
+      // Mark student record as having portal accounts
+      await Students.updateOne({ id: firstStudent.id }, {
+        $set: { hasPortalAccount: true, hasParentAccount: true },
+      });
+      console.log(`[seed-demo] ✅ Portal accounts linked — student: ${firstStudent.admissionNumber} (login: ${firstStudent.admissionNumber?.toLowerCase()})`);
+    }
+  } catch (err) {
+    console.warn('[seed-demo] Portal account linking failed:', err.message);
+  }
 }
 
 module.exports = { seedDemo };

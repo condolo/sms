@@ -20,12 +20,12 @@ import useAuthStore from '@/store/auth.js';
 const LIMIT = 25;
 
 const STATUS_OPTIONS = [
-  { value: '',           label: 'All statuses' },
-  { value: 'active',     label: 'Active'       },
-  { value: 'inactive',   label: 'Inactive'     },
-  { value: 'suspended',  label: 'Suspended'    },
-  { value: 'graduated',  label: 'Graduated'    },
-  { value: 'transferred',label: 'Transferred'  },
+  { value: '',           label: 'Active (default)' },  // backend excludes withdrawn/graduated
+  { value: 'active',     label: 'Active'            },
+  { value: 'inactive',   label: 'Inactive'          },
+  { value: 'withdrawn',  label: 'Withdrawn'         },
+  { value: 'graduated',  label: 'Graduated'         },
+  { value: 'all',        label: 'All students'      },
 ];
 const GENDER_OPTIONS = [
   { value: '',                  label: 'All genders' },

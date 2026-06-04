@@ -6,6 +6,30 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.38.0',
+    date: '2026-05-30',
+    label: 'Student & Parent Portal Logins',
+    changes: [
+      { type: 'new', text: 'Student portal login: students log in with their admission number (username) + password — no email required' },
+      { type: 'new', text: 'POST /api/students/:id/portal-account — create or reset a student login account; returns username + temp password shown once to admin; plan-gated (Student or Family tier)' },
+      { type: 'new', text: 'DELETE /api/students/:id/portal-account — deactivate a student login account without touching their academic records' },
+      { type: 'new', text: 'POST /api/students/:id/parent-account — create or reset parent login linked to student.parentEmail; if same email is already a parent, their child list is updated; sends welcome email with credentials; plan-gated (Family tier)' },
+      { type: 'new', text: 'Student Dashboard (/student-dashboard): welcome card, attendance ring + summary, fee balance, curriculum coverage bars per subject, today\'s timetable, published report cards' },
+      { type: 'new', text: 'Parent Dashboard (/parent-dashboard): child selector (multi-child families), child overview, attendance summary + last 5 records, fee balance + recent payments, curriculum coverage, report cards' },
+      { type: 'new', text: 'GET /api/student-portal/dashboard — single-request aggregation: student record, attendance, fee balance, lesson coverage per subject, today\'s timetable, report cards' },
+      { type: 'new', text: 'GET /api/parent-portal/children — list of children linked to the parent account' },
+      { type: 'new', text: 'GET /api/parent-portal/dashboard/:childId — full child dashboard (parent must be linked to that child)' },
+      { type: 'new', text: 'Login flow: role-aware redirect after login — students go to /student-dashboard, parents to /parent-dashboard, staff to /dashboard' },
+      { type: 'new', text: 'Login input: "Email or admission number" — backend accepts identifier field, looks up by email OR username in one $or query' },
+      { type: 'new', text: 'JWT payload: studentId added for student role; studentIds + guardianOf added for parent role' },
+      { type: 'new', text: 'StudentProfile → Portal tab (new 7th tab): create/reset student account (shows temp credentials), create/reset parent account, deactivate student, reactivate student — all from one panel' },
+      { type: 'new', text: 'StudentList status options updated: Active (default), Inactive, Withdrawn, Graduated, All students — backend already excludes withdrawn/graduated by default' },
+      { type: 'new', text: 'users collection: username index (schoolId + username unique sparse) + studentId index added' },
+      { type: 'new', text: 'Demo seed: demo student user linked to first student record via studentId + username; demo parent linked via studentIds/guardianOf; student record flagged hasPortalAccount + hasParentAccount' },
+      { type: 'new', text: 'Bootstrap: enterprise plan grants all portal tiers; Student tier enables student login; Family tier additionally enables parent login' },
+    ],
+  },
+  {
     version: '4.37.0',
     date: '2026-05-30',
     label: 'Landing Page CMS — Edit Every Section from Platform Admin',

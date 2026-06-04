@@ -40,6 +40,11 @@ function _buildTokenPayload(user, schoolId) {
   // Include guardian link only for roles that use it — keeps tokens lean for everyone else
   if (role === 'parent' || role === 'guardian') {
     payload.guardianOf = Array.isArray(user.guardianOf) ? user.guardianOf : [];
+    payload.studentIds = Array.isArray(user.studentIds) ? user.studentIds : (payload.guardianOf || []);
+  }
+  // Include studentId for student role so portal endpoints can scope data
+  if (role === 'student') {
+    payload.studentId = user.studentId || null;
   }
 
   return payload;
@@ -80,16 +85,21 @@ const loginLimiter = rateLimit({
 router.post('/login', loginLimiter, tenantMiddleware, async (req, res) => {
   try {
     // NOTE: renamed to userEmail to avoid shadowing the module-level `email` import
-    const { email: userEmail, password } = req.body;
-    if (!userEmail || !password) return res.status(400).json({ error: 'Email and password required' });
+    // 'identifier' supports admission-number login for students; falls back to 'email' for staff
+    const { email: userEmail, password, identifier } = req.body;
+    const loginId = ((identifier || userEmail) || '').toLowerCase().trim();
+    if (!loginId || !password) return res.status(400).json({ error: 'Email or admission number and password required' });
 
     const User   = _model('users');
     const School = _model('schools');
 
     // Find user regardless of isActive so we can give a clear pending message
+    // Students log in with admission number stored in `username` field; staff use email
     const user = await User.findOne({
-      email: userEmail.toLowerCase().trim(),
-      schoolId: req.school.id
+      $or: [
+        { email: loginId,    schoolId: req.school.id },
+        { username: loginId, schoolId: req.school.id },
+      ],
     }).lean();
 
     if (!user) return res.status(401).json({ error: 'Invalid email or password' });

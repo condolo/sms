@@ -110,8 +110,10 @@ const INDEXES = [
   {
     col: 'users',
     indexes: [
-      { key: { schoolId: 1, email: 1 }, name: 'users_school_email', unique: true, sparse: true },
-      { key: { id: 1 },                 name: 'users_id',           unique: true, sparse: true },
+      { key: { schoolId: 1, email: 1 },    name: 'users_school_email',    unique: true, sparse: true },
+      { key: { schoolId: 1, username: 1 }, name: 'users_school_username', unique: true, sparse: true },
+      { key: { studentId: 1 },             name: 'users_student_id',      sparse: true },
+      { key: { id: 1 },                    name: 'users_id',              unique: true, sparse: true },
     ],
   },
 
