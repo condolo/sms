@@ -787,6 +787,69 @@ function SocialLinks({ links = {} }) {
   );
 }
 
+/* ── Landing CMS defaults (shown if DB has no override) ─────── */
+const CMS_DEFAULTS = {
+  hero: {
+    headline:    'The Operating System\nfor Modern Schools.',
+    subheadline: 'Admissions, academics, attendance, curriculum, finance, reporting, and communications — connected in one operational platform so institutions run with clarity and accountability.',
+    tagline:     'Operational infrastructure for modern institutions',
+    cta1:        'Book a Demo',
+    cta2:        'Explore the Platform',
+    italic:      'Most school systems digitize tasks. Msingi structures institutions.',
+  },
+  conviction: CONVICTION_PAIRS,
+  ecosystem: {
+    heading:     'One student. Every operational layer — connected.',
+    subheading:  'From the first enquiry to the published report card, collected fee, and lesson covered — one unbroken data trail across the entire institution.',
+    enabledNodes: ECOSYSTEM_NODES.map(n => n.label), // all enabled by default
+    nodeDescs:   Object.fromEntries(ECOSYSTEM_NODES.map(n => [n.label, n.desc])),
+  },
+  showcase: SHOWCASE_TABS.map(t => ({
+    id:       t.id,
+    label:    t.label,
+    headline: t.headline,
+    bullets:  t.bullets,
+  })),
+  trust: {
+    schools: ['Greenwood Academy', 'Sunrise School', 'TestSync Academy', 'MLA', 'Westbrook College', 'Horizon Institute'],
+    tagline: 'Built for institutions that require operational clarity and academic accountability',
+  },
+  footer: {
+    tagline: 'The operating system for modern African schools.',
+    email:   'hello@msingi.io',
+  },
+  seo: {
+    title:       'Msingi — The Operating System for Modern Schools',
+    description: 'Admissions, academics, attendance, finance, reporting and communications — connected in one platform.',
+    ogImageUrl:  '',
+  },
+};
+
+let _cachedCMS    = null;
+let _cmsPromise   = null;
+async function getLandingCMS() {
+  if (_cachedCMS) return _cachedCMS;
+  if (_cmsPromise) return _cmsPromise;
+  _cmsPromise = fetch('/api/platform/landing-content')
+    .then(r => r.ok ? r.json() : { data: null })
+    .then(json => {
+      const db = json?.data || {};
+      // Deep merge: DB values override defaults, but defaults fill any gaps
+      _cachedCMS = {
+        hero:       { ...CMS_DEFAULTS.hero,       ...(db.hero       || {}) },
+        conviction: db.conviction?.length ? db.conviction : CMS_DEFAULTS.conviction,
+        ecosystem:  { ...CMS_DEFAULTS.ecosystem,  ...(db.ecosystem  || {}) },
+        showcase:   db.showcase?.length   ? db.showcase   : CMS_DEFAULTS.showcase,
+        trust:      { ...CMS_DEFAULTS.trust,      ...(db.trust      || {}) },
+        footer:     { ...CMS_DEFAULTS.footer,     ...(db.footer     || {}) },
+        seo:        { ...CMS_DEFAULTS.seo,        ...(db.seo        || {}) },
+      };
+      return _cachedCMS;
+    })
+    .catch(() => { _cachedCMS = CMS_DEFAULTS; return CMS_DEFAULTS; });
+  return _cmsPromise;
+}
+
 /* ═══════════════════════════════════════════════════════════════
    MAIN LANDING PAGE
 ═══════════════════════════════════════════════════════════════ */
@@ -797,8 +860,10 @@ export default function Landing() {
   const [socialLinks, setSocialLinks] = useState({});
   const [navScrolled, setNavScrolled] = useState(false);
   const [showcaseTab, setShowcaseTab] = useState(0);
+  const [cms,         setCms]         = useState(CMS_DEFAULTS);
 
   useEffect(() => {
+    getLandingCMS().then(c => setCms(c));
     getPlatformSettings().then(s => setSocialLinks(s.socialLinks || {}));
     function onScroll() { setNavScrolled(window.scrollY > 20); }
     window.addEventListener('scroll', onScroll, { passive: true });
@@ -892,24 +957,26 @@ export default function Landing() {
           className="flex justify-center mb-8">
           <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 backdrop-blur-sm px-3.5 py-1.5 text-xs font-medium text-slate-600 shadow-sm">
             <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-            Operational infrastructure for modern institutions
+            {cms.hero.tagline}
           </div>
         </motion.div>
 
         <motion.div initial="hidden" animate="visible" variants={stagger(0.07)} className="text-center max-w-4xl mx-auto">
           <motion.h1 variants={fadeUp}
             className="text-5xl sm:text-6xl lg:text-[72px] font-bold tracking-tighter text-slate-900 leading-[1.04] mb-6">
-            The Operating System<br />
-            <span className="text-indigo-600">for Modern Schools.</span>
+            {cms.hero.headline.split('\n').map((line, i, arr) => (
+              i < arr.length - 1
+                ? <span key={i}>{line}<br /></span>
+                : <span key={i} className="text-indigo-600">{line}</span>
+            ))}
           </motion.h1>
 
           <motion.p variants={fadeUp} className="text-lg sm:text-xl text-slate-500 max-w-2xl mx-auto leading-relaxed mb-3">
-            Admissions, academics, attendance, curriculum, finance, reporting, and communications —
-            connected in one operational platform so institutions run with clarity and accountability.
+            {cms.hero.subheadline}
           </motion.p>
 
           <motion.p variants={fadeUp} className="text-base text-slate-400 italic mb-10">
-            Most school systems digitize tasks. Msingi structures institutions.
+            {cms.hero.italic}
           </motion.p>
 
           <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center gap-3">
@@ -939,10 +1006,10 @@ export default function Landing() {
       <section className="py-10 bg-white border-y border-slate-100">
         <div className="max-w-7xl mx-auto px-6 lg:px-8 text-center">
           <p className="text-xs font-medium uppercase tracking-widest text-slate-400 mb-6">
-            Built for institutions that require operational clarity and academic accountability
+            {cms.trust.tagline}
           </p>
           <div className="flex flex-wrap items-center justify-center gap-8 lg:gap-14">
-            {['Greenwood Academy', 'Sunrise School', 'TestSync Academy', 'MLA', 'Westbrook College', 'Horizon Institute'].map(name => (
+            {(cms.trust.schools || []).map(name => (
               <span key={name} className="text-slate-300 font-bold text-sm tracking-widest uppercase select-none">{name}</span>
             ))}
           </div>
@@ -964,7 +1031,7 @@ export default function Landing() {
             </motion.div>
 
             <div className="space-y-3">
-              {CONVICTION_PAIRS.map(({ before, after }, i) => (
+              {(cms.conviction || CONVICTION_PAIRS).map(({ before, after }, i) => (
                 <motion.div key={i} variants={fadeUp}
                   className="grid sm:grid-cols-[1fr_auto_1fr] gap-3 sm:gap-5 items-center">
                   <div className="flex items-start gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3.5">
@@ -996,18 +1063,17 @@ export default function Landing() {
           <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()} className="text-center mb-16">
             <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-4">Platform Architecture</motion.p>
             <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-bold tracking-tight text-white mb-4 leading-tight">
-              One student. Every operational layer — connected.
+              {cms.ecosystem.heading}
             </motion.h2>
             <motion.p variants={fadeUp} className="text-base text-slate-400 max-w-xl mx-auto leading-relaxed">
-              From the first enquiry to the published report card, collected fee, and lesson covered —
-              one unbroken data trail across the entire institution.
+              {cms.ecosystem.subheading}
             </motion.p>
           </motion.div>
 
           {/* Chain — scrollable on mobile, single row on lg */}
           <div className="overflow-x-auto pb-4">
             <div className="flex items-start gap-0 min-w-max mx-auto justify-center">
-              {ECOSYSTEM_NODES.map((node, i) => (
+              {ECOSYSTEM_NODES.filter(n => (cms.ecosystem.enabledNodes || []).includes(n.label)).map((node, i, arr) => (
                 <div key={node.label} className="flex items-start">
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}
@@ -1020,10 +1086,10 @@ export default function Landing() {
                       <node.Icon size={22} className="text-white" />
                     </div>
                     <p className="text-xs font-semibold text-white text-center leading-tight">{node.label}</p>
-                    <p className="text-[10px] text-slate-500 text-center leading-tight">{node.desc}</p>
+                    <p className="text-[10px] text-slate-500 text-center leading-tight">{cms.ecosystem.nodeDescs?.[node.label] ?? node.desc}</p>
                   </motion.div>
 
-                  {i < ECOSYSTEM_NODES.length - 1 && (
+                  {i < arr.length - 1 && (
                     <motion.div
                       initial={{ opacity: 0 }}
                       whileInView={{ opacity: 1 }}

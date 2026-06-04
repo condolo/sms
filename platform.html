@@ -75,6 +75,12 @@
       <button class="pa-nav-item" onclick="showView('branding')" id="nav-branding">
         <i class="fas fa-paint-brush"></i> Branding & Settings
       </button>
+      <button class="pa-nav-item" onclick="showView('landing')" id="nav-landing">
+        <i class="fas fa-globe"></i> Landing Page CMS
+      </button>
+      <button class="pa-nav-item" onclick="showView('billing')" id="nav-billing">
+        <i class="fas fa-file-invoice"></i> Billing Overview
+      </button>
     </nav>
 
     <div class="pa-sidebar-footer">
@@ -220,10 +226,10 @@ function showView(view) {
   document.querySelectorAll('.pa-nav-item').forEach(el => el.classList.remove('active'));
   document.getElementById('nav-' + view)?.classList.add('active');
 
-  const titles = { overview:'Overview', pending:'Pending Approvals', schools:'Registered Schools', provision:'Provision New School', announcements:'System Announcements', diagnostics:'System Diagnostics', branding:'Branding & Platform Settings' };
+  const titles = { overview:'Overview', pending:'Pending Approvals', schools:'Registered Schools', provision:'Provision New School', announcements:'System Announcements', diagnostics:'System Diagnostics', branding:'Branding & Platform Settings', landing:'Landing Page CMS', billing:'Billing Overview' };
   document.getElementById('view-title').textContent = titles[view] || view;
 
-  const views = { overview: renderOverview, pending: renderPending, schools: renderSchools, provision: renderProvision, announcements: renderAnnouncements, diagnostics: renderDiagnostics, branding: renderBranding };
+  const views = { overview: renderOverview, pending: renderPending, schools: renderSchools, provision: renderProvision, announcements: renderAnnouncements, diagnostics: renderDiagnostics, branding: renderBranding, landing: renderLandingCMS, billing: renderBillingOverview };
   (views[view] || (() => {}))();
 }
 
@@ -1318,6 +1324,371 @@ async function saveBranding() {
     msgEl.style.color = '#991b1b';
     msgEl.style.fontSize = '14px';
     msgEl.innerHTML = '❌ Failed to save: ' + e.message;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   LANDING PAGE CMS
+   ══════════════════════════════════════════════════════════════ */
+let _cmsData = null;
+
+async function renderLandingCMS() {
+  const el = document.getElementById('pa-content');
+  el.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading CMS content…</div>';
+
+  try {
+    const res  = await fetch('/api/platform/landing-content', { headers: { 'X-Platform-Key': _key } });
+    const json = await res.json();
+    _cmsData   = json?.data || {};
+  } catch {
+    _cmsData = {};
+  }
+
+  el.innerHTML = `
+    <div style="max-width:860px;display:flex;flex-direction:column;gap:20px;">
+
+      ${_cmsSection('hero', 'Hero Section', `
+        <div style="display:grid;gap:10px;">
+          <div class="cms-field">
+            <label>Headline (use \\n for line break)</label>
+            <textarea id="cms-hero-headline" rows="2" style="font-size:14px;">${_cmsVal('hero.headline','The Operating System\\nfor Modern Schools.')}</textarea>
+          </div>
+          <div class="cms-field">
+            <label>Sub-headline (description paragraph)</label>
+            <textarea id="cms-hero-subheadline" rows="3" style="font-size:13px;">${_cmsVal('hero.subheadline','Admissions, academics, attendance, curriculum, finance, reporting, and communications — connected in one operational platform so institutions run with clarity and accountability.')}</textarea>
+          </div>
+          <div class="cms-field">
+            <label>Italic tagline (below description)</label>
+            <input id="cms-hero-italic" type="text" value="${_cmsVal('hero.italic','Most school systems digitize tasks. Msingi structures institutions.')}" />
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+            <div class="cms-field">
+              <label>Pill tagline (badge text)</label>
+              <input id="cms-hero-tagline" type="text" value="${_cmsVal('hero.tagline','Operational infrastructure for modern institutions')}" />
+            </div>
+            <div class="cms-field">
+              <label>CTA 1 label</label>
+              <input id="cms-hero-cta1" type="text" value="${_cmsVal('hero.cta1','Book a Demo')}" />
+            </div>
+            <div class="cms-field">
+              <label>CTA 2 label</label>
+              <input id="cms-hero-cta2" type="text" value="${_cmsVal('hero.cta2','Explore the Platform')}" />
+            </div>
+          </div>
+        </div>
+        <button class="pa-btn pa-btn-primary" style="margin-top:12px" onclick="_saveCmsSection('hero',{headline:_v('cms-hero-headline'),subheadline:_v('cms-hero-subheadline'),italic:_v('cms-hero-italic'),tagline:_v('cms-hero-tagline'),cta1:_v('cms-hero-cta1'),cta2:_v('cms-hero-cta2')})">
+          <i class="fas fa-save"></i> Save Hero
+        </button>
+      `)}
+
+      ${_cmsSection('conviction', 'Conviction Pairs (Before → After)', `
+        <p style="font-size:12px;color:#94a3b8;margin:0 0 10px">Each row shows an old pain on the left and the Msingi solution on the right.</p>
+        <div id="cms-conviction-rows" style="display:flex;flex-direction:column;gap:8px;">
+          ${_convictionRows()}
+        </div>
+        <button class="pa-btn" style="margin-top:10px;font-size:12px" onclick="_addConvictionRow()">
+          <i class="fas fa-plus"></i> Add Row
+        </button>
+        <button class="pa-btn pa-btn-primary" style="margin-top:10px;margin-left:8px" onclick="_saveConviction()">
+          <i class="fas fa-save"></i> Save Pairs
+        </button>
+      `)}
+
+      ${_cmsSection('ecosystem', 'Ecosystem Section', `
+        <div style="display:grid;gap:10px;">
+          <div class="cms-field">
+            <label>Section heading</label>
+            <input id="cms-eco-heading" type="text" value="${_cmsVal('ecosystem.heading','One student. Every operational layer — connected.')}" />
+          </div>
+          <div class="cms-field">
+            <label>Section sub-heading</label>
+            <textarea id="cms-eco-subheading" rows="2">${_cmsVal('ecosystem.subheading','From the first enquiry to the published report card, collected fee, and lesson covered — one unbroken data trail across the entire institution.')}</textarea>
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:8px">Visible nodes (toggle on/off)</label>
+            <div id="cms-eco-nodes" style="display:flex;flex-wrap:wrap;gap:8px;">
+              ${_ecoNodeToggles()}
+            </div>
+          </div>
+        </div>
+        <button class="pa-btn pa-btn-primary" style="margin-top:12px" onclick="_saveEcosystem()">
+          <i class="fas fa-save"></i> Save Ecosystem
+        </button>
+      `)}
+
+      ${_cmsSection('trust', 'Trust Band (School Names)', `
+        <div class="cms-field">
+          <label>School names (comma-separated)</label>
+          <input id="cms-trust-schools" type="text" value="${(_cmsData.trust?.schools || ['Greenwood Academy','Sunrise School','TestSync Academy','MLA','Westbrook College','Horizon Institute']).join(', ')}" />
+        </div>
+        <div class="cms-field" style="margin-top:8px">
+          <label>Band tagline</label>
+          <input id="cms-trust-tagline" type="text" value="${_cmsVal('trust.tagline','Built for institutions that require operational clarity and academic accountability')}" />
+        </div>
+        <button class="pa-btn pa-btn-primary" style="margin-top:12px" onclick="_saveCmsSection('trust',{schools:_v('cms-trust-schools').split(',').map(s=>s.trim()).filter(Boolean),tagline:_v('cms-trust-tagline')})">
+          <i class="fas fa-save"></i> Save Trust Band
+        </button>
+      `)}
+
+      ${_cmsSection('footer', 'Footer', `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="cms-field">
+            <label>Footer tagline</label>
+            <input id="cms-footer-tagline" type="text" value="${_cmsVal('footer.tagline','The operating system for modern African schools.')}" />
+          </div>
+          <div class="cms-field">
+            <label>Contact email</label>
+            <input id="cms-footer-email" type="email" value="${_cmsVal('footer.email','hello@msingi.io')}" />
+          </div>
+        </div>
+        <button class="pa-btn pa-btn-primary" style="margin-top:12px" onclick="_saveCmsSection('footer',{tagline:_v('cms-footer-tagline'),email:_v('cms-footer-email')})">
+          <i class="fas fa-save"></i> Save Footer
+        </button>
+      `)}
+
+      ${_cmsSection('seo', 'SEO & Meta Tags', `
+        <div style="display:grid;gap:10px;">
+          <div class="cms-field">
+            <label>Page title</label>
+            <input id="cms-seo-title" type="text" value="${_cmsVal('seo.title','Msingi — The Operating System for Modern Schools')}" />
+          </div>
+          <div class="cms-field">
+            <label>Meta description</label>
+            <textarea id="cms-seo-desc" rows="2">${_cmsVal('seo.description','Admissions, academics, attendance, finance, reporting and communications — connected in one platform.')}</textarea>
+          </div>
+          <div class="cms-field">
+            <label>OG Image URL (for social sharing preview)</label>
+            <input id="cms-seo-og" type="url" value="${_cmsVal('seo.ogImageUrl','')}" placeholder="https://..." />
+          </div>
+        </div>
+        <button class="pa-btn pa-btn-primary" style="margin-top:12px" onclick="_saveCmsSection('seo',{title:_v('cms-seo-title'),description:_v('cms-seo-desc'),ogImageUrl:_v('cms-seo-og')})">
+          <i class="fas fa-save"></i> Save SEO
+        </button>
+      `)}
+
+    </div>
+  `;
+
+  // Add styles if not already present
+  _injectCmsStyles();
+}
+
+/* ── CMS helpers ─────────────────────────────────────────── */
+function _cmsSection(id, title, inner) {
+  return `
+    <div class="pa-card" id="cms-sec-${id}">
+      <div class="pa-card-header" style="cursor:pointer;user-select:none" onclick="_toggleCmsSection('${id}')">
+        <h3 style="margin:0;display:flex;align-items:center;gap:8px">
+          <i class="fas fa-chevron-down" id="cms-chevron-${id}" style="font-size:11px;color:#94a3b8;transition:transform .2s"></i>
+          ${title}
+        </h3>
+      </div>
+      <div id="cms-body-${id}" style="padding:16px 0 0">
+        ${inner}
+      </div>
+    </div>`;
+}
+
+function _toggleCmsSection(id) {
+  const body = document.getElementById('cms-body-' + id);
+  const icon = document.getElementById('cms-chevron-' + id);
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  icon.style.transform = open ? 'rotate(-90deg)' : 'rotate(0)';
+}
+
+function _cmsVal(path, def = '') {
+  const parts = path.split('.');
+  let cur = _cmsData;
+  for (const p of parts) { if (cur == null) return def; cur = cur[p]; }
+  return (cur !== undefined && cur !== null) ? String(cur).replace(/"/g,'&quot;') : def;
+}
+
+function _v(id) {
+  const el = document.getElementById(id);
+  return el ? (el.tagName === 'TEXTAREA' ? el.value : el.value) : '';
+}
+
+function _convictionRows() {
+  const pairs = _cmsData.conviction || [
+    { before: 'Fee tracking in Excel, reconciled every Friday', after: 'Real-time fee ledger — every payment, every receipt, live' },
+    { before: 'Report cards assembled manually by the registrar', after: 'Governed publishing: Teacher → HOD → Principal → Portal' },
+    { before: 'Curriculum coverage tracked in a teacher\'s notebook', after: 'Syllabus tracker — every topic marked, every subject covered live' },
+    { before: 'Parent notices via personal WhatsApp groups', after: 'Structured institutional channels with full audit trail' },
+    { before: 'Leadership decisions on week-old paper summaries', after: 'Live director dashboard across attendance, grades, and finance' },
+  ];
+  return pairs.map((p, i) => `
+    <div class="cms-conv-row" data-index="${i}" style="display:grid;grid-template-columns:1fr 1fr 32px;gap:8px;align-items:center">
+      <input class="cms-conv-before" type="text" placeholder="Before (old pain)" value="${(p.before||'').replace(/"/g,'&quot;')}" />
+      <input class="cms-conv-after"  type="text" placeholder="After (Msingi solution)" value="${(p.after||'').replace(/"/g,'&quot;')}" />
+      <button onclick="this.closest('.cms-conv-row').remove()" style="background:#fee2e2;border:none;border-radius:6px;color:#dc2626;cursor:pointer;padding:6px">
+        <i class="fas fa-trash"></i>
+      </button>
+    </div>`).join('');
+}
+
+function _addConvictionRow() {
+  const container = document.getElementById('cms-conviction-rows');
+  const idx = container.children.length;
+  const div = document.createElement('div');
+  div.className = 'cms-conv-row';
+  div.dataset.index = idx;
+  div.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 32px;gap:8px;align-items:center';
+  div.innerHTML = `
+    <input class="cms-conv-before" type="text" placeholder="Before (old pain)" />
+    <input class="cms-conv-after"  type="text" placeholder="After (Msingi solution)" />
+    <button onclick="this.closest('.cms-conv-row').remove()" style="background:#fee2e2;border:none;border-radius:6px;color:#dc2626;cursor:pointer;padding:6px">
+      <i class="fas fa-trash"></i>
+    </button>`;
+  container.appendChild(div);
+}
+
+function _saveConviction() {
+  const rows  = document.querySelectorAll('.cms-conv-row');
+  const pairs = [];
+  rows.forEach(row => {
+    const before = row.querySelector('.cms-conv-before')?.value?.trim();
+    const after  = row.querySelector('.cms-conv-after')?.value?.trim();
+    if (before || after) pairs.push({ before: before || '', after: after || '' });
+  });
+  _saveCmsSection('conviction', pairs);
+}
+
+const ALL_ECO_NODES = ['Admissions','Student Records','Classes','Timetable','Attendance','Lessons','Grades','Behaviour','Reports','Finance','Library','Transport','Hostel','Analytics'];
+
+function _ecoNodeToggles() {
+  const enabled = _cmsData.ecosystem?.enabledNodes || ALL_ECO_NODES;
+  return ALL_ECO_NODES.map(label => {
+    const on = enabled.includes(label);
+    return `<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;background:${on?'#eef2ff':'#f8fafc'};border:1px solid ${on?'#c7d2fe':'#e2e8f0'};padding:4px 10px;border-radius:20px">
+      <input type="checkbox" data-node="${label}" ${on?'checked':''} style="cursor:pointer"> ${label}
+    </label>`;
+  }).join('');
+}
+
+function _saveEcosystem() {
+  const heading    = _v('cms-eco-heading');
+  const subheading = _v('cms-eco-subheading');
+  const nodeDescs  = {};
+  const enabledNodes = [];
+  document.querySelectorAll('#cms-eco-nodes input[data-node]').forEach(cb => {
+    if (cb.checked) enabledNodes.push(cb.dataset.node);
+  });
+  _saveCmsSection('ecosystem', { heading, subheading, enabledNodes, nodeDescs });
+}
+
+async function _saveCmsSection(section, data) {
+  try {
+    const res  = await fetch('/api/platform/landing-content', {
+      method:  'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Platform-Key': _key },
+      body:    JSON.stringify({ section, data }),
+    });
+    const json = await res.json();
+    if (json.success) {
+      toast('✓ ' + section + ' saved successfully', 'success');
+      // Update local cache
+      if (!_cmsData) _cmsData = {};
+      _cmsData[section] = data;
+    } else {
+      toast('Failed: ' + (json.error || 'Unknown error'), 'error');
+    }
+  } catch (err) {
+    toast('Save failed: ' + err.message, 'error');
+  }
+}
+
+function _injectCmsStyles() {
+  if (document.getElementById('cms-styles')) return;
+  const s = document.createElement('style');
+  s.id = 'cms-styles';
+  s.textContent = `
+    .cms-field { display:flex;flex-direction:column;gap:4px; }
+    .cms-field label { font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.04em; }
+    .cms-field input, .cms-field textarea {
+      border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;font-size:13px;
+      font-family:inherit;color:#1e293b;background:#fff;resize:vertical;
+      transition:border-color .15s,box-shadow .15s;
+    }
+    .cms-field input:focus, .cms-field textarea:focus {
+      outline:none;border-color:#818cf8;box-shadow:0 0 0 3px rgba(99,102,241,.1);
+    }
+  `;
+  document.head.appendChild(s);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   BILLING OVERVIEW
+   ══════════════════════════════════════════════════════════════ */
+async function renderBillingOverview() {
+  const el = document.getElementById('pa-content');
+  el.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading billing data…</div>';
+
+  try {
+    const res  = await fetch('/api/billing/all', { headers: { 'X-Platform-Key': _key } });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || 'Failed to fetch billing data');
+
+    const snapshots = json.data || [];
+    const total     = snapshots.reduce((s, x) => s + (x.totalAmount || 0), 0);
+    const paid      = snapshots.filter(x => x.status === 'paid').reduce((s, x) => s + (x.paidAmount || x.totalAmount || 0), 0);
+    const pending   = snapshots.filter(x => x.status === 'pending');
+
+    const STATUS_COLOR = { pending: '#f59e0b', paid: '#22c55e', overdue: '#ef4444' };
+
+    el.innerHTML = `
+      <div class="pa-stats" style="margin-bottom:20px">
+        <div class="pa-stat-card">
+          <div class="pa-stat-label">Total Invoiced</div>
+          <div class="pa-stat-value">KSh ${(total/1000).toFixed(1)}K</div>
+          <div class="pa-stat-sub">${snapshots.length} invoices</div>
+        </div>
+        <div class="pa-stat-card">
+          <div class="pa-stat-label">Total Collected</div>
+          <div class="pa-stat-value">KSh ${(paid/1000).toFixed(1)}K</div>
+          <div class="pa-stat-sub">${snapshots.filter(x=>x.status==='paid').length} paid</div>
+        </div>
+        <div class="pa-stat-card">
+          <div class="pa-stat-label">Outstanding</div>
+          <div class="pa-stat-value" style="color:#f59e0b">KSh ${((total-paid)/1000).toFixed(1)}K</div>
+          <div class="pa-stat-sub">${pending.length} pending</div>
+        </div>
+      </div>
+
+      <div class="pa-card">
+        <div class="pa-card-header"><h3>All Invoices</h3></div>
+        ${snapshots.length === 0 ? '<p style="color:#94a3b8;padding:16px 0">No billing snapshots yet. Snapshots are created automatically on term start dates.</p>' : `
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="border-bottom:2px solid #e2e8f0">
+              <th style="text-align:left;padding:8px 12px;color:#64748b;font-size:11px;text-transform:uppercase">School</th>
+              <th style="text-align:left;padding:8px 12px;color:#64748b;font-size:11px;text-transform:uppercase">Invoice Ref</th>
+              <th style="text-align:left;padding:8px 12px;color:#64748b;font-size:11px;text-transform:uppercase">Year / Term</th>
+              <th style="text-align:right;padding:8px 12px;color:#64748b;font-size:11px;text-transform:uppercase">Students</th>
+              <th style="text-align:right;padding:8px 12px;color:#64748b;font-size:11px;text-transform:uppercase">Amount</th>
+              <th style="text-align:center;padding:8px 12px;color:#64748b;font-size:11px;text-transform:uppercase">Status</th>
+              <th style="text-align:left;padding:8px 12px;color:#64748b;font-size:11px;text-transform:uppercase">Paid</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${snapshots.map(s => `
+              <tr style="border-bottom:1px solid #f1f5f9;hover:background:#f8fafc">
+                <td style="padding:10px 12px;font-weight:600">${s.schoolName || s.schoolId}</td>
+                <td style="padding:10px 12px;font-family:monospace;font-size:12px;color:#6366f1">${s.invoiceRef}</td>
+                <td style="padding:10px 12px;color:#64748b">${s.academicYear} · T${s.term}</td>
+                <td style="padding:10px 12px;text-align:right">${s.activeCount}</td>
+                <td style="padding:10px 12px;text-align:right;font-weight:600">KSh ${(s.totalAmount||0).toLocaleString()}</td>
+                <td style="padding:10px 12px;text-align:center">
+                  <span style="background:${STATUS_COLOR[s.status]||'#94a3b8'}22;color:${STATUS_COLOR[s.status]||'#94a3b8'};padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600;text-transform:capitalize">${s.status}</span>
+                </td>
+                <td style="padding:10px 12px;color:#94a3b8;font-size:12px">${s.paidAt ? new Date(s.paidAt).toLocaleDateString('en-GB') : '—'}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`}
+      </div>`;
+
+  } catch (err) {
+    el.innerHTML = `<div class="pa-error">Failed to load billing data: ${err.message}</div>`;
   }
 }
 

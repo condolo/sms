@@ -836,4 +836,53 @@ router.put('/settings', async (req, res) => {
    in the main collections route instead. Dismiss is tracked as schoolId in dismissedBy[].
    We handle this via a special route here with a loose auth fallback: ── */
 
+/* ══════════════════════════════════════════════════════════════
+   LANDING PAGE CMS
+   GET  /api/platform/landing-content  — public, cached 60s (Landing.jsx uses this)
+   PUT  /api/platform/landing-content  — platform admin key required, partial merge
+   ══════════════════════════════════════════════════════════════ */
+
+/* Public GET — no platform key required (landing page needs it without auth) */
+router.get('/landing-content', async (req, res) => {
+  try {
+    const LC  = _model('landing_content');
+    const doc = await LC.findOne({ id: 'global' }).lean();
+    res.setHeader('Cache-Control', 'public, max-age=60');
+    return res.json({ success: true, data: doc?.content || null });
+  } catch (err) {
+    console.error('[platform/landing-content GET]', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* Platform-admin PUT — partial merge update */
+router.put('/landing-content', async (req, res) => {
+  try {
+    const { section, data } = req.body;
+    if (!section || !data) {
+      return res.status(400).json({ success: false, error: 'section and data are required.' });
+    }
+
+    const ALLOWED_SECTIONS = ['hero', 'conviction', 'ecosystem', 'showcase', 'trust', 'footer', 'seo'];
+    if (!ALLOWED_SECTIONS.includes(section)) {
+      return res.status(400).json({ success: false, error: `Unknown section: ${section}. Allowed: ${ALLOWED_SECTIONS.join(', ')}` });
+    }
+
+    const LC  = _model('landing_content');
+    const now = new Date().toISOString();
+
+    await LC.findOneAndUpdate(
+      { id: 'global' },
+      { $set: { [`content.${section}`]: data, updatedAt: now } },
+      { upsert: true, new: true }
+    );
+
+    console.log(`[platform/landing-content] Section '${section}' updated`);
+    return res.json({ success: true, section, updatedAt: now });
+  } catch (err) {
+    console.error('[platform/landing-content PUT]', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
