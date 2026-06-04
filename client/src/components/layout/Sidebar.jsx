@@ -22,7 +22,7 @@ import {
   CheckSquare, BarChart3, ClipboardList, Scale,
   Wallet, Settings, LogOut, Library,
   MessageSquare, UserCog, TrendingUp, Tag, HelpCircle,
-  BookMarked, Bus, BedDouble, X, BookCheck,
+  BookMarked, Bus, BedDouble, X, BookCheck, MonitorPlay,
 } from 'lucide-react';
 import clsx from 'clsx';
 import useAuthStore from '@/store/auth.js';
@@ -44,6 +44,7 @@ const CONFIGURABLE_MODULES = [
   { key: 'events',     to: '/events',     Icon: Calendar,       label: 'Events',              section: 'Operations' },
   { key: 'hr',         to: '/hr',         Icon: UserCog,        label: 'HR & Staff',          section: 'Operations' },
   { key: 'lessons',    to: '/lessons',    Icon: BookCheck,      label: 'Lessons',             section: 'Academic'   },
+  { key: 'elearning',  to: '/elearning',  Icon: MonitorPlay,    label: 'eLearning',           section: 'Academic'   },
   { key: 'library',    to: '/library',    Icon: BookMarked,     label: 'Library',             section: 'Operations' },
   { key: 'transport',  to: '/transport',  Icon: Bus,            label: 'Transport',           section: 'Operations' },
   { key: 'hostel',     to: '/hostel',     Icon: BedDouble,      label: 'Hostel',              section: 'Operations' },

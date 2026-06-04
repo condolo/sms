@@ -40,6 +40,7 @@ const LibraryPage       = lazy(() => import('@/pages/library/LibraryPage.jsx'));
 const TransportPage     = lazy(() => import('@/pages/transport/TransportPage.jsx'));
 const HostelPage        = lazy(() => import('@/pages/hostel/HostelPage.jsx'));
 const LessonsPage          = lazy(() => import('@/pages/lessons/LessonsPage.jsx'));
+const ELearningPage        = lazy(() => import('@/pages/elearning/ELearningPage.jsx'));
 const StudentDashboard     = lazy(() => import('@/pages/student-portal/StudentDashboard.jsx'));
 const ParentDashboard      = lazy(() => import('@/pages/parent-portal/ParentDashboard.jsx'));
 
@@ -171,6 +172,10 @@ export const router = createBrowserRouter([
 
       // Lessons / Syllabus Tracker (v4.33.0)
       { path: 'lessons',                element: <SuspenseWrapper><LessonsPage /></SuspenseWrapper> },
+
+      // eLearning — Google Classroom integration
+      { path: 'elearning',              element: <SuspenseWrapper><ELearningPage /></SuspenseWrapper> },
+      { path: 'elearning/*',            element: <SuspenseWrapper><ELearningPage /></SuspenseWrapper> },
 
       // Fallback
       { path: '*',                     element: <SuspenseWrapper><NotFound /></SuspenseWrapper> },

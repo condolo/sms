@@ -143,6 +143,9 @@ app.use('/api/hostel',    require('./routes/hostel'));
 /* ── v4.33.0: Lessons / Syllabus Tracker ── */
 app.use('/api/lessons',  require('./routes/lessons'));
 
+/* ── eLearning — Google Classroom integration ── */
+app.use('/api/elearning', require('./routes/elearning'));
+
 /* ── Billing — platform subscription invoicing ── */
 app.use('/api/billing',        require('./routes/billing'));
 
