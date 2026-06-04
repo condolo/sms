@@ -1070,47 +1070,40 @@ export default function Landing() {
             </motion.p>
           </motion.div>
 
-          {/* Chain — scrollable on mobile, single row on lg */}
-          <div className="overflow-x-auto pb-4">
-            <div className="flex items-start gap-0 min-w-max mx-auto justify-center">
-              {ECOSYSTEM_NODES.filter(n => (cms.ecosystem.enabledNodes || []).includes(n.label)).map((node, i, arr) => (
-                <div key={node.label} className="flex items-start">
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true }}
-                    transition={{ delay: i * 0.08, duration: 0.5, ease: EASE }}
-                    className="flex flex-col items-center gap-2 w-[90px] sm:w-[100px]"
-                  >
-                    <div className={`w-12 h-12 rounded-2xl ${node.color} flex items-center justify-center shadow-lg`}>
-                      <node.Icon size={22} className="text-white" />
-                    </div>
-                    <p className="text-xs font-semibold text-white text-center leading-tight">{node.label}</p>
-                    <p className="text-[10px] text-slate-500 text-center leading-tight">{cms.ecosystem.nodeDescs?.[node.label] ?? node.desc}</p>
-                  </motion.div>
+          {/* Ecosystem grid — fully responsive, no horizontal scroll */}
+          <div className="relative rounded-3xl border border-slate-800/60 bg-slate-900/40 p-6 sm:p-8 lg:p-10">
+            {/* Subtle radial glow — enterprise depth */}
+            <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-indigo-950/30 via-transparent to-slate-950/30 pointer-events-none" />
 
-                  {i < arr.length - 1 && (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      whileInView={{ opacity: 1 }}
-                      viewport={{ once: true }}
-                      transition={{ delay: i * 0.08 + 0.15, duration: 0.4 }}
-                      className="mt-4 text-slate-700 px-1 text-sm font-light select-none"
-                    >
-                      →
-                    </motion.div>
-                  )}
-                </div>
+            <motion.div
+              initial="hidden"
+              whileInView="visible"
+              viewport={VP}
+              variants={stagger(0.045)}
+              className="relative grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 gap-y-8 gap-x-4 sm:gap-x-6"
+            >
+              {ECOSYSTEM_NODES.filter(n => (cms.ecosystem.enabledNodes || []).includes(n.label)).map((node, i) => (
+                <motion.div
+                  key={node.label}
+                  variants={fadeUp}
+                  className="flex flex-col items-center gap-2.5 group cursor-default"
+                >
+                  <div className={`w-12 h-12 rounded-2xl ${node.color} flex items-center justify-center shadow-lg group-hover:scale-110 group-hover:shadow-xl transition-all duration-200`}>
+                    <node.Icon size={22} className="text-white" />
+                  </div>
+                  <p className="text-xs font-semibold text-white text-center leading-tight">{node.label}</p>
+                  <p className="text-[10px] text-slate-500 text-center leading-tight">{cms.ecosystem.nodeDescs?.[node.label] ?? node.desc}</p>
+                </motion.div>
               ))}
-            </div>
+            </motion.div>
           </div>
 
           <motion.p
             initial={{ opacity: 0 }}
             whileInView={{ opacity: 1 }}
             viewport={{ once: true }}
-            transition={{ delay: 0.8, duration: 0.6 }}
-            className="text-center text-slate-600 text-sm mt-10 font-medium tracking-wide"
+            transition={{ delay: 0.6, duration: 0.6 }}
+            className="text-center text-slate-600 text-sm mt-8 font-medium tracking-wide"
           >
             No data re-entry. No reconciliation. No manual handoff.
           </motion.p>
