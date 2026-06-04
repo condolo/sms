@@ -778,6 +778,7 @@ const MODULE_PREVIEWS = {
       'No duplicate student records — admissions feed directly into Student Records',
       'Offer letters issued in seconds, not assembled by hand',
     ],
+    badge: 'Pipeline Tracked',
     connectedModules: ['Student Records', 'Finance', 'Reports'],
     demoPath: '/admissions',
     mockup: {
@@ -804,6 +805,7 @@ const MODULE_PREVIEWS = {
       'Complete history available instantly — for parent meetings, legal requests or audits',
       'No data lost when staff change — institutional memory lives in the system',
     ],
+    badge: 'Audit Ready',
     connectedModules: ['Attendance', 'Grades', 'Reports', 'Behaviour', 'Finance'],
     demoPath: '/students',
     mockup: {
@@ -830,6 +832,7 @@ const MODULE_PREVIEWS = {
       'New academic year setup takes minutes — not a week of spreadsheet work',
       'Timetable, attendance and reports always aligned — no manual class mapping',
     ],
+    badge: 'Multi-Curriculum',
     connectedModules: ['Attendance', 'Timetable', 'Grades', 'Reports', 'Finance'],
     demoPath: '/classes',
     mockup: {
@@ -856,6 +859,7 @@ const MODULE_PREVIEWS = {
       'Every teacher sees their current schedule in real time — no WhatsApp reminders',
       'Timetable changes take effect across all portals immediately',
     ],
+    badge: 'Conflict-Free',
     connectedModules: ['Attendance', 'Lessons', 'Classes', 'Student Records'],
     demoPath: '/timetable',
     mockup: {
@@ -880,6 +884,7 @@ const MODULE_PREVIEWS = {
       'Chronic absenteeism visible in the dashboard before it becomes a pastoral crisis',
       'Attendance data in reports comes from the same record — no reconciliation',
     ],
+    badge: 'Real-time',
     connectedModules: ['Reports', 'Analytics', 'Grades', 'Student Records'],
     demoPath: '/attendance',
     mockup: {
@@ -906,6 +911,7 @@ const MODULE_PREVIEWS = {
       'No end-of-term scramble to cover missed topics — gaps are visible throughout the term',
       'Parents informed on curriculum without teachers making individual phone calls',
     ],
+    badge: 'Syllabus Linked',
     connectedModules: ['Reports', 'Analytics', 'Grades', 'Timetable'],
     demoPath: '/lessons',
     mockup: {
@@ -931,6 +937,7 @@ const MODULE_PREVIEWS = {
       'Subject totals, class averages and rank positions calculated in real time',
       'Teachers spend time on teaching, not on reconciling mark sheets',
     ],
+    badge: 'Auto-Calculated',
     connectedModules: ['Reports', 'Analytics', 'Attendance', 'Lessons'],
     demoPath: '/grades',
     mockup: {
@@ -957,6 +964,7 @@ const MODULE_PREVIEWS = {
       'Disciplinary records available for parent meetings, staff transitions and tribunal processes',
       'Merit culture reinforced alongside accountability — not just a punishment log',
     ],
+    badge: 'Stage-Based',
     connectedModules: ['Reports', 'Analytics', 'Student Records'],
     demoPath: '/behaviour',
     mockup: {
@@ -983,6 +991,7 @@ const MODULE_PREVIEWS = {
       'No unsigned, unreviewed or incorrect report card reaches a parent',
       'Full audit trail protects the school in the event of a grade dispute',
     ],
+    badge: '5-Stage Approval',
     connectedModules: ['Grades', 'Analytics', 'Finance', 'Student Records'],
     demoPath: '/reports',
     mockup: {
@@ -1009,6 +1018,7 @@ const MODULE_PREVIEWS = {
       'Every payment accounted for regardless of method — one audit-ready ledger',
       'Bursars focus on exceptions, not on manually matching bank statements to registers',
     ],
+    badge: 'M-Pesa Integrated',
     connectedModules: ['Analytics', 'Reports', 'Student Records', 'Admissions'],
     demoPath: '/finance',
     mockup: {
@@ -1034,6 +1044,7 @@ const MODULE_PREVIEWS = {
       'Book availability accurate at all times — staff check without walking to the shelf',
       'Loan history preserved permanently for every student',
     ],
+    badge: 'Fine Automated',
     connectedModules: ['Student Records', 'Finance'],
     demoPath: '/library',
     mockup: {
@@ -1060,6 +1071,7 @@ const MODULE_PREVIEWS = {
       'Vehicle capacity never exceeded — the safety constraint is enforced by the platform',
       'Transport fees collected without a separate billing process',
     ],
+    badge: 'Capacity Enforced',
     connectedModules: ['Student Records', 'Finance'],
     demoPath: '/transport',
     mockup: {
@@ -1085,6 +1097,7 @@ const MODULE_PREVIEWS = {
       'Boarding fee collection handled through the same Finance module as tuition',
       'Warden handovers take minutes — all resident information is in the system',
     ],
+    badge: 'Room Managed',
     connectedModules: ['Student Records', 'Finance', 'Reports'],
     demoPath: '/hostel',
     mockup: {
@@ -1111,6 +1124,7 @@ const MODULE_PREVIEWS = {
       'No end-of-term report assembly — the dashboard is always ready',
       'Financial health, academic performance and operational data visible in one view',
     ],
+    badge: 'Live Dashboard',
     connectedModules: ['Finance', 'Grades', 'Attendance', 'Reports'],
     demoPath: '/reports',
     mockup: {
@@ -1410,7 +1424,14 @@ function PanelContent({ node, preview, demoUrl, onClose, onNavigate }) {
           <node.Icon size={20} className="text-white" />
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className="text-base font-bold text-white leading-tight">{node.label}</h3>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-base font-bold text-white leading-tight">{node.label}</h3>
+            {preview.badge && (
+              <span className="inline-block text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 whitespace-nowrap">
+                {preview.badge}
+              </span>
+            )}
+          </div>
           <p className="text-xs text-slate-400 leading-snug mt-0.5">{preview.tagline}</p>
         </div>
         <button onClick={onClose}
