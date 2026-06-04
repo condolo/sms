@@ -359,6 +359,19 @@ const INDEXES = [
      Primary: coverage for a class-subject pair.
      Unique: prevent duplicate coverage for same class+subject+topic+subtopic.
      Note: co-teachers sharing a class see the same coverage pool. */
+  /* ── billing_snapshots ───────────────────────────────────────
+     Platform subscription invoices (one per school per term).
+     Primary lookup: school + year + term (unique per billing period). */
+  {
+    col: 'billing_snapshots',
+    indexes: [
+      { key: { schoolId: 1, academicYear: 1, term: 1 }, name: 'bs_school_year_term', unique: true },
+      { key: { schoolId: 1, status: 1 },                name: 'bs_school_status' },
+      { key: { status: 1, generatedAt: -1 },             name: 'bs_status_date' },
+      { key: { id: 1 },                                  name: 'bs_id', unique: true },
+    ],
+  },
+
   {
     col: 'lesson_coverage',
     indexes: [

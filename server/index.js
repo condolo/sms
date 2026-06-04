@@ -141,7 +141,10 @@ app.use('/api/transport', require('./routes/transport'));
 app.use('/api/hostel',    require('./routes/hostel'));
 
 /* ── v4.33.0: Lessons / Syllabus Tracker ── */
-app.use('/api/lessons', require('./routes/lessons'));
+app.use('/api/lessons',  require('./routes/lessons'));
+
+/* ── Billing — platform subscription invoicing ── */
+app.use('/api/billing', require('./routes/billing'));
 
 /* ── Growth Profile (v4.22.0) ── */
 app.use('/api/growth-profile',         require('./routes/growth-profile'));
@@ -275,6 +278,14 @@ async function start() {
       startLessonReminders();
     } catch (err) {
       console.error('[lesson-reminders] Failed to start:', err.message);
+    }
+
+    // Billing cron — auto-snapshot on term start dates (daily 06:00 Kenya)
+    try {
+      const { startBillingCron } = require('./utils/billing-cron');
+      startBillingCron();
+    } catch (err) {
+      console.error('[billing-cron] Failed to start:', err.message);
     }
   });
 }

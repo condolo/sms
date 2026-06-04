@@ -504,11 +504,16 @@ router.post('/subscription', authMiddleware, async (req, res) => {
     // Record pending subscription transaction
     const Transactions = _model('mpesa_transactions');
     const txnId = _uid();
+    // Fetch current academic year + pending invoice term for callback reconciliation
+    const schoolDoc    = await _model('schools').findOne({ id: schoolId }).select('academicYear').lean();
+    const pendingSnap  = await _model('billing_snapshots').findOne({ schoolId, status: 'pending' }).sort({ generatedAt: -1 }).lean();
     await Transactions.create({
       id:                txnId,
       schoolId,
       type:              'subscription',
       plan:              targetPlan,
+      academicYear:      schoolDoc?.academicYear || '',
+      term:              pendingSnap?.term || null,
       merchantRequestId: result.MerchantRequestID,
       checkoutRequestId: result.CheckoutRequestID,
       phone:             normalizedPhone,
@@ -571,20 +576,40 @@ router.post('/subscription/callback', async (req, res) => {
       $set: { status: 'completed', mpesaReceiptNumber: mpesaCode, amount: paidAmount, paidAt: now, updatedAt: now },
     });
 
-    // Activate the school's plan for 30 days
+    // Activate the school's plan until end of current term (90 days fallback)
     const Schools = _model('schools');
-    const planExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    // Find the term end date from school settings if possible
+    const school = await Schools.findOne({ id: txn.schoolId }).lean();
+    const termDates = school?.termDates || [];
+    // Try to find an end date for the paid term — use invoiceRef to extract term number
+    let planExpiry;
+    if (txn.term && termDates.length) {
+      const termDef = termDates.find(t => t.term === txn.term);
+      planExpiry = termDef?.endDate
+        ? new Date(termDef.endDate + 'T23:59:59Z').toISOString()
+        : new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+    } else {
+      planExpiry = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+    }
+
     await Schools.updateOne({ id: txn.schoolId }, {
       $set: {
-        plan:              txn.plan,
-        planExpiresAt:     planExpiry,
-        planPaidAt:        now,
-        planMpesaCode:     mpesaCode,
-        updatedAt:         now,
+        plan:          txn.plan,
+        planExpiresAt: planExpiry,
+        planPaidAt:    now,
+        planMpesaCode: mpesaCode,
+        updatedAt:     now,
       },
     });
 
-    console.log(`[mpesa/subscription] ✓ Plan activated — school ${txn.schoolId} → ${txn.plan} until ${planExpiry} · ${mpesaCode} · KES ${paidAmount}`);
+    // Mark the billing snapshot as paid (if one exists for this term)
+    const Snapshots = _model('billing_snapshots');
+    await Snapshots.updateOne(
+      { schoolId: txn.schoolId, status: 'pending', academicYear: txn.academicYear },
+      { $set: { status: 'paid', paidAt: now, mpesaCode, paidAmount, updatedAt: now } }
+    );
+
+    console.log(`[mpesa/subscription] ✓ Plan activated — school ${txn.schoolId} → ${txn.plan} until ${planExpiry} · ${mpesaCode} · KSh ${paidAmount}`);
   } catch (err) {
     console.error('[mpesa/subscription] callback processing error:', err);
   }

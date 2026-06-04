@@ -47,6 +47,7 @@ function _genTempPassword() {
 const SCHOOL_UPDATABLE = [
   'name', 'tagline', 'email', 'phone', 'address', 'website',
   'country', 'currency', 'timezone', 'academicYear', 'academicYearStartMonth', 'termsPerYear',
+  'termDates',   // [{term,label,startDate,endDate}] — per-term billing trigger dates
   'houses', 'shortName', 'primaryColor', 'accentColor', 'themePreset', 'logoUrl', 'modulePermissions',
   'moduleConfig',
   'mpesa',

@@ -14,7 +14,7 @@ import {
   Eye, EyeOff, Lock, ShieldCheck, Database, Download,
   RefreshCcw, Info, Server, Check, Minus, ChevronDown, ChevronUp,
   CreditCard, Smartphone, Zap, ArrowRight, Layers, Pencil,
-  Bell, MessageSquare, BookOpen, Calendar, Clock,
+  Bell, MessageSquare, BookOpen, Calendar, CalendarDays, Clock,
 } from 'lucide-react';
 import { sections as sectionsApi } from '@/api/client.js';
 import { settings as settingsApi } from '@/api/client.js';
@@ -466,6 +466,51 @@ function SchoolTab() {
             Set the start month so the system knows when your year rolls over — a September start means the year
             changes in September, not January.
           </p>
+        </div>
+
+        {/* ── Term dates ────────────────────────────────────── */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100">
+            <CalendarDays size={13} className="text-slate-400" />
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Term dates for {f.academicYear || 'this academic year'}</span>
+          </div>
+          <p className="text-[11px] text-slate-400 leading-relaxed">
+            Set the start and end date for each term. The system auto-generates billing invoices on each term start date based on your enrolled active student count.
+          </p>
+          <div className="space-y-2">
+            {Array.from({ length: f.termsPerYear ?? 3 }, (_, i) => {
+              const termNum = i + 1;
+              const termKey = `term${termNum}`;
+              const termData = (f.termDates ?? []).find(t => t.term === termNum) ?? { term: termNum, label: `Term ${termNum}`, startDate: '', endDate: '' };
+              function updateTermDate(field, val) {
+                const current = (f.termDates ?? []).filter(t => t.term !== termNum);
+                set('termDates', [...current, { ...termData, [field]: val }].sort((a, b) => a.term - b.term));
+              }
+              return (
+                <div key={termKey} className="grid grid-cols-[80px_1fr_1fr] gap-2 items-center">
+                  <span className="text-xs font-semibold text-slate-600">Term {termNum}</span>
+                  <div>
+                    <label className="block text-[10px] text-slate-400 mb-0.5">Start date</label>
+                    <input
+                      type="date"
+                      value={termData.startDate ?? ''}
+                      onChange={e => updateTermDate('startDate', e.target.value)}
+                      className={iCls()}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-400 mb-0.5">End date</label>
+                    <input
+                      type="date"
+                      value={termData.endDate ?? ''}
+                      onChange={e => updateTermDate('endDate', e.target.value)}
+                      className={iCls()}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -1652,6 +1697,7 @@ function SubscriptionTab() {
   const [selTier,      setSelTier]      = useState(() => LEGACY_TO_TIER[school?.plan] || 'student');
   const [studentCount, setStudentCount] = useState(300);
   const [loading,      setLoading]      = useState(false);
+  const [generating,   setGenerating]   = useState(false);
   const [result,       setResult]       = useState(null);
   const [error,        setError]        = useState('');
 
@@ -1662,8 +1708,53 @@ function SubscriptionTab() {
     ? new Date(school.planExpiresAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
     : null;
 
+  // Fetch current pending invoice
+  const { data: invoiceData, refetch: refetchInvoice } = useQuery({
+    queryKey:  ['billing-current'],
+    queryFn:   async () => {
+      const token = JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token;
+      const res   = await fetch('/api/billing/current', { headers: { Authorization: `Bearer ${token}` } });
+      return res.ok ? res.json() : { invoice: null };
+    },
+    select: d => d?.invoice ?? null,
+  });
+
+  const invoice      = invoiceData;
   const selectedRate = PORTAL_TIERS_SETTINGS[selTier]?.rate || 0;
-  const termAmount   = selectedRate * Math.max(1, studentCount);
+  // If there's a pending invoice, use its amount; otherwise calculate from manual input
+  const termAmount   = invoice ? invoice.totalAmount : selectedRate * Math.max(1, studentCount);
+
+  async function handleGenerate() {
+    setGenerating(true); setError(''); setResult(null);
+    try {
+      const token = JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token;
+      // Determine current term from school settings (first term whose start date <= today)
+      const schoolData = school;
+      const termDates  = schoolData?.termDates ?? [];
+      const today      = new Date().toISOString().slice(0, 10);
+      const currentTermDef = termDates
+        .filter(t => t.startDate && t.startDate <= today)
+        .sort((a, b) => b.startDate.localeCompare(a.startDate))[0];
+
+      const body = {
+        academicYear: schoolData?.academicYear || '',
+        term:         currentTermDef?.term ?? 1,
+      };
+
+      const res  = await fetch('/api/billing/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error?.message || 'Failed to generate invoice.');
+      await refetchInvoice();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setGenerating(false);
+    }
+  }
 
   async function handlePay() {
     if (!phone.trim())     { setError('Enter the M-Pesa number to charge.'); return; }
@@ -1768,25 +1859,51 @@ function SubscriptionTab() {
           An STK push will be sent to your M-Pesa number.
         </p>
 
-        {/* Student count + calculated amount */}
-        <div className="flex items-center gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
-          <div className="flex-1">
-            <label className="block text-xs font-medium text-slate-600 mb-1">Enrolled students this term</label>
-            <input
-              type="number"
-              min="1"
-              max="9999"
-              value={studentCount}
-              onChange={e => setStudentCount(Math.max(1, parseInt(e.target.value) || 1))}
-              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
-            />
+        {/* Invoice panel — shows auto-generated invoice or manual fallback */}
+        {invoice ? (
+          <div className="p-4 rounded-xl bg-indigo-50 border border-indigo-200 space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">Current Invoice</p>
+                <p className="text-[10px] text-indigo-500 mt-0.5">{invoice.invoiceRef} · {invoice.academicYear} Term {invoice.term}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-2xl font-bold text-indigo-800">KSh {invoice.totalAmount.toLocaleString()}</p>
+                <p className="text-[10px] text-indigo-500">{invoice.activeCount} students × KSh {invoice.ratePerStudent}</p>
+              </div>
+            </div>
           </div>
-          <div className="text-right shrink-0">
-            <p className="text-xs text-slate-400 mb-1">Term total</p>
-            <p className="text-xl font-bold text-slate-800">KSh {termAmount.toLocaleString()}</p>
-            <p className="text-[10px] text-slate-400">{studentCount} × KSh {selectedRate}</p>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-center gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+              <div className="flex-1">
+                <label className="block text-xs font-medium text-slate-600 mb-1">Enrolled students this term</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="9999"
+                  value={studentCount}
+                  onChange={e => setStudentCount(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+                />
+              </div>
+              <div className="text-right shrink-0">
+                <p className="text-xs text-slate-400 mb-1">Term total</p>
+                <p className="text-xl font-bold text-slate-800">KSh {termAmount.toLocaleString()}</p>
+                <p className="text-[10px] text-slate-400">{studentCount} × KSh {selectedRate}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleGenerate}
+              disabled={generating}
+              className="flex items-center gap-2 text-xs font-medium text-slate-500 hover:text-indigo-600 transition-colors"
+            >
+              {generating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCcw size={12} />}
+              Generate invoice from active student count
+            </button>
           </div>
-        </div>
+        )}
 
         {error && (
           <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2.5 text-sm text-red-700 flex items-center gap-2">
@@ -1833,6 +1950,55 @@ function SubscriptionTab() {
           <Lock size={10} />
           Payment is processed directly by Safaricom. Msingi does not store M-Pesa PINs.
         </p>
+      </div>
+
+      {/* Billing history */}
+      <BillingHistory />
+    </div>
+  );
+}
+
+function BillingHistory() {
+  const { data: history = [] } = useQuery({
+    queryKey: ['billing-history'],
+    queryFn: async () => {
+      const token = JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token;
+      const res   = await fetch('/api/billing/history', { headers: { Authorization: `Bearer ${token}` } });
+      const json  = await res.json();
+      return json.success ? json.data : [];
+    },
+  });
+
+  if (!history.length) return null;
+
+  const STATUS_STYLE = {
+    pending: 'bg-amber-50 text-amber-700 border-amber-200',
+    paid:    'bg-emerald-50 text-emerald-700 border-emerald-200',
+    overdue: 'bg-red-50 text-red-700 border-red-200',
+  };
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5">
+      <div className="flex items-center gap-2 mb-4 pb-2 border-b border-slate-100">
+        <Clock size={14} className="text-slate-400" />
+        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Billing History</h3>
+      </div>
+      <div className="space-y-2">
+        {history.map(inv => (
+          <div key={inv.id} className="flex items-center gap-3 py-2 border-b border-slate-50 last:border-0">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-slate-800">{inv.invoiceRef}</p>
+              <p className="text-xs text-slate-400">{inv.academicYear} · Term {inv.term} · {inv.activeCount} students</p>
+            </div>
+            <div className="text-right shrink-0">
+              <p className="text-sm font-semibold text-slate-800">KSh {inv.totalAmount.toLocaleString()}</p>
+              {inv.paidAt && <p className="text-[10px] text-slate-400">{new Date(inv.paidAt).toLocaleDateString('en-GB')}</p>}
+            </div>
+            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize ${STATUS_STYLE[inv.status] || 'bg-slate-50 text-slate-600 border-slate-200'}`}>
+              {inv.status}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   );
