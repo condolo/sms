@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import Sidebar from './Sidebar.jsx';
 import TopBar  from './TopBar.jsx';
+import useAuthStore from '@/store/auth.js';
 
 const W_EXPANDED  = 256;  // 16rem
 const W_COLLAPSED = 64;   // 4rem
@@ -12,10 +13,34 @@ export default function AppShell() {
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem('sidebar-collapsed') === 'true'; } catch { return false; }
   });
-  const location = useLocation();
+  const location   = useLocation();
+  const school     = useAuthStore(s => s.session?.school);
+  const faviconUrl = school?.faviconUrl ?? null;
+  const schoolName = school?.name ?? null;
 
   // Close mobile overlay on navigation
   useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
+
+  // Apply school favicon + page title dynamically
+  useEffect(() => {
+    // Favicon
+    let link = document.querySelector("link[rel~='icon']");
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'icon';
+      document.head.appendChild(link);
+    }
+    if (faviconUrl) {
+      link.href = faviconUrl;
+    } else {
+      link.href = '/favicon.ico';
+    }
+
+    // Page title
+    if (schoolName) {
+      document.title = schoolName;
+    }
+  }, [faviconUrl, schoolName]);
 
   function toggleCollapse() {
     setCollapsed(c => {

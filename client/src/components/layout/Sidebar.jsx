@@ -110,6 +110,7 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
   const schoolName     = school?.name ?? user?.schoolName ?? 'My School';
   const schoolInitials = schoolName
     .split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
+  const schoolLogo  = school?.logoUrl ?? null;
   const userInitial = (user?.name ?? 'U').charAt(0).toUpperCase();
 
   async function handleLogout() {
@@ -131,10 +132,18 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
         collapsed ? 'justify-center gap-0 px-0' : 'gap-3 px-4',
       )}>
 
-        {/* School initials badge — always visible */}
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-600 text-white font-bold text-sm">
-          {schoolInitials}
-        </div>
+        {/* School logo / initials badge — always visible */}
+        {schoolLogo ? (
+          <img
+            src={schoolLogo}
+            alt={schoolName}
+            className="h-8 w-8 shrink-0 rounded-lg object-contain bg-white/10 p-0.5"
+          />
+        ) : (
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-600 text-white font-bold text-sm">
+            {schoolInitials}
+          </div>
+        )}
 
         {/* School name + role — opacity-fade */}
         <div className="flex-1 min-w-0 leading-none" style={labelStyle(collapsed)}>
