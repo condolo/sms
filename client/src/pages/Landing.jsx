@@ -3,7 +3,7 @@
  * Shorter · cleaner · faster · more intentional
  * 6-section flow: Hero → Conviction → Ecosystem → Showcase → Trust → CTA
  */
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as THREE from 'three';
@@ -13,7 +13,7 @@ import {
   Calendar, CheckCircle, CheckCircle2, ChevronRight, ClipboardList,
   DollarSign, FileText, GraduationCap, Globe, Layers, Lock,
   MessageCircle, MessageSquare, ShieldCheck, TrendingUp, UserCheck,
-  Users,
+  Users, X,
 } from 'lucide-react';
 import { schoolPortalUrl, storeSchoolSlug } from '@/utils/schoolDetect.js';
 
@@ -758,6 +758,603 @@ function FacebookIcon({ size = 16 }) { return <svg width={size} height={size} vi
 function InstagramIcon({ size = 16 }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z"/></svg>; }
 function YouTubeIcon({ size = 16 }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>; }
 
+/* ═══════════════════════════════════════════════════════════════
+   MODULE PREVIEW DATA
+   One entry per ecosystem node — tagline, outcome bullets,
+   mini mockup config, and demo deep-link path.
+═══════════════════════════════════════════════════════════════ */
+const MODULE_PREVIEWS = {
+  'Admissions': {
+    tagline: 'Structured intake from first enquiry to enrolled student.',
+    outcomes: [
+      'Capture enquiries with source, notes and contact details',
+      'Move applicants through configurable pipeline stages — Enquiry → Applied → Interview → Offered → Enrolled',
+      'Auto-generate admission references and offer letters',
+      'One-click conversion from approved applicant to student record',
+    ],
+    demoPath: '/admissions',
+    mockup: {
+      type: 'pipeline',
+      rows: [
+        { stage: 'Enquiry',   count: 14, color: 'bg-slate-500'  },
+        { stage: 'Applied',   count: 9,  color: 'bg-blue-500'   },
+        { stage: 'Interview', count: 6,  color: 'bg-amber-500'  },
+        { stage: 'Offered',   count: 4,  color: 'bg-indigo-500' },
+        { stage: 'Enrolled',  count: 2,  color: 'bg-emerald-500'},
+      ],
+    },
+  },
+  'Student Records': {
+    tagline: 'A single, permanent record for every student — from admission to graduation.',
+    outcomes: [
+      'Complete profile: personal details, photo, guardian contacts, medical notes',
+      'Academic history: classes, subjects, report cards and grades across all years',
+      'Behaviour, attendance and fee records all accessible in one place',
+      'Immutable audit trail — every edit timestamped and attributed',
+    ],
+    demoPath: '/students',
+    mockup: {
+      type: 'list',
+      headers: ['Student', 'Class', 'Status'],
+      rows: [
+        ['Amara Wanjiku', 'Form 3A', 'active'],
+        ['Brian Otieno',  'Form 1B', 'active'],
+        ['Chloe Kamau',   'Form 4A', 'active'],
+        ['David Njoroge', 'Form 2C', 'inactive'],
+      ],
+    },
+  },
+  'Classes': {
+    tagline: 'Sections, streams and key-stage structure that mirror your school exactly.',
+    outcomes: [
+      'Create classes with any naming convention — Form 1A, Year 7, Grade 4 Stream B',
+      'Assign class teachers and configure subject sets per class',
+      'Multi-curriculum support — CBC, 844, IGCSE, IB side-by-side',
+      'Class enrolment automatically gates attendance, timetable, and report cards',
+    ],
+    demoPath: '/classes',
+    mockup: {
+      type: 'list',
+      headers: ['Class', 'Teacher', 'Students'],
+      rows: [
+        ['Form 1A', 'Ms Achieng',  '38'],
+        ['Form 2B', 'Mr Mwangi',   '35'],
+        ['Form 3A', 'Mrs Kariuki',  '40'],
+        ['Form 4C', 'Mr Odhiambo', '32'],
+      ],
+    },
+  },
+  'Timetable': {
+    tagline: 'A visual schedule for every class, subject and teacher — no conflicts, no gaps.',
+    outcomes: [
+      'Drag-and-drop period builder across days, classes and rooms',
+      'Conflict detection — no teacher or room double-booked automatically',
+      'Students and teachers see their own timetable view after login',
+      'Timetable changes publish instantly across all portals',
+    ],
+    demoPath: '/timetable',
+    mockup: {
+      type: 'timetable',
+      periods: [
+        { time: '8:00', subjects: ['Maths', 'English', 'Science', 'Kiswahili'] },
+        { time: '9:00', subjects: ['English', 'Maths', 'History', 'Science'] },
+        { time: '10:00', subjects: ['Science', 'CRE', 'Maths', 'English'] },
+      ],
+    },
+  },
+  'Attendance': {
+    tagline: 'Daily register for every class — marked once, visible everywhere.',
+    outcomes: [
+      'Teachers mark attendance per class in under 60 seconds',
+      'Present, absent and late states — notes optional per record',
+      'Real-time attendance percentage per student, class and school',
+      'Parents receive automatic alerts on unexplained absences (Family tier)',
+    ],
+    demoPath: '/attendance',
+    mockup: {
+      type: 'register',
+      rows: [
+        { name: 'Amara Wanjiku',  status: 'present' },
+        { name: 'Brian Otieno',   status: 'absent'  },
+        { name: 'Chloe Kamau',    status: 'present' },
+        { name: 'David Njoroge',  status: 'late'    },
+        { name: 'Esther Muthoni', status: 'present' },
+      ],
+    },
+  },
+  'Lessons': {
+    tagline: 'Every topic in the syllabus — tracked, covered, and visible to all stakeholders.',
+    outcomes: [
+      'Admin defines the syllabus once; teachers mark topics as covered per class',
+      'Co-teachers of the same class share a single coverage pool — no duplication',
+      'HOD sees every subject\'s coverage progress across all classes at a glance',
+      'Parents and students see real-time curriculum coverage in their portal',
+    ],
+    demoPath: '/lessons',
+    mockup: {
+      type: 'coverage',
+      rows: [
+        { subject: 'Mathematics', covered: 18, total: 24, pct: 75  },
+        { subject: 'English',     covered: 22, total: 28, pct: 79  },
+        { subject: 'Science',     covered: 12, total: 20, pct: 60  },
+        { subject: 'History',     covered: 16, total: 18, pct: 89  },
+      ],
+    },
+  },
+  'Grades': {
+    tagline: 'A four-component assessment system — CA, HW, mid-term and end-term in one view.',
+    outcomes: [
+      'Record Continuous Assessment, Homework, Mid-Term and End-Term scores per subject',
+      'Weighted totals calculated automatically — no Excel formulas',
+      'Grade boundaries configurable per school or curriculum',
+      'Feeds directly into report cards — zero manual data transfer',
+    ],
+    demoPath: '/grades',
+    mockup: {
+      type: 'list',
+      headers: ['Student', 'CA', 'MT', 'ET', 'Total'],
+      rows: [
+        ['Amara W.', '28', '61', '74', '163 / A'],
+        ['Brian O.',  '24', '55', '68', '147 / B+'],
+        ['Chloe K.',  '30', '70', '82', '182 / A+'],
+        ['David N.',  '18', '42', '58', '118 / C+'],
+      ],
+    },
+  },
+  'Behaviour': {
+    tagline: 'Behaviour Point System — merit awards and incident logs with escalation tracking.',
+    outcomes: [
+      'Award merits or log demerits with category, notes and teacher attribution',
+      'Student stage progression: Commended → Good Standing → Monitored → At Risk → Intervention',
+      'Milestone achievements — community service, honour roll, leadership badges',
+      'Behaviour history preserved permanently in the student record',
+    ],
+    demoPath: '/behaviour',
+    mockup: {
+      type: 'list',
+      headers: ['Student', 'Points', 'Stage'],
+      rows: [
+        ['Amara W.', '+42', 'Commended'],
+        ['Brian O.',  '+15', 'Good Standing'],
+        ['Chloe K.',  '+38', 'Commended'],
+        ['David N.',  '-12', 'Monitored'],
+      ],
+    },
+  },
+  'Reports': {
+    tagline: 'A five-stage approval pipeline — no report card leaves without the right sign-off.',
+    outcomes: [
+      'Teacher enters marks → HOD reviews → Deputy approves → Principal authorises → Published',
+      'Every action timestamped and attributed — permanently auditable chain of custody',
+      'Publication blocked until every gate is cleared for every student in the class',
+      'Parents receive in-portal notifications the moment report cards are published',
+    ],
+    demoPath: '/reports',
+    mockup: {
+      type: 'pipeline',
+      rows: [
+        { stage: 'Teacher Entry', count: 4,  color: 'bg-slate-500'  },
+        { stage: 'HOD Review',    count: 3,  color: 'bg-blue-500'   },
+        { stage: 'Deputy',        count: 2,  color: 'bg-amber-500'  },
+        { stage: 'Principal',     count: 1,  color: 'bg-indigo-500' },
+        { stage: 'Published',     count: 8,  color: 'bg-emerald-500'},
+      ],
+    },
+  },
+  'Finance': {
+    tagline: 'Fee structures, invoices and M-Pesa collections — reconciled automatically.',
+    outcomes: [
+      'Build fee structures by class, term and item — tuition, boarding, transport, activities',
+      'M-Pesa STK Push triggers payment directly to parent phones — confirmed in seconds',
+      'Paybill, bank transfer and cash recorded in the same ledger with receipt numbers',
+      'Overdue accounts flagged automatically; parents notified via SMS and portal',
+    ],
+    demoPath: '/finance',
+    mockup: {
+      type: 'ledger',
+      rows: [
+        { name: 'Amara W.', amount: '18,500', status: 'paid',    ref: 'RCP-0041' },
+        { name: 'Brian O.',  amount: '18,500', status: 'partial', ref: 'RCP-0039' },
+        { name: 'Chloe K.',  amount: '18,500', status: 'paid',    ref: 'RCP-0038' },
+        { name: 'David N.',  amount: '18,500', status: 'overdue', ref: '—'        },
+      ],
+    },
+  },
+  'Library': {
+    tagline: 'Book catalogue, loan tracking and overdue fines — all in one register.',
+    outcomes: [
+      'Catalogue books with ISBN, category, shelf location and copy count',
+      'Issue loans to students or staff — due date tracked automatically',
+      'Overdue fines calculated at a configurable daily rate and added to fee account',
+      'Search catalogue by title, author or ISBN in real time',
+    ],
+    demoPath: '/library',
+    mockup: {
+      type: 'list',
+      headers: ['Title', 'Borrower', 'Due'],
+      rows: [
+        ['KCSE Chemistry Revision', 'Amara W.', 'Jun 12'],
+        ['Blossoms of the Savannah', 'Brian O.',  'Jun 8 ⚠'],
+        ['Business Studies Bk 3',    'Chloe K.',  'Jun 15'],
+        ['Mathematics Form 4',       'Esther M.', 'Jun 10'],
+      ],
+    },
+  },
+  'Transport': {
+    tagline: 'School bus routes, stops and student assignments — managed centrally.',
+    outcomes: [
+      'Create routes with stops, departure times, vehicle and driver details',
+      'Assign students to routes with their specific pickup stop',
+      'Capacity enforcement — system blocks over-assignment automatically',
+      'Transport fees configurable per route and added to the student fee structure',
+    ],
+    demoPath: '/transport',
+    mockup: {
+      type: 'list',
+      headers: ['Route', 'Students', 'Driver'],
+      rows: [
+        ['Westlands Express', '38 / 40', 'James Mwenda'],
+        ['Eastlands Shuttle', '31 / 33', 'Peter Omondi'],
+        ['Karen Runner',      '12 / 14', 'Samuel Njiru'],
+      ],
+    },
+  },
+  'Hostel': {
+    tagline: 'Boarding houses, room assignments and resident management in one module.',
+    outcomes: [
+      'Create hostels and rooms with capacity, gender rules and warden contacts',
+      'Assign students to rooms — occupancy count updated automatically',
+      'Discharge workflow marks end date and frees the room immediately',
+      'Hostel fees link directly to the student fee structure',
+    ],
+    demoPath: '/hostel',
+    mockup: {
+      type: 'list',
+      headers: ['Room', 'Occupied', 'Capacity'],
+      rows: [
+        ['Boys B101', '4',  '4 ✓'],
+        ['Boys B102', '3',  '4'  ],
+        ['Girls G201','4',  '4 ✓'],
+        ['Girls G202','2',  '4'  ],
+      ],
+    },
+  },
+  'Analytics': {
+    tagline: 'Director-level insight across attendance, academics and finance — live.',
+    outcomes: [
+      'School-wide attendance trends, class-by-class and day-by-day breakdowns',
+      'Grade distribution and performance outliers surfaced automatically',
+      'Fee collection rate, outstanding balances and month-on-month comparison',
+      'No manual compilation — every chart reflects the current state of the institution',
+    ],
+    demoPath: '/reports',
+    mockup: {
+      type: 'stats',
+      items: [
+        { label: 'Attendance',   value: '94%',      trend: '+2%',    up: true  },
+        { label: 'Fee Collected', value: 'KSh 2.4M', trend: '+18%',  up: true  },
+        { label: 'Avg Grade',    value: 'B+',        trend: '−0.2',  up: false },
+        { label: 'At Risk',      value: '4',         trend: '−2',    up: true  },
+      ],
+    },
+  },
+};
+
+/* ─── Mini mockup renderer ──────────────────────────────────── */
+const STATUS_DOT = {
+  present: 'bg-emerald-400',
+  absent:  'bg-red-400',
+  late:    'bg-amber-400',
+  paid:    'bg-emerald-400',
+  partial: 'bg-amber-400',
+  overdue: 'bg-red-400',
+};
+const STATUS_LABEL = { present:'Present', absent:'Absent', late:'Late', paid:'Paid', partial:'Partial', overdue:'Overdue' };
+
+function ModuleMockup({ mockup, color }) {
+  const { type, rows = [], headers = [], periods = [], items = [] } = mockup;
+
+  const baseCell = 'text-[10px] text-slate-300 truncate';
+  const headCell = 'text-[9px] font-semibold uppercase tracking-wider text-slate-500';
+
+  if (type === 'list') return (
+    <div className="rounded-xl bg-slate-900 border border-slate-800 overflow-hidden">
+      <div className={`${color} px-3 py-1.5 flex items-center gap-1.5`}>
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+      </div>
+      <table className="w-full border-collapse">
+        <thead>
+          <tr className="border-b border-slate-800">
+            {headers.map(h => <th key={h} className={`${headCell} px-3 py-2 text-left`}>{h}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={i} className="border-b border-slate-800/60 last:border-0">
+              {row.map((cell, j) => (
+                <td key={j} className={`${baseCell} px-3 py-2`}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  if (type === 'pipeline') return (
+    <div className="rounded-xl bg-slate-900 border border-slate-800 overflow-hidden">
+      <div className={`${color} px-3 py-1.5 flex items-center gap-1.5`}>
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+      </div>
+      <div className="p-3 space-y-2">
+        {rows.map((row, i) => (
+          <div key={i} className="flex items-center gap-2.5">
+            <span className="text-[10px] text-slate-400 w-24 shrink-0">{row.stage}</span>
+            <div className="flex-1 h-4 bg-slate-800 rounded-full overflow-hidden">
+              <motion.div
+                initial={{ width: 0 }}
+                whileInView={{ width: `${(row.count / rows[0].count) * 100}%` }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.6, delay: i * 0.1 }}
+                className={`h-full ${row.color} rounded-full`}
+              />
+            </div>
+            <span className="text-[10px] text-slate-400 w-4 text-right">{row.count}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  if (type === 'register') return (
+    <div className="rounded-xl bg-slate-900 border border-slate-800 overflow-hidden">
+      <div className={`${color} px-3 py-1.5 flex items-center gap-1.5`}>
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+      </div>
+      <div className="divide-y divide-slate-800/60">
+        {rows.map((row, i) => (
+          <div key={i} className="flex items-center gap-2.5 px-3 py-2">
+            <div className={`w-2 h-2 rounded-full shrink-0 ${STATUS_DOT[row.status] || 'bg-slate-500'}`} />
+            <span className="text-[10px] text-slate-300 flex-1 truncate">{row.name}</span>
+            <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+              row.status === 'present' ? 'bg-emerald-900/60 text-emerald-400' :
+              row.status === 'absent'  ? 'bg-red-900/60 text-red-400' :
+              'bg-amber-900/60 text-amber-400'
+            }`}>{STATUS_LABEL[row.status]}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  if (type === 'coverage') return (
+    <div className="rounded-xl bg-slate-900 border border-slate-800 overflow-hidden">
+      <div className={`${color} px-3 py-1.5 flex items-center gap-1.5`}>
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+      </div>
+      <div className="p-3 space-y-3">
+        {rows.map((row, i) => (
+          <div key={i}>
+            <div className="flex justify-between mb-1">
+              <span className="text-[10px] text-slate-300">{row.subject}</span>
+              <span className="text-[10px] font-bold text-slate-400">{row.pct}%</span>
+            </div>
+            <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+              <motion.div
+                initial={{ width: 0 }}
+                whileInView={{ width: `${row.pct}%` }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.7, delay: i * 0.1 }}
+                className={`h-full rounded-full ${row.pct >= 80 ? 'bg-emerald-500' : row.pct >= 60 ? 'bg-amber-400' : 'bg-blue-400'}`}
+              />
+            </div>
+            <p className="text-[9px] text-slate-600 mt-0.5">{row.covered} / {row.total} topics</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  if (type === 'ledger') return (
+    <div className="rounded-xl bg-slate-900 border border-slate-800 overflow-hidden">
+      <div className={`${color} px-3 py-1.5 flex items-center gap-1.5`}>
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+      </div>
+      <div className="divide-y divide-slate-800/60">
+        {rows.map((row, i) => (
+          <div key={i} className="flex items-center gap-2 px-3 py-2">
+            <span className="text-[10px] text-slate-300 flex-1 truncate">{row.name}</span>
+            <span className="text-[10px] text-slate-400 font-mono">KSh {row.amount}</span>
+            <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+              row.status === 'paid'    ? 'bg-emerald-900/60 text-emerald-400' :
+              row.status === 'partial' ? 'bg-amber-900/60 text-amber-400' :
+              'bg-red-900/60 text-red-400'
+            }`}>{STATUS_LABEL[row.status]}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  if (type === 'timetable') return (
+    <div className="rounded-xl bg-slate-900 border border-slate-800 overflow-hidden">
+      <div className={`${color} px-3 py-1.5 flex items-center gap-1.5`}>
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+      </div>
+      <div className="p-3">
+        <div className="grid grid-cols-5 gap-1 mb-1">
+          {['', 'Mon', 'Tue', 'Wed', 'Thu'].map(d => (
+            <div key={d} className="text-[9px] font-semibold text-slate-500 text-center">{d}</div>
+          ))}
+        </div>
+        {periods.map((row, ri) => (
+          <div key={ri} className="grid grid-cols-5 gap-1 mb-1">
+            <div className="text-[9px] text-slate-500 flex items-center">{row.time}</div>
+            {row.subjects.map((s, si) => (
+              <div key={si} className="bg-slate-800 rounded px-1 py-1 text-[9px] text-slate-300 text-center truncate">{s}</div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  if (type === 'stats') return (
+    <div className="rounded-xl bg-slate-900 border border-slate-800 overflow-hidden">
+      <div className={`${color} px-3 py-1.5 flex items-center gap-1.5`}>
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+        <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+      </div>
+      <div className="grid grid-cols-2 gap-2 p-3">
+        {items.map((item, i) => (
+          <div key={i} className="bg-slate-800 rounded-lg p-2.5">
+            <p className="text-[9px] text-slate-500 uppercase tracking-wide mb-1">{item.label}</p>
+            <p className="text-sm font-bold text-white">{item.value}</p>
+            <p className={`text-[9px] font-semibold mt-0.5 ${item.up ? 'text-emerald-400' : 'text-red-400'}`}>{item.trend}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  return null;
+}
+
+/* ─── Module preview panel (right-side on desktop, bottom sheet on mobile) ─ */
+function ModulePreviewPanel({ node, onClose }) {
+  const preview = MODULE_PREVIEWS[node?.label];
+  if (!node || !preview) return null;
+
+  const demoUrl = `https://demo.msingi.io${preview.demoPath}`;
+
+  // Close on Escape key
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  // Lock body scroll while open
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = ''; };
+  }, []);
+
+  return (
+    <AnimatePresence>
+      <div className="fixed inset-0 z-[100] flex items-end sm:items-stretch justify-end">
+        {/* Backdrop */}
+        <motion.div
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          transition={{ duration: 0.25 }}
+          className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+          onClick={onClose}
+        />
+
+        {/* Panel — slides from right on sm+, slides from bottom on mobile */}
+        <motion.div
+          initial={{ x: '100%', y: 0 }}
+          animate={{ x: 0, y: 0 }}
+          exit={{ x: '100%', y: 0 }}
+          transition={{ type: 'spring', damping: 32, stiffness: 350 }}
+          className="relative z-10 hidden sm:flex flex-col bg-slate-950 border-l border-slate-800 w-[420px] h-full overflow-y-auto"
+        >
+          <PanelContent node={node} preview={preview} demoUrl={demoUrl} onClose={onClose} />
+        </motion.div>
+
+        {/* Bottom sheet on mobile */}
+        <motion.div
+          initial={{ y: '100%' }}
+          animate={{ y: 0 }}
+          exit={{ y: '100%' }}
+          transition={{ type: 'spring', damping: 32, stiffness: 350 }}
+          className="relative z-10 sm:hidden flex flex-col bg-slate-950 border-t border-slate-800 w-full max-h-[82vh] rounded-t-3xl overflow-y-auto"
+        >
+          {/* Drag handle */}
+          <div className="flex justify-center pt-3 pb-1 shrink-0">
+            <div className="w-10 h-1 rounded-full bg-slate-700" />
+          </div>
+          <PanelContent node={node} preview={preview} demoUrl={demoUrl} onClose={onClose} />
+        </motion.div>
+      </div>
+    </AnimatePresence>
+  );
+}
+
+function PanelContent({ node, preview, demoUrl, onClose }) {
+  function openDemo(e) {
+    e.preventDefault();
+    storeSchoolSlug('demo');
+    window.open(demoUrl, '_blank', 'noopener,noreferrer');
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-800 shrink-0">
+        <div className={`w-10 h-10 rounded-xl ${node.color} flex items-center justify-center shadow-lg shrink-0`}>
+          <node.Icon size={20} className="text-white" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-base font-bold text-white leading-tight">{node.label}</h3>
+          <p className="text-xs text-slate-500 leading-snug mt-0.5 line-clamp-2">{preview.tagline}</p>
+        </div>
+        <button onClick={onClose}
+          className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-400 hover:text-white transition-colors shrink-0">
+          <X size={14} />
+        </button>
+      </div>
+
+      {/* Scrollable body */}
+      <div className="flex-1 overflow-y-auto p-5 space-y-5">
+        {/* Key outcomes */}
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-3">What it does</p>
+          <ul className="space-y-2.5">
+            {preview.outcomes.map((outcome, i) => (
+              <li key={i} className="flex items-start gap-2.5">
+                <div className={`w-4 h-4 rounded-full ${node.color} flex items-center justify-center shrink-0 mt-0.5`}>
+                  <CheckCircle size={8} className="text-white" />
+                </div>
+                <span className="text-sm text-slate-300 leading-snug">{outcome}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {/* Mockup */}
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-3">Module preview</p>
+          <ModuleMockup mockup={preview.mockup} color={node.color} />
+        </div>
+      </div>
+
+      {/* CTA footer */}
+      <div className="px-5 py-4 border-t border-slate-800 shrink-0 bg-slate-950">
+        <button onClick={openDemo}
+          className={`w-full flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold text-white transition-all shadow-lg ${node.color} hover:opacity-90 active:scale-[0.98]`}>
+          Try {node.label} Live
+          <ArrowRight size={14} />
+        </button>
+        <p className="text-[10px] text-slate-600 text-center mt-2">Opens in the demo school — no sign-up required</p>
+      </div>
+    </div>
+  );
+}
+
 let _cachedSettings = null;
 async function getPlatformSettings() {
   if (_cachedSettings) return _cachedSettings;
@@ -854,13 +1451,16 @@ async function getLandingCMS() {
    MAIN LANDING PAGE
 ═══════════════════════════════════════════════════════════════ */
 export default function Landing() {
-  const [schoolInput, setSchoolInput] = useState('');
-  const [finding,     setFinding]     = useState(false);
-  const [findError,   setFindError]   = useState('');
-  const [socialLinks, setSocialLinks] = useState({});
-  const [navScrolled, setNavScrolled] = useState(false);
-  const [showcaseTab, setShowcaseTab] = useState(0);
-  const [cms,         setCms]         = useState(CMS_DEFAULTS);
+  const [schoolInput,    setSchoolInput]    = useState('');
+  const [finding,        setFinding]        = useState(false);
+  const [findError,      setFindError]      = useState('');
+  const [socialLinks,    setSocialLinks]    = useState({});
+  const [navScrolled,    setNavScrolled]    = useState(false);
+  const [showcaseTab,    setShowcaseTab]    = useState(0);
+  const [cms,            setCms]            = useState(CMS_DEFAULTS);
+  const [activeModule,   setActiveModule]   = useState(null);
+
+  const closePanel = useCallback(() => setActiveModule(null), []);
 
   useEffect(() => {
     getLandingCMS().then(c => setCms(c));
@@ -894,6 +1494,11 @@ export default function Landing() {
 
   return (
     <div className="min-h-screen bg-white text-slate-900 antialiased">
+
+      {/* Module preview panel — rendered at root so it overlays everything */}
+      {activeModule && (
+        <ModulePreviewPanel node={activeModule} onClose={closePanel} />
+      )}
 
       {/* ══════════════════════════════════════════
           NAVBAR
@@ -1068,6 +1673,10 @@ export default function Landing() {
             <motion.p variants={fadeUp} className="text-base text-slate-400 max-w-xl mx-auto leading-relaxed">
               {cms.ecosystem.subheading}
             </motion.p>
+            <motion.p variants={fadeUp} className="text-xs text-slate-600 mt-3 flex items-center justify-center gap-1.5">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-slate-600 animate-pulse" />
+              Click any module to explore its features
+            </motion.p>
           </motion.div>
 
           {/* Ecosystem grid — fully responsive, no horizontal scroll */}
@@ -1083,17 +1692,23 @@ export default function Landing() {
               className="relative grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 gap-y-8 gap-x-4 sm:gap-x-6"
             >
               {ECOSYSTEM_NODES.filter(n => (cms.ecosystem.enabledNodes || []).includes(n.label)).map((node, i) => (
-                <motion.div
+                <motion.button
                   key={node.label}
                   variants={fadeUp}
-                  className="flex flex-col items-center gap-2.5 group cursor-default"
+                  onClick={() => setActiveModule(node)}
+                  aria-label={`Preview ${node.label} module`}
+                  className={`flex flex-col items-center gap-2.5 group cursor-pointer rounded-2xl p-2 -m-2 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${
+                    activeModule?.label === node.label ? 'opacity-100' : 'hover:opacity-100 opacity-85'
+                  }`}
                 >
-                  <div className={`w-12 h-12 rounded-2xl ${node.color} flex items-center justify-center shadow-lg group-hover:scale-110 group-hover:shadow-xl transition-all duration-200`}>
+                  <div className={`w-12 h-12 rounded-2xl ${node.color} flex items-center justify-center shadow-lg group-hover:scale-110 group-hover:shadow-xl transition-all duration-200 ${
+                    activeModule?.label === node.label ? 'ring-2 ring-white/50 scale-110' : ''
+                  }`}>
                     <node.Icon size={22} className="text-white" />
                   </div>
                   <p className="text-xs font-semibold text-white text-center leading-tight">{node.label}</p>
                   <p className="text-[10px] text-slate-500 text-center leading-tight">{cms.ecosystem.nodeDescs?.[node.label] ?? node.desc}</p>
-                </motion.div>
+                </motion.button>
               ))}
             </motion.div>
           </div>
