@@ -2,6 +2,51 @@ import { create } from 'zustand';
 
 const SESSION_KEY = 'msingi_session';
 
+/**
+ * What we persist to localStorage:
+ *   token        — JWT (needed to re-authenticate on refresh)
+ *   user (slim)  — id, name, role, schoolId, studentId, guardianOf
+ *                  NO email, NO permissions — those stay in memory only
+ *   school (slim)— id, name, slug, plan, logoUrl, faviconUrl, moduleConfig, primaryColor
+ *                  NO tagline, address, mpesa keys, etc.
+ *
+ * Full objects (with PII / permissions) live in Zustand memory only.
+ * XSS can still steal the token, but cannot read email/permissions from storage.
+ */
+function _slimUser(user) {
+  if (!user) return null;
+  return {
+    id:         user.id,
+    name:       user.name,
+    role:       user.role,
+    roles:      user.roles,
+    primaryRole: user.primaryRole,
+    schoolId:   user.schoolId,
+    studentId:  user.studentId   ?? undefined,
+    guardianOf: user.guardianOf  ?? undefined,
+    studentIds: user.studentIds  ?? undefined,
+    photoUrl:   user.photoUrl    ?? undefined,
+  };
+}
+
+function _slimSchool(school) {
+  if (!school) return null;
+  return {
+    id:           school.id,
+    name:         school.name,
+    shortName:    school.shortName,
+    slug:         school.slug,
+    plan:         school.plan,
+    logoUrl:      school.logoUrl     ?? undefined,
+    faviconUrl:   school.faviconUrl  ?? undefined,
+    primaryColor: school.primaryColor ?? undefined,
+    accentColor:  school.accentColor  ?? undefined,
+    moduleConfig: school.moduleConfig ?? undefined,
+    modulePermissions: school.modulePermissions ?? undefined,
+    isActive:     school.isActive,
+  };
+}
+
 function loadSession() {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
@@ -12,8 +57,17 @@ function loadSession() {
 }
 
 function saveSession(session) {
-  if (session) localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  else         localStorage.removeItem(SESSION_KEY);
+  if (!session) {
+    localStorage.removeItem(SESSION_KEY);
+    return;
+  }
+  // Only persist slim (non-sensitive) fields
+  const slim = {
+    token:  session.token,
+    user:   _slimUser(session.user),
+    school: _slimSchool(session.school),
+  };
+  localStorage.setItem(SESSION_KEY, JSON.stringify(slim));
 }
 
 const useAuthStore = create((set, get) => ({
@@ -34,11 +88,13 @@ const useAuthStore = create((set, get) => ({
 
   /**
    * Call after successful /api/auth/login response.
-   * @param {{ token: string, user: object }} session
+   * Full session object (with email, permissions etc.) lives in memory.
+   * Only slim version is persisted to localStorage.
+   * @param {{ token: string, user: object, school: object }} session
    */
   setSession(session) {
-    saveSession(session);
-    set({ session, error: null });
+    saveSession(session);          // persists slim version
+    set({ session, error: null }); // keeps full object in memory
   },
 
   /** Clear session and redirect to /login */

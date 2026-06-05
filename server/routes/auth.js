@@ -10,10 +10,26 @@ const email      = require('../utils/email');
 
 const router = express.Router();
 
-/* ── OTP helper — cryptographically secure ──────────────── */
+/* ── OTP helpers — cryptographically secure ─────────────── */
 function _genOTP() {
   return String(crypto.randomInt(100000, 999999)); // 6-digit CSPRNG
 }
+// Hash OTP before storing — DB breach cannot reveal pending codes
+function _hashOTP(otp) {
+  return crypto.createHash('sha256').update(otp).digest('hex');
+}
+// Timing-safe OTP comparison — prevents timing attacks
+function _verifyOTP(input, storedHash) {
+  try {
+    const inputHash = _hashOTP(input);
+    return crypto.timingSafeEqual(Buffer.from(inputHash, 'hex'), Buffer.from(storedHash, 'hex'));
+  } catch {
+    return false;
+  }
+}
+
+/* Roles that require 2FA */
+const MFA_ROLES = new Set(['superadmin', 'admin', 'deputy', 'finance']);
 
 /**
  * Build the JWT payload from a user document + school.
@@ -54,13 +70,19 @@ function _buildTokenPayload(user, schoolId) {
 function _genTempPassword() {
   const alpha = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz';
   const nums  = '23456789';
-  let pwd = '';
-  for (let i = 0; i < 8; i++) pwd += alpha[Math.floor(Math.random() * alpha.length)];
-  pwd += nums[Math.floor(Math.random() * nums.length)];
-  pwd += nums[Math.floor(Math.random() * nums.length)];
-  pwd += '!';
-  // shuffle
-  return pwd.split('').sort(() => 0.5 - Math.random()).join('');
+  let chars = '';
+  // Use crypto.randomInt — CSPRNG, not Math.random
+  for (let i = 0; i < 8; i++) chars += alpha[crypto.randomInt(alpha.length)];
+  chars += nums[crypto.randomInt(nums.length)];
+  chars += nums[crypto.randomInt(nums.length)];
+  chars += '!';
+  // Fisher-Yates shuffle using CSPRNG
+  const arr = chars.split('');
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(i + 1);
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.join('');
 }
 
 /* ── Password age check (60-day policy) ─────────────────── */
@@ -73,7 +95,7 @@ function _passwordAge(user) {
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,  // 15 minutes
-  max: 20,
+  max: 10,                    // tightened from 20 — 10 attempts then lockout
   message: { error: 'Too many login attempts. Please wait 15 minutes.' }
 });
 
@@ -158,18 +180,21 @@ router.post('/login', loginLimiter, tenantMiddleware, async (req, res) => {
       _checkPasswordExpiryAndNotify(user, req.school).catch(() => {});
     }
 
-    // ── 2FA for superadmin ──────────────────────────────────
+    // ── 2FA for privileged roles ─────────────────────────────
+    // Applies to: superadmin, admin, deputy, finance
+    // Can be disabled per-user with mfaEnabled: false
     const userRole = user.primaryRole || user.role;
-    if (userRole === 'superadmin' && user.mfaEnabled !== false) {
-      const otp     = _genOTP();
-      const expiry  = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 min
-      await _model('users').updateOne({ _id: user._id }, { mfaOtp: otp, mfaExpiry: expiry });
+    if (MFA_ROLES.has(userRole) && user.mfaEnabled !== false) {
+      const otp      = _genOTP();
+      const otpHash  = _hashOTP(otp);          // store hash, not plaintext
+      const expiry   = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 min
+      await _model('users').updateOne({ _id: user._id }, { mfaOtp: otpHash, mfaExpiry: expiry });
 
-      // Send OTP email (non-blocking — log if it fails)
+      // Send OTP email with plaintext code (non-blocking — log if it fails)
       email.sendLoginOTP({
         name:        user.name,
         email:       user.email,
-        otp,
+        otp,                                   // send plaintext code, store hash
         schoolName:  req.school.name || req.school.slug,
         schoolEmail: req.school.systemEmail || ''
       }).catch(err => console.error('[2FA email]', err.message));
@@ -218,7 +243,8 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
       await User.updateOne({ id: userId }, { $unset: { mfaOtp: 1, mfaExpiry: 1 } });
       return res.status(400).json({ error: 'Code expired. Please sign in again to get a new code.' });
     }
-    if (otp.trim() !== user.mfaOtp) {
+    // Timing-safe comparison against stored hash
+    if (!_verifyOTP(otp.trim(), user.mfaOtp)) {
       return res.status(401).json({ error: 'Incorrect code. Please check your email and try again.' });
     }
 

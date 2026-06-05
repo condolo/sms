@@ -11,6 +11,7 @@
    ============================================================ */
 const express  = require('express');
 const bcrypt   = require('bcryptjs');
+const crypto   = require('crypto');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
 const emailUtil          = require('../utils/email');
@@ -30,17 +31,25 @@ function _isSuperAdmin(req) {
   return r === 'superadmin' || rs.includes('superadmin');
 }
 function _uid() {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  // Use crypto.randomBytes for the random suffix — CSPRNG
+  return Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
 }
 function _genTempPassword() {
   const alpha = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz';
   const nums  = '23456789';
-  let pwd = '';
-  for (let i = 0; i < 8; i++) pwd += alpha[Math.floor(Math.random() * alpha.length)];
-  pwd += nums[Math.floor(Math.random() * nums.length)];
-  pwd += nums[Math.floor(Math.random() * nums.length)];
-  pwd += '!';
-  return pwd.split('').sort(() => 0.5 - Math.random()).join('');
+  let chars = '';
+  // CSPRNG — no Math.random()
+  for (let i = 0; i < 8; i++) chars += alpha[crypto.randomInt(alpha.length)];
+  chars += nums[crypto.randomInt(nums.length)];
+  chars += nums[crypto.randomInt(nums.length)];
+  chars += '!';
+  // Fisher-Yates shuffle with CSPRNG
+  const arr = chars.split('');
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(i + 1);
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.join('');
 }
 
 /* ── Allowed fields for school update ──────────────────────── */
