@@ -773,6 +773,21 @@ router.get('/zoom/status', authMiddleware, (req, res) => {
   res.json({ configured });
 });
 
+/* ── List ALL sessions for this teacher (across all courses) ─────
+   GET /api/elearning/sessions?platform=meet|zoom  (optional filter)
+*/
+router.get('/sessions', authMiddleware, async (req, res) => {
+  try {
+    const Sessions = _model('elearning_sessions');
+    const query    = { schoolId: req.jwtUser.schoolId, teacherId: req.jwtUser.userId };
+    if (req.query.platform) query.platform = req.query.platform;
+    const sessions = await Sessions.find(query).sort({ scheduledAt: -1 }).lean();
+    res.json({ sessions });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* ── List sessions for a course ──────────────────────────────── */
 router.get('/courses/:id/sessions', authMiddleware, async (req, res) => {
   try {

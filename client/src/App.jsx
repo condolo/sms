@@ -173,9 +173,11 @@ export const router = createBrowserRouter([
       // Lessons / Syllabus Tracker (v4.33.0)
       { path: 'lessons',                element: <SuspenseWrapper><LessonsPage /></SuspenseWrapper> },
 
-      // eLearning — Google Classroom integration
+      // eLearning — sub-routes for each tool
       { path: 'elearning',              element: <SuspenseWrapper><ELearningPage /></SuspenseWrapper> },
-      { path: 'elearning/*',            element: <SuspenseWrapper><ELearningPage /></SuspenseWrapper> },
+      { path: 'elearning/classroom',    element: <SuspenseWrapper><ELearningPage /></SuspenseWrapper> },
+      { path: 'elearning/meet',         element: <SuspenseWrapper><ELearningPage /></SuspenseWrapper> },
+      { path: 'elearning/zoom',         element: <SuspenseWrapper><ELearningPage /></SuspenseWrapper> },
 
       // Fallback
       { path: '*',                     element: <SuspenseWrapper><NotFound /></SuspenseWrapper> },

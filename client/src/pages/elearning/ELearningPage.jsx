@@ -1040,10 +1040,10 @@ function LiveTab({ course }) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   MAIN PAGE
+   GOOGLE CLASSROOM VIEW
    ══════════════════════════════════════════════════════════════ */
-export default function ELearningPage() {
-  const location = useLocation();
+function ClassroomView({ statusData, connected }) {
+  const navigate = useNavigate();
   const qc       = useQueryClient();
 
   const [activeCourse, setActiveCourse] = useState(null);
@@ -1051,30 +1051,6 @@ export default function ELearningPage() {
   const [showLink,     setShowLink]     = useState(false);
   const [toast,        setToast]        = useState(null);
 
-  /* Handle OAuth redirect params */
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    if (params.get('gc_connected') === '1') {
-      setToast({ type: 'success', msg: 'Google Classroom connected successfully!' });
-      window.history.replaceState({}, '', '/elearning');
-      qc.invalidateQueries({ queryKey: ['elearning-status'] });
-    }
-    if (params.get('gc_error')) {
-      const msgs = { denied: 'Google sign-in was cancelled.', failed: 'Connection failed. Please try again.', invalid_state: 'Invalid state. Please try again.' };
-      setToast({ type: 'error', msg: msgs[params.get('gc_error')] || 'Connection failed.' });
-      window.history.replaceState({}, '', '/elearning');
-    }
-  }, [location.search, qc]);
-
-  /* Auth status */
-  const { data: statusData, isLoading: statusLoading } = useQuery({
-    queryKey: ['elearning-status'],
-    queryFn:  () => apiFetch('/auth/status'),
-    staleTime: 5 * 60_000,
-  });
-  const connected = statusData?.connected === true;
-
-  /* Linked courses */
   const { data: coursesData, isLoading: coursesLoading } = useQuery({
     queryKey: ['elearning-courses'],
     queryFn:  () => apiFetch('/courses'),
@@ -1083,15 +1059,14 @@ export default function ELearningPage() {
   });
   const linkedCourses = coursesData?.courses || [];
 
-  /* GC courses (for link modal) */
   const { data: gcCoursesData } = useQuery({
     queryKey: ['elearning-gc-courses'],
     queryFn:  () => apiFetch('/gc/courses'),
     enabled:  connected && showLink,
     staleTime: 60_000,
   });
-  const gcCourses  = gcCoursesData?.courses || [];
-  const linkedIds  = new Set(linkedCourses.map(c => c.gcCourseId));
+  const gcCourses = gcCoursesData?.courses || [];
+  const linkedIds = new Set(linkedCourses.map(c => c.gcCourseId));
 
   async function handleUnlink(id) {
     if (!window.confirm('Unlink this course from Msingi? The course stays in Google Classroom.')) return;
@@ -1105,55 +1080,28 @@ export default function ELearningPage() {
     }
   }
 
-  async function handleDisconnect() {
-    if (!window.confirm('Disconnect your Google account from Msingi eLearning?')) return;
-    try {
-      await apiFetch('/auth/disconnect', { method: 'DELETE' });
-      qc.invalidateQueries({ queryKey: ['elearning-status'] });
-      qc.invalidateQueries({ queryKey: ['elearning-courses'] });
-      setActiveCourse(null);
-    } catch (err) {
-      setToast({ type: 'error', msg: err.message });
-    }
-  }
-
-  if (statusLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 size={24} className="animate-spin text-slate-400" />
-      </div>
-    );
-  }
-
-  if (!connected) return <ConnectCard />;
-
   const TABS = [
     { id: 'classwork', label: 'Classwork', Icon: BookOpen  },
-    { id: 'live',      label: 'Live',      Icon: Video     },
     { id: 'people',    label: 'People',    Icon: Users     },
     { id: 'grades',    label: 'Grades',    Icon: BarChart3 },
   ];
 
   return (
     <div className="flex h-full">
-      {/* ── Left sidebar — course list ─────────────────────── */}
+      {/* Course sidebar */}
       <aside className="w-64 shrink-0 border-r border-slate-200 bg-white flex flex-col h-full overflow-hidden">
-        {/* Account header */}
         <div className="px-4 py-3.5 border-b border-slate-100 flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center shrink-0">
-            <MonitorPlay size={14} className="text-white" />
-          </div>
+          <svg viewBox="0 0 48 48" className="w-7 h-7 shrink-0">
+            <path d="M40 6H8a2 2 0 00-2 2v32a2 2 0 002 2h32a2 2 0 002-2V8a2 2 0 00-2-2z" fill="#4CAF50"/>
+            <path d="M24 14a5 5 0 100 10 5 5 0 000-10z" fill="white"/>
+            <path d="M24 26c-5.33 0-8 2.67-8 4v2h16v-2c0-1.33-2.67-4-8-4z" fill="white"/>
+          </svg>
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-slate-800 truncate">eLearning</p>
+            <p className="text-xs font-semibold text-slate-800">Google Classroom</p>
             <p className="text-[10px] text-slate-400 truncate">{statusData?.googleEmail}</p>
           </div>
-          <button onClick={handleDisconnect} title="Disconnect Google account"
-            className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition shrink-0">
-            <Link2Off size={13} />
-          </button>
         </div>
 
-        {/* Course list */}
         <div className="flex-1 overflow-y-auto py-2">
           {coursesLoading
             ? <div className="px-4 py-2 space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-10 bg-slate-100 rounded-lg animate-pulse" />)}</div>
@@ -1162,11 +1110,11 @@ export default function ELearningPage() {
               : linkedCourses.map(c => (
                   <div key={c._id}
                     className={`group flex items-center gap-2.5 mx-2 px-3 py-2.5 rounded-xl cursor-pointer transition
-                      ${activeCourse?._id === c._id ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-slate-50 text-slate-700'}`}
+                      ${activeCourse?._id === c._id ? 'bg-green-50 text-green-800' : 'hover:bg-slate-50 text-slate-700'}`}
                     onClick={() => { setActiveCourse(c); setActiveTab('classwork'); }}
                   >
                     <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0
-                      ${activeCourse?._id === c._id ? 'bg-indigo-200 text-indigo-800' : 'bg-slate-100 text-slate-600'}`}>
+                      ${activeCourse?._id === c._id ? 'bg-green-200 text-green-800' : 'bg-slate-100 text-slate-600'}`}>
                       {c.gcCourseName?.[0] || 'C'}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -1182,78 +1130,63 @@ export default function ELearningPage() {
           }
         </div>
 
-        {/* Link course button */}
         <div className="px-3 py-3 border-t border-slate-100">
           <button onClick={() => setShowLink(true)}
-            className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-dashed border-indigo-300 text-indigo-600 text-xs font-semibold hover:bg-indigo-50 transition">
+            className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-dashed border-green-400 text-green-700 text-xs font-semibold hover:bg-green-50 transition">
             <Link2 size={12} /> Link a course
           </button>
         </div>
       </aside>
 
-      {/* ── Main content ───────────────────────────────────── */}
+      {/* Main */}
       <main className="flex-1 overflow-y-auto bg-slate-50">
         {!activeCourse ? (
           <div className="flex flex-col items-center justify-center h-full text-center px-6">
-            <MonitorPlay size={32} className="text-slate-300 mb-3" />
+            <svg viewBox="0 0 48 48" className="w-12 h-12 mb-3 opacity-30">
+              <path d="M40 6H8a2 2 0 00-2 2v32a2 2 0 002 2h32a2 2 0 002-2V8a2 2 0 00-2-2z" fill="#4CAF50"/>
+              <path d="M24 14a5 5 0 100 10 5 5 0 000-10z" fill="white"/>
+              <path d="M24 26c-5.33 0-8 2.67-8 4v2h16v-2c0-1.33-2.67-4-8-4z" fill="white"/>
+            </svg>
             <p className="text-slate-500 font-medium">Select a course</p>
             <p className="text-sm text-slate-400 mt-1">
-              {linkedCourses.length === 0
-                ? 'Link a Google Classroom course to get started.'
-                : 'Pick a course from the left to manage classwork and grades.'}
+              {linkedCourses.length === 0 ? 'Link a Google Classroom course to get started.' : 'Pick a course to manage classwork, people, and grades.'}
             </p>
             {linkedCourses.length === 0 && (
               <button onClick={() => setShowLink(true)}
-                className="mt-4 flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition">
+                className="mt-4 flex items-center gap-1.5 px-4 py-2 rounded-xl bg-green-600 text-white text-sm font-semibold hover:bg-green-700 transition">
                 <Link2 size={14} /> Link your first course
               </button>
             )}
           </div>
         ) : (
           <div className="max-w-3xl mx-auto px-6 py-6">
-            {/* Course header */}
             <div className="mb-6">
               <div className="flex items-center gap-2 mb-1">
                 <h1 className="text-xl font-bold text-slate-900">{activeCourse.gcCourseName}</h1>
                 <a href={`https://classroom.google.com/c/${activeCourse.gcCourseId}`} target="_blank" rel="noreferrer"
-                  className="text-slate-400 hover:text-indigo-600 transition">
+                  className="text-slate-400 hover:text-green-600 transition">
                   <ExternalLink size={14} />
                 </a>
               </div>
               <p className="text-sm text-slate-500">{activeCourse.subjectName} · {activeCourse.className}</p>
             </div>
-
-            {/* Toast */}
-            {toast && (
-              <div className="mb-4">
-                <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />
-              </div>
-            )}
-
-            {/* Tabs */}
+            {toast && <div className="mb-4"><Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} /></div>}
             <div className="flex gap-0 border-b border-slate-200 mb-6">
               {TABS.map(({ id, label, Icon }) => (
                 <button key={id} onClick={() => setActiveTab(id)}
                   className={`flex items-center gap-1.5 px-5 py-2.5 text-sm font-medium border-b-2 transition -mb-px
-                    ${activeTab === id
-                      ? 'border-indigo-600 text-indigo-700'
-                      : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
-                  <Icon size={14} />
-                  {label}
+                    ${activeTab === id ? 'border-green-600 text-green-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
+                  <Icon size={14} /> {label}
                 </button>
               ))}
             </div>
-
-            {/* Tab content */}
             {activeTab === 'classwork' && <ClassworkTab course={activeCourse} />}
-            {activeTab === 'live'      && <LiveTab      course={activeCourse} />}
             {activeTab === 'people'    && <PeopleTab    course={activeCourse} />}
             {activeTab === 'grades'    && <GradesTab    course={activeCourse} />}
           </div>
         )}
       </main>
 
-      {/* Modals */}
       {showLink && (
         <LinkCourseModal
           gcCourses={gcCourses}
@@ -1262,6 +1195,408 @@ export default function ELearningPage() {
           onClose={() => setShowLink(false)}
         />
       )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SHARED SESSIONS VIEW (Meet or Zoom)
+   Shows all sessions of one platform across all linked courses.
+   ══════════════════════════════════════════════════════════════ */
+function SessionsView({ platform }) {
+  const qc      = useQueryClient();
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [toast,        setToast]        = useState(null);
+  const now = new Date();
+
+  const isMeet = platform === 'meet';
+
+  const { data: sessData, isLoading, refetch } = useQuery({
+    queryKey: ['elearning-sessions-all', platform],
+    queryFn:  () => apiFetch(`/sessions?platform=${platform}`),
+    staleTime: 30_000,
+  });
+
+  const { data: zoomStatus } = useQuery({
+    queryKey: ['zoom-status'],
+    queryFn:  () => apiFetch('/zoom/status'),
+    staleTime: 60_000,
+    enabled:  !isMeet,
+  });
+
+  const { data: coursesData } = useQuery({
+    queryKey: ['elearning-courses'],
+    queryFn:  () => apiFetch('/courses'),
+    staleTime: 60_000,
+  });
+  const linkedCourses = coursesData?.courses || [];
+
+  const sessions  = sessData?.sessions || [];
+  const upcoming  = sessions.filter(s => s.status !== 'cancelled' && new Date(s.scheduledAt) >= now);
+  const past      = sessions.filter(s => s.status === 'ended' || (s.status !== 'cancelled' && new Date(s.scheduledAt) < now));
+
+  async function handleCancel(sessionId) {
+    if (!window.confirm('Cancel this session?')) return;
+    try {
+      await apiFetch(`/sessions/${sessionId}`, { method: 'DELETE' });
+      qc.invalidateQueries({ queryKey: ['elearning-sessions-all', platform] });
+      setToast({ type: 'success', msg: 'Session cancelled.' });
+    } catch (err) {
+      setToast({ type: 'error', msg: err.message });
+    }
+  }
+
+  // Zoom not configured warning
+  if (!isMeet && !zoomStatus?.configured) {
+    return (
+      <div className="max-w-lg mx-auto px-6 py-16 text-center space-y-4">
+        <div className="w-16 h-16 rounded-2xl bg-sky-50 flex items-center justify-center mx-auto">
+          <svg viewBox="0 0 48 48" className="w-8 h-8">
+            <rect width="48" height="48" rx="8" fill="#2D8CFF"/>
+            <path d="M8 17a2 2 0 012-2h18a2 2 0 012 2v14a2 2 0 01-2 2H10a2 2 0 01-2-2V17z" fill="white"/>
+            <path d="M30 22l8-5v14l-8-5V22z" fill="white"/>
+          </svg>
+        </div>
+        <h2 className="text-lg font-bold text-slate-900">Zoom not configured</h2>
+        <p className="text-sm text-slate-500 leading-relaxed">
+          Add the following to your server environment to enable Zoom live sessions:
+        </p>
+        <div className="bg-slate-900 text-green-400 rounded-xl px-5 py-4 text-left font-mono text-xs space-y-1">
+          <p>ZOOM_ACCOUNT_ID=<span className="text-slate-400">your_account_id</span></p>
+          <p>ZOOM_CLIENT_ID=<span className="text-slate-400">your_client_id</span></p>
+          <p>ZOOM_CLIENT_SECRET=<span className="text-slate-400">your_client_secret</span></p>
+          <p>ZOOM_WEBHOOK_SECRET=<span className="text-slate-400">your_webhook_secret</span></p>
+        </div>
+        <p className="text-xs text-slate-400">Create a Server-to-Server OAuth app in the <a href="https://marketplace.zoom.us" target="_blank" rel="noreferrer" className="text-sky-600 hover:underline">Zoom Marketplace</a>.</p>
+      </div>
+    );
+  }
+
+  const accentCls = isMeet ? 'bg-blue-600 hover:bg-blue-700' : 'bg-sky-600 hover:bg-sky-700';
+
+  function StatusBadge({ status }) {
+    const map = {
+      scheduled: { label: 'Scheduled', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+      live:      { label: 'Live now',  cls: 'bg-green-50 text-green-700 border-green-200 animate-pulse' },
+      ended:     { label: 'Ended',     cls: 'bg-slate-50 text-slate-500 border-slate-200' },
+      cancelled: { label: 'Cancelled', cls: 'bg-red-50 text-red-600 border-red-200' },
+    };
+    const { label, cls } = map[status] || map.scheduled;
+    return <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${cls}`}>{label}</span>;
+  }
+
+  function SessionRow({ session }) {
+    const [joining, setJoining] = useState(false);
+    const start      = new Date(session.scheduledAt);
+    const isLive     = session.status === 'live';
+    const isUpcoming = session.status === 'scheduled' && start >= now;
+    const course     = linkedCourses.find(c => c.gcCourseId === session.gcCourseId);
+
+    async function handleMeetJoin() {
+      setJoining(true);
+      try {
+        const data = await apiFetch(`/sessions/${session.id}/attend`, { method: 'POST' });
+        window.open(data.meetLink || session.meetLink, '_blank', 'noopener');
+      } catch {
+        window.open(session.meetLink, '_blank', 'noopener');
+      } finally { setJoining(false); }
+    }
+
+    return (
+      <div className={`bg-white border rounded-xl px-5 py-4 flex items-start gap-4 transition
+        ${isLive ? 'border-green-300 shadow-sm shadow-green-100' : 'border-slate-200 hover:border-slate-300'}`}>
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${isLive ? 'bg-green-100' : 'bg-slate-100'}`}>
+          <Video size={18} className={isLive ? 'text-green-600' : 'text-slate-500'} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <p className="font-semibold text-slate-800 text-sm">{session.title}</p>
+            <StatusBadge status={session.status} />
+          </div>
+          <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
+            {course && <span className="text-indigo-600 font-medium">{course.gcCourseName}</span>}
+            <span className="flex items-center gap-1"><Calendar size={11} />
+              {start.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
+            </span>
+            <span className="flex items-center gap-1"><Clock size={11} />
+              {start.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+            <span>{session.duration} min</span>
+            {session.attendees?.length > 0 && <span><Users size={11} className="inline mr-1" />{session.attendees.length} attended</span>}
+          </div>
+          {session.recordingUrl && (
+            <a href={session.recordingUrl} target="_blank" rel="noreferrer"
+              className="inline-flex items-center gap-1 mt-1.5 text-xs text-indigo-600 hover:text-indigo-800 font-medium">
+              <Play size={11} /> View recording
+            </a>
+          )}
+        </div>
+        <div className="flex flex-col gap-1.5 items-end shrink-0">
+          {(isLive || isUpcoming) && (
+            isMeet ? (
+              <button onClick={handleMeetJoin} disabled={joining}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition ${accentCls} disabled:opacity-60`}>
+                {joining ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}
+                {isLive ? 'Join Meet' : 'Join Meet'}
+              </button>
+            ) : (
+              <a href={session.zoomHostUrl} target="_blank" rel="noreferrer"
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition shadow-sm ${isLive ? 'bg-green-600 hover:bg-green-700' : accentCls}`}>
+                {isLive ? <><Mic size={11} /> In session</> : <><Play size={11} /> Start</>}
+              </a>
+            )
+          )}
+          {isUpcoming && (
+            <button onClick={() => handleCancel(session.id)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50 transition">
+              <Trash2 size={11} /> Cancel
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-3xl mx-auto px-6 py-6 space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          {isMeet ? (
+            <svg viewBox="0 0 48 48" className="w-7 h-7">
+              <path d="M44 24c0-1.3-.1-2.5-.4-3.7H24v7h11.3c-.5 2.5-1.9 4.6-3.9 6.1v5h6.3C40.9 35 44 30 44 24z" fill="#4285F4"/>
+              <path d="M24 44c5.6 0 10.3-1.9 13.8-5l-6.3-5c-1.9 1.3-4.4 2-7.5 2-5.7 0-10.6-3.9-12.4-9.1H5.1v5.2C8.5 39.8 15.7 44 24 44z" fill="#34A853"/>
+              <path d="M11.6 27c-.5-1.3-.7-2.6-.7-4s.2-2.8.7-4v-5.2H5.1C3.8 16.7 3 20.3 3 24s.8 7.3 2.1 10.2L11.6 27z" fill="#FBBC05"/>
+              <path d="M24 10.9c3.2 0 6 1.1 8.2 3.2l6.1-6.1C34.3 4.5 29.6 3 24 3 15.7 3 8.5 7.2 5.1 13.8l6.5 5.2C13.4 13.8 18.3 10.9 24 10.9z" fill="#EA4335"/>
+            </svg>
+          ) : (
+            <svg viewBox="0 0 48 48" className="w-7 h-7">
+              <rect width="48" height="48" rx="8" fill="#2D8CFF"/>
+              <path d="M8 17a2 2 0 012-2h18a2 2 0 012 2v14a2 2 0 01-2 2H10a2 2 0 01-2-2V17z" fill="white"/>
+              <path d="M30 22l8-5v14l-8-5V22z" fill="white"/>
+            </svg>
+          )}
+          <div>
+            <h1 className="text-xl font-bold text-slate-900">{isMeet ? 'Google Meet' : 'Zoom'}</h1>
+            <p className="text-xs text-slate-400">{isMeet ? 'Live sessions via Google Meet' : 'Live sessions via Zoom'}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => refetch()} className="p-2 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition">
+            <RefreshCcw size={14} />
+          </button>
+          <button onClick={() => setShowSchedule(true)}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-sm font-semibold transition shadow-sm ${accentCls}`}>
+            <Plus size={14} /> Schedule Session
+          </button>
+        </div>
+      </div>
+
+      {toast && <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}
+
+      {isLoading ? (
+        <div className="space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-20 bg-slate-100 rounded-xl animate-pulse" />)}</div>
+      ) : sessions.length === 0 ? (
+        <div className="bg-white border border-dashed border-slate-200 rounded-xl p-14 text-center">
+          <Video size={28} className="text-slate-300 mx-auto mb-3" />
+          <p className="font-semibold text-slate-500">No {isMeet ? 'Meet' : 'Zoom'} sessions yet</p>
+          <p className="text-sm text-slate-400 mt-1">Schedule your first live session to get started.</p>
+        </div>
+      ) : (
+        <>
+          {upcoming.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Upcoming</p>
+              {upcoming.map(s => <SessionRow key={s.id} session={s} />)}
+            </div>
+          )}
+          {past.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Past Sessions</p>
+              {past.map(s => <SessionRow key={s.id} session={s} />)}
+            </div>
+          )}
+        </>
+      )}
+
+      {showSchedule && linkedCourses.length > 0 && (
+        <ScheduleSessionModalFull
+          platform={platform}
+          courses={linkedCourses}
+          onCreated={() => {
+            setShowSchedule(false);
+            qc.invalidateQueries({ queryKey: ['elearning-sessions-all', platform] });
+            setToast({ type: 'success', msg: `Session scheduled on ${isMeet ? 'Google Meet' : 'Zoom'}.` });
+          }}
+          onClose={() => setShowSchedule(false)}
+        />
+      )}
+      {showSchedule && linkedCourses.length === 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
+          <div className="bg-white rounded-2xl p-8 max-w-sm w-full text-center space-y-3 border border-slate-200 shadow-xl">
+            <p className="font-semibold text-slate-900">No courses linked</p>
+            <p className="text-sm text-slate-500">Link a Google Classroom course first to associate this session with a subject and class.</p>
+            <button onClick={() => setShowSchedule(false)}
+              className="mt-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition">OK</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Schedule modal with course picker (used from SessionsView) */
+function ScheduleSessionModalFull({ platform, courses, onCreated, onClose }) {
+  const [form, setForm] = useState({
+    courseId:    courses[0]?.gcCourseId || '',
+    title:       '',
+    scheduledAt: '',
+    duration:    '60',
+    agenda:      '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState('');
+
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+  const isMeet = platform === 'meet';
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.courseId || !form.title.trim() || !form.scheduledAt) {
+      setError('Course, title, and date/time are required.'); return;
+    }
+    setSaving(true); setError('');
+    try {
+      await apiFetch(`/courses/${form.courseId}/sessions`, {
+        method: 'POST',
+        body: { ...form, platform, scheduledAt: new Date(form.scheduledAt).toISOString(), duration: Number(form.duration) },
+      });
+      onCreated();
+    } catch (err) {
+      setError(err.message);
+    } finally { setSaving(false); }
+  }
+
+  const iCls = 'w-full text-sm border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white';
+  const btnCls = isMeet ? 'bg-blue-600 hover:bg-blue-700' : 'bg-sky-600 hover:bg-sky-700';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm px-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <Video size={16} className={isMeet ? 'text-blue-600' : 'text-sky-600'} />
+            <h2 className="font-semibold text-slate-900">Schedule {isMeet ? 'Google Meet' : 'Zoom'} Session</h2>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"><X size={16} /></button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+          {error && <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-sm text-red-700"><AlertTriangle size={13} /> {error}</div>}
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Course *</label>
+            <select value={form.courseId} onChange={e => set('courseId', e.target.value)} className={iCls} required>
+              {courses.map(c => <option key={c.gcCourseId} value={c.gcCourseId}>{c.gcCourseName} — {c.subjectName}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Session Title *</label>
+            <input value={form.title} onChange={e => set('title', e.target.value)} className={iCls} placeholder="e.g. Week 4 Live Class" required />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Date & Time *</label>
+              <input type="datetime-local" value={form.scheduledAt} onChange={e => set('scheduledAt', e.target.value)} className={iCls} required />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Duration</label>
+              <select value={form.duration} onChange={e => set('duration', e.target.value)} className={iCls}>
+                {[30, 45, 60, 90, 120].map(m => <option key={m} value={m}>{m} min</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Agenda</label>
+            <textarea value={form.agenda} onChange={e => set('agenda', e.target.value)} className={`${iCls} resize-none`} rows={2} placeholder="Topics to cover…" />
+          </div>
+        </form>
+
+        <div className="flex gap-2 px-6 pb-5">
+          <button type="button" onClick={onClose}
+            className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition">Cancel</button>
+          <button onClick={handleSubmit} disabled={saving}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-white text-sm font-semibold disabled:opacity-50 transition ${btnCls}`}>
+            {saving ? <Loader2 size={13} className="animate-spin" /> : <Video size={13} />}
+            {saving ? 'Scheduling…' : `Schedule on ${isMeet ? 'Google Meet' : 'Zoom'}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   MAIN PAGE — dispatcher
+   ══════════════════════════════════════════════════════════════ */
+export default function ELearningPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const qc       = useQueryClient();
+  const [toast,  setToast] = useState(null);
+
+  /* Handle OAuth redirect params */
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('gc_connected') === '1') {
+      setToast({ type: 'success', msg: 'Google Classroom connected successfully!' });
+      window.history.replaceState({}, '', location.pathname);
+      qc.invalidateQueries({ queryKey: ['elearning-status'] });
+    }
+    if (params.get('gc_error')) {
+      const msgs = { denied: 'Google sign-in was cancelled.', failed: 'Connection failed. Please try again.', invalid_state: 'Invalid state. Please try again.' };
+      setToast({ type: 'error', msg: msgs[params.get('gc_error')] || 'Connection failed.' });
+      window.history.replaceState({}, '', location.pathname);
+    }
+  }, [location.search, qc]);
+
+  const { data: statusData, isLoading: statusLoading } = useQuery({
+    queryKey: ['elearning-status'],
+    queryFn:  () => apiFetch('/auth/status'),
+    staleTime: 5 * 60_000,
+  });
+  const connected = statusData?.connected === true;
+
+  /* Redirect /elearning → /elearning/classroom */
+  useEffect(() => {
+    if (location.pathname === '/elearning') navigate('/elearning/classroom', { replace: true });
+  }, [location.pathname, navigate]);
+
+  if (statusLoading) {
+    return <div className="flex items-center justify-center h-64"><Loader2 size={24} className="animate-spin text-slate-400" /></div>;
+  }
+
+  if (!connected) {
+    return (
+      <>
+        {toast && <div className="fixed top-4 right-4 z-50"><Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} /></div>}
+        <ConnectCard />
+      </>
+    );
+  }
+
+  const path = location.pathname;
+
+  return (
+    <div className="h-full flex flex-col">
+      {toast && <div className="fixed top-4 right-4 z-50"><Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} /></div>}
+
+      {path.startsWith('/elearning/classroom') && <ClassroomView statusData={statusData} connected={connected} />}
+      {path.startsWith('/elearning/meet')      && <SessionsView  platform="meet" />}
+      {path.startsWith('/elearning/zoom')      && <SessionsView  platform="zoom" />}
     </div>
   );
 }

@@ -16,13 +16,15 @@
    • Sidebar reads from auth session (reactive via patchSchool)
    • Default: all 17 configurable modules shown, original order
    ============================================================ */
-import { NavLink, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, GraduationCap, Users, BookOpen, Calendar,
   CheckSquare, BarChart3, ClipboardList, Scale,
   Wallet, Settings, LogOut, Library,
   MessageSquare, UserCog, TrendingUp, Tag, HelpCircle,
   BookMarked, Bus, BedDouble, X, BookCheck, MonitorPlay,
+  ChevronDown, BookMarked as ClassroomIcon, Video,
 } from 'lucide-react';
 import clsx from 'clsx';
 import useAuthStore from '@/store/auth.js';
@@ -70,7 +72,7 @@ function computeNav(moduleConfig) {
   }
 
   return [
-    { label: null, items: [{ to: '/dashboard', Icon: LayoutDashboard, label: 'Dashboard' }] },
+    { label: null, items: [{ key: 'dashboard', to: '/dashboard', Icon: LayoutDashboard, label: 'Dashboard' }] },
     ...SECTION_ORDER
       .filter(sec => grouped[sec]?.length)
       .map(sec => ({ label: sec, items: grouped[sec] })),
@@ -97,12 +99,56 @@ function labelStyle(collapsed) {
   };
 }
 
+/* ── eLearning sub-items ─────────────────────────────────────── */
+const ELEARNING_ITEMS = [
+  {
+    to: '/elearning/classroom',
+    label: 'Google Classroom',
+    icon: (
+      <svg viewBox="0 0 48 48" className="w-3.5 h-3.5 shrink-0">
+        <path d="M40 6H8a2 2 0 00-2 2v32a2 2 0 002 2h32a2 2 0 002-2V8a2 2 0 00-2-2z" fill="#4CAF50"/>
+        <path d="M24 14a5 5 0 100 10 5 5 0 000-10z" fill="white"/>
+        <path d="M24 26c-5.33 0-8 2.67-8 4v2h16v-2c0-1.33-2.67-4-8-4z" fill="white"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/elearning/meet',
+    label: 'Google Meet',
+    icon: (
+      <svg viewBox="0 0 48 48" className="w-3.5 h-3.5 shrink-0">
+        <path d="M44 24c0-1.3-.1-2.5-.4-3.7H24v7h11.3c-.5 2.5-1.9 4.6-3.9 6.1v5h6.3C40.9 35 44 30 44 24z" fill="#4285F4"/>
+        <path d="M24 44c5.6 0 10.3-1.9 13.8-5l-6.3-5c-1.9 1.3-4.4 2-7.5 2-5.7 0-10.6-3.9-12.4-9.1H5.1v5.2C8.5 39.8 15.7 44 24 44z" fill="#34A853"/>
+        <path d="M11.6 27c-.5-1.3-.7-2.6-.7-4s.2-2.8.7-4v-5.2H5.1C3.8 16.7 3 20.3 3 24s.8 7.3 2.1 10.2L11.6 27z" fill="#FBBC05"/>
+        <path d="M24 10.9c3.2 0 6 1.1 8.2 3.2l6.1-6.1C34.3 4.5 29.6 3 24 3 15.7 3 8.5 7.2 5.1 13.8l6.5 5.2C13.4 13.8 18.3 10.9 24 10.9z" fill="#EA4335"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/elearning/zoom',
+    label: 'Zoom',
+    icon: (
+      <svg viewBox="0 0 48 48" className="w-3.5 h-3.5 shrink-0">
+        <rect width="48" height="48" rx="8" fill="#2D8CFF"/>
+        <path d="M8 17a2 2 0 012-2h18a2 2 0 012 2v14a2 2 0 01-2 2H10a2 2 0 01-2-2V17z" fill="white"/>
+        <path d="M30 22l8-5v14l-8-5V22z" fill="white"/>
+      </svg>
+    ),
+  },
+];
+
 /* ══════════════════════════════════════════════════════════════ */
 export default function Sidebar({ collapsed = false, onToggle, onClose }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const logout   = useAuthStore(s => s.logout);
   const user     = useAuthStore(s => s.session?.user);
   const school   = useAuthStore(s => s.session?.school);
+
+  // eLearning accordion — auto-open when on any /elearning/* path
+  const [eLearningOpen, setELearningOpen] = useState(
+    () => location.pathname.startsWith('/elearning')
+  );
 
   /* Dynamic nav — reacts to patchSchool({ moduleConfig }) instantly */
   const moduleConfig = useAuthStore(s => s.session?.school?.moduleConfig);
@@ -207,39 +253,110 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
             )}
 
             <ul className="space-y-0.5">
-              {section.items.map(({ to, Icon, label }) => (
-                <li key={to}>
-                  <NavLink
-                    to={to}
-                    end={to === '/dashboard'}
-                    onClick={onClose}
-                    title={collapsed ? label : undefined}
-                    className={({ isActive }) =>
-                      clsx(
-                        'flex items-center rounded-lg transition-colors duration-150',
-                        collapsed
-                          ? 'justify-center w-10 h-10 mx-auto'
-                          : 'gap-3 px-3 py-2',
-                        isActive
-                          ? 'bg-white/10 text-white font-medium'
-                          : 'text-slate-400 hover:bg-white/5 hover:text-white',
-                      )
-                    }
-                  >
-                    {({ isActive }) => (
-                      <>
-                        <Icon
+              {section.items.map(({ to, Icon, label, key }) => {
+
+                /* ── eLearning accordion ─────────────────────── */
+                if (key === 'elearning') {
+                  const isAnyActive = location.pathname.startsWith('/elearning');
+                  return (
+                    <li key="elearning">
+                      {/* Parent trigger */}
+                      <button
+                        type="button"
+                        title={collapsed ? 'eLearning' : undefined}
+                        onClick={() => {
+                          if (collapsed) { navigate('/elearning/classroom'); return; }
+                          setELearningOpen(v => !v);
+                        }}
+                        className={clsx(
+                          'w-full flex items-center rounded-lg transition-colors duration-150',
+                          collapsed ? 'justify-center w-10 h-10 mx-auto' : 'gap-3 px-3 py-2',
+                          isAnyActive
+                            ? 'bg-white/10 text-white font-medium'
+                            : 'text-slate-400 hover:bg-white/5 hover:text-white',
+                        )}
+                      >
+                        <MonitorPlay
                           size={16}
-                          className={clsx('shrink-0', isActive ? 'text-white' : 'text-slate-500')}
+                          className={clsx('shrink-0', isAnyActive ? 'text-white' : 'text-slate-500')}
                         />
-                        <span style={labelStyle(collapsed)}>
-                          {label}
+                        <span style={labelStyle(collapsed)} className="flex-1 text-left text-sm">
+                          eLearning
                         </span>
-                      </>
-                    )}
-                  </NavLink>
-                </li>
-              ))}
+                        {!collapsed && (
+                          <ChevronDown
+                            size={13}
+                            className={clsx(
+                              'text-slate-500 transition-transform duration-200 shrink-0',
+                              eLearningOpen ? 'rotate-180' : ''
+                            )}
+                          />
+                        )}
+                      </button>
+
+                      {/* Sub-items — slide down when open */}
+                      {!collapsed && eLearningOpen && (
+                        <ul className="mt-0.5 ml-3 pl-4 border-l border-slate-700/60 space-y-0.5">
+                          {ELEARNING_ITEMS.map(item => (
+                            <li key={item.to}>
+                              <NavLink
+                                to={item.to}
+                                onClick={onClose}
+                                className={({ isActive }) =>
+                                  clsx(
+                                    'flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[13px] transition-colors duration-150',
+                                    isActive
+                                      ? 'bg-white/10 text-white font-medium'
+                                      : 'text-slate-400 hover:bg-white/5 hover:text-white',
+                                  )
+                                }
+                              >
+                                {item.icon}
+                                <span>{item.label}</span>
+                              </NavLink>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  );
+                }
+
+                /* ── Regular nav item ────────────────────────── */
+                return (
+                  <li key={to}>
+                    <NavLink
+                      to={to}
+                      end={to === '/dashboard'}
+                      onClick={onClose}
+                      title={collapsed ? label : undefined}
+                      className={({ isActive }) =>
+                        clsx(
+                          'flex items-center rounded-lg transition-colors duration-150',
+                          collapsed
+                            ? 'justify-center w-10 h-10 mx-auto'
+                            : 'gap-3 px-3 py-2',
+                          isActive
+                            ? 'bg-white/10 text-white font-medium'
+                            : 'text-slate-400 hover:bg-white/5 hover:text-white',
+                        )
+                      }
+                    >
+                      {({ isActive }) => (
+                        <>
+                          <Icon
+                            size={16}
+                            className={clsx('shrink-0', isActive ? 'text-white' : 'text-slate-500')}
+                          />
+                          <span style={labelStyle(collapsed)}>
+                            {label}
+                          </span>
+                        </>
+                      )}
+                    </NavLink>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         ))}
