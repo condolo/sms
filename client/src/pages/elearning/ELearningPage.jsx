@@ -59,24 +59,46 @@ function WorkTypeBadge({ type }) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   CONNECT CARD — shown when no Google account is linked
+   CONNECT CARD — shown when no Google account is linked.
+   forMeet=true shows Meet-specific messaging.
    ══════════════════════════════════════════════════════════════ */
-function ConnectCard() {
+function ConnectCard({ forMeet = false }) {
   function connect() {
     window.location.href = '/api/elearning/auth/connect';
   }
+
+  const title = forMeet ? 'Connect Google Meet' : 'Connect Google Classroom';
+  const desc  = forMeet
+    ? 'Sign in with your Google Workspace account to schedule Google Meet sessions and track attendance directly from Msingi.'
+    : 'Sign in with your Google Workspace account to link your classes, create assignments, and sync grades automatically.';
+  const note  = forMeet
+    ? 'Requires a Google Workspace account. Google Meet sessions are created via your Google Calendar.'
+    : 'Requires a Google Workspace for Education account. Your school must have Google Classroom enabled.';
+
+  const icon = forMeet ? (
+    <svg viewBox="0 0 48 48" className="w-8 h-8">
+      <path d="M44 24c0-1.3-.1-2.5-.4-3.7H24v7h11.3c-.5 2.5-1.9 4.6-3.9 6.1v5h6.3C40.9 35 44 30 44 24z" fill="#4285F4"/>
+      <path d="M24 44c5.6 0 10.3-1.9 13.8-5l-6.3-5c-1.9 1.3-4.4 2-7.5 2-5.7 0-10.6-3.9-12.4-9.1H5.1v5.2C8.5 39.8 15.7 44 24 44z" fill="#34A853"/>
+      <path d="M11.6 27c-.5-1.3-.7-2.6-.7-4s.2-2.8.7-4v-5.2H5.1C3.8 16.7 3 20.3 3 24s.8 7.3 2.1 10.2L11.6 27z" fill="#FBBC05"/>
+      <path d="M24 10.9c3.2 0 6 1.1 8.2 3.2l6.1-6.1C34.3 4.5 29.6 3 24 3 15.7 3 8.5 7.2 5.1 13.8l6.5 5.2C13.4 13.8 18.3 10.9 24 10.9z" fill="#EA4335"/>
+    </svg>
+  ) : (
+    <svg viewBox="0 0 48 48" className="w-8 h-8">
+      <path d="M40 6H8a2 2 0 00-2 2v32a2 2 0 002 2h32a2 2 0 002-2V8a2 2 0 00-2-2z" fill="#4CAF50"/>
+      <path d="M24 14a5 5 0 100 10 5 5 0 000-10z" fill="white"/>
+      <path d="M24 26c-5.33 0-8 2.67-8 4v2h16v-2c0-1.33-2.67-4-8-4z" fill="white"/>
+    </svg>
+  );
+
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] px-4">
       <div className="max-w-sm w-full bg-white rounded-2xl border border-slate-200 shadow-sm p-8 text-center space-y-5">
-        <div className="w-16 h-16 rounded-2xl bg-indigo-50 flex items-center justify-center mx-auto">
-          <MonitorPlay size={28} className="text-indigo-600" />
+        <div className="w-16 h-16 rounded-2xl bg-slate-50 flex items-center justify-center mx-auto border border-slate-200">
+          {icon}
         </div>
         <div>
-          <h2 className="text-lg font-bold text-slate-900">Connect Google Classroom</h2>
-          <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">
-            Sign in with your Google Workspace account to link your classes,
-            create assignments, and sync grades automatically.
-          </p>
+          <h2 className="text-lg font-bold text-slate-900">{title}</h2>
+          <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">{desc}</p>
         </div>
         <button
           onClick={connect}
@@ -90,10 +112,7 @@ function ConnectCard() {
           </svg>
           Sign in with Google
         </button>
-        <p className="text-xs text-slate-400 leading-relaxed">
-          Requires a Google Workspace for Education account.<br />
-          Your school must have Google Classroom enabled.
-        </p>
+        <p className="text-xs text-slate-400 leading-relaxed">{note}</p>
       </div>
     </div>
   );
@@ -1575,28 +1594,39 @@ export default function ELearningPage() {
     if (location.pathname === '/elearning') navigate('/elearning/classroom', { replace: true });
   }, [location.pathname, navigate]);
 
+  const path = location.pathname;
+
   if (statusLoading) {
     return <div className="flex items-center justify-center h-64"><Loader2 size={24} className="animate-spin text-slate-400" /></div>;
   }
 
+  const toastEl = toast && (
+    <div className="fixed top-4 right-4 z-50">
+      <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />
+    </div>
+  );
+
+  // Zoom never needs Google OAuth — it uses its own server-to-server credentials
+  if (path.startsWith('/elearning/zoom')) {
+    return <div className="h-full flex flex-col">{toastEl}<SessionsView platform="zoom" /></div>;
+  }
+
+  // Google Classroom and Meet both need Google OAuth
   if (!connected) {
+    const forMeet = path.startsWith('/elearning/meet');
     return (
       <>
-        {toast && <div className="fixed top-4 right-4 z-50"><Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} /></div>}
-        <ConnectCard />
+        {toastEl}
+        <ConnectCard forMeet={forMeet} />
       </>
     );
   }
 
-  const path = location.pathname;
-
   return (
     <div className="h-full flex flex-col">
-      {toast && <div className="fixed top-4 right-4 z-50"><Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} /></div>}
-
+      {toastEl}
       {path.startsWith('/elearning/classroom') && <ClassroomView statusData={statusData} connected={connected} />}
       {path.startsWith('/elearning/meet')      && <SessionsView  platform="meet" />}
-      {path.startsWith('/elearning/zoom')      && <SessionsView  platform="zoom" />}
     </div>
   );
 }
