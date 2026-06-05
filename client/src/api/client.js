@@ -57,17 +57,29 @@ async function _req(method, path, body = null, params = null) {
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  // 401 → clear session and broadcast
-  if (res.status === 401) {
-    localStorage.removeItem('msingi_session');
-    window.dispatchEvent(new CustomEvent('api:unauthorized'));
-    throw new APIError('UNAUTHORIZED', 'Session expired. Please log in again.', 401);
-  }
-
   const json = await res.json().catch(() => null);
 
+  if (res.status === 401) {
+    // Only treat as session expiry if the request was made with a token.
+    // Unauthenticated requests (login, OTP verify, etc.) should show the
+    // actual server error ("Invalid email or password") — not "Session expired".
+    if (token) {
+      localStorage.removeItem('msingi_session');
+      window.dispatchEvent(new CustomEvent('api:unauthorized'));
+      throw new APIError('UNAUTHORIZED', 'Session expired. Please log in again.', 401);
+    }
+    // No token — pass through the actual server error message
+    const msg = typeof json?.error === 'string' ? json.error
+              : json?.error?.message ?? json?.message ?? 'Invalid credentials.';
+    throw new APIError('UNAUTHORIZED', msg, 401, json ?? {});
+  }
+
   if (!res.ok) {
-    const { code = 'SERVER_ERROR', message = 'An error occurred' } = json?.error ?? {};
+    // Handle both { error: 'string' } and { error: { code, message } } shapes
+    const errBody = json?.error;
+    const code    = typeof errBody === 'object' ? (errBody?.code ?? 'SERVER_ERROR') : 'SERVER_ERROR';
+    const message = typeof errBody === 'string'  ? errBody
+                  : errBody?.message ?? json?.message ?? 'An error occurred';
     throw new APIError(code, message, res.status, json ?? {});
   }
 
