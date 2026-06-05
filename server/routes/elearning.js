@@ -1,30 +1,33 @@
 /* ============================================================
-   eLearning — Google Classroom Integration
+   eLearning — Google Classroom + Zoom Live Sessions
    All academic content lives in Google Classroom / Google Drive.
-   Msingi stores only: OAuth tokens, course links, coursework IDs,
-   and a grade cache (synced from GC webhooks).
+   Live sessions are created via Zoom Server-to-Server OAuth.
+   Msingi stores: OAuth tokens, course links, coursework IDs,
+   grade cache, and live session records.
 
-   Auth model: per-teacher Google OAuth with Classroom + Drive scopes.
-   Teachers must connect their Google Workspace account once.
-
-   Routes:
+   Google Classroom routes:
    GET  /api/elearning/auth/connect       — start GC OAuth flow
    GET  /api/elearning/auth/callback      — OAuth callback, store tokens
    GET  /api/elearning/auth/status        — check connection + whoami
    DELETE /api/elearning/auth/disconnect  — revoke + delete tokens
-
    GET  /api/elearning/gc/courses         — list teacher's GC courses
-   GET  /api/elearning/courses            — list linked courses (Msingi side)
+   GET  /api/elearning/courses            — list linked courses
    POST /api/elearning/courses/link       — link GC course to class/subject
    DELETE /api/elearning/courses/:id      — unlink course
+   GET/POST/DELETE /api/elearning/courses/:id/coursework
+   POST /api/elearning/gc-webhook         — Google Pub/Sub grade push
 
-   GET  /api/elearning/courses/:id/coursework        — list GC coursework
-   POST /api/elearning/courses/:id/coursework        — create assignment in GC
-   DELETE /api/elearning/courses/:id/coursework/:cwId — delete coursework in GC
-
-   POST /api/elearning/gc-webhook         — receive grade push from Google Pub/Sub
+   Zoom Live Session routes:
+   GET  /api/elearning/zoom/status                    — Zoom configured?
+   GET  /api/elearning/courses/:id/sessions           — list sessions
+   POST /api/elearning/courses/:id/sessions           — schedule meeting
+   GET  /api/elearning/sessions/:sessionId            — session detail
+   PATCH /api/elearning/sessions/:sessionId           — update session
+   DELETE /api/elearning/sessions/:sessionId          — cancel meeting
+   POST /api/elearning/zoom-webhook                   — Zoom event webhooks
    ============================================================ */
 const express        = require('express');
+const crypto         = require('crypto');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
 
@@ -615,6 +618,388 @@ router.get('/gc/students/:courseId', authMiddleware, async (req, res) => {
     res.json({ students: data.students || [] });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   ZOOM — SERVER-TO-SERVER OAUTH + LIVE SESSIONS
+   Env vars required:
+     ZOOM_ACCOUNT_ID     — from Zoom Marketplace app
+     ZOOM_CLIENT_ID      — Server-to-Server OAuth client ID
+     ZOOM_CLIENT_SECRET  — Server-to-Server OAuth client secret
+     ZOOM_WEBHOOK_SECRET — from Zoom Webhook configuration (for verification)
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── In-memory Zoom token cache (1-hour TTL) ─────────────────── */
+let _zoomToken     = null;
+let _zoomTokenExp  = 0;
+
+async function _getZoomToken() {
+  if (_zoomToken && Date.now() < _zoomTokenExp - 60_000) return _zoomToken;
+
+  const { ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET } = process.env;
+  if (!ZOOM_ACCOUNT_ID || !ZOOM_CLIENT_ID || !ZOOM_CLIENT_SECRET) {
+    throw new Error('Zoom is not configured. Add ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET.');
+  }
+
+  const creds = Buffer.from(`${ZOOM_CLIENT_ID}:${ZOOM_CLIENT_SECRET}`).toString('base64');
+  const res   = await fetch(
+    `https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${ZOOM_ACCOUNT_ID}`,
+    { method: 'POST', headers: { Authorization: `Basic ${creds}` } }
+  );
+  const json = await res.json();
+  if (!json.access_token) throw new Error('Failed to get Zoom access token.');
+
+  _zoomToken    = json.access_token;
+  _zoomTokenExp = Date.now() + (json.expires_in ?? 3600) * 1000;
+  return _zoomToken;
+}
+
+async function _zoomFetch(path, opts = {}) {
+  const token = await _getZoomToken();
+  const res   = await fetch(`https://api.zoom.us/v2${path}`, {
+    ...opts,
+    headers: {
+      Authorization:  `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...(opts.headers || {}),
+    },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (res.status === 204 || res.status === 200 && opts.method === 'DELETE') return {};
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json?.message || `Zoom API error ${res.status}`);
+  return json;
+}
+
+/* Verify Zoom webhook signature */
+function _verifyZoomWebhook(req) {
+  const secret    = process.env.ZOOM_WEBHOOK_SECRET;
+  if (!secret) return true; // skip in dev
+  const ts        = req.headers['x-zm-request-timestamp'] || '';
+  const sig       = req.headers['x-zm-signature']          || '';
+  const rawBody   = JSON.stringify(req.body);
+  const message   = `v0:${ts}:${rawBody}`;
+  const expected  = `v0=${crypto.createHmac('sha256', secret).update(message).digest('hex')}`;
+  return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+}
+
+/* ── Zoom status ─────────────────────────────────────────────── */
+router.get('/zoom/status', authMiddleware, (req, res) => {
+  const configured = !!(
+    process.env.ZOOM_ACCOUNT_ID &&
+    process.env.ZOOM_CLIENT_ID  &&
+    process.env.ZOOM_CLIENT_SECRET
+  );
+  res.json({ configured });
+});
+
+/* ── List sessions for a course ──────────────────────────────── */
+router.get('/courses/:id/sessions', authMiddleware, async (req, res) => {
+  try {
+    const Sessions = _model('elearning_sessions');
+    const sessions = await Sessions.find({
+      schoolId:  req.jwtUser.schoolId,
+      gcCourseId: req.params.id,
+    }).sort({ scheduledAt: -1 }).lean();
+    res.json({ sessions });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ── Schedule a new Zoom meeting for a course ────────────────── */
+/* POST /api/elearning/courses/:id/sessions
+   Body: { title, scheduledAt (ISO), duration (mins), agenda }
+*/
+router.post('/courses/:id/sessions', authMiddleware, async (req, res) => {
+  try {
+    const { title, scheduledAt, duration = 60, agenda = '' } = req.body;
+    if (!title || !scheduledAt) {
+      return res.status(400).json({ error: 'title and scheduledAt are required.' });
+    }
+
+    // Resolve teacher email for Zoom host
+    const Users   = _model('users');
+    const teacher = await Users.findOne({ id: req.jwtUser.userId }).lean();
+    const hostEmail = teacher?.email || 'me';
+
+    // Create Zoom meeting
+    const meeting = await _zoomFetch(`/users/${encodeURIComponent(hostEmail)}/meetings`, {
+      method: 'POST',
+      body: {
+        topic:       title,
+        type:        2,  // scheduled
+        start_time:  new Date(scheduledAt).toISOString().replace('.000Z', 'Z'),
+        duration:    Number(duration),
+        timezone:    'Africa/Nairobi',
+        agenda,
+        settings: {
+          host_video:       true,
+          participant_video: true,
+          join_before_host: false,
+          waiting_room:     true,
+          mute_upon_entry:  true,
+          auto_recording:   'cloud',
+        },
+      },
+    });
+
+    // Resolve course link for subjectId/classId
+    const CourseLinks = _model('elearning_course_links');
+    const courseLink  = await CourseLinks.findOne({
+      gcCourseId: req.params.id,
+      schoolId:   req.jwtUser.schoolId,
+    }).lean();
+
+    // Persist session
+    const Sessions = _model('elearning_sessions');
+    const id       = `sess_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const doc      = {
+      id,
+      schoolId:    req.jwtUser.schoolId,
+      gcCourseId:  req.params.id,
+      teacherId:   req.jwtUser.userId,
+      subjectId:   courseLink?.subjectId || null,
+      classId:     courseLink?.classId   || null,
+      title,
+      agenda,
+      scheduledAt,
+      duration:    Number(duration),
+      zoomMeetingId:  String(meeting.id),
+      zoomHostUrl:    meeting.start_url,
+      zoomJoinUrl:    meeting.join_url,
+      zoomPassword:   meeting.password,
+      status:         'scheduled',
+      attendees:      [],
+      recordingUrl:   null,
+      createdAt:      new Date().toISOString(),
+    };
+    await Sessions.insertOne(doc);
+
+    res.json({ success: true, session: doc });
+  } catch (err) {
+    console.error('[elearning/sessions POST]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ── Get single session ──────────────────────────────────────── */
+router.get('/sessions/:sessionId', authMiddleware, async (req, res) => {
+  try {
+    const Sessions = _model('elearning_sessions');
+    const session  = await Sessions.findOne({
+      id:       req.params.sessionId,
+      schoolId: req.jwtUser.schoolId,
+    }).lean();
+    if (!session) return res.status(404).json({ error: 'Session not found.' });
+    res.json({ session });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ── Update session (reschedule) ─────────────────────────────── */
+router.patch('/sessions/:sessionId', authMiddleware, async (req, res) => {
+  try {
+    const Sessions = _model('elearning_sessions');
+    const session  = await Sessions.findOne({
+      id: req.params.sessionId, schoolId: req.jwtUser.schoolId,
+    }).lean();
+    if (!session) return res.status(404).json({ error: 'Session not found.' });
+
+    const { title, scheduledAt, duration, agenda } = req.body;
+    const update = {};
+    if (title)       update.title       = title;
+    if (scheduledAt) update.scheduledAt = scheduledAt;
+    if (duration)    update.duration    = Number(duration);
+    if (agenda)      update.agenda      = agenda;
+
+    // Sync with Zoom
+    if (Object.keys(update).length) {
+      await _zoomFetch(`/meetings/${session.zoomMeetingId}`, {
+        method: 'PATCH',
+        body: {
+          topic:      update.title      || session.title,
+          start_time: update.scheduledAt ? new Date(update.scheduledAt).toISOString().replace('.000Z', 'Z') : undefined,
+          duration:   update.duration   || session.duration,
+          agenda:     update.agenda     || session.agenda,
+        },
+      });
+    }
+
+    update.updatedAt = new Date().toISOString();
+    await Sessions.updateOne({ id: req.params.sessionId }, { $set: update });
+    const fresh = await Sessions.findOne({ id: req.params.sessionId }).lean();
+    res.json({ success: true, session: fresh });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ── Cancel / delete session ─────────────────────────────────── */
+router.delete('/sessions/:sessionId', authMiddleware, async (req, res) => {
+  try {
+    const Sessions = _model('elearning_sessions');
+    const session  = await Sessions.findOne({
+      id: req.params.sessionId, schoolId: req.jwtUser.schoolId,
+    }).lean();
+    if (!session) return res.status(404).json({ error: 'Session not found.' });
+
+    // Delete from Zoom
+    await _zoomFetch(`/meetings/${session.zoomMeetingId}`, { method: 'DELETE' });
+
+    await Sessions.updateOne(
+      { id: req.params.sessionId },
+      { $set: { status: 'cancelled', updatedAt: new Date().toISOString() } }
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   ZOOM WEBHOOK — attendance + recording auto-sync
+   Events handled:
+     meeting.participant_joined → mark attendance started
+     meeting.participant_left   → update attendance duration
+     meeting.ended              → close session, calculate durations
+     recording.completed        → store recording URL
+   ══════════════════════════════════════════════════════════════ */
+router.post('/zoom-webhook', async (req, res) => {
+  // URL validation challenge (Zoom sends this once when you set up the endpoint)
+  if (req.body?.event === 'endpoint.url_validation') {
+    const hash = crypto
+      .createHmac('sha256', process.env.ZOOM_WEBHOOK_SECRET || '')
+      .update(req.body.payload?.plainToken || '')
+      .digest('hex');
+    return res.json({ plainToken: req.body.payload?.plainToken, encryptedToken: hash });
+  }
+
+  // Signature verification
+  if (!_verifyZoomWebhook(req)) {
+    return res.status(401).json({ error: 'Invalid signature' });
+  }
+
+  res.sendStatus(200); // ack immediately
+
+  try {
+    const { event, payload } = req.body;
+    const zoomMeetingId = String(payload?.object?.id || '');
+    if (!zoomMeetingId) return;
+
+    const Sessions = _model('elearning_sessions');
+    const session  = await Sessions.findOne({ zoomMeetingId }).lean();
+    if (!session) return;
+
+    const Users = _model('users');
+
+    if (event === 'meeting.started') {
+      await Sessions.updateOne({ zoomMeetingId }, { $set: { status: 'live', startedAt: new Date().toISOString() } });
+    }
+
+    if (event === 'meeting.participant_joined') {
+      const participant = payload.object.participant;
+      const email       = participant?.email?.toLowerCase();
+      if (!email) return;
+
+      const student = await Users.findOne({ schoolId: session.schoolId, email }).lean();
+      if (!student) return;
+
+      // Add attendee record (or update if re-joining)
+      await Sessions.updateOne(
+        { zoomMeetingId },
+        {
+          $pull: { attendees: { studentId: student.id } }, // remove stale entry
+        }
+      );
+      await Sessions.updateOne(
+        { zoomMeetingId },
+        {
+          $push: {
+            attendees: {
+              studentId:   student.id,
+              studentName: student.name,
+              email,
+              joinedAt:    new Date().toISOString(),
+              leftAt:      null,
+              durationMins: 0,
+            },
+          },
+        }
+      );
+    }
+
+    if (event === 'meeting.participant_left') {
+      const participant = payload.object.participant;
+      const email       = participant?.email?.toLowerCase();
+      if (!email) return;
+
+      const student = await Users.findOne({ schoolId: session.schoolId, email }).lean();
+      if (!student) return;
+
+      const leftAt  = new Date().toISOString();
+      const sess    = await Sessions.findOne({ zoomMeetingId }).lean();
+      const rec     = sess?.attendees?.find(a => a.studentId === student.id);
+      const joinMs  = rec?.joinedAt ? new Date(rec.joinedAt).getTime() : Date.now();
+      const durMins = Math.round((Date.now() - joinMs) / 60_000);
+
+      await Sessions.updateOne(
+        { zoomMeetingId, 'attendees.studentId': student.id },
+        { $set: { 'attendees.$.leftAt': leftAt, 'attendees.$.durationMins': durMins } }
+      );
+    }
+
+    if (event === 'meeting.ended') {
+      const sess = await Sessions.findOne({ zoomMeetingId }).lean();
+      await Sessions.updateOne(
+        { zoomMeetingId },
+        { $set: { status: 'ended', endedAt: new Date().toISOString() } }
+      );
+
+      // Write attendance to the Attendance module for each attendee
+      if (sess?.attendees?.length && sess.classId) {
+        const Attendance = _model('attendance');
+        const date       = new Date(sess.scheduledAt).toISOString().split('T')[0];
+        for (const att of sess.attendees) {
+          if (!att.studentId) continue;
+          await Attendance.updateOne(
+            { schoolId: sess.schoolId, studentId: att.studentId, date, type: 'virtual_class', sessionId: sess.id },
+            {
+              $set: {
+                schoolId:     sess.schoolId,
+                studentId:    att.studentId,
+                classId:      sess.classId,
+                subjectId:    sess.subjectId || null,
+                date,
+                type:         'virtual_class',
+                sessionId:    sess.id,
+                sessionTitle: sess.title,
+                status:       att.durationMins >= Math.floor(sess.duration * 0.5) ? 'present' : 'partial',
+                durationMins: att.durationMins,
+                source:       'zoom_webhook',
+                markedAt:     new Date().toISOString(),
+              },
+            },
+            { upsert: true }
+          );
+        }
+      }
+    }
+
+    if (event === 'recording.completed') {
+      const recordings = payload.object?.recording_files || [];
+      const mp4        = recordings.find(r => r.file_type === 'MP4' && r.status === 'completed');
+      if (mp4?.play_url) {
+        await Sessions.updateOne(
+          { zoomMeetingId },
+          { $set: { recordingUrl: mp4.play_url } }
+        );
+      }
+    }
+  } catch (err) {
+    console.error('[elearning/zoom-webhook]', err);
   }
 });
 

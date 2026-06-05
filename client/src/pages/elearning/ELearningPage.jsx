@@ -1,9 +1,5 @@
 /* ============================================================
-   eLearning — Google Classroom Integration
-   Three views:
-   1. Not connected  → Connect Google Classroom card
-   2. Connected, no linked courses → Link a GC course
-   3. Linked course selected → Classwork / People / Grades tabs
+   eLearning — Google Classroom + Zoom Live Sessions
    ============================================================ */
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -12,7 +8,8 @@ import {
   MonitorPlay, Link2, Link2Off, Plus, Trash2, Loader2,
   BookOpen, Users, BarChart3, Upload, Calendar, Clock,
   CheckCircle2, AlertTriangle, ChevronDown, X, FileText,
-  ExternalLink, RefreshCcw,
+  ExternalLink, RefreshCcw, Video, Play, StopCircle,
+  Mic, MicOff, WifiOff,
 } from 'lucide-react';
 import { settings as settingsApi } from '@/api/client.js';
 
@@ -649,6 +646,298 @@ function PeopleTab({ course }) {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   SCHEDULE SESSION MODAL
+   ══════════════════════════════════════════════════════════════ */
+function ScheduleSessionModal({ courseId, onCreated, onClose }) {
+  const [form, setForm] = useState({
+    title:       '',
+    scheduledAt: '',
+    duration:    '60',
+    agenda:      '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState('');
+
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.title.trim() || !form.scheduledAt) {
+      setError('Title and date/time are required.');
+      return;
+    }
+    setSaving(true); setError('');
+    try {
+      await apiFetch(`/courses/${courseId}/sessions`, {
+        method: 'POST',
+        body: {
+          ...form,
+          scheduledAt: new Date(form.scheduledAt).toISOString(),
+          duration: Number(form.duration),
+        },
+      });
+      onCreated();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const iCls = 'w-full text-sm border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm px-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <Video size={16} className="text-indigo-600" />
+            <h2 className="font-semibold text-slate-900">Schedule Live Session</h2>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition"><X size={16} /></button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+          {error && (
+            <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-sm text-red-700">
+              <AlertTriangle size={13} /> {error}
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Session Title *</label>
+            <input value={form.title} onChange={e => set('title', e.target.value)}
+              className={iCls} placeholder="e.g. Week 4 Live Class — Photosynthesis" required />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Date & Time *</label>
+              <input type="datetime-local" value={form.scheduledAt} onChange={e => set('scheduledAt', e.target.value)} className={iCls} required />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Duration (mins)</label>
+              <select value={form.duration} onChange={e => set('duration', e.target.value)} className={iCls}>
+                {[30, 45, 60, 90, 120].map(m => <option key={m} value={m}>{m} min</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Agenda (optional)</label>
+            <textarea value={form.agenda} onChange={e => set('agenda', e.target.value)}
+              className={`${iCls} resize-none`} rows={2} placeholder="Topics to cover…" />
+          </div>
+
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-start gap-2.5">
+            <Video size={13} className="text-blue-600 mt-0.5 shrink-0" />
+            <p className="text-xs text-blue-800 leading-relaxed">
+              A Zoom meeting is created automatically. You get the host link, students get the join link. Attendance is tracked via webhook when students join.
+            </p>
+          </div>
+        </form>
+
+        <div className="flex gap-2 px-6 pb-5">
+          <button type="button" onClick={onClose}
+            className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition">Cancel</button>
+          <button onClick={handleSubmit} disabled={saving}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition">
+            {saving ? <Loader2 size={13} className="animate-spin" /> : <Video size={13} />}
+            {saving ? 'Scheduling…' : 'Schedule on Zoom'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   LIVE SESSIONS TAB
+   ══════════════════════════════════════════════════════════════ */
+function LiveTab({ course }) {
+  const qc = useQueryClient();
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  const { data: zoomStatus } = useQuery({
+    queryKey: ['zoom-status'],
+    queryFn:  () => apiFetch('/zoom/status'),
+    staleTime: 60_000,
+  });
+
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ['elearning-sessions', course.gcCourseId],
+    queryFn:  () => apiFetch(`/courses/${course.gcCourseId}/sessions`),
+    staleTime: 30_000,
+  });
+
+  const sessions = data?.sessions || [];
+  const now      = new Date();
+
+  const upcoming = sessions.filter(s => s.status !== 'cancelled' && new Date(s.scheduledAt) >= now);
+  const past     = sessions.filter(s => s.status === 'ended' || (s.status !== 'cancelled' && new Date(s.scheduledAt) < now));
+
+  async function handleCancel(sessionId) {
+    if (!window.confirm('Cancel this session? It will be deleted from Zoom.')) return;
+    try {
+      await apiFetch(`/sessions/${sessionId}`, { method: 'DELETE' });
+      qc.invalidateQueries({ queryKey: ['elearning-sessions', course.gcCourseId] });
+      setToast({ type: 'success', msg: 'Session cancelled.' });
+    } catch (err) {
+      setToast({ type: 'error', msg: err.message });
+    }
+  }
+
+  function StatusBadge({ status }) {
+    const map = {
+      scheduled: { label: 'Scheduled',  cls: 'bg-blue-50 text-blue-700 border-blue-200'   },
+      live:      { label: 'Live now',   cls: 'bg-green-50 text-green-700 border-green-200 animate-pulse' },
+      ended:     { label: 'Ended',      cls: 'bg-slate-50 text-slate-500 border-slate-200' },
+      cancelled: { label: 'Cancelled',  cls: 'bg-red-50 text-red-600 border-red-200'       },
+    };
+    const { label, cls } = map[status] || map.scheduled;
+    return <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${cls}`}>{label}</span>;
+  }
+
+  function SessionCard({ session }) {
+    const start = new Date(session.scheduledAt);
+    const isLive = session.status === 'live';
+    const isUpcoming = session.status === 'scheduled' && start >= now;
+
+    return (
+      <div className={`bg-white border rounded-xl px-5 py-4 flex items-start gap-4 transition
+        ${isLive ? 'border-green-300 shadow-sm shadow-green-100' : 'border-slate-200 hover:border-indigo-200'}`}>
+
+        {/* Icon */}
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5
+          ${isLive ? 'bg-green-100' : 'bg-indigo-50'}`}>
+          <Video size={18} className={isLive ? 'text-green-600' : 'text-indigo-500'} />
+        </div>
+
+        {/* Info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <p className="font-semibold text-slate-800 text-sm">{session.title}</p>
+            <StatusBadge status={session.status} />
+          </div>
+          <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
+            <span className="flex items-center gap-1">
+              <Calendar size={11} />
+              {start.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+            </span>
+            <span className="flex items-center gap-1">
+              <Clock size={11} />
+              {start.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+            <span>{session.duration} min</span>
+            {session.attendees?.length > 0 && (
+              <span className="flex items-center gap-1">
+                <Users size={11} /> {session.attendees.length} attended
+              </span>
+            )}
+          </div>
+          {session.agenda && (
+            <p className="text-xs text-slate-400 mt-1 truncate">{session.agenda}</p>
+          )}
+          {session.recordingUrl && (
+            <a href={session.recordingUrl} target="_blank" rel="noreferrer"
+              className="inline-flex items-center gap-1 mt-1.5 text-xs text-indigo-600 hover:text-indigo-800 font-medium transition">
+              <Play size={11} /> View recording
+            </a>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-col gap-1.5 items-end shrink-0">
+          {(isLive || isUpcoming) && (
+            <a href={session.zoomHostUrl} target="_blank" rel="noreferrer"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition shadow-sm
+                ${isLive ? 'bg-green-600 hover:bg-green-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
+              {isLive ? <><Mic size={11} /> In session</> : <><Play size={11} /> Start</>}
+            </a>
+          )}
+          {isUpcoming && (
+            <button onClick={() => handleCancel(session.id)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50 transition">
+              <Trash2 size={11} /> Cancel
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (!zoomStatus?.configured) {
+    return (
+      <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-8 text-center space-y-3">
+        <WifiOff size={24} className="text-amber-500 mx-auto" />
+        <p className="font-semibold text-amber-800">Zoom not configured</p>
+        <p className="text-sm text-amber-700 max-w-sm mx-auto leading-relaxed">
+          Add <code className="bg-amber-100 px-1 rounded text-xs">ZOOM_ACCOUNT_ID</code>,{' '}
+          <code className="bg-amber-100 px-1 rounded text-xs">ZOOM_CLIENT_ID</code>, and{' '}
+          <code className="bg-amber-100 px-1 rounded text-xs">ZOOM_CLIENT_SECRET</code> to your server environment variables to enable live sessions.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>{toast && <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}</div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => refetch()} className="p-2 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition">
+            <RefreshCcw size={14} />
+          </button>
+          <button onClick={() => setShowSchedule(true)}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition shadow-sm">
+            <Plus size={14} /> Schedule Session
+          </button>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">{[...Array(2)].map((_, i) => <div key={i} className="h-20 bg-slate-100 rounded-xl animate-pulse" />)}</div>
+      ) : sessions.length === 0 ? (
+        <div className="bg-white border border-dashed border-slate-200 rounded-xl p-12 text-center">
+          <Video size={24} className="text-slate-300 mx-auto mb-2" />
+          <p className="text-sm text-slate-500 font-medium">No sessions yet</p>
+          <p className="text-xs text-slate-400 mt-1">Schedule a Zoom session for this course.</p>
+        </div>
+      ) : (
+        <>
+          {upcoming.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Upcoming</p>
+              {upcoming.map(s => <SessionCard key={s.id} session={s} />)}
+            </div>
+          )}
+          {past.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Past Sessions</p>
+              {past.map(s => <SessionCard key={s.id} session={s} />)}
+            </div>
+          )}
+        </>
+      )}
+
+      {showSchedule && (
+        <ScheduleSessionModal
+          courseId={course.gcCourseId}
+          onCreated={() => {
+            setShowSchedule(false);
+            qc.invalidateQueries({ queryKey: ['elearning-sessions', course.gcCourseId] });
+            setToast({ type: 'success', msg: 'Session scheduled on Zoom.' });
+          }}
+          onClose={() => setShowSchedule(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
    MAIN PAGE
    ══════════════════════════════════════════════════════════════ */
 export default function ELearningPage() {
@@ -738,6 +1027,7 @@ export default function ELearningPage() {
 
   const TABS = [
     { id: 'classwork', label: 'Classwork', Icon: BookOpen  },
+    { id: 'live',      label: 'Live',      Icon: Video     },
     { id: 'people',    label: 'People',    Icon: Users     },
     { id: 'grades',    label: 'Grades',    Icon: BarChart3 },
   ];
@@ -854,6 +1144,7 @@ export default function ELearningPage() {
 
             {/* Tab content */}
             {activeTab === 'classwork' && <ClassworkTab course={activeCourse} />}
+            {activeTab === 'live'      && <LiveTab      course={activeCourse} />}
             {activeTab === 'people'    && <PeopleTab    course={activeCourse} />}
             {activeTab === 'grades'    && <GradesTab    course={activeCourse} />}
           </div>
