@@ -650,6 +650,7 @@ function PeopleTab({ course }) {
    ══════════════════════════════════════════════════════════════ */
 function ScheduleSessionModal({ courseId, onCreated, onClose }) {
   const [form, setForm] = useState({
+    platform:    'meet',
     title:       '',
     scheduledAt: '',
     duration:    '60',
@@ -657,6 +658,12 @@ function ScheduleSessionModal({ courseId, onCreated, onClose }) {
   });
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState('');
+
+  const { data: zoomStatus } = useQuery({
+    queryKey: ['zoom-status'],
+    queryFn:  () => apiFetch('/zoom/status'),
+    staleTime: 60_000,
+  });
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
 
@@ -704,6 +711,52 @@ function ScheduleSessionModal({ courseId, onCreated, onClose }) {
             </div>
           )}
 
+          {/* Platform picker */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Platform</label>
+            <div className="grid grid-cols-2 gap-2">
+              {/* Google Meet */}
+              <button type="button" onClick={() => set('platform', 'meet')}
+                className={`flex items-center gap-2.5 px-3 py-3 rounded-xl border text-left transition
+                  ${form.platform === 'meet'
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-slate-200 hover:border-blue-300 hover:bg-slate-50'}`}>
+                <svg className="w-5 h-5 shrink-0" viewBox="0 0 48 48">
+                  <path d="M44 24c0-1.3-.1-2.5-.4-3.7H24v7h11.3c-.5 2.5-1.9 4.6-3.9 6.1v5h6.3C40.9 35 44 30 44 24z" fill="#4285F4"/>
+                  <path d="M24 44c5.6 0 10.3-1.9 13.8-5l-6.3-5c-1.9 1.3-4.4 2-7.5 2-5.7 0-10.6-3.9-12.4-9.1H5.1v5.2C8.5 39.8 15.7 44 24 44z" fill="#34A853"/>
+                  <path d="M11.6 27c-.5-1.3-.7-2.6-.7-4s.2-2.8.7-4v-5.2H5.1C3.8 16.7 3 20.3 3 24s.8 7.3 2.1 10.2L11.6 27z" fill="#FBBC05"/>
+                  <path d="M24 10.9c3.2 0 6 1.1 8.2 3.2l6.1-6.1C34.3 4.5 29.6 3 24 3 15.7 3 8.5 7.2 5.1 13.8l6.5 5.2C13.4 13.8 18.3 10.9 24 10.9z" fill="#EA4335"/>
+                </svg>
+                <div>
+                  <p className={`text-sm font-semibold ${form.platform === 'meet' ? 'text-blue-800' : 'text-slate-700'}`}>Google Meet</p>
+                  <p className="text-[10px] text-slate-400">Uses your Google Workspace</p>
+                </div>
+              </button>
+
+              {/* Zoom */}
+              <button type="button"
+                onClick={() => zoomStatus?.configured && set('platform', 'zoom')}
+                disabled={!zoomStatus?.configured}
+                className={`flex items-center gap-2.5 px-3 py-3 rounded-xl border text-left transition
+                  ${!zoomStatus?.configured ? 'opacity-40 cursor-not-allowed border-slate-200' :
+                    form.platform === 'zoom'
+                      ? 'border-blue-500 bg-blue-50'
+                      : 'border-slate-200 hover:border-blue-300 hover:bg-slate-50'}`}>
+                <svg className="w-5 h-5 shrink-0" viewBox="0 0 48 48">
+                  <rect width="48" height="48" rx="8" fill="#2D8CFF"/>
+                  <path d="M8 17a2 2 0 012-2h18a2 2 0 012 2v14a2 2 0 01-2 2H10a2 2 0 01-2-2V17z" fill="white"/>
+                  <path d="M30 22l8-5v14l-8-5V22z" fill="white"/>
+                </svg>
+                <div>
+                  <p className={`text-sm font-semibold ${form.platform === 'zoom' ? 'text-blue-800' : 'text-slate-700'}`}>Zoom</p>
+                  <p className="text-[10px] text-slate-400">
+                    {zoomStatus?.configured ? 'School Zoom account' : 'Not configured'}
+                  </p>
+                </div>
+              </button>
+            </div>
+          </div>
+
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Session Title *</label>
             <input value={form.title} onChange={e => set('title', e.target.value)}
@@ -731,9 +784,15 @@ function ScheduleSessionModal({ courseId, onCreated, onClose }) {
 
           <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-start gap-2.5">
             <Video size={13} className="text-blue-600 mt-0.5 shrink-0" />
-            <p className="text-xs text-blue-800 leading-relaxed">
-              A Zoom meeting is created automatically. You get the host link, students get the join link. Attendance is tracked via webhook when students join.
-            </p>
+            {form.platform === 'meet' ? (
+              <p className="text-xs text-blue-800 leading-relaxed">
+                A Google Meet is created via your Calendar. Everyone uses the same link. Attendance is recorded when students click Join through Msingi.
+              </p>
+            ) : (
+              <p className="text-xs text-blue-800 leading-relaxed">
+                A Zoom meeting is created automatically. You get the host link, students get the join link. Attendance is tracked via webhook when students join.
+              </p>
+            )}
           </div>
         </form>
 
@@ -799,10 +858,41 @@ function LiveTab({ course }) {
     return <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${cls}`}>{label}</span>;
   }
 
+  function PlatformBadge({ platform }) {
+    if (platform === 'meet') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-blue-50 text-blue-700 border-blue-200">
+          <svg className="w-2.5 h-2.5" viewBox="0 0 48 48"><path d="M44 24c0-1.3-.1-2.5-.4-3.7H24v7h11.3c-.5 2.5-1.9 4.6-3.9 6.1v5h6.3C40.9 35 44 30 44 24z" fill="#4285F4"/><path d="M24 44c5.6 0 10.3-1.9 13.8-5l-6.3-5c-1.9 1.3-4.4 2-7.5 2-5.7 0-10.6-3.9-12.4-9.1H5.1v5.2C8.5 39.8 15.7 44 24 44z" fill="#34A853"/><path d="M11.6 27c-.5-1.3-.7-2.6-.7-4s.2-2.8.7-4v-5.2H5.1C3.8 16.7 3 20.3 3 24s.8 7.3 2.1 10.2L11.6 27z" fill="#FBBC05"/><path d="M24 10.9c3.2 0 6 1.1 8.2 3.2l6.1-6.1C34.3 4.5 29.6 3 24 3 15.7 3 8.5 7.2 5.1 13.8l6.5 5.2C13.4 13.8 18.3 10.9 24 10.9z" fill="#EA4335"/></svg>
+          Meet
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-sky-50 text-sky-700 border-sky-200">
+        <svg className="w-2.5 h-2.5" viewBox="0 0 48 48"><rect width="48" height="48" rx="4" fill="#2D8CFF"/><path d="M8 17a2 2 0 012-2h18a2 2 0 012 2v14a2 2 0 01-2 2H10a2 2 0 01-2-2V17z" fill="white"/><path d="M30 22l8-5v14l-8-5V22z" fill="white"/></svg>
+        Zoom
+      </span>
+    );
+  }
+
   function SessionCard({ session }) {
-    const start = new Date(session.scheduledAt);
-    const isLive = session.status === 'live';
+    const [joining, setJoining] = useState(false);
+    const start      = new Date(session.scheduledAt);
+    const isLive     = session.status === 'live';
     const isUpcoming = session.status === 'scheduled' && start >= now;
+    const isMeet     = session.platform === 'meet';
+
+    async function handleMeetJoin() {
+      setJoining(true);
+      try {
+        const data = await apiFetch(`/sessions/${session.id}/attend`, { method: 'POST' });
+        window.open(data.meetLink || session.meetLink, '_blank', 'noopener');
+      } catch {
+        window.open(session.meetLink, '_blank', 'noopener');
+      } finally {
+        setJoining(false);
+      }
+    }
 
     return (
       <div className={`bg-white border rounded-xl px-5 py-4 flex items-start gap-4 transition
@@ -819,6 +909,7 @@ function LiveTab({ course }) {
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <p className="font-semibold text-slate-800 text-sm">{session.title}</p>
             <StatusBadge status={session.status} />
+            <PlatformBadge platform={session.platform || 'zoom'} />
           </div>
           <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
             <span className="flex items-center gap-1">
@@ -850,11 +941,22 @@ function LiveTab({ course }) {
         {/* Actions */}
         <div className="flex flex-col gap-1.5 items-end shrink-0">
           {(isLive || isUpcoming) && (
-            <a href={session.zoomHostUrl} target="_blank" rel="noreferrer"
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition shadow-sm
-                ${isLive ? 'bg-green-600 hover:bg-green-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
-              {isLive ? <><Mic size={11} /> In session</> : <><Play size={11} /> Start</>}
-            </a>
+            isMeet ? (
+              <button onClick={handleMeetJoin} disabled={joining}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition shadow-sm
+                  ${isLive ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'} disabled:opacity-60`}>
+                {joining
+                  ? <Loader2 size={11} className="animate-spin" />
+                  : isLive ? <Mic size={11} /> : <Play size={11} />}
+                {isLive ? 'Join Meet' : 'Join Meet'}
+              </button>
+            ) : (
+              <a href={session.zoomHostUrl} target="_blank" rel="noreferrer"
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition shadow-sm
+                  ${isLive ? 'bg-green-600 hover:bg-green-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
+                {isLive ? <><Mic size={11} /> In session</> : <><Play size={11} /> Start</>}
+              </a>
+            )
           )}
           {isUpcoming && (
             <button onClick={() => handleCancel(session.id)}

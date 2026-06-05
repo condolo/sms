@@ -40,6 +40,7 @@ const GC_SCOPES = [
   'https://www.googleapis.com/auth/classroom.student-submissions.students.readonly',
   'https://www.googleapis.com/auth/classroom.rosters.readonly',
   'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/calendar.events',  // for Google Meet session creation
 ].join(' ');
 
 function _gcRedirectUri() {
@@ -622,6 +623,84 @@ router.get('/gc/students/:courseId', authMiddleware, async (req, res) => {
 });
 
 /* ══════════════════════════════════════════════════════════════
+   GOOGLE MEET — via Google Calendar API
+   Uses the teacher's existing GC OAuth token (calendar.events scope).
+   Creates a calendar event with conferenceData → Google generates
+   the Meet link automatically. Same link for teacher + students.
+   ══════════════════════════════════════════════════════════════ */
+
+async function _createMeetSession({ tok, title, agenda, scheduledAt, duration, teacherEmail, attendeeEmails = [] }) {
+  const fresh = await _refreshIfNeeded(tok);
+  if (!fresh) throw new Error('Google token expired. Please reconnect your account.');
+
+  const startDt = new Date(scheduledAt);
+  const endDt   = new Date(startDt.getTime() + duration * 60_000);
+
+  // ISO with timezone offset for East Africa (UTC+3)
+  function toCalDt(d) {
+    return { dateTime: d.toISOString(), timeZone: 'Africa/Nairobi' };
+  }
+
+  const body = {
+    summary:     title,
+    description: agenda || '',
+    start:       toCalDt(startDt),
+    end:         toCalDt(endDt),
+    conferenceData: {
+      createRequest: {
+        requestId:            `msingi-${Date.now()}`,
+        conferenceSolutionKey: { type: 'hangoutsMeet' },
+      },
+    },
+    attendees: [
+      { email: teacherEmail, organizer: true },
+      ...attendeeEmails.map(e => ({ email: e })),
+    ],
+  };
+
+  const res = await fetch(
+    'https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1&sendUpdates=none',
+    {
+      method:  'POST',
+      headers: {
+        Authorization:  `Bearer ${fresh.googleAccessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const msg = err?.error?.message || `Google Calendar API error ${res.status}`;
+    if (res.status === 403 && msg.toLowerCase().includes('insufficient')) {
+      throw new Error('Calendar permission missing. Please disconnect and reconnect your Google account to grant Calendar access.');
+    }
+    throw new Error(msg);
+  }
+
+  const event = await res.json();
+  const meetLink = event.hangoutLink ||
+    event.conferenceData?.entryPoints?.find(e => e.entryPointType === 'video')?.uri;
+
+  if (!meetLink) throw new Error('Google did not return a Meet link. Make sure your Workspace plan supports Google Meet.');
+
+  return { eventId: event.id, meetLink };
+}
+
+async function _deleteMeetSession({ tok, eventId }) {
+  const fresh = await _refreshIfNeeded(tok);
+  if (!fresh) return; // best-effort
+  await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}?sendUpdates=none`,
+    {
+      method:  'DELETE',
+      headers: { Authorization: `Bearer ${fresh.googleAccessToken}` },
+    }
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
    ZOOM — SERVER-TO-SERVER OAUTH + LIVE SESSIONS
    Env vars required:
      ZOOM_ACCOUNT_ID     — from Zoom Marketplace app
@@ -708,73 +787,91 @@ router.get('/courses/:id/sessions', authMiddleware, async (req, res) => {
   }
 });
 
-/* ── Schedule a new Zoom meeting for a course ────────────────── */
+/* ── Schedule a session (Zoom or Google Meet) ────────────────── */
 /* POST /api/elearning/courses/:id/sessions
-   Body: { title, scheduledAt (ISO), duration (mins), agenda }
+   Body: { platform: 'zoom'|'meet', title, scheduledAt, duration, agenda }
 */
 router.post('/courses/:id/sessions', authMiddleware, async (req, res) => {
   try {
-    const { title, scheduledAt, duration = 60, agenda = '' } = req.body;
+    const { platform = 'zoom', title, scheduledAt, duration = 60, agenda = '' } = req.body;
     if (!title || !scheduledAt) {
       return res.status(400).json({ error: 'title and scheduledAt are required.' });
     }
 
-    // Resolve teacher email for Zoom host
     const Users   = _model('users');
     const teacher = await Users.findOne({ id: req.jwtUser.userId }).lean();
-    const hostEmail = teacher?.email || 'me';
 
-    // Create Zoom meeting
-    const meeting = await _zoomFetch(`/users/${encodeURIComponent(hostEmail)}/meetings`, {
-      method: 'POST',
-      body: {
-        topic:       title,
-        type:        2,  // scheduled
-        start_time:  new Date(scheduledAt).toISOString().replace('.000Z', 'Z'),
-        duration:    Number(duration),
-        timezone:    'Africa/Nairobi',
-        agenda,
-        settings: {
-          host_video:       true,
-          participant_video: true,
-          join_before_host: false,
-          waiting_room:     true,
-          mute_upon_entry:  true,
-          auto_recording:   'cloud',
-        },
-      },
-    });
-
-    // Resolve course link for subjectId/classId
     const CourseLinks = _model('elearning_course_links');
     const courseLink  = await CourseLinks.findOne({
-      gcCourseId: req.params.id,
-      schoolId:   req.jwtUser.schoolId,
+      gcCourseId: req.params.id, schoolId: req.jwtUser.schoolId,
     }).lean();
 
-    // Persist session
-    const Sessions = _model('elearning_sessions');
-    const id       = `sess_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-    const doc      = {
+    const id  = `sess_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const doc = {
       id,
-      schoolId:    req.jwtUser.schoolId,
-      gcCourseId:  req.params.id,
-      teacherId:   req.jwtUser.userId,
-      subjectId:   courseLink?.subjectId || null,
-      classId:     courseLink?.classId   || null,
+      schoolId:   req.jwtUser.schoolId,
+      gcCourseId: req.params.id,
+      teacherId:  req.jwtUser.userId,
+      subjectId:  courseLink?.subjectId || null,
+      classId:    courseLink?.classId   || null,
       title,
       agenda,
       scheduledAt,
-      duration:    Number(duration),
-      zoomMeetingId:  String(meeting.id),
-      zoomHostUrl:    meeting.start_url,
-      zoomJoinUrl:    meeting.join_url,
-      zoomPassword:   meeting.password,
-      status:         'scheduled',
-      attendees:      [],
-      recordingUrl:   null,
-      createdAt:      new Date().toISOString(),
+      duration:   Number(duration),
+      platform,
+      status:     'scheduled',
+      attendees:  [],
+      recordingUrl: null,
+      createdAt:  new Date().toISOString(),
     };
+
+    if (platform === 'meet') {
+      /* ── Google Meet via Calendar API ── */
+      const tok = await _getToken(req.jwtUser.userId);
+      if (!tok) return res.status(403).json({ error: 'Google account not connected.' });
+
+      const { eventId, meetLink } = await _createMeetSession({
+        tok,
+        title,
+        agenda,
+        scheduledAt,
+        duration: Number(duration),
+        teacherEmail: teacher?.email || tok.googleEmail,
+      });
+
+      doc.meetEventId = eventId;
+      doc.meetLink    = meetLink;   // same link for teacher + students
+
+    } else {
+      /* ── Zoom via Server-to-Server OAuth ── */
+      const hostEmail = teacher?.email || 'me';
+      const meeting   = await _zoomFetch(`/users/${encodeURIComponent(hostEmail)}/meetings`, {
+        method: 'POST',
+        body: {
+          topic:      title,
+          type:       2,
+          start_time: new Date(scheduledAt).toISOString().replace('.000Z', 'Z'),
+          duration:   Number(duration),
+          timezone:   'Africa/Nairobi',
+          agenda,
+          settings: {
+            host_video:        true,
+            participant_video: true,
+            join_before_host:  false,
+            waiting_room:      true,
+            mute_upon_entry:   true,
+            auto_recording:    'cloud',
+          },
+        },
+      });
+
+      doc.zoomMeetingId = String(meeting.id);
+      doc.zoomHostUrl   = meeting.start_url;
+      doc.zoomJoinUrl   = meeting.join_url;
+      doc.zoomPassword  = meeting.password;
+    }
+
+    const Sessions = _model('elearning_sessions');
     await Sessions.insertOne(doc);
 
     res.json({ success: true, session: doc });
@@ -846,14 +943,86 @@ router.delete('/sessions/:sessionId', authMiddleware, async (req, res) => {
     }).lean();
     if (!session) return res.status(404).json({ error: 'Session not found.' });
 
-    // Delete from Zoom
-    await _zoomFetch(`/meetings/${session.zoomMeetingId}`, { method: 'DELETE' });
+    if (session.platform === 'meet' && session.meetEventId) {
+      const tok = await _getToken(req.jwtUser.userId);
+      if (tok) await _deleteMeetSession({ tok, eventId: session.meetEventId });
+    } else if (session.zoomMeetingId) {
+      await _zoomFetch(`/meetings/${session.zoomMeetingId}`, { method: 'DELETE' });
+    }
 
     await Sessions.updateOne(
       { id: req.params.sessionId },
       { $set: { status: 'cancelled', updatedAt: new Date().toISOString() } }
     );
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ── Student join tracking for Google Meet ───────────────────── */
+/* POST /api/elearning/sessions/:sessionId/attend
+   Called when a student clicks "Join" for a Meet session.
+   Records attendance since Meet has no join webhook.
+*/
+router.post('/sessions/:sessionId/attend', authMiddleware, async (req, res) => {
+  try {
+    const Sessions = _model('elearning_sessions');
+    const session  = await Sessions.findOne({
+      id: req.params.sessionId, schoolId: req.jwtUser.schoolId,
+    }).lean();
+    if (!session) return res.status(404).json({ error: 'Session not found.' });
+
+    const Users   = _model('users');
+    const student = await Users.findOne({ id: req.jwtUser.userId }).lean();
+    if (!student) return res.status(404).json({ error: 'User not found.' });
+
+    const already = session.attendees?.some(a => a.studentId === student.id);
+    if (!already) {
+      await Sessions.updateOne(
+        { id: req.params.sessionId },
+        {
+          $push: {
+            attendees: {
+              studentId:   student.id,
+              studentName: student.name,
+              email:       student.email,
+              joinedAt:    new Date().toISOString(),
+              leftAt:      null,
+              durationMins: null,
+              source:      'self_reported',
+            },
+          },
+        }
+      );
+
+      // Write to Attendance module immediately (present — they clicked Join)
+      if (session.classId) {
+        const Attendance = _model('attendance');
+        const date       = new Date(session.scheduledAt).toISOString().split('T')[0];
+        await Attendance.updateOne(
+          { schoolId: session.schoolId, studentId: student.id, date, type: 'virtual_class', sessionId: session.id },
+          {
+            $set: {
+              schoolId:     session.schoolId,
+              studentId:    student.id,
+              classId:      session.classId,
+              subjectId:    session.subjectId || null,
+              date,
+              type:         'virtual_class',
+              sessionId:    session.id,
+              sessionTitle: session.title,
+              status:       'present',
+              source:       'meet_join',
+              markedAt:     new Date().toISOString(),
+            },
+          },
+          { upsert: true }
+        );
+      }
+    }
+
+    res.json({ success: true, meetLink: session.meetLink });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
