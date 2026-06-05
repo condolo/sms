@@ -11,6 +11,17 @@ export default class ErrorBoundary extends Component {
   }
 
   static getDerivedStateFromError(error) {
+    // Stale chunk after a new deploy — auto-reload clears the cache
+    const msg = error?.message || '';
+    if (
+      msg.includes('Failed to fetch dynamically imported module') ||
+      msg.includes('Importing a module script failed') ||
+      msg.includes('Unable to preload CSS') ||
+      msg.includes('error loading dynamically imported module')
+    ) {
+      window.location.reload();
+      return { hasError: false, error: null };
+    }
     return { hasError: true, error };
   }
 

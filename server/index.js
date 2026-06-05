@@ -245,8 +245,12 @@ app.get('*', (req, res) => {
   if (req.path === '/platform' || req.path === '/platform/') {
     return res.sendFile(path.join(ROOT_DIR, 'platform.html'));
   }
-  // React SPA — serve index.html for every other route (universal wildcard)
+  // React SPA — serve index.html with no-cache so browsers always fetch
+  // the latest entry point after a new deploy (prevents stale-chunk errors)
   if (reactBuilt) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     return res.sendFile(path.join(REACT_DIST, 'index.html'));
   }
   // No build available (dev mode without running `npm run build`)

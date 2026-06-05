@@ -8,9 +8,22 @@ import { router } from './App.jsx';
 import ErrorBoundary from '@/components/guards/ErrorBoundary.jsx';
 import './index.css';
 
-// Auto-reload when a lazy chunk 404s (stale browser cache after new deploy)
-window.addEventListener('vite:preloadError', () => {
-  window.location.reload();
+// Auto-reload when a lazy chunk 404s after a new deploy.
+// Covers two cases:
+//   1. vite:preloadError — Vite's <link rel="modulepreload"> hint fails
+//   2. unhandledrejection — dynamic import() promise rejects (React Router lazy routes)
+window.addEventListener('vite:preloadError', () => window.location.reload());
+
+window.addEventListener('unhandledrejection', (event) => {
+  const msg = event?.reason?.message || '';
+  if (
+    msg.includes('Failed to fetch dynamically imported module') ||
+    msg.includes('Importing a module script failed') ||
+    msg.includes('error loading dynamically imported module')
+  ) {
+    event.preventDefault();
+    window.location.reload();
+  }
 });
 
 const queryClient = new QueryClient({
