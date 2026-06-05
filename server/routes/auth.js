@@ -183,8 +183,10 @@ router.post('/login', loginLimiter, tenantMiddleware, async (req, res) => {
     // ── 2FA for privileged roles ─────────────────────────────
     // Applies to: superadmin, admin, deputy, finance
     // Can be disabled per-user with mfaEnabled: false
+    // Skipped for the demo school — demo accounts have no real email inboxes
     const userRole = user.primaryRole || user.role;
-    if (MFA_ROLES.has(userRole) && user.mfaEnabled !== false) {
+    const isDemo   = req.school?.slug === 'demo';
+    if (!isDemo && MFA_ROLES.has(userRole) && user.mfaEnabled !== false) {
       const otp      = _genOTP();
       const otpHash  = _hashOTP(otp);          // store hash, not plaintext
       const expiry   = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 min
