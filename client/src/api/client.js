@@ -357,9 +357,10 @@ export const settings = {
     update: (data)   => _put('/settings/notifications', data),
   },
   customRoles: {
-    list:   ()      => _get('/settings/custom-roles'),
-    create: (data)  => _post('/settings/custom-roles', data),
-    remove: (key)   => _delete(`/settings/custom-roles/${key}`),
+    list:   ()           => _get('/settings/custom-roles'),
+    create: (data)       => _post('/settings/custom-roles', data),
+    update: (key, data)  => _put(`/settings/custom-roles/${key}`, data),
+    remove: (key)        => _delete(`/settings/custom-roles/${key}`),
   },
 };
 

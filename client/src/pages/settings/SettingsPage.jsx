@@ -42,7 +42,19 @@ const ROLE_PILL = {
   parent:     'bg-emerald-50 text-emerald-700 border-emerald-200',
   student:    'bg-amber-50 text-amber-700 border-amber-200',
 };
-function RolePill({ role }) {
+function RolePill({ role, customRoles = [] }) {
+  // Check if this is a custom role first
+  const cr = customRoles.find(r => r.key === role);
+  if (cr) {
+    return (
+      <span
+        className="inline-flex px-2 py-0.5 text-[11px] font-medium rounded border"
+        style={{ backgroundColor: cr.color + '18', color: cr.color, borderColor: cr.color + '55' }}
+      >
+        {cr.label}
+      </span>
+    );
+  }
   const cls = ROLE_PILL[role] ?? 'bg-slate-100 text-slate-600 border-slate-200';
   return (
     <span className={`inline-flex px-2 py-0.5 text-[11px] font-medium rounded border capitalize ${cls}`}>
@@ -1025,6 +1037,21 @@ function UsersTab() {
     staleTime: 60_000,
   });
   const allUsers = data?.data ?? [];
+
+  /* Fetch custom roles so filter + pills stay in sync */
+  const { data: crData } = useQuery({
+    queryKey: ['settings', 'custom-roles'],
+    queryFn:  () => settingsApi.customRoles.list(),
+    staleTime: 60_000,
+  });
+  const customRoles = crData?.data ?? [];
+
+  /* Merge built-in role groups + custom roles for the filter dropdown */
+  const roleGroups = [
+    ...USER_ROLE_GROUPS,
+    ...customRoles.map(cr => ({ value: cr.key, label: cr.label })),
+  ];
+
   const users = allUsers.filter(u => {
     const matchRole   = !roleFilter || u.role === roleFilter;
     const matchSearch = !search || (u.name ?? '').toLowerCase().includes(search.toLowerCase()) || (u.email ?? '').toLowerCase().includes(search.toLowerCase());
@@ -1083,7 +1110,7 @@ function UsersTab() {
             onChange={e => setRoleFilter(e.target.value)}
             className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40 focus:border-violet-400"
           >
-            {USER_ROLE_GROUPS.map(g => (
+            {roleGroups.map(g => (
               <option key={g.value} value={g.value}>{g.label}</option>
             ))}
           </select>
@@ -1127,7 +1154,7 @@ function UsersTab() {
                 <tr key={u._id ?? u.id} className="hover:bg-slate-50 transition group">
                   <td className="px-4 py-3 font-medium text-slate-800">{u.name ?? '—'}</td>
                   <td className="px-4 py-3 text-slate-500 text-xs hidden sm:table-cell">{u.email}</td>
-                  <td className="px-4 py-3"><RolePill role={u.role} /></td>
+                  <td className="px-4 py-3"><RolePill role={u.role} customRoles={customRoles} /></td>
                   {canManage && (
                     <td className="px-4 py-3 text-right">
                       <button
@@ -1149,6 +1176,7 @@ function UsersTab() {
       <AnimatePresence>
         {showInvite && (
           <InviteSlideOver
+            customRoles={customRoles}
             onClose={() => setShowInvite(false)}
             onInvited={() => {
               setShowInvite(false);
@@ -1162,7 +1190,7 @@ function UsersTab() {
   );
 }
 
-function InviteSlideOver({ onClose, onInvited }) {
+function InviteSlideOver({ customRoles = [], onClose, onInvited }) {
   const [email, setEmail] = useState('');
   const [role,  setRole]  = useState('teacher');
   const [name,  setName]  = useState('');
@@ -1219,6 +1247,13 @@ function InviteSlideOver({ onClose, onInvited }) {
               {INVITE_ROLES.map(r => (
                 <option key={r} value={r} className="capitalize">{r.charAt(0).toUpperCase() + r.slice(1)}</option>
               ))}
+              {customRoles.length > 0 && (
+                <optgroup label="── Custom Roles ──">
+                  {customRoles.map(cr => (
+                    <option key={cr.key} value={cr.key}>{cr.label}</option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </FField>
         </form>
@@ -1250,6 +1285,13 @@ function AccountTab() {
   const [pwVisible, setPwVisible] = useState(false);
   const [toast, setToast] = useState(null);
   const [pwError, setPwError] = useState('');
+
+  const { data: crData } = useQuery({
+    queryKey: ['settings', 'custom-roles'],
+    queryFn:  () => settingsApi.customRoles.list(),
+    staleTime: 120_000,
+  });
+  const customRoles = crData?.data ?? [];
 
   const { mutate: saveName, isPending: savingName } = useMutation({
     mutationFn: () => settingsApi.update({ name }),
@@ -1303,7 +1345,7 @@ function AccountTab() {
             <p className="text-sm font-semibold text-slate-800">{user?.name ?? user?.email ?? '—'}</p>
             <p className="text-xs text-slate-400">{user?.email}</p>
           </div>
-          <RolePill role={user?.role} />
+          <RolePill role={user?.role} customRoles={customRoles} />
         </div>
       </div>
 
@@ -1460,6 +1502,71 @@ function CreateCustomRoleModal({ onClose, onCreated }) {
           >
             {isPending ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
             {isPending ? 'Creating…' : 'Create Role'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   EDIT CUSTOM ROLE MODAL
+   ══════════════════════════════════════════════════════════════ */
+function EditCustomRoleModal({ role, onClose, onSaved }) {
+  const [label, setLabel] = useState(role.label);
+  const [color, setColor] = useState(role.color ?? '#6366f1');
+  const [error, setError] = useState('');
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: () => settingsApi.customRoles.update(role.key, { label: label.trim(), color }),
+    onSuccess:  d  => onSaved(d?.data),
+    onError:    err => setError(err?.message ?? 'Failed to update role.'),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-bold text-slate-900">Edit Role</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition">
+            <X size={16} />
+          </button>
+        </div>
+
+        <p className="text-[11px] text-slate-400 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+          Key: <code className="font-mono text-slate-600">{role.key}</code>
+          {' '}— permanent. Renaming the label updates the display everywhere without affecting
+          users already assigned this role.
+        </p>
+
+        {error && (
+          <div className="text-sm text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded-lg flex items-center gap-2">
+            <AlertTriangle size={13} />{error}
+          </div>
+        )}
+
+        <FField label="Display name">
+          <input value={label} onChange={e => setLabel(e.target.value)} className={iCls()} autoFocus />
+        </FField>
+
+        <FField label="Role colour">
+          <div className="flex items-center gap-3">
+            <input type="color" value={color} onChange={e => setColor(e.target.value)}
+              className="w-9 h-9 rounded-lg cursor-pointer border border-slate-200 p-0.5 shrink-0" />
+            <span className="text-xs text-slate-500 flex-1">Shown as the role badge throughout the platform.</span>
+          </div>
+        </FField>
+
+        <div className="flex gap-2 pt-1">
+          <button onClick={onClose}
+            className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition">
+            Cancel
+          </button>
+          <button onClick={() => mutate()} disabled={isPending || !label.trim()}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-semibold transition">
+            {isPending ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+            {isPending ? 'Saving…' : 'Save Changes'}
           </button>
         </div>
       </div>
@@ -1712,6 +1819,7 @@ function RolesTab() {
   const [dirty,          setDirty]          = useState(false);
   const [toast,          setToast]          = useState(null);
   const [showCreateRole, setShowCreateRole] = useState(false);
+  const [editingRole,    setEditingRole]    = useState(null);   // null | custom_role doc
 
   /* Load school data (holds saved modulePermissions) */
   const { data: schoolData } = useQuery({
@@ -1878,13 +1986,22 @@ function RolesTab() {
                       <span className="flex-1 truncate" style={!isSel ? { color: cr.color } : {}}>{cr.label}</span>
                     </button>
                     {isAdmin && (
-                      <button
-                        onClick={() => confirmDeleteRole(cr.key, cr.label)}
-                        title="Delete role"
-                        className="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition"
-                      >
-                        <Trash2 size={11} />
-                      </button>
+                      <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 flex items-center gap-0.5">
+                        <button
+                          onClick={e => { e.stopPropagation(); setEditingRole(cr); }}
+                          title="Edit role"
+                          className="p-1 rounded text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition"
+                        >
+                          <Pencil size={11} />
+                        </button>
+                        <button
+                          onClick={e => { e.stopPropagation(); confirmDeleteRole(cr.key, cr.label); }}
+                          title="Delete role"
+                          className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition"
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </div>
                     )}
                   </div>
                 );
@@ -1999,6 +2116,20 @@ function RolesTab() {
           )}
         </div>
       </div>
+
+      {/* Edit custom role modal */}
+      {editingRole && (
+        <EditCustomRoleModal
+          role={editingRole}
+          onClose={() => setEditingRole(null)}
+          onSaved={updated => {
+            qc.invalidateQueries({ queryKey: ['settings','custom-roles'] });
+            qc.invalidateQueries({ queryKey: ['settings','users'] }); // refresh role pills
+            setEditingRole(null);
+            setToast({ msg: `Role "${updated?.label}" updated.`, type: 'success' });
+          }}
+        />
+      )}
 
       {/* Create custom role modal */}
       <AnimatePresence>

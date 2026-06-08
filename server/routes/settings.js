@@ -630,6 +630,32 @@ router.post('/custom-roles', authMiddleware, async (req, res) => {
   }
 });
 
+router.put('/custom-roles/:key', authMiddleware, async (req, res) => {
+  try {
+    if (!_isAdmin(req)) return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Admin access required.' } });
+
+    const { key } = req.params;
+    const { schoolId } = req.jwtUser;
+    const { label, color } = req.body;
+
+    const patch = { updatedAt: new Date().toISOString() };
+    if (label?.trim()) patch.label = label.trim();
+    if (color)         patch.color = color;
+
+    const doc = await _model('custom_roles').findOneAndUpdate(
+      { schoolId, key },
+      { $set: patch },
+      { new: true }
+    ).lean();
+    if (!doc) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Custom role not found.' } });
+
+    res.json({ success: true, data: doc });
+  } catch (err) {
+    console.error('[settings] PUT /custom-roles/:key:', err);
+    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to update custom role' } });
+  }
+});
+
 router.delete('/custom-roles/:key', authMiddleware, async (req, res) => {
   try {
     if (!_isAdmin(req)) return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Admin access required.' } });
