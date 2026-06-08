@@ -15,7 +15,7 @@ import {
   RefreshCcw, Info, Server, Check, Minus, ChevronDown, ChevronUp,
   CreditCard, Smartphone, Zap, ArrowRight, Layers, Pencil,
   Bell, MessageSquare, BookOpen, Calendar, CalendarDays, Clock,
-  Upload, ImageIcon,
+  Upload, ImageIcon, KeyRound, Copy,
 } from 'lucide-react';
 import { sections as sectionsApi } from '@/api/client.js';
 import { settings as settingsApi } from '@/api/client.js';
@@ -33,14 +33,55 @@ const TABS = [
   { id: 'account',        label: 'Account',             Icon: User,        adminOnly: false },
 ];
 
+/* ── Role display constants (must be before RolePill + USER_ROLE_GROUPS) ── */
+const SYSTEM_ROLE_LABELS = {
+  superadmin:           'Super Admin',
+  admin:                'Admin',
+  deputy_principal:     'Deputy Principal',
+  deputy:               'Deputy',               // legacy alias
+  section_head:         'Section Head',
+  teacher:              'Teacher',
+  exams_officer:        'Exams Officer',
+  timetabler:           'Timetabler',
+  admissions_officer:   'Admissions Officer',
+  finance:              'Finance',
+  hr:                   'HR',
+  discipline_committee: 'Discipline Committee',
+  parent:               'Parent',
+  student:              'Student',
+};
+const SYSTEM_ROLE_COLORS = {
+  superadmin:           { sel:'bg-red-600 text-white ring-red-600',          idle:'ring-slate-200 bg-white text-red-700'        },
+  admin:                { sel:'bg-violet-600 text-white ring-violet-600',     idle:'ring-slate-200 bg-white text-violet-700'     },
+  deputy_principal:     { sel:'bg-indigo-600 text-white ring-indigo-600',     idle:'ring-slate-200 bg-white text-indigo-700'     },
+  section_head:         { sel:'bg-purple-600 text-white ring-purple-600',     idle:'ring-slate-200 bg-white text-purple-700'     },
+  teacher:              { sel:'bg-blue-600 text-white ring-blue-600',         idle:'ring-slate-200 bg-white text-blue-700'       },
+  exams_officer:        { sel:'bg-cyan-600 text-white ring-cyan-600',         idle:'ring-slate-200 bg-white text-cyan-700'       },
+  timetabler:           { sel:'bg-teal-600 text-white ring-teal-600',         idle:'ring-slate-200 bg-white text-teal-700'       },
+  admissions_officer:   { sel:'bg-sky-600 text-white ring-sky-600',           idle:'ring-slate-200 bg-white text-sky-700'        },
+  finance:              { sel:'bg-green-600 text-white ring-green-600',       idle:'ring-slate-200 bg-white text-green-700'      },
+  hr:                   { sel:'bg-lime-600 text-white ring-lime-600',         idle:'ring-slate-200 bg-white text-lime-700'       },
+  discipline_committee: { sel:'bg-orange-600 text-white ring-orange-600',     idle:'ring-slate-200 bg-white text-orange-700'     },
+  parent:               { sel:'bg-emerald-600 text-white ring-emerald-600',   idle:'ring-slate-200 bg-white text-emerald-700'    },
+  student:              { sel:'bg-amber-500 text-white ring-amber-500',       idle:'ring-slate-200 bg-white text-amber-700'      },
+};
+
 /* ── Role pills ─────────────────────────────────────────────── */
 const ROLE_PILL = {
-  superadmin: 'bg-red-50 text-red-700 border-red-200',
-  admin:      'bg-violet-50 text-violet-700 border-violet-200',
-  deputy:     'bg-indigo-50 text-indigo-700 border-indigo-200',
-  teacher:    'bg-blue-50 text-blue-700 border-blue-200',
-  parent:     'bg-emerald-50 text-emerald-700 border-emerald-200',
-  student:    'bg-amber-50 text-amber-700 border-amber-200',
+  superadmin:           'bg-red-50 text-red-700 border-red-200',
+  admin:                'bg-violet-50 text-violet-700 border-violet-200',
+  deputy_principal:     'bg-indigo-50 text-indigo-700 border-indigo-200',
+  deputy:               'bg-indigo-50 text-indigo-700 border-indigo-200',  // legacy alias
+  section_head:         'bg-purple-50 text-purple-700 border-purple-200',
+  teacher:              'bg-blue-50 text-blue-700 border-blue-200',
+  exams_officer:        'bg-cyan-50 text-cyan-700 border-cyan-200',
+  timetabler:           'bg-teal-50 text-teal-700 border-teal-200',
+  admissions_officer:   'bg-sky-50 text-sky-700 border-sky-200',
+  finance:              'bg-green-50 text-green-700 border-green-200',
+  hr:                   'bg-lime-50 text-lime-700 border-lime-200',
+  discipline_committee: 'bg-orange-50 text-orange-700 border-orange-200',
+  parent:               'bg-emerald-50 text-emerald-700 border-emerald-200',
+  student:              'bg-amber-50 text-amber-700 border-amber-200',
 };
 function RolePill({ role, customRoles = [] }) {
   // Check if this is a custom role first
@@ -55,10 +96,11 @@ function RolePill({ role, customRoles = [] }) {
       </span>
     );
   }
-  const cls = ROLE_PILL[role] ?? 'bg-slate-100 text-slate-600 border-slate-200';
+  const label = SYSTEM_ROLE_LABELS[role] ?? role.replace(/_/g, ' ');
+  const cls   = ROLE_PILL[role] ?? 'bg-slate-100 text-slate-600 border-slate-200';
   return (
     <span className={`inline-flex px-2 py-0.5 text-[11px] font-medium rounded border capitalize ${cls}`}>
-      {role}
+      {label}
     </span>
   );
 }
@@ -1003,22 +1045,25 @@ function SchoolTab() {
 /* ══════════════════════════════════════════════════════════════
    USERS TAB
    ══════════════════════════════════════════════════════════════ */
-const INVITE_ROLES = ['teacher', 'deputy', 'admin', 'parent', 'student'];
+/* ── Canonical system role list ─────────────────────────────────
+   Single source of truth — filter, invite form, and R&P all derive
+   from this. `deputy` kept below as a legacy alias (backward compat)
+   but does NOT appear in the UI — it is merged with deputy_principal.
+   ─────────────────────────────────────────────────────────────── */
+const SYSTEM_ROLES = [
+  'superadmin', 'admin', 'deputy_principal', 'section_head', 'teacher',
+  'exams_officer', 'timetabler', 'admissions_officer', 'finance', 'hr',
+  'discipline_committee', 'parent', 'student',
+];
 
+// Roles that can never be deleted from the school (safety guard)
+const PROTECTED_ROLES = new Set(['superadmin', 'admin']);
+
+// User filter groups — derived so they always stay in sync with SYSTEM_ROLES
+// 'All roles' sentinel first; the rest come from SYSTEM_ROLES
 const USER_ROLE_GROUPS = [
-  { value: '',                   label: 'All roles' },
-  { value: 'admin',              label: 'Admin' },
-  { value: 'superadmin',         label: 'Super Admin' },
-  { value: 'teacher',            label: 'Teachers' },
-  { value: 'section_head',       label: 'Section Heads' },
-  { value: 'deputy_principal',   label: 'Deputy Principals' },
-  { value: 'hr',                 label: 'HR' },
-  { value: 'finance',            label: 'Finance' },
-  { value: 'admissions_officer', label: 'Admissions' },
-  { value: 'exams_officer',      label: 'Exams Officers' },
-  { value: 'timetabler',         label: 'Timetablers' },
-  { value: 'parent',             label: 'Parents' },
-  { value: 'student',            label: 'Students' },
+  { value: '', label: 'All roles' },
+  ...SYSTEM_ROLES.map(r => ({ value: r, label: SYSTEM_ROLE_LABELS[r] })),
 ];
 
 function UsersTab() {
@@ -1029,7 +1074,8 @@ function UsersTab() {
   const [showInvite, setShowInvite] = useState(false);
   const [toast, setToast] = useState(null);
   const [roleFilter, setRoleFilter] = useState('');
-  const [search, setSearch] = useState('');
+  const [search, setSearch]         = useState('');
+  const [resetPwdUser, setResetPwdUser] = useState(null);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['settings', 'users'],
@@ -1037,6 +1083,14 @@ function UsersTab() {
     staleTime: 60_000,
   });
   const allUsers = data?.data ?? [];
+
+  /* Fetch school doc — needed for hiddenSystemRoles */
+  const { data: schoolData } = useQuery({
+    queryKey: ['settings', 'school'],
+    queryFn:  () => settingsApi.school.get(),
+    staleTime: 60_000,
+  });
+  const hiddenSystemRoles = schoolData?.data?.hiddenSystemRoles ?? [];
 
   /* Fetch custom roles so filter + pills stay in sync */
   const { data: crData } = useQuery({
@@ -1157,12 +1211,22 @@ function UsersTab() {
                   <td className="px-4 py-3"><RolePill role={u.role} customRoles={customRoles} /></td>
                   {canManage && (
                     <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={() => confirmRemove(u)}
-                        className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                      <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition">
+                        <button
+                          onClick={() => setResetPwdUser(u)}
+                          className="p-1.5 text-slate-300 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition"
+                          title="Set temporary password"
+                        >
+                          <KeyRound size={13} />
+                        </button>
+                        <button
+                          onClick={() => confirmRemove(u)}
+                          className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                          title="Remove user"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     </td>
                   )}
                 </tr>
@@ -1177,6 +1241,7 @@ function UsersTab() {
         {showInvite && (
           <InviteSlideOver
             customRoles={customRoles}
+            hiddenSystemRoles={hiddenSystemRoles}
             onClose={() => setShowInvite(false)}
             onInvited={() => {
               setShowInvite(false);
@@ -1186,11 +1251,18 @@ function UsersTab() {
           />
         )}
       </AnimatePresence>
+
+      {/* Reset password modal */}
+      <AnimatePresence>
+        {resetPwdUser && (
+          <ResetPasswordModal user={resetPwdUser} onClose={() => setResetPwdUser(null)} />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
-function InviteSlideOver({ customRoles = [], onClose, onInvited }) {
+function InviteSlideOver({ customRoles = [], hiddenSystemRoles = [], onClose, onInvited }) {
   const [email, setEmail] = useState('');
   const [role,  setRole]  = useState('teacher');
   const [name,  setName]  = useState('');
@@ -1244,9 +1316,13 @@ function InviteSlideOver({ customRoles = [], onClose, onInvited }) {
           </FField>
           <FField label="Role">
             <select value={role} onChange={e => setRole(e.target.value)} className={iCls()}>
-              {INVITE_ROLES.map(r => (
-                <option key={r} value={r} className="capitalize">{r.charAt(0).toUpperCase() + r.slice(1)}</option>
-              ))}
+              {/* System roles: exclude superadmin (can't be invited) and school-hidden roles */}
+              {SYSTEM_ROLES
+                .filter(r => r !== 'superadmin' && !hiddenSystemRoles.includes(r))
+                .map(r => (
+                  <option key={r} value={r}>{SYSTEM_ROLE_LABELS[r] ?? r}</option>
+                ))
+              }
               {customRoles.length > 0 && (
                 <optgroup label="── Custom Roles ──">
                   {customRoles.map(cr => (
@@ -1269,6 +1345,130 @@ function InviteSlideOver({ customRoles = [], onClose, onInvited }) {
             {isPending ? 'Sending…' : 'Send invite'}
           </button>
         </div>
+      </motion.div>
+    </>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   RESET PASSWORD MODAL
+   ══════════════════════════════════════════════════════════════ */
+function ResetPasswordModal({ user, onClose }) {
+  const [result,  setResult]  = useState(null);
+  const [copied,  setCopied]  = useState(false);
+  const [errMsg,  setErrMsg]  = useState('');
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: () => settingsApi.users.resetPassword(user.id ?? user._id),
+    onSuccess:  res  => setResult(res?.data),
+    onError:    err  => setErrMsg(err?.message ?? 'Failed to reset password.'),
+  });
+
+  function copyPwd() {
+    navigator.clipboard.writeText(result.tempPassword).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <>
+      <motion.div
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50"
+        onClick={!result ? onClose : undefined}
+      />
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1,    opacity: 1 }}
+        exit={{ scale: 0.95,    opacity: 0 }}
+        transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+        className="fixed z-50 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden"
+      >
+        {!result ? (
+          /* ── Confirmation ── */
+          <div className="p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+                <KeyRound size={18} className="text-amber-600" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-slate-900">Set Temporary Password</h2>
+                <p className="text-xs text-slate-500">{user.name ?? user.email}</p>
+              </div>
+            </div>
+
+            <p className="text-sm text-slate-600">
+              A new temporary password will be generated for <strong>{user.name ?? user.email}</strong>. They will be required to change it on their next login.
+            </p>
+            <p className="text-sm text-slate-600">
+              An email will be sent to{' '}
+              <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">{user.email}</span>
+              {' '}— keep this dialog open in case the email doesn&apos;t arrive.
+            </p>
+
+            {errMsg && (
+              <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{errMsg}</p>
+            )}
+
+            <div className="flex justify-end gap-3 pt-1">
+              <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition">
+                Cancel
+              </button>
+              <button
+                onClick={() => mutate()}
+                disabled={isPending}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-lg transition"
+              >
+                {isPending && <Loader2 size={13} className="animate-spin" />}
+                {isPending ? 'Generating…' : 'Set Password'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* ── Result ── */
+          <div className="p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center shrink-0">
+                <CheckCircle2 size={18} className="text-green-600" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-slate-900">Password Set</h2>
+                <p className="text-xs text-slate-500">{result.name} · {result.email}</p>
+              </div>
+            </div>
+
+            <p className="text-sm text-slate-600">Share this temporary password securely. The user must change it on first login.</p>
+
+            <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
+              <code className="flex-1 text-lg font-bold tracking-widest text-violet-700 font-mono break-all">
+                {result.tempPassword}
+              </code>
+              <button
+                onClick={copyPwd}
+                className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 border border-slate-200 rounded-lg px-2.5 py-1.5 hover:bg-white transition shrink-0"
+              >
+                {copied ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
+                {copied ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+
+            <div className={`rounded-lg px-3 py-2.5 text-xs flex items-start gap-2 ${result.emailSent ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
+              {result.emailSent ? (
+                <><CheckCircle2 size={13} className="shrink-0 mt-0.5" /> Email with credentials sent to {result.email}.</>
+              ) : (
+                <><AlertTriangle size={13} className="shrink-0 mt-0.5" /> Email could not be sent — share this password directly with {result.name}.</>
+              )}
+            </div>
+
+            <p className="text-[11px] text-slate-400">This password will not be shown again after you close this dialog.</p>
+
+            <div className="flex justify-end pt-1">
+              <button onClick={onClose} className="px-5 py-2 text-sm font-medium bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition">
+                Done
+              </button>
+            </div>
+          </div>
+        )}
       </motion.div>
     </>
   );
@@ -1701,20 +1901,6 @@ const PERM_MODULES = [
   ]},
 ];
 
-const PERM_ROLES = ['superadmin','admin','deputy','teacher','parent','student'];
-const PERM_ROLE_LABELS = {
-  superadmin:'Super Admin', admin:'Admin', deputy:'Deputy',
-  teacher:'Teacher', parent:'Parent', student:'Student',
-};
-const PERM_ROLE_COLORS = {
-  superadmin: { sel:'bg-red-600 text-white ring-red-600',        idle:'ring-slate-200 bg-white text-red-700'     },
-  admin:      { sel:'bg-violet-600 text-white ring-violet-600',  idle:'ring-slate-200 bg-white text-violet-700'  },
-  deputy:     { sel:'bg-indigo-600 text-white ring-indigo-600',  idle:'ring-slate-200 bg-white text-indigo-700'  },
-  teacher:    { sel:'bg-blue-600 text-white ring-blue-600',      idle:'ring-slate-200 bg-white text-blue-700'    },
-  parent:     { sel:'bg-emerald-600 text-white ring-emerald-600',idle:'ring-slate-200 bg-white text-emerald-700' },
-  student:    { sel:'bg-amber-500 text-white ring-amber-500',    idle:'ring-slate-200 bg-white text-amber-700'   },
-};
-
 function _makeDefaultPerms() {
   const T = { v:true,  e:true,  d:true  };
   const V = { v:true,  e:false, d:false };
@@ -1723,13 +1909,27 @@ function _makeDefaultPerms() {
   const DEFS = {
     superadmin: ()      => T,
     admin:      ()      => T,
-    deputy: (m, s) => {
+
+    /* deputy_principal — canonical key; deputy kept as alias below */
+    deputy_principal: (m, s) => {
       if (m==='finance'  && ['void_invoice','record_payment','payroll_view','payroll_export','mpesa'].includes(s)) return N;
-      if (m==='finance'  && s==='fee_structure') return E;  // deputy can manage fee structures
+      if (m==='finance'  && s==='fee_structure') return E;
       if (m==='hr'       && ['payroll_view','payroll_export','documents'].includes(s)) return N;
       if (m==='settings' && s==='permissions') return N;
       return E;
     },
+    deputy: (m, s) => DEFS.deputy_principal(m, s),  // legacy alias
+
+    section_head: (m, s) => {
+      if (['finance','hr','admissions'].includes(m)) return N;
+      if (m==='settings') return N;
+      if (m==='timetable' && ['rooms','bell_schedule','assignments'].includes(s)) return V;
+      if (m==='behaviour' && ['delete'].includes(s)) return N;
+      if (m==='growth_profile' && ['delete_records','aspirations'].includes(s)) return N;
+      if (s==='import') return N;
+      return E;
+    },
+
     teacher: (m, s) => {
       if (['finance','admissions','hr','settings'].includes(m)) return N;
       if (m==='attendance') return s==='edit' ? N : s==='export' ? V : E;
@@ -1737,40 +1937,100 @@ function _makeDefaultPerms() {
       if (m==='behaviour')  return s==='create' ? E : V;
       if (m==='messages')   return s==='delete' ? N : E;
       if (m==='growth_profile') {
-        // Teachers can view, add, edit, write recommendations, and verify (staff level)
-        // They cannot delete records or manage aspirations
-        if (['delete_records'].includes(s)) return N;
-        if (['aspirations'].includes(s)) return N;
-        if (['verify'].includes(s)) return E;   // staff_verified tier
+        if (['delete_records','aspirations'].includes(s)) return N;
+        if (s==='verify') return E;
         return E;
       }
-      // Block bulk-import and admin-only management for teachers
       if (s==='import') return N;
       if (m==='classes'   && ['section','delete'].includes(s)) return N;
       if (m==='timetable' && ['rooms','bell_schedule','assignments'].includes(s)) return V;
       return V;
     },
+
+    exams_officer: (m, s) => {
+      if (['finance','hr','admissions'].includes(m)) return N;
+      if (m==='settings') return N;
+      if (m==='grades')   return T;
+      if (m==='students') return V;
+      if (m==='classes')  return V;
+      if (m==='subjects') return V;
+      if (m==='reports')  return E;
+      if (m==='growth_profile') return V;
+      return N;
+    },
+
+    timetabler: (m, s) => {
+      if (['finance','hr','admissions'].includes(m)) return N;
+      if (m==='settings') return N;
+      if (m==='timetable') return T;
+      if (m==='subjects')  return V;
+      if (m==='classes')   return V;
+      if (m==='students')  return V;
+      return N;
+    },
+
+    admissions_officer: (m, s) => {
+      if (['finance','hr'].includes(m)) return N;
+      if (m==='settings') return N;
+      if (m==='admissions') return T;
+      if (m==='students')   return E;
+      if (m==='classes')    return V;
+      if (m==='events')     return V;
+      if (m==='messages')   return s==='delete' ? N : E;
+      return N;
+    },
+
+    finance: (m, s) => {
+      if (m==='hr' && ['payroll_view','payroll_export','documents'].includes(s)) return N;
+      if (m==='settings') return N;
+      if (m==='finance')  return T;
+      if (m==='students') return V;
+      if (m==='reports')  return V;
+      return N;
+    },
+
+    hr: (m, s) => {
+      if (m==='settings') return N;
+      if (m==='finance' && !['fee_structure'].includes(s)) return N;
+      if (m==='hr')      return T;
+      if (m==='students') return V;
+      if (m==='reports')  return V;
+      return N;
+    },
+
+    discipline_committee: (m, s) => {
+      if (['finance','hr','admissions'].includes(m)) return N;
+      if (m==='settings') return N;
+      if (m==='behaviour') return T;
+      if (m==='students')  return V;
+      if (m==='classes')   return V;
+      if (m==='attendance') return V;
+      if (m==='messages')  return s==='delete' ? N : E;
+      if (m==='growth_profile') return V;
+      return N;
+    },
+
     parent: (m, s) => {
       if (!['students','finance','attendance','grades','behaviour','events','messages','growth_profile'].includes(m)) return N;
-      // Parents can view invoices/payments but not manage financial config
       if (m==='finance' && ['fee_structure','mpesa','import','create_invoice','void_invoice','record_payment'].includes(s)) return N;
-      // Parents: view growth profile only — cannot add/edit/verify
       if (m==='growth_profile' && s !== 'view') return N;
       return V;
     },
-    student:(m, s) => {
+
+    student: (m, s) => {
       if (['students','timetable','grades','events'].includes(m)) return V;
       if (m==='growth_profile') {
-        // Students can view their profile and edit their own aspirations
         if (s==='view') return V;
-        if (s==='aspirations') return E;  // self-edit aspirations
+        if (s==='aspirations') return E;
         return N;
       }
       return N;
     },
   };
   const perms = { byRole:{}, byUser:{} };
-  PERM_ROLES.forEach(role => {
+  /* Iterate all system roles + the legacy 'deputy' alias */
+  [...SYSTEM_ROLES, 'deputy'].forEach(role => {
+    if (!DEFS[role]) return;   // skip any unknown key
     perms.byRole[role] = {};
     PERM_MODULES.forEach(mod => mod.subs.forEach(sub => {
       perms.byRole[role][`${mod.key}__${sub.key}`] = DEFS[role](mod.key, sub.key);
@@ -1851,6 +2111,39 @@ function RolesTab() {
   function confirmDeleteRole(key, label) {
     if (!window.confirm(`Delete the "${label}" role? Users assigned this role will lose access until reassigned.`)) return;
     deleteCustomRole(key);
+  }
+
+  /* Hidden system roles — read from school doc */
+  const hiddenSystemRoles = schoolData?.data?.hiddenSystemRoles ?? [];
+
+  /* Hide a system role (non-destructive — just adds to hiddenSystemRoles list) */
+  const { mutate: hideRoleMutate } = useMutation({
+    mutationFn: (roleKey) => settingsApi.school.update({
+      hiddenSystemRoles: [...new Set([...hiddenSystemRoles, roleKey])],
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings','school'] });
+      setToast({ msg: 'Role hidden from the invite form.', type: 'success' });
+    },
+    onError: err => setToast({ msg: err?.message ?? 'Failed to hide role.', type: 'error' }),
+  });
+
+  /* Restore a hidden system role */
+  const { mutate: restoreRoleMutate } = useMutation({
+    mutationFn: (roleKey) => settingsApi.school.update({
+      hiddenSystemRoles: hiddenSystemRoles.filter(r => r !== roleKey),
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings','school'] });
+      setToast({ msg: 'Role restored.', type: 'success' });
+    },
+    onError: err => setToast({ msg: err?.message ?? 'Failed to restore role.', type: 'error' }),
+  });
+
+  function confirmHideRole(roleKey) {
+    const label = SYSTEM_ROLE_LABELS[roleKey] ?? roleKey;
+    if (!window.confirm(`Hide the "${label}" role? It will no longer appear in the invite form. Existing users keep their access.`)) return;
+    hideRoleMutate(roleKey);
   }
 
   /* Load users for Per-User mode */
@@ -1958,18 +2251,51 @@ function RolesTab() {
         <div className="shrink-0 w-44 space-y-1.5">
           {mode === 'role' ? (
             <>
-              {/* Built-in roles */}
-              {PERM_ROLES.map(r => {
-                const c = PERM_ROLE_COLORS[r];
+              {/* Built-in system roles (hidden ones are omitted from the main list) */}
+              {SYSTEM_ROLES.filter(r => !hiddenSystemRoles.includes(r)).map(r => {
+                const c         = SYSTEM_ROLE_COLORS[r] ?? SYSTEM_ROLE_COLORS.teacher;
+                const isProtect = PROTECTED_ROLES.has(r);
                 return (
-                  <button key={r} onClick={() => setSelRole(r)}
-                    className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold text-left transition ring-1 ${selRole===r ? c.sel : c.idle}`}
-                  >
-                    <ShieldCheck size={12} className="shrink-0" />
-                    {PERM_ROLE_LABELS[r]}
-                  </button>
+                  <div key={r} className="relative group">
+                    <button onClick={() => setSelRole(r)}
+                      className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold text-left transition ring-1 ${
+                        selRole===r ? c.sel : c.idle
+                      } ${!isProtect && isAdmin ? 'pr-7' : ''}`}
+                    >
+                      <ShieldCheck size={12} className="shrink-0" />
+                      <span className="flex-1 truncate">{SYSTEM_ROLE_LABELS[r]}</span>
+                    </button>
+                    {isAdmin && !isProtect && (
+                      <button
+                        onClick={e => { e.stopPropagation(); confirmHideRole(r); }}
+                        title="Hide role from invite form"
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1 rounded text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition"
+                      >
+                        <EyeOff size={11} />
+                      </button>
+                    )}
+                  </div>
                 );
               })}
+
+              {/* Hidden roles restore strip */}
+              {hiddenSystemRoles.length > 0 && isAdmin && (
+                <div className="mt-2 pt-2 border-t border-slate-100">
+                  <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wide px-1 mb-1">Hidden</p>
+                  {hiddenSystemRoles.map(r => (
+                    <div key={r} className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-slate-50 group">
+                      <span className="flex-1 text-[11px] text-slate-400 truncate">{SYSTEM_ROLE_LABELS[r] ?? r}</span>
+                      <button
+                        onClick={() => restoreRoleMutate(r)}
+                        title="Restore role"
+                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition"
+                      >
+                        <Eye size={11} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* Custom roles */}
               {customRoles.map(cr => {
