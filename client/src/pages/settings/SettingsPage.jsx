@@ -1383,6 +1383,91 @@ function AccountTab() {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   CREATE CUSTOM ROLE MODAL
+   ══════════════════════════════════════════════════════════════ */
+function CreateCustomRoleModal({ onClose, onCreated }) {
+  const [label,    setLabel]    = useState('');
+  const [color,    setColor]    = useState('#6366f1');
+  const [baseRole, setBaseRole] = useState('teacher');
+  const [error,    setError]    = useState('');
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: () => settingsApi.customRoles.create({ label: label.trim(), color, baseRole }),
+    onSuccess:  d  => onCreated(d?.data),
+    onError:    err => setError(err?.message ?? 'Failed to create role.'),
+  });
+
+  const key = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-bold text-slate-900">Create Custom Role</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition">
+            <X size={16} />
+          </button>
+        </div>
+
+        {error && (
+          <div className="text-sm text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded-lg flex items-center gap-2">
+            <AlertTriangle size={13} />{error}
+          </div>
+        )}
+
+        <FField label="Role name">
+          <input
+            value={label} onChange={e => setLabel(e.target.value)}
+            placeholder="e.g. Office Admin, Admission Officer"
+            className={iCls()} autoFocus
+          />
+        </FField>
+
+        {key && (
+          <p className="text-[11px] text-slate-400 -mt-1">
+            Role key: <code className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 font-mono">{key}</code>
+          </p>
+        )}
+
+        <FField label="Start permissions from">
+          <select value={baseRole} onChange={e => setBaseRole(e.target.value)} className={iCls()}>
+            <option value="teacher">Teacher — limited access (recommended)</option>
+            <option value="deputy">Deputy — moderate access</option>
+            <option value="admin">Admin — full access</option>
+          </select>
+        </FField>
+
+        <FField label="Role colour">
+          <div className="flex items-center gap-3">
+            <input type="color" value={color} onChange={e => setColor(e.target.value)}
+              className="w-9 h-9 rounded-lg cursor-pointer border border-slate-200 p-0.5 shrink-0" />
+            <span className="text-xs text-slate-500 flex-1">
+              Shown as a badge in the Roles tab and when assigning access.
+            </span>
+          </div>
+        </FField>
+
+        <div className="flex gap-2 pt-1">
+          <button onClick={onClose}
+            className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition">
+            Cancel
+          </button>
+          <button
+            onClick={() => mutate()}
+            disabled={isPending || !label.trim()}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-semibold transition"
+          >
+            {isPending ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+            {isPending ? 'Creating…' : 'Create Role'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
    ROLES & PERMISSIONS TAB — editable sub-module RBAC matrix
    ══════════════════════════════════════════════════════════════ */
 
@@ -1619,13 +1704,14 @@ function RolesTab() {
   const userRole = useAuthStore(s => s.session?.user?.role ?? '');
   const isAdmin  = ['admin','superadmin'].includes(userRole);
 
-  const [mode,     setMode]     = useState('role');   // 'role' | 'user'
-  const [selRole,  setSelRole]  = useState('admin');
-  const [selUser,  setSelUser]  = useState(null);
-  const [expanded, setExpanded] = useState({});
-  const [perms,    setPerms]    = useState(null);
-  const [dirty,    setDirty]    = useState(false);
-  const [toast,    setToast]    = useState(null);
+  const [mode,           setMode]           = useState('role');   // 'role' | 'user'
+  const [selRole,        setSelRole]        = useState('admin');
+  const [selUser,        setSelUser]        = useState(null);
+  const [expanded,       setExpanded]       = useState({});
+  const [perms,          setPerms]          = useState(null);
+  const [dirty,          setDirty]          = useState(false);
+  const [toast,          setToast]          = useState(null);
+  const [showCreateRole, setShowCreateRole] = useState(false);
 
   /* Load school data (holds saved modulePermissions) */
   const { data: schoolData } = useQuery({
@@ -1633,6 +1719,31 @@ function RolesTab() {
     queryFn:  () => settingsApi.school.get(),
     staleTime: 30_000,
   });
+
+  /* Load custom roles */
+  const { data: customRolesData } = useQuery({
+    queryKey: ['settings','custom-roles'],
+    queryFn:  () => settingsApi.customRoles.list(),
+    staleTime: 30_000,
+  });
+  const customRoles = customRolesData?.data ?? [];
+
+  /* Delete custom role mutation */
+  const { mutate: deleteCustomRole } = useMutation({
+    mutationFn: key => settingsApi.customRoles.remove(key),
+    onSuccess: (_, key) => {
+      qc.invalidateQueries({ queryKey: ['settings','custom-roles'] });
+      qc.invalidateQueries({ queryKey: ['settings','school'] });
+      if (selRole === key) setSelRole('admin');
+      setToast({ msg: 'Custom role deleted.', type: 'success' });
+    },
+    onError: err => setToast({ msg: err?.message ?? 'Delete failed.', type: 'error' }),
+  });
+
+  function confirmDeleteRole(key, label) {
+    if (!window.confirm(`Delete the "${label}" role? Users assigned this role will lose access until reassigned.`)) return;
+    deleteCustomRole(key);
+  }
 
   /* Load users for Per-User mode */
   const { data: usersData, isLoading: usersLoading } = useQuery({
@@ -1738,17 +1849,56 @@ function RolesTab() {
         {/* ── Left: entity selector ── */}
         <div className="shrink-0 w-44 space-y-1.5">
           {mode === 'role' ? (
-            PERM_ROLES.map(r => {
-              const c = PERM_ROLE_COLORS[r];
-              return (
-                <button key={r} onClick={() => setSelRole(r)}
-                  className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold text-left transition ring-1 ${selRole===r ? c.sel : c.idle}`}
+            <>
+              {/* Built-in roles */}
+              {PERM_ROLES.map(r => {
+                const c = PERM_ROLE_COLORS[r];
+                return (
+                  <button key={r} onClick={() => setSelRole(r)}
+                    className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold text-left transition ring-1 ${selRole===r ? c.sel : c.idle}`}
+                  >
+                    <ShieldCheck size={12} className="shrink-0" />
+                    {PERM_ROLE_LABELS[r]}
+                  </button>
+                );
+              })}
+
+              {/* Custom roles */}
+              {customRoles.map(cr => {
+                const isSel = selRole === cr.key;
+                return (
+                  <div key={cr.key} className="relative group">
+                    <button onClick={() => setSelRole(cr.key)}
+                      className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold text-left transition ring-1 ${
+                        isSel ? 'text-white ring-transparent' : 'ring-slate-200 bg-white hover:bg-slate-50'
+                      }`}
+                      style={isSel ? { backgroundColor: cr.color } : {}}
+                    >
+                      <ShieldCheck size={12} className="shrink-0" style={!isSel ? { color: cr.color } : {}} />
+                      <span className="flex-1 truncate" style={!isSel ? { color: cr.color } : {}}>{cr.label}</span>
+                    </button>
+                    {isAdmin && (
+                      <button
+                        onClick={() => confirmDeleteRole(cr.key, cr.label)}
+                        title="Delete role"
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* New Role button */}
+              {isAdmin && (
+                <button onClick={() => setShowCreateRole(true)}
+                  className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-50 ring-1 ring-dashed ring-slate-200 transition"
                 >
-                  <ShieldCheck size={12} className="shrink-0" />
-                  {PERM_ROLE_LABELS[r]}
+                  <Plus size={12} /> New Role
                 </button>
-              );
-            })
+              )}
+            </>
           ) : usersLoading ? (
             <div className="space-y-2">{[...Array(4)].map((_,i) => <div key={i} className="h-12 bg-slate-100 rounded-xl animate-pulse" />)}</div>
           ) : users.length === 0 ? (
@@ -1849,6 +1999,21 @@ function RolesTab() {
           )}
         </div>
       </div>
+
+      {/* Create custom role modal */}
+      <AnimatePresence>
+        {showCreateRole && (
+          <CreateCustomRoleModal
+            onClose={() => setShowCreateRole(false)}
+            onCreated={newRole => {
+              qc.invalidateQueries({ queryKey: ['settings','custom-roles'] });
+              setShowCreateRole(false);
+              setSelRole(newRole?.key ?? selRole);
+              setToast({ msg: `Role "${newRole?.label}" created. Configure its permissions and save.`, type: 'success' });
+            }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

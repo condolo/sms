@@ -12,10 +12,11 @@
 const express  = require('express');
 const bcrypt   = require('bcryptjs');
 const crypto   = require('crypto');
-const { authMiddleware } = require('../middleware/auth');
-const { _model }         = require('../utils/model');
-const emailUtil          = require('../utils/email');
+const { authMiddleware }    = require('../middleware/auth');
+const { _model }            = require('../utils/model');
+const emailUtil             = require('../utils/email');
 const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY } = require('../utils/notif-settings');
+const { invalidatePermCache } = require('../middleware/rbac');
 
 const router = express.Router();
 
@@ -50,6 +51,28 @@ function _genTempPassword() {
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr.join('');
+}
+
+/* ── Derive backend API permissions from the V/E/D matrix ─── */
+// Used when a custom role's module-permissions are saved to also update role_permissions.
+function _deriveApiPerms(byRoleCell) {
+  const MODS = [
+    'students','teachers','classes','attendance','finance',
+    'behaviour','grades','admissions','messages','events',
+    'hr','reports','timetable','subjects','growth_profile','settings',
+  ];
+  const perms = {};
+  for (const mod of MODS) {
+    const actions = new Set();
+    for (const [key, cell] of Object.entries(byRoleCell ?? {})) {
+      if (!key.startsWith(`${mod}__`)) continue;
+      if (cell.v) actions.add('read');
+      if (cell.e) { actions.add('create'); actions.add('update'); }
+      if (cell.d) actions.add('delete');
+    }
+    if (actions.size > 0) perms[mod] = [...actions];
+  }
+  return perms;
 }
 
 /* ── Allowed fields for school update ──────────────────────── */
@@ -162,6 +185,32 @@ router.put('/school', authMiddleware, async (req, res) => {
     if (result.matchedCount === 0) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'School not found' } });
     }
+
+    // Sync role_permissions for any custom roles whose V/E/D matrix was just saved.
+    // This keeps the backend RBAC in step with the UI permission matrix.
+    if (update.modulePermissions?.byRole) {
+      try {
+        const CustomRoles = _model('custom_roles');
+        const customRoles = await CustomRoles.find({ schoolId: req.jwtUser.schoolId }, { key: 1 }).lean();
+        const customKeys  = new Set(customRoles.map(r => r.key));
+        const syncOps     = [];
+        for (const [roleKey, rolePerms] of Object.entries(update.modulePermissions.byRole)) {
+          if (!customKeys.has(roleKey)) continue;
+          syncOps.push(_model('role_permissions').updateOne(
+            { schoolId: req.jwtUser.schoolId, roleKey },
+            { $set: { permissions: _deriveApiPerms(rolePerms), updatedAt: new Date().toISOString() } },
+            { upsert: true }
+          ));
+        }
+        if (syncOps.length) {
+          await Promise.all(syncOps);
+          invalidatePermCache(req.jwtUser.schoolId);
+        }
+      } catch (syncErr) {
+        console.warn('[settings] custom-role perm sync (non-fatal):', syncErr.message);
+      }
+    }
+
     const fresh = await Schools.findOne({ id: req.jwtUser.schoolId }).lean();
     const { _id, __v, ...safe } = fresh;
     res.json({ success: true, data: safe });
@@ -289,9 +338,13 @@ router.post('/users/invite', authMiddleware, async (req, res) => {
     const { name, email: userEmail, role = 'teacher' } = req.body;
     if (!userEmail) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Email is required.' } });
 
-    const allowedRoles = ['teacher', 'deputy', 'admin', 'parent', 'student'];
-    if (!allowedRoles.includes(role)) {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Invalid role. Allowed: ${allowedRoles.join(', ')}` } });
+    const BUILTIN_INVITE_ROLES = ['teacher', 'deputy', 'admin', 'parent', 'student'];
+    if (!BUILTIN_INVITE_ROLES.includes(role)) {
+      // Allow any custom role belonging to this school
+      const customRole = await _model('custom_roles').findOne({ schoolId: req.jwtUser.schoolId, key: role }).lean();
+      if (!customRole) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Invalid role '${role}'.` } });
+      }
     }
     // Superadmin-only guard: only superadmin can invite other admins
     if (role === 'admin' && !_isSuperAdmin(req)) {
@@ -356,9 +409,12 @@ router.put('/users/:id', authMiddleware, async (req, res) => {
     const update = { updatedAt: new Date().toISOString() };
     if (name)  update.name = name.trim();
     if (role) {
-      const allowedRoles = ['teacher', 'deputy', 'admin', 'parent', 'guardian', 'student', 'section_head', 'timetabler'];
-      if (!allowedRoles.includes(role)) {
-        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Invalid role.` } });
+      const BUILTIN_UPDATE_ROLES = ['teacher', 'deputy', 'admin', 'parent', 'guardian', 'student', 'section_head', 'timetabler'];
+      if (!BUILTIN_UPDATE_ROLES.includes(role)) {
+        const customRole = await _model('custom_roles').findOne({ schoolId: req.jwtUser.schoolId, key: role }).lean();
+        if (!customRole) {
+          return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Invalid role.` } });
+        }
       }
       if (role === 'admin' && !_isSuperAdmin(req)) {
         return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Only superadmin can assign admin role.' } });
@@ -500,6 +556,105 @@ router.put('/notifications', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('[settings] PUT /notifications error:', err);
     res.status(500).json({ error: 'Failed to save notification settings' });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   CUSTOM ROLES
+   GET    /api/settings/custom-roles        — list school's custom roles
+   POST   /api/settings/custom-roles        — create a new custom role
+   DELETE /api/settings/custom-roles/:key   — delete a custom role
+   ══════════════════════════════════════════════════════════════ */
+
+const BUILT_IN_ROLE_KEYS = new Set([
+  'superadmin','admin','deputy','teacher','parent','student',
+  'section_head','timetabler','guardian','hr','finance',
+]);
+
+router.get('/custom-roles', authMiddleware, async (req, res) => {
+  try {
+    if (!_isAdmin(req)) return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Admin access required.' } });
+    const roles = await _model('custom_roles').find({ schoolId: req.jwtUser.schoolId }).sort({ createdAt: 1 }).lean();
+    res.json({ success: true, data: roles });
+  } catch (err) {
+    console.error('[settings] GET /custom-roles:', err);
+    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to fetch custom roles' } });
+  }
+});
+
+router.post('/custom-roles', authMiddleware, async (req, res) => {
+  try {
+    if (!_isAdmin(req)) return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Admin access required.' } });
+
+    const { label, color = '#6366f1', baseRole = 'teacher' } = req.body;
+    if (!label?.trim()) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Label is required.' } });
+
+    // Derive a stable snake_case key from the label
+    const key = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
+    if (!key) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Label must contain alphanumeric characters.' } });
+
+    if (BUILT_IN_ROLE_KEYS.has(key)) {
+      return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: `'${key}' is a reserved role name.` } });
+    }
+
+    const { schoolId, userId } = req.jwtUser;
+    const CustomRoles = _model('custom_roles');
+    const existing = await CustomRoles.findOne({ schoolId, key }).lean();
+    if (existing) return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: `A role with key '${key}' already exists.` } });
+
+    // Copy API-level permissions from baseRole's role_permissions doc
+    const RolePerms = _model('role_permissions');
+    const baseDoc   = await RolePerms.findOne({ schoolId, roleKey: baseRole }).lean();
+    const basePerms = baseDoc?.permissions ?? {};
+
+    const now = new Date().toISOString();
+
+    // Upsert a role_permissions doc for this custom role
+    await RolePerms.updateOne(
+      { schoolId, roleKey: key },
+      { $set: { id: `rp_${key}_${schoolId}`, schoolId, roleKey: key, permissions: basePerms, updatedAt: now } },
+      { upsert: true }
+    );
+
+    // Create the custom_roles record
+    const doc = await CustomRoles.create({
+      id: _uid(), schoolId, key, label: label.trim(), color, baseRole,
+      createdAt: now, createdBy: userId, updatedAt: now,
+    });
+
+    invalidatePermCache(schoolId);
+    res.status(201).json({ success: true, data: doc.toObject ? doc.toObject() : doc });
+  } catch (err) {
+    console.error('[settings] POST /custom-roles:', err);
+    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to create custom role' } });
+  }
+});
+
+router.delete('/custom-roles/:key', authMiddleware, async (req, res) => {
+  try {
+    if (!_isAdmin(req)) return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Admin access required.' } });
+
+    const { key } = req.params;
+    const { schoolId } = req.jwtUser;
+
+    const CustomRoles = _model('custom_roles');
+    const deleted = await CustomRoles.findOneAndDelete({ schoolId, key });
+    if (!deleted) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Custom role not found.' } });
+
+    // Remove role_permissions doc
+    await _model('role_permissions').deleteOne({ schoolId, roleKey: key });
+
+    // Strip the role's column from school.modulePermissions.byRole
+    await _model('schools').updateOne(
+      { id: schoolId },
+      { $unset: { [`modulePermissions.byRole.${key}`]: '' }, $set: { updatedAt: new Date().toISOString() } }
+    );
+
+    invalidatePermCache(schoolId);
+    res.json({ success: true, message: `Role '${key}' deleted.` });
+  } catch (err) {
+    console.error('[settings] DELETE /custom-roles/:key:', err);
+    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to delete custom role' } });
   }
 });
 

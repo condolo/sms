@@ -356,6 +356,11 @@ export const settings = {
     get:    ()       => _get('/settings/notifications'),
     update: (data)   => _put('/settings/notifications', data),
   },
+  customRoles: {
+    list:   ()      => _get('/settings/custom-roles'),
+    create: (data)  => _post('/settings/custom-roles', data),
+    remove: (key)   => _delete(`/settings/custom-roles/${key}`),
+  },
 };
 
 export const departments = _resource('departments');

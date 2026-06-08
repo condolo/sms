@@ -316,9 +316,15 @@ const SYSTEM_ROLES = [
 ];
 
 /* ── Create login account modal ─────────────────────────── */
-function CreateLoginModal({ staff, onClose, onConfirm, saving }) {
+function CreateLoginModal({ staff, customRoles = [], onClose, onConfirm, saving }) {
   const suggestedRole = STAFF_TYPE_ROLE_HINT[staff?.staffType] ?? 'teacher';
   const [role, setRole] = useState(suggestedRole);
+
+  // Combine built-in roles + custom roles
+  const allRoles = [
+    ...SYSTEM_ROLES,
+    ...customRoles.map(cr => ({ value: cr.key, label: cr.label })),
+  ];
 
   const name  = [staff?.firstName, staff?.lastName].filter(Boolean).join(' ');
   const email = staff?.email ?? '';
@@ -362,7 +368,7 @@ function CreateLoginModal({ staff, onClose, onConfirm, saving }) {
             </label>
             <select value={role} onChange={e => setRole(e.target.value)}
               className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40 bg-white">
-              {SYSTEM_ROLES.map(r => (
+              {allRoles.map(r => (
                 <option key={r.value} value={r.value}>{r.label}</option>
               ))}
             </select>
@@ -474,13 +480,23 @@ export default function HRPage() {
     staleTime: 60_000,
   });
 
+  // Fetch custom roles so we can offer them in the Create Login modal
+  const { data: customRolesData } = useQuery({
+    queryKey: ['settings', 'custom-roles'],
+    queryFn:  () => settingsApi.customRoles.list(),
+    select:   r => r?.data ?? [],
+    enabled:  isHR,
+    staleTime: 60_000,
+  });
+
   const teachers    = teachersData?.teachers ?? teachersData?.data ?? [];
   const leaves      = leaveData?.data        ?? leaveData?.requests   ?? [];
   const payrollRecs = payrollData?.data      ?? payrollData?.records  ?? [];
   const summary     = summaryData?.data      ?? summaryData           ?? {};
   const departments = deptsData   ?? [];
   const subjectsList= subjectsListData ?? [];
-  const schoolUsers = usersData ?? [];
+  const schoolUsers    = usersData ?? [];
+  const customRolesList = customRolesData ?? [];
 
   const pendingLeaves = leaves.filter(l => l.status === 'pending');
 
@@ -1163,6 +1179,7 @@ export default function HRPage() {
       {createLoginStaff && (
         <CreateLoginModal
           staff={createLoginStaff}
+          customRoles={customRolesList}
           saving={inviteUser.isPending}
           onClose={() => setCreateLoginStaff(null)}
           onConfirm={vars => inviteUser.mutate(vars)}
