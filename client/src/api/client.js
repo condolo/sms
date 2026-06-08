@@ -123,11 +123,13 @@ export const auth = {
 };
 
 export const profile = {
-  get:         ()       => _get('/users/me'),
-  update:      (data)   => _put('/users/me', data),
-  uploadPhoto: (data)   => _put('/users/me/photo', data),
-  removePhoto: ()       => _delete('/users/me/photo'),
-  photoUrl:    (userId) => `/api/users/${userId}/photo`,
+  get:                ()       => _get('/users/me'),
+  update:             (data)   => _put('/users/me', data),
+  uploadPhoto:        (data)   => _put('/users/me/photo', data),
+  removePhoto:        ()       => _delete('/users/me/photo'),
+  photoUrl:           (userId) => `/api/users/${userId}/photo`,
+  staffRecord:        ()       => _get('/teachers/me'),
+  updateStaffRecord:  (data)   => _put('/teachers/me', data),
 };
 
 export const students = {
@@ -350,7 +352,8 @@ export const settings = {
     list:   ()         => _get('/settings/users'),
     invite: (data)     => _post('/settings/users/invite', data),
     update: (id, data) => _put(`/settings/users/${id}`, data),
-    remove: (id)       => _delete(`/settings/users/${id}`),
+    remove:        (id)       => _delete(`/settings/users/${id}`),
+    resetPassword: (id)       => _post(`/settings/users/${id}/reset-password`),
   },
   notifications: {
     get:    ()       => _get('/settings/notifications'),

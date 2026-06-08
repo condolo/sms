@@ -3,6 +3,7 @@
    Protected by X-Platform-Key header (not school JWT)
    ============================================================ */
 const express  = require('express');
+const crypto   = require('crypto');
 const mongoose = require('mongoose');
 const bcrypt   = require('bcryptjs');
 const { platformAdmin } = require('../middleware/auth');
@@ -613,7 +614,7 @@ async function _seedBaseData(schoolId) {
    ════════════════════════════════════════════════════════════ */
 
 function _annId() {
-  return 'ann_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
+  return 'ann_' + Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
 }
 
 /* GET /api/platform/announcements — list all announcements */

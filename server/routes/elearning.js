@@ -821,7 +821,7 @@ router.post('/courses/:id/sessions', authMiddleware, async (req, res) => {
       gcCourseId: req.params.id, schoolId: req.jwtUser.schoolId,
     }).lean();
 
-    const id  = `sess_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const id  = `sess_${Date.now().toString(36)}${crypto.randomBytes(3).toString('hex')}`;
     const doc = {
       id,
       schoolId:   req.jwtUser.schoolId,

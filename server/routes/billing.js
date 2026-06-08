@@ -14,6 +14,7 @@
 'use strict';
 
 const express        = require('express');
+const crypto         = require('crypto');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }     = require('../utils/model');
 const { ok, created, E } = require('../utils/response');
@@ -21,7 +22,7 @@ const { STUDENT_RATE } = require('../config/pricing');
 
 const router = express.Router();
 
-function _uid() { return Date.now().toString(36) + Math.random().toString(36).substr(2, 5); }
+function _uid() { return Date.now().toString(36) + crypto.randomBytes(4).toString('hex'); }
 
 function _isAdmin(req) {
   const r = req.jwtUser?.role || '';

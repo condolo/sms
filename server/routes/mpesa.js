@@ -21,7 +21,7 @@ const router = express.Router();
 
 /* ── Helpers ───────────────────────────────────────────────── */
 function _uid() {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  return Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
 }
 
 function _getMpesaConfig(school) {

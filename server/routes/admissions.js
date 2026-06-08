@@ -4,6 +4,7 @@
    Plan: premium | RBAC: admissions:{read,create,update,delete}
    ============================================================ */
 const express = require('express');
+const crypto  = require('crypto');
 const { z }   = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
@@ -164,7 +165,7 @@ router.post('/', authMiddleware, PLAN, rbac('admissions', 'create'), async (req,
     const yearLabel  = schoolDoc?.academicYear ?? String(new Date().getFullYear());
     // Extract leading 4-digit year from label ("2025/2026" → "2025", "2026" → "2026")
     const yearCode   = yearLabel.match(/\d{4}/)?.[0] ?? String(new Date().getFullYear());
-    const ref        = `APP-${yearCode}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    const ref        = `APP-${yearCode}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
 
     const doc = await _model('admissions').create({
       ...data,

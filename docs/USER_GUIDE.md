@@ -1,6 +1,6 @@
 ﻿# Msingi — User Guide
 
-**Version 4.9.9** · Updated 2026-05-19
+**Version 4.29.0** · Updated 2026-06-08
 
 > **Looking for admin guides?**
 > - 🔧 [Platform Admin Guide](PLATFORM_ADMIN_GUIDE.md) — for the Msingi platform owner
@@ -105,7 +105,7 @@ Available demo roles: **Super Admin · Teacher · Parent · Finance · Student �
 If your account was created by an administrator (individually or via bulk import), you will be asked to **set your own password** the very first time you sign in. Your temporary password (sent to your email) is valid for one login only.
 
 ### Forgot Password
-Contact your school administrator to reset your password.
+Contact your school administrator to reset your password. They can generate a new temporary password for you immediately from **Settings → Users** — no email required. See [Your Profile & Password](#your-profile--password) below for how to then change it yourself.
 
 ### Auto-Logout (Security)
 For your security, Msingi automatically signs you out after **10 minutes of inactivity**. At 9 minutes, an amber warning toast appears — click **Stay signed in** to reset the timer. This protects shared or unattended devices.
@@ -766,7 +766,37 @@ Administrators can download a single merged PDF containing all students in a cla
 
 ## 16. Settings
 
-> **Admin / Superadmin only**
+### Your Profile & Password
+
+Every staff member — regardless of role — can access their own profile from the **avatar menu** in the top-right corner of any page. Click your avatar and select **My Profile**.
+
+#### What you can update yourself
+
+| Section | Fields |
+|---|---|
+| **Photo** | Upload a new photo (JPG/PNG/WebP, max 10 MB) or remove existing |
+| **Password** | Enter your current password, then your new password twice |
+| **Personal details** | Address, date of birth, qualifications, specialization |
+| **Next of kin** | Name, phone number, relationship |
+
+> **HR-managed fields** (department, contract type, employment status, national ID, NSSF/SHA/KRA pin) are controlled by your HR administrator and do not appear on this form.
+
+#### Changing your password
+
+1. Click your avatar → **My Profile**
+2. Scroll to the **Security** card
+3. Enter your current password, then the new password twice
+4. Click **Save Password**
+
+> Your new password must be at least 8 characters. After saving, a confirmation email is sent to your address.
+
+#### If you don't have your current password
+
+If you were given a temporary password that you haven't yet changed, just sign in with it — you will be prompted to set a permanent password immediately. If you have lost access entirely, contact your school administrator. They can generate a new temporary password for you from **Settings → Users** — no email delivery required.
+
+---
+
+> **Admin / Superadmin only** — the settings below are managed by school administrators.
 
 ### School Profile
 Update school name, short name, code, type, address, contact details, timezone, currency, and active curriculum tracks.

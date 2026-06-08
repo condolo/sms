@@ -4,6 +4,7 @@
    Logs backup metadata to backup_logs collection.
    ============================================================ */
 const express  = require('express');
+const crypto   = require('crypto');
 const rateLimit = require('express-rate-limit');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
@@ -40,7 +41,7 @@ const BACKUP_COLLECTIONS = [
 ];
 
 function _uid() {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  return Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
 }
 
 /* ── GET /api/backup/history — list this school's backup logs ── */

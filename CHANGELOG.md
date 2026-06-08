@@ -6,6 +6,72 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.29.0] — 2026-06-08  Staff Profile Self-Edit · Admin Password Reset · CSPRNG Sweep
+
+### New — Staff self-edit profile page (`client/src/pages/profile/ProfilePage.jsx`, `server/routes/teachers.js`)
+
+- **`/profile` route** accessible from the top-nav avatar dropdown — every authenticated user can view and edit their own profile without admin involvement
+- **Photo upload / remove** — base64 resize + crop before upload; MIME + 10 MB size validation; immediate preview
+- **Password change** — current password verified server-side, new password bcrypt-hashed; show/hide toggles on all fields
+- **Staff details card** — conditionally rendered only when a `teachers` record exists for the logged-in email:
+  - Self-editable: address (textarea), date of birth, qualifications, specialization
+  - Next of kin: name, phone, relationship (3-column grid)
+  - Read-only note: HR-managed fields (department, contract, employment status) can only be changed by HR team
+- **Backend — `GET /api/teachers/me`** — finds staff record by matching `user.email` → `teacher.email`; strips sensitive fields (`nationalId`, `nssfNo`, `shaNo`, `kraPinNo`) via `_stripSensitive()` before responding; returns `{ data: null }` when no record exists (admin-only users)
+- **Backend — `PUT /api/teachers/me`** — updates only the `SELF_EDITABLE` allowlist: `['phone', 'address', 'qualifications', 'specialization', 'dateOfBirth', 'nextOfKin']`; no RBAC gate, no plan gate — available to all authenticated staff
+- Both `/me` routes placed **before** `GET /:id` in `teachers.js` to prevent Express treating the literal string "me" as a dynamic ID parameter
+- **API client** — `profile.staffRecord()` → `GET /teachers/me`; `profile.updateStaffRecord(data)` → `PUT /teachers/me`
+
+### New — Admin temporary password reset (`server/routes/settings.js`, `client/src/pages/settings/SettingsPage.jsx`)
+
+- **`POST /api/settings/users/:id/reset-password`** — admin/superadmin only
+  - Non-superadmin blocked from resetting another `admin` or `superadmin`'s password
+  - Generates a new temp password via `_genTempPassword()` (CSPRNG, 11 chars: alpha + 2 digits + `!`, shuffled)
+  - Stores bcrypt hash, sets `mustChangePwd: true` → user forced to change on next login
+  - Attempts `sendWelcomeCredentials` email — non-fatal; `emailSent: false` returned when it fails
+  - Response: `{ tempPassword, name, email, emailSent }`
+- **`ResetPasswordModal`** — two-state modal rendered in `UsersTab` (Settings → Users):
+  - **Confirmation state** — explains temp password flow, names target user and email; Cancel + "Set Password" button
+  - **Result state** — temp password in large violet monospace + one-click copy button; green/amber banner showing email delivery status; "This password will not be shown again" note; Done button
+  - Overlay click dismissed only in confirmation state (result must be explicitly closed — prevents accidental dismissal before copying)
+- **User row action cell** upgraded — KeyRound icon button (amber hover) + Trash2 icon button (red hover) in a flex container; both reveal on row hover
+- **API client** — `settingsApi.users.resetPassword(id)` → `POST /settings/users/:id/reset-password`
+
+### Fixed — Welcome email not sent on user invite (`server/routes/settings.js`)
+
+- Invite route called `emailUtil.sendWelcome(...)` which does not exist — the correct export is `sendWelcomeCredentials`
+- All argument keys corrected: `to:` → `email:`, field names aligned with the email template's parameter signature
+- Effect: newly invited users now receive their welcome email with login URL and temporary password
+
+### Fixed — ProfilePage photo actions on wrong API namespace (`client/src/pages/profile/ProfilePage.jsx`)
+
+- `authApi.uploadPhoto` / `authApi.removePhoto` do not exist on the `auth` export — methods live on `profile`
+- Fixed import: `import { auth as authApi, profile as profileApi }` — both call sites updated to `profileApi.*`
+
+### Security — Global `Math.random()` elimination
+
+All production server code now uses Node.js built-in `crypto` (CSPRNG). `Math.random()` is fully banned:
+
+| File | What changed |
+|---|---|
+| `server/routes/users.js` | `_genTempPassword()` → `crypto.randomInt` + Fisher-Yates; `_uid()` → `crypto.randomBytes(4).toString('hex')` |
+| `server/routes/students.js` | `_genTempPassword()` → `crypto.randomInt` + Fisher-Yates |
+| `server/routes/admissions.js` | Application ref → `crypto.randomBytes(3).toString('hex').toUpperCase()` |
+| `server/routes/backup.js` | `_uid()` → `crypto.randomBytes(4).toString('hex')` |
+| `server/routes/bell-schedule.js` | `_uid()` → `crypto.randomBytes(4).toString('hex')` |
+| `server/routes/billing.js` | `_uid()` → `crypto.randomBytes(4).toString('hex')` |
+| `server/routes/collections.js` | `_uid()` → `crypto.randomBytes(4).toString('hex')` |
+| `server/routes/elearning.js` | Session ID → `crypto.randomBytes(3).toString('hex')` |
+| `server/routes/mpesa.js` | `_uid()` → `crypto.randomBytes(4).toString('hex')` |
+| `server/routes/platform.js` | `_annId()` → `crypto.randomBytes(4).toString('hex')` |
+| `server/scripts/seed-demo-data.js` | Fake payment dates → `crypto.randomInt(1, 31)` |
+
+### Removed — `three.js` unused dependency (`client/package.json`)
+
+- `"three": "^0.184.0"` removed from client dependencies — the package was never imported anywhere in the source tree (~900 KB bundle bloat)
+
+---
+
 ## [4.28.0] — 2026-06-08  Security Hardening — 2FA, OTP Hashing, JWT Expiry, CSPRNG, Slim Session
 
 ### Security — Authentication (`server/routes/auth.js`)

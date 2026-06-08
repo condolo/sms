@@ -23,6 +23,7 @@
    ============================================================ */
 'use strict';
 
+const crypto   = require('crypto');
 const mongoose = require('mongoose');
 const bcrypt   = require('bcryptjs');
 
@@ -805,7 +806,7 @@ async function seedDemoData() {
           amount:        s.paid,
           method:        ['mpesa', 'bank_transfer', 'cash', 'cheque'][idx % 4],
           receiptNumber: rcpNum,
-          date:          d(Math.floor(Math.random() * 30) + 5),
+          date:          d(crypto.randomInt(1, 31)),
           note:          'Term 2 fees payment',
           createdBy:     ADMIN_ID,
         });

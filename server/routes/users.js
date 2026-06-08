@@ -8,6 +8,7 @@
 const express  = require('express');
 const mongoose = require('mongoose');
 const bcrypt   = require('bcryptjs');
+const crypto   = require('crypto');
 const rateLimit = require('express-rate-limit');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
@@ -24,16 +25,23 @@ const inviteLimiter = rateLimit({
 function _genTempPassword() {
   const alpha = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz';
   const nums  = '23456789';
-  let pwd = '';
-  for (let i = 0; i < 8; i++) pwd += alpha[Math.floor(Math.random() * alpha.length)];
-  pwd += nums[Math.floor(Math.random() * nums.length)];
-  pwd += nums[Math.floor(Math.random() * nums.length)];
-  pwd += '!';
-  return pwd.split('').sort(() => 0.5 - Math.random()).join('');
+  let chars = '';
+  // CSPRNG — crypto.randomInt, never Math.random()
+  for (let i = 0; i < 8; i++) chars += alpha[crypto.randomInt(alpha.length)];
+  chars += nums[crypto.randomInt(nums.length)];
+  chars += nums[crypto.randomInt(nums.length)];
+  chars += '!';
+  // Fisher-Yates shuffle with CSPRNG
+  const arr = chars.split('');
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(i + 1);
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.join('');
 }
 
 function _uid() {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  return Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
 }
 
 function _isAdmin(req) {

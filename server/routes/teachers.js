@@ -68,6 +68,63 @@ function _validate(schema, data) {
   return { data: result.data };
 }
 
+/* Fields a staff member can update on their own record (no HR gate) */
+const SELF_EDITABLE = ['phone', 'address', 'qualifications', 'specialization', 'dateOfBirth', 'nextOfKin'];
+
+/* Sensitive fields — never returned to the staff member themselves */
+function _stripSensitive(doc) {
+  if (!doc) return doc;
+  const { nationalId, nssfNo, shaNo, kraPinNo, ...safe } = doc;
+  return safe;
+}
+
+/* ── GET /api/teachers/me — own staff record (no RBAC/plan gate) ─ */
+router.get('/me', authMiddleware, async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const user = await _model('users').findOne({ id: userId, schoolId }).lean();
+    if (!user) return E.notFound(res, 'User not found');
+    const doc = await _model('teachers').findOne({ schoolId, email: user.email }).lean();
+    if (!doc) return res.json({ success: true, data: null }); // no staff record — that's OK
+    return ok(res, _stripSensitive(doc));
+  } catch (err) {
+    console.error('[teachers/me GET]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── PUT /api/teachers/me — self-service update (no RBAC/plan gate) ─ */
+router.put('/me', authMiddleware, async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const user = await _model('users').findOne({ id: userId, schoolId }).lean();
+    if (!user) return E.notFound(res, 'User not found');
+
+    // Only allow the approved self-editable subset
+    const update = {};
+    for (const key of SELF_EDITABLE) {
+      if (req.body[key] !== undefined) update[key] = req.body[key];
+    }
+    if (!Object.keys(update).length) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'No updatable fields provided.' } });
+    }
+    update.updatedAt = new Date().toISOString();
+    update.updatedBy = userId;
+
+    const doc = await _model('teachers').findOneAndUpdate(
+      { schoolId, email: user.email },
+      { $set: update },
+      { new: true }
+    ).lean();
+
+    if (!doc) return E.notFound(res, 'No staff directory entry found for your account. Contact your administrator to link your profile.');
+    return ok(res, _stripSensitive(doc));
+  } catch (err) {
+    console.error('[teachers/me PUT]', err);
+    return E.serverError(res);
+  }
+});
+
 /* ── GET /api/teachers ─ Paginated list ─────────────────────── */
 router.get('/', authMiddleware, PLAN, rbac('teachers', 'read'), async (req, res) => {
   try {

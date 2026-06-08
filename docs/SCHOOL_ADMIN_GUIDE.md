@@ -122,13 +122,30 @@ Subjects are then linked to classes via the **Timetable** module (Standard plan 
 
 ## 6. Staff Management & Roles
 
-### Adding a staff member
+### Inviting a staff member
 
 1. Go to **Settings → Users**
-2. Click **Add Staff Member**
-3. Enter name, email, and assign a role
-4. Set a temporary password — the staff member should change it on first login
-5. Save
+2. Click **Invite User** (top right)
+3. Enter full name (optional), email address, and assign a role
+4. Click **Send Invite** — Msingi generates a secure temporary password and emails it to the staff member automatically
+5. The staff member follows the link in the email and is forced to set a new password on first login
+
+> **If the email doesn't arrive** — use the password reset flow below to retrieve or regenerate a temporary password you can share directly.
+
+### Resetting a user's password (admin only)
+
+If a staff member never received their welcome email — or has forgotten their password and cannot recover it by email — you can assign them a new temporary password instantly:
+
+1. Go to **Settings → Users**
+2. Hover over the user's row — a **key icon** (🔑) appears on the right
+3. Click the key icon to open the **Set Temporary Password** dialog
+4. Confirm by clicking **Set Password**
+5. The dialog shows the generated temporary password — copy it and share it with the user via a secure channel (phone, WhatsApp, in person)
+6. A copy of the password is also emailed to the user automatically; the dialog tells you whether the email was delivered
+
+> **The password is shown once.** Copy it before closing the dialog. The user will be required to change it on their next login.
+
+> **Note:** A regular admin cannot reset the password of another admin or superadmin. Only a superadmin can do this.
 
 ### Available roles
 
@@ -141,7 +158,7 @@ Subjects are then linked to classes via the **Timetable** module (Standard plan 
 | **Teacher** | Their classes, attendance, gradebook, timetable |
 | **Exams Officer** | Exams and gradebook management |
 | **Admissions Officer** | Admissions module |
-| **Finance** | Finance module only (Premium plan) |
+| **Finance** | Finance module only (Standard plan) |
 | **HR** | HR & Payroll module (Premium plan) |
 | **Timetabler** | Timetable builder only (Standard plan) |
 | **Discipline Committee** | Behaviour & Pastoral module |
@@ -151,6 +168,16 @@ Subjects are then linked to classes via the **Timetable** module (Standard plan 
 ### Assigning multiple roles
 
 A user can have more than one role (e.g. a teacher who is also section head). In Settings → Users, click the user and add additional roles. Permissions are the **union** of all assigned roles.
+
+### What staff can edit themselves
+
+Every staff member has access to their own **Profile page** (click their avatar in the top-right corner → **My Profile**). From there they can:
+
+- Upload or remove their profile photo
+- Change their password (current password required)
+- Update their personal details: address, date of birth, qualifications, specialization, next of kin
+
+HR-managed fields (department, contract type, employment status, national ID, NSSF/SHA/KRA numbers) can only be changed by the HR team — they are not visible on the self-edit form.
 
 ---
 

@@ -277,12 +277,20 @@ router.post('/bulk', authMiddleware, PLAN, rbac('students', 'create'), async (re
 
 /* ── Local temp-password generator (mirrors auth.js) ─────────── */
 function _genTempPassword() {
-  const alpha = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz';
-  const nums  = '23456789';
-  let pwd = '';
-  for (let i = 0; i < 8; i++) pwd += alpha[Math.floor(Math.random() * alpha.length)];
-  pwd += nums[Math.floor(Math.random() * nums.length)] + nums[Math.floor(Math.random() * nums.length)] + '!';
-  return pwd.split('').sort(() => 0.5 - Math.random()).join('');
+  const crypto = require('crypto');
+  const alpha  = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz';
+  const nums   = '23456789';
+  let chars = '';
+  // CSPRNG — crypto.randomInt, never Math.random()
+  for (let i = 0; i < 8; i++) chars += alpha[crypto.randomInt(alpha.length)];
+  chars += nums[crypto.randomInt(nums.length)] + nums[crypto.randomInt(nums.length)] + '!';
+  // Fisher-Yates shuffle with CSPRNG
+  const arr = chars.split('');
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(i + 1);
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.join('');
 }
 
 /* ── Portal tier check helper ───────────────────────────────────

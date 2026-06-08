@@ -3,6 +3,7 @@
    Every operation is automatically scoped to req.school.id
    ============================================================ */
 const express  = require('express');
+const crypto   = require('crypto');
 const mongoose = require('mongoose');
 const { authMiddleware }   = require('../middleware/auth');
 const { tenantMiddleware } = require('../middleware/tenant');
@@ -211,7 +212,7 @@ router.post('/:col/bulk', authMiddleware, async (req, res) => {
 });
 
 function _uid() {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  return Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
 }
 
 module.exports = router;

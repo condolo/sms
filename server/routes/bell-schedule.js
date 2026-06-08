@@ -19,6 +19,7 @@
    { p: string, start: 'HH:MM', end: 'HH:MM', label: string, isBreak: bool }
    ============================================================ */
 const express = require('express');
+const crypto  = require('crypto');
 const { z }   = require('zod');
 const { authMiddleware } = require('../middleware/auth');
 const { planGate }       = require('../middleware/plan');
@@ -64,7 +65,7 @@ function _isAdmin(req) {
   return r === 'superadmin' || r === 'admin' || rs.includes('superadmin') || rs.includes('admin');
 }
 function _uid() {
-  return 'bs_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  return 'bs_' + Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
 }
 
 /* ── Shared lookup used by timetable route too ───────────────── */

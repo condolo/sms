@@ -7,7 +7,8 @@
    GET  /api/settings/users        — list users in school (admin only)
    POST /api/settings/users/invite — invite a new user (admin only)
    PUT  /api/settings/users/:id    — update user role/details (admin only)
-   DELETE /api/settings/users/:id  — remove user from school (admin only)
+   DELETE /api/settings/users/:id              — remove user from school (admin only)
+   POST   /api/settings/users/:id/reset-password — assign temp password (admin only)
    ============================================================ */
 const express  = require('express');
 const bcrypt   = require('bcryptjs');
@@ -83,6 +84,7 @@ const SCHOOL_UPDATABLE = [
   'houses', 'shortName', 'primaryColor', 'accentColor', 'themePreset', 'logoUrl', 'modulePermissions',
   'moduleConfig',
   'mpesa',
+  'hiddenSystemRoles',   // array of system role keys hidden from invite form / R&P sidebar
 ];
 
 /* ══════════════════════════════════════════════════════════════
@@ -380,12 +382,14 @@ router.post('/users/invite', authMiddleware, async (req, res) => {
     try {
       const Schools = _model('schools');
       const school  = await Schools.findOne({ id: req.jwtUser.schoolId }).lean();
-      await emailUtil.sendWelcome({
-        to:           userEmail,
-        name:         newUser.name,
-        schoolName:   school?.name || 'Your School',
+      await emailUtil.sendWelcomeCredentials({
+        email:       userEmail,
+        name:        newUser.name,
+        schoolName:  school?.name  || 'Your School',
+        schoolEmail: school?.systemEmail || school?.email || '',
         tempPassword,
         role,
+        loginUrl:    process.env.APP_URL || 'https://msingi.io',
       });
     } catch (emailErr) {
       console.warn('[settings] invite email failed (non-fatal):', emailErr.message);
@@ -485,6 +489,71 @@ router.delete('/users/:id', authMiddleware, async (req, res) => {
 });
 
 /* ══════════════════════════════════════════════════════════════
+   POST /api/settings/users/:id/reset-password
+   Admin assigns a new temporary password; user must change on login.
+   ══════════════════════════════════════════════════════════════ */
+router.post('/users/:id/reset-password', authMiddleware, async (req, res) => {
+  if (!_isAdmin(req)) {
+    return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Admin access required.' } });
+  }
+  const { id } = req.params;
+  const schoolId = req.jwtUser.schoolId;
+  try {
+    const User   = _model('users');
+    const School = _model('schools');
+
+    const target = await User.findOne({ id, schoolId }).lean();
+    if (!target) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found.' } });
+    }
+
+    /* Non-superadmin cannot reset another admin/superadmin's password */
+    if (!_isSuperAdmin(req) && (target.role === 'admin' || target.role === 'superadmin')) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Cannot reset password for another admin.' } });
+    }
+
+    const tempPassword = _genTempPassword();
+    const hash         = await bcrypt.hash(tempPassword, 12);
+
+    await User.updateOne(
+      { id, schoolId },
+      { $set: { password: hash, mustChangePwd: true, updatedAt: new Date().toISOString() } }
+    );
+
+    /* Attempt email — non-fatal */
+    const school = await School.findOne({ id: schoolId }).lean();
+    let emailSent = false;
+    try {
+      await emailUtil.sendWelcomeCredentials({
+        email:       target.email,
+        name:        target.name  || target.email,
+        schoolName:  school?.name || 'Your School',
+        schoolEmail: school?.systemEmail || school?.email || '',
+        tempPassword,
+        role:        target.role,
+        loginUrl:    process.env.APP_URL || 'https://msingi.io',
+      });
+      emailSent = true;
+    } catch (emailErr) {
+      console.warn('[settings] reset-password email failed:', emailErr.message);
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        tempPassword,
+        name:      target.name  || target.email,
+        email:     target.email,
+        emailSent,
+      },
+    });
+  } catch (err) {
+    console.error('[settings] POST /users/:id/reset-password error:', err);
+    return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to reset password.' } });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
    NOTIFICATION SETTINGS
    GET  /api/settings/notifications — return per-event channel config
    PUT  /api/settings/notifications — save per-event channel config
@@ -567,8 +636,13 @@ router.put('/notifications', authMiddleware, async (req, res) => {
    ══════════════════════════════════════════════════════════════ */
 
 const BUILT_IN_ROLE_KEYS = new Set([
-  'superadmin','admin','deputy','teacher','parent','student',
-  'section_head','timetabler','guardian','hr','finance',
+  'superadmin','admin',
+  'deputy_principal','deputy',          // deputy is the legacy alias
+  'section_head','teacher',
+  'exams_officer','timetabler',
+  'admissions_officer','finance','hr',
+  'discipline_committee',
+  'parent','guardian','student',
 ]);
 
 router.get('/custom-roles', authMiddleware, async (req, res) => {

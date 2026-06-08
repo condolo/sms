@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { Camera, Trash2, Save, Lock, User, CheckCircle, AlertCircle } from 'lucide-react';
+import { Camera, Trash2, Save, Lock, User, CheckCircle, AlertCircle, Briefcase } from 'lucide-react';
 import useAuthStore from '@/store/auth.js';
-import { auth as authApi } from '@/api/client.js';
+import { auth as authApi, profile as profileApi } from '@/api/client.js';
 
 /* ── client-side image resize using Canvas ────────────────────────────────── */
 function resizeImageToBase64(file, maxPx = 256, quality = 0.82) {
@@ -85,12 +85,44 @@ export default function ProfilePage() {
   const [pwBanner,   setPwBanner]   = useState({ type: '', msg: '' });
   const [showPws,    setShowPws]    = useState(false);
 
+  /* ── staff record state ──────────────────────────── */
+  // undefined = loading  |  null = no staff record  |  object = record found
+  const [staffData,    setStaffData]    = useState(undefined);
+  const [staffSaving,  setStaffSaving]  = useState(false);
+  const [staffBanner,  setStaffBanner]  = useState({ type: '', msg: '' });
+  const [sfAddress,    setSfAddress]    = useState('');
+  const [sfDob,        setSfDob]        = useState('');
+  const [sfQuals,      setSfQuals]      = useState('');
+  const [sfSpec,       setSfSpec]       = useState('');
+  const [sfNokName,    setSfNokName]    = useState('');
+  const [sfNokPhone,   setSfNokPhone]   = useState('');
+  const [sfNokRel,     setSfNokRel]     = useState('');
+
   /* fetch fresh photo url on mount if user has one */
   useEffect(() => {
     if (user?.id) {
       setPhotoUrl(`/api/users/${user.id}/photo?t=${Date.now()}`);
     }
   }, [user?.id]);
+
+  /* fetch staff record on mount */
+  useEffect(() => {
+    profileApi.staffRecord()
+      .then(json => {
+        const rec = json?.data ?? null;
+        setStaffData(rec);
+        if (rec) {
+          setSfAddress(rec.address       || '');
+          setSfDob(rec.dateOfBirth ? rec.dateOfBirth.split('T')[0] : '');
+          setSfQuals(rec.qualifications  || '');
+          setSfSpec(rec.specialization   || '');
+          setSfNokName(rec.nextOfKin?.name         || '');
+          setSfNokPhone(rec.nextOfKin?.phone        || '');
+          setSfNokRel(rec.nextOfKin?.relationship   || '');
+        }
+      })
+      .catch(() => setStaffData(null));
+  }, []);
 
   const isStudent = user?.role === 'student' || user?.roles?.includes('student');
 
@@ -119,7 +151,7 @@ export default function ProfilePage() {
 
     try {
       const base64 = await resizeImageToBase64(file, 256, 0.82);
-      await authApi.uploadPhoto({ photoBase64: base64 });
+      await profileApi.uploadPhoto({ photoBase64: base64 });
       const freshUrl = `/api/users/${user.id}/photo?t=${Date.now()}`;
       setPhotoUrl(freshUrl);
       setSession({ ...session, user: { ...user, photoUrl: freshUrl } });
@@ -136,7 +168,7 @@ export default function ProfilePage() {
     if (!window.confirm('Remove your profile photo?')) return;
     setPhotoLoading(true);
     try {
-      await authApi.removePhoto();
+      await profileApi.removePhoto();
       setPhotoUrl(null);
       setSession({ ...session, user: { ...user, photoUrl: null } });
       setPhotoBanner({ type: 'success', msg: 'Photo removed.' });
@@ -192,6 +224,32 @@ export default function ProfilePage() {
       setPwBanner({ type: 'error', msg: err.message || 'Failed to change password.' });
     } finally {
       setPwSaving(false);
+    }
+  }
+
+  /* ── staff details save ───────────────────────────── */
+  async function handleStaffSave(e) {
+    e.preventDefault();
+    setStaffSaving(true);
+    setStaffBanner({ type: '', msg: '' });
+    try {
+      const json = await profileApi.updateStaffRecord({
+        address:        sfAddress.trim(),
+        dateOfBirth:    sfDob || null,
+        qualifications: sfQuals.trim(),
+        specialization: sfSpec.trim(),
+        nextOfKin: {
+          name:         sfNokName.trim(),
+          phone:        sfNokPhone.trim(),
+          relationship: sfNokRel.trim(),
+        },
+      });
+      setStaffData(json?.data ?? staffData);
+      setStaffBanner({ type: 'success', msg: 'Staff details updated.' });
+    } catch (err) {
+      setStaffBanner({ type: 'error', msg: err.message || 'Failed to update staff details.' });
+    } finally {
+      setStaffSaving(false);
     }
   }
 
@@ -418,6 +476,117 @@ export default function ProfilePage() {
           </div>
         </form>
       </Card>
+
+      {/* ── Staff Details card — only shown when a staff record exists ── */}
+      {staffData && (
+        <Card title="Staff Details" icon={Briefcase}>
+          <form onSubmit={handleStaffSave} className="space-y-5">
+            <Banner type={staffBanner.type} message={staffBanner.msg} onClose={() => setStaffBanner({ type: '', msg: '' })} />
+
+            {/* Address + DOB */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="form-label">Home address</label>
+                <textarea
+                  value={sfAddress}
+                  onChange={e => setSfAddress(e.target.value)}
+                  className="form-input resize-none"
+                  rows={2}
+                  placeholder="Street, city, county"
+                  maxLength={500}
+                />
+              </div>
+              <div>
+                <label className="form-label">Date of birth</label>
+                <input
+                  type="date"
+                  value={sfDob}
+                  onChange={e => setSfDob(e.target.value)}
+                  className="form-input"
+                />
+              </div>
+            </div>
+
+            {/* Qualifications + Specialization */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="form-label">Qualifications</label>
+                <input
+                  type="text"
+                  value={sfQuals}
+                  onChange={e => setSfQuals(e.target.value)}
+                  className="form-input"
+                  placeholder="e.g. BEd Science, PGCE"
+                  maxLength={500}
+                />
+              </div>
+              <div>
+                <label className="form-label">Specialization</label>
+                <input
+                  type="text"
+                  value={sfSpec}
+                  onChange={e => setSfSpec(e.target.value)}
+                  className="form-input"
+                  placeholder="e.g. Mathematics, Biology"
+                  maxLength={200}
+                />
+              </div>
+            </div>
+
+            {/* Next of Kin */}
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Emergency Contact (Next of Kin)</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="form-label">Full name</label>
+                  <input
+                    type="text"
+                    value={sfNokName}
+                    onChange={e => setSfNokName(e.target.value)}
+                    className="form-input"
+                    placeholder="Contact name"
+                    maxLength={100}
+                  />
+                </div>
+                <div>
+                  <label className="form-label">Phone</label>
+                  <input
+                    type="tel"
+                    value={sfNokPhone}
+                    onChange={e => setSfNokPhone(e.target.value)}
+                    className="form-input"
+                    placeholder="+254 7XX XXX XXX"
+                    maxLength={30}
+                  />
+                </div>
+                <div>
+                  <label className="form-label">Relationship</label>
+                  <input
+                    type="text"
+                    value={sfNokRel}
+                    onChange={e => setSfNokRel(e.target.value)}
+                    className="form-input"
+                    placeholder="e.g. Spouse, Parent"
+                    maxLength={50}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-slate-400">HR-managed fields (department, contract, employment status) can only be updated by your HR team.</p>
+              <button
+                type="submit"
+                disabled={staffSaving}
+                className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 transition-colors shrink-0 ml-4"
+              >
+                <Save className="h-4 w-4" />
+                {staffSaving ? 'Saving…' : 'Save details'}
+              </button>
+            </div>
+          </form>
+        </Card>
+      )}
 
       {/* ── Account info (read-only) ───────────────────────────────── */}
       <div className="rounded-xl bg-slate-50 border border-slate-200 px-5 py-4 text-xs text-slate-500 space-y-1">

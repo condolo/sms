@@ -1,6 +1,6 @@
 ﻿# Msingi — Developer Guide
 
-**Version 4.9.9** · Technical Reference & Architecture
+**Version 4.29.0** · Technical Reference & Architecture
 
 ---
 
@@ -38,6 +38,9 @@
 30. [Public Marketing Pages (v4.9.5+)](#30-public-marketing-pages-v495)
 31. [Demo School System (v4.9.7+)](#31-demo-school-system-v497)
 32. [Developer Workflow — Check Docs First (v4.9.9+)](#32-developer-workflow--check-docs-first-v499)
+33. [Staff Self-Edit Profile API (v4.29.0+)](#33-staff-self-edit-profile-api-v4290)
+34. [Admin Password Reset API (v4.29.0+)](#34-admin-password-reset-api-v4290)
+35. [Security — CSPRNG Enforcement (v4.29.0+)](#35-security--csprng-enforcement-v4290)
 
 ---
 
@@ -2808,3 +2811,137 @@ A Claude Code slash command `.claude/commands/check-docs.md` enforces the follow
 6. **Update all docs** after every change
 
 Invoke with `/check-docs` in Claude Code before starting any feature work.
+
+---
+
+## 33. Staff Self-Edit Profile API (v4.29.0+)
+
+Staff members can edit selected fields on their own teacher record without going through HR. Only authenticated users with a matching teacher record (matched by email) can use these endpoints — no RBAC gate, no plan gate.
+
+### Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/teachers/me` | Returns the caller's teacher record (sensitive fields stripped) |
+| `PUT` | `/api/teachers/me` | Updates allowed fields on the caller's teacher record |
+
+### Route placement
+
+Both `/me` routes **must be declared before `/:id`** in `server/routes/teachers.js`. Express matches routes in declaration order — if `/:id` appears first, Express treats the literal string `"me"` as a dynamic ID parameter and the `/me` routes are never reached.
+
+### Self-editable fields
+
+```js
+const SELF_EDITABLE = [
+  'phone', 'address', 'qualifications',
+  'specialization', 'dateOfBirth', 'nextOfKin'
+];
+```
+
+Any field not in this allowlist is silently ignored on PUT. HR-controlled fields (`nationalId`, `nssfNo`, `shaNo`, `kraPinNo`, `contractType`, `employmentStatus`, `departmentId`, `salary`) are never returned by `GET /me` (stripped via `_stripSensitive()`).
+
+### Record matching
+
+Staff records in the `teachers` collection are matched to users in the `users` collection by the `email` field. There is no explicit `userId` foreign key on teacher records. If no teacher record exists for the caller's email, `GET /me` returns `{ success: true, data: null }` — the frontend hides the staff details card in this case (admin-only users, students, parents).
+
+### API client
+
+```js
+profile.staffRecord()             // GET /teachers/me
+profile.updateStaffRecord(data)   // PUT /teachers/me
+```
+
+---
+
+## 34. Admin Password Reset API (v4.29.0+)
+
+Admins can assign a new temporary password to any user in their school. The user is forced to change it on next login via `mustChangePwd: true`.
+
+### Endpoint
+
+```
+POST /api/settings/users/:id/reset-password
+```
+
+**Auth**: `authMiddleware` + `_isAdmin()` check  
+**Scope**: `schoolId` tenant isolation — cannot reset users from other schools  
+**RBAC guard**: non-superadmin cannot reset `admin` or `superadmin` passwords
+
+### Request
+
+No body required — the temp password is generated server-side.
+
+### Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "tempPassword": "Kp7mN3vR!",
+    "name": "Alice Mwangi",
+    "email": "alice@school.edu",
+    "emailSent": true
+  }
+}
+```
+
+`emailSent: false` is returned (not an error) when the email transport fails — the caller shows a warning and the temp password is still in the response for manual sharing.
+
+### Password generation
+
+Uses `_genTempPassword()` from `settings.js`:
+- 8 random alpha characters (ambiguous chars `I`, `l`, `O`, `0` excluded)
+- 2 random digits (1–9, 0 excluded)
+- One `!` suffix
+- Fisher-Yates shuffle with `crypto.randomInt` — fully CSPRNG, no `Math.random()`
+
+### UI flow
+
+The `ResetPasswordModal` component in `SettingsPage.jsx` (`UsersTab`) has two states:
+
+1. **Confirmation** — names the target user, explains the temp-password flow, warns to keep the dialog open; Cancel + Set Password buttons
+2. **Result** — shows the temp password in large monospace with a copy button; email delivery status badge (green / amber); "password will not be shown again" note; Done button closes
+
+The backdrop click is disabled once the result is shown, preventing accidental dismissal before the password is copied.
+
+### API client
+
+```js
+settingsApi.users.resetPassword(id)   // POST /settings/users/:id/reset-password
+```
+
+---
+
+## 35. Security — CSPRNG Enforcement (v4.29.0+)
+
+**Rule:** `Math.random()` is banned from all production server code. Use `crypto.randomInt()` or `crypto.randomBytes()` exclusively.
+
+### Why
+
+`Math.random()` is not a cryptographically secure random number generator (CSPRNG). Values it produces are predictable with sufficient observations, making it unsuitable for:
+- Temporary passwords (guessable → account takeover)
+- Document/entity IDs (guessable → BOLA/IDOR attacks)
+- OTPs and tokens (guessable → auth bypass)
+
+### Standard patterns
+
+```js
+// Unique ID (e.g. for new documents)
+const id = Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
+
+// Random integer in range [0, max)
+const idx = crypto.randomInt(max);
+
+// Random integer in range [min, max)
+const day = crypto.randomInt(1, 31);
+
+// Fisher-Yates shuffle (for password character randomisation)
+for (let i = arr.length - 1; i > 0; i--) {
+  const j = crypto.randomInt(i + 1);
+  [arr[i], arr[j]] = [arr[j], arr[i]];
+}
+```
+
+### Enforcement
+
+All `server/routes/*.js` files and `server/scripts/*.js` files are clean as of v4.29.0. If adding a new file or helper, always `const crypto = require('crypto')` and use the patterns above. PRs containing `Math.random()` in server code should be rejected at review.
