@@ -9,9 +9,9 @@ import {
   Users, UserCheck, Clock, Wallet, Plus, Check, X,
   AlertCircle, Calendar, FolderOpen, Trash2, Edit2, Save,
   Download, ExternalLink, Loader2, Copy, Search, ChevronRight,
-  ShieldCheck, CreditCard,
+  ShieldCheck, CreditCard, UserPlus,
 } from 'lucide-react';
-import { hr as hrApi, teachers as teachersApi, departments as deptsApi, subjects as subjectsApi } from '@/api/client.js';
+import { hr as hrApi, teachers as teachersApi, departments as deptsApi, subjects as subjectsApi, settings as settingsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import StaffFormModal   from './StaffFormModal.jsx';
 import StaffDetailPanel from './StaffDetailPanel.jsx';
@@ -296,9 +296,109 @@ function PayrollForm({ teachers, defaultPeriod, record, sym, onClose, onSave, sa
   );
 }
 
-/* ══════════════════════════════════════════════════════════
-   MAIN COMPONENT
-   ══════════════════════════════════════════════════════════ */
+/* ── staffType → suggested system role ─────────────────── */
+const STAFF_TYPE_ROLE_HINT = {
+  teacher:       'teacher',
+  administrator: 'admin',
+  hr:            'admin',
+  finance:       'teacher',
+  librarian:     'teacher',
+  counselor:     'teacher',
+  it:            'teacher',
+  security:      'teacher',
+  other:         'teacher',
+};
+
+const SYSTEM_ROLES = [
+  { value: 'admin',   label: 'Admin — full school management access' },
+  { value: 'deputy',  label: 'Deputy — deputy principal access' },
+  { value: 'teacher', label: 'Teacher — classroom and gradebook access' },
+];
+
+/* ── Create login account modal ─────────────────────────── */
+function CreateLoginModal({ staff, onClose, onConfirm, saving }) {
+  const suggestedRole = STAFF_TYPE_ROLE_HINT[staff?.staffType] ?? 'teacher';
+  const [role, setRole] = useState(suggestedRole);
+
+  const name  = [staff?.firstName, staff?.lastName].filter(Boolean).join(' ');
+  const email = staff?.email ?? '';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-100">
+          <div className="flex items-center gap-2.5">
+            <div className="h-8 w-8 rounded-lg bg-violet-50 flex items-center justify-center">
+              <UserPlus size={15} className="text-violet-600" />
+            </div>
+            <div>
+              <h2 className="font-bold text-slate-900 text-sm">Create Login Account</h2>
+              <p className="text-[11px] text-slate-500">for {name}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-1"><X size={15} /></button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {/* Summary */}
+          <div className="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3 space-y-1.5">
+            <div className="flex gap-3 text-sm">
+              <span className="text-slate-400 w-14 shrink-0 text-xs font-medium pt-0.5">Name</span>
+              <span className="font-semibold text-slate-800">{name}</span>
+            </div>
+            <div className="flex gap-3 text-sm">
+              <span className="text-slate-400 w-14 shrink-0 text-xs font-medium pt-0.5">Email</span>
+              <span className="font-mono text-xs text-slate-700">{email}</span>
+            </div>
+          </div>
+
+          {/* Role selector */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+              System Role <span className="text-slate-400 font-normal">(controls what they can access)</span>
+            </label>
+            <select value={role} onChange={e => setRole(e.target.value)}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40 bg-white">
+              {SYSTEM_ROLES.map(r => (
+                <option key={r.value} value={r.value}>{r.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* What will happen */}
+          <div className="rounded-xl bg-indigo-50 border border-indigo-100 px-4 py-3 space-y-1.5">
+            <p className="text-[11px] font-semibold text-indigo-800 mb-1">What will happen</p>
+            <p className="text-[11px] text-indigo-700">
+              A login account will be created for <strong>{email}</strong> with a system-generated temporary password.
+            </p>
+            <p className="text-[11px] text-indigo-700">
+              A welcome email will be sent to {name} with their credentials and a link to sign in.
+              They will be prompted to set a new password on first login.
+            </p>
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-2.5 pt-1">
+            <button onClick={onClose}
+              className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition">
+              Cancel
+            </button>
+            <button onClick={() => onConfirm({ name, email, role, staffId: staff?.staffId })}
+              disabled={saving || !email}
+              className="flex-1 rounded-xl bg-violet-600 hover:bg-violet-700 py-2.5 text-sm font-semibold text-white transition disabled:opacity-50 flex items-center justify-center gap-2">
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />}
+              {saving ? 'Creating…' : 'Create & Send Email'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function HRPage() {
   const qc     = useQueryClient();
   const user   = useAuthStore(s => s.session?.user);
@@ -316,6 +416,8 @@ export default function HRPage() {
   const [staffModal, setStaffModal]           = useState(null);  // null | { mode:'add'|'edit' }
   const [selectedStaff, setSelectedStaff]     = useState(null);  // null | teacher doc (for detail panel)
   const [staffSearch, setStaffSearch]         = useState('');
+  const [createLoginStaff, setCreateLoginStaff] = useState(null); // null | teacher doc
+  const [loginToast, setLoginToast]             = useState('');   // success message
 
   /* ── Queries ── */
   const { data: summaryData } = useQuery({
@@ -363,12 +465,22 @@ export default function HRPage() {
     staleTime: 120_000,
   });
 
+  // Fetch school users so we can detect which staff members have login accounts
+  const { data: usersData } = useQuery({
+    queryKey: ['settings-users'],
+    queryFn:  () => settingsApi.users.list(),
+    select:   r => r?.data?.users ?? r?.users ?? (Array.isArray(r?.data) ? r.data : []),
+    enabled:  isHR,
+    staleTime: 60_000,
+  });
+
   const teachers    = teachersData?.teachers ?? teachersData?.data ?? [];
   const leaves      = leaveData?.data        ?? leaveData?.requests   ?? [];
   const payrollRecs = payrollData?.data      ?? payrollData?.records  ?? [];
   const summary     = summaryData?.data      ?? summaryData           ?? {};
   const departments = deptsData   ?? [];
   const subjectsList= subjectsListData ?? [];
+  const schoolUsers = usersData ?? [];
 
   const pendingLeaves = leaves.filter(l => l.status === 'pending');
 
@@ -446,6 +558,17 @@ export default function HRPage() {
         setSelectedStaff(updated?.data ?? updated);
       }
       setStaffModal(null);
+    },
+  });
+
+  const inviteUser = useMutation({
+    mutationFn: ({ name, email, role, staffId }) =>
+      settingsApi.users.invite({ name, email, role, staffId }),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ['settings-users'] });
+      setCreateLoginStaff(null);
+      setLoginToast(`Login account created. Welcome email sent to ${vars.email}.`);
+      setTimeout(() => setLoginToast(''), 6000);
     },
   });
 
@@ -1027,10 +1150,30 @@ export default function HRPage() {
               departments={departments}
               subjects={subjectsList}
               isHR={isHR}
+              users={schoolUsers}
               onClose={() => setSelectedStaff(null)}
               onEdit={() => setStaffModal({ mode: 'edit' })}
+              onCreateLogin={t => setCreateLoginStaff(t)}
             />
           </motion.div>
+        </div>
+      )}
+
+      {/* ── Create login account modal ── */}
+      {createLoginStaff && (
+        <CreateLoginModal
+          staff={createLoginStaff}
+          saving={inviteUser.isPending}
+          onClose={() => setCreateLoginStaff(null)}
+          onConfirm={vars => inviteUser.mutate(vars)}
+        />
+      )}
+
+      {/* ── Success toast ── */}
+      {loginToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-2.5 rounded-xl bg-emerald-600 text-white px-5 py-3 shadow-lg text-sm font-medium">
+          <Check size={15} className="shrink-0" />
+          {loginToast}
         </div>
       )}
     </div>

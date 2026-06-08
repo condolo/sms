@@ -9,7 +9,7 @@
      onEdit      fn — opens edit form
    ============================================================ */
 import { useState } from 'react';
-import { X, Edit2 } from 'lucide-react';
+import { X, Edit2, UserPlus, CheckCircle2, ShieldAlert } from 'lucide-react';
 
 const STAFF_TYPE_LABELS = {
   teacher:'Teacher', administrator:'Administrator', librarian:'Librarian',
@@ -53,7 +53,7 @@ function InfoRow({ label, value, mono }) {
   );
 }
 
-export default function StaffDetailPanel({ teacher: t, departments = [], subjects = [], isHR, onClose, onEdit }) {
+export default function StaffDetailPanel({ teacher: t, departments = [], subjects = [], isHR, users = [], onClose, onEdit, onCreateLogin }) {
   const [tab, setTab] = useState('profile');
 
   if (!t) return null;
@@ -63,6 +63,8 @@ export default function StaffDetailPanel({ teacher: t, departments = [], subject
   const initials        = `${t.firstName?.[0] ?? ''}${t.lastName?.[0] ?? ''}`.toUpperCase();
   const displayName     = [t.title, t.firstName, t.lastName].filter(Boolean).join(' ');
   const hasHRData       = t.nationalId || t.nssfNo || t.shaNo || t.kraPinNo || t.nextOfKin?.name;
+  // Check if this staff member already has a login account
+  const hasAccount      = t.email && users.some(u => u.email?.toLowerCase() === t.email?.toLowerCase());
 
   const TABS = [
     { id: 'profile',    label: 'Profile'    },
@@ -160,6 +162,45 @@ export default function StaffDetailPanel({ teacher: t, departments = [], subject
 
             {!t.email && !t.phone && !t.address && (
               <p className="text-sm text-slate-400 text-center py-8">No personal details on record.</p>
+            )}
+
+            {/* ── Login account status ── */}
+            {isHR && t.email && (
+              <div className={`mt-5 rounded-xl border px-4 py-3.5 flex items-start gap-3 ${
+                hasAccount
+                  ? 'bg-emerald-50 border-emerald-100'
+                  : 'bg-amber-50 border-amber-100'
+              }`}>
+                {hasAccount ? (
+                  <>
+                    <CheckCircle2 size={16} className="text-emerald-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-xs font-semibold text-emerald-800">Has a login account</p>
+                      <p className="text-[11px] text-emerald-700 mt-0.5">
+                        Can sign in to the platform using <span className="font-mono">{t.email}</span>.
+                        Manage their permissions in Settings → Roles.
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <ShieldAlert size={16} className="text-amber-600 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-xs font-semibold text-amber-800">No login account</p>
+                      <p className="text-[11px] text-amber-700 mt-0.5 mb-3">
+                        {displayName} is in the staff directory but cannot sign in. Create an account to give them platform access.
+                      </p>
+                      <button
+                        onClick={() => onCreateLogin?.(t)}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 px-3 py-1.5 text-xs font-semibold text-white transition-colors"
+                      >
+                        <UserPlus size={12} />
+                        Create Login Account
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
           </div>
         )}
