@@ -98,4 +98,20 @@ const E = {
   validation:    (res, issues)                          => fail(res, 'VALIDATION_ERROR', 'Validation failed', 422, { issues }),
 };
 
-module.exports = { ok, created, fail, paginate, parsePagination, E };
+/**
+ * Safe query-param helper — prevents NoSQL injection.
+ *
+ * Express's `qs` parser converts bracket notation (?key[$ne]=x) into objects,
+ * which are passed straight to MongoDB and treated as query operators.
+ * Call this before assigning any req.query param to a Mongoose filter.
+ *
+ * Returns the value only if it is a plain string, undefined otherwise.
+ *
+ * @param {any} val - The value from req.query
+ * @returns {string|undefined}
+ */
+function strParam(val) {
+  return typeof val === 'string' ? val : undefined;
+}
+
+module.exports = { ok, created, fail, paginate, parsePagination, E, strParam };

@@ -6,6 +6,206 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.28.0] — 2026-06-08  Security Hardening — 2FA, OTP Hashing, JWT Expiry, CSPRNG, Slim Session
+
+### Security — Authentication (`server/routes/auth.js`)
+
+- **2FA scope expanded** — `MFA_ROLES` set extended from `['superadmin']` to `['superadmin', 'admin', 'deputy', 'finance']`; all privileged roles now require OTP on login
+- **OTP hashed at rest** — `_hashOTP(otp)` computes SHA-256 before storing in `mfaOtp` field; `_verifyOTP(input, hash)` uses `crypto.timingSafeEqual` to prevent timing-side-channel attacks; plain-text OTP never written to database
+- **CSPRNG for OTP generation** — replaced `Math.random()` with `crypto.randomInt(0, 9)` inside `_genOTP()`; Fisher-Yates shuffle in `_genTempPassword()` also uses `crypto.randomInt`
+- **Demo school 2FA exemption** — `const isDemo = req.school?.slug === 'demo'`; demo accounts are exempt from 2FA requirement so demo quick-login works without real email delivery
+- **Login rate limit tightened** — `loginLimiter` reduced from 20 → 10 attempts per 15-minute window
+
+### Security — JWT (`server/utils/jwt.js`)
+
+- **Token lifetime reduced** — `EXPIRES` default changed from `'7d'` → `'24h'` (`JWT_EXPIRES_IN` env var override still honoured); stolen-token attack window halved
+
+### Security — Platform Key (`server/middleware/auth.js`)
+
+- `X-Platform-Key` header now compared via `crypto.timingSafeEqual` — prevents timing attacks on the operator key
+
+### Security — Settings CSPRNG (`server/routes/settings.js`)
+
+- `_uid()` — switched from `Math.random().toString(36)` to `crypto.randomBytes(4).toString('hex')`
+- `_genTempPassword()` — Fisher-Yates shuffle now uses `crypto.randomInt` (same as auth.js)
+
+### Security — Client localStorage Slim-Session (`client/src/store/auth.js`)
+
+- `_slimUser(user)` strips `email`, `permissions` before localStorage persist; keeps `id, name, role, schoolId, studentId, guardianOf`
+- `_slimSchool(school)` strips `address`, `mpesa*`, `tagline`; keeps `id, name, slug, plan, logoUrl, faviconUrl, primaryColor, moduleConfig`
+- XSS can still steal the JWT but cannot read email / permissions from `localStorage`
+
+---
+
+## [4.27.0] — 2026-06-08  Reliability Fixes — Stale Chunk Crash + Login Session Error
+
+### Fixed — Stale-chunk auto-reload (`client/src/main.jsx`, `client/src/components/guards/ErrorBoundary.jsx`, `server/index.js`)
+
+- **`window.unhandledrejection` listener** in `main.jsx` — catches dynamic-import `TypeError: Failed to fetch dynamically imported module` and calls `window.location.reload()` automatically; users land on a fresh build instead of a blank error screen
+- **`ErrorBoundary.getDerivedStateFromError`** — detects `"Failed to fetch dynamically imported module"` (Vite's `vite:preloadError` string), sets `needsReload = true`, renders a "Loading update…" screen and reloads after 300 ms
+- **`index.html Cache-Control: no-cache, no-store, must-revalidate`** — `server/index.js` serves the SPA shell with no caching; browsers always fetch a fresh HTML document referencing the latest hashed JS chunks after a deploy
+
+### Fixed — Login shows "Session expired" for wrong-password error (`client/src/api/client.js`)
+
+- **Root cause**: all 401 responses were treated as session expiry, dispatching `api:unauthorized` and clearing the session — including 401s from wrong-password attempts before any token existed
+- **Fix**: 401 only triggers `api:unauthorized` if the request had a `Bearer` token; unauthenticated requests pass the actual server error message through to the UI; supports both `{ error: string }` and `{ error: { code, message } }` response shapes
+
+### Fixed — Demo admin 2FA blocked (`server/routes/auth.js`)
+
+- Security hardening in v4.28 extended 2FA to the `admin` role, but demo admin accounts have no real email for OTP delivery
+- Added `isDemo` guard: `const isDemo = req.school?.slug === 'demo'; if (!isDemo && MFA_ROLES.has(userRole) && user.mfaEnabled !== false)`
+
+---
+
+## [4.26.0] — 2026-06-08  eLearning Module — Google Classroom + Google Meet + Zoom
+
+### New — `server/routes/elearning.js` (~900 lines)
+
+**Google OAuth (per teacher)**
+- `GET  /api/elearning/auth/connect` — generates OAuth URL with `classroom.*`, `drive.file`, `calendar.events` scopes
+- `GET  /api/elearning/auth/callback` — exchanges code, stores encrypted tokens per `(schoolId, userId)`
+- `GET  /api/elearning/auth/status` — returns `{ connected, email }` for the current user
+- `DELETE /api/elearning/auth/disconnect` — revokes and removes stored tokens
+
+**Google Classroom — Courses & Coursework**
+- `GET  /api/elearning/courses` — lists linked Classroom courses with local metadata
+- `POST /api/elearning/courses/link` — links a Google Classroom course to a Msingi class
+- `DELETE /api/elearning/courses/:id` — unlinks course
+- `GET/POST/DELETE /api/elearning/courses/:id/coursework` — create assignments (title, description, due date, PDF attachment via Drive); Google Drive stores the file — Msingi only stores the `fileId` reference
+
+**Google Drive Upload**
+- `POST /api/elearning/drive/upload` — base64 payload → multipart upload to teacher's Google Drive → returns `fileId`; file is never stored in Msingi's database
+
+**Grade Auto-Sync (Google Pub/Sub webhook)**
+- `POST /api/elearning/gc-webhook` — validates Pub/Sub push signature; resolves student by `googleId`; writes returned grade to Grades module
+
+**Zoom Live Sessions (Server-to-Server OAuth)**
+- `_getZoomToken()` — cached Server-to-Server OAuth token (`ZOOM_ACCOUNT_ID`, `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`)
+- `_zoomFetch()` — thin wrapper with token injection and error normalisation
+- Zoom webhook: `POST /api/elearning/zoom-webhook` — handles `participant_joined`, `participant_left`, `meeting.ended`, `recording.completed`; marks attendance in Attendance module; HMAC-SHA256 challenge response for setup
+
+**Google Meet Live Sessions (Calendar API)**
+- `_createMeetSession()` — creates a Google Calendar event with `conferenceDataVersion: 1`; returns `hangoutLink`
+- `_deleteMeetSession()` — removes the calendar event when session is cancelled
+- `POST /api/elearning/sessions/:sessionId/attend` — records a student's Meet join-click as an attendance record (Meet doesn't fire webhooks; join-click is the proxy signal)
+
+**Sessions API (Zoom + Meet unified)**
+- `GET  /api/elearning/sessions?platform=zoom|meet` — lists sessions for a course
+- `POST /api/elearning/courses/:id/sessions` — schedule session (platform: `zoom` | `meet`); title, date/time, duration; creates Zoom meeting or Google Calendar event accordingly
+- `PATCH /api/elearning/sessions/:id` — update title / scheduled time
+- `DELETE /api/elearning/sessions/:id` — cancel and delete upstream meeting
+
+### New — `server/index.js`
+
+- `app.use('/api/elearning', require('./routes/elearning'))` mounted
+
+### New — `client/src/pages/elearning/ELearningPage.jsx` (~1600 lines)
+
+- **Route dispatcher** — `/elearning/classroom` → `ClassroomView`; `/elearning/meet` → `SessionsView({ platform: 'meet' })`; `/elearning/zoom` → `SessionsView({ platform: 'zoom' })`; Zoom path skips Google auth check entirely
+- **`ConnectCard`** — shown when teacher has not connected Google account; distinct icon/text for Classroom vs. Meet
+- **`ClassroomView`** — course sidebar + **Classwork / People / Grades** tabs (green Google Classroom accent); course picker; create coursework slide-over with title, instructions, due date, PDF upload
+- **`SessionsView`** — Meet or Zoom session list; **Schedule Session** modal: course picker, title, date, duration; Join link rendered for upcoming sessions
+- **`ScheduleSessionModalFull`** — full-featured scheduling modal used from both Meet and Zoom views
+
+### New — `client/src/components/layout/Sidebar.jsx` — eLearning section
+
+- `ELEARNING_ITEMS` — Google Classroom, Google Meet, Zoom sub-links with inline SVG brand icons
+- Accordion with `eLearningOpen` state; auto-opens when on any `/elearning/*` path
+- Regular `NavLink` for all other module links; accordion only for eLearning
+
+---
+
+## [4.25.0] — 2026-06-08  Profile Photo — Auth Fix, Error Handling, Size Validation
+
+### Fixed — `GET /api/users/:id/photo` no longer requires auth (`server/routes/users.js`)
+
+- **Root cause**: `authMiddleware` was required on the photo endpoint, but browser `<img src="...">` tags cannot send `Authorization: Bearer` headers — photos always returned 401 for all users
+- **Fix**: `authMiddleware` removed from `GET /:id/photo`; school tenant header still resolved from `X-School-Slug` for multi-tenancy
+
+### Fixed — Profile photo upload silent failure (`client/src/pages/profile/ProfilePage.jsx`)
+
+- `resizeImageToBase64` — `img.onerror` was passing the raw DOM `Event` object to `reject()` instead of an `Error`; unhandled rejection was swallowed silently; now wraps in `new Error('Image failed to load: ' + src)`
+- Uses `authApi.uploadPhoto()` / `authApi.removePhoto()` from the API client (handles multi-tenant slug) instead of raw `fetch()`
+
+### Changed — Pre-upload validation + UX
+
+- MIME type check before resize: only `image/jpeg`, `image/png`, `image/webp`, `image/gif` accepted; others rejected with an inline error message
+- File size limit: 10 MB max enforced on the client before any upload attempt
+- `fmtBytes(bytes)` helper — converts raw bytes to human-readable string (e.g. `3.2 MB`)
+- Success banner shows original file size (e.g. "Photo updated · 1.4 MB")
+
+---
+
+## [4.24.0] — 2026-06-08  School Logo in Sidebar + Dynamic Favicon
+
+### Changed — `client/src/components/layout/Sidebar.jsx`
+
+- **School logo in sidebar header** — if `school.logoUrl` is set in session, renders `<img src={logoUrl} alt={schoolName} />` (40×40 rounded, object-cover); falls back to a `<div>` with two-letter initials and `primaryColor` background when no logo is uploaded
+- Logo and initials transition smoothly via shared CSS class; no layout shift
+
+### Changed — `client/src/components/layout/AppShell.jsx`
+
+- **Dynamic favicon** — `useEffect` watches `session.school.faviconUrl` + `session.school.name`; on change, updates `<link rel="icon" href=...>` in `document.head`; falls back to the platform default favicon when `faviconUrl` is absent
+- **Dynamic page title** — `document.title` set to `"Msingi — <School Name>"` when school name is available
+
+---
+
+## [4.23.0] — 2026-06-08  Settings: School Logo + Favicon Upload
+
+### New — `PUT/DELETE /api/settings/school/logo` and `PUT/DELETE /api/settings/school/favicon` (`server/routes/settings.js`)
+
+- `PUT /school/logo` — accepts base64 data URI; validates MIME (`image/*`); stores in `schools.logoUrl`; returns updated URL
+- `DELETE /school/logo` — clears `logoUrl` from school document
+- `PUT /school/favicon` — same flow; stores in `schools.faviconUrl`
+- `DELETE /school/favicon` — clears `faviconUrl`
+- RBAC: admin or superadmin only; `_uid()` uses `crypto.randomBytes` (see v4.28.0)
+
+### New — `AssetUploader` component (`client/src/pages/settings/SettingsPage.jsx`)
+
+- File picker with image preview (drag-and-drop not required — standard `<input type="file">`)
+- Shows current asset if already uploaded; **Replace** and **Remove** actions
+- Instant save on selection — no separate submit needed; toast on success/error
+- `useRef` imported and used for the hidden file input
+
+### New — `BrandingCard` in SettingsPage School tab
+
+- Two side-by-side `AssetUploader` instances: **School Logo** (appears in sidebar, login page) and **Favicon** (browser tab icon)
+- Recommended sizes displayed as helper text (logo: 200×200 px, favicon: 32×32 px)
+- On save, dispatches `patchSchool({ logoUrl, faviconUrl })` to update Zustand session so sidebar and favicon refresh instantly without re-login
+
+---
+
+## [4.22.0] — 2026-06-08  School Finder — Public School Search + Generic Login Guard
+
+### New — `GET /api/public/schools/search?q=` (`server/routes/public.js`)
+
+- Case-insensitive regex search against both `name` and `slug` fields; returns up to 10 matching schools
+- Response shape: `[{ slug, name, shortName, logoUrl }]` — minimal branding info for the autocomplete list
+- No authentication required (public endpoint); rate-limited by global limiter
+
+### New — `GET /api/public/school-asset/:type?slug=` (`server/routes/public.js`)
+
+- `type` ∈ `logo | favicon`; looks up school by `slug` query param; streams the stored data URI as binary with correct `Content-Type` header
+- Allows the login page and School Finder to render school branding without any auth token
+
+### Changed — `GET /api/public/school-info` (`server/routes/public.js`)
+
+- Response now includes `faviconUrl` alongside the existing branding fields
+
+### New — `SchoolFinderPage.jsx` (`client/src/pages/SchoolFinderPage.jsx`)
+
+- Shown on the main domain (no school context) before the login form
+- Search input with 300 ms debounce → `GET /api/public/schools/search?q=` → autocomplete dropdown
+- Each result shows school logo (or initials), name, and slug
+- Clicking a result stores the slug in `localStorage` (`ms_school_slug`) and navigates to `/login?school=<slug>`
+- Empty state with friendly "Start typing a school name…" hint; no results state with "School not found? Contact your administrator."
+
+### Changed — `client/src/pages/Login.jsx`
+
+- **Generic domain guard**: `if (!isSchool) return <SchoolFinderPage />;` inserted before the `loadingBranding` check — users who land on `msingi.io/login` without a school context see the finder instead of a broken login form
+
+---
+
 ## [4.21.0] — 2026-05-26  Sections as a Managed School Resource
 
 ### New — `/api/sections` resource

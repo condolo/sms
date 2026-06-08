@@ -26,7 +26,13 @@ const ALLOWED = new Set([
 const GLOBAL = new Set(['behaviour_matrix', 'system_announcements']);
 
 // Collections only admin/superadmin can write to
-const ADMIN_WRITE = new Set(['users', 'role_permissions', 'schools', 'fee_structures']);
+// grades, invoices, payments, exams, exam_results, attendance, report_cards, admissions
+// all have dedicated routes with proper RBAC — block generic writes to prevent BOLA bypass
+const ADMIN_WRITE = new Set([
+  'users', 'role_permissions', 'schools', 'fee_structures',
+  'grades', 'invoices', 'payments', 'exams', 'exam_results',
+  'attendance', 'report_cards', 'admissions', 'audit_log',
+]);
 
 // Collections only superadmin can write to
 const SUPERADMIN_WRITE = new Set(['schools']);
@@ -45,10 +51,12 @@ function _isSuperAdmin(req) {
   return role === 'superadmin' || roles.includes('superadmin');
 }
 
-/* Strip sensitive fields from user docs */
+/* Strip sensitive fields from user docs — strip BOTH field names to cover legacy docs */
 function _sanitiseUser(doc) {
   if (!doc) return doc;
-  const { password, mfaOtp, mfaExpiry, ...safe } = doc;
+  // auth.js stores hash as `password`; settings.js historically used `passwordHash`
+  // strip both so whichever is present never reaches the wire
+  const { password, passwordHash, mfaOtp, mfaExpiry, ...safe } = doc;
   return safe;
 }
 

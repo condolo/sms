@@ -13,7 +13,7 @@ const { rbac }                         = require('../middleware/rbac');
 const { planGate }                     = require('../middleware/plan');
 const { _model }                       = require('../utils/model');
 const { nextInvoiceNumber, nextReceiptNumber } = require('../utils/counters');
-const { ok, created, paginate, parsePagination, E } = require('../utils/response');
+const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
 
 const router = express.Router();
@@ -93,10 +93,14 @@ router.get('/invoices', authMiddleware, PLAN, rbac('finance', 'read'), async (re
     const { page, limit, skip } = parsePagination(req.query);
 
     const filter = { schoolId };
-    if (req.query.studentId)    filter.studentId    = req.query.studentId;
-    if (req.query.status)       filter.status       = req.query.status;
-    if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
-    if (req.query.termId)       filter.termId       = req.query.termId;
+    const _sid = strParam(req.query.studentId);
+    const _st  = strParam(req.query.status);
+    const _ay  = strParam(req.query.academicYearId);
+    const _tid = strParam(req.query.termId);
+    if (_sid) filter.studentId    = _sid;
+    if (_st)  filter.status       = _st;
+    if (_ay)  filter.academicYearId = _ay;
+    if (_tid) filter.termId       = _tid;
 
     if (req.query.search) {
       const rx = new RegExp(req.query.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
@@ -485,7 +489,8 @@ router.get('/summary', authMiddleware, PLAN, rbac('finance', 'read'), async (req
     const { schoolId } = req.jwtUser;
 
     const filter = { schoolId };
-    if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
+    const _ay2 = strParam(req.query.academicYearId);
+    if (_ay2) filter.academicYearId = _ay2;
 
     const Invoices = _model('invoices');
     const Payments = _model('payments');

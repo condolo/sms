@@ -11,7 +11,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
-const { ok, created, paginate, parsePagination, E } = require('../utils/response');
+const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 
 const router = express.Router();
 const PLAN   = planGate('admissions');
@@ -83,11 +83,16 @@ router.get('/', authMiddleware, PLAN, rbac('admissions', 'read'), async (req, re
     const { page, limit, skip } = parsePagination(req.query);
 
     const filter = { schoolId };
-    if (req.query.stage)        filter.stage        = req.query.stage;
-    if (req.query.priority)     filter.priority     = req.query.priority;
-    if (req.query.keyStageId)   filter.keyStageId   = req.query.keyStageId;
-    if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
-    if (req.query.assignedTo)   filter.assignedTo   = req.query.assignedTo;
+    const _stage = strParam(req.query.stage);
+    const _pri   = strParam(req.query.priority);
+    const _ks    = strParam(req.query.keyStageId);
+    const _ay    = strParam(req.query.academicYearId);
+    const _at    = strParam(req.query.assignedTo);
+    if (_stage) filter.stage          = _stage;
+    if (_pri)   filter.priority       = _pri;
+    if (_ks)    filter.keyStageId     = _ks;
+    if (_ay)    filter.academicYearId = _ay;
+    if (_at)    filter.assignedTo     = _at;
     if (req.query.sibling === 'true') filter.sibling = true;
 
     if (req.query.search) {
@@ -113,7 +118,8 @@ router.get('/stats', authMiddleware, PLAN, rbac('admissions', 'read'), async (re
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId };
-    if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
+    const _ay2 = strParam(req.query.academicYearId);
+    if (_ay2) filter.academicYearId = _ay2;
 
     const Apps = _model('admissions');
     const pipeline = await Apps.aggregate([

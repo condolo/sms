@@ -21,6 +21,12 @@ if (!process.env.JWT_SECRET) {
 const app  = express();
 const PORT = process.env.PORT || 3005;
 
+/* ── Trust Render / Heroku / nginx reverse proxy ────────────────
+   Without this, req.ip returns the proxy IP (10.x.x.x) instead
+   of the real client IP.  Level 1 = trust exactly one hop.
+   Required for M-Pesa IP allowlist and rate-limit IP accuracy.  */
+app.set('trust proxy', 1);
+
 /* ── Security headers (helmet) ──────────────────────────────── */
 try {
   const helmet = require('helmet');

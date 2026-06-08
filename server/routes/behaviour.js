@@ -14,7 +14,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
-const { ok, created, paginate, parsePagination, E } = require('../utils/response');
+const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 
 const router = express.Router();
 const PLAN   = planGate('behaviour');
@@ -77,18 +77,26 @@ router.get('/incidents', authMiddleware, PLAN, rbac('behaviour', 'read'), async 
     const { page, limit, skip } = parsePagination(req.query);
 
     const filter = { schoolId };
-    if (req.query.studentId)  filter.studentId  = req.query.studentId;
-    if (req.query.classId)    filter.classId    = req.query.classId;
-    if (req.query.type)       filter.type       = req.query.type;
-    if (req.query.status)     filter.status     = req.query.status;
-    if (req.query.severity)   filter.severity   = req.query.severity;
-    if (req.query.categoryId) filter.categoryId = req.query.categoryId;
+    const _sid = strParam(req.query.studentId);
+    const _cid = strParam(req.query.classId);
+    const _typ = strParam(req.query.type);
+    const _st  = strParam(req.query.status);
+    const _sev = strParam(req.query.severity);
+    const _cat = strParam(req.query.categoryId);
+    if (_sid) filter.studentId  = _sid;
+    if (_cid) filter.classId    = _cid;
+    if (_typ) filter.type       = _typ;
+    if (_st)  filter.status     = _st;
+    if (_sev) filter.severity   = _sev;
+    if (_cat) filter.categoryId = _cat;
     if (req.query.detention === 'true') filter.detention = true;
 
-    if (req.query.dateFrom || req.query.dateTo) {
+    const _df = strParam(req.query.dateFrom);
+    const _dt = strParam(req.query.dateTo);
+    if (_df || _dt) {
       filter.date = {};
-      if (req.query.dateFrom) filter.date.$gte = req.query.dateFrom;
-      if (req.query.dateTo)   filter.date.$lte = req.query.dateTo;
+      if (_df) filter.date.$gte = _df;
+      if (_dt) filter.date.$lte = _dt;
     }
 
     if (req.query.search) {

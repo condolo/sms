@@ -14,7 +14,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
-const { ok, created, paginate, parsePagination, E } = require('../utils/response');
+const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { isYearArchived } = require('../utils/archival');
 
 const router = express.Router();
@@ -159,17 +159,25 @@ router.get('/', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) =>
     const { page, limit, skip } = parsePagination(req.query);
 
     const filter = { schoolId };
-    if (req.query.classId)      filter.classId      = req.query.classId;
-    if (req.query.subjectId)    filter.subjectId    = req.query.subjectId;
-    if (req.query.termId)       filter.termId       = req.query.termId;
-    if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
-    if (req.query.type)         filter.type         = req.query.type;
-    if (req.query.status)       filter.status       = req.query.status;
+    const _cid = strParam(req.query.classId);
+    const _sub = strParam(req.query.subjectId);
+    const _tid = strParam(req.query.termId);
+    const _ay  = strParam(req.query.academicYearId);
+    const _typ = strParam(req.query.type);
+    const _st  = strParam(req.query.status);
+    if (_cid) filter.classId        = _cid;
+    if (_sub) filter.subjectId      = _sub;
+    if (_tid) filter.termId         = _tid;
+    if (_ay)  filter.academicYearId = _ay;
+    if (_typ) filter.type           = _typ;
+    if (_st)  filter.status         = _st;
 
-    if (req.query.dateFrom || req.query.dateTo) {
+    const _df = strParam(req.query.dateFrom);
+    const _dt = strParam(req.query.dateTo);
+    if (_df || _dt) {
       filter.date = {};
-      if (req.query.dateFrom) filter.date.$gte = req.query.dateFrom;
-      if (req.query.dateTo)   filter.date.$lte = req.query.dateTo;
+      if (_df) filter.date.$gte = _df;
+      if (_dt) filter.date.$lte = _dt;
     }
 
     if (req.query.search) {

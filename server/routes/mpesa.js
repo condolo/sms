@@ -59,7 +59,10 @@ const SAFARICOM_IPS = new Set([
 function _assertSafaricomIP(req, res) {
   if (process.env.MPESA_SKIP_IP_CHECK === 'true') return true;
   if (process.env.NODE_ENV !== 'production') return true;
-  const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || '';
+  // Use req.ip — Express resolves this correctly when app.set('trust proxy', 1) is set.
+  // DO NOT read x-forwarded-for directly: attackers can prepend a spoofed Safaricom IP
+  // and split(',')[0] would match it, bypassing the check entirely.
+  const ip = req.ip || '';
   if (SAFARICOM_IPS.has(ip)) return true;
   console.warn(`[mpesa] Callback rejected — unknown IP: ${ip}`);
   res.status(403).json({ ResultCode: 1, ResultDesc: 'Forbidden' });

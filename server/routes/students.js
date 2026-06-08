@@ -14,7 +14,7 @@ const { rbac }                  = require('../middleware/rbac');
 const { planGate }              = require('../middleware/plan');
 const { _model }                = require('../utils/model');
 const { nextAdmissionNumber }   = require('../utils/counters');
-const { ok, created, fail, paginate, parsePagination, E } = require('../utils/response');
+const { ok, created, fail, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
 
 const router = express.Router();
@@ -95,17 +95,23 @@ router.get('/', authMiddleware, PLAN, rbac('students', 'read'), async (req, res)
     const filter = { schoolId };
 
     // Status filter — default hides withdrawn/graduated; pass ?status=all for everything
-    if (req.query.status && req.query.status !== 'all') {
-      filter.status = req.query.status;
-    } else if (!req.query.status) {
+    const statusParam = strParam(req.query.status);
+    if (statusParam && statusParam !== 'all') {
+      filter.status = statusParam;
+    } else if (!statusParam) {
       filter.status = { $nin: ['withdrawn', 'graduated'] };
     }
     // (status=all → no status filter added)
 
-    if (req.query.classId)  filter.classId  = req.query.classId;
-    if (req.query.houseId)  filter.houseId  = req.query.houseId;
-    if (req.query.keyStageId) filter.keyStageId = req.query.keyStageId;
-    if (req.query.gender)   filter.gender   = req.query.gender;
+    // strParam() guards against NoSQL operator injection (?classId[$ne]=x etc.)
+    const classId    = strParam(req.query.classId);
+    const houseId    = strParam(req.query.houseId);
+    const keyStageId = strParam(req.query.keyStageId);
+    const gender     = strParam(req.query.gender);
+    if (classId)    filter.classId    = classId;
+    if (houseId)    filter.houseId    = houseId;
+    if (keyStageId) filter.keyStageId = keyStageId;
+    if (gender)     filter.gender     = gender;
 
     // Free-text search on name / admissionNumber
     if (req.query.search) {

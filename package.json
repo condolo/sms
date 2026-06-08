@@ -1,6 +1,6 @@
 {
   "name": "msingi",
-  "version": "4.9.19",
+  "version": "4.28.0",
   "description": "Msingi — Multi-tenant SaaS School Management Platform",
   "main": "server/index.js",
   "scripts": {

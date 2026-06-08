@@ -72,7 +72,8 @@ router.get('/', authMiddleware, async (req, res) => {
     const Users = _model('users');
     const user  = await Users.findOne({ id: req.jwtUser.userId }).lean();
     if (!user) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } });
-    const { passwordHash, ...safe } = user;
+    // Strip BOTH field names — auth.js stores as `password`, settings.js historically used `passwordHash`
+    const { password: _pw, passwordHash: _ph, ...safe } = user;
     res.json({ success: true, data: safe });
   } catch (err) {
     console.error('[settings] GET / error:', err);
@@ -96,10 +97,16 @@ router.put('/', authMiddleware, async (req, res) => {
       }
       const user = await Users.findOne({ id: req.jwtUser.userId }).lean();
       if (!user) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } });
-      const ok = await bcrypt.compare(currentPassword, user.passwordHash);
+      // Support both field names during migration — compare against whichever is present
+      const storedHash = user.password || user.passwordHash || '';
+      const ok = await bcrypt.compare(currentPassword, storedHash);
       if (!ok) return res.status(400).json({ success: false, error: { code: 'INVALID_PASSWORD', message: 'Current password is incorrect.' } });
       const hash = await bcrypt.hash(newPassword, 10);
-      await Users.updateOne({ id: req.jwtUser.userId }, { $set: { passwordHash: hash, updatedAt: new Date().toISOString() } });
+      // Normalise to `password` (canonical field used by auth.js); remove legacy `passwordHash`
+      await Users.updateOne({ id: req.jwtUser.userId }, {
+        $set:   { password: hash, updatedAt: new Date().toISOString() },
+        $unset: { passwordHash: '' },
+      });
       return res.json({ success: true, message: 'Password updated.' });
     }
 
@@ -264,7 +271,7 @@ router.get('/users', authMiddleware, async (req, res) => {
     const Users = _model('users');
     const users = await Users.find(
       { schoolId: req.jwtUser.schoolId, isActive: { $ne: false } },
-      { passwordHash: 0 }
+      { password: 0, passwordHash: 0 }   // exclude both field names
     ).sort({ name: 1 }).lean();
     res.json({ success: true, data: users });
   } catch (err) {
@@ -307,7 +314,7 @@ router.post('/users/invite', authMiddleware, async (req, res) => {
       email:         userEmail.toLowerCase().trim(),
       role,
       roles:         [role],
-      passwordHash:  hash,
+      password:      hash,   // canonical field — must match auth.js
       mustChangePwd: true,
       isActive:      true,
       createdAt:     now,
@@ -331,7 +338,7 @@ router.post('/users/invite', authMiddleware, async (req, res) => {
       console.warn('[settings] invite email failed (non-fatal):', emailErr.message);
     }
 
-    const { passwordHash: _ph, ...safe } = newUser;
+    const { password: _pw2, passwordHash: _ph, ...safe } = newUser;
     res.status(201).json({ success: true, data: { user: safe, tempPassword } });
   } catch (err) {
     console.error('[settings] POST /users/invite error:', err);
@@ -387,7 +394,7 @@ router.put('/users/:id', authMiddleware, async (req, res) => {
     if (result.matchedCount === 0) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } });
     }
-    const updated = await Users.findOne({ id: req.params.id }, { passwordHash: 0 }).lean();
+    const updated = await Users.findOne({ id: req.params.id }, { password: 0, passwordHash: 0 }).lean();
     res.json({ success: true, data: updated });
   } catch (err) {
     console.error('[settings] PUT /users/:id error:', err);
