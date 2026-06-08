@@ -1,12 +1,11 @@
 /**
- * Msingi — Landing Page v7.0  "Information Architecture Refinement"
- * Shorter · cleaner · faster · more intentional
- * 6-section flow: Hero → Conviction → Ecosystem → Showcase → Trust → CTA
+ * Msingi — Landing Page
+ * Decision Intelligence positioning for Educational Leaders
+ * 6-section flow: Hero → Conviction → Ecosystem → Showcase → Plans → Trust → CTA
  */
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import * as THREE from 'three';
 import {
   Activity, AlertCircle, ArrowRight, ArrowUp, BarChart3,
   BookCheck, BookOpen, Building2, Bus,
@@ -32,153 +31,28 @@ const stagger = (d = 0.09) => ({
 });
 const VP = { once: true, amount: 0.15 };
 
-/* ═══════════════════════════════════════════════════════════════
-   THREE.JS — OPERATIONAL NODE NETWORK HERO BACKGROUND
-═══════════════════════════════════════════════════════════════ */
-const NODE_DEFS = [
-  { label: 'Students',    x:  0.00, y:  0.00, color: 0x6366f1, size: 0.22 },
-  { label: 'Attendance',  x:  1.40, y:  0.60, color: 0x10b981, size: 0.16 },
-  { label: 'Finance',     x:  1.20, y: -0.80, color: 0xf59e0b, size: 0.18 },
-  { label: 'Reports',     x: -1.30, y:  0.70, color: 0x8b5cf6, size: 0.16 },
-  { label: 'Timetable',   x: -1.10, y: -0.90, color: 0x0ea5e9, size: 0.15 },
-  { label: 'Admissions',  x:  0.30, y:  1.50, color: 0xec4899, size: 0.15 },
-  { label: 'HR',          x: -0.20, y: -1.60, color: 0xf97316, size: 0.14 },
-  { label: 'Analytics',   x:  2.10, y: -0.10, color: 0x14b8a6, size: 0.17 },
-];
-
-const EDGE_DEFS = [
-  [0,1],[0,2],[0,3],[0,4],[0,5],[0,6],[1,7],[2,7],[3,5],[4,1],[5,0],[6,4],[1,2],[3,7],
-];
-
-function ThreeHeroBG() {
-  const canvasRef = useRef(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const W = canvas.clientWidth || window.innerWidth;
-    const H = canvas.clientHeight || 680;
-
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-    renderer.setSize(W, H);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setClearColor(0x000000, 0);
-
-    const scene  = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 100);
-    camera.position.set(0, 0, 5);
-
-    const dustGeo = new THREE.BufferGeometry();
-    const dustCount = 260;
-    const dustPos = new Float32Array(dustCount * 3);
-    for (let i = 0; i < dustCount; i++) {
-      dustPos[i * 3]     = (Math.random() - 0.5) * 14;
-      dustPos[i * 3 + 1] = (Math.random() - 0.5) * 10;
-      dustPos[i * 3 + 2] = (Math.random() - 0.5) * 6 - 2;
-    }
-    dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
-    const dustMat = new THREE.PointsMaterial({ color: 0x94a3b8, size: 0.025, transparent: true, opacity: 0.35 });
-    scene.add(new THREE.Points(dustGeo, dustMat));
-
-    const nodeMeshes = NODE_DEFS.map(n => {
-      const geo  = new THREE.SphereGeometry(n.size, 20, 20);
-      const mat  = new THREE.MeshBasicMaterial({ color: n.color });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(n.x, n.y, 0);
-      scene.add(mesh);
-      const haloGeo = new THREE.SphereGeometry(n.size * 1.9, 20, 20);
-      const haloMat = new THREE.MeshBasicMaterial({ color: n.color, transparent: true, opacity: 0.08, side: THREE.BackSide });
-      const halo    = new THREE.Mesh(haloGeo, haloMat);
-      halo.position.copy(mesh.position);
-      scene.add(halo);
-      return { mesh, halo, def: n };
-    });
-
-    EDGE_DEFS.forEach(([ai, bi]) => {
-      const a = NODE_DEFS[ai];
-      const b = NODE_DEFS[bi];
-      const points = [new THREE.Vector3(a.x, a.y, 0), new THREE.Vector3(b.x, b.y, 0)];
-      const geo = new THREE.BufferGeometry().setFromPoints(points);
-      const mat = new THREE.LineBasicMaterial({ color: 0x475569, transparent: true, opacity: 0.25 });
-      scene.add(new THREE.Line(geo, mat));
-    });
-
-    const pulseCount = 18;
-    const pulses = Array.from({ length: pulseCount }, (_, i) => {
-      const edgeIdx = i % EDGE_DEFS.length;
-      const [ai] = EDGE_DEFS[edgeIdx];
-      const color   = NODE_DEFS[ai].color;
-      const geo     = new THREE.SphereGeometry(0.045, 8, 8);
-      const mat     = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 });
-      const mesh    = new THREE.Mesh(geo, mat);
-      scene.add(mesh);
-      return { mesh, edgeIdx, t: Math.random(), speed: 0.004 + Math.random() * 0.004, forward: Math.random() > 0.5 };
-    });
-
-    let mouse = { x: 0, y: 0 };
-    function onMouseMove(e) {
-      mouse.x = (e.clientX / window.innerWidth  - 0.5) * 2;
-      mouse.y = (e.clientY / window.innerHeight - 0.5) * 2;
-    }
-    window.addEventListener('mousemove', onMouseMove);
-
-    function onResize() {
-      const w = canvas.clientWidth || window.innerWidth;
-      const h = canvas.clientHeight || 680;
-      renderer.setSize(w, h);
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-    }
-    window.addEventListener('resize', onResize);
-
-    let rafId;
-    let t = 0;
-    function animate() {
-      rafId = requestAnimationFrame(animate);
-      t += 0.012;
-      scene.rotation.y = Math.sin(t * 0.18) * 0.12 + mouse.x * 0.06;
-      scene.rotation.x = Math.sin(t * 0.12) * 0.06 - mouse.y * 0.04;
-      nodeMeshes.forEach(({ mesh, halo }, i) => {
-        const pulse = 1 + 0.07 * Math.sin(t + i * 1.1);
-        mesh.scale.setScalar(pulse);
-        halo.scale.setScalar(pulse * (1 + 0.1 * Math.sin(t * 0.5 + i)));
-      });
-      pulses.forEach(p => {
-        p.t += p.forward ? p.speed : -p.speed;
-        if (p.t > 1) { p.t = 0; p.forward = true; }
-        if (p.t < 0) { p.t = 1; p.forward = false; }
-        const [ai, bi] = EDGE_DEFS[p.edgeIdx];
-        const a = NODE_DEFS[ai];
-        const b = NODE_DEFS[bi];
-        p.mesh.position.x = a.x + (b.x - a.x) * p.t;
-        p.mesh.position.y = a.y + (b.y - a.y) * p.t;
-        p.mesh.material.opacity = 0.5 + 0.5 * Math.sin(p.t * Math.PI);
-      });
-      renderer.render(scene, camera);
-    }
-    animate();
-
-    return () => {
-      cancelAnimationFrame(rafId);
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('resize', onResize);
-      renderer.dispose();
-    };
-  }, []);
-
+// Hero background — clean gradient with subtle dot grid
+function GradientHeroBG() {
   return (
-    <canvas
-      ref={canvasRef}
-      className="absolute inset-0 w-full h-full pointer-events-none"
-      style={{ opacity: 0.55 }}
-    />
+    <>
+      {/* Primary radial glow — upper left */}
+      <div className="absolute -top-32 -left-32 w-[520px] h-[520px] rounded-full bg-indigo-100/70 blur-3xl pointer-events-none" />
+      {/* Secondary glow — lower right */}
+      <div className="absolute bottom-0 right-0 w-[360px] h-[360px] rounded-full bg-sky-100/50 blur-3xl pointer-events-none" />
+      {/* Dot grid overlay */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          backgroundImage: 'radial-gradient(circle, #cbd5e1 1px, transparent 1px)',
+          backgroundSize: '28px 28px',
+          opacity: 0.4,
+        }}
+      />
+    </>
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   DASHBOARD MOCKUP — hero visual
-═══════════════════════════════════════════════════════════════ */
+// Dashboard mockup — hero visual
 const SIDEBAR_NAV = [
   { Icon: Activity,      label: 'Dashboard',  active: true  },
   { Icon: Users,         label: 'Students'   },
@@ -312,9 +186,7 @@ function DashboardMockup() {
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   REPORT GOVERNANCE MOCKUP
-═══════════════════════════════════════════════════════════════ */
+// Report governance mockup
 const REPORT_STAGES = [
   { stage: 'Grade Submission', person: 'Mr. Kariuki',    status: 'Complete', date: '14 May 16:04', ok: true  },
   { stage: 'HOD Review',       person: 'Mrs. Wanjiku',   status: 'Approved', date: '15 May 09:30', ok: true  },
@@ -388,9 +260,7 @@ function ReportGovernanceMockup() {
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   FEE CLARITY MOCKUP
-═══════════════════════════════════════════════════════════════ */
+// Fee clarity mockup
 function FeeRegisterMockup() {
   return (
     <div className="rounded-2xl overflow-hidden border border-slate-200/80 shadow-2xl shadow-slate-900/10 bg-white select-none pointer-events-none">
@@ -451,9 +321,7 @@ function FeeRegisterMockup() {
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   DATA — Ecosystem + Showcase + Conviction
-═══════════════════════════════════════════════════════════════ */
+// Data — Ecosystem nodes, showcase tabs, conviction pairs
 const ECOSYSTEM_NODES = [
   { label: 'Admissions',      Icon: ClipboardList, color: 'bg-pink-500',    desc: 'First enquiry in'      },
   { label: 'Student Records', Icon: Users,         color: 'bg-indigo-500',  desc: 'Profile created'       },
@@ -472,11 +340,11 @@ const ECOSYSTEM_NODES = [
 ];
 
 const CONVICTION_PAIRS = [
-  { before: 'Fee tracking in Excel, reconciled every Friday',               after: 'Real-time fee ledger — every payment, every receipt, live'          },
-  { before: 'Report cards assembled manually by the registrar',             after: 'Governed publishing: Teacher → HOD → Principal → Portal' },
-  { before: 'Curriculum coverage tracked in a teacher\'s notebook',         after: 'Syllabus tracker — every topic marked, every subject covered live'    },
-  { before: 'Parent notices via personal WhatsApp groups',                  after: 'Structured institutional channels with full audit trail'              },
-  { before: 'Leadership decisions on week-old paper summaries',             after: 'Live director dashboard across attendance, grades, and finance'       },
+  { before: 'Fee tracking in Excel, reconciled every Friday',               after: 'Real-time fee ledger with every payment, every receipt, tracked live'  },
+  { before: 'Report cards assembled manually by the registrar',             after: 'Governed publishing chain: Teacher → HOD → Principal → Parent Portal'  },
+  { before: 'Curriculum coverage tracked in a teacher\'s notebook',         after: 'Syllabus tracker with every topic marked and every subject covered live' },
+  { before: 'Parent notices via personal WhatsApp groups',                  after: 'Structured institutional channels with a permanent audit trail'          },
+  { before: 'Leadership decisions on week-old paper summaries',             after: 'Live director dashboard spanning attendance, grades, and finance'        },
 ];
 
 const SHOWCASE_TABS = [
@@ -484,11 +352,11 @@ const SHOWCASE_TABS = [
     id: 'director',
     label: "Director's View",
     Icon: BarChart3,
-    headline: "Every operational signal on one screen.",
+    headline: "Every decision signal in one view.",
     bullets: [
-      "Live attendance, academic performance, and financial health — one view",
-      "Outliers and alerts surface automatically. No manual compilation",
-      "Real-time updates. Decisions made on current institutional reality",
+      "Attendance, academic performance, and financial health on a single screen, updated in real time",
+      "Outliers and alerts surface automatically without manual compilation",
+      "Decisions grounded in current data, not last week's spreadsheet",
     ],
     Mockup: DashboardMockup,
   },
@@ -496,11 +364,11 @@ const SHOWCASE_TABS = [
     id: 'reports',
     label: "Report Governance",
     Icon: FileText,
-    headline: "No report leaves without sign-off.",
+    headline: "No report published without every gate cleared.",
     bullets: [
-      "Five-stage approval chain — enforced by the platform, not by email",
-      "Every action logged: who approved, when, what was reviewed",
-      "Publication blocked until every gate is cleared. Permanently auditable",
+      "A five-stage approval chain the platform enforces, not email threads",
+      "Every action logged with attribution: who approved, when, and what was reviewed",
+      "Publication is blocked until the full chain is complete. The trail is permanent",
     ],
     Mockup: ReportGovernanceMockup,
   },
@@ -508,21 +376,19 @@ const SHOWCASE_TABS = [
     id: 'finance',
     label: "Fee Clarity",
     Icon: DollarSign,
-    headline: "Fee collection without the spreadsheets.",
+    headline: "Fee collection without the guesswork.",
     bullets: [
-      "M-Pesa STK Push triggers payment to parent phones — auto-reconciled on receipt",
-      "Paybill · bank transfer · cash — all recorded with receipt numbers in one live register",
-      "Overdue accounts surface automatically with SMS reminders and a full notification log",
+      "M-Pesa STK Push triggers payment to parent phones and auto-reconciles on receipt",
+      "Paybill, bank transfer, and cash all land in one live register with receipt numbers",
+      "Overdue accounts surface automatically, with SMS reminders and a full notification log",
     ],
     Mockup: FeeRegisterMockup,
   },
 ];
 
-/* ═══════════════════════════════════════════════════════════════
-   PLANS DATA — Portal tiers (server/config/pricing.js)
-   All ERP modules included in every tier.
-   Tier controls who gets a login portal, not which features exist.
-═══════════════════════════════════════════════════════════════ */
+// Plans data — portal tiers (server/config/pricing.js)
+// All ERP modules included in every tier.
+// Tier controls who gets a login portal, not which features exist.
 const PORTAL_TIERS_LANDING = [
   {
     name:     'Base',
@@ -722,9 +588,7 @@ function PlansSection() {
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   FLOATING ACTIONS
-═══════════════════════════════════════════════════════════════ */
+// Floating actions — scroll-to-top + WhatsApp
 function FloatingActions() {
   const [showTop, setShowTop] = useState(false);
   useEffect(() => {
@@ -751,19 +615,15 @@ function FloatingActions() {
   );
 }
 
-/* ─── Social icons ── */
+// Social icon components
 function XIcon({ size = 16 }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.253 5.622L18.244 2.25zm-1.161 17.52h1.833L7.084 4.126H5.117L17.083 19.77z"/></svg>; }
 function LinkedInIcon({ size = 16 }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>; }
 function FacebookIcon({ size = 16 }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>; }
 function InstagramIcon({ size = 16 }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z"/></svg>; }
 function YouTubeIcon({ size = 16 }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>; }
 
-/* ═══════════════════════════════════════════════════════════════
-   MODULE PREVIEW DATA
-   Each entry: tagline, outcome-focused bullets, result box,
-   connected module labels, mini mockup config, demo path.
-   badge field drafted — pending approval before activation.
-═══════════════════════════════════════════════════════════════ */
+// Module preview data
+// Each entry: tagline, outcome bullets, results, connected modules, mockup config, demo path.
 const MODULE_PREVIEWS = {
   'Admissions': {
     tagline: 'Every prospective student tracked from first contact to enrolled record.',
@@ -1557,17 +1417,17 @@ function SocialLinks({ links = {} }) {
 /* ── Landing CMS defaults (shown if DB has no override) ─────── */
 const CMS_DEFAULTS = {
   hero: {
-    headline:    'The Operating System\nfor Modern Schools.',
-    subheadline: 'Admissions, academics, attendance, curriculum, finance, reporting, and communications — connected in one operational platform so institutions run with clarity and accountability.',
-    tagline:     'Operational infrastructure for modern institutions',
+    headline:    'Decision Intelligence\nfor Educational Leaders.',
+    subheadline: 'Real-time visibility across admissions, attendance, academics, and finance so school leaders make faster, better-informed decisions every day.',
+    tagline:     'Built for the leaders who run schools',
     cta1:        'Book a Demo',
     cta2:        'Explore the Platform',
-    italic:      'Most school systems digitize tasks. Msingi structures institutions.',
+    italic:      'Most platforms give you data. Msingi gives you institutional clarity.',
   },
   conviction: CONVICTION_PAIRS,
   ecosystem: {
-    heading:     'One student. Every operational layer — connected.',
-    subheading:  'From the first enquiry to the published report card, collected fee, and lesson covered — one unbroken data trail across the entire institution.',
+    heading:     'One student. Every operational layer, connected.',
+    subheading:  'From the first enquiry to the published report card, the collected fee, and the covered lesson. One unbroken data trail across the entire institution.',
     enabledNodes: ECOSYSTEM_NODES.map(n => n.label), // all enabled by default
     nodeDescs:   Object.fromEntries(ECOSYSTEM_NODES.map(n => [n.label, n.desc])),
   },
@@ -1582,12 +1442,12 @@ const CMS_DEFAULTS = {
     tagline: 'Built for institutions that require operational clarity and academic accountability',
   },
   footer: {
-    tagline: 'The operating system for modern African schools.',
+    tagline: 'Decision Intelligence for Educational Leaders.',
     email:   'hello@msingi.io',
   },
   seo: {
-    title:       'Msingi — The Operating System for Modern Schools',
-    description: 'Admissions, academics, attendance, finance, reporting and communications — connected in one platform.',
+    title:       'Msingi — Decision Intelligence for Educational Leaders',
+    description: 'Real-time visibility across attendance, academics, and finance so school leaders make faster, better-informed decisions.',
     ogImageUrl:  '',
   },
 };
@@ -1617,9 +1477,7 @@ async function getLandingCMS() {
   return _cmsPromise;
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   MAIN LANDING PAGE
-═══════════════════════════════════════════════════════════════ */
+// Main landing page component
 export default function Landing() {
   const [schoolInput,    setSchoolInput]    = useState('');
   const [finding,        setFinding]        = useState(false);
@@ -1728,8 +1586,8 @@ export default function Landing() {
       ══════════════════════════════════════════ */}
       <section className="relative max-w-7xl mx-auto px-6 lg:px-8 pt-20 pb-16 overflow-hidden">
         <div className="absolute inset-0 -z-10 pointer-events-none" style={{ height: '110%' }}>
-          <ThreeHeroBG />
-          <div className="absolute inset-0 bg-gradient-to-b from-white/70 via-white/50 to-white/90" />
+          <GradientHeroBG />
+          <div className="absolute inset-0 bg-gradient-to-b from-white/40 via-white/20 to-white/95" />
         </div>
 
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: EASE }}
@@ -1802,10 +1660,10 @@ export default function Landing() {
         <div className="max-w-5xl mx-auto px-6 lg:px-8">
           <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
             <motion.div variants={fadeUp} className="mb-12">
-              <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">The Operational Reality</p>
+              <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">The Leadership Gap</p>
               <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 leading-tight">
-                From fragmented chaos<br />
-                <span className="text-slate-400">to institutional clarity.</span>
+                The information exists.<br />
+                <span className="text-slate-400">Leaders rarely see it when it matters.</span>
               </h2>
             </motion.div>
 
@@ -1906,10 +1764,10 @@ export default function Landing() {
         <div className="max-w-7xl mx-auto px-6 lg:px-8">
 
           <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()} className="mb-12">
-            <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Product Experience</motion.p>
+            <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Platform Intelligence</motion.p>
             <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 leading-tight">
-              Three moments that define<br />
-              <span className="text-slate-400">institutional operations.</span>
+              Three ways leaders see<br />
+              <span className="text-slate-400">what was invisible before.</span>
             </motion.h2>
           </motion.div>
 
@@ -2029,11 +1887,11 @@ export default function Landing() {
             <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-6">The next step</motion.p>
             <motion.h2 variants={fadeUp}
               className="text-4xl sm:text-5xl lg:text-[56px] font-bold tracking-tighter text-slate-900 leading-[1.05] mb-6">
-              Replace the chaos<br />with operational calm.
+              Give your leadership team<br />the clarity they need.
             </motion.h2>
             <motion.p variants={fadeUp} className="text-base text-slate-400 leading-relaxed mb-3 max-w-lg mx-auto">
-              The institutions running on Msingi do not patch workflows with WhatsApp groups and spreadsheets.
-              They run structured, governed, auditable operations from day one.
+              The institutions running on Msingi don't patch workflows with WhatsApp groups and spreadsheets.
+              They have the intelligence to act quickly, govern carefully, and lead with confidence.
             </motion.p>
             <motion.blockquote variants={fadeUp} className="text-sm italic text-slate-400 border-l-2 border-slate-200 pl-4 text-left max-w-md mx-auto mb-10">
               "Our principal now makes the same decisions in minutes that used to take a week of follow-up emails."
@@ -2083,7 +1941,7 @@ export default function Landing() {
             <div className="flex items-center gap-2.5">
               <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center text-white text-[10px] font-bold">M</div>
               <span className="text-sm font-bold text-slate-900">Msingi</span>
-              <span className="text-xs text-slate-400 ml-1">· The School Operating System</span>
+              <span className="text-xs text-slate-400 ml-1">· Decision Intelligence Platform</span>
             </div>
             <SocialLinks links={socialLinks} />
             <div className="flex gap-5 text-xs text-slate-400">
