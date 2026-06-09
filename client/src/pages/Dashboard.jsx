@@ -19,7 +19,7 @@ import {
   BarChart3, Clock, AlertTriangle, Wallet,
   Cake, CalendarDays, CheckCircle, MapPin, Tag,
   ShieldAlert, Activity, Zap, TrendingDown, Award,
-  RefreshCw,
+  RefreshCw, Rocket,
 } from 'lucide-react';
 import {
   students as studentsApi,
@@ -29,6 +29,9 @@ import {
   events as eventsApi,
   attendance as attendanceApi,
   analytics as analyticsApi,
+  classes   as classesApi,
+  teachers  as teachersApi,
+  academicConfig as academicConfigApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 
@@ -343,6 +346,13 @@ export default function Dashboard() {
       </div>
 
       <div className="max-w-screen-2xl mx-auto px-6 py-6 space-y-6">
+
+        {/* ── Setup Checklist (admin / superadmin only, until dismissed) ── */}
+        <SetupChecklist
+          school={school}
+          role={role}
+          stuTotal={stuStats?.data?.total ?? 0}
+        />
 
         {/* ── KPI Cards ─────────────────────────────────── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -850,6 +860,210 @@ function KpiCard({ icon, label, value, sub, to, accent = 'violet', loading, erro
     </div>
   );
   return to ? <Link to={to} className="block focus:outline-none rounded-xl">{inner}</Link> : inner;
+}
+
+/* ══════════════════════════════════════════════════════════
+   SETUP CHECKLIST
+   Shown to superadmin / admin on new schools until dismissed.
+   Tracks 6 essential setup steps with a live progress bar.
+   Dismissal is persisted in localStorage keyed by schoolId.
+   ══════════════════════════════════════════════════════════ */
+function SetupChecklist({ school, role, stuTotal }) {
+  const schoolId = school?.id ?? '';
+  const dismissKey = `msingi_setup_done_${schoolId}`;
+
+  const [dismissed, setDismissed] = useState(
+    () => !!localStorage.getItem(dismissKey),
+  );
+
+  const isAdmin = role === 'superadmin' || role === 'admin';
+
+  /* Only fire the extra queries when the checklist is visible */
+  const enabled = isAdmin && !dismissed && !!schoolId;
+
+  const { data: classRes } = useQuery({
+    queryKey: ['setup-check', 'classes'],
+    queryFn:  () => classesApi.list({ limit: 1 }),
+    enabled,
+    staleTime: 5 * 60_000,
+  });
+  const { data: teacherRes } = useQuery({
+    queryKey: ['setup-check', 'teachers'],
+    queryFn:  () => teachersApi.list({ limit: 1 }),
+    enabled,
+    staleTime: 5 * 60_000,
+  });
+  const { data: feeRes } = useQuery({
+    queryKey: ['setup-check', 'fee-structures'],
+    queryFn:  () => financeApi.feeStructures.list(),
+    enabled,
+    staleTime: 5 * 60_000,
+  });
+  const { data: yearsRes } = useQuery({
+    queryKey: ['setup-check', 'academic-years'],
+    queryFn:  () => academicConfigApi.years.list(),
+    enabled,
+    staleTime: 5 * 60_000,
+  });
+
+  if (!isAdmin || dismissed) return null;
+
+  /* ── Derive step completion ────────────────────────────── */
+  const years      = yearsRes?.data ?? [];
+  const activeYear = years.find(y => y.status === 'active');
+  const hasYear    = !!(activeYear?.terms?.length > 0);
+  const hasClasses  = (classRes?.pagination?.total ?? classRes?.data?.length ?? 0) > 0;
+  const hasTeachers = (teacherRes?.pagination?.total ?? teacherRes?.data?.length ?? 0) > 0;
+  const hasStudents = (stuTotal ?? 0) > 0;
+  const hasFees     = (feeRes?.data?.length ?? 0) > 0;
+  const hasProfile  = !!(school?.logoUrl);
+
+  const STEPS = [
+    {
+      id: 'profile',
+      emoji: '🏫',
+      label: 'Complete school profile',
+      hint: 'Upload your logo and add contact details',
+      done: hasProfile,
+      to: '/settings',
+    },
+    {
+      id: 'ay',
+      emoji: '📅',
+      label: 'Set academic year & terms',
+      hint: 'Create the current year and set term dates',
+      done: hasYear,
+      to: '/settings',
+    },
+    {
+      id: 'classes',
+      emoji: '🚪',
+      label: 'Create classes / grades',
+      hint: 'Add Grade 1, Form 1, etc.',
+      done: hasClasses,
+      to: '/classes',
+    },
+    {
+      id: 'staff',
+      emoji: '👨‍🏫',
+      label: 'Add teaching staff',
+      hint: 'Import or manually add your teachers',
+      done: hasTeachers,
+      to: '/teachers',
+    },
+    {
+      id: 'students',
+      emoji: '🎓',
+      label: 'Enroll first students',
+      hint: 'Add students or import via CSV',
+      done: hasStudents,
+      to: '/students',
+    },
+    {
+      id: 'fees',
+      emoji: '💰',
+      label: 'Set up fee structures',
+      hint: 'Configure tuition, boarding, transport fees',
+      done: hasFees,
+      to: '/finance',
+    },
+  ];
+
+  const doneCount = STEPS.filter(s => s.done).length;
+  const pct       = Math.round((doneCount / STEPS.length) * 100);
+  const allDone   = doneCount === STEPS.length;
+
+  function dismiss() {
+    localStorage.setItem(dismissKey, 'true');
+    setDismissed(true);
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden"
+    >
+      {/* ── Header ──────────────────────────────────────────── */}
+      <div className="px-5 py-4 flex items-center justify-between gap-4 border-b border-slate-100">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center shrink-0">
+            <Rocket size={15} className="text-amber-500" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-sm font-semibold text-slate-900">School Setup Checklist</h3>
+              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                allDone ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+              }`}>{pct}% complete</span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5 truncate">
+              {allDone
+                ? '🎉 Your school is fully configured! You can dismiss this.'
+                : `${STEPS.length - doneCount} step${STEPS.length - doneCount !== 1 ? 's' : ''} remaining — complete them to unlock the full platform.`}
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={dismiss}
+          className="text-xs text-slate-400 hover:text-slate-600 shrink-0 transition"
+        >
+          {allDone ? 'Dismiss ✓' : 'Hide for now'}
+        </button>
+      </div>
+
+      {/* ── Progress bar ────────────────────────────────────── */}
+      <div className="h-1 bg-slate-100">
+        <div
+          className={`h-full transition-all duration-700 ease-out ${allDone ? 'bg-emerald-500' : 'bg-indigo-500'}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+
+      {/* ── Steps grid ──────────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
+        {STEPS.map((step, i) => {
+          const inner = (
+            <div
+              key={step.id}
+              className={`flex flex-col gap-1.5 px-4 py-3 border-r border-b border-slate-100 last:border-r-0 transition-colors ${
+                step.done
+                  ? 'bg-emerald-50/40 cursor-default'
+                  : 'hover:bg-indigo-50/60 cursor-pointer'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${
+                  step.done ? 'bg-emerald-500' : 'bg-slate-200'
+                }`}>
+                  {step.done
+                    ? <CheckCircle size={11} className="text-white" />
+                    : <span className="text-[10px] text-slate-500 font-bold">{i + 1}</span>}
+                </div>
+                <span className="text-base leading-none">{step.emoji}</span>
+              </div>
+              <p className={`text-xs font-medium leading-snug ${
+                step.done ? 'text-emerald-700 line-through decoration-emerald-400/60' : 'text-slate-700'
+              }`}>
+                {step.label}
+              </p>
+              {!step.done && (
+                <p className="text-[11px] text-slate-400 leading-snug">{step.hint}</p>
+              )}
+              {!step.done && (
+                <span className="text-[11px] text-indigo-500 font-medium flex items-center gap-0.5 mt-auto">
+                  Go <ArrowRight size={10} />
+                </span>
+              )}
+            </div>
+          );
+          return step.done
+            ? <div key={step.id}>{inner}</div>
+            : <Link key={step.id} to={step.to}>{inner}</Link>;
+        })}
+      </div>
+    </motion.div>
+  );
 }
 
 /* ══════════════════════════════════════════════════════════

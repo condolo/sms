@@ -1860,7 +1860,7 @@ function AcademicYearsSection({ schoolId }) {
                               <span className="text-[11px] font-semibold text-slate-600">{t.label || fallbackLabel}</span>
                               <span className="text-xs text-slate-500">{t.startDate || <span className="text-slate-300 italic">not set</span>}</span>
                               <span className="text-xs text-slate-500">{t.endDate   || <span className="text-slate-300 italic">not set</span>}</span>
-                            </div>{/* closes grid div */}
+                            </div>
                           )}
                         </div>
                         );
