@@ -1456,7 +1456,7 @@ function UsersTab() {
                         <button
                           onClick={() => setResetPwdUser(u)}
                           className="p-1.5 text-slate-300 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition"
-                          title="Set temporary password"
+                          title="Set password"
                         >
                           <KeyRound size={13} />
                         </button>
@@ -1592,21 +1592,29 @@ function InviteSlideOver({ customRoles = [], hiddenSystemRoles = [], onClose, on
 }
 
 /* ══════════════════════════════════════════════════════════════
-   RESET PASSWORD MODAL
+   SET PASSWORD MODAL
+   Admin sets a usable password for the user.  They can use it
+   immediately — no forced change on login.  The platform's
+   90-day rotation policy handles scheduled expiry.
    ══════════════════════════════════════════════════════════════ */
 function ResetPasswordModal({ user, onClose }) {
-  const [result,  setResult]  = useState(null);
-  const [copied,  setCopied]  = useState(false);
-  const [errMsg,  setErrMsg]  = useState('');
+  const [result,     setResult]     = useState(null);
+  const [copied,     setCopied]     = useState(false);
+  const [errMsg,     setErrMsg]     = useState('');
+  const [customPwd,  setCustomPwd]  = useState('');
+  const [showPwd,    setShowPwd]    = useState(false);
 
   const { mutate, isPending } = useMutation({
-    mutationFn: () => settingsApi.users.resetPassword(user.id ?? user._id),
-    onSuccess:  res  => setResult(res?.data),
-    onError:    err  => setErrMsg(err?.message ?? 'Failed to reset password.'),
+    mutationFn: () => settingsApi.users.resetPassword(
+      user.id ?? user._id,
+      customPwd.trim() ? { password: customPwd.trim() } : {}
+    ),
+    onSuccess: res  => setResult(res?.data),
+    onError:   err  => setErrMsg(err?.message ?? 'Failed to set password.'),
   });
 
   function copyPwd() {
-    navigator.clipboard.writeText(result.tempPassword).catch(() => {});
+    navigator.clipboard.writeText(result.password).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
@@ -1626,24 +1634,53 @@ function ResetPasswordModal({ user, onClose }) {
         className="fixed z-50 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden"
       >
         {!result ? (
-          /* ── Confirmation ── */
+          /* ── Form ── */
           <div className="p-6 space-y-4">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
                 <KeyRound size={18} className="text-amber-600" />
               </div>
               <div>
-                <h2 className="text-base font-semibold text-slate-900">Set Temporary Password</h2>
+                <h2 className="text-base font-semibold text-slate-900">Set Password</h2>
                 <p className="text-xs text-slate-500">{user.name ?? user.email}</p>
               </div>
             </div>
 
             <p className="text-sm text-slate-600">
-              A new temporary password will be generated for <strong>{user.name ?? user.email}</strong>. They will be required to change it on their next login.
+              Set a new password for <strong>{user.name ?? user.email}</strong>. They can use it immediately — no forced change on login.
             </p>
-            <p className="text-sm text-slate-600">
-              An email will be sent to{' '}
-              <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">{user.email}</span>
+
+            {/* Optional custom password */}
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Password <span className="text-slate-400 font-normal">(leave blank to auto-generate)</span>
+              </label>
+              <div className="relative">
+                <input
+                  type={showPwd ? 'text' : 'password'}
+                  value={customPwd}
+                  onChange={e => { setCustomPwd(e.target.value); setErrMsg(''); }}
+                  placeholder="Type a password, or leave blank"
+                  minLength={8}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPwd(v => !v)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  tabIndex={-1}
+                >
+                  {showPwd ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+              {customPwd && customPwd.length < 8 && (
+                <p className="text-xs text-amber-600 mt-1">Must be at least 8 characters</p>
+              )}
+            </div>
+
+            <p className="text-xs text-slate-500">
+              An email with the new password will be sent to{' '}
+              <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded">{user.email}</span>
               {' '}— keep this dialog open in case the email doesn&apos;t arrive.
             </p>
 
@@ -1657,11 +1694,11 @@ function ResetPasswordModal({ user, onClose }) {
               </button>
               <button
                 onClick={() => mutate()}
-                disabled={isPending}
+                disabled={isPending || (customPwd.length > 0 && customPwd.length < 8)}
                 className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-lg transition"
               >
                 {isPending && <Loader2 size={13} className="animate-spin" />}
-                {isPending ? 'Generating…' : 'Set Password'}
+                {isPending ? 'Saving…' : 'Set Password'}
               </button>
             </div>
           </div>
@@ -1678,11 +1715,11 @@ function ResetPasswordModal({ user, onClose }) {
               </div>
             </div>
 
-            <p className="text-sm text-slate-600">Share this temporary password securely. The user must change it on first login.</p>
+            <p className="text-sm text-slate-600">Share this password securely with the user. They can log in with it immediately.</p>
 
             <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
               <code className="flex-1 text-lg font-bold tracking-widest text-violet-700 font-mono break-all">
-                {result.tempPassword}
+                {result.password}
               </code>
               <button
                 onClick={copyPwd}
@@ -1695,7 +1732,7 @@ function ResetPasswordModal({ user, onClose }) {
 
             <div className={`rounded-lg px-3 py-2.5 text-xs flex items-start gap-2 ${result.emailSent ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
               {result.emailSent ? (
-                <><CheckCircle2 size={13} className="shrink-0 mt-0.5" /> Email with credentials sent to {result.email}.</>
+                <><CheckCircle2 size={13} className="shrink-0 mt-0.5" /> Email with the new password sent to {result.email}.</>
               ) : (
                 <><AlertTriangle size={13} className="shrink-0 mt-0.5" /> Email could not be sent — share this password directly with {result.name}.</>
               )}

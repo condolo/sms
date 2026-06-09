@@ -358,7 +358,7 @@ export const settings = {
     invite: (data)     => _post('/settings/users/invite', data),
     update: (id, data) => _put(`/settings/users/${id}`, data),
     remove:        (id)       => _delete(`/settings/users/${id}`),
-    resetPassword: (id)       => _post(`/settings/users/${id}/reset-password`),
+    resetPassword: (id, data = {}) => _post(`/settings/users/${id}/reset-password`, data),
   },
   notifications: {
     get:    ()       => _get('/settings/notifications'),

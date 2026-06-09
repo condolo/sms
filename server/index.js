@@ -269,6 +269,31 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
+/* ── One-time migration: initialize passwordChangedAt ───────────
+   Sets passwordChangedAt = now for every user who lacks the field.
+   This initialises the 90-day rotation clock for all existing accounts
+   so no one is immediately locked out on first deploy of this change.
+   Idempotent — the $exists:false filter means it only touches users
+   that haven't been updated yet; safe to run on every startup.
+   ────────────────────────────────────────────────────────────── */
+async function _migratePasswordChangedAt() {
+  try {
+    const { _model } = require('./utils/model');
+    const Users  = _model('users');
+    const now    = new Date().toISOString();
+    const result = await Users.updateMany(
+      { passwordChangedAt: { $exists: false } },
+      { $set: { passwordChangedAt: now } }
+    );
+    if (result.modifiedCount > 0) {
+      console.log(`[Migration] passwordChangedAt: initialised for ${result.modifiedCount} user(s) — 90-day clock starts now.`);
+    }
+  } catch (err) {
+    // Non-fatal — next startup will retry
+    console.error('[Migration] _migratePasswordChangedAt failed:', err.message);
+  }
+}
+
 /* ── Start ──────────────────────────────────────────────────── */
 async function start() {
   await connect();        // Connect to MongoDB (no-op if MONGODB_URI not set)
@@ -288,6 +313,10 @@ async function start() {
 
     seedDemo()
       .catch(err => console.error('[seed-demo] Unhandled top-level error — demo school may not be provisioned correctly:', err));
+
+    // Initialise 90-day password rotation clock for existing users
+    _migratePasswordChangedAt()
+      .catch(err => console.error('[_migratePasswordChangedAt] Unhandled error:', err));
 
     // Lesson coverage reminder cron jobs (Friday + Saturday)
     try {

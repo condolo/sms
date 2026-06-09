@@ -378,11 +378,11 @@ router.post('/users/invite', authMiddleware, async (req, res) => {
       email:         userEmail.toLowerCase().trim(),
       role,
       roles:         [role],
-      password:      hash,   // canonical field — must match auth.js
-      mustChangePwd: true,
-      isActive:      true,
-      createdAt:     now,
-      updatedAt:     now,
+      password:          hash,   // canonical field — must match auth.js
+      passwordChangedAt: now,    // 90-day clock starts from account creation
+      isActive:          true,
+      createdAt:         now,
+      updatedAt:         now,
     };
 
     await Users.create(newUser);
@@ -500,14 +500,26 @@ router.delete('/users/:id', authMiddleware, async (req, res) => {
 
 /* ══════════════════════════════════════════════════════════════
    POST /api/settings/users/:id/reset-password
-   Admin assigns a new temporary password; user must change on login.
+   Admin sets a usable password for a user.
+   Body (optional): { password: string }  — if omitted, a strong random
+   password is generated.  No forced change on login; the 90-day platform
+   rotation policy handles expiry.
    ══════════════════════════════════════════════════════════════ */
 router.post('/users/:id/reset-password', authMiddleware, async (req, res) => {
   if (!_isAdmin(req)) {
     return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Admin access required.' } });
   }
   const { id } = req.params;
+  const { password: customPwd } = req.body;
   const schoolId = req.jwtUser.schoolId;
+
+  /* Validate custom password if provided */
+  if (customPwd !== undefined && customPwd !== null && customPwd !== '') {
+    if (typeof customPwd !== 'string' || customPwd.length < 8) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Password must be at least 8 characters.' } });
+    }
+  }
+
   try {
     const User   = _model('users');
     const School = _model('schools');
@@ -529,16 +541,23 @@ router.post('/users/:id/reset-password', authMiddleware, async (req, res) => {
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Cannot reset password for another admin.' } });
     }
 
-    const tempPassword = _genTempPassword();
-    const hash         = await bcrypt.hash(tempPassword, 12);
+    /* Use custom password if provided, otherwise generate a strong random one */
+    const newPassword = (customPwd && customPwd.trim()) ? customPwd.trim() : _genTempPassword();
+    const hash        = await bcrypt.hash(newPassword, 12);
+    const now         = new Date().toISOString();
 
-    /* Update by whichever field actually matched */
+    /* Update by whichever field actually matched.
+       - Remove legacy mustChangePwd / mustChangePassword flags
+       - Reset the 90-day rotation clock from now */
     const updateFilter = target.id
       ? { id: target.id, schoolId }
       : { _id: target._id, schoolId };
     await User.updateOne(
       updateFilter,
-      { $set: { password: hash, mustChangePwd: true, updatedAt: new Date().toISOString() } }
+      {
+        $set:   { password: hash, passwordChangedAt: now, updatedAt: now },
+        $unset: { mustChangePwd: 1, mustChangePassword: 1 },
+      }
     );
 
     /* Attempt email — non-fatal */
@@ -551,9 +570,9 @@ router.post('/users/:id/reset-password', authMiddleware, async (req, res) => {
         schoolName:  school?.name || 'Your School',
         schoolEmail: school?.systemEmail || school?.email || '',
         schoolId,
-        tempPassword,
-        role:        target.role,
-        loginUrl:    process.env.APP_URL || 'https://msingi.io',
+        tempPassword: newPassword,
+        role:         target.role,
+        loginUrl:     process.env.APP_URL || 'https://msingi.io',
       });
       emailSent = true;
     } catch (emailErr) {
@@ -563,7 +582,7 @@ router.post('/users/:id/reset-password', authMiddleware, async (req, res) => {
     return res.json({
       success: true,
       data: {
-        tempPassword,
+        password:  newPassword,
         name:      target.name  || target.email,
         email:     target.email,
         emailSent,
@@ -571,7 +590,7 @@ router.post('/users/:id/reset-password', authMiddleware, async (req, res) => {
     });
   } catch (err) {
     console.error('[settings] POST /users/:id/reset-password error:', err);
-    return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to reset password.' } });
+    return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to set password.' } });
   }
 });
 

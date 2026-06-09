@@ -420,21 +420,21 @@ async function sendLoginOTP({ name, email, otp, schoolName, schoolEmail, schoolI
   return _sendAsSchool(email, `${otp} — Your ${schoolName} sign-in code`, html, { schoolName, schoolEmail, schoolId });
 }
 
-/* 8. New user welcome — sends temporary login credentials */
+/* 8. New user welcome — sends login credentials */
 async function sendWelcomeCredentials({ name, email, tempPassword, schoolName, schoolEmail, schoolId = null, role, loginUrl }) {
   const roleLabel = (role || 'staff').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   const support   = schoolEmail || PLATFORM_EMAIL;
   const html = _wrap(`
     <h2>Welcome to ${schoolName}! 🎉</h2>
     <p>Hi ${name},</p>
-    <p>Your account on <strong>${schoolName}</strong> has been created. Here are your login credentials to get started.</p>
+    <p>Your account on <strong>${schoolName}</strong> has been set up. Here are your login credentials.</p>
     <div class="info">
       <p><strong>School:</strong> ${schoolName}</p>
       <p><strong>Role:</strong> ${roleLabel}</p>
       <p><strong>Email:</strong> ${email}</p>
-      <p><strong>Temporary Password:</strong> <span style="font-family:monospace;font-size:15px;font-weight:700;color:#4f46e5;background:#ede9fe;padding:3px 8px;border-radius:4px">${tempPassword}</span></p>
+      <p><strong>Password:</strong> <span style="font-family:monospace;font-size:15px;font-weight:700;color:#4f46e5;background:#ede9fe;padding:3px 8px;border-radius:4px">${tempPassword}</span></p>
     </div>
-    <p>⚠️ You will be asked to <strong>change your password</strong> when you first sign in. Choose something strong and unique.</p>
+    <p>You can sign in immediately with these credentials. You may change your password at any time from your account settings.</p>
     <p style="text-align:center">
       <a href="${loginUrl || APP_URL}" class="btn">Sign In Now →</a>
     </p>
@@ -451,7 +451,7 @@ async function sendPasswordExpirySoon({ name, email, schoolName, schoolEmail, sc
   const html = _wrap(`
     <h2>${urgency}: Your password expires ${daysLeft <= 0 ? 'today' : `in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`}</h2>
     <p>Hi ${name},</p>
-    <p>Your password for <strong>${schoolName}</strong> ${daysLeft <= 0 ? 'has expired' : `will expire in <strong>${daysLeft} day${daysLeft !== 1 ? 's' : ''}</strong>`} as part of our 60-day security policy.</p>
+    <p>Your password for <strong>${schoolName}</strong> ${daysLeft <= 0 ? 'has expired' : `will expire in <strong>${daysLeft} day${daysLeft !== 1 ? 's' : ''}</strong>`} as part of our 90-day security policy.</p>
     <p>Please sign in and update your password now to avoid being locked out.</p>
     <p style="text-align:center">
       <a href="${APP_URL}" class="btn">Update Password Now →</a>
@@ -467,7 +467,7 @@ async function sendPasswordChanged({ name, email, schoolName, schoolEmail, schoo
   const html = _wrap(`
     <h2>✅ Password updated successfully</h2>
     <p>Hi ${name},</p>
-    <p>Your password for <strong>${schoolName}</strong> was just changed. Your next password change will be due in <strong>60 days</strong>.</p>
+    <p>Your password for <strong>${schoolName}</strong> was just changed. Your next password change will be due in <strong>90 days</strong>.</p>
     <p style="font-size:13px;color:#6b7280">If you did not make this change, contact your school administrator immediately at <a href="mailto:${support}">${support}</a>.</p>
     <p style="text-align:center">
       <a href="${APP_URL}" class="btn">Sign In →</a>

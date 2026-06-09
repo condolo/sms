@@ -85,8 +85,8 @@ function _genTempPassword() {
   return arr.join('');
 }
 
-/* ── Password age check (60-day policy) ─────────────────── */
-const PASSWORD_MAX_DAYS = 60;
+/* ── Password age check (90-day policy) ─────────────────── */
+const PASSWORD_MAX_DAYS = 90;
 function _passwordAge(user) {
   const ref = user.passwordChangedAt || user.createdAt;
   if (!ref) return 0;
@@ -150,18 +150,10 @@ router.post('/login', loginLimiter, tenantMiddleware, async (req, res) => {
 
     if (!match) return res.status(401).json({ error: 'Invalid email or password' });
 
-    // ── First-login forced change (new user temp password) ──
-    if (user.mustChangePassword) {
-      return res.json({
-        passwordExpired: true,
-        reason: 'first_login',
-        userId:   user.id,
-        schoolId: req.school.id,
-        hint:     'Your administrator has set a temporary password. Please choose your own password to continue.'
-      });
-    }
-
-    // ── 60-day password rotation policy ────────────────────
+    // ── 90-day password rotation policy ────────────────────
+    // userId uses custom id if available; falls back to MongoDB _id string.
+    // The force-change route accepts both via $or lookup.
+    const _userId = user.id || user._id.toString();
     const ageDays = _passwordAge(user);
     if (ageDays >= PASSWORD_MAX_DAYS) {
       // Send expiry email (non-blocking, deduplication by day)
@@ -169,7 +161,7 @@ router.post('/login', loginLimiter, tenantMiddleware, async (req, res) => {
       return res.json({
         passwordExpired: true,
         reason: 'expired',
-        userId:   user.id,
+        userId:   _userId,
         schoolId: req.school.id,
         hint:     `Your password is ${ageDays} days old. For your security, please set a new password to continue.`
       });
@@ -290,9 +282,11 @@ async function _checkPasswordExpiryAndNotify(user, school) {
   });
 }
 
-/* POST /api/auth/force-change — change password when expired or on first login
+/* POST /api/auth/force-change — change password when 90-day rotation is due
    No JWT required (user is locked at password screen)
    Body: { userId, schoolId, newPassword }
+   userId may be either the custom `id` field (e.g. "usr_xxx") or the MongoDB
+   _id hex string — the $or lookup handles both cases.
 */
 const forceChangeLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10,
   message: { error: 'Too many attempts. Please try again later.' } });
@@ -304,16 +298,31 @@ router.post('/force-change', forceChangeLimiter, tenantMiddleware, async (req, r
     if (newPassword.length < 8)  return res.status(400).json({ error: 'Password must be at least 8 characters' });
 
     const User = _model('users');
-    const user = await User.findOne({ id: userId, schoolId: schoolId || req.school?.id }).lean();
+    const sid  = schoolId || req.school?.id;
+
+    /* Support users with custom `id` field AND users that only have MongoDB _id */
+    const isOid     = /^[0-9a-f]{24}$/i.test(userId);
+    const userQuery = isOid
+      ? { schoolId: sid, $or: [{ id: userId }, { _id: userId }] }
+      : { id: userId, schoolId: sid };
+
+    const user = await User.findOne(userQuery).lean();
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const now    = new Date().toISOString();
     const hashed = await bcrypt.hash(newPassword, 12);
-    await User.updateOne({ id: userId }, {
-      password: hashed,
+
+    /* Update by whichever field actually matched */
+    const updateFilter = user.id
+      ? { id: user.id }
+      : { _id: user._id };
+
+    await User.updateOne(updateFilter, {
+      password:          hashed,
       passwordChangedAt: now,
-      mustChangePassword: false,
-      lastLogin: now
+      mustChangePassword: false,  // clear legacy flag if present
+      mustChangePwd:      false,  // clear legacy alias if present
+      lastLogin:          now,
     });
 
     const School = _model('schools');

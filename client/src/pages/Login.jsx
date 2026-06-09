@@ -869,13 +869,9 @@ export default function Login() {
           {/* ── CHANGE PASSWORD MODE ────────────────────────────────── */}
           {mode === MODES.CHANGE_PASSWORD && (
             <>
-              <h2 className="text-2xl font-bold text-slate-800">
-                {pendingPw?.reason === 'first_login' ? 'Set your password 🔐' : 'Password expired 🔑'}
-              </h2>
+              <h2 className="text-2xl font-bold text-slate-800">Password expired 🔑</h2>
               <p className="mt-1 text-sm text-slate-500">
-                {pendingPw?.reason === 'first_login'
-                  ? 'Welcome! Your administrator set a temporary password. Choose your own to continue.'
-                  : 'Your password has expired. Please choose a new one to continue.'}
+                Your password is more than 90 days old. Please choose a new one to continue.
               </p>
 
               <form onSubmit={handleChangePassword} className="mt-8 space-y-4">
