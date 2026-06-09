@@ -340,8 +340,13 @@ router.post('/users/invite', authMiddleware, async (req, res) => {
     const { name, email: userEmail, role = 'teacher' } = req.body;
     if (!userEmail) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Email is required.' } });
 
-    const BUILTIN_INVITE_ROLES = ['teacher', 'deputy', 'admin', 'parent', 'student'];
-    if (!BUILTIN_INVITE_ROLES.includes(role)) {
+    /* All canonical system roles (+ legacy deputy alias) that can be invited */
+    const BUILTIN_INVITE_ROLES = new Set([
+      'admin', 'deputy_principal', 'deputy', 'section_head', 'teacher',
+      'exams_officer', 'timetabler', 'admissions_officer',
+      'finance', 'hr', 'discipline_committee', 'parent', 'student',
+    ]);
+    if (!BUILTIN_INVITE_ROLES.has(role)) {
       // Allow any custom role belonging to this school
       const customRole = await _model('custom_roles').findOne({ schoolId: req.jwtUser.schoolId, key: role }).lean();
       if (!customRole) {
@@ -502,7 +507,14 @@ router.post('/users/:id/reset-password', authMiddleware, async (req, res) => {
     const User   = _model('users');
     const School = _model('schools');
 
-    const target = await User.findOne({ id, schoolId }).lean();
+    /* Support both custom `id` field and MongoDB `_id` (for users created
+       outside the invite flow who may only have _id set) */
+    const isOid     = /^[0-9a-f]{24}$/i.test(id);
+    const userQuery = isOid
+      ? { schoolId, $or: [{ id }, { _id: id }] }
+      : { id, schoolId };
+
+    const target = await User.findOne(userQuery).lean();
     if (!target) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found.' } });
     }
@@ -515,8 +527,12 @@ router.post('/users/:id/reset-password', authMiddleware, async (req, res) => {
     const tempPassword = _genTempPassword();
     const hash         = await bcrypt.hash(tempPassword, 12);
 
+    /* Update by whichever field actually matched */
+    const updateFilter = target.id
+      ? { id: target.id, schoolId }
+      : { _id: target._id, schoolId };
     await User.updateOne(
-      { id, schoolId },
+      updateFilter,
       { $set: { password: hash, mustChangePwd: true, updatedAt: new Date().toISOString() } }
     );
 
