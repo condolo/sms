@@ -127,25 +127,28 @@ Subjects are then linked to classes via the **Timetable** module (Standard plan 
 1. Go to **Settings → Users**
 2. Click **Invite User** (top right)
 3. Enter full name (optional), email address, and assign a role
-4. Click **Send Invite** — Msingi generates a secure temporary password and emails it to the staff member automatically
-5. The staff member follows the link in the email and is forced to set a new password on first login
+4. Click **Send Invite** — Msingi generates a secure password and emails it to the staff member automatically
+5. The staff member can log in immediately with those credentials
 
-> **If the email doesn't arrive** — use the password reset flow below to retrieve or regenerate a temporary password you can share directly.
+> **If the email doesn't arrive** — use the Set Password flow below to generate or type a new password you can share directly.
 
-### Resetting a user's password (admin only)
+### Setting a user's password (admin only)
 
-If a staff member never received their welcome email — or has forgotten their password and cannot recover it by email — you can assign them a new temporary password instantly:
+If a staff member never received their welcome email, has forgotten their password, or you need to set a specific password for them:
 
 1. Go to **Settings → Users**
 2. Hover over the user's row — a **key icon** (🔑) appears on the right
-3. Click the key icon to open the **Set Temporary Password** dialog
-4. Confirm by clicking **Set Password**
-5. The dialog shows the generated temporary password — copy it and share it with the user via a secure channel (phone, WhatsApp, in person)
-6. A copy of the password is also emailed to the user automatically; the dialog tells you whether the email was delivered
+3. Click the key icon to open the **Set Password** dialog
+4. **Optional**: type a specific password in the field, or leave it blank to auto-generate a strong random one
+5. Click **Set Password**
+6. The dialog shows the new password — copy it and share it securely (phone, WhatsApp, in person)
+7. A copy is also emailed to the user automatically; the dialog tells you whether the email was delivered
 
-> **The password is shown once.** Copy it before closing the dialog. The user will be required to change it on their next login.
+> **The password is shown once.** Copy it before closing the dialog.
 
-> **Note:** A regular admin cannot reset the password of another admin or superadmin. Only a superadmin can do this.
+> **No forced change**: the user can log in immediately with this password. They are not required to change it on first login — it is a fully usable password. The platform's 90-day rotation policy applies to everyone: all users are prompted to update their password after 90 days regardless of how it was set.
+
+> **Note:** A regular admin cannot set the password of another admin or superadmin. Only a superadmin can do this.
 
 ### Available roles
 
@@ -273,7 +276,58 @@ These settings are used across reports, letters, and the app header.
 
 ---
 
-## 11. Data Export & Backup
+## 11. Custom Email Sending (SMTP) — Standard plan and above
+
+By default, all system emails from your school (welcome messages, password resets, attendance alerts, report card notifications, etc.) are sent from the Msingi platform address (`innolearnnetwork@gmail.com`) with your school's name as the display name.
+
+If you want emails to come from your own domain — e.g. `noreply@greenwood.ke` or `info@mla.ac.ke` — you can configure your own SMTP server.
+
+### Setting up custom SMTP
+
+1. Go to **Settings → School Profile**
+2. Scroll to the **Email / SMTP** section
+3. Toggle **Use custom SMTP for school emails** on
+4. Fill in the fields:
+
+| Field | What to enter |
+|---|---|
+| **From name** | Your school's display name (e.g. `Greenwood Academy`) |
+| **From email address** | The address emails will appear to come from (e.g. `noreply@greenwood.ke`) |
+| **SMTP host** | Your mail server hostname (e.g. `smtp.gmail.com`, `mail.yourschool.ke`) |
+| **Port** | `587` with STARTTLS is recommended. Use `465` for SSL/TLS. |
+| **Security** | Match the port: STARTTLS for 587, SSL/TLS for 465 |
+| **SMTP username** | Your email account username (usually the full email address) |
+| **Password** | Your email account password or App Password |
+
+5. Enter a test recipient email address and click **Test** — a test message will be sent. Check the inbox to confirm delivery.
+6. Click **Save SMTP** to activate.
+
+> ✅ Msingi always **falls back to the platform sender** if your SMTP server is unreachable, so you will never miss a critical email even during an outage on your mail server.
+
+### Using Gmail as your school SMTP
+
+If your school email runs on Google Workspace (Gmail):
+
+1. Enable **2-Step Verification** on the sending account: [myaccount.google.com → Security](https://myaccount.google.com/security)
+2. Go to **App passwords** and generate one for "Mail" / "Other"
+3. Use the 16-character App Password (without spaces) as the **Password** field — **not** your regular Gmail password
+4. Set **SMTP host** to `smtp.gmail.com`, **Port** to `587`, **Security** to `STARTTLS`
+
+### Removing custom SMTP
+
+Click **Remove Custom SMTP** at the bottom of the SMTP section to revert to the platform sender. All future emails will go through `innolearnnetwork@gmail.com` again.
+
+### Troubleshooting
+
+| Error shown | Likely cause | Fix |
+|---|---|---|
+| *"SMTP_ENCRYPTION_KEY is not set on the server"* | Platform admin has not set the encryption key in Render | Contact the platform administrator — this is a server configuration issue, not a settings error on your side |
+| Test email not received | Wrong host / port / credentials | Double-check the SMTP host and port; for Gmail ensure you are using an App Password, not your account password |
+| *"Authentication failed"* | Incorrect username or password | Re-enter credentials; for Gmail check App Password is correct and 2FA is enabled on the account |
+
+---
+
+## 12. Data Export & Backup
 
 ### Exporting data
 
@@ -299,7 +353,7 @@ This export can be re-imported if you ever need to restore.
 
 ---
 
-## 12. Demo School (Msingi)
+## 13. Demo School (Msingi)
 
 **Msingi Demo School** is the built-in demo environment at `demo.msingi.io`. It contains realistic sample data including 20 students, 9+ teachers, timetables, behaviour records, finance records, and admissions.
 
@@ -324,7 +378,7 @@ Password for all demo accounts: **`Demo2025!`**
 
 ---
 
-## 13. Getting Help
+## 14. Getting Help
 
 ### In-app Help Centre
 
