@@ -16,9 +16,11 @@ import {
   CreditCard, Smartphone, Zap, ArrowRight, Layers, Pencil,
   Bell, MessageSquare, BookOpen, Calendar, CalendarDays, Clock,
   Upload, ImageIcon, KeyRound, Copy,
+  PlusCircle, ChevronRight, AlertCircle, Archive,
 } from 'lucide-react';
 import { sections as sectionsApi } from '@/api/client.js';
 import { settings as settingsApi } from '@/api/client.js';
+import { academicConfig as academicConfigApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 
 /* ── Tab config ─────────────────────────────────────────────── */
@@ -659,89 +661,36 @@ function SchoolTab() {
             </select>
           </FField>
         </div>
-        {/* ── Academic year configuration ──────────────────── */}
-        <div className="space-y-2">
-          <div className="grid grid-cols-3 gap-3">
-            <FField label="Academic year label">
-              <input
-                value={f.academicYear ?? ''}
-                onChange={e => set('academicYear', e.target.value)}
-                className={iCls()}
-                placeholder="e.g. 2025/2026"
-              />
-            </FField>
-            <FField label="Year starts in">
-              <select
-                value={f.academicYearStartMonth ?? 1}
-                onChange={e => set('academicYearStartMonth', Number(e.target.value))}
-                className={iCls()}
-              >
-                {['January','February','March','April','May','June',
-                  'July','August','September','October','November','December'
-                ].map((m, i) => (
-                  <option key={i + 1} value={i + 1}>{m}</option>
-                ))}
-              </select>
-            </FField>
-            <FField label="Terms per year">
-              <select value={f.termsPerYear ?? 3} onChange={e => set('termsPerYear', Number(e.target.value))} className={iCls()}>
-                <option value={2}>2 terms</option>
-                <option value={3}>3 terms</option>
-                <option value={4}>4 terms (quarters)</option>
-              </select>
-            </FField>
-          </div>
-          <p className="text-[11px] text-slate-400 leading-relaxed">
-            The label (e.g. <strong>2025/2026</strong>) appears on fee structures, report cards and admission references.
-            Set the start month so the system knows when your year rolls over — a September start means the year
-            changes in September, not January.
-          </p>
-        </div>
+        {/* ── Academic year management ──────────────────────── */}
+        <AcademicYearsSection schoolId={school.id} />
 
-        {/* ── Term dates ────────────────────────────────────── */}
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100">
-            <CalendarDays size={13} className="text-slate-400" />
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Term dates for {f.academicYear || 'this academic year'}</span>
-          </div>
-          <p className="text-[11px] text-slate-400 leading-relaxed">
-            Set the start and end date for each term. The system auto-generates billing invoices on each term start date based on your enrolled active student count.
-          </p>
-          <div className="space-y-2">
-            {Array.from({ length: f.termsPerYear ?? 3 }, (_, i) => {
-              const termNum = i + 1;
-              const termKey = `term${termNum}`;
-              const termData = (f.termDates ?? []).find(t => t.term === termNum) ?? { term: termNum, label: `Term ${termNum}`, startDate: '', endDate: '' };
-              function updateTermDate(field, val) {
-                const current = (f.termDates ?? []).filter(t => t.term !== termNum);
-                set('termDates', [...current, { ...termData, [field]: val }].sort((a, b) => a.term - b.term));
-              }
-              return (
-                <div key={termKey} className="grid grid-cols-[80px_1fr_1fr] gap-2 items-center">
-                  <span className="text-xs font-semibold text-slate-600">Term {termNum}</span>
-                  <div>
-                    <label className="block text-[10px] text-slate-400 mb-0.5">Start date</label>
-                    <input
-                      type="date"
-                      value={termData.startDate ?? ''}
-                      onChange={e => updateTermDate('startDate', e.target.value)}
-                      className={iCls()}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-slate-400 mb-0.5">End date</label>
-                    <input
-                      type="date"
-                      value={termData.endDate ?? ''}
-                      onChange={e => updateTermDate('endDate', e.target.value)}
-                      className={iCls()}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+        {/* ── Year start month (still controls billing roll-over) */}
+        <div className="grid grid-cols-2 gap-3">
+          <FField label="Year starts in">
+            <select
+              value={f.academicYearStartMonth ?? 1}
+              onChange={e => set('academicYearStartMonth', Number(e.target.value))}
+              className={iCls()}
+            >
+              {['January','February','March','April','May','June',
+                'July','August','September','October','November','December'
+              ].map((m, i) => (
+                <option key={i + 1} value={i + 1}>{m}</option>
+              ))}
+            </select>
+          </FField>
+          <FField label="Terms per year">
+            <select value={f.termsPerYear ?? 3} onChange={e => set('termsPerYear', Number(e.target.value))} className={iCls()}>
+              <option value={2}>2 terms</option>
+              <option value={3}>3 terms</option>
+              <option value={4}>4 terms (quarters)</option>
+            </select>
+          </FField>
         </div>
+        <p className="text-[11px] text-slate-400 leading-relaxed">
+          <strong>Year starts in</strong> controls when billing invoices are auto-generated — a September start means the year
+          rolls over in September, not January.
+        </p>
       </div>
 
       {/* ── Login Appearance ──────────────────────────────────── */}
@@ -1588,6 +1537,434 @@ function InviteSlideOver({ customRoles = [], hiddenSystemRoles = [], onClose, on
         </div>
       </motion.div>
     </>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ACADEMIC YEARS SECTION
+   Full academic year lifecycle manager embedded in the School tab.
+   Lists all years with status badges, allows creating draft years,
+   editing term dates, and transitioning to a new active year.
+   ══════════════════════════════════════════════════════════════ */
+const STATUS_META = {
+  active: { label: 'Active',  cls: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' },
+  draft:  { label: 'Draft',   cls: 'bg-slate-50  text-slate-500  ring-1 ring-slate-200'  },
+  locked: { label: 'Locked',  cls: 'bg-amber-50  text-amber-700  ring-1 ring-amber-200'  },
+};
+
+function YearStatusBadge({ status }) {
+  const m = STATUS_META[status] ?? STATUS_META.draft;
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${m.cls}`}>
+      {status === 'active' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+      {status === 'locked' && <Lock size={9} />}
+      {m.label}
+    </span>
+  );
+}
+
+function AcademicYearsSection({ schoolId }) {
+  const qc = useQueryClient();
+  const [showNew, setShowNew]         = useState(false);
+  const [editingId, setEditingId]     = useState(null);   // yearId being edited
+  const [transitioning, setTransitioning] = useState(false); // confirm dialog
+
+  // ── New year form state ──────────────────────────────────────
+  const [newName, setNewName]         = useState('');
+  const [newStart, setNewStart]       = useState('');
+  const [newEnd, setNewEnd]           = useState('');
+  const [newTermCount, setNewTermCount] = useState(3);
+
+  // ── Transition confirmation ──────────────────────────────────
+  const [transTarget, setTransTarget] = useState(null); // year object
+  const [transReason, setTransReason] = useState('');
+
+  const { data: years = [], isLoading, error } = useQuery({
+    queryKey: ['academic-years'],
+    queryFn:  () => academicConfigApi.years.list().then(r => r.data ?? r),
+    staleTime: 30_000,
+  });
+
+  const activeYear = years.find(y => y.status === 'active');
+  const draftYears = years.filter(y => y.status === 'draft');
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['academic-years'] });
+
+  // ── Create ──────────────────────────────────────────────────
+  const createMut = useMutation({
+    mutationFn: (data) => academicConfigApi.years.create(data),
+    onSuccess: () => { invalidate(); setShowNew(false); setNewName(''); setNewStart(''); setNewEnd(''); setNewTermCount(3); },
+  });
+
+  function handleCreate(e) {
+    e.preventDefault();
+    if (!newName.trim() || !newStart || !newEnd) return;
+    const terms = Array.from({ length: newTermCount }, (_, i) => ({
+      term: i + 1, label: `Term ${i + 1}`, startDate: '', endDate: '',
+    }));
+    createMut.mutate({ name: newName.trim(), startDate: newStart, endDate: newEnd, terms });
+  }
+
+  // ── Delete ──────────────────────────────────────────────────
+  const deleteMut = useMutation({
+    mutationFn: (id) => academicConfigApi.years.remove(id),
+    onSuccess: invalidate,
+  });
+
+  // ── Inline term-date edit ────────────────────────────────────
+  const [editTerms, setEditTerms] = useState({});  // yearId → terms[]
+  const [savingTerms, setSavingTerms] = useState(null);
+
+  function startEdit(year) {
+    setEditingId(year.id || year._id);
+    setEditTerms(prev => ({
+      ...prev,
+      [year.id || year._id]: JSON.parse(JSON.stringify(year.terms ?? [])),
+    }));
+  }
+  function cancelEdit() { setEditingId(null); }
+
+  async function saveTerms(year) {
+    const yid = year.id || year._id;
+    setSavingTerms(yid);
+    try {
+      await academicConfigApi.years.update(yid, { terms: editTerms[yid] ?? [] });
+      invalidate();
+      setEditingId(null);
+    } catch (err) {
+      console.error('[saveTerms]', err);
+    } finally { setSavingTerms(null); }
+  }
+
+  function updateTermDate(yid, termNum, field, val) {
+    setEditTerms(prev => {
+      const terms = (prev[yid] ?? []).map(t =>
+        t.term === termNum ? { ...t, [field]: val } : t
+      );
+      return { ...prev, [yid]: terms };
+    });
+  }
+
+  // ── Transition ───────────────────────────────────────────────
+  const transMut = useMutation({
+    mutationFn: (data) => academicConfigApi.transition(data),
+    onSuccess: () => {
+      invalidate();
+      qc.invalidateQueries({ queryKey: ['settings'] });
+      qc.invalidateQueries({ queryKey: ['school'] });
+      setTransitioning(false);
+      setTransTarget(null);
+      setTransReason('');
+    },
+  });
+
+  if (isLoading) return (
+    <div className="py-6 flex items-center justify-center gap-2 text-slate-400 text-sm">
+      <Loader2 size={16} className="animate-spin" /> Loading academic years…
+    </div>
+  );
+
+  if (error) return (
+    <div className="py-4 flex items-center gap-2 text-red-500 text-sm">
+      <AlertCircle size={14} /> Failed to load academic years
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* ── Header ──────────────────────────────────────────── */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <CalendarDays size={14} className="text-slate-400" />
+          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Academic Years</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowNew(v => !v)}
+          className="flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 px-2.5 py-1 rounded-md transition"
+        >
+          <PlusCircle size={13} />
+          New year
+        </button>
+      </div>
+
+      {/* ── Create new year form ────────────────────────────── */}
+      <AnimatePresence>
+        {showNew && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <form
+              onSubmit={handleCreate}
+              className="border border-indigo-100 rounded-xl bg-indigo-50/40 p-4 space-y-3"
+            >
+              <p className="text-xs font-semibold text-indigo-700">New Academic Year</p>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-3 sm:col-span-1">
+                  <label className="block text-[10px] text-slate-500 mb-1">Year name *</label>
+                  <input
+                    value={newName}
+                    onChange={e => setNewName(e.target.value)}
+                    placeholder="e.g. 2026-2027"
+                    required
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-500 mb-1">Start date *</label>
+                  <input type="date" value={newStart} onChange={e => setNewStart(e.target.value)} required
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-500 mb-1">End date *</label>
+                  <input type="date" value={newEnd} onChange={e => setNewEnd(e.target.value)} required
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-500 mb-1">Terms per year</label>
+                  <select value={newTermCount} onChange={e => setNewTermCount(Number(e.target.value))}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                    <option value={2}>2 terms</option>
+                    <option value={3}>3 terms</option>
+                    <option value={4}>4 terms</option>
+                  </select>
+                </div>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button type="submit" disabled={createMut.isPending}
+                  className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">
+                  {createMut.isPending ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                  Create draft year
+                </button>
+                <button type="button" onClick={() => setShowNew(false)}
+                  className="text-xs text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg transition">
+                  Cancel
+                </button>
+              </div>
+              {createMut.isError && (
+                <p className="text-xs text-red-600 flex items-center gap-1">
+                  <AlertCircle size={11} /> {createMut.error?.response?.data?.message ?? 'Failed to create year'}
+                </p>
+              )}
+            </form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Year list ───────────────────────────────────────── */}
+      {years.length === 0 ? (
+        <div className="text-center py-8 text-slate-400 text-sm">
+          No academic years yet — click <strong>New year</strong> to add one.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {[...years].sort((a, b) => {
+            const ord = { active: 0, draft: 1, locked: 2 };
+            return (ord[a.status] ?? 3) - (ord[b.status] ?? 3) || a.name.localeCompare(b.name);
+          }).map(year => {
+            const yid     = year.id || year._id;
+            const isEditing = editingId === yid;
+            const terms   = isEditing ? (editTerms[yid] ?? []) : (year.terms ?? []);
+            const isLocked = year.status === 'locked';
+
+            return (
+              <div key={yid} className={`rounded-xl border transition ${
+                year.status === 'active' ? 'border-emerald-200 bg-emerald-50/30' :
+                year.status === 'locked' ? 'border-amber-100 bg-amber-50/20' :
+                'border-slate-200 bg-white'
+              }`}>
+                {/* Year header row */}
+                <div className="flex items-center gap-3 px-4 py-2.5">
+                  <CalendarDays size={13} className={
+                    year.status === 'active' ? 'text-emerald-500' :
+                    year.status === 'locked' ? 'text-amber-500' : 'text-slate-400'
+                  } />
+                  <span className="text-sm font-semibold text-slate-800 flex-1">{year.name}</span>
+                  <YearStatusBadge status={year.status} />
+                  {!isLocked && (
+                    <button type="button"
+                      onClick={() => isEditing ? cancelEdit() : startEdit(year)}
+                      className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition"
+                      title={isEditing ? 'Cancel editing' : 'Edit term dates'}>
+                      {isEditing ? <X size={13} /> : <Pencil size={13} />}
+                    </button>
+                  )}
+                  {year.status === 'draft' && (
+                    <button type="button"
+                      onClick={() => { if (window.confirm(`Delete draft year "${year.name}"? This cannot be undone.`)) deleteMut.mutate(yid); }}
+                      disabled={deleteMut.isPending}
+                      className="p-1 rounded hover:bg-red-50 text-slate-300 hover:text-red-500 transition"
+                      title="Delete draft year">
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                  {year.status === 'locked' && (
+                    <span title="Permanently locked — part of the academic record" className="p-1 text-amber-300">
+                      <Lock size={13} />
+                    </span>
+                  )}
+                </div>
+
+                {/* Term dates — always show; editable when not locked */}
+                {terms.length > 0 && (
+                  <div className="px-4 pb-3 space-y-1.5 border-t border-slate-100">
+                    <div className="pt-2 space-y-1.5">
+                      {terms.map(t => (
+                        <div key={t.term} className="grid grid-cols-[72px_1fr_1fr] gap-2 items-center">
+                          <span className="text-[11px] font-semibold text-slate-500">{t.label || `Term ${t.term}`}</span>
+                          {isEditing ? (
+                            <>
+                              <div>
+                                <label className="block text-[9px] text-slate-400 mb-0.5">Start</label>
+                                <input type="date" value={editTerms[yid]?.find(x => x.term === t.term)?.startDate ?? t.startDate ?? ''}
+                                  onChange={e => updateTermDate(yid, t.term, 'startDate', e.target.value)}
+                                  className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-400" />
+                              </div>
+                              <div>
+                                <label className="block text-[9px] text-slate-400 mb-0.5">End</label>
+                                <input type="date" value={editTerms[yid]?.find(x => x.term === t.term)?.endDate ?? t.endDate ?? ''}
+                                  onChange={e => updateTermDate(yid, t.term, 'endDate', e.target.value)}
+                                  className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-400" />
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <span className="text-xs text-slate-500">{t.startDate || <span className="text-slate-300 italic">not set</span>}</span>
+                              <span className="text-xs text-slate-500">{t.endDate   || <span className="text-slate-300 italic">not set</span>}</span>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {isEditing && (
+                      <div className="flex gap-2 pt-1">
+                        <button type="button"
+                          onClick={() => saveTerms(year)}
+                          disabled={savingTerms === yid}
+                          className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">
+                          {savingTerms === yid ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                          Save term dates
+                        </button>
+                        <button type="button" onClick={cancelEdit}
+                          className="text-xs text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg transition">
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Activate button for draft years */}
+                {year.status === 'draft' && (
+                  <div className="px-4 pb-3">
+                    <button
+                      type="button"
+                      onClick={() => { setTransTarget(year); setTransitioning(true); }}
+                      className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-200 transition"
+                    >
+                      <ChevronRight size={12} />
+                      Start this academic year
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Transition confirmation dialog ──────────────────── */}
+      <AnimatePresence>
+        {transitioning && transTarget && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-amber-50">
+                  <Archive size={20} className="text-amber-600" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-slate-800">Start New Academic Year</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">This action is permanent and cannot be reversed.</p>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 rounded-xl p-4 space-y-2 text-sm">
+                {activeYear ? (
+                  <div className="flex items-start gap-2 text-slate-600">
+                    <Lock size={14} className="mt-0.5 text-amber-500 shrink-0" />
+                    <span>
+                      <strong>{activeYear.name}</strong> will be <strong>permanently locked</strong>.
+                      All grades, exams and report cards for this year will be frozen.
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-2 text-slate-500">
+                    <Info size={14} className="mt-0.5 shrink-0" />
+                    <span>There is no currently active year — only the new year will be activated.</span>
+                  </div>
+                )}
+                <div className="flex items-start gap-2 text-slate-600">
+                  <CheckCircle2 size={14} className="mt-0.5 text-emerald-500 shrink-0" />
+                  <span>
+                    <strong>{transTarget.name}</strong> will become the active academic year.
+                    Term dates will be synced school-wide.
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Reason (optional)</label>
+                <input
+                  value={transReason}
+                  onChange={e => setTransReason(e.target.value)}
+                  placeholder="e.g. End of 2025/2026 academic year"
+                  className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                />
+              </div>
+
+              {transMut.isError && (
+                <p className="text-xs text-red-600 flex items-center gap-1">
+                  <AlertCircle size={11} />
+                  {transMut.error?.response?.data?.message ?? 'Transition failed — please try again'}
+                </p>
+              )}
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => transMut.mutate({ targetYearId: transTarget.id || transTarget._id, reason: transReason || undefined })}
+                  disabled={transMut.isPending}
+                  className="flex-1 flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition"
+                >
+                  {transMut.isPending ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
+                  {activeYear ? 'Lock current & activate new year' : 'Activate year'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setTransitioning(false); setTransTarget(null); setTransReason(''); transMut.reset(); }}
+                  className="px-4 py-2.5 text-sm font-medium text-slate-600 hover:text-slate-800 rounded-xl hover:bg-slate-100 transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 

@@ -27,6 +27,7 @@ const {
   aggregateMarks,
   buildSubjectReport,
 } = require('../utils/grade-calc');
+const { isYearArchived, firstArchivedYear } = require('../utils/archival');
 
 const router = express.Router();
 const PLAN   = planGate('grades');
@@ -320,6 +321,11 @@ router.post('/marks', authMiddleware, PLAN, rbac('grades', 'create'), async (req
     }
     const d = parsed.data;
 
+    // Guard: reject writes to archived academic years
+    if (d.academicYearId && await isYearArchived(schoolId, d.academicYearId)) {
+      return _err(res, 'This academic year is locked — marks cannot be added or modified.', 403);
+    }
+
     // Enforce that only admin/superadmin can add MT and ET
     // (teachers add CA and HW by default; MT/ET require elevated permission)
     const role = req.jwtUser.role;
@@ -382,6 +388,15 @@ router.post('/marks/bulk', authMiddleware, PLAN, rbac('grades', 'create'), async
       return _err(res, parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; '));
     }
     const { marks } = parsed.data;
+
+    // Guard: reject if any mark targets an archived academic year
+    const yearIds = marks.map(d => d.academicYearId).filter(Boolean);
+    if (yearIds.length > 0) {
+      const lockedYid = await firstArchivedYear(schoolId, yearIds);
+      if (lockedYid) {
+        return _err(res, `Academic year "${lockedYid}" is locked — marks cannot be added or modified.`, 403);
+      }
+    }
 
     // Enforce that only admin/deputy_principal can bulk-enter MT and ET
     const role = req.jwtUser.role;

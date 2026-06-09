@@ -2210,8 +2210,14 @@ async function _isYearArchived(schoolId, academicYearId) {
 | `POST /api/grades` | rejects if `data.academicYearId` is archived |
 | `POST /api/grades/bulk` | rejects if any distinct `academicYearId` in payload is archived |
 | `POST /api/exams/:id/results` | rejects if `exam.academicYearId` is archived |
+| `POST /api/assessment/marks` | rejects if `d.academicYearId` is archived (v4.30.0) |
+| `POST /api/assessment/marks/bulk` | rejects if any `academicYearId` in payload is archived (v4.30.0) |
 
-All return `HTTP 400` with a human-readable message. This is additive to the existing `yearArchived` flag on individual documents — the config check is the server-enforced gate; the document flag is for query-time filtering.
+All return `HTTP 403` with a human-readable message. This is additive to the existing `yearArchived` flag on individual documents — the config check is the server-enforced gate; the document flag is for query-time filtering.
+
+**Known gaps (not protected):**
+- `attendance_records` — records carry no `academicYearId` field; attendance is date-scoped only
+- Lessons — reference year by string label not by ID; architectural mismatch prevents a cheap guard
 
 ---
 
@@ -2399,6 +2405,35 @@ The gate (Step C) is **always written after the data** (Step B). If Step C fails
 
 ---
 
+### 27.3b Academic Year CRUD API (v4.30.0)
+
+The `academic_years` collection is now managed through a full CRUD + transition API under `/api/academic-config/years`. The old free-text `school.academicYear` label is a legacy field kept in sync by `transition-year` for backward compatibility only.
+
+**Status derivation** (never stored — always computed):
+```js
+function _yearStatus(year, archivedIds = []) {
+  if (archivedIds.includes(year.id || year._id.toString())) return 'locked';
+  if (year.isCurrent) return 'active';
+  return 'draft';
+}
+```
+
+**Endpoints:**
+| Method + Path | Auth | What it does |
+|---|---|---|
+| `GET /api/academic-config/years` | admin/deputy | List all years enriched with `status` |
+| `POST /api/academic-config/years` | admin | Create draft year (`name`, `startDate`, `endDate`, `terms[]`) |
+| `PUT /api/academic-config/years/:id` | admin | Update name/dates/terms — 403 on locked years |
+| `DELETE /api/academic-config/years/:id` | admin | Delete draft years only |
+| `POST /api/academic-config/transition-year` | admin | Atomic archive current + activate target |
+
+**Transition-year atomicity model**: the route performs Step B (data cascade) then Step C (write-blocking gate) then Step D (activate new year) sequentially, not in a DB transaction. If the server crashes mid-way, the audit log records the partial state and the operator can manually complete the transition via the `/archive-year` or direct DB update. This is the same model as the original `/archive-year` endpoint.
+
+**Startup migration** (`_migrateAcademicYears` in `server/index.js`):
+- Assigns `uuidv4` `id` to any `academic_years` doc missing it
+- Sets `isCurrent: false` on docs missing the field
+- Non-blocking, idempotent — runs after `listen()` on every startup
+
 ### 27.4 Audit Action Types Reference (complete)
 
 | Action | Written by | What it records |
@@ -2408,6 +2443,7 @@ The gate (Step C) is **always written after the data** (Step B). If Step C fails
 | `EXAM_UNLOCKED` | `exams.js` | Admin unlock with mandatory reason |
 | `MODERATION_BYPASS` | `report-cards.js` | Bypass of moderation guard on publish |
 | `ACADEMIC_YEAR_ARCHIVED` | `academic-config.js` | Year-end close with cascade counts + gate status |
+| `ACADEMIC_YEAR_ACTIVATED` | `academic-config.js` | New year set as active via `transition-year` |
 | `WRITE_BLOCKED_ARCHIVED_YEAR` | `grades.js`, `exams.js` | Rejected write attempt to a closed year |
 | `GUARDIAN_ACCESS_DENIED` | `report-cards.js` | Parent/guardian 403 on report card or PDF |
 

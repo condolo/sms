@@ -43,7 +43,7 @@ Visit **[demo.msingi.io](https://demo.msingi.io)** to explore the system using t
 After your school is created, complete these steps before inviting staff:
 
 - [ ] **Update school profile** — Settings → School Profile (logo, motto, address, phone, website)
-- [ ] **Verify academic year** — Settings → Academic Years (a default 2025-2026 year with 3 terms is pre-created)
+- [ ] **Verify academic year** — Settings → School Profile → Academic Years (a default year is pre-created as Active; edit its term dates to match your school calendar)
 - [ ] **Confirm/edit sections** — Settings → Sections (KG, Primary, Secondary, A-Level are pre-created — edit to match your school)
 - [ ] **Add classes** — Classes module → Add your year groups / form levels
 - [ ] **Add subjects** — Subjects module → Add your curriculum subjects
@@ -55,24 +55,59 @@ After your school is created, complete these steps before inviting staff:
 
 ## 3. Managing Academic Years & Terms
 
-Go to **Settings → Academic Years**.
+Go to **Settings → School Profile**, scroll to the **Academic Years** panel.
 
-### Creating a new academic year
+### How the year lifecycle works
 
-1. Click **Add Academic Year**
-2. Enter the year name (e.g. `2026-2027`), start and end dates
-3. Add terms with their own start/end dates
-4. Mark one term as **Current** — this drives attendance, timetable, and reporting
-5. Save
+Every academic year has one of three statuses:
 
-### Setting the current term
+| Status | What it means |
+|---|---|
+| **Draft** | Created, not yet activated. Term dates can be edited freely. Can be deleted. |
+| **Active** | The current running year. Term dates can still be adjusted. Cannot be deleted. |
+| **Locked** | Archived. Grades, exams, and report cards are permanently frozen. No edits allowed. |
 
-Only one term can be active at a time. Click **Set as Current** next to the relevant term. This updates:
-- Attendance sheets (only current-term dates shown)
-- Timetable display
-- Grade entries
+Only **one year can be active at a time**. All past years become locked when you transition to a new one.
 
-> ⚠️ Changing the current term mid-term will affect what teachers see immediately. Do this at the start of a new term.
+### Creating a new draft year
+
+1. Go to **Settings → School Profile → Academic Years**
+2. Click **New year**
+3. Enter the year name (e.g. `2026-2027`), start date, end date, and number of terms
+4. Click **Create draft year**
+
+The year appears in the list with a **Draft** badge. You can edit its term dates before activating it.
+
+### Editing term dates
+
+1. Click the **pencil icon** on any non-locked year
+2. Enter start and end dates for each term
+3. Click **Save term dates**
+
+> ⚠️ Locked years are read-only — the pencil icon does not appear.
+
+### Starting a new academic year (transition)
+
+When you are ready to end the current year and begin the next:
+
+1. Make sure you have created a **draft** year for the incoming period and set its term dates
+2. Click **Start this academic year** on the draft year
+3. Review the confirmation dialog — it shows exactly what will be locked and what will be activated
+4. Enter a reason (optional) and click **Lock current & activate new year**
+
+**What happens automatically:**
+- The active year is permanently locked
+- All exams for the old year are frozen
+- All published report cards for the old year are marked year-archived
+- Grade entries for the old year are blocked
+- The new year becomes active and its term dates are synced school-wide
+- A full audit log entry is written
+
+> ⚠️ **This action is irreversible.** Once a year is locked, it cannot be unlocked. Ensure all grades, report cards, and exam results for the old year are final before transitioning.
+
+### What happens if I need to correct data in a locked year?
+
+Contact your Msingi platform administrator. Corrections to locked-year data require a platform-level operation and are subject to audit review.
 
 ---
 
@@ -406,4 +441,4 @@ Email support@msingi.io with:
 
 ---
 
-*Last updated: 2026-05-19 — Msingi v4.9.9*
+*Last updated: 2026-06-09 — Msingi v4.30.0*

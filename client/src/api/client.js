@@ -372,6 +372,17 @@ export const settings = {
   },
 };
 
+export const academicConfig = {
+  years: {
+    list:       ()           => _get('/academic-config/years'),
+    create:     (data)       => _post('/academic-config/years', data),
+    update:     (id, data)   => _put(`/academic-config/years/${id}`, data),
+    remove:     (id)         => _delete(`/academic-config/years/${id}`),
+  },
+  transition:   (data)       => _post('/academic-config/transition-year', data),
+  archiveYear:  (data)       => _post('/academic-config/archive-year', data),
+};
+
 export const departments = _resource('departments');
 
 export const subjects = {

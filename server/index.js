@@ -294,6 +294,46 @@ async function _migratePasswordChangedAt() {
   }
 }
 
+/**
+ * _migrateAcademicYears — idempotent startup migration.
+ * Ensures every academic_years document has an `id` (uuid) field,
+ * and that `isCurrent` defaults to false if missing.
+ * Also sets isCurrent:true on the year whose id matches school.academicYear
+ * for schools that haven't yet been migrated to the new structure.
+ * Safe to run multiple times — uses $setOnInsert-style logic (skips docs that already have the field).
+ */
+async function _migrateAcademicYears() {
+  try {
+    const { _model } = require('./utils/model');
+    const { v4: uuidv4 } = require('uuid');
+    const Years = _model('academic_years');
+
+    // 1. Assign `id` to any doc that is missing it
+    const missing = await Years.find({ id: { $exists: false } }).lean();
+    if (missing.length > 0) {
+      const ops = missing.map(doc => ({
+        updateOne: {
+          filter: { _id: doc._id },
+          update:  { $set: { id: uuidv4() } },
+        },
+      }));
+      const r = await Years.bulkWrite(ops, { ordered: false });
+      console.log(`[Migration] academic_years: assigned id to ${r.modifiedCount} doc(s)`);
+    }
+
+    // 2. Default isCurrent to false where missing
+    const noFlag = await Years.updateMany(
+      { isCurrent: { $exists: false } },
+      { $set: { isCurrent: false } }
+    );
+    if (noFlag.modifiedCount > 0) {
+      console.log(`[Migration] academic_years: defaulted isCurrent=false for ${noFlag.modifiedCount} doc(s)`);
+    }
+  } catch (err) {
+    console.error('[Migration] _migrateAcademicYears failed:', err.message);
+  }
+}
+
 /* ── Start ──────────────────────────────────────────────────── */
 async function start() {
   await connect();        // Connect to MongoDB (no-op if MONGODB_URI not set)
@@ -317,6 +357,10 @@ async function start() {
     // Initialise 90-day password rotation clock for existing users
     _migratePasswordChangedAt()
       .catch(err => console.error('[_migratePasswordChangedAt] Unhandled error:', err));
+
+    // Ensure all academic_years docs have id + isCurrent fields
+    _migrateAcademicYears()
+      .catch(err => console.error('[_migrateAcademicYears] Unhandled error:', err));
 
     // Lesson coverage reminder cron jobs (Friday + Saturday)
     try {

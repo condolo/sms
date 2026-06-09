@@ -356,6 +356,325 @@ router.post('/archive-year', authMiddleware, PLAN, rbac('settings', 'update'), a
 });
 
 /* ══════════════════════════════════════════════════════════════
+   Academic Year CRUD — list / create / update / delete / transition
+   ══════════════════════════════════════════════════════════════ */
+
+const { v4: uuidv4 } = require('uuid');
+
+/**
+ * _yearStatus — derive the display status from stored fields.
+ * We deliberately do NOT store a `status` field to avoid dual state.
+ * isCurrent:true  → 'active'
+ * id in archivedAcademicYears array → 'locked'
+ * else → 'draft'
+ */
+function _yearStatus(year, archivedIds = []) {
+  if (archivedIds.includes(year.id || year._id.toString())) return 'locked';
+  if (year.isCurrent) return 'active';
+  return 'draft';
+}
+
+/**
+ * GET /api/academic-config/years
+ * Returns all academic years for this school, enriched with status.
+ */
+router.get('/years', authMiddleware, async (req, res) => {
+  try {
+    const { schoolId, role } = req.jwtUser;
+    if (!['superadmin', 'admin', 'deputy_principal'].includes(role)) {
+      return E.forbidden(res, 'Admin access required');
+    }
+
+    const [years, cfg] = await Promise.all([
+      _model('academic_years').find({ schoolId }).sort({ startDate: 1 }).lean(),
+      _model('academic_config').findOne({ schoolId }, { archivedAcademicYears: 1 }).lean(),
+    ]);
+
+    const archivedIds = cfg?.archivedAcademicYears ?? [];
+    const enriched = years.map(y => ({
+      ...y,
+      status: _yearStatus(y, archivedIds),
+    }));
+
+    return ok(res, enriched);
+  } catch (err) { console.error('[academic-config/years GET]', err); return E.serverError(res); }
+});
+
+/**
+ * POST /api/academic-config/years
+ * Create a new draft academic year.
+ * Body: { name, startDate, endDate, terms? }
+ */
+router.post('/years', authMiddleware, async (req, res) => {
+  try {
+    const { schoolId, role, userId } = req.jwtUser;
+    if (!['superadmin', 'admin'].includes(role)) {
+      return E.forbidden(res, 'Admin access required');
+    }
+
+    const { name, startDate, endDate, terms } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return E.badRequest(res, 'name is required');
+    }
+    if (!startDate || !endDate) {
+      return E.badRequest(res, 'startDate and endDate are required');
+    }
+    if (new Date(endDate) <= new Date(startDate)) {
+      return E.badRequest(res, 'endDate must be after startDate');
+    }
+
+    // Prevent duplicate name for same school
+    const existing = await _model('academic_years').findOne({ schoolId, name: name.trim() }).lean();
+    if (existing) return E.badRequest(res, `An academic year named "${name.trim()}" already exists`);
+
+    const now = new Date().toISOString();
+    const doc = await _model('academic_years').create({
+      id:         uuidv4(),
+      schoolId,
+      name:       name.trim(),
+      startDate,
+      endDate,
+      isCurrent:  false,
+      terms:      Array.isArray(terms) ? terms : [],
+      createdBy:  userId,
+      createdAt:  now,
+      updatedAt:  now,
+    });
+
+    console.log(`[ACADEMIC-CONFIG] Year created: "${name.trim()}" by ${userId}`);
+    return ok(res, { ...doc.toObject(), status: 'draft' }, 201);
+  } catch (err) { console.error('[academic-config/years POST]', err); return E.serverError(res); }
+});
+
+/**
+ * PUT /api/academic-config/years/:id
+ * Update name, dates, or term dates on a draft or active year.
+ * Locked (archived) years are immutable — returns 403.
+ */
+router.put('/years/:id', authMiddleware, async (req, res) => {
+  try {
+    const { schoolId, role, userId } = req.jwtUser;
+    if (!['superadmin', 'admin'].includes(role)) {
+      return E.forbidden(res, 'Admin access required');
+    }
+
+    const yearId = req.params.id;
+    const year   = await _model('academic_years').findOne({ schoolId, $or: [{ id: yearId }, { _id: yearId }] }).lean();
+    if (!year) return E.notFound(res, 'Academic year not found');
+
+    const cfg        = await _model('academic_config').findOne({ schoolId }, { archivedAcademicYears: 1 }).lean();
+    const archivedIds = cfg?.archivedAcademicYears ?? [];
+    const yid        = year.id || year._id.toString();
+
+    if (archivedIds.includes(yid)) {
+      return E.forbidden(res, 'This academic year is locked and cannot be modified. Create a new year instead.');
+    }
+
+    const { name, startDate, endDate, terms } = req.body;
+    const update = { updatedAt: new Date().toISOString(), updatedBy: userId };
+
+    if (name !== undefined) {
+      if (!name.trim()) return E.badRequest(res, 'name cannot be empty');
+      // check for duplicate name (exclude self)
+      const dup = await _model('academic_years').findOne({ schoolId, name: name.trim(), id: { $ne: yid } }).lean();
+      if (dup) return E.badRequest(res, `An academic year named "${name.trim()}" already exists`);
+      update.name = name.trim();
+    }
+    if (startDate !== undefined) update.startDate = startDate;
+    if (endDate   !== undefined) update.endDate   = endDate;
+    if (Array.isArray(terms))    update.terms      = terms;
+
+    if (update.startDate && update.endDate && new Date(update.endDate) <= new Date(update.startDate)) {
+      return E.badRequest(res, 'endDate must be after startDate');
+    }
+
+    const updateFilter = year.id ? { id: year.id } : { _id: year._id };
+    const updated = await _model('academic_years').findOneAndUpdate(
+      updateFilter,
+      { $set: update },
+      { new: true }
+    ).lean();
+
+    const status = _yearStatus(updated, archivedIds);
+    console.log(`[ACADEMIC-CONFIG] Year updated: "${updated.name}" by ${userId}`);
+    return ok(res, { ...updated, status });
+  } catch (err) { console.error('[academic-config/years PUT]', err); return E.serverError(res); }
+});
+
+/**
+ * DELETE /api/academic-config/years/:id
+ * Delete a draft year only — active and locked years cannot be deleted.
+ */
+router.delete('/years/:id', authMiddleware, async (req, res) => {
+  try {
+    const { schoolId, role, userId } = req.jwtUser;
+    if (!['superadmin', 'admin'].includes(role)) {
+      return E.forbidden(res, 'Admin access required');
+    }
+
+    const yearId = req.params.id;
+    const year   = await _model('academic_years').findOne({ schoolId, $or: [{ id: yearId }, { _id: yearId }] }).lean();
+    if (!year) return E.notFound(res, 'Academic year not found');
+
+    const cfg        = await _model('academic_config').findOne({ schoolId }, { archivedAcademicYears: 1 }).lean();
+    const archivedIds = cfg?.archivedAcademicYears ?? [];
+    const yid        = year.id || year._id.toString();
+
+    if (archivedIds.includes(yid)) {
+      return E.forbidden(res, 'Locked years cannot be deleted — they are part of the permanent academic record.');
+    }
+    if (year.isCurrent) {
+      return E.forbidden(res, 'The active academic year cannot be deleted. Use "Start New Year" to transition first.');
+    }
+
+    const deleteFilter = year.id ? { id: year.id } : { _id: year._id };
+    await _model('academic_years').deleteOne(deleteFilter);
+
+    console.log(`[ACADEMIC-CONFIG] Year deleted: "${year.name}" by ${userId}`);
+    return ok(res, { deleted: true, id: yid });
+  } catch (err) { console.error('[academic-config/years DELETE]', err); return E.serverError(res); }
+});
+
+/**
+ * POST /api/academic-config/transition-year
+ * Atomic academic year transition:
+ *   1. Archive the currently active year (same cascade as /archive-year)
+ *   2. Activate the target draft year
+ *   3. Update school.academicYear label and school.termDates for backward compatibility
+ *
+ * Body: { targetYearId, reason? }
+ * Only superadmin/admin. Irreversible.
+ */
+router.post('/transition-year', authMiddleware, async (req, res) => {
+  try {
+    const { schoolId, role, userId } = req.jwtUser;
+    if (!['superadmin', 'admin'].includes(role)) {
+      return E.forbidden(res, 'Admin access required — only superadmin or admin may transition academic years');
+    }
+
+    const { targetYearId, reason = 'Academic year transition' } = req.body;
+    if (!targetYearId) return E.badRequest(res, 'targetYearId is required');
+
+    // ── Locate the active and target years ────────────────────
+    const [activeYear, targetYear, cfg] = await Promise.all([
+      _model('academic_years').findOne({ schoolId, isCurrent: true }).lean(),
+      _model('academic_years').findOne({ schoolId, $or: [{ id: targetYearId }, { _id: targetYearId }] }).lean(),
+      _model('academic_config').findOne({ schoolId }, { archivedAcademicYears: 1 }).lean(),
+    ]);
+
+    if (!targetYear) return E.notFound(res, 'Target academic year not found');
+
+    const archivedIds = cfg?.archivedAcademicYears ?? [];
+    const targetYid   = targetYear.id || targetYear._id.toString();
+
+    if (archivedIds.includes(targetYid)) {
+      return E.badRequest(res, 'Target year is already locked — you cannot activate a locked year');
+    }
+    if (targetYear.isCurrent) {
+      return E.badRequest(res, 'Target year is already the active year');
+    }
+
+    const now = new Date().toISOString();
+
+    // ── Step A: Archive the currently active year (if any) ────
+    let archiveResult = null;
+    if (activeYear) {
+      const activeYid            = activeYear.id || activeYear._id.toString();
+      const activeLabel          = activeYear.name || 'current year';
+      const archiveFilter        = { schoolId, academicYearId: activeYid };
+
+      const [examsResult, snapshotsResult, gradesResult] = await Promise.all([
+        _model('exams').updateMany(
+          { ...archiveFilter, status: { $nin: ['archived', 'cancelled'] } },
+          { $set: { status: 'archived', archivedAt: now, archivedBy: userId, archiveReason: reason } }
+        ),
+        _model('report_card_snapshots').updateMany(
+          { ...archiveFilter, status: 'published', superseded: { $ne: true } },
+          { $set: { yearArchived: true, yearArchivedAt: now, yearArchivedBy: userId } }
+        ),
+        _model('grades').updateMany(
+          { ...archiveFilter },
+          { $set: { yearArchived: true, yearArchivedAt: now } }
+        ),
+      ]);
+
+      await _model('academic_config').findOneAndUpdate(
+        { schoolId },
+        {
+          $addToSet: { archivedAcademicYears: activeYid },
+          $set: { updatedBy: userId, updatedAt: now },
+        },
+        { upsert: true, new: true, runValidators: false }
+      );
+
+      // Mark active year as no longer current
+      const activeFilter = activeYear.id ? { id: activeYear.id } : { _id: activeYear._id };
+      await _model('academic_years').updateOne(activeFilter, { $set: { isCurrent: false, updatedAt: now } });
+
+      archiveResult = {
+        archivedYearId:    activeYid,
+        archivedYearLabel: activeLabel,
+        examsArchived:     examsResult.modifiedCount,
+        snapshotsLocked:   snapshotsResult.modifiedCount,
+        gradesLocked:      gradesResult.modifiedCount,
+      };
+
+      await _model('mark_audit_log').create({
+        action:            'ACADEMIC_YEAR_ARCHIVED',
+        schoolId,
+        academicYearId:    activeYid,
+        academicYearLabel: activeLabel,
+        editedBy:          userId,
+        reason:            `[Transition] ${reason}`,
+        timestamp:         now,
+        writeBlockActive:  true,
+        cascade: {
+          examsArchived:   examsResult.modifiedCount,
+          snapshotsLocked: snapshotsResult.modifiedCount,
+          gradesLocked:    gradesResult.modifiedCount,
+        },
+      });
+    }
+
+    // ── Step B: Activate the target year ──────────────────────
+    const targetFilter = targetYear.id ? { id: targetYear.id } : { _id: targetYear._id };
+    const activatedYear = await _model('academic_years').findOneAndUpdate(
+      targetFilter,
+      { $set: { isCurrent: true, updatedAt: now } },
+      { new: true }
+    ).lean();
+
+    // ── Step C: Sync backward-compat school fields ─────────────
+    // school.academicYear (label string) and school.termDates are legacy
+    // fields used by attendance, billing, and display. Keep them in sync.
+    const syncPayload = { academicYear: activatedYear.name };
+    if (Array.isArray(activatedYear.terms) && activatedYear.terms.length > 0) {
+      syncPayload.termDates = activatedYear.terms;
+    }
+    await _model('schools').updateOne({ id: schoolId }, { $set: syncPayload });
+
+    await _model('mark_audit_log').create({
+      action:            'ACADEMIC_YEAR_ACTIVATED',
+      schoolId,
+      academicYearId:    targetYid,
+      academicYearLabel: activatedYear.name,
+      editedBy:          userId,
+      reason,
+      timestamp:         now,
+    });
+
+    console.log(`[ACADEMIC-CONFIG] Year transition: "${activatedYear.name}" is now active (by ${userId})`);
+    return ok(res, {
+      activatedYear: { ...activatedYear, status: 'active' },
+      archive: archiveResult,
+      message: archiveResult
+        ? `"${archiveResult.archivedYearLabel}" has been locked and "${activatedYear.name}" is now the active year.`
+        : `"${activatedYear.name}" is now the active year.`,
+    });
+  } catch (err) { console.error('[academic-config/transition-year]', err); return E.serverError(res); }
+});
+
+/* ══════════════════════════════════════════════════════════════
    School Profile — GET / PATCH
    Superadmin/admin can view and update top-level school settings:
    name, shortName, systemEmail, phone, address, logo, timezone, currency.

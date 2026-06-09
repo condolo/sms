@@ -6,6 +6,74 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.30.0] — 2026-06-09  Academic Year Lifecycle Management
+
+### New — Academic Year CRUD + Transition (`server/routes/academic-config.js`)
+
+Full year lifecycle — draft → active → locked — replacing the old free-text academic year label.
+
+- **`GET /api/academic-config/years`** — list all academic years for the school, enriched with computed `status` (`draft` | `active` | `locked`). Status is derived at query time from `isCurrent` + `archivedAcademicYears` array — no duplicate state stored.
+- **`POST /api/academic-config/years`** — create a draft year with `name`, `startDate`, `endDate`, and optional `terms[]`. Validates uniqueness of name per school.
+- **`PUT /api/academic-config/years/:id`** — update name, dates, or term dates on any non-locked year. Returns 403 on locked years.
+- **`DELETE /api/academic-config/years/:id`** — delete draft years only. Active and locked years cannot be deleted.
+- **`POST /api/academic-config/transition-year`** — atomic, irreversible transition:
+  1. Runs the same cascade as `/archive-year` on the currently active year (freeze exams, lock report card snapshots, mark grades `yearArchived`, activate write-blocking gate via `archivedAcademicYears`)
+  2. Sets `isCurrent: true` on the target draft year
+  3. Syncs `school.academicYear` label and `school.termDates` for backward compatibility with attendance, billing, and display
+  4. Writes audit log entries for both the archive and activation
+- `_yearStatus(year, archivedIds)` helper — single source of truth for derived status
+- `uuidv4` used for new year `id` fields; `v4` imported at route level
+
+### New — Assessment Year-Lock Guard (`server/routes/assessment.js`)
+
+- **`POST /api/assessment/marks`** — now checks `isYearArchived(schoolId, d.academicYearId)` before the upsert. Returns `403 "This academic year is locked"` if archived.
+- **`POST /api/assessment/marks/bulk`** — checks `firstArchivedYear(schoolId, yearIds)` across all distinct `academicYearId` values in the payload. Returns `403` naming the locked year if any is found.
+- Both checks use the existing `server/utils/archival.js` helpers — no new logic introduced.
+- **Scope**: assessment marks (`assessment_marks` collection) are now fully protected. Attendance (`attendance_records`) and Lessons are not protected — attendance records carry no `academicYearId` field and lessons reference year by string label rather than ID; this is documented as a known limitation.
+
+### New — `academicConfig` API client (`client/src/api/client.js`)
+
+```js
+export const academicConfig = {
+  years: {
+    list:      ()           => _get('/academic-config/years'),
+    create:    (data)       => _post('/academic-config/years', data),
+    update:    (id, data)   => _put(`/academic-config/years/${id}`, data),
+    remove:    (id)         => _delete(`/academic-config/years/${id}`),
+  },
+  transition:  (data)       => _post('/academic-config/transition-year', data),
+  archiveYear: (data)       => _post('/academic-config/archive-year', data),
+};
+```
+
+### New — `AcademicYearsSection` component (`client/src/pages/settings/SettingsPage.jsx`)
+
+Replaces the old free-text "Academic year label" input + manual term dates table in the School settings tab.
+
+- Year list with status badges (`Active` pulse dot, `Locked` padlock icon, `Draft` muted)
+- Years sorted: active first, drafts next, locked last
+- **Create form** — inline animated form for creating draft years with name, start/end dates, and term count
+- **Inline term editor** — per-year edit mode with date pickers for each term's start/end date; save/cancel controls
+- **Delete** — trash icon on draft rows only; confirmation via `window.confirm`
+- **Activate button** — "Start this academic year" button on each draft row
+- **Transition dialog** — full confirmation modal with:
+  - Summary of what will be locked (current active year name + cascade effects)
+  - Summary of what will be activated (target year name)
+  - Optional reason field
+  - Amber "Lock current & activate new year" CTA
+  - Error display on failure
+- Old free-text `academicYear` input and manual `termDates` rows removed
+- `academicYearStartMonth` and `termsPerYear` fields retained (control billing roll-over, not year lifecycle)
+
+### New — Startup migration: `_migrateAcademicYears` (`server/index.js`)
+
+Non-blocking post-startup migration:
+- Assigns `uuidv4` `id` field to any `academic_years` document missing it (legacy docs from before this version)
+- Sets `isCurrent: false` on any document with the field absent
+- Idempotent — safe to run on every startup; becomes a no-op once all docs are migrated
+
+---
+
 ## [4.29.0] — 2026-06-08  Staff Profile Self-Edit · Admin Password Reset · CSPRNG Sweep
 
 ### New — Staff self-edit profile page (`client/src/pages/profile/ProfilePage.jsx`, `server/routes/teachers.js`)
