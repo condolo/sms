@@ -120,6 +120,25 @@ describe('_mapSchoolDoc — branding fields', () => {
   test('themePreset passes through from doc', () => {
     expect(_mapSchoolDoc(minimalDoc({ themePreset: 'ocean' })).themePreset).toBe('ocean');
   });
+
+  test('faviconUrl is null when missing', () => {
+    expect(_mapSchoolDoc(minimalDoc()).faviconUrl).toBeNull();
+  });
+
+  test('faviconUrl passes through from doc', () => {
+    const doc = minimalDoc({ faviconUrl: 'https://cdn.example.com/favicon.ico' });
+    expect(_mapSchoolDoc(doc).faviconUrl).toBe('https://cdn.example.com/favicon.ico');
+  });
+
+  test('moduleConfig is null when missing', () => {
+    expect(_mapSchoolDoc(minimalDoc()).moduleConfig).toBeNull();
+  });
+
+  test('moduleConfig passes through from doc when set', () => {
+    const cfg = { finance: true, hostel: false };
+    const doc = minimalDoc({ moduleConfig: cfg });
+    expect(_mapSchoolDoc(doc).moduleConfig).toEqual(cfg);
+  });
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -200,7 +219,8 @@ describe('_mapSchoolDoc — no undefined required fields', () => {
   const REQUIRED_FIELDS = [
     'id', 'slug', 'name', 'shortName', 'logoUrl', 'systemEmail', 'adminEmail',
     'plan', 'addOns', 'isActive', 'planExpiresAt',
-    'primaryColor', 'accentColor', 'themePreset',
+    'primaryColor', 'accentColor', 'themePreset', 'faviconUrl',
+    'moduleConfig',
     'currency', 'currencySymbol', 'timezone', 'country',
     'academicYear', 'termsPerYear',
   ];
