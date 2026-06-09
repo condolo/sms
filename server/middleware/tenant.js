@@ -90,6 +90,9 @@ function _mapSchoolDoc(doc) {
     primaryColor:   doc.primaryColor || '#4f46e5',
     accentColor:    doc.accentColor  || '#7c3aed',
     themePreset:    doc.themePreset  || null,
+    faviconUrl:     doc.faviconUrl   || null,
+    /* ── Module visibility ── */
+    moduleConfig:   doc.moduleConfig || null,
     /* ── Regional / financial ── */
     currency,
     currencySymbol: doc.currencySymbol || CURRENCY_SYMBOLS[currency] || currency,

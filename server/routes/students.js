@@ -334,7 +334,7 @@ router.post('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'updat
 
     // Generate temp password — shown once to admin
     const tempPassword = _genTempPassword();
-    const hash = await bcrypt.hash(tempPassword, 10);
+    const hash = await bcrypt.hash(tempPassword, 12);
 
     const username  = student.admissionNumber.toLowerCase();
     const name      = `${student.firstName} ${student.lastName}`;
@@ -424,7 +424,7 @@ router.post('/:id/parent-account', authMiddleware, PLAN, rbac('students', 'updat
     const parentName  = student.parentName || 'Parent';
     const now         = new Date().toISOString();
     const tempPassword = _genTempPassword();
-    const hash        = await bcrypt.hash(tempPassword, 10);
+    const hash        = await bcrypt.hash(tempPassword, 12);
 
     // Check if parent account already exists for this email in this school
     let existing = await Users.findOne({ email: parentEmail, schoolId, role: 'parent' }).lean();

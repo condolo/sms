@@ -6,6 +6,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.30.1] — 2026-06-09  Security & Bug Fixes
+
+### Fixed — Security hardening
+
+- **`server/routes/settings.js` `PUT /`** — self-service password change was missing `passwordChangedAt` update, meaning the 90-day rotation clock was never reset after a manual change. Clock now resets correctly. Also raised bcrypt cost 10→12 and minimum password length 6→8 to match the rest of the codebase.
+- **`server/routes/settings.js` `/users/invite`** — bcrypt cost raised 10→12 (consistent with `users.js` invite route).
+- **`server/routes/students.js`** — student portal account and parent portal account creation both used bcrypt cost 10. Raised to 12.
+- **`server/routes/platform.js`** — new-school superadmin password was hashed at cost 10. Raised to 12.
+
+### Fixed — `_mapSchoolDoc()` missing fields (`server/middleware/tenant.js`)
+
+- `moduleConfig` and `faviconUrl` were not included in the object returned by `_mapSchoolDoc()`. On every fresh login these fields were `undefined` in `session.school`, causing the sidebar to ignore saved module visibility configuration and the browser tab to show no custom favicon. Both fields are now forwarded.
+
+### Fixed — Invoice currency defaulting to GBP (`server/routes/finance.js`)
+
+- Zod schema had `currency: z.string().length(3).default('GBP')`. Since the frontend `CreateInvoiceSlideOver` never sends a `currency` field, every invoice was silently stored with `GBP`. The default is removed. The POST `/invoices` route now reads the school's own `currency` field as the fallback, with `'KES'` as the hard-coded last resort.
+
+### Fixed — Dead code: `mustChangePassword: true` in user invite (`server/routes/users.js`)
+
+- `POST /invite` and `POST /bulk-invite` both set `mustChangePassword: true` on new user documents. `auth.js` no longer reads or acts on this flag (it was replaced by the `passwordChangedAt` 90-day rotation mechanism). The dead field is removed from both code paths to avoid confusion.
+
+---
+
 ## [4.30.0] — 2026-06-09  Academic Year Lifecycle Management
 
 ### New — Academic Year CRUD + Transition (`server/routes/academic-config.js`)

@@ -119,8 +119,8 @@ router.put('/', authMiddleware, async (req, res) => {
       if (!currentPassword) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Current password is required.' } });
       }
-      if (newPassword.length < 6) {
-        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'New password must be at least 6 characters.' } });
+      if (newPassword.length < 8) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'New password must be at least 8 characters.' } });
       }
       const user = await Users.findOne({ id: req.jwtUser.userId }).lean();
       if (!user) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } });
@@ -128,10 +128,12 @@ router.put('/', authMiddleware, async (req, res) => {
       const storedHash = user.password || user.passwordHash || '';
       const ok = await bcrypt.compare(currentPassword, storedHash);
       if (!ok) return res.status(400).json({ success: false, error: { code: 'INVALID_PASSWORD', message: 'Current password is incorrect.' } });
-      const hash = await bcrypt.hash(newPassword, 10);
+      const hash = await bcrypt.hash(newPassword, 12);
+      const now  = new Date().toISOString();
       // Normalise to `password` (canonical field used by auth.js); remove legacy `passwordHash`
+      // Reset 90-day rotation clock so the new password doesn't immediately expire
       await Users.updateOne({ id: req.jwtUser.userId }, {
-        $set:   { password: hash, updatedAt: new Date().toISOString() },
+        $set:   { password: hash, passwordChangedAt: now, updatedAt: now },
         $unset: { passwordHash: '' },
       });
       return res.json({ success: true, message: 'Password updated.' });
@@ -369,7 +371,7 @@ router.post('/users/invite', authMiddleware, async (req, res) => {
     }
 
     const tempPassword = _genTempPassword();
-    const hash = await bcrypt.hash(tempPassword, 10);
+    const hash = await bcrypt.hash(tempPassword, 12);
     const now  = new Date().toISOString();
     const newUser = {
       id:            _uid(),

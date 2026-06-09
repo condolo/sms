@@ -62,7 +62,7 @@ const InvoiceCreateSchema = z.object({
   lineItems:   z.array(LineItemSchema).min(1),
   discountPct: z.number().min(0).max(100).default(0),
   taxPct:      z.number().min(0).max(100).default(0),
-  currency:    z.string().length(3).default('GBP'),
+  currency:    z.string().length(3).optional(),
   notes:       z.string().max(1000).optional(),
 });
 
@@ -144,6 +144,12 @@ router.post('/invoices', authMiddleware, PLAN, rbac('finance', 'create'), async 
     // Server-side financial calculations — client totals are ignored
     const totals        = _calcInvoiceTotals(data.lineItems, data.discountPct, data.taxPct);
     const invoiceNumber = await nextInvoiceNumber(schoolId);
+
+    // Use school's currency if client didn't specify — never default to GBP
+    if (!data.currency) {
+      const school = await _model('schools').findOne({ id: schoolId }, { currency: 1 }).lean();
+      data.currency = school?.currency || 'KES';
+    }
 
     const Invoices = _model('invoices');
     const doc = await Invoices.create({

@@ -101,7 +101,6 @@ router.post('/invite', authMiddleware, inviteLimiter, async (req, res) => {
       phone:            phone || '',
       staffId:          staffId || '',
       isActive:         true,
-      mustChangePassword: true,
       passwordChangedAt:  now,
       createdAt:          now,
       createdBy:          req.jwtUser.userId,
@@ -178,7 +177,6 @@ router.post('/bulk-invite', authMiddleware, inviteLimiter, async (req, res) => {
         role: safeRole, primaryRole: safeRole, roles: [safeRole],
         phone: phone || '', staffId: staffId || '',
         isActive: true,
-        mustChangePassword: true,
         passwordChangedAt: now,
         createdAt: now,
         createdBy: req.jwtUser.userId

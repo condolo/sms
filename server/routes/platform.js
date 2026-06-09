@@ -108,7 +108,7 @@ router.post('/schools', async (req, res) => {
     await db.collection('schools').insertOne(schoolDoc);
 
     // Create superadmin user
-    const hashed = await bcrypt.hash(adminPassword, 10);
+    const hashed = await bcrypt.hash(adminPassword, 12);
     await db.collection('users').insertOne({
       id: userId, schoolId, name: adminName || adminEmail,
       email: adminEmail.toLowerCase(), password: hashed,
