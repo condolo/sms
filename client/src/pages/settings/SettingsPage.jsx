@@ -1616,11 +1616,17 @@ function AcademicYearsSection({ schoolId }) {
   const [savingTerms, setSavingTerms] = useState(null);
 
   function startEdit(year) {
-    setEditingId(year.id || year._id);
-    setEditTerms(prev => ({
-      ...prev,
-      [year.id || year._id]: JSON.parse(JSON.stringify(year.terms ?? [])),
+    const yid = year.id || year._id;
+    setEditingId(yid);
+    // Normalise terms — assign term number + default label for any legacy docs
+    // that are missing these fields so the editor always has valid data to work with
+    const normalised = (year.terms ?? []).map((t, idx) => ({
+      term:      t.term      ?? (idx + 1),
+      label:     t.label     || `Term ${t.term ?? (idx + 1)}`,
+      startDate: t.startDate ?? '',
+      endDate:   t.endDate   ?? '',
     }));
+    setEditTerms(prev => ({ ...prev, [yid]: normalised }));
   }
   function cancelEdit() { setEditingId(null); }
 
@@ -1811,33 +1817,54 @@ function AcademicYearsSection({ schoolId }) {
                 {/* Term dates — always show; editable when not locked */}
                 {terms.length > 0 && (
                   <div className="px-4 pb-3 space-y-1.5 border-t border-slate-100">
-                    <div className="pt-2 space-y-1.5">
-                      {terms.map(t => (
-                        <div key={t.term} className="grid grid-cols-[72px_1fr_1fr] gap-2 items-center">
-                          <span className="text-[11px] font-semibold text-slate-500">{t.label || `Term ${t.term}`}</span>
+                    {isEditing && (
+                      <p className="pt-2 text-[10px] text-slate-400">Edit term names, start and end dates — these appear on report cards and invoices.</p>
+                    )}
+                    <div className={isEditing ? 'pt-1 space-y-3' : 'pt-2 space-y-1.5'}>
+                      {terms.map((t, idx) => {
+                        const termNum = t.term ?? (idx + 1);
+                        const fallbackLabel = `Term ${termNum}`;
+                        const editRow = editTerms[yid]?.find(x => (x.term ?? -1) === termNum) ?? editTerms[yid]?.[idx];
+                        return (
+                        <div key={t.term ?? idx}>
                           {isEditing ? (
-                            <>
+                            /* ── Edit mode: name input + date pickers ── */
+                            <div className="space-y-1">
                               <div>
-                                <label className="block text-[9px] text-slate-400 mb-0.5">Start</label>
-                                <input type="date" value={editTerms[yid]?.find(x => x.term === t.term)?.startDate ?? t.startDate ?? ''}
-                                  onChange={e => updateTermDate(yid, t.term, 'startDate', e.target.value)}
-                                  className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-400" />
+                                <label className="block text-[9px] text-slate-400 mb-0.5">Term name</label>
+                                <input
+                                  value={editRow?.label ?? t.label ?? fallbackLabel}
+                                  onChange={e => updateTermDate(yid, termNum, 'label', e.target.value)}
+                                  placeholder={fallbackLabel}
+                                  className="w-full text-xs font-semibold border border-indigo-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-indigo-50/40"
+                                />
                               </div>
-                              <div>
-                                <label className="block text-[9px] text-slate-400 mb-0.5">End</label>
-                                <input type="date" value={editTerms[yid]?.find(x => x.term === t.term)?.endDate ?? t.endDate ?? ''}
-                                  onChange={e => updateTermDate(yid, t.term, 'endDate', e.target.value)}
-                                  className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-400" />
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <label className="block text-[9px] text-slate-400 mb-0.5">Start date</label>
+                                  <input type="date" value={editRow?.startDate ?? t.startDate ?? ''}
+                                    onChange={e => updateTermDate(yid, termNum, 'startDate', e.target.value)}
+                                    className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-400" />
+                                </div>
+                                <div>
+                                  <label className="block text-[9px] text-slate-400 mb-0.5">End date</label>
+                                  <input type="date" value={editRow?.endDate ?? t.endDate ?? ''}
+                                    onChange={e => updateTermDate(yid, termNum, 'endDate', e.target.value)}
+                                    className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-400" />
+                                </div>
                               </div>
-                            </>
+                            </div>
                           ) : (
-                            <>
+                            /* ── View mode ── */
+                            <div className="grid grid-cols-[100px_1fr_1fr] gap-2 items-center">
+                              <span className="text-[11px] font-semibold text-slate-600">{t.label || fallbackLabel}</span>
                               <span className="text-xs text-slate-500">{t.startDate || <span className="text-slate-300 italic">not set</span>}</span>
                               <span className="text-xs text-slate-500">{t.endDate   || <span className="text-slate-300 italic">not set</span>}</span>
-                            </>
+                            </div>{/* closes grid div */}
                           )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                     {isEditing && (
                       <div className="flex gap-2 pt-1">
@@ -1846,7 +1873,7 @@ function AcademicYearsSection({ schoolId }) {
                           disabled={savingTerms === yid}
                           className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">
                           {savingTerms === yid ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
-                          Save term dates
+                          Save terms
                         </button>
                         <button type="button" onClick={cancelEdit}
                           className="text-xs text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg transition">
