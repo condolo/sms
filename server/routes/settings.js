@@ -13,9 +13,11 @@
 const express  = require('express');
 const bcrypt   = require('bcryptjs');
 const crypto   = require('crypto');
+const nodemailer = require('nodemailer');
 const { authMiddleware }    = require('../middleware/auth');
 const { _model }            = require('../utils/model');
 const emailUtil             = require('../utils/email');
+const { encrypt, smtpEncryptReady } = require('../utils/smtpEncrypt');
 const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY } = require('../utils/notif-settings');
 const { invalidatePermCache } = require('../middleware/rbac');
 
@@ -159,8 +161,10 @@ router.get('/school', authMiddleware, async (req, res) => {
     const Schools = _model('schools');
     const school  = await Schools.findOne({ id: req.jwtUser.schoolId }).lean();
     if (!school) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'School not found' } });
-    // Strip internal fields
-    const { _id, __v, ...safe } = school;
+    // Strip internal fields and never expose the encrypted SMTP password
+    const { _id, __v, smtpPassEnc, ...safe } = school;
+    // Expose a safe boolean so the UI knows a password is saved without seeing it
+    safe.smtpPassSaved = !!smtpPassEnc;
     res.json({ success: true, data: safe });
   } catch (err) {
     console.error('[settings] GET /school error:', err);
@@ -392,6 +396,7 @@ router.post('/users/invite', authMiddleware, async (req, res) => {
         name:        newUser.name,
         schoolName:  school?.name  || 'Your School',
         schoolEmail: school?.systemEmail || school?.email || '',
+        schoolId:    req.jwtUser.schoolId,
         tempPassword,
         role,
         loginUrl:    process.env.APP_URL || 'https://msingi.io',
@@ -545,6 +550,7 @@ router.post('/users/:id/reset-password', authMiddleware, async (req, res) => {
         name:        target.name  || target.email,
         schoolName:  school?.name || 'Your School',
         schoolEmail: school?.systemEmail || school?.email || '',
+        schoolId,
         tempPassword,
         role:        target.role,
         loginUrl:    process.env.APP_URL || 'https://msingi.io',
@@ -641,6 +647,143 @@ router.put('/notifications', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('[settings] PUT /notifications error:', err);
     res.status(500).json({ error: 'Failed to save notification settings' });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   CUSTOM SMTP
+   POST   /api/settings/school/smtp         — save SMTP config (encrypts pass)
+   POST   /api/settings/school/smtp/test    — test connection (no save)
+   DELETE /api/settings/school/smtp         — remove custom SMTP config
+   ══════════════════════════════════════════════════════════════ */
+
+/* POST /api/settings/school/smtp — save custom SMTP credentials */
+router.post('/school/smtp', authMiddleware, async (req, res) => {
+  if (!_isAdmin(req)) {
+    return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Admin access required.' } });
+  }
+  if (!smtpEncryptReady()) {
+    return res.status(503).json({ success: false, error: { code: 'SMTP_ENCRYPT_NOT_CONFIGURED', message: 'SMTP_ENCRYPTION_KEY is not set on the server. Contact the platform administrator.' } });
+  }
+  const { smtpEnabled, smtpHost, smtpPort, smtpSecure, smtpUser, smtpPass, smtpFromName, smtpFromEmail } = req.body;
+  const schoolId = req.jwtUser.schoolId;
+
+  try {
+    const Schools = _model('schools');
+    const school  = await Schools.findOne({ id: schoolId }, { smtpPassEnc: 1 }).lean();
+    if (!school) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'School not found.' } });
+
+    const update = {
+      smtpEnabled:   !!smtpEnabled,
+      smtpHost:      (smtpHost || '').trim(),
+      smtpPort:      parseInt(smtpPort, 10) || 587,
+      smtpSecure:    !!smtpSecure,
+      smtpUser:      (smtpUser || '').trim(),
+      smtpFromName:  (smtpFromName || '').trim(),
+      smtpFromEmail: (smtpFromEmail || '').trim(),
+      updatedAt:     new Date().toISOString(),
+    };
+
+    // Only update the encrypted password if a new one is provided
+    if (smtpPass && smtpPass.trim()) {
+      update.smtpPassEnc = encrypt(smtpPass.trim());
+    } else if (!school.smtpPassEnc) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'SMTP password is required.' } });
+    }
+
+    await Schools.updateOne({ id: schoolId }, { $set: update });
+    emailUtil.invalidateSmtpCache(schoolId);
+    return res.json({ success: true, message: 'SMTP settings saved.' });
+  } catch (err) {
+    console.error('[settings] POST /school/smtp error:', err);
+    return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to save SMTP settings.' } });
+  }
+});
+
+/* POST /api/settings/school/smtp/test — test connection without saving */
+router.post('/school/smtp/test', authMiddleware, async (req, res) => {
+  if (!_isAdmin(req)) {
+    return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Admin access required.' } });
+  }
+  if (!smtpEncryptReady()) {
+    return res.status(503).json({ success: false, error: { code: 'SMTP_ENCRYPT_NOT_CONFIGURED', message: 'SMTP_ENCRYPTION_KEY is not set on the server.' } });
+  }
+
+  const { smtpHost, smtpPort, smtpSecure, smtpUser, smtpPass, smtpFromEmail, sendTo } = req.body;
+  const schoolId = req.jwtUser.schoolId;
+  const PASS_PLACEHOLDER = '••••••••'; // ••••••••
+
+  if (!smtpHost || !smtpUser || !smtpPass) {
+    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'smtpHost, smtpUser and smtpPass are required.' } });
+  }
+
+  let pass = smtpPass;
+  if (smtpPass === PASS_PLACEHOLDER) {
+    // Client is using the masked placeholder — load the real password from DB
+    try {
+      const Schools = _model('schools');
+      const school  = await Schools.findOne({ id: schoolId }, { smtpPassEnc: 1 }).lean();
+      if (!school?.smtpPassEnc) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'No saved SMTP password. Enter your password to test.' } });
+      }
+      const { decrypt: _dec } = require('../utils/smtpEncrypt');
+      pass = _dec(school.smtpPassEnc);
+    } catch (e) {
+      return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to load saved SMTP password.' } });
+    }
+  }
+
+  try {
+    const t = nodemailer.createTransport({
+      host:   smtpHost.trim(),
+      port:   parseInt(smtpPort, 10) || 587,
+      secure: !!smtpSecure,
+      auth:   { user: smtpUser.trim(), pass },
+      connectionTimeout: 10_000,
+      greetingTimeout:   10_000,
+      socketTimeout:     15_000,
+    });
+
+    await t.verify();
+
+    const to   = (sendTo || smtpUser).trim();
+    const from = smtpFromEmail
+      ? `"Msingi SMTP Test" <${smtpFromEmail.trim()}>`
+      : `"Msingi SMTP Test" <${smtpUser.trim()}>`;
+    await t.sendMail({
+      from, to,
+      subject: '✅ Msingi — Custom SMTP test successful',
+      html: `<p>Your custom SMTP settings are working correctly.</p>
+             <p><strong>Host:</strong> ${smtpHost} &nbsp; <strong>Port:</strong> ${smtpPort} &nbsp; <strong>User:</strong> ${smtpUser}</p>
+             <p>All school emails will be sent from this address going forward.</p>`,
+    });
+    return res.json({ success: true, message: `Test email sent to ${to}. Check your inbox.` });
+  } catch (err) {
+    const msg = err.message || 'Unknown SMTP error';
+    console.warn(`[settings] SMTP test failed for school ${schoolId}: ${msg}`);
+    return res.status(400).json({ success: false, error: { code: 'SMTP_TEST_FAILED', message: msg } });
+  }
+});
+
+/* DELETE /api/settings/school/smtp — remove custom SMTP config entirely */
+router.delete('/school/smtp', authMiddleware, async (req, res) => {
+  if (!_isAdmin(req)) {
+    return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Admin access required.' } });
+  }
+  try {
+    await _model('schools').updateOne(
+      { id: req.jwtUser.schoolId },
+      {
+        $unset: { smtpEnabled:1, smtpHost:1, smtpPort:1, smtpSecure:1,
+                  smtpUser:1, smtpPassEnc:1, smtpFromName:1, smtpFromEmail:1 },
+        $set:   { updatedAt: new Date().toISOString() },
+      }
+    );
+    emailUtil.invalidateSmtpCache(req.jwtUser.schoolId);
+    return res.json({ success: true, message: 'Custom SMTP configuration removed. Emails will now route through the Msingi platform.' });
+  } catch (err) {
+    console.error('[settings] DELETE /school/smtp error:', err);
+    return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to remove SMTP config.' } });
   }
 });
 

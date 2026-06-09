@@ -54,6 +54,9 @@ const FEATURE_PLAN = {
   hr:                 'premium',
   hostel:             'premium',   // boarding facility — rooms and residents
 
+  /* ── Standard (continued) ── */
+  custom_smtp:        'standard',   // per-school SMTP sending from own domain
+
   /* ── Enterprise ── */
   api_access:         'enterprise',
   sso:                'enterprise',

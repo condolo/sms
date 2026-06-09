@@ -347,6 +347,11 @@ export const settings = {
     deleteLogo:   ()     => _delete('/settings/school/logo'),
     uploadFavicon:(b64)  => _put('/settings/school/favicon', { faviconBase64: b64 }),
     deleteFavicon:()     => _delete('/settings/school/favicon'),
+    smtp: {
+      save:   (data) => _post('/settings/school/smtp', data),
+      test:   (data) => _post('/settings/school/smtp/test', data),
+      remove: ()     => _delete('/settings/school/smtp'),
+    },
   },
   users: {
     list:   ()         => _get('/settings/users'),

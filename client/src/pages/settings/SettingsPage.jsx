@@ -1038,7 +1038,248 @@ function SchoolTab() {
           </button>
         )}
       </div>
+
+      {/* Custom SMTP — separate save, outside the main form submit */}
+      <SmtpCard school={school} onSaved={() => qc.invalidateQueries({ queryKey: ['settings','school'] })} />
     </form>
+  );
+}
+
+/* ── SmtpCard — per-school custom SMTP configuration ────────────
+   Rendered inside SchoolTab but has its own save/test/remove mutations.
+   Password is never pre-filled — server returns smtpPassSaved:bool only.
+   ──────────────────────────────────────────────────────────────── */
+const PASS_PLACEHOLDER = '••••••••';
+
+function SmtpCard({ school = {}, onSaved }) {
+  const qc = useQueryClient();
+  const PORTS = [
+    { value: 587,  label: '587 — STARTTLS (recommended)' },
+    { value: 465,  label: '465 — SSL/TLS' },
+    { value: 25,   label: '25  — Plain (not recommended)' },
+    { value: 2525, label: '2525 — Alternative' },
+  ];
+
+  const init = () => ({
+    smtpEnabled:   school.smtpEnabled   ?? false,
+    smtpHost:      school.smtpHost      ?? '',
+    smtpPort:      school.smtpPort      ?? 587,
+    smtpSecure:    school.smtpSecure    ?? false,
+    smtpUser:      school.smtpUser      ?? '',
+    smtpPass:      school.smtpPassSaved ? PASS_PLACEHOLDER : '',
+    smtpFromName:  school.smtpFromName  ?? school.name ?? '',
+    smtpFromEmail: school.smtpFromEmail ?? '',
+    sendTo:        '',
+  });
+
+  const [f,        setF]        = useState(init);
+  const [toast,    setToast]    = useState(null);
+  const [testMsg,  setTestMsg]  = useState(null);  // { ok, text }
+
+  /* Re-sync when school data reloads */
+  const prevSchoolId = useRef(school.id);
+  useEffect(() => {
+    if (school.id !== prevSchoolId.current) {
+      prevSchoolId.current = school.id;
+      setF(init());
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [school.id, school.smtpEnabled, school.smtpPassSaved]);
+
+  function set(k, v) { setF(p => ({ ...p, [k]: v })); }
+
+  const { mutate: save, isPending: saving } = useMutation({
+    mutationFn: () => settingsApi.school.smtp.save({
+      smtpEnabled:   f.smtpEnabled,
+      smtpHost:      f.smtpHost,
+      smtpPort:      f.smtpPort,
+      smtpSecure:    f.smtpSecure,
+      smtpUser:      f.smtpUser,
+      smtpPass:      f.smtpPass === PASS_PLACEHOLDER ? '' : f.smtpPass,  // blank = keep existing
+      smtpFromName:  f.smtpFromName,
+      smtpFromEmail: f.smtpFromEmail,
+    }),
+    onSuccess: () => {
+      onSaved?.();
+      setToast({ ok: true, text: 'SMTP settings saved.' });
+    },
+    onError: err => setToast({ ok: false, text: err?.message ?? 'Failed to save.' }),
+  });
+
+  const { mutate: testConn, isPending: testing } = useMutation({
+    mutationFn: () => settingsApi.school.smtp.test({
+      smtpHost:      f.smtpHost,
+      smtpPort:      f.smtpPort,
+      smtpSecure:    f.smtpSecure,
+      smtpUser:      f.smtpUser,
+      smtpPass:      f.smtpPass,
+      smtpFromEmail: f.smtpFromEmail,
+      sendTo:        f.sendTo || f.smtpUser,
+    }),
+    onSuccess: res => setTestMsg({ ok: true,  text: res?.message ?? 'Test email sent.' }),
+    onError:   err => setTestMsg({ ok: false, text: err?.message ?? 'Connection failed.' }),
+  });
+
+  const { mutate: remove, isPending: removing } = useMutation({
+    mutationFn: () => settingsApi.school.smtp.remove(),
+    onSuccess: () => {
+      onSaved?.();
+      setF(init());
+      setToast({ ok: true, text: 'Custom SMTP removed. Emails will use the Msingi platform.' });
+    },
+    onError: err => setToast({ ok: false, text: err?.message ?? 'Failed to remove.' }),
+  });
+
+  const hasSavedConfig = !!(school.smtpHost && school.smtpUser && school.smtpPassSaved);
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+        <div className="flex items-center gap-2">
+          <Mail size={14} className="text-slate-400" />
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Email & Custom SMTP</h3>
+        </div>
+        {hasSavedConfig && (
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+            <CheckCircle2 size={10} /> Custom SMTP active
+          </span>
+        )}
+      </div>
+
+      {/* Toast */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div initial={{ opacity:0, y:-4 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }}
+            className={`flex items-center gap-2 text-sm px-3 py-2 rounded-lg border ${toast.ok ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'}`}
+          >
+            {toast.ok ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}
+            {toast.text}
+            <button onClick={() => setToast(null)} className="ml-auto opacity-60 hover:opacity-100"><X size={11} /></button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Description */}
+      <p className="text-xs text-slate-400 leading-relaxed">
+        By default, Msingi sends all school emails from <span className="font-medium text-slate-600">innolearnnetwork@gmail.com</span> with your school name as the display name.
+        Configure your own SMTP server to send from <span className="font-medium text-slate-600">noreply@yourschool.ke</span> or any address you control.
+        Msingi always falls back to the platform sender if your SMTP is unreachable.
+      </p>
+
+      {/* Enable toggle */}
+      <label className="flex items-center gap-3 cursor-pointer select-none">
+        <button
+          type="button"
+          onClick={() => set('smtpEnabled', !f.smtpEnabled)}
+          className={`relative w-9 h-5 rounded-full transition-colors ${f.smtpEnabled ? 'bg-violet-600' : 'bg-slate-200'}`}
+        >
+          <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${f.smtpEnabled ? 'translate-x-4' : ''}`} />
+        </button>
+        <span className="text-sm font-medium text-slate-700">Use custom SMTP for school emails</span>
+      </label>
+
+      {/* Config fields — always visible so admin can pre-fill before enabling */}
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <FField label="From name">
+            <input value={f.smtpFromName} onChange={e => set('smtpFromName', e.target.value)}
+              className={iCls()} placeholder="e.g. Greenwood Academy" />
+          </FField>
+          <FField label="From email address">
+            <input type="email" value={f.smtpFromEmail} onChange={e => set('smtpFromEmail', e.target.value)}
+              className={iCls()} placeholder="noreply@yourschool.ke" />
+          </FField>
+        </div>
+
+        <FField label="SMTP host">
+          <input value={f.smtpHost} onChange={e => set('smtpHost', e.target.value)}
+            className={iCls()} placeholder="smtp.gmail.com  or  mail.yourschool.ke" />
+        </FField>
+
+        <div className="grid grid-cols-2 gap-3">
+          <FField label="Port">
+            <select value={f.smtpPort} onChange={e => set('smtpPort', Number(e.target.value))} className={iCls()}>
+              {PORTS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+            </select>
+          </FField>
+          <FField label="Security">
+            <select value={f.smtpSecure ? 'ssl' : 'starttls'}
+              onChange={e => set('smtpSecure', e.target.value === 'ssl')} className={iCls()}>
+              <option value="starttls">STARTTLS (port 587)</option>
+              <option value="ssl">SSL/TLS (port 465)</option>
+            </select>
+          </FField>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <FField label="SMTP username">
+            <input value={f.smtpUser} onChange={e => set('smtpUser', e.target.value)}
+              className={iCls()} placeholder="your@email.com" autoComplete="off" />
+          </FField>
+          <FField label={school.smtpPassSaved ? 'Password (saved — leave blank to keep)' : 'Password'}>
+            <input type="password" value={f.smtpPass}
+              onChange={e => set('smtpPass', e.target.value)}
+              className={iCls()} placeholder={school.smtpPassSaved ? PASS_PLACEHOLDER : 'SMTP password or App Password'}
+              autoComplete="new-password" />
+          </FField>
+        </div>
+      </div>
+
+      {/* Test connection */}
+      <div className="pt-1 border-t border-slate-100 space-y-2">
+        <div className="flex items-center gap-2">
+          <FField label="Send test email to" className="flex-1 min-w-0">
+            <input value={f.sendTo} onChange={e => set('sendTo', e.target.value)}
+              type="email" className={iCls()} placeholder={f.smtpUser || 'admin@yourschool.ke'} />
+          </FField>
+          <div className="pt-5">
+            <button
+              type="button"
+              onClick={() => { setTestMsg(null); testConn(); }}
+              disabled={testing || !f.smtpHost || !f.smtpUser}
+              className="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 disabled:opacity-40 transition"
+            >
+              {testing ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
+              {testing ? 'Testing…' : 'Test'}
+            </button>
+          </div>
+        </div>
+        <AnimatePresence>
+          {testMsg && (
+            <motion.p initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
+              className={`text-xs px-3 py-2 rounded-lg border ${testMsg.ok ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'}`}
+            >
+              {testMsg.ok ? '✅' : '❌'} {testMsg.text}
+            </motion.p>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-2 pt-1">
+        <button
+          type="button"
+          onClick={() => save()}
+          disabled={saving}
+          className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+        >
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+          {saving ? 'Saving…' : 'Save SMTP settings'}
+        </button>
+        {hasSavedConfig && (
+          <button
+            type="button"
+            onClick={() => { if (window.confirm('Remove custom SMTP? Emails will revert to the Msingi platform sender.')) remove(); }}
+            disabled={removing}
+            className="flex items-center gap-1.5 text-sm font-medium text-red-600 hover:text-red-700 px-3 py-2 rounded-lg hover:bg-red-50 transition"
+          >
+            {removing ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+            Remove
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 

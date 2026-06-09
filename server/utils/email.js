@@ -1,63 +1,137 @@
 /* ============================================================
-   Msingi — Email Utility (Gmail SMTP via nodemailer)
+   Msingi — Email Utility
 
-   Two sending modes:
+   Three sending modes:
    ─ Platform emails  (registration, approval, system notices)
-     From: "Msingi Platform" <platform SMTP user>
+     From: "Msingi Platform" <SMTP_USER>
 
-   ─ School emails  (2FA, passwords, messages, invites, etc.)
-     From: "<School Name> via Msingi" <platform SMTP user>
-     Reply-To: school.systemEmail  (if configured, else PLATFORM_EMAIL)
+   ─ School emails via platform SMTP  (default / fallback)
+     From: "<School Name> via Msingi" <SMTP_USER>
+     Reply-To: school.systemEmail
 
-   All mail physically routes through one Gmail SMTP account.
-   Reply-To lets schools receive replies at their own address.
-   When a school later provides their own SMTP, only _send()
-   needs to change — callers are already passing schoolEmail.
+   ─ School emails via custom SMTP  (Standard plan+, opt-in)
+     From: "<smtpFromName>" <smtpFromEmail>
+     Authenticated with the school's own SMTP credentials
+     Credentials stored encrypted (AES-256-GCM) on school doc.
+     Falls back to platform SMTP if custom SMTP fails.
+
+   Custom SMTP requires SMTP_ENCRYPTION_KEY in env.
    ============================================================ */
-const nodemailer = require('nodemailer');
+const nodemailer  = require('nodemailer');
+const { _model }  = require('./model');
+const { decrypt, smtpEncryptReady } = require('./smtpEncrypt');
 
+/* ── Platform SMTP (fixed) ──────────────────────────────── */
 const SMTP_USER      = process.env.SMTP_USER;
-// Gmail App Passwords are displayed as "xxxx xxxx xxxx xxxx" — strip spaces
 const SMTP_PASS      = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
 const SMTP_READY     = !!(SMTP_USER && SMTP_PASS);
 const PLATFORM_EMAIL = process.env.PLATFORM_EMAIL || SMTP_USER || '';
-// Contact address shown to users in email templates (not the SMTP sender)
 const SUPPORT_EMAIL  = process.env.SUPPORT_EMAIL  || 'support@msingi.io';
 const APP_URL        = process.env.APP_URL || 'https://msingi.io';
 
 if (!SMTP_READY) {
-  console.warn('[EMAIL] ⚠️  SMTP_USER / SMTP_PASS not set — all emails will be skipped. Set them in Render dashboard → Environment.');
+  console.warn('[EMAIL] ⚠️  SMTP_USER / SMTP_PASS not set — platform emails will be skipped.');
 }
 
-const transporter = nodemailer.createTransport({
+/* Platform transporter — created once at module load */
+const _platformTransporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
   port: 587,
   secure: false,
   auth: { user: SMTP_USER, pass: SMTP_PASS },
 });
 
-// Default From for platform-level emails
 const PLATFORM_FROM = `"Msingi Platform" <${SMTP_USER}>`;
 
-/* ── Core send helper ──────────────────────────────────────
-   opts.fromName  — display name override (e.g. "Greenwood School via Msingi")
-   opts.replyTo   — Reply-To address (school's systemEmail)
+/* ── Per-school transporter cache ───────────────────────────
+   Key:   schoolId (string)
+   Value: { transporter, fromAddress, expiresAt }
+   TTL:   60 minutes — SMTP creds rarely change
+   Invalidate via invalidateSmtpCache(schoolId) after save/delete.
+*/
+const _smtpCache = new Map();
+const SMTP_CACHE_TTL = 60 * 60 * 1000;
+
+function invalidateSmtpCache(schoolId) {
+  _smtpCache.delete(schoolId);
+}
+
+/**
+ * Resolve the transporter and From address for a school.
+ * Returns { transporter, from } — always falls back to platform.
+ */
+async function _resolveTransporter(schoolId, { schoolName, schoolEmail } = {}) {
+  const platformFrom    = schoolName ? `"${schoolName} via Msingi" <${SMTP_USER}>` : PLATFORM_FROM;
+  const platformReplyTo = schoolEmail || PLATFORM_EMAIL;
+  const platformResult  = { transporter: _platformTransporter, from: platformFrom, replyTo: platformReplyTo, isCustom: false };
+
+  if (!schoolId || !smtpEncryptReady()) return platformResult;
+
+  /* Check cache first */
+  const cached = _smtpCache.get(schoolId);
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.value;
+  }
+
+  try {
+    const Schools = _model('schools');
+    const school  = await Schools.findOne(
+      { id: schoolId },
+      { smtpEnabled:1, smtpHost:1, smtpPort:1, smtpSecure:1, smtpUser:1, smtpPassEnc:1, smtpFromName:1, smtpFromEmail:1 }
+    ).lean();
+
+    if (!school?.smtpEnabled || !school?.smtpHost || !school?.smtpUser || !school?.smtpPassEnc) {
+      return platformResult;   // custom SMTP not configured — use platform
+    }
+
+    const pass = decrypt(school.smtpPassEnc);
+    const t    = nodemailer.createTransport({
+      host:   school.smtpHost,
+      port:   school.smtpPort  || 587,
+      secure: school.smtpSecure || false,
+      auth:   { user: school.smtpUser, pass },
+      connectionTimeout: 10_000,
+      greetingTimeout:   10_000,
+      socketTimeout:     15_000,
+    });
+
+    const fromName  = school.smtpFromName  || schoolName || 'School';
+    const fromEmail = school.smtpFromEmail || school.smtpUser;
+    const result    = {
+      transporter: t,
+      from:        `"${fromName}" <${fromEmail}>`,
+      replyTo:     null,   // when using custom SMTP, From IS the school — no Reply-To needed
+      isCustom:    true,
+    };
+    _smtpCache.set(schoolId, { value: result, expiresAt: Date.now() + SMTP_CACHE_TTL });
+    return result;
+  } catch (err) {
+    console.error(`[EMAIL] ⚠️ Failed to load custom SMTP for school ${schoolId}: ${err.message} — falling back to platform`);
+    return platformResult;
+  }
+}
+
+/* ── Core send helper ───────────────────────────────────────
+   opts.fromName  — display name (platform SMTP path only)
+   opts.replyTo   — Reply-To address
+   opts.transporter — explicit transporter override
+   opts.from      — explicit From header override
 */
 async function _send(to, subject, html, opts = {}) {
-  if (!SMTP_READY) {
-    console.warn(`[EMAIL] SKIPPED (no SMTP): "${subject}" → ${to}`);
+  const t    = opts.transporter ?? _platformTransporter;
+  const from = opts.from ?? (opts.fromName ? `"${opts.fromName}" <${SMTP_USER}>` : PLATFORM_FROM);
+
+  /* Platform SMTP path: skip entirely if not configured */
+  if (!opts.transporter && !SMTP_READY) {
+    console.warn(`[EMAIL] SKIPPED (no platform SMTP): "${subject}" → ${to}`);
     return false;
   }
-  try {
-    const from = opts.fromName
-      ? `"${opts.fromName}" <${SMTP_USER}>`
-      : PLATFORM_FROM;
 
+  try {
     const mailOpts = { from, to, subject, html };
     if (opts.replyTo) mailOpts.replyTo = opts.replyTo;
-
-    await transporter.sendMail(mailOpts);
-    console.log(`[EMAIL] ✅ Sent "${subject}" → ${to}`);
+    await t.sendMail(mailOpts);
+    console.log(`[EMAIL] ✅ Sent "${subject}" → ${to}${opts.isCustom ? ' [custom SMTP]' : ''}`);
     return true;
   } catch (err) {
     console.error(`[EMAIL] ❌ Failed "${subject}" → ${to}: ${err.message}`);
@@ -65,15 +139,36 @@ async function _send(to, subject, html, opts = {}) {
   }
 }
 
-/* ── Convenience: send as a school ────────────────────────
-   schoolName  — shown in From display name
-   schoolEmail — school's systemEmail; used as Reply-To
-                 falls back to PLATFORM_EMAIL if blank
+/* ── School email sender ────────────────────────────────────
+   Uses custom SMTP when schoolId is provided and configured.
+   Falls back to platform SMTP transparently on any failure.
+
+   opts:
+     schoolName   — display name
+     schoolEmail  — systemEmail (Reply-To for platform SMTP path)
+     schoolId     — if provided, enables custom SMTP lookup
 */
-function _sendAsSchool(to, subject, html, { schoolName, schoolEmail } = {}) {
-  const fromName = schoolName ? `${schoolName} via Msingi` : 'Msingi';
-  const replyTo  = schoolEmail || PLATFORM_EMAIL;
-  return _send(to, subject, html, { fromName, replyTo });
+async function _sendAsSchool(to, subject, html, { schoolName, schoolEmail, schoolId } = {}) {
+  const resolved = await _resolveTransporter(schoolId, { schoolName, schoolEmail });
+
+  const result = await _send(to, subject, html, {
+    transporter: resolved.transporter,
+    from:        resolved.from,
+    replyTo:     resolved.replyTo,
+    isCustom:    resolved.isCustom,
+  });
+
+  /* If custom SMTP failed, retry once with platform SMTP */
+  if (!result && resolved.isCustom && SMTP_READY) {
+    console.warn(`[EMAIL] ⚠️ Custom SMTP failed — retrying with platform SMTP`);
+    const platformFrom = schoolName ? `"${schoolName} via Msingi" <${SMTP_USER}>` : PLATFORM_FROM;
+    return _send(to, subject, html, {
+      from:    platformFrom,
+      replyTo: schoolEmail || PLATFORM_EMAIL,
+    });
+  }
+
+  return result;
 }
 
 /* ── Shared HTML wrapper ───────────────────────────────────
@@ -308,7 +403,7 @@ async function sendSystemUpdateNotice({ adminName, adminEmail, schoolName, title
    ══════════════════════════════════════════════════════════════ */
 
 /* 7. Two-factor authentication OTP */
-async function sendLoginOTP({ name, email, otp, schoolName, schoolEmail }) {
+async function sendLoginOTP({ name, email, otp, schoolName, schoolEmail, schoolId = null }) {
   const support = schoolEmail || SUPPORT_EMAIL;
   const html = _wrap(`
     <h2>Your sign-in code 🔐</h2>
@@ -322,11 +417,11 @@ async function sendLoginOTP({ name, email, otp, schoolName, schoolEmail }) {
     <p style="font-size:13px;color:#6b7280">This code expires in <strong>5 minutes</strong>. If you did not attempt to sign in, please change your password immediately and contact <a href="mailto:${support}">${support}</a>.</p>
     <p style="font-size:12px;color:#9ca3af">Do not share this code with anyone — Msingi will never ask for it.</p>
   `, schoolName);
-  return _sendAsSchool(email, `${otp} — Your ${schoolName} sign-in code`, html, { schoolName, schoolEmail });
+  return _sendAsSchool(email, `${otp} — Your ${schoolName} sign-in code`, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 8. New user welcome — sends temporary login credentials */
-async function sendWelcomeCredentials({ name, email, tempPassword, schoolName, schoolEmail, role, loginUrl }) {
+async function sendWelcomeCredentials({ name, email, tempPassword, schoolName, schoolEmail, schoolId = null, role, loginUrl }) {
   const roleLabel = (role || 'staff').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   const support   = schoolEmail || PLATFORM_EMAIL;
   const html = _wrap(`
@@ -346,11 +441,11 @@ async function sendWelcomeCredentials({ name, email, tempPassword, schoolName, s
     <p style="font-size:13px;color:#6b7280">If you did not expect this email, contact your school administrator at <a href="mailto:${support}">${support}</a>.</p>
     <p style="font-size:12px;color:#9ca3af">⚠️ Never share your password with anyone — Msingi will never ask for it.</p>
   `, schoolName);
-  return _sendAsSchool(email, `Your ${schoolName} account is ready — welcome aboard`, html, { schoolName, schoolEmail });
+  return _sendAsSchool(email, `Your ${schoolName} account is ready — welcome aboard`, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 9. Password expiry reminder */
-async function sendPasswordExpirySoon({ name, email, schoolName, schoolEmail, daysLeft }) {
+async function sendPasswordExpirySoon({ name, email, schoolName, schoolEmail, schoolId = null, daysLeft }) {
   const urgency = daysLeft <= 1 ? '🚨 Urgent' : daysLeft <= 3 ? '⚠️ Action needed' : '🔑 Reminder';
   const support = schoolEmail || SUPPORT_EMAIL;
   const html = _wrap(`
@@ -363,11 +458,11 @@ async function sendPasswordExpirySoon({ name, email, schoolName, schoolEmail, da
     </p>
     <p style="font-size:13px;color:#6b7280">Need help? Contact your school administrator at <a href="mailto:${support}">${support}</a>.</p>
   `, schoolName);
-  return _sendAsSchool(email, `${urgency} — password expires ${daysLeft <= 0 ? 'today' : `in ${daysLeft} days`} · ${schoolName}`, html, { schoolName, schoolEmail });
+  return _sendAsSchool(email, `${urgency} — password expires ${daysLeft <= 0 ? 'today' : `in ${daysLeft} days`} · ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 10. Password changed — security confirmation */
-async function sendPasswordChanged({ name, email, schoolName, schoolEmail }) {
+async function sendPasswordChanged({ name, email, schoolName, schoolEmail, schoolId = null }) {
   const support = schoolEmail || SUPPORT_EMAIL;
   const html = _wrap(`
     <h2>✅ Password updated successfully</h2>
@@ -378,11 +473,11 @@ async function sendPasswordChanged({ name, email, schoolName, schoolEmail }) {
       <a href="${APP_URL}" class="btn">Sign In →</a>
     </p>
   `, schoolName);
-  return _sendAsSchool(email, `Password changed — ${schoolName}`, html, { schoolName, schoolEmail });
+  return _sendAsSchool(email, `Password changed — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 11. Role / permission change notification */
-async function sendRoleChanged({ name, email, schoolName, schoolEmail, oldRole, newRole, changedBy }) {
+async function sendRoleChanged({ name, email, schoolName, schoolEmail, schoolId = null, oldRole, newRole, changedBy }) {
   const fmt    = r => (r || 'staff').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   const support = schoolEmail || SUPPORT_EMAIL;
   const html = _wrap(`
@@ -401,11 +496,11 @@ async function sendRoleChanged({ name, email, schoolName, schoolEmail, oldRole, 
     </p>
     <p style="font-size:13px;color:#6b7280">If you believe this change was made in error, contact your school administrator at <a href="mailto:${support}">${support}</a>.</p>
   `, schoolName);
-  return _sendAsSchool(email, `Your role has changed — ${schoolName}`, html, { schoolName, schoolEmail });
+  return _sendAsSchool(email, `Your role has changed — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 13. In-app message / announcement notification */
-async function sendMessageNotification({ recipientName, recipientEmail, senderName, subject, preview, schoolName, schoolEmail, isDirect, appUrl }) {
+async function sendMessageNotification({ recipientName, recipientEmail, senderName, subject, preview, schoolName, schoolEmail, schoolId = null, isDirect, appUrl }) {
   const url   = appUrl || APP_URL;
   const icon  = isDirect ? '✉️' : '📢';
   const label = isDirect ? 'New Message' : 'School Announcement';
@@ -424,13 +519,13 @@ async function sendMessageNotification({ recipientName, recipientEmail, senderNa
     </p>
     <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a member of <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
   `, schoolName);
-  return _sendAsSchool(recipientEmail, `${icon} ${label}: ${subject} — ${schoolName}`, html, { schoolName, schoolEmail });
+  return _sendAsSchool(recipientEmail, `${icon} ${label}: ${subject} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
 }
 
 /* 13. Assessment reminder — sent to teachers */
 async function sendAssessmentReminder({
   name, email: toEmail, assessment, termNumber, dateFrom, dateTo,
-  status, schoolName, schoolEmail,
+  status, schoolName, schoolEmail, schoolId = null,
 }) {
   const statusDetails = {
     upcoming: { icon: '📅', title: 'Upcoming Assessment', color: '#4f46e5', msg: `opens on <strong>${dateFrom}</strong> and closes on <strong>${dateTo}</strong>` },
@@ -455,10 +550,11 @@ async function sendAssessmentReminder({
     <p style="font-size:12px;color:#9ca3af">You are receiving this as a teacher at <strong>${schoolName}</strong>.</p>
   `, schoolName);
 
-  return _sendAsSchool(toEmail, `${statusDetails.icon} ${schoolName} — ${assessment} (Term ${termNumber}) ${status}`, html, { schoolName, schoolEmail });
+  return _sendAsSchool(toEmail, `${statusDetails.icon} ${schoolName} — ${assessment} (Term ${termNumber}) ${status}`, html, { schoolName, schoolEmail, schoolId });
 }
 
 module.exports = {
+  invalidateSmtpCache,
   sendRegistrationPending,
   sendAdminNewSchoolAlert,
   sendApprovalWelcome,
