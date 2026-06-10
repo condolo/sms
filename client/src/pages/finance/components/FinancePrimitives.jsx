@@ -3,6 +3,7 @@
    Exports: ChartTip, SummaryCard, RowSkeleton, EmptyOrError,
             METHOD_COLORS
    ============================================================ */
+import { useSchoolTheme } from '@/hooks/useSchoolTheme.js';
 
 export const METHOD_COLORS = ['#8b5cf6','#3b82f6','#10b981','#f59e0b','#ec4899'];
 
@@ -16,18 +17,22 @@ export function ChartTip({ active, payload }) {
   );
 }
 
-export function SummaryCard({ label, value, sub, accent, icon }) {
-  const ACCENT = {
-    slate:   { bg: 'bg-slate-50',   icon: 'text-slate-600'   },
-    emerald: { bg: 'bg-emerald-50', icon: 'text-emerald-600' },
-    amber:   { bg: 'bg-amber-50',   icon: 'text-amber-600'   },
-    blue:    { bg: 'bg-blue-50',    icon: 'text-blue-600'    },
-    red:     { bg: 'bg-red-50',     icon: 'text-red-600'     },
-  };
-  const c = ACCENT[accent] ?? ACCENT.slate;
+/**
+ * SummaryCard — Finance KPI mini-card.
+ * colorIndex 0-3 cycles through the school's theme palette tints.
+ * The legacy `accent` prop is accepted but ignored in favour of colorIndex.
+ */
+export function SummaryCard({ label, value, sub, colorIndex = 0, accent, icon }) {
+  const { tint } = useSchoolTheme();
+  const t = tint(colorIndex);
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-5">
-      <div className={`w-10 h-10 rounded-xl ${c.bg} flex items-center justify-center ${c.icon} mb-4`}>{icon}</div>
+    <div className="bg-white border border-slate-200 rounded-xl p-5 hover:shadow-md hover:border-slate-300 transition-all">
+      <div
+        className="w-10 h-10 rounded-xl flex items-center justify-center mb-4"
+        style={{ background: t.iconBg, color: t.iconColor }}
+      >
+        {icon}
+      </div>
       <p className="text-2xl font-bold text-slate-900 tabular-nums tracking-tight">{value}</p>
       {sub && <p className="text-xs text-slate-400 mt-0.5">{sub}</p>}
       <p className="text-xs font-medium text-slate-500 mt-3">{label}</p>

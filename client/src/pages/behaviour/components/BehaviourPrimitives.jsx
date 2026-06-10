@@ -5,6 +5,7 @@
             ErrState, FField, iCls
    ============================================================ */
 import { TrendingUp, TrendingDown, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useSchoolTheme, withOpacity } from '@/hooks/useSchoolTheme.js';
 
 export const LIMIT = 20;
 
@@ -58,7 +59,34 @@ export function TypeBadge({ type }) {
 }
 
 /* ── Stat card ───────────────────────────────────────────────── */
-export function StatCard({ icon, label, value, valueColor, bg }) {
+/**
+ * StatCard — Behaviour KPI card.
+ *
+ * When `colorIndex` is passed the background and icon colour come from
+ * the school's dynamic theme palette.  The legacy `bg` / `valueColor`
+ * Tailwind-class props are kept for the semantic merit/demerit cards
+ * (emerald/red) that still need their UX meaning.
+ */
+export function StatCard({ icon, label, value, valueColor, bg, colorIndex }) {
+  const { tint } = useSchoolTheme();
+
+  if (colorIndex != null) {
+    const t = tint(colorIndex);
+    return (
+      <div
+        className="rounded-xl border border-slate-200 p-4 flex items-center gap-3"
+        style={{ background: t.iconBg }}
+      >
+        <div className="shrink-0" style={{ color: t.iconColor }}>{icon}</div>
+        <div>
+          <p className="text-xl font-bold" style={{ color: t.iconColor }}>{value}</p>
+          <p className="text-xs text-slate-500 mt-0.5">{label}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Legacy path — semantic colours (merits=green, demerits=red) pass bg/valueColor
   return (
     <div className={`${bg} rounded-xl border border-slate-200 p-4 flex items-center gap-3`}>
       <div className="shrink-0">{icon}</div>

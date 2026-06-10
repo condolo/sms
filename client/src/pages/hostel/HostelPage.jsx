@@ -5,6 +5,7 @@ import {
   X, RefreshCw, UserPlus, LogOut,
 } from 'lucide-react';
 import { hostel as hostelApi } from '@/api/client.js';
+import { KpiCard } from '@/components/ui/KpiCard.jsx';
 
 /* ── Role helpers ─────────────────────────────────────────── */
 function useRole() {
@@ -15,26 +16,7 @@ function useRole() {
 }
 const MANAGE_ROLES = new Set(['superadmin', 'admin', 'hostel_master']);
 
-/* ── KPI card ─────────────────────────────────────────────── */
-function KpiCard({ icon: Icon, label, value, color = 'blue' }) {
-  const colors = {
-    blue:    'bg-blue-50    text-blue-600',
-    green:   'bg-emerald-50 text-emerald-600',
-    amber:   'bg-amber-50   text-amber-600',
-    red:     'bg-red-50     text-red-600',
-    slate:   'bg-slate-100  text-slate-600',
-    purple:  'bg-purple-50  text-purple-600',
-  };
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 p-4 flex items-center gap-3">
-      <div className={`p-2 rounded-lg ${colors[color]}`}><Icon size={18} /></div>
-      <div>
-        <p className="text-xs text-slate-500">{label}</p>
-        <p className="text-xl font-bold text-slate-800">{value ?? '—'}</p>
-      </div>
-    </div>
-  );
-}
+/* KpiCard — shared themed component (see @/components/ui/KpiCard.jsx) */
 
 function EmptyState({ icon: Icon, message }) {
   return (
@@ -463,12 +445,12 @@ export default function HostelPage() {
 
       {/* KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <KpiCard icon={BedDouble} label="Hostels"      value={summary.totalHostels}    color="purple" />
-        <KpiCard icon={Home}      label="Total Rooms"  value={summary.totalRooms}      color="blue"   />
-        <KpiCard icon={Users}     label="Capacity"     value={summary.totalCapacity}   color="slate"  />
-        <KpiCard icon={Users}     label="Occupied"     value={summary.occupiedBeds}    color="amber"  />
-        <KpiCard icon={BedDouble} label="Available"    value={summary.availableBeds}   color="green"  />
-        <KpiCard icon={Users}     label="Residents"    value={summary.activeResidents} color="purple" />
+        <KpiCard icon={<BedDouble size={18} />} label="Hostels"      value={summary.totalHostels}    colorIndex={0} />
+        <KpiCard icon={<Home size={18} />}     label="Total Rooms"  value={summary.totalRooms}      colorIndex={1} />
+        <KpiCard icon={<Users size={18} />}    label="Capacity"     value={summary.totalCapacity}   colorIndex={2} />
+        <KpiCard icon={<Users size={18} />}    label="Occupied"     value={summary.occupiedBeds}    colorIndex={3} />
+        <KpiCard icon={<BedDouble size={18} />} label="Available"   value={summary.availableBeds}   colorIndex={0} />
+        <KpiCard icon={<Users size={18} />}    label="Residents"    value={summary.activeResidents} colorIndex={1} />
       </div>
 
       {/* Tabs */}

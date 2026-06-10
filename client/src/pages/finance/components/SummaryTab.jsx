@@ -64,10 +64,10 @@ export default function SummaryTab({ fmtCurrency }) {
     <div className="space-y-6">
       {/* KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <SummaryCard label="Total Invoiced"  value={fmtCurrency(totalInvoiced)}          accent="slate"   icon={<FileText size={18} />} />
-        <SummaryCard label="Fees Collected"  value={fmtCurrency(totalPaid)}              accent="emerald" icon={<CheckCircle2 size={18} />} sub={`${collectionRate}% collection rate`} />
-        <SummaryCard label="Outstanding"     value={fmtCurrency(totalBalance)}           accent="amber"   icon={<BadgeDollarSign size={18} />} />
-        <SummaryCard label="Total Invoices"  value={countInvoices.toLocaleString()}      accent="blue"    icon={<Wallet size={18} />} sub={`${countPaid} paid · ${countUnpaid} unpaid`} />
+        <SummaryCard label="Total Invoiced"  value={fmtCurrency(totalInvoiced)}          colorIndex={0} icon={<FileText size={18} />} />
+        <SummaryCard label="Fees Collected"  value={fmtCurrency(totalPaid)}              colorIndex={1} icon={<CheckCircle2 size={18} />} sub={`${collectionRate}% collection rate`} />
+        <SummaryCard label="Outstanding"     value={fmtCurrency(totalBalance)}           colorIndex={2} icon={<BadgeDollarSign size={18} />} />
+        <SummaryCard label="Total Invoices"  value={countInvoices.toLocaleString()}      colorIndex={3} icon={<Wallet size={18} />} sub={`${countPaid} paid · ${countUnpaid} unpaid`} />
       </div>
 
       {/* Charts */}

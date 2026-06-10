@@ -20,24 +20,25 @@ import {
   assessment as assessmentApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
+import { useSchoolTheme } from '@/hooks/useSchoolTheme.js';
 
 /* ── Helpers ──────────────────────────────────────────────── */
 const COLORS = ['#8b5cf6','#3b82f6','#10b981','#f59e0b','#ef4444','#ec4899'];
 const MONTHS  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-function Stat({ label, value, sub, trend, Icon, color }) {
-  const colors = {
-    violet: 'bg-violet-50 text-violet-600',
-    blue:   'bg-blue-50   text-blue-600',
-    green:  'bg-emerald-50 text-emerald-600',
-    amber:  'bg-amber-50  text-amber-600',
-    red:    'bg-red-50    text-red-600',
-  };
+/**
+ * Stat — Reports page KPI card.
+ * colorIndex selects the school's palette tint slot.
+ * trend is kept as semantic green/red (has UX meaning).
+ */
+function Stat({ label, value, sub, trend, Icon, colorIndex = 0 }) {
+  const { tint } = useSchoolTheme();
+  const t = tint(colorIndex);
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5">
+    <div className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-md hover:border-slate-300 transition-all">
       <div className="flex items-center justify-between mb-3">
         <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{label}</span>
-        <div className={`rounded-lg p-2 ${colors[color] ?? colors.violet}`}>
+        <div className="rounded-lg p-2" style={{ background: t.iconBg, color: t.iconColor }}>
           <Icon size={16} />
         </div>
       </div>
@@ -312,10 +313,10 @@ export default function ReportsPage() {
         <div className="space-y-6">
           {/* KPI row */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <Stat label="Total Students"     value={totalStudents.toLocaleString()} sub={`${activeStudents} active`} Icon={Users}    color="violet" />
-            <Stat label="Fee Collection"     value={`${collectionRate}%`}           sub={`${sym} ${totalCollected.toLocaleString()} collected`} Icon={Wallet}   color="green"  />
-            <Stat label="Outstanding Fees"   value={`${sym} ${outstanding.toLocaleString()}`} sub="current term" Icon={AlertCircle} color="amber"  />
-            <Stat label="Behaviour Merits"   value={totalMerits.toLocaleString()}   sub={`${totalDemerits} demerits`} Icon={Scale}    color="blue"   />
+            <Stat label="Total Students"     value={totalStudents.toLocaleString()} sub={`${activeStudents} active`} Icon={Users}    colorIndex={0} />
+            <Stat label="Fee Collection"     value={`${collectionRate}%`}           sub={`${sym} ${totalCollected.toLocaleString()} collected`} Icon={Wallet}   colorIndex={1}  />
+            <Stat label="Outstanding Fees"   value={`${sym} ${outstanding.toLocaleString()}`} sub="current term" Icon={AlertCircle} colorIndex={3}  />
+            <Stat label="Behaviour Merits"   value={totalMerits.toLocaleString()}   sub={`${totalDemerits} demerits`} Icon={Scale}    colorIndex={2}   />
           </div>
 
           {/* Charts row */}
@@ -360,9 +361,9 @@ export default function ReportsPage() {
       {tab === 'attendance' && (
         <div className="space-y-6">
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-            <Stat label="Avg Daily Attendance" value={attSummary?.avgRate != null ? `${Math.round(attSummary.avgRate * 100)}%` : '—'} Icon={Calendar} color="green" />
-            <Stat label="Days Recorded"  value={attSummary?.daysRecorded ?? '—'} Icon={Calendar} color="blue"   />
-            <Stat label="Chronic Absent" value={attSummary?.chronicAbsent ?? '—'} sub="< 80% attendance" Icon={AlertCircle} color="red" />
+            <Stat label="Avg Daily Attendance" value={attSummary?.avgRate != null ? `${Math.round(attSummary.avgRate * 100)}%` : '—'} Icon={Calendar} colorIndex={1} />
+            <Stat label="Days Recorded"  value={attSummary?.daysRecorded ?? '—'} Icon={Calendar} colorIndex={2}   />
+            <Stat label="Chronic Absent" value={attSummary?.chronicAbsent ?? '—'} sub="< 80% attendance" Icon={AlertCircle} colorIndex={3} />
           </div>
           <Card title="Attendance by Class">
             {attSummary?.byClass && Object.keys(attSummary.byClass).length > 0 ? (
@@ -389,10 +390,10 @@ export default function ReportsPage() {
       {tab === 'finance' && (
         <div className="space-y-6">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <Stat label="Total Invoiced"   value={`${sym} ${totalInvoiced.toLocaleString()}`}   Icon={Wallet} color="violet" />
-            <Stat label="Total Collected"  value={`${sym} ${totalCollected.toLocaleString()}`}  Icon={Wallet} color="green"  />
-            <Stat label="Outstanding"      value={`${sym} ${outstanding.toLocaleString()}`}     Icon={AlertCircle} color="amber" />
-            <Stat label="Collection Rate"  value={`${collectionRate}%`}                          Icon={TrendingUp} color="blue" />
+            <Stat label="Total Invoiced"   value={`${sym} ${totalInvoiced.toLocaleString()}`}   Icon={Wallet} colorIndex={0} />
+            <Stat label="Total Collected"  value={`${sym} ${totalCollected.toLocaleString()}`}  Icon={Wallet} colorIndex={1}  />
+            <Stat label="Outstanding"      value={`${sym} ${outstanding.toLocaleString()}`}     Icon={AlertCircle} colorIndex={3} />
+            <Stat label="Collection Rate"  value={`${collectionRate}%`}                          Icon={TrendingUp} colorIndex={2} />
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card title="Invoice Status Distribution" action={
@@ -440,9 +441,9 @@ export default function ReportsPage() {
       {tab === 'behaviour' && (
         <div className="space-y-6">
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-            <Stat label="Total Merits"   value={totalMerits.toLocaleString()}   Icon={Scale}  color="green"  />
-            <Stat label="Total Demerits" value={totalDemerits.toLocaleString()} Icon={Scale}  color="red"    />
-            <Stat label="Incidents This Term" value={(totalMerits + totalDemerits).toLocaleString()} Icon={BarChart3} color="blue" />
+            <Stat label="Total Merits"   value={totalMerits.toLocaleString()}   Icon={Scale}  colorIndex={1}  />
+            <Stat label="Total Demerits" value={totalDemerits.toLocaleString()} Icon={Scale}  colorIndex={3}    />
+            <Stat label="Incidents This Term" value={(totalMerits + totalDemerits).toLocaleString()} Icon={BarChart3} colorIndex={2} />
           </div>
           <Card title="Behaviour by Type">
             {behSummary ? (
@@ -474,11 +475,11 @@ export default function ReportsPage() {
         <div className="space-y-6">
           {/* KPI row from studStats */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <Stat label="Total Enrolled"  value={(studStats?.total  ?? 0).toLocaleString()} Icon={Users}     color="violet" />
-            <Stat label="Active Students" value={(studStats?.active ?? 0).toLocaleString()} Icon={UserCheck} color="green"  />
+            <Stat label="Total Enrolled"  value={(studStats?.total  ?? 0).toLocaleString()} Icon={Users}     colorIndex={0} />
+            <Stat label="Active Students" value={(studStats?.active ?? 0).toLocaleString()} Icon={UserCheck} colorIndex={1}  />
             <Stat label="Inactive"
               value={((studStats?.total ?? 0) - (studStats?.active ?? 0)).toLocaleString()}
-              Icon={AlertCircle} color="amber" />
+              Icon={AlertCircle} colorIndex={3} />
             <Stat
               label="Avg Class Size"
               value={
@@ -486,7 +487,7 @@ export default function ReportsPage() {
                   ? Math.round((studStats.total ?? 0) / studStats.byClass.length)
                   : '—'
               }
-              Icon={BarChart3} color="blue"
+              Icon={BarChart3} colorIndex={2}
             />
           </div>
 
@@ -579,10 +580,10 @@ export default function ReportsPage() {
             <>
               {/* KPI row */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <Stat label="Subjects Tracked"  value={rawSubjectRows.length}                Icon={BookOpen}  color="violet" />
-                <Stat label="Marks Entered"      value={_marks.filter(m => m.score != null).length.toLocaleString()} Icon={BarChart3} color="blue"   />
-                <Stat label="Overall Avg Score"  value={acOverallAvg > 0 ? `${acOverallAvg}` : '—'} Icon={TrendingUp}  color="green"  />
-                <Stat label="Avg Pass Rate"      value={acOverallPass > 0 ? `${acOverallPass}%` : '—'} Icon={Scale} color="amber"  />
+                <Stat label="Subjects Tracked"  value={rawSubjectRows.length}                Icon={BookOpen}  colorIndex={0} />
+                <Stat label="Marks Entered"      value={_marks.filter(m => m.score != null).length.toLocaleString()} Icon={BarChart3} colorIndex={2}   />
+                <Stat label="Overall Avg Score"  value={acOverallAvg > 0 ? `${acOverallAvg}` : '—'} Icon={TrendingUp}  colorIndex={1}  />
+                <Stat label="Avg Pass Rate"      value={acOverallPass > 0 ? `${acOverallPass}%` : '—'} Icon={Scale} colorIndex={3}  />
               </div>
 
               {/* Bar chart */}

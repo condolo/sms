@@ -100,10 +100,10 @@ export default function AdmissionsPage() {
 
           {/* Stats strip */}
           <div className="flex items-center gap-6 mt-5 pt-4 border-t border-slate-100 overflow-x-auto pb-1">
-            <StatChip icon={<Users size={14} />}      label="Total"    value={totalApplications} />
-            <StatChip icon={<TrendingUp size={14} />} label="Enrolled" value={statsByStage['enrolled']?.count ?? 0}  accent="emerald" />
-            <StatChip icon={<Clock size={14} />}      label="Pending"  value={(statsByStage['enquiry']?.count ?? 0) + (statsByStage['application']?.count ?? 0)} accent="blue" />
-            <StatChip icon={<Star size={14} />}       label="High Pri" value={Object.values(statsByStage).reduce((a, s) => a + (s.highPriority ?? 0), 0)} accent="amber" />
+            <StatChip icon={<Users size={14} />}      label="Total"    value={totalApplications}                                                                          colorIndex={0} />
+            <StatChip icon={<TrendingUp size={14} />} label="Enrolled" value={statsByStage['enrolled']?.count ?? 0}                                                        colorIndex={1} />
+            <StatChip icon={<Clock size={14} />}      label="Pending"  value={(statsByStage['enquiry']?.count ?? 0) + (statsByStage['application']?.count ?? 0)}           colorIndex={2} />
+            <StatChip icon={<Star size={14} />}       label="High Pri" value={Object.values(statsByStage).reduce((a, s) => a + (s.highPriority ?? 0), 0)}                  colorIndex={3} />
           </div>
         </div>
       </div>

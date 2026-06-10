@@ -1,15 +1,26 @@
 /* ============================================================
    AdmissionsPrimitives — shared UI atoms for Admissions
    ============================================================ */
+import { useSchoolTheme } from '@/hooks/useSchoolTheme.js';
 
 /* ── Stat chip (header strip) ─────────────────────────────── */
-export function StatChip({ icon, label, value, accent }) {
-  const accents = { emerald: 'text-emerald-600', blue: 'text-blue-600', amber: 'text-amber-600' };
+/**
+ * colorIndex cycles through the school palette tints.
+ * The legacy `accent` prop is still accepted for backward compat
+ * but colorIndex takes precedence when provided.
+ */
+export function StatChip({ icon, label, value, accent, colorIndex }) {
+  const { tint, primary, accent: accentColor } = useSchoolTheme();
+  // When colorIndex is given use school theme; otherwise fall back
+  // to a legacy static accent so existing callers without colorIndex still work.
+  const useTheme = colorIndex != null;
+  const t = useTheme ? tint(colorIndex) : null;
+  const iconColor = useTheme ? t.iconColor : (accent === 'emerald' ? '#059669' : accent === 'blue' ? '#2563eb' : accent === 'amber' ? '#d97706' : primary);
   return (
     <div className="flex items-center gap-2 shrink-0">
-      <span className={accent ? accents[accent] : 'text-slate-500'}>{icon}</span>
+      <span style={{ color: iconColor }}>{icon}</span>
       <span className="text-xs text-slate-500">{label}</span>
-      <span className={`text-sm font-semibold ${accent ? accents[accent] : 'text-slate-800'}`}>{value}</span>
+      <span className="text-sm font-semibold" style={{ color: iconColor }}>{value}</span>
     </div>
   );
 }

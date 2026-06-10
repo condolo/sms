@@ -57,10 +57,11 @@ export default function OverviewTab() {
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="space-y-5">
       {/* Stats strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard icon={<TrendingUp size={18} className="text-emerald-600" />}  label="Total Merits"    value={`+${totalMerits}`}       valueColor="text-emerald-600" bg="bg-emerald-50" />
-        <StatCard icon={<TrendingDown size={18} className="text-red-600" />}    label="Total Demerits"  value={`-${totalDemerits}`}      valueColor="text-red-600"     bg="bg-red-50" />
-        <StatCard icon={<Scale size={18} className="text-slate-600" />}         label="Total Events"    value={totalEvents}               valueColor="text-slate-800"   bg="bg-slate-100" />
-        <StatCard icon={<Flag size={18} className="text-amber-600" />}          label="On Intervention" value={stageAlerts.length}        valueColor="text-amber-700"   bg="bg-amber-50" />
+        {/* Merits/demerits keep semantic green/red; neutral cards use school theme */}
+        <StatCard icon={<TrendingUp size={18} className="text-emerald-600" />}  label="Total Merits"    value={`+${totalMerits}`}  valueColor="text-emerald-600" bg="bg-emerald-50" />
+        <StatCard icon={<TrendingDown size={18} className="text-red-600" />}    label="Total Demerits"  value={`-${totalDemerits}`} valueColor="text-red-600"    bg="bg-red-50" />
+        <StatCard icon={<Scale size={18} />}  label="Total Events"    value={totalEvents}      colorIndex={0} />
+        <StatCard icon={<Flag  size={18} />}  label="On Intervention" value={stageAlerts.length} colorIndex={1} />
       </div>
 
       <div className="grid lg:grid-cols-2 gap-5">

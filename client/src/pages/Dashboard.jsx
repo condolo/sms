@@ -34,6 +34,7 @@ import {
   academicConfig as academicConfigApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
+import { KpiCard }  from '@/components/ui/KpiCard.jsx';
 
 /* ── Helpers ──────────────────────────────────────────────── */
 function greeting() {
@@ -357,55 +358,61 @@ export default function Dashboard() {
         {/* ── KPI Cards ─────────────────────────────────── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <KpiCard
+            variant="filled" colorIndex={0}
             icon={<Users size={18} />}
             label="Total Students"
             value={fmt(totalStudents)}
             sub={activeStudents != null ? `${fmt(activeStudents)} active` : null}
-            accent="violet" to="/students"
+            to="/students"
             loading={stuLoading} error={stuError}
           />
           <KpiCard
+            variant="filled" colorIndex={1}
             icon={<GraduationCap size={18} />}
             label="Active Enrolment"
             value={fmt(activeStudents)}
             sub="Currently enrolled"
-            accent="emerald" to="/students"
+            to="/students"
             loading={stuLoading} error={stuError}
           />
           {canViewFinance ? (
             <KpiCard
+              variant="filled" colorIndex={2}
               icon={<BadgeDollarSign size={18} />}
               label="Fees Collected"
               value={fmtCurrency(totalPaid)}
               sub={totalInvoiced != null ? `of ${fmtCurrency(totalInvoiced)} invoiced` : 'This year'}
-              accent="blue" to="/finance"
+              to="/finance"
               loading={finLoading} error={finError}
             />
           ) : (
             <KpiCard
+              variant="filled" colorIndex={2}
               icon={<CalendarDays size={18} />}
               label="Upcoming Events"
               value={fmt(upcomingEvents.length)}
               sub="In the next 30 days"
-              accent="blue" to="/events"
+              to="/events"
             />
           )}
           {canViewFinance ? (
             <KpiCard
+              variant="filled" colorIndex={3}
               icon={<Wallet size={18} />}
               label="Outstanding Fees"
               value={fmtCurrency(totalBalance)}
               sub="Unpaid balance"
-              accent="amber" to="/finance"
+              to="/finance"
               loading={finLoading} error={finError}
             />
           ) : (
             <KpiCard
+              variant="filled" colorIndex={3}
               icon={<CheckCircle size={18} />}
               label="Today's Attendance"
               value={attRate != null ? `${attRate}%` : '—'}
               sub={attPresent != null ? `${fmt(attPresent)} present` : 'Not taken yet'}
-              accent="amber" to="/attendance"
+              to="/attendance"
             />
           )}
         </div>
@@ -823,44 +830,7 @@ function EmptyChart({ label }) {
   );
 }
 
-/* ── KPI Card ─────────────────────────────────────────────── */
-const ACCENT = {
-  violet:  { bg: 'bg-violet-50',  icon: 'text-violet-600'  },
-  emerald: { bg: 'bg-emerald-50', icon: 'text-emerald-600' },
-  amber:   { bg: 'bg-amber-50',   icon: 'text-amber-600'   },
-  blue:    { bg: 'bg-blue-50',    icon: 'text-blue-600'    },
-};
-
-function KpiCard({ icon, label, value, sub, to, accent = 'violet', loading, error }) {
-  const c = ACCENT[accent] ?? ACCENT.violet;
-  const inner = (
-    <div className="bg-white border border-slate-200 rounded-xl p-5 hover:shadow-md hover:border-slate-300 transition-all group">
-      <div className="flex items-start justify-between">
-        <div className={`w-10 h-10 rounded-xl ${c.bg} flex items-center justify-center ${c.icon} shrink-0`}>{icon}</div>
-        {to && <ChevronRight size={14} className="text-slate-300 group-hover:text-slate-500 transition mt-1 shrink-0" />}
-      </div>
-      <div className="mt-4">
-        {loading ? (
-          <div className="space-y-2 animate-pulse">
-            <div className="h-7 w-20 bg-slate-100 rounded" />
-            <div className="h-3 w-32 bg-slate-100 rounded" />
-          </div>
-        ) : error ? (
-          <div className="flex items-center gap-1.5 text-slate-400">
-            <AlertTriangle size={13} /><span className="text-xs">Failed to load</span>
-          </div>
-        ) : (
-          <>
-            <p className="text-2xl font-bold text-slate-900 tabular-nums tracking-tight">{value ?? '—'}</p>
-            {sub && <p className="text-xs text-slate-400 mt-0.5 truncate">{sub}</p>}
-          </>
-        )}
-        <p className="text-xs font-medium text-slate-500 mt-3">{label}</p>
-      </div>
-    </div>
-  );
-  return to ? <Link to={to} className="block focus:outline-none rounded-xl">{inner}</Link> : inner;
-}
+/* KpiCard is imported from @/components/ui/KpiCard.jsx */
 
 /* ══════════════════════════════════════════════════════════
    SETUP CHECKLIST

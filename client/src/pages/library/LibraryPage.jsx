@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { KpiCard } from '@/components/ui/KpiCard.jsx';
 import {
   BookOpen, Plus, Search, BookMarked, Users, AlertTriangle,
   ChevronRight, X, Check, RefreshCw, Trash2, Edit2, ArrowLeft,
@@ -15,27 +16,7 @@ function useRole() {
 }
 const MANAGE_ROLES = new Set(['superadmin', 'admin', 'librarian']);
 
-/* ── KPI card ─────────────────────────────────────────────── */
-function KpiCard({ icon: Icon, label, value, color = 'blue' }) {
-  const colors = {
-    blue:   'bg-blue-50   text-blue-600',
-    green:  'bg-emerald-50 text-emerald-600',
-    amber:  'bg-amber-50  text-amber-600',
-    red:    'bg-red-50    text-red-600',
-    slate:  'bg-slate-100 text-slate-600',
-  };
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 p-4 flex items-center gap-3">
-      <div className={`p-2 rounded-lg ${colors[color]}`}>
-        <Icon size={18} />
-      </div>
-      <div>
-        <p className="text-xs text-slate-500">{label}</p>
-        <p className="text-xl font-bold text-slate-800">{value ?? '—'}</p>
-      </div>
-    </div>
-  );
-}
+/* KpiCard — shared themed component (see @/components/ui/KpiCard.jsx) */
 
 /* ── Empty state ───────────────────────────────────────────── */
 function EmptyState({ icon: Icon, message }) {
@@ -358,10 +339,10 @@ export default function LibraryPage() {
 
       {/* KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <KpiCard icon={BookOpen}       label="Total Books"   value={summary.totalBooks}   color="blue"  />
-        <KpiCard icon={BookMarked}     label="Total Copies"  value={summary.totalCopies}  color="slate" />
-        <KpiCard icon={Check}          label="Available"     value={summary.available}    color="green" />
-        <KpiCard icon={AlertTriangle}  label="Overdue Loans" value={summary.overdueLoans} color="red"   />
+        <KpiCard icon={<BookOpen size={18} />}      label="Total Books"   value={summary.totalBooks}   colorIndex={0} />
+        <KpiCard icon={<BookMarked size={18} />}    label="Total Copies"  value={summary.totalCopies}  colorIndex={1} />
+        <KpiCard icon={<Check size={18} />}         label="Available"     value={summary.available}    colorIndex={2} />
+        <KpiCard icon={<AlertTriangle size={18} />} label="Overdue Loans" value={summary.overdueLoans} colorIndex={3} />
       </div>
 
       {/* Tabs */}

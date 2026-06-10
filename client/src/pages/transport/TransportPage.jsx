@@ -5,6 +5,7 @@ import {
   X, RefreshCw, UserPlus, ChevronDown,
 } from 'lucide-react';
 import { transport as transportApi } from '@/api/client.js';
+import { KpiCard } from '@/components/ui/KpiCard.jsx';
 
 /* ── Role helpers ─────────────────────────────────────────── */
 function useRole() {
@@ -15,24 +16,7 @@ function useRole() {
 }
 const MANAGE_ROLES = new Set(['superadmin', 'admin', 'transport_officer']);
 
-/* ── KPI card ─────────────────────────────────────────────── */
-function KpiCard({ icon: Icon, label, value, color = 'blue' }) {
-  const colors = {
-    blue:  'bg-blue-50   text-blue-600',
-    green: 'bg-emerald-50 text-emerald-600',
-    amber: 'bg-amber-50  text-amber-600',
-    slate: 'bg-slate-100 text-slate-600',
-  };
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 p-4 flex items-center gap-3">
-      <div className={`p-2 rounded-lg ${colors[color]}`}><Icon size={18} /></div>
-      <div>
-        <p className="text-xs text-slate-500">{label}</p>
-        <p className="text-xl font-bold text-slate-800">{value ?? '—'}</p>
-      </div>
-    </div>
-  );
-}
+/* KpiCard — shared themed component (see @/components/ui/KpiCard.jsx) */
 
 function EmptyState({ icon: Icon, message }) {
   return (
@@ -370,10 +354,10 @@ export default function TransportPage() {
 
       {/* KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <KpiCard icon={Bus}    label="Total Routes"       value={summary.totalRoutes}        color="amber" />
-        <KpiCard icon={Users}  label="Total Assigned"     value={summary.totalAssignments}   color="blue"  />
-        <KpiCard icon={Users}  label="Active"             value={summary.activeAssignments}  color="green" />
-        <KpiCard icon={MapPin} label="Inactive"           value={summary.inactiveAssignments} color="slate" />
+        <KpiCard icon={<Bus size={18} />}    label="Total Routes"   value={summary.totalRoutes}         colorIndex={0} />
+        <KpiCard icon={<Users size={18} />} label="Total Assigned" value={summary.totalAssignments}    colorIndex={1} />
+        <KpiCard icon={<Users size={18} />} label="Active"         value={summary.activeAssignments}   colorIndex={2} />
+        <KpiCard icon={<MapPin size={18} />} label="Inactive"      value={summary.inactiveAssignments} colorIndex={3} />
       </div>
 
       {/* Tabs */}
