@@ -6,6 +6,55 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Upcoming] — Dashboard Widget Customisation (drag-and-drop)
+
+> **Status:** Planned — not yet implemented. Design agreed; implementation queued.
+
+### Planned — `client/src/pages/Dashboard.jsx` + new `dashboard/` sub-folder
+
+Full per-user drag-and-drop dashboard customisation for admin and teacher roles.
+
+#### Widget catalogue
+
+| Widget ID | Label | Roles |
+|---|---|---|
+| `kpi_students` | Student count KPI cards | All |
+| `kpi_finance` | Fee collection KPI | Admin, Finance |
+| `kpi_admissions` | Admissions pipeline KPI | Admin |
+| `kpi_attendance` | Attendance rate KPI | All |
+| `chart_finance` | Fees collected/outstanding bar chart | Admin, Finance |
+| `chart_admissions` | Admissions funnel | Admin |
+| `chart_gender` | Gender breakdown pie | Admin |
+| `birthdays` | Today's & upcoming birthdays | All |
+| `events` | Upcoming events | All |
+| `recent_students` | Recently enrolled students | Admin |
+| `announcements` | System announcements banner | All |
+| `leadership_analytics` | Attendance risk, fee exposure, behaviour heatmap, academic health | Admin, Deputy |
+| `quick_actions` | Quick action buttons | Teacher |
+| `setup_checklist` | New-school setup checklist (not draggable, always first) | Admin |
+
+#### New files
+- `client/src/pages/dashboard/WidgetRegistry.js` — widget catalogue; role/plan visibility rules
+- `client/src/pages/dashboard/useDashboardLayout.js` — layout state; localStorage read/write; DB sync for school-wide defaults
+- `client/src/pages/dashboard/DragGrid.jsx` — `@dnd-kit/sortable` wrapper
+- `client/src/pages/dashboard/DashboardEditBar.jsx` — edit-mode toolbar (pen icon, Save / Reset / Cancel)
+- `client/src/pages/dashboard/widgets/*.jsx` — one file per widget (extracted from Dashboard.jsx)
+
+#### Changes to existing files
+- `client/src/pages/Dashboard.jsx` — refactored: each block extracted into a named widget component; `DragGrid` + `DashboardEditBar` wired in
+- `server/routes/settings.js` — new `GET /api/settings/dashboard-layout` + `POST /api/settings/dashboard-layout` (admin sets school-wide default layout; stored in `schools` collection under `defaultDashboardLayout`)
+- `client/src/api/client.js` — `settingsApi.dashboardLayout.get()` / `.save(layout)`
+- `client/package.json` — add `@dnd-kit/core` + `@dnd-kit/sortable`
+
+#### UX behaviour
+- All authenticated users see a **pen (✏) icon** top-right of the dashboard to enter edit mode
+- Edit mode shows drag handles (⠿) on each widget and an eye toggle (show/hide)
+- **Admin only** — "Set as school default for all staff" checkbox on Save; saves layout to DB
+- **Teachers** — personal layout persists in `localStorage`; "Reset to default" reverts to the school admin's saved default (or built-in default if none set)
+- `setup_checklist` widget is always pinned at top and cannot be reordered or hidden
+
+---
+
 ## [4.30.1] — 2026-06-09  Security & Bug Fixes
 
 ### Fixed — Security hardening
