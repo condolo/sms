@@ -1564,6 +1564,7 @@ function YearStatusBadge({ status }) {
 }
 
 function AcademicYearsSection({ schoolId }) {
+  const patchSchool = useAuthStore(s => s.patchSchool);
   const qc = useQueryClient();
   const [showNew, setShowNew]         = useState(false);
   const [editingId, setEditingId]     = useState(null);   // yearId being edited
@@ -1654,7 +1655,13 @@ function AcademicYearsSection({ schoolId }) {
   // ── Transition ───────────────────────────────────────────────
   const transMut = useMutation({
     mutationFn: (data) => academicConfigApi.transition(data),
-    onSuccess: () => {
+    onSuccess: (res) => {
+      // Keep the auth-store session in sync so every module that reads
+      // session.school.academicYear (Lessons subtitle, StudentDashboard,
+      // FeeStructureSlideOver default year, etc.) reflects the new year
+      // immediately — without requiring a logout/login.
+      const newYearName = res?.data?.activatedYear?.name;
+      if (newYearName) patchSchool({ academicYear: newYearName });
       invalidate();
       qc.invalidateQueries({ queryKey: ['settings'] });
       qc.invalidateQueries({ queryKey: ['school'] });

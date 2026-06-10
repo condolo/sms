@@ -44,6 +44,9 @@ function _slimSchool(school) {
     moduleConfig: school.moduleConfig ?? undefined,
     modulePermissions: school.modulePermissions ?? undefined,
     isActive:     school.isActive,
+    // Persisted so academic year labels survive a page refresh.
+    // Updated via patchSchool() after a year transition in Settings.
+    academicYear: school.academicYear ?? undefined,
   };
 }
 
