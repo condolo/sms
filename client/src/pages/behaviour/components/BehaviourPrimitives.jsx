@@ -5,7 +5,7 @@
             ErrState, FField, iCls
    ============================================================ */
 import { TrendingUp, TrendingDown, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
-import { useSchoolTheme, withOpacity } from '@/hooks/useSchoolTheme.js';
+import { useSchoolTheme } from '@/hooks/useSchoolTheme.js';
 
 export const LIMIT = 20;
 
