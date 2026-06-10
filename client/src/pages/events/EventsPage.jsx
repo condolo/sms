@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Calendar, Plus, ChevronLeft, ChevronRight, List,
   LayoutGrid, MapPin, Users, Trash2, Edit2, X, Check, Download, Cake,
+  Video, Lock, ExternalLink,
 } from 'lucide-react';
 import { events as eventsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
@@ -16,16 +17,17 @@ const MONTHS = ['January','February','March','April','May','June','July','August
 const DAYS   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
 const CATEGORIES = {
-  term:     { label: 'Term',     color: '#4f46e5' },
-  exam:     { label: 'Exam',     color: '#0f766e' },
-  meeting:  { label: 'Meeting',  color: '#0891b2' },
-  sports:   { label: 'Sports',   color: '#16a34a' },
-  cultural: { label: 'Cultural', color: '#be185d' },
-  training: { label: 'Training', color: '#dc2626' },
-  academic: { label: 'Academic', color: '#7c3aed' },
-  break:    { label: 'Break',    color: '#d97706' },
-  general:  { label: 'General',  color: '#6b7280' },
-  birthday: { label: 'Birthday', color: '#f43f5e' },
+  term:         { label: 'Term',          color: '#4f46e5' },
+  exam:         { label: 'Exam',          color: '#0f766e' },
+  meeting:      { label: 'Meeting',       color: '#0891b2' },
+  sports:       { label: 'Sports',        color: '#16a34a' },
+  cultural:     { label: 'Cultural',      color: '#be185d' },
+  training:     { label: 'Training',      color: '#dc2626' },
+  academic:     { label: 'Academic',      color: '#7c3aed' },
+  break:        { label: 'Break',         color: '#d97706' },
+  general:      { label: 'General',       color: '#6b7280' },
+  birthday:     { label: 'Birthday',      color: '#f43f5e' },
+  online_class: { label: 'Online Class',  color: '#0284c7' },  // school-scheduled virtual session
 };
 
 const ADMIN_ROLES = ['superadmin','admin','deputy_principal','timetabler'];
@@ -118,7 +120,7 @@ function BirthdayCard({ person, isToday }) {
 function EventModal({ event, onClose, onSave, onDelete, canAdmin }) {
   const [editing, setEditing] = useState(!event?.id);
   const [form, setForm] = useState(
-    event ?? { title:'', description:'', startDate:'', endDate:'', allDay:true, category:'general', location:'', audience:['all'] }
+    event ?? { title:'', description:'', startDate:'', endDate:'', allDay:true, category:'general', location:'', audience:['all'], meetingLink:'', meetingPasscode:'', platform:'zoom' }
   );
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
@@ -189,6 +191,39 @@ function EventModal({ event, onClose, onSave, onDelete, canAdmin }) {
                 placeholder="e.g. School Hall"
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40" />
             </div>
+
+            {/* Online meeting fields — shown only for online_class category */}
+            {form.category === 'online_class' && (
+              <div className="space-y-3 rounded-xl border border-sky-100 bg-sky-50/60 p-4">
+                <p className="text-[11px] font-semibold text-sky-700 uppercase tracking-wide flex items-center gap-1.5">
+                  <Video size={12} /> Online Meeting Details
+                </p>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Platform</label>
+                  <select value={form.platform || 'zoom'} onChange={e => set('platform', e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40">
+                    <option value="zoom">Zoom</option>
+                    <option value="meet">Google Meet</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Meeting Link</label>
+                  <input value={form.meetingLink || ''} onChange={e => set('meetingLink', e.target.value)}
+                    placeholder="https://zoom.us/j/... or https://meet.google.com/..."
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40 focus:border-violet-400" />
+                </div>
+                {(form.platform === 'zoom' || !form.platform) && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Passcode <span className="font-normal text-slate-400">(optional)</span></label>
+                    <input value={form.meetingPasscode || ''} onChange={e => set('meetingPasscode', e.target.value)}
+                      placeholder="e.g. abc123"
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40" />
+                  </div>
+                )}
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">Description</label>
               <textarea value={form.description} onChange={e => set('description', e.target.value)} rows={3}
@@ -227,6 +262,28 @@ function EventModal({ event, onClose, onSave, onDelete, canAdmin }) {
                 <div className="flex items-center gap-2"><Users size={14} className="text-slate-400" />{(event.audience ?? []).join(', ')}</div>
               )}
             </div>
+            {/* Join meeting button — shown when event has a meeting link */}
+            {event.meetingLink && (
+              <div className="border-t border-slate-100 pt-4 space-y-2">
+                <a
+                  href={event.meetingLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 w-full rounded-xl py-2.5 text-sm font-semibold text-white transition"
+                  style={{ background: '#0284c7' }}
+                >
+                  <Video size={15} />
+                  Join {event.platform === 'meet' ? 'Google Meet' : event.platform === 'zoom' ? 'Zoom' : 'Meeting'}
+                  <ExternalLink size={12} className="opacity-70" />
+                </a>
+                {event.meetingPasscode && (
+                  <div className="flex items-center gap-2 text-xs text-slate-500 justify-center">
+                    <Lock size={11} className="text-slate-400" />
+                    Passcode: <span className="font-mono font-semibold text-slate-700">{event.meetingPasscode}</span>
+                  </div>
+                )}
+              </div>
+            )}
             {event.description && (
               <p className="text-sm text-slate-700 leading-relaxed border-t border-slate-100 pt-3">{event.description}</p>
             )}

@@ -1,19 +1,31 @@
 /* ============================================================
    TimetableGrid — period grid, slot cards, break rows
    Props:
-     slots    []          — timetable slot documents
-     onDelete fn(id)
-     onAdd    fn(day, p)
-     canEdit  bool
-     bell     []          — bell schedule periods (from constants or custom)
+     slots         []          — timetable slot documents
+     onDelete      fn(id)
+     onAdd         fn(day, p)
+     canEdit       bool
+     bell          []          — bell schedule periods (from constants or custom)
+     emergencyMode bool        — when true, show teacher's meeting join button
+     teacherMap    {}          — map of teacherId → { zoomPMILink, meetLink, ... }
    ============================================================ */
 import { motion } from 'framer-motion';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, Play } from 'lucide-react';
 import { DAYS, DAY_FULL, DAY_SHORT, DEFAULT_BELL, buildSlotMap, slotColor } from '../constants.js';
 
 /* ── Slot card ───────────────────────────────────────────────── */
-function SlotCard({ slot, onDelete, onEdit, canEdit }) {
+function SlotCard({ slot, onDelete, onEdit, canEdit, emergencyMode, teacherMap }) {
   const col = slotColor(slot.subject ?? '');
+
+  // Emergency mode: resolve teacher's meeting link if available
+  const teacher   = slot.teacherId ? teacherMap?.[slot.teacherId] : null;
+  const joinLink  = emergencyMode && teacher
+    ? (teacher.zoomPMILink || teacher.meetLink || null)
+    : null;
+  const platform  = (emergencyMode && teacher?.zoomPMILink) ? 'Zoom'
+                  : (emergencyMode && teacher?.meetLink)    ? 'Meet'
+                  : null;
+
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
@@ -37,6 +49,19 @@ function SlotCard({ slot, onDelete, onEdit, canEdit }) {
       )}
       {slot.room && (
         <p className={`text-[10px] truncate ${col.sub} opacity-60`}>{slot.room}</p>
+      )}
+      {/* Emergency Online Mode — Join button */}
+      {joinLink && (
+        <a
+          href={joinLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={e => e.stopPropagation()}
+          className="mt-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-sky-600 hover:bg-sky-700 text-white text-[9px] font-semibold transition w-fit"
+          title={`Join ${platform} class`}
+        >
+          <Play size={8} /> Join {platform}
+        </a>
       )}
     </motion.div>
   );
@@ -72,7 +97,7 @@ function BreakRow({ bell }) {
 }
 
 /* ── Period row ──────────────────────────────────────────────── */
-function PeriodRow({ bell, slotMap, onDelete, onEdit, onAdd, canEdit }) {
+function PeriodRow({ bell, slotMap, onDelete, onEdit, onAdd, canEdit, emergencyMode, teacherMap }) {
   return (
     <div className="flex border-b border-slate-100" style={{ minHeight: '72px' }}>
       <div
@@ -93,7 +118,8 @@ function PeriodRow({ bell, slotMap, onDelete, onEdit, onAdd, canEdit }) {
             style={{ minWidth: 0 }}
           >
             {slot
-              ? <SlotCard slot={slot} onDelete={onDelete} onEdit={onEdit} canEdit={canEdit} />
+              ? <SlotCard slot={slot} onDelete={onDelete} onEdit={onEdit} canEdit={canEdit}
+                  emergencyMode={emergencyMode} teacherMap={teacherMap} />
               : <EmptyCell onAdd={() => onAdd(day, bell.p)} canEdit={canEdit} />
             }
           </div>
@@ -104,7 +130,7 @@ function PeriodRow({ bell, slotMap, onDelete, onEdit, onAdd, canEdit }) {
 }
 
 /* ── Timetable grid (public export) ─────────────────────────── */
-export default function TimetableGrid({ slots, onDelete, onEdit, onAdd, canEdit, bell = DEFAULT_BELL }) {
+export default function TimetableGrid({ slots, onDelete, onEdit, onAdd, canEdit, bell = DEFAULT_BELL, emergencyMode = false, teacherMap = {} }) {
   const slotMap = buildSlotMap(slots);
 
   return (
@@ -140,6 +166,8 @@ export default function TimetableGrid({ slots, onDelete, onEdit, onAdd, canEdit,
                   onEdit={onEdit}
                   onAdd={onAdd}
                   canEdit={canEdit}
+                  emergencyMode={emergencyMode}
+                  teacherMap={teacherMap}
                 />
               )
           )}

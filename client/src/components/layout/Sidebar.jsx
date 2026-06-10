@@ -102,36 +102,20 @@ function labelStyle(collapsed) {
 /* ── eLearning sub-items ─────────────────────────────────────── */
 const ELEARNING_ITEMS = [
   {
-    to: '/elearning/classroom',
-    label: 'Google Classroom',
+    to:       '/elearning/sessions',
+    label:    'Online Sessions',
+    upcoming: false,
+    icon: <MonitorPlay className="w-3.5 h-3.5 shrink-0" />,
+  },
+  {
+    to:       '/elearning/classroom',
+    label:    'Google Classroom',
+    upcoming: true,   // hidden behind "upcoming" badge — backend intact
     icon: (
       <svg viewBox="0 0 48 48" className="w-3.5 h-3.5 shrink-0">
         <path d="M40 6H8a2 2 0 00-2 2v32a2 2 0 002 2h32a2 2 0 002-2V8a2 2 0 00-2-2z" fill="#4CAF50"/>
         <path d="M24 14a5 5 0 100 10 5 5 0 000-10z" fill="white"/>
         <path d="M24 26c-5.33 0-8 2.67-8 4v2h16v-2c0-1.33-2.67-4-8-4z" fill="white"/>
-      </svg>
-    ),
-  },
-  {
-    to: '/elearning/meet',
-    label: 'Google Meet',
-    icon: (
-      <svg viewBox="0 0 48 48" className="w-3.5 h-3.5 shrink-0">
-        <path d="M44 24c0-1.3-.1-2.5-.4-3.7H24v7h11.3c-.5 2.5-1.9 4.6-3.9 6.1v5h6.3C40.9 35 44 30 44 24z" fill="#4285F4"/>
-        <path d="M24 44c5.6 0 10.3-1.9 13.8-5l-6.3-5c-1.9 1.3-4.4 2-7.5 2-5.7 0-10.6-3.9-12.4-9.1H5.1v5.2C8.5 39.8 15.7 44 24 44z" fill="#34A853"/>
-        <path d="M11.6 27c-.5-1.3-.7-2.6-.7-4s.2-2.8.7-4v-5.2H5.1C3.8 16.7 3 20.3 3 24s.8 7.3 2.1 10.2L11.6 27z" fill="#FBBC05"/>
-        <path d="M24 10.9c3.2 0 6 1.1 8.2 3.2l6.1-6.1C34.3 4.5 29.6 3 24 3 15.7 3 8.5 7.2 5.1 13.8l6.5 5.2C13.4 13.8 18.3 10.9 24 10.9z" fill="#EA4335"/>
-      </svg>
-    ),
-  },
-  {
-    to: '/elearning/zoom',
-    label: 'Zoom',
-    icon: (
-      <svg viewBox="0 0 48 48" className="w-3.5 h-3.5 shrink-0">
-        <rect width="48" height="48" rx="8" fill="#2D8CFF"/>
-        <path d="M8 17a2 2 0 012-2h18a2 2 0 012 2v14a2 2 0 01-2 2H10a2 2 0 01-2-2V17z" fill="white"/>
-        <path d="M30 22l8-5v14l-8-5V22z" fill="white"/>
       </svg>
     ),
   },
@@ -265,7 +249,7 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
                         type="button"
                         title={collapsed ? 'eLearning' : undefined}
                         onClick={() => {
-                          if (collapsed) { navigate('/elearning/classroom'); return; }
+                          if (collapsed) { navigate('/elearning/sessions'); return; }
                           setELearningOpen(v => !v);
                         }}
                         className={clsx(
@@ -299,21 +283,32 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
                         <ul className="mt-0.5 ml-3 pl-4 border-l border-slate-700/60 space-y-0.5">
                           {ELEARNING_ITEMS.map(item => (
                             <li key={item.to}>
-                              <NavLink
-                                to={item.to}
-                                onClick={onClose}
-                                className={({ isActive }) =>
-                                  clsx(
-                                    'flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[13px] transition-colors duration-150',
-                                    isActive
-                                      ? 'bg-white/10 text-white font-medium'
-                                      : 'text-slate-400 hover:bg-white/5 hover:text-white',
-                                  )
-                                }
-                              >
-                                {item.icon}
-                                <span>{item.label}</span>
-                              </NavLink>
+                              {item.upcoming ? (
+                                /* Upcoming items — not clickable, just a visual placeholder */
+                                <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[13px] text-slate-600 cursor-default select-none">
+                                  {item.icon}
+                                  <span className="flex-1">{item.label}</span>
+                                  <span className="text-[10px] font-semibold uppercase tracking-wide bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded-full">
+                                    Soon
+                                  </span>
+                                </div>
+                              ) : (
+                                <NavLink
+                                  to={item.to}
+                                  onClick={onClose}
+                                  className={({ isActive }) =>
+                                    clsx(
+                                      'flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[13px] transition-colors duration-150',
+                                      isActive
+                                        ? 'bg-white/10 text-white font-medium'
+                                        : 'text-slate-400 hover:bg-white/5 hover:text-white',
+                                    )
+                                  }
+                                >
+                                  {item.icon}
+                                  <span>{item.label}</span>
+                                </NavLink>
+                              )}
                             </li>
                           ))}
                         </ul>

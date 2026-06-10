@@ -9,7 +9,7 @@ import { AnimatePresence } from 'framer-motion';
 import {
   CalendarDays, Plus, AlertCircle, CheckCircle2, BarChart3,
   Clock, User, LayoutGrid, Globe, UserX, Zap, Download, Printer,
-  DoorOpen, Upload,
+  DoorOpen, Upload, MonitorPlay,
 } from 'lucide-react';
 import {
   timetable    as ttApi,
@@ -129,6 +129,25 @@ export default function TimetablePage() {
   });
   const allSlots = allSlotsData?.data ?? [];
   const teacherList = teachersData?.data ?? [];
+
+  /* ── Emergency Online Mode ───────────────────────────────────
+     Reads from Zustand (persisted to localStorage via _slimSchool).
+     teacherMap: { [teacherId]: { zoomPMILink, meetLink } }
+     Built only when emergency mode is ON (lazy). */
+  const emergencyMode = !!school?.emergencyOnlineMode;
+
+  /* Fetch full teacher records (with meeting links) only when mode is ON */
+  const { data: teacherLinksData } = useQuery({
+    queryKey: ['teachers-meeting-links'],
+    queryFn:  () => teachersApi.list({ limit: 200, status: 'active' }),
+    enabled:  emergencyMode,
+    staleTime: 5 * 60_000,
+  });
+  const teacherMap = emergencyMode
+    ? Object.fromEntries(
+        (teacherLinksData?.data ?? teacherList).map(t => [t.id ?? t._id, t])
+      )
+    : {};
 
   /* ── View-specific queries ───────────────────────────────── */
   const { data: classData, isLoading: classLoading, isError: classError } = useQuery({
@@ -557,6 +576,19 @@ export default function TimetablePage() {
         </div>
       </div>
 
+      {/* ── Emergency Online Mode banner ── */}
+      {emergencyMode && (
+        <div className="bg-sky-600 px-6 py-2.5 flex items-center gap-3">
+          <MonitorPlay size={16} className="text-white shrink-0" />
+          <p className="text-white text-sm font-semibold flex-1">
+            Emergency Online Learning Mode is active — meeting join links are shown on each timetable slot
+          </p>
+          <a href="/settings?tab=school" className="text-sky-200 hover:text-white text-xs underline shrink-0">
+            Manage in Settings
+          </a>
+        </div>
+      )}
+
       {/* ── Main content ── */}
       <div className={`max-w-screen-2xl mx-auto px-6 py-5 ${showWorkload ? 'pr-80' : ''} transition-all`}>
 
@@ -587,7 +619,8 @@ export default function TimetablePage() {
               <p className="text-sm text-slate-600">Failed to load timetable.</p>
             </div>
           ) : (
-            <TimetableGrid slots={classSlots} onDelete={removeSlot} onEdit={openEdit} onAdd={openAdd} canEdit={canEdit} bell={bell} />
+            <TimetableGrid slots={classSlots} onDelete={removeSlot} onEdit={openEdit} onAdd={openAdd} canEdit={canEdit} bell={bell}
+              emergencyMode={emergencyMode} teacherMap={teacherMap} />
           )
         )}
 
@@ -607,7 +640,8 @@ export default function TimetablePage() {
               ))}
             </div>
           ) : (
-            <TimetableGrid slots={teacherSlots} onDelete={removeSlot} onAdd={() => {}} canEdit={false} bell={bell} />
+            <TimetableGrid slots={teacherSlots} onDelete={removeSlot} onAdd={() => {}} canEdit={false} bell={bell}
+              emergencyMode={emergencyMode} teacherMap={teacherMap} />
           )
         )}
 

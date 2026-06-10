@@ -17,14 +17,18 @@
    GET/POST/DELETE /api/elearning/courses/:id/coursework
    POST /api/elearning/gc-webhook         — Google Pub/Sub grade push
 
-   Zoom Live Session routes:
+   Zoom Live Session routes (legacy — API-based):
    GET  /api/elearning/zoom/status                    — Zoom configured?
-   GET  /api/elearning/courses/:id/sessions           — list sessions
-   POST /api/elearning/courses/:id/sessions           — schedule meeting
+   GET  /api/elearning/courses/:id/sessions           — list sessions for a GC course
+   POST /api/elearning/courses/:id/sessions           — schedule via Zoom/Meet API (legacy)
    GET  /api/elearning/sessions/:sessionId            — session detail
    PATCH /api/elearning/sessions/:sessionId           — update session
    DELETE /api/elearning/sessions/:sessionId          — cancel meeting
    POST /api/elearning/zoom-webhook                   — Zoom event webhooks
+
+   PMI-based (new — no external API calls):
+   GET  /api/elearning/sessions                       — list teacher's sessions
+   POST /api/elearning/sessions                       — schedule using stored PMI/Meet link + create calendar event
    ============================================================ */
 const express        = require('express');
 const crypto         = require('crypto');
@@ -784,6 +788,121 @@ router.get('/sessions', authMiddleware, async (req, res) => {
     const sessions = await Sessions.find(query).sort({ scheduledAt: -1 }).lean();
     res.json({ sessions });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   STANDALONE SESSION ENDPOINTS (PMI-based, no GC/Zoom API calls)
+   ══════════════════════════════════════════════════════════════
+
+   POST /api/elearning/sessions
+   Schedule an online session using the teacher's stored PMI/Meet link.
+   Auto-reads the teacher's zoomPMILink / meetLink from the teachers
+   collection — no Zoom API call, no Google OAuth required.
+   Also creates a calendar event in the `events` collection so the
+   session appears on the school calendar with a "Join" button.
+
+   Body: {
+     platform:   'zoom' | 'meet',
+     title:      string,
+     scheduledAt: ISO string,
+     duration:   number (minutes, default 60),
+     agenda:     string,
+     audience: {
+       type: 'class' | 'student' | 'parent',
+       id:   string  (classId | studentId | parentId),
+       label: string (human-readable name for the event)
+     }
+   }
+*/
+const { planGate } = require('../middleware/plan');
+
+router.post('/sessions', authMiddleware, planGate('elearning'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { platform = 'zoom', title, scheduledAt, duration = 60, agenda = '', audience } = req.body;
+
+    if (!title || !scheduledAt) {
+      return res.status(400).json({ error: 'title and scheduledAt are required.' });
+    }
+    if (!audience?.type || !audience?.id) {
+      return res.status(400).json({ error: 'audience.type and audience.id are required.' });
+    }
+
+    // Resolve the teacher's stored meeting link
+    const Users   = _model('users');
+    const user    = await Users.findOne({ id: userId, schoolId }).lean();
+    if (!user) return res.status(404).json({ error: 'User not found.' });
+
+    const Teachers = _model('teachers');
+    const teacher  = await Teachers.findOne({ schoolId, email: user.email }).lean();
+
+    let meetingLink    = null;
+    let meetingPasscode = null;
+
+    if (platform === 'zoom') {
+      meetingLink    = teacher?.zoomPMILink  || null;
+      meetingPasscode = teacher?.zoomPasscode || null;
+    } else if (platform === 'meet') {
+      meetingLink = teacher?.meetLink || null;
+    }
+
+    if (!meetingLink) {
+      const field = platform === 'zoom' ? 'Zoom PMI link' : 'Google Meet link';
+      return res.status(422).json({
+        error: `You have not saved a ${field} yet. Please add it in your Profile → Online Meeting Links before scheduling.`,
+        missingLink: true,
+      });
+    }
+
+    // Create session record (no Zoom/Meet API calls)
+    const sessionId = `sess_${Date.now().toString(36)}${crypto.randomBytes(3).toString('hex')}`;
+    const sessionDoc = {
+      id:          sessionId,
+      schoolId,
+      teacherId:   userId,
+      title,
+      agenda,
+      scheduledAt,
+      duration:    Number(duration),
+      platform,
+      meetingLink,
+      ...(meetingPasscode ? { meetingPasscode } : {}),
+      audience,
+      status:      'scheduled',
+      attendees:   [],
+      recordingUrl: null,
+      createdAt:   new Date().toISOString(),
+    };
+    await _model('elearning_sessions').create(sessionDoc);
+
+    // Create matching calendar event so the session appears on the school calendar
+    const { v4: uuidv4 } = require('uuid');
+    const audienceLabel  = audience.label || audience.type;
+    const eventDate      = new Date(scheduledAt).toISOString().slice(0, 10);
+    const calendarEvent  = await _model('events').create({
+      id:              `evt_${uuidv4().slice(0, 8)}`,
+      schoolId,
+      title,
+      description:     agenda || `Online class scheduled by ${user.name || user.email}.`,
+      startDate:       eventDate,
+      endDate:         eventDate,
+      allDay:          false,
+      type:            'online_class',
+      category:        'online_class',
+      color:           '#0284c7',
+      audience:        [audienceLabel],
+      meetingLink,
+      ...(meetingPasscode ? { meetingPasscode } : {}),
+      platform,
+      sessionId,       // link back to the session record
+      createdAt:       new Date().toISOString(),
+    });
+
+    res.status(201).json({ session: sessionDoc, event: calendarEvent });
+  } catch (err) {
+    console.error('[elearning/sessions POST]', err);
     res.status(500).json({ error: err.message });
   }
 });

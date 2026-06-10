@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Camera, Trash2, Save, Lock, User, CheckCircle, AlertCircle, Briefcase } from 'lucide-react';
+import { Camera, Trash2, Save, Lock, User, CheckCircle, AlertCircle, Briefcase, Video, ExternalLink, Info } from 'lucide-react';
 import useAuthStore from '@/store/auth.js';
 import { auth as authApi, profile as profileApi } from '@/api/client.js';
 
@@ -98,6 +98,13 @@ export default function ProfilePage() {
   const [sfNokPhone,   setSfNokPhone]   = useState('');
   const [sfNokRel,     setSfNokRel]     = useState('');
 
+  /* ── meeting link state ──────────────────────────── */
+  const [sfZoomLink,     setSfZoomLink]     = useState('');
+  const [sfZoomPasscode, setSfZoomPasscode] = useState('');
+  const [sfMeetLink,     setSfMeetLink]     = useState('');
+  const [meetSaving,     setMeetSaving]     = useState(false);
+  const [meetBanner,     setMeetBanner]     = useState({ type: '', msg: '' });
+
   /* fetch fresh photo url on mount if user has one */
   useEffect(() => {
     if (user?.id) {
@@ -119,6 +126,9 @@ export default function ProfilePage() {
           setSfNokName(rec.nextOfKin?.name         || '');
           setSfNokPhone(rec.nextOfKin?.phone        || '');
           setSfNokRel(rec.nextOfKin?.relationship   || '');
+          setSfZoomLink(rec.zoomPMILink  || '');
+          setSfZoomPasscode(rec.zoomPasscode || '');
+          setSfMeetLink(rec.meetLink     || '');
         }
       })
       .catch(() => setStaffData(null));
@@ -250,6 +260,33 @@ export default function ProfilePage() {
       setStaffBanner({ type: 'error', msg: err.message || 'Failed to update staff details.' });
     } finally {
       setStaffSaving(false);
+    }
+  }
+
+  /* ── meeting links save ───────────────────────────── */
+  async function handleMeetingSave(e) {
+    e.preventDefault();
+    // Basic URL validation — must be https:// or empty
+    for (const [label, val] of [['Zoom link', sfZoomLink], ['Meet link', sfMeetLink]]) {
+      if (val && !val.startsWith('https://')) {
+        setMeetBanner({ type: 'error', msg: `${label} must start with https://` });
+        return;
+      }
+    }
+    setMeetSaving(true);
+    setMeetBanner({ type: '', msg: '' });
+    try {
+      const json = await profileApi.updateStaffRecord({
+        zoomPMILink:  sfZoomLink.trim(),
+        zoomPasscode: sfZoomPasscode.trim(),
+        meetLink:     sfMeetLink.trim(),
+      });
+      setStaffData(json?.data ?? staffData);
+      setMeetBanner({ type: 'success', msg: 'Meeting links saved.' });
+    } catch (err) {
+      setMeetBanner({ type: 'error', msg: err.message || 'Failed to save meeting links.' });
+    } finally {
+      setMeetSaving(false);
     }
   }
 
@@ -582,6 +619,94 @@ export default function ProfilePage() {
               >
                 <Save className="h-4 w-4" />
                 {staffSaving ? 'Saving…' : 'Save details'}
+              </button>
+            </div>
+          </form>
+        </Card>
+      )}
+
+      {/* ── Meeting Links card — staff only ────────────────────────── */}
+      {staffData && (
+        <Card title="Online Meeting Links" icon={Video}>
+          <form onSubmit={handleMeetingSave} className="space-y-5">
+            <Banner type={meetBanner.type} message={meetBanner.msg} onClose={() => setMeetBanner({ type: '', msg: '' })} />
+
+            {/* Info banner */}
+            <div className="flex items-start gap-2 rounded-lg bg-blue-50 border border-blue-100 px-3.5 py-3 text-xs text-blue-700">
+              <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-blue-400" />
+              <span>Save your personal meeting links here once. They are used when you schedule online classes — no sign-in or API keys required. Students and parents receive the link automatically when you schedule a session.</span>
+            </div>
+
+            {/* Zoom PMI */}
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Zoom (Personal Meeting Room)</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="form-label">Zoom PMI Link</label>
+                  <div className="relative">
+                    <input
+                      type="url"
+                      value={sfZoomLink}
+                      onChange={e => setSfZoomLink(e.target.value)}
+                      className="form-input pr-8"
+                      placeholder="https://zoom.us/j/123456789"
+                    />
+                    {sfZoomLink && (
+                      <a href={sfZoomLink} target="_blank" rel="noopener noreferrer"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500 transition">
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">Your permanent Zoom meeting room — find it in the Zoom app under "Personal Meeting Room"</p>
+                </div>
+                <div>
+                  <label className="form-label">Passcode <span className="text-slate-400 font-normal">(optional)</span></label>
+                  <input
+                    type="text"
+                    value={sfZoomPasscode}
+                    onChange={e => setSfZoomPasscode(e.target.value)}
+                    className="form-input"
+                    placeholder="e.g. abc123"
+                    maxLength={20}
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">Shown to students so they can join your room directly</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Google Meet */}
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Google Meet (Personal Room)</p>
+              <div>
+                <label className="form-label">Meet Link</label>
+                <div className="relative">
+                  <input
+                    type="url"
+                    value={sfMeetLink}
+                    onChange={e => setSfMeetLink(e.target.value)}
+                    className="form-input pr-8"
+                    placeholder="https://meet.google.com/abc-defg-hij"
+                  />
+                  {sfMeetLink && (
+                    <a href={sfMeetLink} target="_blank" rel="noopener noreferrer"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500 transition">
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">Create a personal Meet room at <a href="https://meet.google.com" target="_blank" rel="noopener noreferrer" className="underline">meet.google.com</a> → use the reusable room link</p>
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={meetSaving}
+                className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 transition-colors"
+              >
+                <Save className="h-4 w-4" />
+                {meetSaving ? 'Saving…' : 'Save meeting links'}
               </button>
             </div>
           </form>

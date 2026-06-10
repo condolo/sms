@@ -1559,6 +1559,428 @@ function ScheduleSessionModalFull({ platform, courses, onCreated, onClose }) {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   NEW SCHEDULE MODAL
+   PMI-based — reads teacher's stored links, no external API call.
+   Creates a session record + calendar event in one request.
+   ══════════════════════════════════════════════════════════════ */
+function NewScheduleModal({ teacherRecord, onClose, onScheduled }) {
+  const [step,          setStep]          = useState(1);  // 1=audience, 2=details
+  const [audType,       setAudType]       = useState('class');
+  const [audId,         setAudId]         = useState('');
+  const [audLabel,      setAudLabel]      = useState('');
+  const [platform,      setPlatform]      = useState('zoom');
+  const [title,         setTitle]         = useState('');
+  const [dateVal,       setDateVal]       = useState('');
+  const [timeVal,       setTimeVal]       = useState('09:00');
+  const [duration,      setDuration]      = useState(60);
+  const [agenda,        setAgenda]        = useState('');
+  const [saving,        setSaving]        = useState(false);
+  const [err,           setErr]           = useState('');
+
+  /* Fetch classes and students for audience picker */
+  const { data: classesData } = useQuery({
+    queryKey: ['classes'],
+    queryFn:  () => fetch('/api/classes', {
+      headers: { Authorization: `Bearer ${JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token}` }
+    }).then(r => r.json()),
+    staleTime: 300_000,
+  });
+  const { data: studentsData } = useQuery({
+    queryKey: ['students-light'],
+    queryFn:  () => fetch('/api/students?limit=200', {
+      headers: { Authorization: `Bearer ${JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token}` }
+    }).then(r => r.json()),
+    staleTime: 300_000,
+    enabled: audType === 'student',
+  });
+
+  const classes  = classesData?.data  || classesData?.classes  || [];
+  const students = studentsData?.data || studentsData?.students || [];
+
+  const zoomLink     = teacherRecord?.zoomPMILink  || '';
+  const zoomPasscode = teacherRecord?.zoomPasscode || '';
+  const meetLink     = teacherRecord?.meetLink     || '';
+  const activeLink   = platform === 'zoom' ? zoomLink : meetLink;
+  const missingLink  = !activeLink;
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!audId)          { setErr('Please select an audience.');    return; }
+    if (!title.trim())   { setErr('Please enter a title.');         return; }
+    if (!dateVal)        { setErr('Please select a date.');         return; }
+    if (missingLink)     { setErr(`Save your ${platform === 'zoom' ? 'Zoom PMI' : 'Meet'} link in Profile → Online Meeting Links first.`); return; }
+
+    const scheduledAt = new Date(`${dateVal}T${timeVal}:00`).toISOString();
+    setSaving(true);
+    setErr('');
+    try {
+      const result = await apiFetch('/sessions', {
+        method: 'POST',
+        body: { platform, title: title.trim(), scheduledAt, duration, agenda, audience: { type: audType, id: audId, label: audLabel } },
+      });
+      onScheduled(result);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const platformBtnCls = (p) =>
+    `flex-1 flex flex-col items-center gap-1.5 py-3 rounded-xl border-2 text-xs font-semibold transition
+     ${platform === p ? 'border-sky-500 bg-sky-50 text-sky-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm px-4">
+      <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden max-h-[92vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
+          <div className="flex items-center gap-2.5">
+            <Video size={18} className="text-sky-600" />
+            <h2 className="font-bold text-slate-900">Schedule Online Class / Meeting</h2>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition">
+            <X size={16} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+          {err && (
+            <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              {err}
+              {err.includes('Profile') && (
+                <a href="/profile" target="_blank" rel="noopener noreferrer"
+                  className="ml-1 underline font-semibold">Open Profile →</a>
+              )}
+            </div>
+          )}
+
+          {/* ── Audience ── */}
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Who is this for?</p>
+            <div className="flex gap-2 mb-3">
+              {[['class','Class'],['student','Student'],['parent','Parent']].map(([v, l]) => (
+                <button key={v} type="button" onClick={() => { setAudType(v); setAudId(''); setAudLabel(''); }}
+                  className={`flex-1 py-2 rounded-xl text-xs font-semibold border-2 transition
+                    ${audType === v ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}>
+                  {l}
+                </button>
+              ))}
+            </div>
+
+            {audType === 'class' && (
+              <select required value={audId} onChange={e => {
+                setAudId(e.target.value);
+                setAudLabel(e.target.selectedOptions[0]?.text || '');
+              }} className="w-full text-sm rounded-xl border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400/40">
+                <option value="">— Select class —</option>
+                {classes.map(c => <option key={c.id || c._id} value={c.id || c._id}>{c.name}</option>)}
+              </select>
+            )}
+            {audType === 'student' && (
+              <select required value={audId} onChange={e => {
+                setAudId(e.target.value);
+                const s = students.find(x => (x.id || x._id) === e.target.value);
+                setAudLabel(s ? `${s.firstName} ${s.lastName}` : e.target.value);
+              }} className="w-full text-sm rounded-xl border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400/40">
+                <option value="">— Select student —</option>
+                {students.map(s => <option key={s.id || s._id} value={s.id || s._id}>{s.firstName} {s.lastName} ({s.className || s.class || ''})</option>)}
+              </select>
+            )}
+            {audType === 'parent' && (
+              <div>
+                <input value={audId} onChange={e => { setAudId(e.target.value); setAudLabel(e.target.value); }}
+                  placeholder="Enter parent name or contact"
+                  className="w-full text-sm rounded-xl border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400/40" />
+                <p className="text-[11px] text-slate-400 mt-1">Type parent name — they will receive the meeting details via the messaging module.</p>
+              </div>
+            )}
+          </div>
+
+          {/* ── Platform ── */}
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Platform</p>
+            <div className="flex gap-3 mb-3">
+              <button type="button" onClick={() => setPlatform('zoom')} className={platformBtnCls('zoom')}>
+                <svg viewBox="0 0 48 48" className="w-6 h-6"><rect width="48" height="48" rx="8" fill="#2D8CFF"/><path d="M8 17a2 2 0 012-2h18a2 2 0 012 2v14a2 2 0 01-2 2H10a2 2 0 01-2-2V17z" fill="white"/><path d="M30 22l8-5v14l-8-5V22z" fill="white"/></svg>
+                Zoom PMI
+              </button>
+              <button type="button" onClick={() => setPlatform('meet')} className={platformBtnCls('meet')}>
+                <svg viewBox="0 0 48 48" className="w-6 h-6"><path d="M44 24c0-1.3-.1-2.5-.4-3.7H24v7h11.3c-.5 2.5-1.9 4.6-3.9 6.1v5h6.3C40.9 35 44 30 44 24z" fill="#4285F4"/><path d="M24 44c5.6 0 10.3-1.9 13.8-5l-6.3-5c-1.9 1.3-4.4 2-7.5 2-5.7 0-10.6-3.9-12.4-9.1H5.1v5.2C8.5 39.8 15.7 44 24 44z" fill="#34A853"/><path d="M11.6 27c-.5-1.3-.7-2.6-.7-4s.2-2.8.7-4v-5.2H5.1C3.8 16.7 3 20.3 3 24s.8 7.3 2.1 10.2L11.6 27z" fill="#FBBC05"/><path d="M24 10.9c3.2 0 6 1.1 8.2 3.2l6.1-6.1C34.3 4.5 29.6 3 24 3 15.7 3 8.5 7.2 5.1 13.8l6.5 5.2C13.4 13.8 18.3 10.9 24 10.9z" fill="#EA4335"/></svg>
+                Google Meet
+              </button>
+            </div>
+
+            {/* Link preview or warning */}
+            {activeLink ? (
+              <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-100 rounded-xl px-3.5 py-2.5 text-xs">
+                <CheckCircle2 size={13} className="text-emerald-500 shrink-0" />
+                <span className="text-emerald-700 font-medium truncate flex-1">{activeLink}</span>
+                {platform === 'zoom' && zoomPasscode && (
+                  <span className="text-emerald-600 font-mono ml-1 shrink-0">· {zoomPasscode}</span>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-3 text-xs text-amber-700">
+                <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                <span>
+                  You haven't saved a {platform === 'zoom' ? 'Zoom PMI' : 'Meet'} link yet.{' '}
+                  <a href="/profile" target="_blank" rel="noopener noreferrer" className="underline font-semibold">
+                    Add it in Profile →
+                  </a>
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* ── Session details ── */}
+          <div className="space-y-4">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Session Details</p>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Title *</label>
+              <input required value={title} onChange={e => setTitle(e.target.value)}
+                placeholder="e.g. Form 3 — Mathematics revision"
+                className="w-full text-sm rounded-xl border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400/40" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Date *</label>
+                <input required type="date" value={dateVal} onChange={e => setDateVal(e.target.value)}
+                  className="w-full text-sm rounded-xl border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400/40" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Time *</label>
+                <input required type="time" value={timeVal} onChange={e => setTimeVal(e.target.value)}
+                  className="w-full text-sm rounded-xl border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400/40" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Duration (minutes)</label>
+              <select value={duration} onChange={e => setDuration(Number(e.target.value))}
+                className="w-full text-sm rounded-xl border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400/40">
+                {[30,45,60,90,120].map(d => <option key={d} value={d}>{d} min</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Agenda / Notes <span className="font-normal text-slate-400">(optional)</span></label>
+              <textarea value={agenda} onChange={e => setAgenda(e.target.value)} rows={2}
+                placeholder="Topics to cover, instructions for students…"
+                className="w-full text-sm rounded-xl border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400/40 resize-none" />
+            </div>
+          </div>
+        </form>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50 shrink-0">
+          <button type="button" onClick={onClose}
+            className="px-4 py-2 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-100 transition">
+            Cancel
+          </button>
+          <button onClick={handleSubmit} disabled={saving || missingLink}
+            className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-sm font-semibold transition shadow-sm">
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Video size={14} />}
+            {saving ? 'Scheduling…' : 'Schedule Session'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ONLINE SESSIONS TAB
+   Lists all PMI-based sessions. No external OAuth required.
+   ══════════════════════════════════════════════════════════════ */
+function OnlineSessionsTab() {
+  const navigate = useNavigate();
+  const qc       = useQueryClient();
+  const [showModal, setShowModal] = useState(false);
+  const [toast,     setToast]     = useState(null);
+  const now = new Date();
+
+  /* Fetch teacher's own staff record (for stored meeting links) */
+  const { data: teacherData } = useQuery({
+    queryKey: ['teacher-me'],
+    queryFn:  () => fetch('/api/teachers/me', {
+      headers: { Authorization: `Bearer ${JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token}` }
+    }).then(r => r.json()),
+    staleTime: 120_000,
+  });
+  const teacherRecord = teacherData?.data ?? null;
+  const hasMeetingLink = !!(teacherRecord?.zoomPMILink || teacherRecord?.meetLink);
+
+  /* Fetch all sessions */
+  const { data: sessData, isLoading, refetch } = useQuery({
+    queryKey: ['elearning-sessions-all'],
+    queryFn:  () => apiFetch('/sessions'),
+    staleTime: 30_000,
+  });
+  const sessions  = sessData?.sessions || [];
+  const upcoming  = sessions.filter(s => s.status !== 'cancelled' && new Date(s.scheduledAt) >= now);
+  const past      = sessions.filter(s => s.status === 'cancelled' || new Date(s.scheduledAt) < now);
+
+  async function handleCancel(sessionId) {
+    if (!window.confirm('Cancel this session?')) return;
+    try {
+      await apiFetch(`/sessions/${sessionId}`, { method: 'DELETE' });
+      qc.invalidateQueries({ queryKey: ['elearning-sessions-all'] });
+      setToast({ type: 'success', msg: 'Session cancelled.' });
+    } catch (err) {
+      setToast({ type: 'error', msg: err.message });
+    }
+  }
+
+  function PlatformBadge({ platform }) {
+    if (platform === 'meet') return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
+        <svg viewBox="0 0 48 48" className="w-3 h-3"><path d="M44 24c0-1.3-.1-2.5-.4-3.7H24v7h11.3c-.5 2.5-1.9 4.6-3.9 6.1v5h6.3C40.9 35 44 30 44 24z" fill="#4285F4"/><path d="M24 44c5.6 0 10.3-1.9 13.8-5l-6.3-5c-1.9 1.3-4.4 2-7.5 2-5.7 0-10.6-3.9-12.4-9.1H5.1v5.2C8.5 39.8 15.7 44 24 44z" fill="#34A853"/><path d="M11.6 27c-.5-1.3-.7-2.6-.7-4s.2-2.8.7-4v-5.2H5.1C3.8 16.7 3 20.3 3 24s.8 7.3 2.1 10.2L11.6 27z" fill="#FBBC05"/><path d="M24 10.9c3.2 0 6 1.1 8.2 3.2l6.1-6.1C34.3 4.5 29.6 3 24 3 15.7 3 8.5 7.2 5.1 13.8l6.5 5.2C13.4 13.8 18.3 10.9 24 10.9z" fill="#EA4335"/></svg>
+        Meet
+      </span>
+    );
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-100">
+        <svg viewBox="0 0 48 48" className="w-3 h-3"><rect width="48" height="48" rx="8" fill="#2D8CFF"/><path d="M8 17a2 2 0 012-2h18a2 2 0 012 2v14a2 2 0 01-2 2H10a2 2 0 01-2-2V17z" fill="white"/><path d="M30 22l8-5v14l-8-5V22z" fill="white"/></svg>
+        Zoom
+      </span>
+    );
+  }
+
+  function SessionCard({ session }) {
+    const start     = new Date(session.scheduledAt);
+    const isLive    = session.status === 'live';
+    const upcoming  = session.status === 'scheduled' && start >= now;
+    const cancelled = session.status === 'cancelled';
+    const audLabel  = session.audience?.label || session.audience?.type || '';
+
+    return (
+      <div className={`bg-white border rounded-xl px-5 py-4 flex items-start gap-4
+        ${isLive ? 'border-green-300 shadow-sm shadow-green-100' : cancelled ? 'border-slate-100 opacity-60' : 'border-slate-200 hover:border-slate-300'}`}>
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5
+          ${isLive ? 'bg-green-100' : 'bg-sky-50'}`}>
+          <Video size={18} className={isLive ? 'text-green-600' : 'text-sky-600'} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <p className="font-semibold text-slate-800 text-sm">{session.title}</p>
+            <PlatformBadge platform={session.platform} />
+            {cancelled && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-100">Cancelled</span>}
+            {isLive    && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-100 animate-pulse">Live now</span>}
+          </div>
+          <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
+            {audLabel && <span className="text-indigo-600 font-medium">{audLabel}</span>}
+            <span className="flex items-center gap-1">
+              <Calendar size={11} />
+              {start.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
+            </span>
+            <span className="flex items-center gap-1">
+              <Clock size={11} />
+              {start.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+            <span>{session.duration} min</span>
+          </div>
+          {session.meetingPasscode && (
+            <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
+              <MicOff size={10} /> Passcode: <span className="font-mono font-semibold text-slate-600">{session.meetingPasscode}</span>
+            </p>
+          )}
+        </div>
+        <div className="flex flex-col gap-1.5 items-end shrink-0">
+          {!cancelled && session.meetingLink && (
+            <a href={session.meetingLink} target="_blank" rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-sky-600 hover:bg-sky-700 transition shadow-sm">
+              <Play size={11} /> Join
+            </a>
+          )}
+          {upcoming && (
+            <button onClick={() => handleCancel(session.id)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50 transition">
+              <Trash2 size={11} /> Cancel
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-3xl mx-auto px-6 py-6 space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-slate-900">Online Sessions</h1>
+          <p className="text-xs text-slate-400 mt-0.5">Schedule online classes and meetings using your personal Zoom or Meet link</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => refetch()} className="p-2 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition">
+            <RefreshCcw size={14} />
+          </button>
+          <button onClick={() => setShowModal(true)}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-sm font-semibold transition shadow-sm bg-sky-600 hover:bg-sky-700">
+            <Plus size={14} /> Schedule Meeting
+          </button>
+        </div>
+      </div>
+
+      {/* No meeting link warning */}
+      {!hasMeetingLink && (
+        <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3.5 text-sm">
+          <AlertTriangle size={16} className="text-amber-500 mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <p className="font-semibold text-amber-800">Meeting link not set</p>
+            <p className="text-amber-700 text-xs mt-0.5">Save your Zoom PMI or Google Meet link in your profile before scheduling.</p>
+          </div>
+          <a href="/profile" target="_blank" rel="noopener noreferrer"
+            className="shrink-0 text-xs font-semibold text-amber-700 underline hover:text-amber-900">
+            Profile →
+          </a>
+        </div>
+      )}
+
+      {toast && <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}
+
+      {isLoading ? (
+        <div className="space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-20 bg-slate-100 rounded-xl animate-pulse" />)}</div>
+      ) : sessions.length === 0 ? (
+        <div className="bg-white border border-dashed border-slate-200 rounded-xl p-14 text-center">
+          <MonitorPlay size={32} className="text-slate-300 mx-auto mb-3" />
+          <p className="text-slate-500 font-medium text-sm">No sessions yet</p>
+          <p className="text-xs text-slate-400 mt-1">Schedule your first online class or meeting above</p>
+        </div>
+      ) : (
+        <>
+          {upcoming.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Upcoming</p>
+              {upcoming.map(s => <SessionCard key={s.id} session={s} />)}
+            </div>
+          )}
+          {past.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Past</p>
+              {past.map(s => <SessionCard key={s.id} session={s} />)}
+            </div>
+          )}
+        </>
+      )}
+
+      {showModal && (
+        <NewScheduleModal
+          teacherRecord={teacherRecord}
+          onClose={() => setShowModal(false)}
+          onScheduled={(result) => {
+            setShowModal(false);
+            qc.invalidateQueries({ queryKey: ['elearning-sessions-all'] });
+            qc.invalidateQueries({ queryKey: ['events'] });
+            setToast({ type: 'success', msg: `Session scheduled! Also added to the school calendar.` });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
    MAIN PAGE — dispatcher
    ══════════════════════════════════════════════════════════════ */
 export default function ELearningPage() {
@@ -1582,23 +2004,22 @@ export default function ELearningPage() {
     }
   }, [location.search, qc]);
 
+  /* Only load GC auth status if navigating to the classroom path */
+  const path = location.pathname;
+  const needsGcAuth = path.startsWith('/elearning/classroom');
+
   const { data: statusData, isLoading: statusLoading } = useQuery({
     queryKey: ['elearning-status'],
     queryFn:  () => apiFetch('/auth/status'),
     staleTime: 5 * 60_000,
+    enabled:  needsGcAuth,   // only fetch for classroom — sessions tab needs no OAuth
   });
   const connected = statusData?.connected === true;
 
-  /* Redirect /elearning → /elearning/classroom */
+  /* Redirect /elearning → /elearning/sessions (new default) */
   useEffect(() => {
-    if (location.pathname === '/elearning') navigate('/elearning/classroom', { replace: true });
+    if (location.pathname === '/elearning') navigate('/elearning/sessions', { replace: true });
   }, [location.pathname, navigate]);
-
-  const path = location.pathname;
-
-  if (statusLoading) {
-    return <div className="flex items-center justify-center h-64"><Loader2 size={24} className="animate-spin text-slate-400" /></div>;
-  }
 
   const toastEl = toast && (
     <div className="fixed top-4 right-4 z-50">
@@ -1606,27 +2027,37 @@ export default function ELearningPage() {
     </div>
   );
 
-  // Zoom never needs Google OAuth — it uses its own server-to-server credentials
-  if (path.startsWith('/elearning/zoom')) {
-    return <div className="h-full flex flex-col">{toastEl}<SessionsView platform="zoom" /></div>;
-  }
-
-  // Google Classroom and Meet both need Google OAuth
-  if (!connected) {
-    const forMeet = path.startsWith('/elearning/meet');
+  // ── Online Sessions tab — no OAuth required ──────────────────
+  if (path.startsWith('/elearning/sessions')) {
     return (
-      <>
+      <div className="h-full flex flex-col">
         {toastEl}
-        <ConnectCard forMeet={forMeet} />
-      </>
+        <OnlineSessionsTab />
+      </div>
     );
   }
 
-  return (
-    <div className="h-full flex flex-col">
-      {toastEl}
-      {path.startsWith('/elearning/classroom') && <ClassroomView statusData={statusData} connected={connected} />}
-      {path.startsWith('/elearning/meet')      && <SessionsView  platform="meet" />}
-    </div>
-  );
+  // ── Google Classroom — needs GC OAuth ────────────────────────
+  if (path.startsWith('/elearning/classroom')) {
+    if (statusLoading) {
+      return <div className="flex items-center justify-center h-64"><Loader2 size={24} className="animate-spin text-slate-400" /></div>;
+    }
+    if (!connected) {
+      return (
+        <>
+          {toastEl}
+          <ConnectCard forMeet={false} />
+        </>
+      );
+    }
+    return (
+      <div className="h-full flex flex-col">
+        {toastEl}
+        <ClassroomView statusData={statusData} connected={connected} />
+      </div>
+    );
+  }
+
+  // ── Fallback: redirect anything else to sessions ─────────────
+  return <div className="flex items-center justify-center h-64"><Loader2 size={24} className="animate-spin text-slate-400" /></div>;
 }

@@ -87,6 +87,7 @@ const SCHOOL_UPDATABLE = [
   'moduleConfig',
   'mpesa',
   'hiddenSystemRoles',   // array of system role keys hidden from invite form / R&P sidebar
+  'emergencyOnlineMode', // boolean — when true timetable embeds teacher meeting links for students
 ];
 
 /* ══════════════════════════════════════════════════════════════

@@ -106,7 +106,8 @@ router.post('/', async (req, res) => {
     if (!ADMIN_ROLES.includes(role)) {
       return res.status(403).json({ error: 'Not authorised to create events' });
     }
-    const { title, description, startDate, endDate, allDay, type, category, location, color, audience } = req.body;
+    const { title, description, startDate, endDate, allDay, type, category, location, color, audience,
+            meetingLink, meetingPasscode, platform } = req.body;
     if (!title || !startDate) return res.status(400).json({ error: 'title and startDate are required' });
 
     const event = await _model('events').create({
@@ -115,9 +116,13 @@ router.post('/', async (req, res) => {
       startDate, endDate: endDate || startDate,
       allDay: allDay !== false,
       type: type || 'general',
-      category: category || 'school',
+      category: category || 'general',
       color: color || '#4f46e5',
       audience: audience || ['all'],
+      // Online meeting fields (optional — only set for online_class events)
+      ...(meetingLink     ? { meetingLink }     : {}),
+      ...(meetingPasscode ? { meetingPasscode } : {}),
+      ...(platform        ? { platform }        : {}),
       createdAt: new Date().toISOString(),
     });
     res.status(201).json({ event });

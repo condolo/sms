@@ -56,6 +56,7 @@ const FEATURE_PLAN = {
 
   /* ── Standard (continued) ── */
   custom_smtp:        'standard',   // per-school SMTP sending from own domain
+  elearning:          'standard',   // online meetings, emergency mode, PMI-based sessions
 
   /* ── Enterprise ── */
   api_access:         'enterprise',

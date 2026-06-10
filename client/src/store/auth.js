@@ -46,7 +46,9 @@ function _slimSchool(school) {
     isActive:     school.isActive,
     // Persisted so academic year labels survive a page refresh.
     // Updated via patchSchool() after a year transition in Settings.
-    academicYear: school.academicYear ?? undefined,
+    academicYear:          school.academicYear          ?? undefined,
+    // Persisted so timetable can read emergency mode on page refresh.
+    emergencyOnlineMode:   school.emergencyOnlineMode   ?? undefined,
   };
 }
 

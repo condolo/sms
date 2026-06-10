@@ -17,6 +17,7 @@ import {
   Bell, MessageSquare, BookOpen, Calendar, CalendarDays, Clock,
   Upload, ImageIcon, KeyRound, Copy,
   PlusCircle, ChevronRight, AlertCircle, Archive,
+  MonitorPlay, WifiOff,
 } from 'lucide-react';
 import { sections as sectionsApi } from '@/api/client.js';
 import { settings as settingsApi } from '@/api/client.js';
@@ -548,7 +549,8 @@ function BrandingCard({ schoolId, logoUrl, faviconUrl, onSaved }) {
    SCHOOL SETTINGS TAB
    ══════════════════════════════════════════════════════════════ */
 function SchoolTab() {
-  const qc = useQueryClient();
+  const qc         = useQueryClient();
+  const patchSchool = useAuthStore(s => s.patchSchool);
   const [toast, setToast] = useState(null);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
@@ -579,10 +581,19 @@ function SchoolTab() {
 
   const { mutate, isPending } = useMutation({
     mutationFn: d => settingsApi.school.update(d),
-    onSuccess: () => {
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['settings', 'school'] });
       setForm(null);
       setToast({ msg: 'School settings saved.', type: 'success' });
+      // Patch in-memory store so timetable banner + other module reads update immediately
+      const saved = res?.data ?? {};
+      const patch = {};
+      if (saved.primaryColor        !== undefined) patch.primaryColor        = saved.primaryColor;
+      if (saved.accentColor         !== undefined) patch.accentColor         = saved.accentColor;
+      if (saved.academicYear        !== undefined) patch.academicYear        = saved.academicYear;
+      if (saved.emergencyOnlineMode !== undefined) patch.emergencyOnlineMode = saved.emergencyOnlineMode;
+      if (saved.moduleConfig        !== undefined) patch.moduleConfig        = saved.moduleConfig;
+      if (Object.keys(patch).length) patchSchool(patch);
     },
     onError: err => setToast({ msg: err?.message ?? 'Failed to save.', type: 'error' }),
   });
@@ -893,6 +904,58 @@ function SchoolTab() {
 
       {/* Curriculum Sections — standalone async panel */}
       <SectionsPanel />
+
+      {/* Emergency Online Learning Mode */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+        <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+          <MonitorPlay size={14} className="text-sky-500" />
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Emergency Online Learning Mode</h3>
+        </div>
+        <p className="text-xs text-slate-500 leading-relaxed">
+          When this mode is active, each timetable slot automatically shows the assigned teacher's personal meeting link.
+          Students see a <strong>"Join"</strong> button on their timetable — no separate scheduling required.
+          Use this when the school cannot operate physically (weather, emergencies, etc.).
+        </p>
+        <div className="flex items-center justify-between gap-4 bg-slate-50 rounded-xl px-4 py-3.5 border border-slate-200">
+          <div className="flex items-center gap-3">
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${f.emergencyOnlineMode ? 'bg-sky-100' : 'bg-slate-100'}`}>
+              {f.emergencyOnlineMode
+                ? <MonitorPlay size={18} className="text-sky-600" />
+                : <WifiOff size={18} className="text-slate-400" />
+              }
+            </div>
+            <div>
+              <p className={`text-sm font-semibold ${f.emergencyOnlineMode ? 'text-sky-700' : 'text-slate-600'}`}>
+                {f.emergencyOnlineMode ? 'Emergency Mode is ON' : 'Emergency Mode is OFF'}
+              </p>
+              <p className="text-[11px] text-slate-400">
+                {f.emergencyOnlineMode
+                  ? 'Timetable shows meeting links. Students can join classes directly.'
+                  : 'Normal operation — timetable shows class schedule only.'
+                }
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => set('emergencyOnlineMode', !f.emergencyOnlineMode)}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none
+              ${f.emergencyOnlineMode ? 'bg-sky-600' : 'bg-slate-200'}`}
+          >
+            <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out
+              ${f.emergencyOnlineMode ? 'translate-x-5' : 'translate-x-0'}`} />
+          </button>
+        </div>
+        {f.emergencyOnlineMode && (
+          <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-3 text-xs text-amber-700">
+            <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+            <span>
+              <strong>Important:</strong> Teachers must have saved their Zoom or Meet link in their Profile for the Join button to appear on their slots.
+              Students will see links for all teachers who have saved a meeting link.
+            </span>
+          </div>
+        )}
+      </div>
 
       {/* M-Pesa Integration */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">

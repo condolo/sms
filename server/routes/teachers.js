@@ -69,7 +69,9 @@ function _validate(schema, data) {
 }
 
 /* Fields a staff member can update on their own record (no HR gate) */
-const SELF_EDITABLE = ['phone', 'address', 'qualifications', 'specialization', 'dateOfBirth', 'nextOfKin'];
+const SELF_EDITABLE = ['phone', 'address', 'qualifications', 'specialization', 'dateOfBirth', 'nextOfKin',
+  'zoomPMILink', 'zoomPasscode', 'meetLink',  // online meeting links — self-managed by teacher
+];
 
 /* Sensitive fields — never returned to the staff member themselves */
 function _stripSensitive(doc) {
