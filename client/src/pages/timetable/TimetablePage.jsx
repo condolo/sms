@@ -487,7 +487,7 @@ export default function TimetablePage() {
                       className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
                         isActive ? 'text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       }`}
-                      style={isActive ? { backgroundColor: s.id === 'all' ? '#0f172a' : s.color } : {}}
+                      style={isActive ? { backgroundColor: s.id === 'all' ? '#0f172a' : (s.color || '#6366f1') } : {}}
                     >
                       {s.label}
                     </button>

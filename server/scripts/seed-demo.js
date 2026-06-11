@@ -131,8 +131,8 @@ async function seedDemo() {
 
   /* ── 5. Sections ── */
   const SECTIONS = [
-    { key: 'primary',   name: 'Primary',   code: 'PRI', order: 1 },
-    { key: 'secondary', name: 'Secondary', code: 'SEC', order: 2 },
+    { key: 'primary',   name: 'Primary',   color: '#3b82f6', code: 'PRI', order: 1 },
+    { key: 'secondary', name: 'Secondary', color: '#8b5cf6', code: 'SEC', order: 2 },
   ];
   await Promise.all(SECTIONS.map(s =>
     Sec.updateOne({ id: `sec_${s.key}_${schoolId}` }, {
