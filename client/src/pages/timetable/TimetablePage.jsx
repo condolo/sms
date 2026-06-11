@@ -48,9 +48,10 @@ const ADMIN_ROLES = new Set(['admin', 'superadmin', 'deputy', 'timetabler']);
 
 export default function TimetablePage() {
   const qc    = useQueryClient();
-  const can   = useAuthStore(s => s.can.bind(s));
-  const role  = useAuthStore(s => s.session?.user?.role  ?? '');
-  const roles = useAuthStore(s => s.session?.user?.roles ?? []);
+  const can    = useAuthStore(s => s.can.bind(s));
+  const role   = useAuthStore(s => s.session?.user?.role   ?? '');
+  const roles  = useAuthStore(s => s.session?.user?.roles  ?? []);
+  const school = useAuthStore(s => s.session?.school);
 
   const canEdit    = can('timetable') || ADMIN_ROLES.has(role);
   const isAdminRole = ADMIN_ROLES.has(role) || roles.some(r => ADMIN_ROLES.has(r));
@@ -237,8 +238,6 @@ export default function TimetablePage() {
   }
 
   /* ── Export helpers ─────────────────────────────────────────── */
-  const school = useAuthStore(s => s.session?.school);
-
   function exportClassCSV() {
     if (!classSlots.length || !selectedClass) return;
     const DAY_LIST = ['monday','tuesday','wednesday','thursday','friday'];
