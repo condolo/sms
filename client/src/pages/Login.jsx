@@ -404,10 +404,12 @@ export default function Login() {
     }
   }, [isAuthenticated, from, navigate]);
 
-  // ── OAuth redirect handler — reads ?token= from Google/Microsoft callback ──
+  // ── OAuth redirect handler — reads ?code= from Google/Microsoft callback ──
+  // The server issues a 30-second single-use exchange code instead of a JWT
+  // so the token never appears in browser history, server logs, or Referer headers.
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const oauthToken = params.get('token');
+    const params     = new URLSearchParams(location.search);
+    const oauthCode  = params.get('code');
     const oauthError = params.get('error');
 
     if (oauthError) {
@@ -425,22 +427,25 @@ export default function Login() {
       return;
     }
 
-    if (oauthToken) {
-      // Token came back from OAuth redirect — exchange it for full user profile
+    if (oauthCode) {
+      // Exchange the short-lived code for a full session (token + user + school)
       const schoolSlug = params.get('school') || slug;
       if (schoolSlug) storeSchoolSlug(schoolSlug);
       window.history.replaceState({}, '', location.pathname);
 
-      // Fetch full user+school profile using the OAuth-issued token
-      fetch('/api/auth/me', { headers: { Authorization: `Bearer ${oauthToken}` } })
+      fetch('/api/auth/exchange', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ code: oauthCode }),
+      })
         .then(r => r.json())
         .then(res => {
-          if (!res.user) throw new Error('No user in response');
-          setSession({ token: oauthToken, user: res.user, school: res.school });
+          if (!res.token || !res.user) throw new Error('Invalid exchange response');
+          setSession({ token: res.token, user: res.user, school: res.school });
           navigate(from || _defaultDest(res.user?.role), { replace: true });
         })
         .catch(() => {
-          setError('OAuth session is invalid. Please try signing in again.');
+          setError('Sign-in session expired. Please try signing in again.');
         });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

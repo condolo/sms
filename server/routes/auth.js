@@ -1,7 +1,7 @@
 ﻿const express    = require('express');
 const bcrypt     = require('bcryptjs');
 const crypto     = require('crypto');
-const { sign }   = require('../utils/jwt');
+const { sign, verify } = require('../utils/jwt');
 const { _model } = require('../utils/model');
 const { tenantMiddleware } = require('../middleware/tenant');
 const { authMiddleware }   = require('../middleware/auth');
@@ -9,6 +9,29 @@ const rateLimit  = require('express-rate-limit');
 const email      = require('../utils/email');
 
 const router = express.Router();
+
+/* ── OAuth exchange-code store ───────────────────────────
+   Single-use, 30-second codes replace JWT-in-URL.
+   Map<code (64-char hex), { token, expiresAt }>
+   JavaScript is single-threaded so no race conditions in
+   a single process.  Codes are generated with CSPRNG.     */
+const _exchangeCodes = new Map();
+
+/**
+ * Issue a short-lived exchange code for an OAuth callback.
+ * Only the opaque code appears in the redirect URL — the JWT
+ * stays server-side until the client calls POST /exchange.
+ */
+function _issueExchangeCode(token) {
+  const code = crypto.randomBytes(32).toString('hex'); // 64-char hex, CSPRNG
+  _exchangeCodes.set(code, { token, expiresAt: Date.now() + 30_000 });
+
+  // Lazy cleanup — sweep expired entries each time a new code is issued
+  for (const [k, v] of _exchangeCodes) {
+    if (v.expiresAt <= Date.now()) _exchangeCodes.delete(k);
+  }
+  return code;
+}
 
 /* ── OTP helpers — cryptographically secure ─────────────── */
 function _genOTP() {
@@ -51,6 +74,7 @@ function _buildTokenPayload(user, schoolId) {
     email:    user.email,
     role,
     roles:    user.roles || [role],
+    tv:       user.tokenVersion ?? 0,  // token version — enables revocation
   };
 
   // Include guardian link only for roles that use it — keeps tokens lean for everyone else
@@ -497,8 +521,9 @@ router.get('/google/callback', async (req, res) => {
     }
 
     const token = sign(_buildTokenPayload(user, school.id));
-    // Redirect to frontend with token — SPA reads it from URL and stores in auth store
-    res.redirect(`${publicUrl}/login?token=${encodeURIComponent(token)}&school=${encodeURIComponent(school.slug)}&provider=google`);
+    // Issue a short-lived exchange code — JWT never appears in the URL or logs
+    const code = _issueExchangeCode(token);
+    res.redirect(`${publicUrl}/login?code=${code}&school=${encodeURIComponent(school.slug)}&provider=google`);
   } catch (err) {
     console.error('[auth/google/callback]', err);
     res.redirect(`${publicUrl}/login?error=google_failed`);
@@ -602,7 +627,8 @@ router.get('/microsoft/callback', async (req, res) => {
     if (!user.isActive) return res.redirect(`${publicUrl}/login?error=account_inactive`);
 
     const token = sign(_buildTokenPayload(user, school.id));
-    res.redirect(`${publicUrl}/login?token=${encodeURIComponent(token)}&school=${encodeURIComponent(school.slug)}&provider=microsoft`);
+    const code  = _issueExchangeCode(token);
+    res.redirect(`${publicUrl}/login?code=${code}&school=${encodeURIComponent(school.slug)}&provider=microsoft`);
   } catch (err) {
     console.error('[auth/microsoft/callback]', err);
     res.redirect(`${publicUrl}/login?error=microsoft_failed`);
@@ -661,6 +687,63 @@ router.post('/change-password', authMiddleware, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to change password' });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   POST /api/auth/exchange
+   Converts a short-lived OAuth exchange code into a full session.
+   The code is single-use and expires after 30 seconds.
+   Returns { token, user, school } — same shape as the login endpoint.
+   ══════════════════════════════════════════════════════════════ */
+router.post('/exchange', async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code || typeof code !== 'string') {
+      return res.status(400).json({ error: 'Exchange code required' });
+    }
+
+    // Single-use: delete the entry immediately regardless of outcome
+    const entry = _exchangeCodes.get(code);
+    _exchangeCodes.delete(code);
+
+    if (!entry) {
+      return res.status(410).json({ error: 'Exchange code not found or already used' });
+    }
+    if (entry.expiresAt < Date.now()) {
+      return res.status(410).json({ error: 'Exchange code expired. Please sign in again.' });
+    }
+
+    // Verify the token is still cryptographically valid
+    const payload = verify(entry.token);
+    if (!payload) {
+      return res.status(401).json({ error: 'Exchange token invalid' });
+    }
+
+    // Build the full session response — mirrors GET /api/auth/me
+    const User    = _model('users');
+    const Photos  = _model('user_photos');
+    const Schools = _model('schools');
+
+    const [user, photo, school] = await Promise.all([
+      User.findOne({ id: payload.userId, schoolId: payload.schoolId }).lean(),
+      Photos.findOne({ userId: payload.userId, schoolId: payload.schoolId }).lean(),
+      Schools.findOne({ id: payload.schoolId }).lean(),
+    ]);
+
+    if (!user || !school) {
+      return res.status(404).json({ error: 'User or school not found' });
+    }
+
+    const safeUser = { ...user, password: undefined, passwordHash: undefined, mfaOtp: undefined, mfaExpiry: undefined };
+    safeUser.photoUrl = photo
+      ? `/api/users/${user.id}/photo?schoolId=${encodeURIComponent(payload.schoolId)}`
+      : null;
+
+    return res.json({ token: entry.token, user: safeUser, school });
+  } catch (err) {
+    console.error('[auth/exchange]', err);
+    res.status(500).json({ error: 'Exchange failed' });
   }
 });
 

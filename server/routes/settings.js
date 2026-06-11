@@ -16,6 +16,7 @@ const crypto   = require('crypto');
 const nodemailer = require('nodemailer');
 const { authMiddleware }    = require('../middleware/auth');
 const { _model }            = require('../utils/model');
+const { revokeUserTokens }  = require('../utils/token-version');
 const emailUtil             = require('../utils/email');
 const { encrypt, smtpEncryptReady } = require('../utils/smtpEncrypt');
 const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY } = require('../utils/notif-settings');
@@ -467,6 +468,15 @@ router.put('/users/:id', authMiddleware, async (req, res) => {
     if (result.matchedCount === 0) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } });
     }
+
+    // Role changed — invalidate all outstanding tokens for this user so the
+    // new permissions take effect immediately rather than after JWT expiry.
+    if (role) {
+      revokeUserTokens(req.params.id).catch(err =>
+        console.warn('[settings] token revocation (non-fatal):', err.message)
+      );
+    }
+
     const updated = await Users.findOne({ id: req.params.id }, { password: 0, passwordHash: 0 }).lean();
     res.json({ success: true, data: updated });
   } catch (err) {
