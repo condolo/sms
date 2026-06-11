@@ -311,6 +311,27 @@ These settings are used across reports, letters, and the app header.
 
 ---
 
+## 10b. eLearning Settings — Emergency Online Learning Mode *(Standard plan)*
+
+Go to **Settings → School Profile** and scroll to the **Emergency Online Learning Mode** section.
+
+### What it does
+When you turn this ON, every teacher's timetable slot immediately shows a **Join** button using that teacher's saved personal meeting link (Zoom PMI or Google Meet). Students also see Join buttons for each lesson in their Student Dashboard — with the correct time (e.g. 8:00–9:00 Mathematics) and a passcode row if one is set.
+
+This is designed for days when the school cannot be physically accessed — unplanned closures, bad weather, public health events — and you need all lessons to move online instantly.
+
+### Before turning it ON
+Ensure every active teacher has saved at least one meeting link in their profile:
+1. Ask each teacher to go to **Profile → Online Meeting Links**.
+2. Paste their Zoom PMI URL and/or Google Meet URL and click **Save Meeting Links**.
+
+The settings page shows an amber reminder about this when the toggle is ON.
+
+### Turning it ON/OFF
+Toggle **Emergency Online Learning Mode** and click **Save Settings**. The change takes effect immediately — no page refresh needed.
+
+---
+
 ## 11. Custom Email Sending (SMTP) — Standard plan and above
 
 By default, all system emails from your school (welcome messages, password resets, attendance alerts, report card notifications, etc.) are sent from the Msingi platform address (`innolearnnetwork@gmail.com`) with your school's name as the display name.

@@ -1496,6 +1496,10 @@ The InnoLearn International School demo seed has students, teachers, and classes
 | `GET /api/grades/report` | standard | Weighted average per student per subject via aggregation |
 | `GET/POST /api/admissions` | premium | `applicationRef` auto-generated, `stageHistory` append-only, `PATCH .../stage`, `GET .../stats` funnel |
 | `GET/POST /api/timetable` | standard | Slot collision detection (409), `GET /api/timetable/class/:classId`, `POST .../bulk` |
+| `POST /api/elearning/sessions` | standard | Schedule online session — no external API; stores teacher's PMI link; creates `elearning_sessions` + `events` record atomically |
+| `GET /api/elearning/sessions` | standard | List all sessions for the school; sorted by scheduledAt desc |
+| `DELETE /api/elearning/sessions/:id` | standard | Cancel session — deletes both `elearning_sessions` and linked `events` document |
+| `GET /api/student-portal/dashboard` | — | Student-scoped payload including today's timetable; when `emergencyOnlineMode` is true, enriches each slot with `meetingLink`, `meetingPasscode`, `platform` by joining `teachers` collection |
 
 ### Middleware Chain
 
@@ -2862,6 +2866,7 @@ function upsert(Model, id, data) {
 | `invoices` | 20 | Tuition/activity/transport, mix of statuses |
 | `payments` | 14 | Linked to invoices |
 | `admissions` | 8 | Spread across all pipeline stages |
+| `elearning_sessions` | 0 | Created live by teachers; not seeded |
 
 ---
 
@@ -3011,3 +3016,85 @@ for (let i = arr.length - 1; i > 0; i--) {
 ### Enforcement
 
 All `server/routes/*.js` files and `server/scripts/*.js` files are clean as of v4.29.0. If adding a new file or helper, always `const crypto = require('crypto')` and use the patterns above. PRs containing `Math.random()` in server code should be rejected at review.
+
+---
+
+## 36. eLearning Module — PMI Sessions + Emergency Online Mode (v4.31.0)
+
+### Architecture overview
+
+The eLearning module uses **zero external API calls**. Teachers store their personal meeting links (Zoom PMI URL, Zoom passcode, Google Meet URL) directly on their `teachers` collection document. When a session is scheduled the system copies those links into the session record — it never calls Zoom or Google APIs.
+
+### Collections
+
+| Collection | Purpose |
+|---|---|
+| `elearning_sessions` | One document per scheduled session. Fields: `schoolId`, `teacherId`, `title`, `scheduledAt`, `durationMin`, `platform` (`zoom`/`meet`), `meetingLink`, `meetingPasscode`, `audience` (`{ type, id, label }`), `status` (`scheduled`/`cancelled`), `calendarEventId`, `agenda`, `createdAt`. |
+| `events` | Dual-written on session create/cancel. `category: 'online_class'`, `meetingLink`, `meetingPasscode`, `platform`, `sessionId` cross-reference. |
+
+### Session lifecycle
+
+```
+POST /api/elearning/sessions
+  → validate input
+  → find user → find teacher record by email
+  → resolve meetingLink from teacher.zoomPMILink || teacher.meetLink
+  → if no link: return { missingLink: true, error }
+  → create elearning_sessions document
+  → create events document (category: 'online_class', meetingLink, sessionId)
+  → return { session, event }
+
+DELETE /api/elearning/sessions/:id
+  → verify ownership (schoolId match)
+  → set session.status = 'cancelled'
+  → delete linked events document (by session._id stored in calendarEventId)
+```
+
+### Plan gating
+
+`server/middleware/plan.js` — `FEATURE_PLAN` entry:
+```js
+elearning: 'standard',   // online meetings, emergency mode, PMI-based sessions
+```
+
+### Teacher self-edit fields
+
+`server/routes/teachers.js` — `SELF_EDITABLE` array includes:
+```js
+'zoomPMILink', 'zoomPasscode', 'meetLink',
+```
+Teachers can update these via `PUT /api/teachers/me` without admin approval.
+
+### Emergency Online Learning Mode
+
+Stored on `schools.emergencyOnlineMode` (boolean). When `true`:
+
+**Staff timetable** (`TimetablePage.jsx`):
+1. Reads `school.emergencyOnlineMode` from Zustand + localStorage (`_slimSchool`).
+2. Fetches all active teachers (`GET /api/teachers?limit=200&status=active`) — enabled only when mode is ON.
+3. Builds `teacherMap = { [teacherId]: teacherDoc }`.
+4. Passes `emergencyMode={true}` and `teacherMap` to `TimetableGrid`.
+5. `SlotCard` renders a "Join Zoom/Meet" button using `teacherMap[slot.teacherId].zoomPMILink || meetLink`.
+
+**Student portal** (`GET /api/student-portal/dashboard`):
+1. Selects `emergencyOnlineMode` from school document.
+2. Selects `teacherId` from timetable slots.
+3. When `emergencyMode`:
+   - Collects unique `teacherIds` from today's slots.
+   - Queries `teachers.find({ id: { $in: teacherIds } }).select('id zoomPMILink zoomPasscode meetLink')`.
+   - Enriches each slot: `meetingLink = teacher.zoomPMILink || teacher.meetLink`, `platform = 'zoom'/'meet'`.
+4. Returns `timetableToday` (enriched) and `school.emergencyOnlineMode` in response payload.
+5. `StudentDashboard.jsx` renders a sky-blue banner + Join button per lesson.
+
+### Frontend file map
+
+| File | Role |
+|---|---|
+| `client/src/pages/elearning/ELearningPage.jsx` | `NewScheduleModal` + `OnlineSessionsTab` + dispatcher |
+| `client/src/pages/profile/ProfilePage.jsx` | "Online Meeting Links" self-edit card |
+| `client/src/pages/timetable/TimetablePage.jsx` | Emergency banner, teacherMap fetch, props to grid |
+| `client/src/pages/timetable/components/TimetableGrid.jsx` | `SlotCard` Join button |
+| `client/src/pages/student-portal/StudentDashboard.jsx` | Emergency banner + per-lesson Join button |
+| `client/src/pages/events/EventsPage.jsx` | `online_class` category, Join button in event modal |
+| `client/src/pages/settings/SettingsPage.jsx` | Emergency mode toggle, `patchSchool()` on save |
+| `client/src/store/auth.js` | `_slimSchool()` persists `emergencyOnlineMode` |

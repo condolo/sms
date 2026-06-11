@@ -585,6 +585,35 @@ Open a message and scroll to the **Reply** box at the bottom. Type your reply an
 
 ---
 
+## 11b. eLearning — Online Sessions *(Standard plan)*
+
+### Overview
+The eLearning module lets teachers schedule online classes via their personal Zoom or Google Meet links. No sign-in to Zoom or Google is required from Msingi — each teacher simply saves their permanent meeting URL once in their profile, and the system uses it whenever a session is scheduled.
+
+### Step 1 — Save your meeting link (teachers only)
+1. Click your name or avatar → **Profile**.
+2. Scroll to the **Online Meeting Links** section.
+3. Paste your **Zoom PMI URL** (e.g. `https://zoom.us/j/123456789`) and optional passcode, and/or your **Google Meet URL**.
+4. Click **Save Meeting Links**.
+
+### Step 2 — Schedule a session
+1. Go to **eLearning → Online Sessions → + Schedule Session**.
+2. Choose your audience: **A class**, **An individual student**, or **A parent**.
+3. Pick your platform (Zoom or Meet) — a green preview box confirms your saved link.
+4. Set the title, date, time, duration, and optional agenda.
+5. Click **Schedule** — the session is created and automatically added to the school calendar as an **Online Class** event.
+
+### Viewing sessions
+- **Upcoming** sessions are listed at the top with a countdown.
+- **Past** sessions are shown below.
+- Each card has a **Join** button (direct link) and the passcode if set.
+- Cancel a future session with the × button — this also removes the calendar event.
+
+### Missing link warning
+If you have not yet saved a meeting link in your profile, a yellow banner appears on the sessions page with a direct link to your profile. You cannot schedule sessions until a link is saved.
+
+---
+
 ## 12. Events & Calendar
 
 ### Adding an Event
@@ -599,6 +628,12 @@ Switch between **Month**, **Week**, and **List** views using the view toggle.
 - **School-wide**: visible to all roles
 - **Class event**: visible to students and parents in that class
 - **Staff only**: visible to teachers and above
+- **Online Class**: marks an event as an online meeting. Shows a **Join Meeting** button and optional passcode in the event detail view. Created automatically when a session is scheduled from the eLearning module.
+
+### Online Class Events
+When an event's category is **Online Class**, anyone viewing the event detail will see:
+- A sky-blue **Join Meeting** button that opens the meeting link in a new tab.
+- A **Passcode** line (if one was saved) so participants can copy it before joining.
 
 ### Birthday Indicators
 The calendar automatically marks days that have student or staff birthdays with a 🎂 emoji next to the date number.
@@ -910,6 +945,8 @@ Sub-tabs:
 - See their current stage and milestone progress
 - Submit appeals against active demerits
 - Track appeal status and staff resolution
+- View today's timetable with lesson timings (e.g. 8:00–9:00 Mathematics)
+- **Join online lessons** directly from the student dashboard when Emergency Online Learning Mode is active — each lesson shows a Join button with the teacher's Zoom or Meet link, plus the passcode if one is set
 
 ### What Parents Can Do
 - View their children's attendance, grades, and behaviour

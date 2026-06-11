@@ -55,6 +55,72 @@ Full per-user drag-and-drop dashboard customisation for admin and teacher roles.
 
 ---
 
+## [4.31.0] — 2026-06-11  eLearning Redesign — PMI Sessions, Calendar Integration, Emergency Online Mode, Student Portal Join Buttons
+
+### Added — eLearning module (8 phases)
+
+#### Phase 1 — Google Classroom moved to "Upcoming"
+- Sidebar item `Google Classroom` is now shown as a non-clickable chip with a "Soon" badge.
+- All existing Classroom OAuth and course-listing code is preserved behind the route guard; it is hidden, not deleted.
+- Default redirect `/elearning` now goes to `/elearning/sessions`.
+
+#### Phase 2 — No more Zoom / Meet API calls
+- Removed `/elearning/zoom` and `/elearning/meet` route cases.
+- All meeting links are now plain URLs stored by teachers on their own profiles — no OAuth sign-in, no API call to Zoom or Google.
+
+#### Phase 3 — Teacher profile: Online Meeting Links section
+- **`client/src/pages/profile/ProfilePage.jsx`** — new "Online Meeting Links" card for staff only.
+  - Fields: Zoom PMI URL, Zoom Passcode, Google Meet URL.
+  - URL validation (`https://` required), separate save button, external preview links.
+- **`server/routes/teachers.js`** — `SELF_EDITABLE` array extended with `zoomPMILink`, `zoomPasscode`, `meetLink` so teachers can save their own links via `PUT /api/teachers/me`.
+
+#### Phase 4 — Schedule Online Class / Session
+- **`server/routes/elearning.js`** — new `POST /api/elearning/sessions` endpoint.
+  - Plan-gated: `planGate('elearning')` — requires standard plan.
+  - Validates audience type (`class` / `student` / `parent`) and audience ID.
+  - Resolves the teacher's stored Zoom PMI or Meet link; returns `{ missingLink: true }` if none saved.
+  - Creates `elearning_sessions` document (no external API call).
+  - Creates `events` document simultaneously with `category: 'online_class'`, `meetingLink`, `sessionId` reference.
+  - Returns `{ session, event }`.
+- **`server/middleware/plan.js`** — `elearning: 'standard'` added to `FEATURE_PLAN` map.
+
+#### Phase 5 — Online Sessions tab (replaces Zoom / Meet tabs)
+- **`client/src/pages/elearning/ELearningPage.jsx`** — major rework.
+  - `NewScheduleModal`: audience picker (class / student / parent), platform toggle (Zoom / Meet), link preview, date/time/duration, agenda.
+  - `OnlineSessionsTab`: fetches teacher's own link status, lists upcoming and past sessions, shows `SessionCard` per session with Join / Cancel buttons.
+  - Missing-link warning banner with link to Profile page.
+  - React Query invalidates `['elearning-sessions-all']` and `['events']` after scheduling.
+
+#### Phase 6 — Calendar: Online Class events show Join button
+- **`client/src/pages/events/EventsPage.jsx`** — `online_class` added to `CATEGORIES`.
+  - Event form shows platform/link/passcode fields when category is `online_class`.
+  - View mode shows a "Join Meeting" button and passcode when `event.meetingLink` is set.
+- **`server/routes/events.js`** — POST/PUT handlers accept and store `meetingLink`, `meetingPasscode`, `platform`.
+
+#### Phase 7 — Emergency Online Learning Mode
+- **`client/src/pages/settings/SettingsPage.jsx`** — new toggle under School Settings.
+  - Sky-blue UI indicator, amber warning reminding admins to ensure teachers have links saved.
+  - `patchSchool()` called on save so timetable reacts immediately without refresh.
+- **`client/src/store/auth.js`** — `_slimSchool()` persists `emergencyOnlineMode` to localStorage.
+- **`client/src/pages/timetable/TimetablePage.jsx`** — emergency banner above grid; fetches teacher meeting links when mode is ON; passes `emergencyMode` and `teacherMap` to `TimetableGrid`.
+- **`client/src/pages/timetable/components/TimetableGrid.jsx`** — `SlotCard` shows per-slot "Join Zoom / Meet" button in emergency mode.
+
+#### Phase 8 — Student Portal: per-lesson Join buttons
+- **`server/routes/student-portal.js`** — `GET /api/student-portal/dashboard`:
+  - Selects `teacherId` on timetable slots.
+  - Reads `emergencyOnlineMode` from school document.
+  - When mode is ON, queries `teachers` collection for `zoomPMILink`, `zoomPasscode`, `meetLink` and attaches `meetingLink`, `meetingPasscode`, `platform` to each slot.
+  - Includes `emergencyOnlineMode` in the `school` key of the response.
+- **`client/src/pages/student-portal/StudentDashboard.jsx`** — "Today" widget:
+  - Sky-blue "Emergency Online Learning" banner when `school.emergencyOnlineMode`.
+  - Each lesson row now shows `startTime / endTime` (already present) plus a sky-blue "Join" button when `slot.meetingLink` is set.
+  - Passcode row displayed below each slot when `slot.meetingPasscode` is present.
+
+### Changed — eLearning sidebar
+- `ELEARNING_ITEMS` now has 2 items only: `Online Sessions` (active) and `Google Classroom` (upcoming / non-clickable).
+
+---
+
 ## [4.30.1] — 2026-06-09  Security & Bug Fixes
 
 ### Fixed — Security hardening
