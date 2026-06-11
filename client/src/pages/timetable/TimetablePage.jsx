@@ -344,19 +344,19 @@ export default function TimetablePage() {
 
             {/* Left: icon + title + class count chip */}
             <div className="flex items-center gap-3.5">
-              <div className="w-10 h-10 rounded-xl bg-white/15 border border-white/20 flex items-center justify-center shrink-0 shadow-inner">
+              <div className="w-10 h-10 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center shrink-0">
                 <CalendarDays size={20} className="text-white" />
               </div>
               <div>
                 <div className="flex items-center gap-2.5 flex-wrap">
                   <h1 className="text-lg font-bold text-white leading-tight">Scheduling Engine</h1>
                   {classList.length > 0 && (
-                    <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold bg-white/15 text-indigo-100 px-2 py-0.5 rounded-full border border-white/20">
+                    <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold bg-white/20 text-white px-2 py-0.5 rounded-full border border-white/30">
                       <LayoutGrid size={9} /> {classList.length} {classList.length === 1 ? 'class' : 'classes'}
                     </span>
                   )}
                 </div>
-                <p className="text-indigo-200 text-xs mt-0.5">Institutional timetable &amp; coordination</p>
+                <p className="text-indigo-100 text-xs mt-0.5">Institutional timetable &amp; coordination</p>
               </div>
             </div>
 
@@ -366,10 +366,10 @@ export default function TimetablePage() {
               {/* Conflict badge */}
               <button
                 onClick={() => conflictCount > 0 && setShowConflicts(true)}
-                className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border transition ${
+                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition ${
                   conflictCount > 0
-                    ? 'bg-red-400/25 text-red-100 border-red-300/50 hover:bg-red-400/40'
-                    : 'bg-emerald-400/20 text-emerald-100 border-emerald-300/40'
+                    ? 'bg-red-500/30 text-white border-red-300/60 hover:bg-red-500/45'
+                    : 'bg-emerald-500/25 text-white border-emerald-300/50 hover:bg-emerald-500/35'
                 }`}
               >
                 {conflictCount > 0
@@ -381,10 +381,10 @@ export default function TimetablePage() {
               {/* Workload toggle */}
               <button
                 onClick={() => setShowWorkload(s => !s)}
-                className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border transition ${
+                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition ${
                   showWorkload
                     ? 'bg-white text-indigo-700 border-white shadow-sm'
-                    : 'bg-white/10 text-white border-white/25 hover:bg-white/20'
+                    : 'bg-white/15 text-white border-white/40 hover:bg-white/25'
                 }`}
               >
                 <BarChart3 size={12} /> Workload
@@ -394,7 +394,7 @@ export default function TimetablePage() {
               {canEdit && (
                 <button
                   onClick={() => setShowBell(true)}
-                  className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-white/25 bg-white/10 text-white hover:bg-white/20 transition"
+                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/40 bg-white/15 text-white hover:bg-white/25 transition"
                 >
                   <Clock size={12} /> Bell
                 </button>
@@ -404,7 +404,7 @@ export default function TimetablePage() {
               {canEdit && (
                 <button
                   onClick={() => setShowImport(true)}
-                  className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-white/25 bg-white/10 text-white hover:bg-white/20 transition"
+                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/40 bg-white/15 text-white hover:bg-white/25 transition"
                   title="Import timetable from CSV"
                 >
                   <Upload size={12} /> Import
@@ -415,7 +415,7 @@ export default function TimetablePage() {
               {canEdit && activeView === 'class' && classId && (
                 <button
                   onClick={() => openAdd('monday', '1')}
-                  className="flex items-center gap-1.5 bg-white hover:bg-indigo-50 text-indigo-700 text-xs font-semibold px-4 py-1.5 rounded-lg shadow-sm transition"
+                  className="flex items-center gap-1.5 bg-white hover:bg-indigo-50 text-indigo-700 text-xs font-bold px-4 py-1.5 rounded-lg shadow-sm transition"
                 >
                   <Plus size={13} /> Add slot
                 </button>
@@ -429,10 +429,10 @@ export default function TimetablePage() {
               <button
                 key={v.id}
                 onClick={() => setActiveView(v.id)}
-                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium transition rounded-t-lg ${
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold transition rounded-t-lg ${
                   activeView === v.id
-                    ? 'bg-white text-indigo-700 font-semibold shadow-sm'
-                    : 'text-white/65 hover:text-white hover:bg-white/10'
+                    ? 'bg-white text-indigo-700 shadow-sm'
+                    : 'text-white/90 hover:text-white hover:bg-white/15'
                 }`}
               >
                 <v.Icon size={13} />{v.label}
