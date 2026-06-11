@@ -54,6 +54,17 @@ function _validate(schema, data) {
   return { data: r.data };
 }
 
+/* ── Infer a section key from its display name ───────────────── */
+function _inferKey(name) {
+  const n = (name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (/kg|kindergarten|nursery|reception|pre.?school/.test(n)) return 'kg';
+  if (/primary|elementary|standard|junior/.test(n))            return 'primary';
+  if (/secondary|high.?school|form/.test(n))                   return 'secondary';
+  if (/a.?level|sixth|advanced/.test(n))                       return 'alevel';
+  // generic fallback: slugify name
+  return n.replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30) || 'section';
+}
+
 /* ── GET /api/sections ───────────────────────────────────────── */
 /* Any authenticated user can read sections (needed for filter   */
 /* tabs in Classes and Timetable pages for all roles).           */
@@ -70,6 +81,24 @@ router.get('/', authMiddleware, async (req, res) => {
       }));
       const seeded = await Sections.insertMany(inserts);
       docs = seeded.map(d => (d.toObject ? d.toObject() : d));
+    } else {
+      // Auto-migrate: backfill missing `key` or `color` fields.
+      // Affects schools whose sections were seeded before these fields were added.
+      const broken = docs.filter(d => !d.key || !d.color);
+      if (broken.length) {
+        await Promise.all(broken.map(d => {
+          const guess = DEFAULT_SECTIONS.find(
+            ds => ds.name.toLowerCase() === (d.name || '').toLowerCase(),
+          );
+          const patch = {};
+          if (!d.key)   patch.key   = guess?.key   || _inferKey(d.name);
+          if (!d.color) patch.color = guess?.color || '#6366f1';
+          return Sections.updateOne({ _id: d._id }, { $set: patch });
+        }));
+        // Reload with patched data
+        docs = await Sections.find({ schoolId }).sort({ order: 1, name: 1 }).select('-__v').lean();
+        console.log(`[sections] Auto-migrated ${broken.length} section(s) — added missing key/color fields`);
+      }
     }
 
     return ok(res, docs);

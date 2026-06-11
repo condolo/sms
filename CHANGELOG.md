@@ -55,6 +55,24 @@ Full per-user drag-and-drop dashboard customisation for admin and teacher roles.
 
 ---
 
+## [4.32.4] — 2026-06-11  Section Tab "all highlighted" Bug Fix
+
+### Fixed — `server/routes/sections.js` + `client/src/hooks/useSections.js`
+
+**Root cause:** Schools whose sections were auto-seeded by an older version of the route (before `key`/`color` were added to `DEFAULT_SECTIONS`) had section documents in the DB without a `key` field.  
+`useSections` mapped `id: s.key` → `id: undefined` for every tab.  
+Clicking any tab called `setSection(undefined)`, after which `undefined === undefined` is `true` for all tabs simultaneously → every section tab appeared "active" at once.
+
+**Server fix (`server/routes/sections.js`):**
+- Added `_inferKey(name)` helper that maps a section's display name to a `key` string using regex patterns (kg, primary, secondary, alevel) with a slugify fallback
+- `GET /api/sections` now detects sections with missing `key` or `color`, patches them via `$set`, and reloads before responding — a silent one-time migration that runs on the next page load
+
+**Client fix (`client/src/hooks/useSections.js`):**
+- `sectionTabs` now filters out sections without a `key` before mapping (`.filter(s => s.key)`) so a missing-key section can never enter the tabs array
+- Added `color` fallback: `s.color || '#6366f1'` so even unpatched data shows distinct fallback colour
+
+---
+
 ## [4.32.3] — 2026-06-11  Timetable Dashboard Visual Redesign
 
 ### Changed — `client/src/pages/timetable/TimetablePage.jsx`

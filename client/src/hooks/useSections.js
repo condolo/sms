@@ -42,7 +42,12 @@ export function useSections() {
   /* Ready-to-use tabs array: first entry is always "All" */
   const sectionTabs = [
     { id: 'all', label: 'All Sections', color: '#64748b' },
-    ...sections.map(s => ({ id: s.key, label: s.name, color: s.color })),
+    // Guard: skip any section without a key (would cause undefined === undefined
+    // to match every tab simultaneously when clicked).
+    // color fallback prevents all tabs collapsing to the same #6366f1 purple.
+    ...sections
+      .filter(s => s.key)
+      .map(s => ({ id: s.key, label: s.name, color: s.color || '#6366f1' })),
   ];
 
   return { sections, sectionMap, sectionTabs, isLoading: isLoading && !isError };
