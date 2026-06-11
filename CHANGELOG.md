@@ -55,6 +55,79 @@ Full per-user drag-and-drop dashboard customisation for admin and teacher roles.
 
 ---
 
+## [4.32.0] — 2026-06-11  OAuth Exchange-Code Flow + JWT Token-Version Revocation
+
+### Security — OAuth token no longer exposed in redirect URL (F4)
+
+The Google and Microsoft OAuth callbacks previously embedded the full JWT in the redirect URL (`?token=...`), leaking it into browser history, server access logs, and third-party `Referer` headers.
+
+**New flow:**
+1. OAuth callback generates a 30-second single-use **exchange code** (`crypto.randomBytes(32)` — 64-char hex) and stores `{ token, expiresAt }` in an in-process Map.
+2. Redirect URL carries `?code=<hex>` only — no JWT.
+3. New **`POST /api/auth/exchange`** endpoint: validates code (deletes on first read), re-reads `user + photo + school` from DB, returns `{ token, user, school }` identical in shape to the login endpoint.
+4. `client/src/pages/Login.jsx` updated: reads `?code=` instead of `?token=`, calls `/api/auth/exchange` via POST, eliminates the secondary `/api/auth/me` call.
+
+**Files changed:** `server/routes/auth.js`, `client/src/pages/Login.jsx`
+
+### Security — JWT revocation via per-user token version (F11)
+
+Previously, a role change (e.g. demoting an admin) took up to 24 hours to take effect because existing JWTs were stateless.
+
+**New mechanism:**
+- `server/utils/token-version.js` — new utility: `getTokenVersion(userId)` with 5-minute in-process cache; `revokeUserTokens(userId)` increments `tokenVersion` in DB and busts the cache entry.
+- Every JWT payload now includes `tv: user.tokenVersion ?? 0`.
+- `authMiddleware` is now async; after signature verification it checks `payload.tv` against the cached DB version — a lower version returns 401 immediately.
+- `server/routes/settings.js` — `PUT /users/:id` calls `revokeUserTokens()` when a role change is applied; takes effect on the user's next request.
+- **Backward compat:** tokens issued before this version carry no `tv` claim and pass through unchanged until they expire naturally (max 24 h).
+
+**Files changed:** `server/utils/token-version.js` *(new)*, `server/middleware/auth.js`, `server/routes/auth.js`, `server/routes/settings.js`
+
+---
+
+## [4.31.3] — 2026-06-11  Multi-Tenant Security Hardening (Findings F1–F10)
+
+Full audit of all 47 backend routes, middleware, and utilities against an 11-area security checklist. Ten findings fixed; one informational note closed.
+
+### Fixed — Missing `schoolId` scope on user queries (F1, F6, F7)
+
+| File | Location | Fix |
+|---|---|---|
+| `server/routes/auth.js` | `change-password` `findOne` + `updateOne` | Added `schoolId: req.jwtUser.schoolId` |
+| `server/routes/users.js` | `PUT /me` post-update `findOne` | Added `schoolId: req.jwtUser.schoolId` |
+| `server/routes/settings.js` | `GET /` and `PUT /` `findOne` | Added `schoolId: req.jwtUser.schoolId` |
+
+### Fixed — `verify-otp` client-controlled `schoolId` stripped (F3)
+
+`server/routes/auth.js` — `schoolId` removed from body destructure; all three DB calls (`findOne`, two `updateOne`) now use the server-resolved `req.school.id` exclusively.
+
+### Fixed — Photo endpoint: unauthenticated cross-tenant access blocked (F2)
+
+`GET /api/users/:id/photo` now requires a `?schoolId=` query parameter and filters `user_photos` by `schoolId`. Returns 400 if the parameter is absent.
+
+All server-side `photoUrl` response fields updated to include `?schoolId=encodeURIComponent(...)`. Frontend updated in three locations (`TopBar.jsx`, `ProfilePage.jsx` ×2, `client.js` helper).
+
+### Fixed — M-Pesa STK callback scoped to transaction's school (F5)
+
+`server/routes/mpesa.js` — both `updateOne` calls and the invoice `findOne` inside the STK callback now include `schoolId: txn.schoolId` (available from the already-found transaction document).
+
+### Added — `mpesa_transactions` DB indexes (F10)
+
+`server/utils/indexes.js` — new collection entry with four indexes: unique on `checkoutRequestId`, compound `schoolId + status + createdAt`, `schoolId + invoiceId`, and unique on `id`.
+
+### Fixed — Backup export strips credential fields (F8)
+
+`server/routes/backup.js` — users collection export strips `password`, `passwordHash`, `twoFactorSecret`, `mfaOtp`, `mfaExpiry` before serialisation; schools collection strips `smtpPassEnc` and `mpesa` (API keys).
+
+### Fixed — School-wide message broadcast restricted to staff (F9)
+
+`server/routes/messages.js` — `POST /` now enforces a `BROADCAST_ROLES` set (`superadmin`, `admin`, `deputy_principal`, `deputy`, `section_head`, `teacher`, `hr`). Students and parents receive 403 when attempting `recipients: 'all'`.
+
+### Confirmed secure (no change needed)
+
+Login rate limiting (10/15 min), bcrypt hash guard, OTP CSPRNG + timing-safe comparison, platform admin key, finance route isolation, server-side financial totals, parent/student portal ownership checks, analytics role gate, report-card publish admin-only gate, public endpoint field whitelist.
+
+---
+
 ## [4.31.2] — 2026-06-11  Centralise Auth Token Reads
 
 ### Refactored — Token access pattern (8 files)
