@@ -6,14 +6,8 @@ import {
   ChevronRight, X, Check, RefreshCw, Trash2, Edit2, ArrowLeft,
 } from 'lucide-react';
 import { library as libApi } from '@/api/client.js';
+import useAuthStore from '@/store/auth.js';
 
-/* ── Role helpers ─────────────────────────────────────────── */
-function useRole() {
-  try {
-    const s = JSON.parse(localStorage.getItem('msingi_session') || '{}');
-    return s?.user?.role ?? 'student';
-  } catch { return 'student'; }
-}
 const MANAGE_ROLES = new Set(['superadmin', 'admin', 'librarian']);
 
 /* KpiCard — shared themed component (see @/components/ui/KpiCard.jsx) */
@@ -219,7 +213,7 @@ function LoanModal({ onClose, onSave }) {
    ══════════════════════════════════════════════════════════════ */
 export default function LibraryPage() {
   const qc      = useQueryClient();
-  const role    = useRole();
+  const role    = useAuthStore(s => s.session?.user?.role ?? 'student');
   const canEdit = MANAGE_ROLES.has(role);
 
   const [tab,    setTab]    = useState('books');    // books | loans

@@ -537,6 +537,20 @@ export const analytics = {
   leadership: (days = 30) => _get('/analytics/leadership', { days }),
 };
 
+export const billing = {
+  /** Current pending invoice for this school */
+  current:  ()     => _get('/billing/current'),
+  /** Generate (or regenerate) the subscription invoice for the current term */
+  generate: (data) => _post('/billing/generate', data),
+  /** Full invoice history */
+  history:  ()     => _get('/billing/history'),
+};
+
+export const mpesa = {
+  /** Initiate an STK-push subscription payment */
+  subscription: (data) => _post('/mpesa/subscription', data),
+};
+
 export const bellSchedule = {
   /** Fetch a section's schedule. Falls back: section → 'all' → hardcoded default. */
   get:      (section = 'all') => _get('/bell-schedule', { section }),
@@ -659,6 +673,8 @@ const api = {
   importExport,
   growthProfile,
   analytics,
+  billing,
+  mpesa,
   library,
   transport,
   hostel,

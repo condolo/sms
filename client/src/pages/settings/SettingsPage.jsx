@@ -22,6 +22,7 @@ import {
 import { sections as sectionsApi } from '@/api/client.js';
 import { settings as settingsApi } from '@/api/client.js';
 import { academicConfig as academicConfigApi } from '@/api/client.js';
+import { billing as billingApi, mpesa as mpesaApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 
 /* ── Tab config ─────────────────────────────────────────────── */
@@ -3261,11 +3262,7 @@ function SubscriptionTab() {
   // Fetch current pending invoice
   const { data: invoiceData, refetch: refetchInvoice } = useQuery({
     queryKey:  ['billing-current'],
-    queryFn:   async () => {
-      const token = JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token;
-      const res   = await fetch('/api/billing/current', { headers: { Authorization: `Bearer ${token}` } });
-      return res.ok ? res.json() : { invoice: null };
-    },
+    queryFn:   () => billingApi.current().catch(() => ({ invoice: null })),
     select: d => d?.invoice ?? null,
   });
 
@@ -3277,7 +3274,6 @@ function SubscriptionTab() {
   async function handleGenerate() {
     setGenerating(true); setError(''); setResult(null);
     try {
-      const token = JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token;
       // Determine current term from school settings (first term whose start date <= today)
       const schoolData = school;
       const termDates  = schoolData?.termDates ?? [];
@@ -3291,12 +3287,7 @@ function SubscriptionTab() {
         term:         currentTermDef?.term ?? 1,
       };
 
-      const res  = await fetch('/api/billing/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(body),
-      });
-      const json = await res.json();
+      const json = await billingApi.generate(body);
       if (!json.success) throw new Error(json.error?.message || 'Failed to generate invoice.');
       await refetchInvoice();
     } catch (err) {
@@ -3311,15 +3302,7 @@ function SubscriptionTab() {
     if (studentCount < 1)  { setError('Enter a valid student count.'); return; }
     setLoading(true); setError(''); setResult(null);
     try {
-      const res = await fetch('/api/mpesa/subscription', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token}`,
-        },
-        body: JSON.stringify({ phone: phone.trim(), tier: selTier, studentCount }),
-      });
-      const json = await res.json();
+      const json = await mpesaApi.subscription({ phone: phone.trim(), tier: selTier, studentCount });
       if (!json.success) throw new Error(json.error?.message || 'Payment initiation failed.');
       setResult(json);
     } catch (err) {
@@ -3512,9 +3495,7 @@ function BillingHistory() {
   const { data: history = [] } = useQuery({
     queryKey: ['billing-history'],
     queryFn: async () => {
-      const token = JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token;
-      const res   = await fetch('/api/billing/history', { headers: { Authorization: `Bearer ${token}` } });
-      const json  = await res.json();
+      const json = await billingApi.history();
       return json.success ? json.data : [];
     },
   });

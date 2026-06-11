@@ -6,14 +6,8 @@ import {
 } from 'lucide-react';
 import { hostel as hostelApi } from '@/api/client.js';
 import { KpiCard } from '@/components/ui/KpiCard.jsx';
+import useAuthStore from '@/store/auth.js';
 
-/* ── Role helpers ─────────────────────────────────────────── */
-function useRole() {
-  try {
-    const s = JSON.parse(localStorage.getItem('msingi_session') || '{}');
-    return s?.user?.role ?? 'student';
-  } catch { return 'student'; }
-}
 const MANAGE_ROLES = new Set(['superadmin', 'admin', 'hostel_master']);
 
 /* KpiCard — shared themed component (see @/components/ui/KpiCard.jsx) */
@@ -318,7 +312,7 @@ function AssignModal({ hostels, rooms, onClose, onSave }) {
    ══════════════════════════════════════════════════════════════ */
 export default function HostelPage() {
   const qc      = useQueryClient();
-  const role    = useRole();
+  const role    = useAuthStore(s => s.session?.user?.role ?? 'student');
   const canEdit = MANAGE_ROLES.has(role);
 
   const [tab,          setTab]          = useState('hostels');

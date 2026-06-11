@@ -202,19 +202,7 @@ export default function ProfilePage() {
     setProfSaving(true);
     setProfBanner({ type: '', msg: '' });
     try {
-      const token = JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token;
-      const { slug } = (await import('@/utils/schoolDetect.js')).detectSchool();
-      const res = await fetch('/api/users/me', {
-        method:  'PUT',
-        headers: {
-          'Content-Type':  'application/json',
-          'Authorization': `Bearer ${token}`,
-          ...(slug ? { 'X-School-Slug': slug } : {}),
-        },
-        body: JSON.stringify({ name: name.trim(), phone: phone.trim(), bio: bio.trim() }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Update failed');
+      await profileApi.update({ name: name.trim(), phone: phone.trim(), bio: bio.trim() });
       setSession({ ...session, user: { ...user, name: name.trim(), phone: phone.trim(), bio: bio.trim() } });
       setProfBanner({ type: 'success', msg: 'Profile updated successfully.' });
     } catch (err) {

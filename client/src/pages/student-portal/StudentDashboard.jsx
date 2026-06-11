@@ -15,7 +15,7 @@ import {
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 
 function _token() {
-  return JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token || '';
+  return useAuthStore.getState().session?.token || '';
 }
 
 async function _fetch(path) {

@@ -55,6 +55,43 @@ Full per-user drag-and-drop dashboard customisation for admin and teacher roles.
 
 ---
 
+## [4.31.2] — 2026-06-11  Centralise Auth Token Reads
+
+### Refactored — Token access pattern (8 files)
+
+All client-side pages that were reading `JSON.parse(localStorage.getItem('msingi_session'))?.token` directly have been migrated to the proper centrally-managed patterns. This means a future key-name or schema change needs updating in exactly one place (`auth.js`/`client.js`), not scattered across the codebase.
+
+#### Changes per file
+
+| File | Was | Now |
+|---|---|---|
+| `StudentDashboard.jsx` | `_token()` read localStorage | `useAuthStore.getState().session?.token` |
+| `ParentDashboard.jsx` | `_token()` read localStorage | `useAuthStore.getState().session?.token` |
+| `LibraryPage.jsx` | `useRole()` read localStorage for role | `useAuthStore(s => s.session?.user?.role)` selector |
+| `TransportPage.jsx` | `useRole()` read localStorage for role | `useAuthStore(s => s.session?.user?.role)` selector |
+| `HostelPage.jsx` | `useRole()` read localStorage for role | `useAuthStore(s => s.session?.user?.role)` selector |
+| `ProfilePage.jsx` | Raw `fetch('/api/users/me')` with manual token | `profileApi.update()` from `client.js` |
+| `SettingsPage.jsx` | Raw fetches for 4 billing/mpesa endpoints | New `billingApi.*` / `mpesaApi.*` from `client.js` |
+| `ELearningPage.jsx` | `apiFetch` + 4 raw `useQuery` fetches | `useAuthStore.getState()` in `apiFetch`; client helpers for subjects/classes/students/teacher |
+
+#### Added — `client/src/api/client.js`
+
+```js
+export const billing = {
+  current:  () => _get('/billing/current'),
+  generate: (data) => _post('/billing/generate', data),
+  history:  () => _get('/billing/history'),
+};
+
+export const mpesa = {
+  subscription: (data) => _post('/mpesa/subscription', data),
+};
+```
+
+Both are also included in the default `api` export object.
+
+---
+
 ## [4.31.0] — 2026-06-11  eLearning Redesign — PMI Sessions, Calendar Integration, Emergency Online Mode, Student Portal Join Buttons
 
 ### Added — eLearning module (8 phases)

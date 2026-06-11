@@ -11,14 +11,20 @@ import {
   ExternalLink, RefreshCcw, Video, Play, StopCircle,
   Mic, MicOff, WifiOff,
 } from 'lucide-react';
-import { settings as settingsApi } from '@/api/client.js';
+import {
+  settings as settingsApi,
+  subjects as subjectsApi,
+  classes as classesApi,
+  students as studentsApi,
+  profile as profileApi,
+} from '@/api/client.js';
+import useAuthStore from '@/store/auth.js';
 
 /* ── API helpers ─────────────────────────────────────────────── */
 const BASE = '/api/elearning';
 
 async function apiFetch(path, opts = {}) {
-  const raw   = localStorage.getItem('msingi_session');
-  const token = raw ? JSON.parse(raw)?.token : null;
+  const token = useAuthStore.getState().session?.token ?? null;
   const res   = await fetch(`${BASE}${path}`, {
     ...opts,
     headers: {
@@ -131,15 +137,11 @@ function LinkCourseModal({ gcCourses, linkedIds, onLink, onClose }) {
 
   const { data: subjectsData } = useQuery({
     queryKey: ['subjects'],
-    queryFn:  () => fetch('/api/subjects', {
-      headers: { Authorization: `Bearer ${JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token}` }
-    }).then(r => r.json()),
+    queryFn:  () => subjectsApi.list(),
   });
   const { data: classesData } = useQuery({
     queryKey: ['classes'],
-    queryFn:  () => fetch('/api/classes', {
-      headers: { Authorization: `Bearer ${JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token}` }
-    }).then(r => r.json()),
+    queryFn:  () => classesApi.list(),
   });
 
   const subjects = subjectsData?.data || subjectsData?.subjects || [];
@@ -1580,16 +1582,12 @@ function NewScheduleModal({ teacherRecord, onClose, onScheduled }) {
   /* Fetch classes and students for audience picker */
   const { data: classesData } = useQuery({
     queryKey: ['classes'],
-    queryFn:  () => fetch('/api/classes', {
-      headers: { Authorization: `Bearer ${JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token}` }
-    }).then(r => r.json()),
+    queryFn:  () => classesApi.list(),
     staleTime: 300_000,
   });
   const { data: studentsData } = useQuery({
     queryKey: ['students-light'],
-    queryFn:  () => fetch('/api/students?limit=200', {
-      headers: { Authorization: `Bearer ${JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token}` }
-    }).then(r => r.json()),
+    queryFn:  () => studentsApi.list({ limit: 200 }),
     staleTime: 300_000,
     enabled: audType === 'student',
   });
@@ -1802,9 +1800,7 @@ function OnlineSessionsTab() {
   /* Fetch teacher's own staff record (for stored meeting links) */
   const { data: teacherData } = useQuery({
     queryKey: ['teacher-me'],
-    queryFn:  () => fetch('/api/teachers/me', {
-      headers: { Authorization: `Bearer ${JSON.parse(localStorage.getItem('msingi_session') || '{}')?.token}` }
-    }).then(r => r.json()),
+    queryFn:  () => profileApi.staffRecord(),
     staleTime: 120_000,
   });
   const teacherRecord = teacherData?.data ?? null;
