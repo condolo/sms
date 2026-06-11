@@ -130,6 +130,7 @@ export const profile = {
   photoUrl:           (userId) => `/api/users/${userId}/photo`,
   staffRecord:        ()       => _get('/teachers/me'),
   updateStaffRecord:  (data)   => _put('/teachers/me', data),
+  saveMeetingLinks:   (data)   => _put('/users/me/meeting-links', data),
 };
 
 export const students = {

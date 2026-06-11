@@ -241,10 +241,11 @@ router.post('/:id/role-change', authMiddleware, async (req, res) => {
 
 /* ══════════════════════════════════════════════════════════════
    SELF-SERVICE PROFILE ENDPOINTS
-   GET  /api/users/me         — fetch own profile (+ photoUrl)
-   PUT  /api/users/me         — update own name / phone / bio
-   PUT  /api/users/me/photo   — upload / replace profile photo (non-students)
-   DELETE /api/users/me/photo — remove profile photo
+   GET  /api/users/me                  — fetch own profile (+ photoUrl)
+   PUT  /api/users/me                  — update own name / phone / bio
+   PUT  /api/users/me/meeting-links    — save Zoom PMI / Meet links (all roles)
+   PUT  /api/users/me/photo            — upload / replace profile photo (non-students)
+   DELETE /api/users/me/photo          — remove profile photo
    GET  /api/users/:id/photo  — serve photo as image/* (tenant-scoped)
    ══════════════════════════════════════════════════════════════ */
 
@@ -292,6 +293,46 @@ router.put('/me', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('[users/me PUT]', err);
     res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+/* PUT /api/users/me/meeting-links — save Zoom PMI / Google Meet links (all roles) */
+router.put('/me/meeting-links', authMiddleware, async (req, res) => {
+  try {
+    const { userId, schoolId } = req.jwtUser;
+    const { zoomPMILink = '', zoomPasscode = '', meetLink = '' } = req.body;
+
+    // Validate: if a URL is provided it must start with https://
+    for (const [label, val] of [['Zoom PMI link', zoomPMILink], ['Google Meet link', meetLink]]) {
+      if (val && !val.trim().startsWith('https://')) {
+        return res.status(400).json({ success: false, error: { message: `${label} must start with https://` } });
+      }
+    }
+
+    const updates = {
+      zoomPMILink:  zoomPMILink.trim(),
+      zoomPasscode: zoomPasscode.trim(),
+      meetLink:     meetLink.trim(),
+      updatedAt:    new Date().toISOString(),
+    };
+
+    const User = _model('users');
+    await User.updateOne({ id: userId, schoolId }, { $set: updates });
+
+    // Mirror onto teacher record if one exists (keeps emergency timetable logic working)
+    const Teachers = _model('teachers');
+    const user = await User.findOne({ id: userId, schoolId }).lean();
+    if (user) {
+      await Teachers.updateOne(
+        { schoolId, email: user.email },
+        { $set: { zoomPMILink: updates.zoomPMILink, zoomPasscode: updates.zoomPasscode, meetLink: updates.meetLink, updatedAt: updates.updatedAt } }
+      );
+    }
+
+    return res.json({ success: true, data: updates });
+  } catch (err) {
+    console.error('[users/me/meeting-links PUT]', err);
+    return res.status(500).json({ success: false, error: { message: 'Failed to save meeting links.' } });
   }
 });
 

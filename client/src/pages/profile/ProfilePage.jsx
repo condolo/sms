@@ -112,8 +112,13 @@ export default function ProfilePage() {
     }
   }, [user?.id]);
 
-  /* fetch staff record on mount */
+  /* fetch staff record on mount — also pre-populate meeting links from user doc as fallback */
   useEffect(() => {
+    // Pre-populate meeting links from the session user (available for all roles incl. admin)
+    setSfZoomLink(user?.zoomPMILink  || '');
+    setSfZoomPasscode(user?.zoomPasscode || '');
+    setSfMeetLink(user?.meetLink     || '');
+
     profileApi.staffRecord()
       .then(json => {
         const rec = json?.data ?? null;
@@ -126,9 +131,10 @@ export default function ProfilePage() {
           setSfNokName(rec.nextOfKin?.name         || '');
           setSfNokPhone(rec.nextOfKin?.phone        || '');
           setSfNokRel(rec.nextOfKin?.relationship   || '');
-          setSfZoomLink(rec.zoomPMILink  || '');
-          setSfZoomPasscode(rec.zoomPasscode || '');
-          setSfMeetLink(rec.meetLink     || '');
+          // Teacher record overrides user-level links when both exist
+          setSfZoomLink(rec.zoomPMILink  || user?.zoomPMILink  || '');
+          setSfZoomPasscode(rec.zoomPasscode || user?.zoomPasscode || '');
+          setSfMeetLink(rec.meetLink     || user?.meetLink     || '');
         }
       })
       .catch(() => setStaffData(null));
@@ -276,12 +282,13 @@ export default function ProfilePage() {
     setMeetSaving(true);
     setMeetBanner({ type: '', msg: '' });
     try {
-      const json = await profileApi.updateStaffRecord({
+      // Save to user document (works for all roles — admin, superadmin, teacher, etc.)
+      // The server also mirrors onto the teacher record when one exists.
+      await profileApi.saveMeetingLinks({
         zoomPMILink:  sfZoomLink.trim(),
         zoomPasscode: sfZoomPasscode.trim(),
         meetLink:     sfMeetLink.trim(),
       });
-      setStaffData(json?.data ?? staffData);
       setMeetBanner({ type: 'success', msg: 'Meeting links saved.' });
     } catch (err) {
       setMeetBanner({ type: 'error', msg: err.message || 'Failed to save meeting links.' });
@@ -625,8 +632,8 @@ export default function ProfilePage() {
         </Card>
       )}
 
-      {/* ── Meeting Links card — staff only ────────────────────────── */}
-      {staffData && (
+      {/* ── Meeting Links card — all roles except student ───────────── */}
+      {!isStudent && (
         <Card title="Online Meeting Links" icon={Video}>
           <form onSubmit={handleMeetingSave} className="space-y-5">
             <Banner type={meetBanner.type} message={meetBanner.msg} onClose={() => setMeetBanner({ type: '', msg: '' })} />

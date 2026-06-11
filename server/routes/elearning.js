@@ -838,14 +838,16 @@ router.post('/sessions', authMiddleware, planGate('elearning'), async (req, res)
     const Teachers = _model('teachers');
     const teacher  = await Teachers.findOne({ schoolId, email: user.email }).lean();
 
+    // Resolve meeting link — teacher record first, then user document (for admin/superadmin roles
+    // who don't have a teacher directory entry but have saved their personal links on their user account)
     let meetingLink    = null;
     let meetingPasscode = null;
 
     if (platform === 'zoom') {
-      meetingLink    = teacher?.zoomPMILink  || null;
-      meetingPasscode = teacher?.zoomPasscode || null;
+      meetingLink     = teacher?.zoomPMILink  || user.zoomPMILink  || null;
+      meetingPasscode = teacher?.zoomPasscode || user.zoomPasscode || null;
     } else if (platform === 'meet') {
-      meetingLink = teacher?.meetLink || null;
+      meetingLink = teacher?.meetLink || user.meetLink || null;
     }
 
     if (!meetingLink) {
