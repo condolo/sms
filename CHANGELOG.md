@@ -121,6 +121,22 @@ Full per-user drag-and-drop dashboard customisation for admin and teacher roles.
 
 ---
 
+## [4.31.1] — 2026-06-11  Help Centre — Role-Based Section Filtering + Content Expansion
+
+### Added — Help Centre (`client/src/pages/help/HelpPage.jsx`)
+
+- **Role-based section filtering** — the Help Centre now shows only the sections that match the modules a user has access to.
+  - Each FAQ section has a `moduleKey` property that maps to the same module permission keys used by the sidebar (`classes`, `students`, `admissions`, `attendance`, `timetable`, `elearning`, `finance`, `behaviour`, `grades`, `lessons`, `events`, `hr`, `messages`).
+  - Sections with `moduleKey: null` (Getting Started, Settings, Roles & Permissions, Data & Import/Export) are always visible to every role.
+  - Filtering uses `useAuthStore`'s `can(moduleKey)` method — the same gate that controls sidebar visibility. `superadmin` and `admin` bypass the check and see all sections.
+  - Both the sidebar navigation list and the article panel grid respect the filtered set; the search query also runs only over the visible sections.
+
+- **Content expansion** — 18 sections, 80+ articles covering every module:
+  - New sections added: Classes & Subjects, Admissions, Timetable, eLearning & Online Sessions, Exams, Report Cards, Lessons & Coverage, HR & Staff, Events & Calendar.
+  - All hardcoded `violet-*` colour references replaced with `useSchoolTheme` primary/accent colours.
+
+---
+
 ## [4.30.1] — 2026-06-09  Security & Bug Fixes
 
 ### Fixed — Security hardening

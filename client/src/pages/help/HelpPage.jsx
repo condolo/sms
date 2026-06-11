@@ -10,12 +10,19 @@ import {
   ClipboardCheck, Layers, UserCog, Trophy,
 } from 'lucide-react';
 import { useSchoolTheme, withOpacity } from '@/hooks/useSchoolTheme.js';
+import useAuthStore from '@/store/auth.js';
+
+/* ── Section → module permission key mapping ──────────────────────
+   null  = always visible (Getting Started, universal sections)
+   string = must pass can(moduleKey) OR be admin/superadmin
+   ──────────────────────────────────────────────────────────────── */
 
 /* ── All FAQ content ──────────────────────────────────────────── */
 const SECTIONS = [
   /* ── Getting Started ──────────────────────────────────────── */
   {
     id: 'getting-started',
+    moduleKey: null,          // visible to all roles
     Icon: BookOpen,
     title: 'Getting Started',
     articles: [
@@ -57,6 +64,7 @@ const SECTIONS = [
   /* ── Classes & Subjects ───────────────────────────────────── */
   {
     id: 'classes',
+    moduleKey: 'classes',
     Icon: Layers,
     title: 'Classes & Subjects',
     articles: [
@@ -82,6 +90,7 @@ const SECTIONS = [
   /* ── Students ─────────────────────────────────────────────── */
   {
     id: 'students',
+    moduleKey: 'students',
     Icon: GraduationCap,
     title: 'Students',
     articles: [
@@ -115,6 +124,7 @@ const SECTIONS = [
   /* ── Admissions ───────────────────────────────────────────── */
   {
     id: 'admissions',
+    moduleKey: 'admissions',
     Icon: ClipboardList,
     title: 'Admissions',
     articles: [
@@ -144,6 +154,7 @@ const SECTIONS = [
   /* ── Attendance ───────────────────────────────────────────── */
   {
     id: 'attendance',
+    moduleKey: 'attendance',
     Icon: CalendarDays,
     title: 'Attendance',
     articles: [
@@ -173,6 +184,7 @@ const SECTIONS = [
   /* ── Timetable ────────────────────────────────────────────── */
   {
     id: 'timetable',
+    moduleKey: 'timetable',
     Icon: Clock,
     title: 'Timetable',
     articles: [
@@ -202,6 +214,7 @@ const SECTIONS = [
   /* ── eLearning & Online Sessions ─────────────────────────── */
   {
     id: 'elearning',
+    moduleKey: 'elearning',
     Icon: MonitorPlay,
     title: 'eLearning & Online Sessions',
     articles: [
@@ -231,6 +244,7 @@ const SECTIONS = [
   /* ── Finance ──────────────────────────────────────────────── */
   {
     id: 'finance',
+    moduleKey: 'finance',
     Icon: Wallet,
     title: 'Finance',
     articles: [
@@ -264,6 +278,7 @@ const SECTIONS = [
   /* ── Behaviour ────────────────────────────────────────────── */
   {
     id: 'behaviour',
+    moduleKey: 'behaviour',
     Icon: Scale,
     title: 'Behaviour & Pastoral',
     articles: [
@@ -293,6 +308,7 @@ const SECTIONS = [
   /* ── Exams ────────────────────────────────────────────────── */
   {
     id: 'exams',
+    moduleKey: 'grades',     // exams live under the grades/assessment module key
     Icon: ClipboardCheck,
     title: 'Exams',
     articles: [
@@ -318,6 +334,7 @@ const SECTIONS = [
   /* ── Grades & Assessment ──────────────────────────────────── */
   {
     id: 'grades',
+    moduleKey: 'grades',
     Icon: BarChart3,
     title: 'Grades & Assessment',
     articles: [
@@ -343,6 +360,7 @@ const SECTIONS = [
   /* ── Report Cards ─────────────────────────────────────────── */
   {
     id: 'report-cards',
+    moduleKey: 'grades',
     Icon: FileText,
     title: 'Report Cards',
     articles: [
@@ -368,6 +386,7 @@ const SECTIONS = [
   /* ── Lessons / Curriculum Coverage ───────────────────────── */
   {
     id: 'lessons',
+    moduleKey: 'lessons',
     Icon: BookCheck,
     title: 'Lessons & Coverage',
     articles: [
@@ -389,6 +408,7 @@ const SECTIONS = [
   /* ── Events & Calendar ────────────────────────────────────── */
   {
     id: 'events',
+    moduleKey: 'events',
     Icon: CalendarDays,
     title: 'Events & Calendar',
     articles: [
@@ -414,6 +434,7 @@ const SECTIONS = [
   /* ── HR & Staff ───────────────────────────────────────────── */
   {
     id: 'hr',
+    moduleKey: 'hr',
     Icon: UserCog,
     title: 'HR & Staff',
     articles: [
@@ -439,6 +460,7 @@ const SECTIONS = [
   /* ── Messages ─────────────────────────────────────────────── */
   {
     id: 'messages',
+    moduleKey: 'messages',
     Icon: MessageSquare,
     title: 'Messages',
     articles: [
@@ -464,6 +486,7 @@ const SECTIONS = [
   /* ── Settings ─────────────────────────────────────────────── */
   {
     id: 'settings',
+    moduleKey: null,             // all staff can read settings guidance
     Icon: Settings,
     title: 'Settings',
     articles: [
@@ -493,6 +516,7 @@ const SECTIONS = [
   /* ── Roles & Permissions ──────────────────────────────────── */
   {
     id: 'roles',
+    moduleKey: null,             // role information is universal reference
     Icon: Users,
     title: 'Roles & Permissions',
     articles: [
@@ -522,6 +546,7 @@ const SECTIONS = [
   /* ── Data & Import/Export ─────────────────────────────────── */
   {
     id: 'data',
+    moduleKey: null,             // data help visible to all (admin-only features explained in body)
     Icon: Trophy,
     title: 'Data & Import/Export',
     articles: [
@@ -572,10 +597,23 @@ export default function HelpPage() {
   const [query,    setQuery]    = useState('');
   const [activeId, setActiveId] = useState(null);
 
+  // Role-based section filtering — only show help for modules the user can access
+  const can  = useAuthStore(s => s.can.bind(s));
+  const role = useAuthStore(s => s.session?.user?.role);
+
+  const visibleSections = useMemo(() =>
+    SECTIONS.filter(sec =>
+      sec.moduleKey === null ||
+      role === 'superadmin' ||
+      role === 'admin' ||
+      can(sec.moduleKey),
+    ),
+  [role]); // `can` is a stable bound method — role change is the only trigger
+
   const filtered = useMemo(() => {
-    if (!query.trim()) return SECTIONS;
+    if (!query.trim()) return visibleSections;
     const q = query.toLowerCase();
-    return SECTIONS
+    return visibleSections
       .map(sec => ({
         ...sec,
         articles: sec.articles.filter(
@@ -583,7 +621,7 @@ export default function HelpPage() {
         ),
       }))
       .filter(sec => sec.articles.length > 0);
-  }, [query]);
+  }, [query, visibleSections]);
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -634,7 +672,7 @@ export default function HelpPage() {
           {/* ── Section sidebar ──────────────────────────────── */}
           {!query && (
             <div className="md:col-span-1 space-y-0.5">
-              {SECTIONS.map(sec => {
+              {visibleSections.map(sec => {
                 const isActive = activeId === sec.id;
                 return (
                   <button
