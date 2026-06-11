@@ -55,7 +55,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     if (!student) return E.notFound(res, 'Student record not found.');
 
     const school = await Schools.findOne({ id: schoolId })
-      .select('academicYear termsPerYear name')
+      .select('academicYear termsPerYear name emergencyOnlineMode')
       .lean();
 
     const academicYear = school?.academicYear || '';
@@ -106,12 +106,42 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     // ── Today's timetable ────────────────────────────────────
     const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
     const today = DAY_NAMES[new Date().getDay()];
-    const timetableToday = student.classId
+
+    let rawSlots = student.classId
       ? await Timetable.find({ schoolId, classId: student.classId, day: today })
           .sort({ startTime: 1 })
-          .select('subjectId subjectName teacherName startTime endTime room day')
+          .select('subjectId subjectName teacherName teacherId startTime endTime room day')
           .lean()
       : [];
+
+    // When Emergency Online Learning Mode is active, attach meeting link to each slot
+    // so students see a "Join" button with the correct teacher's link.
+    const emergencyMode = !!(school?.emergencyOnlineMode);
+    let timetableToday = rawSlots;
+
+    if (emergencyMode && rawSlots.length > 0) {
+      // Collect unique teacherIds present in today's slots
+      const teacherIds = [...new Set(rawSlots.map(s => s.teacherId).filter(Boolean))];
+      if (teacherIds.length > 0) {
+        const Teachers = _model('teachers');
+        const teacherDocs = await Teachers.find({ schoolId, id: { $in: teacherIds } })
+          .select('id zoomPMILink zoomPasscode meetLink')
+          .lean();
+        const teacherMap = Object.fromEntries(teacherDocs.map(t => [t.id, t]));
+
+        timetableToday = rawSlots.map(slot => {
+          if (!slot.teacherId) return slot;
+          const teacher = teacherMap[slot.teacherId];
+          if (!teacher) return slot;
+          // Prefer Zoom PMI, fall back to Meet link
+          const meetingLink     = teacher.zoomPMILink || teacher.meetLink || null;
+          const meetingPasscode = teacher.zoomPMILink ? (teacher.zoomPasscode || null) : null;
+          const platform        = teacher.zoomPMILink ? 'zoom' : teacher.meetLink ? 'meet' : null;
+          if (!meetingLink) return slot;
+          return { ...slot, meetingLink, meetingPasscode, platform };
+        });
+      }
+    }
 
     // ── Published report cards ───────────────────────────────
     const reportCards = await Reports.find({
@@ -130,7 +160,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
         photo:           student.photo || null,
         gender:          student.gender,
       },
-      school: { name: school?.name, academicYear },
+      school: { name: school?.name, academicYear, emergencyOnlineMode: emergencyMode },
       attendance:      attSummary,
       feeBalance,
       lessonsCoverage,

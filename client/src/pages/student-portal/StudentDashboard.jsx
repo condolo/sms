@@ -9,7 +9,7 @@ import useAuthStore from '@/store/auth.js';
 import {
   BookCheck, Calendar, CheckCircle, Clock, FileText,
   GraduationCap, LogOut, TrendingUp, User, Wallet,
-  AlertCircle, BookOpen, ChevronRight,
+  AlertCircle, BookOpen, ChevronRight, MonitorPlay, Play, Lock,
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
@@ -190,21 +190,58 @@ export default function StudentDashboard() {
                 {new Date().toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'short' })}
               </span>
             </div>
+
+            {/* Emergency Online Learning Mode banner */}
+            {school?.emergencyOnlineMode && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-sky-50 border border-sky-200 mb-3">
+                <MonitorPlay size={13} className="text-sky-600 shrink-0" />
+                <p className="text-[11px] font-semibold text-sky-700">Emergency Online Learning — all lessons are online today</p>
+              </div>
+            )}
+
             {timetableToday.length === 0 ? (
               <p className="text-sm text-slate-400 text-center py-6">No lessons scheduled today</p>
             ) : (
               <div className="space-y-2.5">
                 {timetableToday.map((slot, i) => (
-                  <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50">
-                    <div className="text-center shrink-0 w-14">
-                      <p className="text-[10px] text-slate-400">{slot.startTime}</p>
-                      <p className="text-[10px] text-slate-400">{slot.endTime}</p>
+                  <div key={i} className="rounded-xl bg-slate-50 border border-slate-100 overflow-hidden">
+                    <div className="flex items-center gap-3 p-3">
+                      {/* Time column */}
+                      <div className="text-center shrink-0 w-14">
+                        <p className="text-[10px] font-semibold text-slate-600">{slot.startTime}</p>
+                        <p className="text-[10px] text-slate-400">{slot.endTime}</p>
+                      </div>
+                      {/* Subject + teacher */}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-slate-800 truncate">{slot.subjectName}</p>
+                        {slot.teacherName && (
+                          <p className="text-[11px] text-slate-400 truncate">{slot.teacherName}</p>
+                        )}
+                      </div>
+                      {/* Room badge */}
+                      {slot.room && !slot.meetingLink && (
+                        <span className="text-[10px] text-slate-400 shrink-0">{slot.room}</span>
+                      )}
+                      {/* Join button */}
+                      {slot.meetingLink && (
+                        <a
+                          href={slot.meetingLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 shrink-0 px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-[11px] font-semibold transition"
+                        >
+                          <Play size={9} />
+                          Join {slot.platform === 'zoom' ? 'Zoom' : slot.platform === 'meet' ? 'Meet' : 'Class'}
+                        </a>
+                      )}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-slate-800 truncate">{slot.subjectName}</p>
-                      {slot.teacherName && <p className="text-[11px] text-slate-400 truncate">{slot.teacherName}</p>}
-                    </div>
-                    {slot.room && <span className="text-[10px] text-slate-400 shrink-0">{slot.room}</span>}
+                    {/* Passcode row (only shown when present) */}
+                    {slot.meetingPasscode && (
+                      <div className="flex items-center gap-1.5 px-3 pb-2.5 text-[10px] text-slate-500">
+                        <Lock size={9} className="text-slate-400 shrink-0" />
+                        Passcode: <span className="font-mono font-bold text-slate-700">{slot.meetingPasscode}</span>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
