@@ -55,6 +55,48 @@ Full per-user drag-and-drop dashboard customisation for admin and teacher roles.
 
 ---
 
+## [4.32.2] — 2026-06-11  Monitoring, Nightly Backup Cron, Email Batching, Exchange Rate-Limit
+
+### Added — Error monitoring utility (`server/utils/monitoring.js`)
+
+Lightweight, zero-new-dependency error tracking with three optional channels:
+
+| Channel | Activation |
+|---|---|
+| **Disk log** | Always active. Writes rotating `logs/errors-YYYY-MM-DD.log` JSON files. |
+| **Sentry** | Active when `SENTRY_DSN` env var is set **and** `@sentry/node` is installed (`npm install @sentry/node`). |
+| **Alert webhook** | Active when `ALERT_WEBHOOK_URL` env var is set. Sends a POST to any webhook endpoint (Discord, Slack, custom). |
+
+Global `uncaughtException` and `unhandledRejection` handlers registered at startup. `captureException(err, ctx)` called from the Express error handler with `route`, `method`, `userId`, `schoolId` context.
+
+**`server/index.js`** wired at three points:
+- `monitoring.init()` — before any middleware
+- `app.use(monitoring.requestHandler())` — after CORS (Sentry request context)
+- `app.use(monitoring.errorHandler())` — before the final error handler (Sentry error context)
+
+### Added — Nightly backup cron (`server/utils/backup-cron.js`)
+
+Auto-exports a full JSON backup for every active school once per day and saves it to disk.
+
+- Schedule: `BACKUP_CRON_EXPR` env var, default `"0 23 * * *"` (02:00 Kenya / 23:00 UTC)
+- Storage: `BACKUP_DIR` env var, default `<project_root>/backups/`
+- Retention: `BACKUP_KEEP_DAYS` env var, default `7` — older files auto-pruned per school
+- Same credential-stripping rules as the manual export (`password`, `passwordHash`, `twoFactorSecret`, `mfaOtp`, `mfaExpiry` from users; `smtpPassEnc`, `mpesa` from schools)
+- Writes a `backup_logs` row per school with `source: 'cron'` (distinguishable from manual exports in the Backup History UI)
+- Registered in `server/index.js` `app.listen` callback alongside existing crons
+
+### Fixed — School-wide announcements batch emails to avoid SMTP rate limits
+
+`server/routes/messages.js` previously fired all notification emails concurrently via `Promise.allSettled`, risking hitting Gmail's sending limits on large schools.
+
+**New:** `server/utils/email-queue.js` — `enqueueBatch(thunks)` sends in batches of `EMAIL_BATCH_SIZE` (default 20) with `EMAIL_BATCH_DELAY_MS` (default 1 500 ms) between batches. Email jobs are stored as **thunks** (lazy functions) to prevent SMTP calls from starting before batching can control them.
+
+### Fixed — Rate-limit `POST /api/auth/exchange` (B from security audit)
+
+`server/routes/auth.js` — added `exchangeLimiter`: 10 requests / 5 min per IP. Prevents brute-forcing exchange codes even though each code is single-use and expires in 30 seconds.
+
+---
+
 ## [4.32.0] — 2026-06-11  OAuth Exchange-Code Flow + JWT Token-Version Revocation
 
 ### Security — OAuth token no longer exposed in redirect URL (F4)

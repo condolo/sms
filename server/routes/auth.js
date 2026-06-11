@@ -696,7 +696,15 @@ router.post('/change-password', authMiddleware, async (req, res) => {
    The code is single-use and expires after 30 seconds.
    Returns { token, user, school } — same shape as the login endpoint.
    ══════════════════════════════════════════════════════════════ */
-router.post('/exchange', async (req, res) => {
+const exchangeLimiter = rateLimit({
+  windowMs:        5 * 60 * 1000,  // 5 minutes
+  max:             10,              // 10 attempts per IP — each OAuth login uses exactly 1
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message: { error: 'Too many exchange attempts. Please try again in a few minutes.' },
+});
+
+router.post('/exchange', exchangeLimiter, async (req, res) => {
   try {
     const { code } = req.body;
     if (!code || typeof code !== 'string') {

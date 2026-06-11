@@ -4,14 +4,21 @@
    Serves both the API (/api/*) and the static frontend
    ============================================================ */
 require('dotenv').config();
-const express   = require('express');
-const cors      = require('cors');
-const path      = require('path');
-const rateLimit = require('express-rate-limit');
+const express    = require('express');
+const cors       = require('cors');
+const path       = require('path');
+const rateLimit  = require('express-rate-limit');
+const monitoring = require('./utils/monitoring');
 const { connect }             = require('./config/db');
 const { ensureIndexes }       = require('./utils/indexes');
 const { repairPermissions }   = require('./utils/repairPermissions');
 const { seedDemo }            = require('./scripts/seed-demo');
+
+/* ── Monitoring: initialise BEFORE anything else ──────────────
+   Registers uncaughtException + unhandledRejection handlers.
+   Optionally activates Sentry (if SENTRY_DSN env var is set
+   and @sentry/node is installed).                              */
+monitoring.init();
 
 /* ── Security: warn if JWT_SECRET not set ───────────────────── */
 if (!process.env.JWT_SECRET) {
@@ -73,6 +80,9 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));   // 10MB for bulk sync payloads
 app.use(express.urlencoded({ extended: true }));
+
+/* ── Monitoring: request context (Sentry, if active) ───────── */
+app.use(monitoring.requestHandler());
 
 /* ── Rate limiting ──────────────────────────────────────────── */
 // General limiter: 300 requests per 15 min per IP across all /api/* routes
@@ -263,9 +273,18 @@ app.get('*', (req, res) => {
   res.status(503).send('<h2>Msingi is starting up — run <code>cd client && npm run build</code> first, or use <code>npm run dev:react</code> for development.</h2>');
 });
 
+/* ── Monitoring: Sentry error handler (must come before the final handler) */
+app.use(monitoring.errorHandler());
+
 /* ── Error handler ──────────────────────────────────────────── */
 app.use((err, req, res, next) => {
   console.error('[SERVER ERROR]', err.stack);
+  monitoring.captureException(err, {
+    route:    req.path,
+    method:   req.method,
+    userId:   req.jwtUser?.userId,
+    schoolId: req.jwtUser?.schoolId,
+  });
   res.status(500).json({ error: 'Internal server error' });
 });
 
@@ -376,6 +395,14 @@ async function start() {
       startBillingCron();
     } catch (err) {
       console.error('[billing-cron] Failed to start:', err.message);
+    }
+
+    // Nightly backup cron — full school data export to disk (daily 02:00 Kenya)
+    try {
+      const { startBackupCron } = require('./utils/backup-cron');
+      startBackupCron();
+    } catch (err) {
+      console.error('[backup-cron] Failed to start:', err.message);
     }
   });
 }

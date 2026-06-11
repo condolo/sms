@@ -11,6 +11,7 @@ const { authMiddleware }   = require('../middleware/auth');
 const { tenantMiddleware } = require('../middleware/tenant');
 const email = require('../utils/email');
 const notif = require('../utils/notif-settings');
+const { enqueueBatch } = require('../utils/email-queue');
 
 const router = express.Router();
 router.use(authMiddleware, tenantMiddleware);
@@ -141,7 +142,9 @@ router.post('/', async (req, res) => {
         }).lean();
         for (const u of targets) {
           if (u.email && emailEnabled) {
-            notifyJobs.push(email.sendMessageNotification({
+            // Push a thunk — function not yet called — so enqueueBatch
+            // can control when each batch of SMTP calls fires.
+            notifyJobs.push(() => email.sendMessageNotification({
               recipientName:  u.name,
               recipientEmail: u.email,
               senderName,
@@ -164,7 +167,7 @@ router.post('/', async (req, res) => {
         }).lean();
         for (const u of targets) {
           if (u.email && emailEnabled) {
-            notifyJobs.push(email.sendMessageNotification({
+            notifyJobs.push(() => email.sendMessageNotification({
               recipientName:  u.name,
               recipientEmail: u.email,
               senderName,
@@ -181,7 +184,7 @@ router.post('/', async (req, res) => {
         // Direct — single user by ID
         const target = await User.findOne({ id: recipient, schoolId }).lean();
         if (target?.email && emailEnabled) {
-          notifyJobs.push(email.sendMessageNotification({
+          notifyJobs.push(() => email.sendMessageNotification({
             recipientName:  target.name,
             recipientEmail: target.email,
             senderName,
@@ -196,11 +199,12 @@ router.post('/', async (req, res) => {
       }
     }
 
-    // Fire emails non-blocking — don't hold up the response
-    Promise.allSettled(notifyJobs).then(results => {
-      const failed = results.filter(r => r.status === 'rejected').length;
-      if (failed) console.warn(`[MESSAGES] ${failed}/${notifyJobs.length} notification emails failed`);
-    });
+    // Fire emails non-blocking in batches of EMAIL_BATCH_SIZE (default 20)
+    // with EMAIL_BATCH_DELAY_MS (default 1500 ms) between batches.
+    // Prevents bursting into Gmail's sending limits on school-wide announcements.
+    enqueueBatch(notifyJobs).catch(err =>
+      console.error('[messages] email queue error:', err)
+    );
 
     res.status(201).json(msg.toObject());
   } catch (err) { res.status(500).json({ error: err.message }); }
