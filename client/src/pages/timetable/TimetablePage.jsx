@@ -331,28 +331,45 @@ export default function TimetablePage() {
   return (
     <div className="min-h-screen bg-slate-50">
 
-      {/* ── Page header ── */}
-      <div className="bg-white border-b border-slate-200 px-6 py-4">
+      {/* ── Page header — warm gradient ── */}
+      <div className="relative overflow-hidden bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 px-6 pt-5 pb-0">
+        {/* Decorative soft circles */}
+        <div className="pointer-events-none absolute -top-10 -right-10 w-48 h-48 rounded-full bg-white/5" />
+        <div className="pointer-events-none absolute top-3 right-32 w-28 h-28 rounded-full bg-white/5" />
+
         <div className="max-w-screen-2xl mx-auto">
 
-          {/* Title + header actions */}
+          {/* Title row + actions */}
           <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <CalendarDays size={18} className="text-slate-400" />
+
+            {/* Left: icon + title + class count chip */}
+            <div className="flex items-center gap-3.5">
+              <div className="w-10 h-10 rounded-xl bg-white/15 border border-white/20 flex items-center justify-center shrink-0 shadow-inner">
+                <CalendarDays size={20} className="text-white" />
+              </div>
               <div>
-                <h1 className="text-base font-semibold text-slate-900 leading-tight">Scheduling Engine</h1>
-                <p className="text-xs text-slate-400 mt-0.5">Institutional timetable &amp; coordination</p>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h1 className="text-lg font-bold text-white leading-tight">Scheduling Engine</h1>
+                  {classList.length > 0 && (
+                    <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold bg-white/15 text-indigo-100 px-2 py-0.5 rounded-full border border-white/20">
+                      <LayoutGrid size={9} /> {classList.length} {classList.length === 1 ? 'class' : 'classes'}
+                    </span>
+                  )}
+                </div>
+                <p className="text-indigo-200 text-xs mt-0.5">Institutional timetable &amp; coordination</p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            {/* Right: action buttons */}
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+
               {/* Conflict badge */}
               <button
                 onClick={() => conflictCount > 0 && setShowConflicts(true)}
                 className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border transition ${
                   conflictCount > 0
-                    ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
-                    : 'bg-emerald-50 text-emerald-600 border-emerald-200'
+                    ? 'bg-red-400/25 text-red-100 border-red-300/50 hover:bg-red-400/40'
+                    : 'bg-emerald-400/20 text-emerald-100 border-emerald-300/40'
                 }`}
               >
                 {conflictCount > 0
@@ -366,39 +383,39 @@ export default function TimetablePage() {
                 onClick={() => setShowWorkload(s => !s)}
                 className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border transition ${
                   showWorkload
-                    ? 'bg-slate-900 text-white border-slate-900'
-                    : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                    ? 'bg-white text-indigo-700 border-white shadow-sm'
+                    : 'bg-white/10 text-white border-white/25 hover:bg-white/20'
                 }`}
               >
                 <BarChart3 size={12} /> Workload
               </button>
 
-              {/* Bell schedule (admin only) */}
+              {/* Bell schedule */}
               {canEdit && (
                 <button
                   onClick={() => setShowBell(true)}
-                  className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 transition"
+                  className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-white/25 bg-white/10 text-white hover:bg-white/20 transition"
                 >
                   <Clock size={12} /> Bell
                 </button>
               )}
 
-              {/* Import timetable CSV (admin only) */}
+              {/* Import */}
               {canEdit && (
                 <button
                   onClick={() => setShowImport(true)}
-                  className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 transition"
+                  className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-white/25 bg-white/10 text-white hover:bg-white/20 transition"
                   title="Import timetable from CSV"
                 >
                   <Upload size={12} /> Import
                 </button>
               )}
 
-              {/* Add slot (class view only) */}
+              {/* Add slot */}
               {canEdit && activeView === 'class' && classId && (
                 <button
                   onClick={() => openAdd('monday', '1')}
-                  className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium px-4 py-1.5 rounded-lg transition"
+                  className="flex items-center gap-1.5 bg-white hover:bg-indigo-50 text-indigo-700 text-xs font-semibold px-4 py-1.5 rounded-lg shadow-sm transition"
                 >
                   <Plus size={13} /> Add slot
                 </button>
@@ -406,16 +423,16 @@ export default function TimetablePage() {
             </div>
           </div>
 
-          {/* View tabs */}
-          <div className="flex gap-1 mt-4">
+          {/* View tabs — active tab "bridges" into the white content below */}
+          <div className="flex gap-0.5 mt-5">
             {VIEWS.filter(v => !v.adminOnly || canEdit).map(v => (
               <button
                 key={v.id}
                 onClick={() => setActiveView(v.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium transition rounded-t-lg ${
                   activeView === v.id
-                    ? 'bg-slate-900 text-white'
-                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
+                    ? 'bg-white text-indigo-700 font-semibold shadow-sm'
+                    : 'text-white/65 hover:text-white hover:bg-white/10'
                 }`}
               >
                 <v.Icon size={13} />{v.label}
@@ -599,9 +616,14 @@ export default function TimetablePage() {
 
         {activeView === 'class' && (
           !classId ? (
-            <div className="bg-white border border-slate-200 rounded-xl p-14 flex flex-col items-center gap-3">
-              <CalendarDays size={32} className="text-slate-200" />
-              <p className="text-sm font-medium text-slate-400">Select a class above to view its timetable</p>
+            <div className="bg-white border border-slate-200 rounded-xl p-14 flex flex-col items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-indigo-50 flex items-center justify-center">
+                <CalendarDays size={26} className="text-indigo-300" />
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-semibold text-slate-600">Select a class to view its timetable</p>
+                <p className="text-xs text-slate-400 mt-1">Use the section tabs and class picker above</p>
+              </div>
             </div>
           ) : classLoading ? (
             <div className="bg-white border border-slate-200 rounded-xl p-10 animate-pulse space-y-3">
@@ -625,9 +647,14 @@ export default function TimetablePage() {
 
         {activeView === 'teacher' && (
           !teacherId ? (
-            <div className="bg-white border border-slate-200 rounded-xl p-14 flex flex-col items-center gap-3">
-              <User size={32} className="text-slate-200" />
-              <p className="text-sm font-medium text-slate-400">Select a teacher above to view their schedule</p>
+            <div className="bg-white border border-slate-200 rounded-xl p-14 flex flex-col items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-violet-50 flex items-center justify-center">
+                <User size={26} className="text-violet-300" />
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-semibold text-slate-600">Select a teacher to view their schedule</p>
+                <p className="text-xs text-slate-400 mt-1">Choose a teacher from the picker above</p>
+              </div>
             </div>
           ) : teacherLoading ? (
             <div className="bg-white border border-slate-200 rounded-xl p-10 animate-pulse space-y-3">

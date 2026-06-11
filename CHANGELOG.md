@@ -55,6 +55,28 @@ Full per-user drag-and-drop dashboard customisation for admin and teacher roles.
 
 ---
 
+## [4.32.3] — 2026-06-11  Timetable Dashboard Visual Redesign
+
+### Changed — `client/src/pages/timetable/TimetablePage.jsx`
+
+**Timetable page header redesigned — warmer, more engaging UI:**
+
+- Replaced the flat `bg-white border-b` header with a rich `bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700` banner matching Msingi brand palette
+- Added subtle decorative circles (white/5 opacity) for visual depth
+- Calendar icon now lives in a frosted-glass tile (`bg-white/15 border border-white/20`)
+- Title promoted from `text-base font-semibold text-slate-900` to `text-lg font-bold text-white`
+- Added a pill chip showing live class count (`{classList.length} classes`) when classes are loaded
+- View tabs redesigned: active tab = `bg-white text-indigo-700` (bridges into the white content below), inactive tabs = `text-white/65` on the gradient
+- All action buttons (Bell, Import, Workload, Conflict badge) restyled to `bg-white/10 text-white border-white/25` on gradient; "Add slot" CTA = `bg-white text-indigo-700` for strong contrast
+- Conflict badge on gradient: red variant = `bg-red-400/25 text-red-100`, green = `bg-emerald-400/20 text-emerald-100`
+- "Workload" toggle active state: `bg-white text-indigo-700 shadow-sm` (clear visual distinction)
+
+**Empty state panels warmed up:**
+- "Select a class" placeholder: replaced flat icon with `bg-indigo-50` rounded tile + icon + two-line copy
+- "Select a teacher" placeholder: replaced flat icon with `bg-violet-50` rounded tile + icon + two-line copy
+
+---
+
 ## [4.32.2] — 2026-06-11  Monitoring, Nightly Backup Cron, Email Batching, Exchange Rate-Limit
 
 ### Added — Error monitoring utility (`server/utils/monitoring.js`)
