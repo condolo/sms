@@ -257,9 +257,9 @@ router.get('/me', authMiddleware, async (req, res) => {
     const user   = await User.findOne({ id: req.jwtUser.userId, schoolId: req.jwtUser.schoolId }).lean();
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const photo   = await Photos.findOne({ userId: user.id }).lean();
+    const photo   = await Photos.findOne({ userId: user.id, schoolId: req.jwtUser.schoolId }).lean();
     const safeUser = { ...user, password: undefined, mfaOtp: undefined, mfaExpiry: undefined };
-    safeUser.photoUrl = photo ? `/api/users/${user.id}/photo` : null;
+    safeUser.photoUrl = photo ? `/api/users/${user.id}/photo?schoolId=${encodeURIComponent(req.jwtUser.schoolId)}` : null;
 
     res.json({ user: safeUser });
   } catch (err) {
@@ -284,10 +284,10 @@ router.put('/me', authMiddleware, async (req, res) => {
     await User.updateOne({ id: req.jwtUser.userId, schoolId: req.jwtUser.schoolId }, { $set: updates });
 
     const Photos  = _model('user_photos');
-    const user    = await User.findOne({ id: req.jwtUser.userId }).lean();
-    const photo   = await Photos.findOne({ userId: req.jwtUser.userId }).lean();
+    const user    = await User.findOne({ id: req.jwtUser.userId, schoolId: req.jwtUser.schoolId }).lean();
+    const photo   = await Photos.findOne({ userId: req.jwtUser.userId, schoolId: req.jwtUser.schoolId }).lean();
     const safeUser = { ...user, password: undefined, mfaOtp: undefined, mfaExpiry: undefined };
-    safeUser.photoUrl = photo ? `/api/users/${user.id}/photo` : null;
+    safeUser.photoUrl = photo ? `/api/users/${user.id}/photo?schoolId=${encodeURIComponent(req.jwtUser.schoolId)}` : null;
 
     res.json({ success: true, user: safeUser });
   } catch (err) {
@@ -364,7 +364,7 @@ router.put('/me/photo', authMiddleware, async (req, res) => {
       { upsert: true }
     );
 
-    res.json({ success: true, photoUrl: `/api/users/${req.jwtUser.userId}/photo` });
+    res.json({ success: true, photoUrl: `/api/users/${req.jwtUser.userId}/photo?schoolId=${encodeURIComponent(req.jwtUser.schoolId)}` });
   } catch (err) {
     console.error('[users/me/photo PUT]', err);
     res.status(500).json({ error: 'Failed to upload photo' });
@@ -382,14 +382,18 @@ router.delete('/me/photo', authMiddleware, async (req, res) => {
   }
 });
 
-/* GET /api/users/:id/photo — serve photo as binary image (public, no auth)
-   Photos are identified by opaque UUID userId so enumeration is not practical.
-   Auth was previously required here but browser <img> tags cannot send Bearer
-   tokens, causing every photo load to 401 and silently fail. */
+/* GET /api/users/:id/photo — serve photo as binary image
+   Requires ?schoolId= query param for tenant isolation.
+   Auth tokens cannot be sent by browser <img> tags, so we use schoolId
+   as a scoping guard instead of Bearer auth.  The schoolId is not sensitive
+   (every user knows their own school), but it prevents cross-tenant enumeration. */
 router.get('/:id/photo', async (req, res) => {
   try {
+    const { schoolId } = req.query;
+    if (!schoolId) return res.status(400).end();
+
     const Photos = _model('user_photos');
-    const photo  = await Photos.findOne({ userId: req.params.id }).lean();
+    const photo  = await Photos.findOne({ userId: req.params.id, schoolId }).lean();
 
     if (!photo?.photoBase64) return res.status(404).end();
 

@@ -240,7 +240,7 @@ router.post('/callback', async (req, res) => {
     }
 
     if (resultCode !== 0) {
-      await Transactions.updateOne({ checkoutRequestId }, {
+      await Transactions.updateOne({ checkoutRequestId, schoolId: txn.schoolId }, {
         $set: { status: 'failed', resultCode, resultDesc: body.ResultDesc, updatedAt: now },
       });
       console.log(`[mpesa] STK failed — ${checkoutRequestId} — ${body.ResultDesc}`);
@@ -256,13 +256,13 @@ router.post('/callback', async (req, res) => {
     const mpesaCode = String(meta.MpesaReceiptNumber || '');
 
     // Mark transaction complete
-    await Transactions.updateOne({ checkoutRequestId }, {
+    await Transactions.updateOne({ checkoutRequestId, schoolId: txn.schoolId }, {
       $set: { status: 'completed', mpesaReceiptNumber: mpesaCode, amount, paidAt: now, updatedAt: now },
     });
 
     // Record payment on the invoice
     const Invoices = _model('invoices');
-    const invoice  = await Invoices.findOne({ id: txn.invoiceId }).lean();
+    const invoice  = await Invoices.findOne({ id: txn.invoiceId, schoolId: txn.schoolId }).lean();
     if (!invoice) return;
 
     let receiptNum = mpesaCode;

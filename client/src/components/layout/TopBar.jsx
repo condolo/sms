@@ -37,7 +37,7 @@ function useBreadcrumb() {
 function Avatar({ user, size = 8 }) {
   const [imgErr, setImgErr] = useState(false);
   const initials = (user?.name || 'U').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-  const src = user?.id ? `/api/users/${user.id}/photo` : null;
+  const src = user?.id && user?.schoolId ? `/api/users/${user.id}/photo?schoolId=${encodeURIComponent(user.schoolId)}` : null;
 
   if (src && !imgErr) {
     return (

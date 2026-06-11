@@ -223,18 +223,18 @@ const otpLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 10,
 
 router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
   try {
-    const { userId, schoolId, otp } = req.body;
+    const { userId, otp } = req.body;
     if (!userId || !otp) return res.status(400).json({ error: 'userId and otp required' });
 
     const User = _model('users');
-    const user = await User.findOne({ id: userId, schoolId: schoolId || req.school?.id }).lean();
+    const user = await User.findOne({ id: userId, schoolId: req.school.id }).lean();
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     if (!user.mfaOtp || !user.mfaExpiry) {
       return res.status(400).json({ error: 'No pending OTP. Please sign in again.' });
     }
     if (new Date() > new Date(user.mfaExpiry)) {
-      await User.updateOne({ id: userId }, { $unset: { mfaOtp: 1, mfaExpiry: 1 } });
+      await User.updateOne({ id: userId, schoolId: req.school.id }, { $unset: { mfaOtp: 1, mfaExpiry: 1 } });
       return res.status(400).json({ error: 'Code expired. Please sign in again to get a new code.' });
     }
     // Timing-safe comparison against stored hash
@@ -243,7 +243,7 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
     }
 
     // OTP verified — clear it, issue JWT
-    await User.updateOne({ id: userId }, { $unset: { mfaOtp: 1, mfaExpiry: 1 }, lastLogin: new Date().toISOString() });
+    await User.updateOne({ id: userId, schoolId: req.school.id }, { $unset: { mfaOtp: 1, mfaExpiry: 1 }, lastLogin: new Date().toISOString() });
 
     const School = _model('schools');
     const school = await School.findOne({ id: user.schoolId }).lean();
@@ -633,7 +633,7 @@ router.post('/change-password', authMiddleware, async (req, res) => {
     if (newPassword.length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters' });
 
     const User = _model('users');
-    const user = await User.findOne({ id: req.jwtUser.userId }).lean();
+    const user = await User.findOne({ id: req.jwtUser.userId, schoolId: req.jwtUser.schoolId }).lean();
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const match = user.password?.startsWith('$2')
@@ -642,7 +642,7 @@ router.post('/change-password', authMiddleware, async (req, res) => {
     if (!match) return res.status(401).json({ error: 'Current password incorrect' });
 
     const hashed = await bcrypt.hash(newPassword, 12);
-    await User.updateOne({ id: req.jwtUser.userId }, {
+    await User.updateOne({ id: req.jwtUser.userId, schoolId: req.jwtUser.schoolId }, {
       password: hashed,
       passwordChangedAt: new Date().toISOString(),
       mustChangePassword: false

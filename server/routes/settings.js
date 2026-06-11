@@ -98,7 +98,7 @@ const SCHOOL_UPDATABLE = [
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const Users = _model('users');
-    const user  = await Users.findOne({ id: req.jwtUser.userId }).lean();
+    const user  = await Users.findOne({ id: req.jwtUser.userId, schoolId: req.jwtUser.schoolId }).lean();
     if (!user) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } });
     // Strip BOTH field names — auth.js stores as `password`, settings.js historically used `passwordHash`
     const { password: _pw, passwordHash: _ph, ...safe } = user;
@@ -123,7 +123,7 @@ router.put('/', authMiddleware, async (req, res) => {
       if (newPassword.length < 8) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'New password must be at least 8 characters.' } });
       }
-      const user = await Users.findOne({ id: req.jwtUser.userId }).lean();
+      const user = await Users.findOne({ id: req.jwtUser.userId, schoolId: req.jwtUser.schoolId }).lean();
       if (!user) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } });
       // Support both field names during migration — compare against whichever is present
       const storedHash = user.password || user.passwordHash || '';

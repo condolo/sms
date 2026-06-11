@@ -127,7 +127,7 @@ export const profile = {
   update:             (data)   => _put('/users/me', data),
   uploadPhoto:        (data)   => _put('/users/me/photo', data),
   removePhoto:        ()       => _delete('/users/me/photo'),
-  photoUrl:           (userId) => `/api/users/${userId}/photo`,
+  photoUrl:           (userId, schoolId) => schoolId ? `/api/users/${userId}/photo?schoolId=${encodeURIComponent(schoolId)}` : `/api/users/${userId}/photo`,
   staffRecord:        ()       => _get('/teachers/me'),
   updateStaffRecord:  (data)   => _put('/teachers/me', data),
   saveMeetingLinks:   (data)   => _put('/users/me/meeting-links', data),

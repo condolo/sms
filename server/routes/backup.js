@@ -95,12 +95,22 @@ router.post('/export', _requireSuperAdmin, backupLimiter, async (req, res) => {
     let   total  = 0;
 
     await Promise.all(BACKUP_COLLECTIONS.map(async col => {
-      const Model   = _model(col);
-      const filter  = col === 'schools' ? { id: schoolId } : { schoolId };
-      const docs    = await Model.find(filter).lean();
-      data[col]     = docs;
-      stats[col]    = docs.length;
-      total        += docs.length;
+      const Model  = _model(col);
+      const filter = col === 'schools' ? { id: schoolId } : { schoolId };
+      let   docs   = await Model.find(filter).lean();
+
+      // Strip credentials before export — bcrypt hashes must never leave the server
+      if (col === 'users') {
+        docs = docs.map(({ password, passwordHash, twoFactorSecret, mfaOtp, mfaExpiry, ...rest }) => rest);
+      }
+      // Strip school M-Pesa keys and encrypted SMTP password
+      if (col === 'schools') {
+        docs = docs.map(({ smtpPassEnc, mpesa, ...rest }) => rest);
+      }
+
+      data[col]   = docs;
+      stats[col]  = docs.length;
+      total      += docs.length;
     }));
 
     /* Get school name for the filename */

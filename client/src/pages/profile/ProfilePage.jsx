@@ -108,7 +108,7 @@ export default function ProfilePage() {
   /* fetch fresh photo url on mount if user has one */
   useEffect(() => {
     if (user?.id) {
-      setPhotoUrl(`/api/users/${user.id}/photo?t=${Date.now()}`);
+      setPhotoUrl(`/api/users/${user.id}/photo?schoolId=${encodeURIComponent(user.schoolId)}&t=${Date.now()}`);
     }
   }, [user?.id]);
 
@@ -168,7 +168,7 @@ export default function ProfilePage() {
     try {
       const base64 = await resizeImageToBase64(file, 256, 0.82);
       await profileApi.uploadPhoto({ photoBase64: base64 });
-      const freshUrl = `/api/users/${user.id}/photo?t=${Date.now()}`;
+      const freshUrl = `/api/users/${user.id}/photo?schoolId=${encodeURIComponent(user.schoolId)}&t=${Date.now()}`;
       setPhotoUrl(freshUrl);
       setSession({ ...session, user: { ...user, photoUrl: freshUrl } });
       setPhotoBanner({ type: 'success', msg: `Photo updated. (Original: ${originalSize} → resized to 256×256)` });

@@ -95,10 +95,19 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'subject, body, and recipients are required' });
     }
 
+    const recipientList = Array.isArray(recipients) ? recipients : [recipients];
+
+    // Only staff roles may broadcast to the entire school
+    const BROADCAST_ROLES = new Set([
+      'superadmin', 'admin', 'deputy_principal', 'deputy',
+      'section_head', 'teacher', 'hr',
+    ]);
+    if (recipientList.includes('all') && !BROADCAST_ROLES.has(senderRole)) {
+      return res.status(403).json({ error: 'Only staff members may send school-wide announcements.' });
+    }
+
     const Msg  = _model('messages');
     const User = _model('users');
-
-    const recipientList = Array.isArray(recipients) ? recipients : [recipients];
 
     const msg = await Msg.create({
       id:         uuidv4(),

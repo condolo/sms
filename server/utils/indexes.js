@@ -361,6 +361,19 @@ const INDEXES = [
      Primary: coverage for a class-subject pair.
      Unique: prevent duplicate coverage for same class+subject+topic+subtopic.
      Note: co-teachers sharing a class see the same coverage pool. */
+  /* ── mpesa_transactions ─────────────────────────────────────
+     Primary: STK callback lookup by Safaricom's checkoutRequestId.
+     Secondary: school + status + date for transaction listing. */
+  {
+    col: 'mpesa_transactions',
+    indexes: [
+      { key: { checkoutRequestId: 1 }, name: 'mpesa_checkout_id',    unique: true, sparse: true },
+      { key: { schoolId: 1, status: 1, createdAt: -1 }, name: 'mpesa_school_status' },
+      { key: { schoolId: 1, invoiceId: 1 },             name: 'mpesa_invoice' },
+      { key: { id: 1 },                                  name: 'mpesa_id', unique: true, sparse: true },
+    ],
+  },
+
   /* ── billing_snapshots ───────────────────────────────────────
      Platform subscription invoices (one per school per term).
      Primary lookup: school + year + term (unique per billing period). */
