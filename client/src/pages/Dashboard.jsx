@@ -35,6 +35,7 @@ import {
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { KpiCard }  from '@/components/ui/KpiCard.jsx';
+import { useSchoolTheme, withOpacity } from '@/hooks/useSchoolTheme.js';
 
 /* ── Helpers ──────────────────────────────────────────────── */
 function greeting() {
@@ -136,6 +137,7 @@ export default function Dashboard() {
   const user   = useAuthStore(s => s.session?.user);
   const school = useAuthStore(s => s.session?.school);
   const can    = useAuthStore(s => s.can.bind(s));
+  const { primary, accent } = useSchoolTheme();
 
   const currency       = school?.currency       ?? 'KES';
   const currencySymbol = school?.currencySymbol ?? 'KSh';
@@ -306,7 +308,8 @@ export default function Dashboard() {
         {todayBirths.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-            className="bg-gradient-to-r from-violet-600 to-purple-600 px-6 py-3 flex items-center gap-3"
+            className="px-6 py-3 flex items-center gap-3"
+            style={{ background: `linear-gradient(to right, ${primary}, ${accent})` }}
           >
             <Cake size={15} className="text-white/90 shrink-0" />
             <p className="text-sm text-white font-medium flex-1 truncate">
@@ -327,7 +330,7 @@ export default function Dashboard() {
         <div className="max-w-screen-2xl mx-auto flex items-end justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <Sparkles size={14} className="text-amber-500" />
+              <Sparkles size={14} style={{ color: primary }} />
               <span className="text-xs font-medium text-slate-400">
                 {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
               </span>
@@ -336,12 +339,13 @@ export default function Dashboard() {
               {greeting()}, {firstName(user?.name)} 👋
             </h1>
             <p className="text-sm text-slate-500 mt-1">
-              {school?.name ?? user?.schoolName ?? 'Your School'} · {role.charAt(0).toUpperCase() + role.slice(1)} Dashboard
+              {school?.name ?? user?.schoolName ?? 'Your School'} ·{' '}
+              <span style={{ color: primary }}>{role.charAt(0).toUpperCase() + role.slice(1)} Dashboard</span>
             </p>
           </div>
-          <div className="hidden sm:flex items-center gap-2 text-xs text-slate-400">
-            <Clock size={13} />
-            <span>Live data</span>
+          <div className="hidden sm:flex items-center gap-2 text-xs rounded-full px-3 py-1.5 border" style={{ color: primary, borderColor: withOpacity(primary, 0.25), background: withOpacity(primary, 0.06) }}>
+            <Clock size={12} />
+            <span className="font-medium">Live data</span>
           </div>
         </div>
       </div>
@@ -421,7 +425,7 @@ export default function Dashboard() {
         <div className="grid lg:grid-cols-3 gap-6">
 
           {/* Gender pie */}
-          <ChartCard title="Students by Gender" icon={<Users size={14} />} loading={stuLoading}>
+          <ChartCard title="Students by Gender" icon={<Users size={14} />} loading={stuLoading} primary={primary}>
             {genderData.length > 0 ? (
               <div className="flex items-center gap-4">
                 <ResponsiveContainer width="55%" height={160}>
@@ -449,7 +453,7 @@ export default function Dashboard() {
 
           {/* Finance donut */}
           {canViewFinance && (
-            <ChartCard title="Fee Collection" icon={<BadgeDollarSign size={14} />} loading={finLoading}>
+            <ChartCard title="Fee Collection" icon={<BadgeDollarSign size={14} />} loading={finLoading} primary={primary}>
               {finPieData.length > 0 && totalInvoiced ? (
                 <div className="flex items-center gap-4">
                   <ResponsiveContainer width="55%" height={160}>
@@ -486,7 +490,7 @@ export default function Dashboard() {
 
           {/* Payment methods */}
           {canViewFinance && paymentMethods.length > 0 && (
-            <ChartCard title="Payment Methods" icon={<Wallet size={14} />} loading={finLoading}>
+            <ChartCard title="Payment Methods" icon={<Wallet size={14} />} loading={finLoading} primary={primary}>
               <div className="space-y-2.5">
                 {paymentMethods.slice(0, 5).map((m) => {
                   const max = Math.max(...paymentMethods.map(x => x.value), 1);
@@ -512,7 +516,7 @@ export default function Dashboard() {
 
           {/* If no finance — show attendance chart */}
           {!canViewFinance && (
-            <ChartCard title="Today's Attendance" icon={<UserCheck size={14} />}>
+            <ChartCard title="Today's Attendance" icon={<UserCheck size={14} />} primary={primary}>
               {attRate != null ? (
                 <div className="flex flex-col items-center justify-center py-4 gap-3">
                   <div className="relative w-28 h-28">
@@ -542,11 +546,13 @@ export default function Dashboard() {
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <ClipboardList size={15} className="text-slate-400" />
+                <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: withOpacity(primary, 0.1) }}>
+                  <ClipboardList size={13} style={{ color: primary }} />
+                </div>
                 <h2 className="text-sm font-semibold text-slate-700">Admissions Pipeline</h2>
                 <span className="text-xs text-slate-400">({activeApps} active)</span>
               </div>
-              <Link to="/admissions" className="text-xs font-medium text-slate-500 hover:text-slate-800 flex items-center gap-1 transition">
+              <Link to="/admissions" className="text-xs font-medium flex items-center gap-1 transition" style={{ color: primary }}>
                 Open board <ArrowRight size={12} />
               </Link>
             </div>
@@ -579,10 +585,12 @@ export default function Dashboard() {
           <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <CalendarDays size={15} className="text-slate-400" />
+                <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: withOpacity(primary, 0.1) }}>
+                  <CalendarDays size={13} style={{ color: primary }} />
+                </div>
                 <h2 className="text-sm font-semibold text-slate-700">Upcoming Events</h2>
               </div>
-              <Link to="/events" className="text-xs font-medium text-slate-500 hover:text-slate-800 flex items-center gap-1 transition">
+              <Link to="/events" className="text-xs font-medium flex items-center gap-1 transition" style={{ color: primary }}>
                 View calendar <ArrowRight size={12} />
               </Link>
             </div>
@@ -590,7 +598,7 @@ export default function Dashboard() {
               <div className="flex flex-col items-center justify-center py-12 text-slate-400">
                 <CalendarDays size={28} className="mb-2 opacity-40" />
                 <p className="text-sm">No upcoming events</p>
-                <Link to="/events" className="text-xs text-violet-600 hover:text-violet-800 mt-1">Add events →</Link>
+                <Link to="/events" className="text-xs mt-1 font-medium" style={{ color: primary }}>Add events →</Link>
               </div>
             ) : (
               <div className="divide-y divide-slate-50">
@@ -618,7 +626,7 @@ export default function Dashboard() {
                         <div className="flex items-center gap-2">
                           <p className="text-sm font-medium text-slate-800 truncate">{ev.title}</p>
                           {isToday && (
-                            <span className="shrink-0 text-[10px] font-bold text-violet-600 bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded-full">TODAY</span>
+                            <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ color: primary, background: withOpacity(primary, 0.1), border: `1px solid ${withOpacity(primary, 0.25)}` }}>TODAY</span>
                           )}
                         </div>
                         <p className="text-xs text-slate-400 truncate capitalize">{ev.category ?? 'general'}{ev.location ? ` · ${ev.location}` : ''}</p>
@@ -638,10 +646,12 @@ export default function Dashboard() {
           <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <GraduationCap size={15} className="text-slate-400" />
+                <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: withOpacity(primary, 0.1) }}>
+                  <GraduationCap size={13} style={{ color: primary }} />
+                </div>
                 <h2 className="text-sm font-semibold text-slate-700">Recently Enrolled</h2>
               </div>
-              <Link to="/students" className="text-xs font-medium text-slate-500 hover:text-slate-800 flex items-center gap-1 transition">
+              <Link to="/students" className="text-xs font-medium flex items-center gap-1 transition" style={{ color: primary }}>
                 View all <ArrowRight size={12} />
               </Link>
             </div>
@@ -693,12 +703,14 @@ export default function Dashboard() {
           {/* Quick actions */}
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
-              <TrendingUp size={15} className="text-slate-400" />
+              <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: withOpacity(primary, 0.1) }}>
+                <TrendingUp size={13} style={{ color: primary }} />
+              </div>
               <h2 className="text-sm font-semibold text-slate-700">Quick Actions</h2>
             </div>
             <div className="px-3 py-3 space-y-1">
               {QUICK_ACTIONS.map(qa => (
-                <Link key={qa.to} to={qa.to} className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-50 transition group">
+                <Link key={qa.to} to={qa.to} className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition group" style={{}}>
                   <div className={`w-7 h-7 rounded-lg ${qa.iconBg} flex items-center justify-center shrink-0`}>
                     <qa.Icon size={14} className={qa.iconColor} />
                   </div>
@@ -731,7 +743,7 @@ export default function Dashboard() {
               <p className="text-sm font-semibold text-slate-700">Today's Attendance</p>
               <p className="text-xs text-slate-400 mt-0.5">{fmt(attPresent)} present · {fmt(attTotal)} students</p>
             </div>
-            <Link to="/attendance" className="shrink-0 flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-800 transition">
+            <Link to="/attendance" className="shrink-0 flex items-center gap-1 text-xs font-medium transition" style={{ color: primary }}>
               Mark attendance <ArrowRight size={12} />
             </Link>
           </div>
@@ -751,15 +763,18 @@ export default function Dashboard() {
 
 /* ── Birthday Widget ──────────────────────────────────────── */
 function BirthdayWidget({ todayBirths, upcomingBirths }) {
+  const { primary, accent } = useSchoolTheme();
   const hasAny = todayBirths.length > 0 || upcomingBirths.length > 0;
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
       <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
-        <Cake size={15} className="text-violet-500" />
+        <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: withOpacity(primary, 0.1) }}>
+          <Cake size={13} style={{ color: primary }} />
+        </div>
         <h2 className="text-sm font-semibold text-slate-700">Birthdays</h2>
         {todayBirths.length > 0 && (
-          <span className="ml-auto text-[10px] font-bold bg-violet-600 text-white px-1.5 py-0.5 rounded-full">
+          <span className="ml-auto text-[10px] font-bold text-white px-1.5 py-0.5 rounded-full" style={{ background: primary }}>
             {todayBirths.length} today
           </span>
         )}
@@ -775,20 +790,25 @@ function BirthdayWidget({ todayBirths, upcomingBirths }) {
         <div className="divide-y divide-slate-50">
           {todayBirths.map(s => (
             <Link key={s.id ?? s._id} to={`/students/${s.id ?? s._id}`}
-              className="flex items-center gap-3 px-4 py-3 hover:bg-violet-50 transition group">
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
+              className="flex items-center gap-3 px-4 py-3 transition group"
+              style={{ '--hover-bg': withOpacity(primary, 0.06) }}
+              onMouseEnter={e => e.currentTarget.style.background = withOpacity(primary, 0.06)}
+              onMouseLeave={e => e.currentTarget.style.background = ''}>
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
+                style={{ background: `linear-gradient(135deg, ${primary}, ${accent})` }}>
                 {(s.firstName?.[0] ?? '?')}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-slate-800 truncate">{s.firstName} {s.lastName}</p>
-                <p className="text-xs text-violet-600 font-medium">🎂 Turning {s.age} today!</p>
+                <p className="text-xs font-medium" style={{ color: primary }}>🎂 Turning {s.age} today!</p>
               </div>
             </Link>
           ))}
           {upcomingBirths.slice(0, 5).map(s => (
             <Link key={s.id ?? s._id} to={`/students/${s.id ?? s._id}`}
               className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition group">
-              <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 text-xs font-bold shrink-0">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                style={{ background: withOpacity(primary, 0.08), color: primary }}>
                 {(s.firstName?.[0] ?? '?')}
               </div>
               <div className="flex-1 min-w-0">
@@ -804,11 +824,15 @@ function BirthdayWidget({ todayBirths, upcomingBirths }) {
 }
 
 /* ── Chart card wrapper ───────────────────────────────────── */
-function ChartCard({ title, icon, loading, children }) {
+function ChartCard({ title, icon, loading, children, primary: _primary }) {
+  const { primary: themePrimary } = useSchoolTheme();
+  const pc = _primary ?? themePrimary;
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
       <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
-        <span className="text-slate-400">{icon}</span>
+        <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: withOpacity(pc, 0.1) }}>
+          <span style={{ color: pc, display: 'flex', alignItems: 'center' }}>{icon}</span>
+        </div>
         <h2 className="text-sm font-semibold text-slate-700">{title}</h2>
       </div>
       <div className="px-5 py-4">
@@ -839,6 +863,7 @@ function EmptyChart({ label }) {
    Dismissal is persisted in localStorage keyed by schoolId.
    ══════════════════════════════════════════════════════════ */
 function SetupChecklist({ school, role, stuTotal }) {
+  const { primary } = useSchoolTheme();
   const schoolId = school?.id ?? '';
   const dismissKey = `msingi_setup_done_${schoolId}`;
 
@@ -985,8 +1010,8 @@ function SetupChecklist({ school, role, stuTotal }) {
       {/* ── Progress bar ────────────────────────────────────── */}
       <div className="h-1 bg-slate-100">
         <div
-          className={`h-full transition-all duration-700 ease-out ${allDone ? 'bg-emerald-500' : 'bg-indigo-500'}`}
-          style={{ width: `${pct}%` }}
+          className={`h-full transition-all duration-700 ease-out ${allDone ? 'bg-emerald-500' : ''}`}
+          style={{ width: `${pct}%`, background: allDone ? undefined : primary }}
         />
       </div>
 
@@ -997,18 +1022,18 @@ function SetupChecklist({ school, role, stuTotal }) {
             <div
               key={step.id}
               className={`flex flex-col gap-1.5 px-4 py-3 border-r border-b border-slate-100 last:border-r-0 transition-colors ${
-                step.done
-                  ? 'bg-emerald-50/40 cursor-default'
-                  : 'hover:bg-indigo-50/60 cursor-pointer'
+                step.done ? 'bg-emerald-50/40 cursor-default' : 'cursor-pointer'
               }`}
+              onMouseEnter={e => { if (!step.done) e.currentTarget.style.background = withOpacity(primary, 0.05); }}
+              onMouseLeave={e => { if (!step.done) e.currentTarget.style.background = ''; }}
             >
               <div className="flex items-center gap-2">
                 <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${
-                  step.done ? 'bg-emerald-500' : 'bg-slate-200'
-                }`}>
+                  step.done ? 'bg-emerald-500' : ''
+                }`} style={!step.done ? { background: withOpacity(primary, 0.15) } : {}}>
                   {step.done
                     ? <CheckCircle size={11} className="text-white" />
-                    : <span className="text-[10px] text-slate-500 font-bold">{i + 1}</span>}
+                    : <span className="text-[10px] font-bold" style={{ color: primary }}>{i + 1}</span>}
                 </div>
                 <span className="text-base leading-none">{step.emoji}</span>
               </div>
@@ -1021,7 +1046,7 @@ function SetupChecklist({ school, role, stuTotal }) {
                 <p className="text-[11px] text-slate-400 leading-snug">{step.hint}</p>
               )}
               {!step.done && (
-                <span className="text-[11px] text-indigo-500 font-medium flex items-center gap-0.5 mt-auto">
+                <span className="text-[11px] font-medium flex items-center gap-0.5 mt-auto" style={{ color: primary }}>
                   Go <ArrowRight size={10} />
                 </span>
               )}
@@ -1059,6 +1084,7 @@ function riskColor(pct) {
 
 function LeadershipPanel({ school }) {
   const [days, setDays] = useState(30);
+  const { primary } = useSchoolTheme();
 
   const { data: raw, isLoading, isError, refetch } = useQuery({
     queryKey: ['analytics', 'leadership', days],
@@ -1111,7 +1137,7 @@ function LeadershipPanel({ school }) {
       {/* Section header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-violet-600 flex items-center justify-center">
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: primary }}>
             <Activity size={13} className="text-white" />
           </div>
           <div>
@@ -1129,10 +1155,9 @@ function LeadershipPanel({ school }) {
                 key={d}
                 onClick={() => setDays(d)}
                 className={`px-2.5 py-1 text-xs rounded-md font-medium transition ${
-                  days === d
-                    ? 'bg-white shadow-sm text-slate-800'
-                    : 'text-slate-500 hover:text-slate-700'
+                  days === d ? 'bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
                 }`}
+                style={days === d ? { color: primary } : {}}
               >
                 {d}d
               </button>
@@ -1155,10 +1180,12 @@ function LeadershipPanel({ school }) {
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
             <div className="flex items-center gap-2">
-              <UserCheck size={14} className="text-slate-400" />
+              <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: withOpacity(primary, 0.1) }}>
+                <UserCheck size={13} style={{ color: primary }} />
+              </div>
               <span className="text-sm font-semibold text-slate-700">Attendance Risk</span>
             </div>
-            <Link to="/attendance" className="text-xs text-slate-400 hover:text-slate-700 transition flex items-center gap-1">
+            <Link to="/attendance" className="text-xs transition flex items-center gap-1 font-medium" style={{ color: primary }}>
               View <ArrowRight size={11} />
             </Link>
           </div>
@@ -1218,10 +1245,12 @@ function LeadershipPanel({ school }) {
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
             <div className="flex items-center gap-2">
-              <Wallet size={14} className="text-slate-400" />
+              <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: withOpacity(primary, 0.1) }}>
+                <Wallet size={13} style={{ color: primary }} />
+              </div>
               <span className="text-sm font-semibold text-slate-700">Fee Exposure</span>
             </div>
-            <Link to="/finance" className="text-xs text-slate-400 hover:text-slate-700 transition flex items-center gap-1">
+            <Link to="/finance" className="text-xs transition flex items-center gap-1 font-medium" style={{ color: primary }}>
               View <ArrowRight size={11} />
             </Link>
           </div>
@@ -1278,10 +1307,12 @@ function LeadershipPanel({ school }) {
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
             <div className="flex items-center gap-2">
-              <ShieldAlert size={14} className="text-slate-400" />
+              <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: withOpacity(primary, 0.1) }}>
+                <ShieldAlert size={13} style={{ color: primary }} />
+              </div>
               <span className="text-sm font-semibold text-slate-700">Behaviour</span>
             </div>
-            <Link to="/behaviour" className="text-xs text-slate-400 hover:text-slate-700 transition flex items-center gap-1">
+            <Link to="/behaviour" className="text-xs transition flex items-center gap-1 font-medium" style={{ color: primary }}>
               View <ArrowRight size={11} />
             </Link>
           </div>
@@ -1347,11 +1378,13 @@ function LeadershipPanel({ school }) {
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
             <div className="flex items-center gap-2">
-              <GraduationCap size={14} className="text-slate-400" />
+              <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: withOpacity(primary, 0.1) }}>
+                <GraduationCap size={13} style={{ color: primary }} />
+              </div>
               <span className="text-sm font-semibold text-slate-700">Academic Health</span>
               <span className="text-[10px] text-slate-400">(published grades)</span>
             </div>
-            <Link to="/grades" className="text-xs text-slate-400 hover:text-slate-700 transition flex items-center gap-1">
+            <Link to="/grades" className="text-xs transition flex items-center gap-1 font-medium" style={{ color: primary }}>
               View <ArrowRight size={11} />
             </Link>
           </div>
