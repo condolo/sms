@@ -6,6 +6,36 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.34.0] — Assessment Types full CRUD (deep DB)
+
+### Added
+- **Assessment Types are now fully configurable per school** — examiners can add, rename, reweight, and delete the assessment components (previously hardcoded to CA/HW/MT/ET).
+- **New DB endpoints** in `/api/assessment/types`:
+  - `GET    /types` — returns the school's configured type definitions
+  - `POST   /types` — adds a new type (key, label, weight%, instances/term, color)
+  - `PUT    /types` — bulk-replaces the full array (for label/weight/color edits)
+  - `DELETE /types/:key` — removes a type; **guarded by mark count** — returns HTTP 409 if marks exist for that type, protecting data integrity
+- **`assessment_config.customTypes`** — new array field on the config document. Each entry: `{ key, label, weight, instances, color }`. Auto-migrated from legacy `weights`/`instances` fields for existing schools.
+- **Legacy field sync** — after any type change, `weights` and `instances` maps are re-synced from `customTypes` for backward compat with the report engine.
+- **`VALID_COLORS`** — 12 named pill colors (violet, purple, amber, red, blue, emerald, sky, orange, rose, teal, indigo, cyan) available for each type.
+
+### Changed
+- `MarkSchema.assessmentType` — changed from `z.enum(['CA','HW','MT','ET'])` to `z.string()` with runtime validation against the school's configured types. Custom types are now accepted.
+- `ScheduleEntrySchema.assessmentType` — same change; schedule entries can use custom types.
+- `_label()` helper — now uses instance number threshold (`instance <= 1 ? key : key + instance`) instead of hardcoded MT/ET check.
+- `GET /report` — derives `weights` map from `customTypes` (falling back to legacy `weights` field).
+- **ConfigTab** (`grades/components/ConfigTab.jsx`) — complete overhaul:
+  - Replaces the fixed 4-input grid with a full CRUD table (key chip | label | weight% | /term instances | color picker | delete)
+  - "Add new assessment type" inline form at the bottom
+  - Merge of the old "Instances per Term" card into the type rows
+  - Delete is immediate (goes to DB); add is immediate; label/weight/color changes batch-saved with "Save configuration"
+  - Schedule type dropdown now reads from the school's configured types, not hardcoded constants
+- **`TypePill`** (`GradesPrimitives.jsx`) — accepts optional `color` prop (color name → Tailwind classes) for dynamic types; falls back to static TYPE_PILL map for legacy CA/HW/MT/ET.
+- **`constants.js`** — added `DEFAULT_CUSTOM_TYPES`, `VALID_TYPE_COLORS`, `COLOR_PILL` exports.
+- **`api/client.js`** — added `assessment.addType`, `assessment.saveTypes`, `assessment.deleteType` methods.
+
+---
+
 ## [v4.33.1] — Assessment Config relocated into Exams module
 
 ### Changed

@@ -202,6 +202,12 @@ export const assessment = {
   getConfig:    (params)     => _get('/assessment/config', params),
   updateConfig: (data)       => _patch('/assessment/config', data),
 
+  // Assessment Types (full CRUD — deep DB)
+  getTypes:    ()            => _get('/assessment/types'),
+  addType:     (data)        => _post('/assessment/types', data),
+  saveTypes:   (data)        => _put('/assessment/types', data),          // bulk replace
+  deleteType:  (key)         => _delete(`/assessment/types/${encodeURIComponent(key)}`),
+
   // Schedule
   getSchedule:    (params)   => _get('/assessment/schedule', params),
   upsertSchedule: (data)     => _put('/assessment/schedule', data),

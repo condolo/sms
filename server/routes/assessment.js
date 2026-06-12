@@ -34,12 +34,22 @@ const PLAN   = planGate('grades');
 
 /* ── Constants ──────────────────────────────────────────────── */
 
-const ASSESSMENT_TYPES  = ['CA', 'HW', 'MT', 'ET'];
-const TERM_NUMBERS      = [1, 2, 3];
-const TEMPLATES         = ['detailed', 'summary'];
+const DEFAULT_ASSESSMENT_TYPES = ['CA', 'HW', 'MT', 'ET'];  // kept for migration
+const TERM_NUMBERS             = [1, 2, 3];
+const TEMPLATES                = ['detailed', 'summary'];
 
 const DEFAULT_WEIGHTS   = { CA: 20, HW: 10, MT: 30, ET: 40 };
-const DEFAULT_INSTANCES = { CA: 2, HW: 2 };   // MT and ET always have 1 instance
+const DEFAULT_INSTANCES = { CA: 2, HW: 2 };
+
+const VALID_COLORS = ['violet','purple','amber','red','blue','emerald','sky','orange','rose','teal','indigo','cyan'];
+
+/** Default assessment types — used to seed schools with no customTypes yet */
+const DEFAULT_CUSTOM_TYPES = [
+  { key: 'CA', label: 'Continuous Assessment', weight: 20, instances: 2, color: 'violet' },
+  { key: 'HW', label: 'Homework / Assignment',  weight: 10, instances: 2, color: 'purple' },
+  { key: 'MT', label: 'Mid-Term Exam',           weight: 30, instances: 1, color: 'amber'  },
+  { key: 'ET', label: 'End-Term Exam',           weight: 40, instances: 1, color: 'red'    },
+];
 
 /* ── Helpers ─────────────────────────────────────────────────── */
 
@@ -58,15 +68,37 @@ async function _getConfig(schoolId, academicYearId) {
       weights:        { ...DEFAULT_WEIGHTS },
       instances:      { ...DEFAULT_INSTANCES },
       reportTemplate: 'detailed',
+      customTypes:    DEFAULT_CUSTOM_TYPES.map(t => ({ ...t })),
     };
     await Config.create(doc);
+  }
+  // Migrate: synthesize customTypes from legacy weights/instances if field is missing
+  if (!doc.customTypes || doc.customTypes.length === 0) {
+    const w    = doc.weights   || DEFAULT_WEIGHTS;
+    const inst = doc.instances || DEFAULT_INSTANCES;
+    doc.customTypes = DEFAULT_ASSESSMENT_TYPES.map(key => ({
+      key,
+      label:     DEFAULT_CUSTOM_TYPES.find(d => d.key === key)?.label ?? key,
+      weight:    w[key] ?? 0,
+      instances: inst[key] ?? 1,
+      color:     DEFAULT_CUSTOM_TYPES.find(d => d.key === key)?.color ?? 'sky',
+    }));
   }
   return doc;
 }
 
-/** Build label from type + instance, e.g. "CA 1", "MT", "ET" */
+/** Build label from type + instance. Single-instance types use key only. */
 function _label(type, instance) {
-  return ['MT', 'ET'].includes(type) ? type : `${type} ${instance}`;
+  return (!instance || instance <= 1) ? type : `${type} ${instance}`;
+}
+
+/** Sync legacy weights/instances fields from customTypes for backward compat */
+function _syncLegacyFields(customTypes) {
+  const weights   = Object.fromEntries(customTypes.map(t => [t.key, t.weight]));
+  const instances = Object.fromEntries(
+    customTypes.filter(t => t.instances > 1).map(t => [t.key, t.instances])
+  );
+  return { weights, instances };
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -109,8 +141,10 @@ router.patch('/config', authMiddleware, PLAN, rbac('settings', 'update'), async 
 
     // ── Validate weights ──
     if (weights) {
+      const cfg  = await _getConfig(schoolId, academicYearId || null);
+      const keys = cfg.customTypes.map(t => t.key);
       const w = {};
-      for (const t of ASSESSMENT_TYPES) {
+      for (const t of keys) {
         const val = Number(weights[t]);
         if (isNaN(val) || val < 0) {
           return _err(res, `Weight for "${t}" must be a non-negative number`);
@@ -171,7 +205,7 @@ router.patch('/config', authMiddleware, PLAN, rbac('settings', 'update'), async 
 
 const ScheduleEntrySchema = z.object({
   termNumber:     z.number().int().min(1).max(3),
-  assessmentType: z.enum(ASSESSMENT_TYPES),
+  assessmentType: z.string().min(1).max(20),
   instance:       z.number().int().min(1).max(10).default(1),
   label:          z.string().max(100).optional(),
   dateFrom:       z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD'),
@@ -211,7 +245,14 @@ router.put('/schedule', authMiddleware, PLAN, rbac('settings', 'update'), async 
     if (!parsed.success) {
       return _err(res, parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; '));
     }
-    const d = parsed.data;
+    const d = { ...parsed.data, assessmentType: parsed.data.assessmentType.toUpperCase() };
+
+    // Validate assessmentType against school's configured types
+    const schedCfg  = await _getConfig(schoolId, null);
+    const validSched = new Set(schedCfg.customTypes.map(t => t.key));
+    if (!validSched.has(d.assessmentType)) {
+      return _err(res, `Invalid assessment type "${d.assessmentType}". Configured types: ${[...validSched].join(', ')}`);
+    }
 
     if (d.dateFrom > d.dateTo) {
       return _err(res, 'dateFrom must be on or before dateTo');
@@ -257,6 +298,173 @@ router.delete('/schedule/:id', authMiddleware, PLAN, rbac('settings', 'update'),
 });
 
 /* ══════════════════════════════════════════════════════════════
+   ASSESSMENT TYPES  —  /api/assessment/types
+   Full CRUD for the school's assessment type definitions.
+   Stored in assessment_config.customTypes (global config, academicYearId: null).
+   Changes sync back to legacy weights/instances fields for backward compat.
+   ══════════════════════════════════════════════════════════════ */
+
+const TypeSchema = z.object({
+  key:       z.string().min(1).max(10).regex(/^[A-Z0-9_]+$/, 'Key must be uppercase letters, digits, or underscores'),
+  label:     z.string().min(1).max(100).trim(),
+  weight:    z.number().min(0).max(100),
+  instances: z.number().int().min(1).max(10).default(1),
+  color:     z.string().refine(v => VALID_COLORS.includes(v), { message: `Color must be one of: ${VALID_COLORS.join(', ')}` }),
+});
+
+/**
+ * GET /api/assessment/types
+ * Returns the school's configured assessment types array.
+ */
+router.get('/types', authMiddleware, PLAN, rbac('settings', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const cfg = await _getConfig(schoolId, null);
+    return _ok(res, cfg.customTypes);
+  } catch (err) {
+    console.error('[assessment/types GET]', err);
+    return E.serverError(res);
+  }
+});
+
+/**
+ * POST /api/assessment/types
+ * Add a new assessment type to the school's configuration.
+ * Body: { key, label, weight, instances, color }
+ */
+router.post('/types', authMiddleware, PLAN, rbac('settings', 'update'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const input  = { ...req.body, key: (req.body.key || '').toUpperCase().trim() };
+    const parsed = TypeSchema.safeParse(input);
+    if (!parsed.success) {
+      return _err(res, parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; '));
+    }
+    const newType = parsed.data;
+
+    const Config = _model('assessment_config');
+    const cfg    = await _getConfig(schoolId, null);
+
+    if (cfg.customTypes.some(t => t.key === newType.key)) {
+      return _err(res, `Assessment type "${newType.key}" already exists`);
+    }
+    if (cfg.customTypes.length >= 20) {
+      return _err(res, 'Maximum of 20 assessment types allowed');
+    }
+
+    const updated              = [...cfg.customTypes, newType];
+    const { weights, instances } = _syncLegacyFields(updated);
+
+    const doc = await Config.findOneAndUpdate(
+      { schoolId, academicYearId: null },
+      { $set: { customTypes: updated, weights, instances } },
+      { new: true, upsert: true }
+    ).lean();
+
+    return created(res, doc.customTypes);
+  } catch (err) {
+    console.error('[assessment/types POST]', err);
+    return E.serverError(res);
+  }
+});
+
+/**
+ * PUT /api/assessment/types
+ * Replace the entire customTypes array (bulk save for edits).
+ * Body: { customTypes: [{ key, label, weight, instances, color }, ...] }
+ * Weights must sum to exactly 100.
+ */
+router.put('/types', authMiddleware, PLAN, rbac('settings', 'update'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const raw = req.body.customTypes;
+    if (!Array.isArray(raw) || raw.length === 0) {
+      return _err(res, 'customTypes must be a non-empty array');
+    }
+    if (raw.length > 20) {
+      return _err(res, 'Maximum of 20 assessment types allowed');
+    }
+
+    const validated = [];
+    const keys      = new Set();
+    for (const item of raw) {
+      const input  = { ...item, key: (item.key || '').toUpperCase().trim() };
+      const parsed = TypeSchema.safeParse(input);
+      if (!parsed.success) {
+        return _err(res, `Type "${input.key}": ${parsed.error.issues.map(i => i.message).join('; ')}`);
+      }
+      if (keys.has(parsed.data.key)) {
+        return _err(res, `Duplicate key: "${parsed.data.key}"`);
+      }
+      keys.add(parsed.data.key);
+      validated.push(parsed.data);
+    }
+
+    const { valid, total } = validateWeights(Object.fromEntries(validated.map(t => [t.key, t.weight])));
+    if (!valid) {
+      return _err(res, `Assessment weights must sum to 100%. Current total: ${total}%`);
+    }
+
+    const { weights, instances } = _syncLegacyFields(validated);
+    const Config = _model('assessment_config');
+    const doc = await Config.findOneAndUpdate(
+      { schoolId, academicYearId: null },
+      { $set: { customTypes: validated, weights, instances } },
+      { new: true, upsert: true }
+    ).lean();
+
+    return _ok(res, doc.customTypes);
+  } catch (err) {
+    console.error('[assessment/types PUT]', err);
+    return E.serverError(res);
+  }
+});
+
+/**
+ * DELETE /api/assessment/types/:key
+ * Remove an assessment type.
+ * Rejected with 409 if any assessment_marks exist for this type.
+ */
+router.delete('/types/:key', authMiddleware, PLAN, rbac('settings', 'update'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const key = req.params.key.toUpperCase();
+
+    const cfg    = await _getConfig(schoolId, null);
+    const exists = cfg.customTypes.some(t => t.key === key);
+    if (!exists) return E.notFound(res, `Assessment type "${key}" not found`);
+
+    if (cfg.customTypes.length <= 1) {
+      return _err(res, 'Cannot delete the last assessment type');
+    }
+
+    // Guard: check for existing marks using this type
+    const markCount = await _model('assessment_marks').countDocuments({ schoolId, assessmentType: key });
+    if (markCount > 0) {
+      return _err(
+        res,
+        `Cannot delete "${key}" — ${markCount} mark${markCount === 1 ? '' : 's'} exist for this type. Remove all marks first or reassign them.`,
+        409
+      );
+    }
+
+    const updated              = cfg.customTypes.filter(t => t.key !== key);
+    const { weights, instances } = _syncLegacyFields(updated);
+    const Config = _model('assessment_config');
+    const doc = await Config.findOneAndUpdate(
+      { schoolId, academicYearId: null },
+      { $set: { customTypes: updated, weights, instances } },
+      { new: true }
+    ).lean();
+
+    return _ok(res, doc.customTypes);
+  } catch (err) {
+    console.error('[assessment/types DELETE]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
    MARKS  —  /api/assessment/marks
    ══════════════════════════════════════════════════════════════ */
 
@@ -266,7 +474,7 @@ const MarkSchema = z.object({
   classId:        z.string().min(1),
   academicYearId: z.string().optional(),
   termNumber:     z.number().int().min(1).max(3),
-  assessmentType: z.enum(ASSESSMENT_TYPES),
+  assessmentType: z.string().min(1).max(20),
   instance:       z.number().int().min(1).max(10).default(1),
   rawScore:       z.number().min(0).max(100),
   label:          z.string().max(100).optional(),
@@ -315,15 +523,24 @@ router.get('/marks', authMiddleware, PLAN, rbac('grades', 'read'), async (req, r
 router.post('/marks', authMiddleware, PLAN, rbac('grades', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const parsed = MarkSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return _err(res, parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; '));
+    const rawParsed = MarkSchema.safeParse(req.body);
+    if (!rawParsed.success) {
+      return _err(res, rawParsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; '));
     }
-    const d = parsed.data;
+    const d = { ...rawParsed.data, assessmentType: rawParsed.data.assessmentType.toUpperCase() };
 
     // Guard: reject writes to archived academic years
     if (d.academicYearId && await isYearArchived(schoolId, d.academicYearId)) {
       return _err(res, 'This academic year is locked — marks cannot be added or modified.', 403);
+    }
+
+    // Load config once (shared for type validation + permission check)
+    const markConfig = await _getConfig(schoolId, d.academicYearId || null);
+
+    // Validate assessmentType against school's configured types
+    const validMarkKeys = new Set(markConfig.customTypes.map(t => t.key));
+    if (!validMarkKeys.has(d.assessmentType)) {
+      return _err(res, `Invalid assessment type "${d.assessmentType}". Configured types: ${[...validMarkKeys].join(', ')}`);
     }
 
     // Enforce that only admin/superadmin can add MT and ET
@@ -331,9 +548,7 @@ router.post('/marks', authMiddleware, PLAN, rbac('grades', 'create'), async (req
     const role = req.jwtUser.role;
     const canAddExams = ['admin', 'superadmin', 'deputy_principal'].includes(role);
     if (['MT', 'ET'].includes(d.assessmentType) && !canAddExams) {
-      // Check if admin has explicitly granted this teacher exam entry permission
-      const config = await _getConfig(schoolId, d.academicYearId || null);
-      const teacherCanEnterExams = config.teacherExamEntry === true;
+      const teacherCanEnterExams = markConfig.teacherExamEntry === true;
       if (!teacherCanEnterExams) {
         return _err(res, 'MT and ET marks can only be entered by admin or deputy. Contact your admin to enable teacher exam entry.', 403);
       }
@@ -383,11 +598,11 @@ router.post('/marks', authMiddleware, PLAN, rbac('grades', 'create'), async (req
 router.post('/marks/bulk', authMiddleware, PLAN, rbac('grades', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const parsed = BulkMarkSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return _err(res, parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; '));
+    const bulkParsed = BulkMarkSchema.safeParse(req.body);
+    if (!bulkParsed.success) {
+      return _err(res, bulkParsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; '));
     }
-    const { marks } = parsed.data;
+    const marks = bulkParsed.data.marks.map(d => ({ ...d, assessmentType: d.assessmentType.toUpperCase() }));
 
     // Guard: reject if any mark targets an archived academic year
     const yearIds = marks.map(d => d.academicYearId).filter(Boolean);
@@ -398,13 +613,22 @@ router.post('/marks/bulk', authMiddleware, PLAN, rbac('grades', 'create'), async
       }
     }
 
+    // Load config once for type validation + permission check
+    const bulkConfig = await _getConfig(schoolId, marks[0]?.academicYearId || null);
+    const validBulkKeys = new Set(bulkConfig.customTypes.map(t => t.key));
+
+    // Validate all assessment types against school's configured types
+    const invalidMark = marks.find(d => !validBulkKeys.has(d.assessmentType));
+    if (invalidMark) {
+      return _err(res, `Invalid assessment type "${invalidMark.assessmentType}". Configured types: ${[...validBulkKeys].join(', ')}`);
+    }
+
     // Enforce that only admin/deputy_principal can bulk-enter MT and ET
     const role = req.jwtUser.role;
     const canAddExams = ['admin', 'superadmin', 'deputy_principal'].includes(role);
     const hasExamTypes = marks.some(d => ['MT', 'ET'].includes(d.assessmentType));
     if (hasExamTypes && !canAddExams) {
-      const config = await _getConfig(req.jwtUser.schoolId, marks[0]?.academicYearId || null);
-      if (!config.teacherExamEntry) {
+      if (!bulkConfig.teacherExamEntry) {
         return _err(res, 'MT and ET marks can only be entered by admin or deputy. Contact your admin to enable teacher exam entry.', 403);
       }
     }
@@ -501,7 +725,10 @@ router.get('/report', authMiddleware, PLAN, rbac('grades', 'read'), async (req, 
 
     // Load config (weights, template)
     const config  = await _getConfig(schoolId, academicYearId || null);
-    const weights = config.weights || DEFAULT_WEIGHTS;
+    // Derive weights from customTypes (new) or fall back to legacy weights map
+    const weights = config.customTypes && config.customTypes.length > 0
+      ? Object.fromEntries(config.customTypes.map(t => [t.key, t.weight]))
+      : (config.weights || DEFAULT_WEIGHTS);
 
     // Fetch all published marks
     const marksFilter = { schoolId, isPublished: true };

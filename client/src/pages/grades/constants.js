@@ -2,7 +2,7 @@
    Grades / Assessment — shared constants and pure helpers
    ============================================================ */
 
-export const ASSESSMENT_TYPES = ['CA', 'HW', 'MT', 'ET'];
+export const ASSESSMENT_TYPES = ['CA', 'HW', 'MT', 'ET'];  // kept for legacy fallback
 export const TERM_NUMBERS     = [1, 2, 3];
 
 export const TYPE_LABELS = {
@@ -19,6 +19,35 @@ export const TYPE_PILL = {
   HW: 'bg-purple-50 text-purple-700 border-purple-200',
   MT: 'bg-amber-50 text-amber-700 border-amber-200',
   ET: 'bg-red-50 text-red-700 border-red-200',
+};
+
+/** Default assessment types — mirrors server DEFAULT_CUSTOM_TYPES */
+export const DEFAULT_CUSTOM_TYPES = [
+  { key: 'CA', label: 'Continuous Assessment', weight: 20, instances: 2, color: 'violet' },
+  { key: 'HW', label: 'Homework / Assignment',  weight: 10, instances: 2, color: 'purple' },
+  { key: 'MT', label: 'Mid-Term Exam',           weight: 30, instances: 1, color: 'amber'  },
+  { key: 'ET', label: 'End-Term Exam',           weight: 40, instances: 1, color: 'red'    },
+];
+
+/** Valid color names for assessment type pills */
+export const VALID_TYPE_COLORS = [
+  'violet','purple','amber','red','blue','emerald','sky','orange','rose','teal','indigo','cyan',
+];
+
+/** Tailwind classes for each color name */
+export const COLOR_PILL = {
+  violet:  'bg-violet-50  text-violet-700  border-violet-200',
+  purple:  'bg-purple-50  text-purple-700  border-purple-200',
+  amber:   'bg-amber-50   text-amber-700   border-amber-200',
+  red:     'bg-red-50     text-red-700     border-red-200',
+  blue:    'bg-blue-50    text-blue-700    border-blue-200',
+  emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  sky:     'bg-sky-50     text-sky-700     border-sky-200',
+  orange:  'bg-orange-50  text-orange-700  border-orange-200',
+  rose:    'bg-rose-50    text-rose-700    border-rose-200',
+  teal:    'bg-teal-50    text-teal-700    border-teal-200',
+  indigo:  'bg-indigo-50  text-indigo-700  border-indigo-200',
+  cyan:    'bg-cyan-50    text-cyan-700    border-cyan-200',
 };
 
 export const EXAM_LIMIT = 20;
