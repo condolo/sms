@@ -380,10 +380,10 @@ function _yearStatus(year, archivedIds = []) {
  */
 router.get('/years', authMiddleware, async (req, res) => {
   try {
-    const { schoolId, role } = req.jwtUser;
-    if (!['superadmin', 'admin', 'deputy_principal'].includes(role)) {
-      return E.forbidden(res, 'Admin access required');
-    }
+    const { schoolId } = req.jwtUser;
+    // All authenticated users may READ academic years (teachers need this
+    // to select the correct year/term when entering marks and viewing reports).
+    // Write operations (POST/PUT/DELETE) remain admin-only.
 
     const [years, cfg] = await Promise.all([
       _model('academic_years').find({ schoolId }).sort({ startDate: 1 }).lean(),

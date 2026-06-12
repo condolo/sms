@@ -374,6 +374,11 @@ export const settings = {
 };
 
 export const academicConfig = {
+  // Main academic config (grading schema, assessment weights, ranking, report settings)
+  get:          ()           => _get('/academic-config'),
+  update:       (data)       => _put('/academic-config', data),
+  resetDefaults:()           => _post('/academic-config/reset'),
+  // Academic years (terms embedded in each year)
   years: {
     list:       ()           => _get('/academic-config/years'),
     create:     (data)       => _post('/academic-config/years', data),

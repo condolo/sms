@@ -6,6 +6,34 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.33.0] — Exam & Assessment Module Overhaul
+
+### Added
+- **Assessment type dropdown** in Create Exam slide-over — types come from the academic-config `assessmentWeights` (configurable per school). Stores both `assessmentType` key and `assessmentLabel` display name on each exam.
+- **Academic Year → Term cascade** in Create Exam and in all exam filters. Year selection auto-populates the current term based on today's date.
+- **Subject dropdown** (connected to the Subjects module FK) replaces the broken free-text subject field. Subject name is denormalized onto the exam for fast list display. Old free-text `subject` field was silently stripped by Zod — now fixed.
+- **Weight % auto-fill** — selecting an assessment type auto-fills the `weightPercent` field from the configured weight.
+- **Title auto-suggest** — "{Assessment Type} — {Subject}" suggested when both are selected, with a one-click apply button.
+- **Cascading filter panel** in Exams tab — Year → Term → Assessment Type → Search text. "Clear all" resets all filters.
+- **ResultsTab enhanced** — Year + Term dropdowns narrow the exam selector; exam picker uses `<optgroup>` when multiple assessment types are present.
+- **Grade Report tab** — Subject filter now uses the Subjects dropdown (FK) instead of free-text.
+- **Warm gradient header** on Exams page (blue-indigo-violet, matching timetable design language). Includes "Assessment Config" shortcut link to Settings.
+- **Academic tab in Settings** — new "Academic" tab with an Assessment Types & Weightings editor. Admins can add, rename, reorder and set weights for each assessment type. Sum-to-100% validation with visual indicator. Saves to `academic-config` via `PUT /api/academic-config`.
+- **`assessmentType`, `assessmentLabel`, `termLabel`, `subjectName`** added to `ExamSchema` in `server/routes/exams.js` (all optional, backward-compatible).
+- **Exam list enrichment** — `GET /api/exams` now resolves `subjectName` (from subjects collection) and `className` (from classes collection) via FK lookup before returning docs.
+- **`assessmentType` + `termLabel` query filters** added to `GET /api/exams` for server-side filtering.
+- **`academicConfig.get()` and `academicConfig.update()`** added to `client/src/api/client.js` for the main academic-config endpoint.
+- **Academic years now readable by all authenticated users** — removed admin-only role check from `GET /api/academic-config/years`. Write endpoints remain admin-only. This allows teachers to see year/term options when entering results.
+
+### Changed
+- `ExamsPage.jsx` fully overhauled — all components rewritten for connectivity and consistency.
+- Status badge config expanded to include all statuses in the state machine (`in_progress`, `moderated`, `approved`, `locked`, `published`, `archived`).
+
+### Fixed
+- **Subject field data loss** — the previous free-text `subject` field in Create Exam was stripped by Zod before saving (the `ExamSchema` never had a `subject` field). Exam list was always showing "—" for subject. Now properly uses `subjectId` FK.
+
+---
+
 ## [Upcoming] — Dashboard Widget Customisation (drag-and-drop)
 
 > **Status:** Planned — not yet implemented. Design agreed; implementation queued.

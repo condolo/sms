@@ -99,6 +99,11 @@ const ExamSchema = z.object({
   // Teacher-subject ownership (set when creating — used for validation)
   ownerId:       z.string().optional(),   // userId of subject teacher who owns this exam
   weightPercent: z.number().min(0).max(100).optional(),  // how much this exam contributes to term grade
+  // Assessment type linkage (v4.33.0) — connected to academic-config assessmentWeights
+  assessmentType:  z.string().max(50).optional(),   // key from assessmentWeights, e.g. 'midterm', 'classwork'
+  assessmentLabel: z.string().max(100).optional(),  // display label, e.g. 'Mid-Term Exam', 'CA 1'
+  termLabel:       z.string().max(100).optional(),  // denormalized term name, e.g. 'Term 1'
+  subjectName:     z.string().max(100).optional(),  // denormalized subject name for quick display
 });
 
 const ResultSchema = z.object({
@@ -172,6 +177,11 @@ router.get('/', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) =>
     if (_typ) filter.type           = _typ;
     if (_st)  filter.status         = _st;
 
+    const _at = strParam(req.query.assessmentType);
+    const _tl = strParam(req.query.termLabel);
+    if (_at) filter.assessmentType = _at;
+    if (_tl) filter.termLabel      = _tl;
+
     const _df = strParam(req.query.dateFrom);
     const _dt = strParam(req.query.dateTo);
     if (_df || _dt) {
@@ -190,7 +200,23 @@ router.get('/', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) =>
       Exams.find(filter).sort({ date: -1 }).skip(skip).limit(limit).select('-__v').lean(),
       Exams.countDocuments(filter)
     ]);
-    return ok(res, docs, paginate(page, limit, total));
+
+    // Enrich with subject names and class names via FK lookup
+    const subjectIds = [...new Set(docs.map(d => d.subjectId).filter(Boolean))];
+    const classIds   = [...new Set(docs.map(d => d.classId).filter(Boolean))];
+    const [subjectDocs, classDocs] = await Promise.all([
+      subjectIds.length ? _model('subjects').find({ id: { $in: subjectIds }, schoolId }).select('id name').lean() : Promise.resolve([]),
+      classIds.length   ? _model('classes').find({ id: { $in: classIds }, schoolId }).select('id name').lean()   : Promise.resolve([]),
+    ]);
+    const subjectMap = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
+    const classMap   = Object.fromEntries(classDocs.map(c => [c.id, c.name]));
+    const enriched   = docs.map(d => ({
+      ...d,
+      subjectName: d.subjectId ? (subjectMap[d.subjectId] ?? d.subjectName ?? null) : (d.subjectName ?? null),
+      className:   d.classId   ? (classMap[d.classId]     ?? d.className   ?? null) : (d.className   ?? null),
+    }));
+
+    return ok(res, enriched, paginate(page, limit, total));
   } catch (err) { console.error('[exams GET]', err); return E.serverError(res); }
 });
 
