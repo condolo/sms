@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, ClipboardList, FileText } from 'lucide-react';
 import { assessment as api, classes as classesApi } from '@/api/client.js';
-import { TERM_NUMBERS, ASSESSMENT_TYPES, DEFAULT_WEIGHTS } from '../constants.js';
+import { TERM_NUMBERS, DEFAULT_CUSTOM_TYPES } from '../constants.js';
 import { Skeleton, SelField, TypePill } from './GradesPrimitives.jsx';
 import StudentReportCard from './StudentReportCard.jsx';
 
@@ -43,7 +43,8 @@ export default function ReportCardsTab() {
   });
 
   const reportCfg      = reportData?.config ?? {};
-  const weights        = reportCfg.weights  ?? DEFAULT_WEIGHTS;
+  const customTypes    = reportCfg.customTypes ?? DEFAULT_CUSTOM_TYPES;
+  const weights        = reportCfg.weights ?? Object.fromEntries(customTypes.map(t => [t.key, t.weight]));
   const template       = reportCfg.reportTemplate ?? 'detailed';
   const reportStudents = reportData?.students ?? (reportData?.student ? [reportData.student] : []);
 
@@ -92,9 +93,9 @@ export default function ReportCardsTab() {
       ) : (
         <div className="space-y-4">
           <div className="flex flex-wrap gap-2 items-center">
-            {ASSESSMENT_TYPES.map(t => (
-              <span key={t} className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 border border-slate-200 px-2.5 py-1 text-xs text-slate-600">
-                <TypePill type={t} />{weights[t]}%
+            {customTypes.map(t => (
+              <span key={t.key} className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 border border-slate-200 px-2.5 py-1 text-xs text-slate-600">
+                <TypePill type={t.key} color={t.color} />{weights[t.key] ?? t.weight}%
               </span>
             ))}
             <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 border border-indigo-200 px-2.5 py-1 text-xs text-indigo-700">
@@ -114,6 +115,7 @@ export default function ReportCardsTab() {
               template={template}
               half={half}
               termNum={termNum}
+              customTypes={customTypes}
             />
           ))}
         </div>

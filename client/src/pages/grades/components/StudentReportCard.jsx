@@ -3,9 +3,13 @@
    Props: student, studentsList, template, half, termNum
    ============================================================ */
 import { Printer } from 'lucide-react';
-import { TERM_NUMBERS, _pct, _scoreColor } from '../constants.js';
+import { TERM_NUMBERS, DEFAULT_CUSTOM_TYPES, _pct, _scoreColor } from '../constants.js';
 
-export default function StudentReportCard({ student, studentsList, template, half, termNum }) {
+export default function StudentReportCard({ student, studentsList, template, half, termNum, customTypes }) {
+  // Fall back to the school defaults if parent didn't pass customTypes
+  const activeTypes = customTypes ?? DEFAULT_CUSTOM_TYPES;
+  // ET running average is only shown when an 'ET' type exists in the school's config
+  const hasET = activeTypes.some(t => t.key === 'ET');
   const subjects    = Object.entries(student.subjects ?? {});
   const termsToShow = termNum ? [Number(termNum)] : TERM_NUMBERS;
 
@@ -89,13 +93,16 @@ export default function StudentReportCard({ student, studentsList, template, hal
                 <thead>
                   <tr className="border-b border-slate-100">
                     <th className="text-left text-xs font-medium text-slate-500 px-4 py-2.5">Subject</th>
-                    <th className="text-right text-xs font-medium text-slate-500 px-3 py-2.5">CA avg</th>
-                    <th className="text-right text-xs font-medium text-slate-500 px-3 py-2.5">HW avg</th>
-                    <th className="text-right text-xs font-medium text-slate-500 px-3 py-2.5">MT</th>
-                    {!half && <th className="text-right text-xs font-medium text-slate-500 px-3 py-2.5">ET</th>}
+                    {activeTypes.map(t => (
+                      half && t.key === 'ET' ? null : (
+                        <th key={t.key} className="text-right text-xs font-medium text-slate-500 px-3 py-2.5">
+                          {t.instances > 1 ? `${t.label} avg` : t.label}
+                        </th>
+                      )
+                    ))}
                     {!half && <th className="text-right text-xs font-medium text-slate-500 px-3 py-2.5">Term total</th>}
                     {half  && <th className="text-right text-xs font-medium text-amber-600 px-3 py-2.5 bg-amber-50/40">Half-term /100</th>}
-                    {!half && termN >= 2 && <th className="text-right text-xs text-slate-400 px-3 py-2.5">ET avg (ref)</th>}
+                    {!half && termN >= 2 && hasET && <th className="text-right text-xs text-slate-400 px-3 py-2.5">ET avg (ref)</th>}
                     {!half && <th className="text-right text-xs font-bold text-slate-700 px-4 py-2.5 bg-slate-50/60">Final grade</th>}
                   </tr>
                 </thead>
@@ -112,13 +119,16 @@ export default function StudentReportCard({ student, studentsList, template, hal
                     return (
                       <tr key={subId} className="hover:bg-slate-50 transition">
                         <td className="px-4 py-2.5 font-medium text-slate-800">{subId}</td>
-                        <td className={`px-3 py-2.5 text-right tabular-nums ${_scoreColor(t.typeAvgs?.CA)}`}>{_pct(t.typeAvgs?.CA)}</td>
-                        <td className={`px-3 py-2.5 text-right tabular-nums ${_scoreColor(t.typeAvgs?.HW)}`}>{_pct(t.typeAvgs?.HW)}</td>
-                        <td className={`px-3 py-2.5 text-right tabular-nums ${_scoreColor(t.typeAvgs?.MT)}`}>{_pct(t.typeAvgs?.MT)}</td>
-                        {!half && <td className={`px-3 py-2.5 text-right tabular-nums ${_scoreColor(t.typeAvgs?.ET)}`}>{_pct(t.typeAvgs?.ET)}</td>}
+                        {activeTypes.map(type => (
+                          half && type.key === 'ET' ? null : (
+                            <td key={type.key} className={`px-3 py-2.5 text-right tabular-nums ${_scoreColor(t.typeAvgs?.[type.key])}`}>
+                              {_pct(t.typeAvgs?.[type.key])}
+                            </td>
+                          )
+                        ))}
                         {!half && <td className={`px-3 py-2.5 text-right tabular-nums ${_scoreColor(t.termTotal)}`}>{_pct(t.termTotal)}</td>}
                         {half  && <td className={`px-3 py-2.5 text-right tabular-nums font-semibold bg-amber-50/40 ${_scoreColor(t.halfTermTotal)}`}>{_pct(t.halfTermTotal)}</td>}
-                        {!half && termN >= 2 && <td className={`px-3 py-2.5 text-right tabular-nums text-slate-400 ${_scoreColor(t.etRunningAvg)}`}>{_pct(t.etRunningAvg)}</td>}
+                        {!half && termN >= 2 && hasET && <td className={`px-3 py-2.5 text-right tabular-nums text-slate-400 ${_scoreColor(t.etRunningAvg)}`}>{_pct(t.etRunningAvg)}</td>}
                         {!half && <td className={`px-4 py-2.5 text-right tabular-nums font-bold bg-slate-50/60 ${_scoreColor(t.finalGrade)}`}>{_pct(t.finalGrade)}</td>}
                       </tr>
                     );

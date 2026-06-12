@@ -775,10 +775,11 @@ router.get('/report', authMiddleware, PLAN, rbac('grades', 'read'), async (req, 
       }
     }
 
-    // Attach config so frontend knows template and weights used
+    // Attach config so frontend knows template, weights, and types used
     const result = {
       config: {
         weights,
+        customTypes:    config.customTypes || DEFAULT_CUSTOM_TYPES,
         reportTemplate: config.reportTemplate,
         instances:      config.instances || DEFAULT_INSTANCES,
       },

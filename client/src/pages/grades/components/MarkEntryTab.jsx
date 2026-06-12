@@ -8,7 +8,7 @@ import { AnimatePresence } from 'framer-motion';
 import { Loader2, Save, PenLine, BookOpen } from 'lucide-react';
 import { assessment as api, classes as classesApi } from '@/api/client.js';
 import {
-  TERM_NUMBERS, ASSESSMENT_TYPES, TYPE_LABELS,
+  TERM_NUMBERS, DEFAULT_CUSTOM_TYPES,
   _pct, _scoreColor,
 } from '../constants.js';
 import { Skeleton, Toast, SelField, iCls, TypePill } from './GradesPrimitives.jsx';
@@ -35,11 +35,10 @@ export default function MarkEntryTab() {
     queryFn:  () => api.getConfig(),
     staleTime: 5 * 60_000,
   });
-  const cfg       = configData?.data ?? {};
-  const instances = cfg.instances ?? { CA: 2, HW: 2 };
-  const maxInst   = assessmentType === 'CA' ? (instances.CA ?? 2)
-                  : assessmentType === 'HW' ? (instances.HW ?? 2)
-                  : 1;
+  const cfg         = configData?.data ?? {};
+  const customTypes = cfg.customTypes ?? DEFAULT_CUSTOM_TYPES;
+  const activeType  = customTypes.find(t => t.key === assessmentType);
+  const maxInst     = activeType?.instances ?? 1;
 
   const { data: studentsData, isLoading: studentsLoading } = useQuery({
     queryKey: ['classes', classId, 'students'],
@@ -117,7 +116,7 @@ export default function MarkEntryTab() {
             options={TERM_NUMBERS.map(n => ({ value: String(n), label: `Term ${n}` }))} placeholder="Select term" />
           <SelField label="Assessment type" value={assessmentType}
             onChange={v => { setAssessmentType(v); setInstance('1'); }}
-            options={ASSESSMENT_TYPES.map(t => ({ value: t, label: `${t} — ${TYPE_LABELS[t]}` }))} placeholder="Select type" />
+            options={customTypes.map(t => ({ value: t.key, label: `${t.key} — ${t.label}` }))} placeholder="Select type" />
           {maxInst > 1 && (
             <SelField label="Instance" value={instance} onChange={setInstance} placeholder=""
               options={Array.from({ length: maxInst }, (_, i) => ({ value: String(i + 1), label: `${assessmentType} ${i + 1}` }))} />
@@ -142,9 +141,9 @@ export default function MarkEntryTab() {
           <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50/50">
             <div>
               <div className="flex items-center gap-2">
-                <TypePill type={assessmentType} />
+                <TypePill type={assessmentType} color={activeType?.color} />
                 <span className="text-sm font-semibold text-slate-800">
-                  {assessmentType} {maxInst > 1 ? instance : ''} — {subjectId} — Term {termNumber}
+                  {activeType?.label ?? assessmentType} {maxInst > 1 ? instance : ''} — {subjectId} — Term {termNumber}
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">Enter marks out of 100</p>
