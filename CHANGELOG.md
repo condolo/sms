@@ -6,6 +6,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.33.1] — Assessment Config relocated into Exams module
+
+### Changed
+- **Assessment Types & Weightings editor moved** from Settings → Academic tab into a new **"Configuration" tab** inside the Exams & Assessment page. Admin-only tab; hidden from teachers. This removes the friction of leaving the Exams module to configure exam types.
+- Removed the Settings → Academic tab entirely (wrong home for exam-specific config).
+- Removed the "Assessment Config" shortcut link from the Exams page header (the Configuration tab is now the direct path).
+- `ExamPage.jsx` now has 4 tabs: Exams · Results · Grade Report · Configuration.
+
+---
+
 ## [v4.33.0] — Exam & Assessment Module Overhaul
 
 ### Added

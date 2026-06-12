@@ -1,12 +1,10 @@
 /* ============================================================
-   Exams & Assessment — v4.33.0 Overhaul
+   Exams & Assessment — v4.33.1
    - Warm gradient header
-   - Assessment type connected to academic-config (configurable)
-   - Subject dropdown (FK, not free text)
-   - Academic Year + Term selectors (connected to real years)
-   - Cascading filters: Year → Term → Assessment Type → Search
-   - CreateExamSlideOver: all proper dropdowns, auto-suggest title
-   - ResultsTab: Year/Term filter to narrow exam picker
+   - 4 tabs: Exams · Results · Grade Report · Configuration (admin)
+   - Assessment types & weightings configured inline (no Settings trip)
+   - Subject dropdown (FK), Year/Term/Type cascade filters
+   - CreateExamSlideOver: all dropdowns connected to real data
    ============================================================ */
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -14,9 +12,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   FileText, BarChart3, ClipboardList, Plus, X, Loader2,
   CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight,
-  Search, BookOpen, Save, Check, Download, TrendingUp,
+  Search, Save, Check, Download, TrendingUp,
   Award, Users2, GraduationCap, Filter, Percent, Settings,
-  Tag, Layers,
+  Tag, Layers, Info, Trash2,
 } from 'lucide-react';
 import {
   exams as examsApi,
@@ -36,10 +34,11 @@ export default function ExamsPage() {
   const canCreate = ['admin', 'superadmin', 'deputy_principal', 'exams_officer'].includes(role);
 
   const TABS = [
-    { id: 'exams',   label: 'Exams',       icon: FileText      },
-    { id: 'results', label: 'Results',      icon: ClipboardList },
-    { id: 'grades',  label: 'Grade Report', icon: BarChart3     },
-  ];
+    { id: 'exams',   label: 'Exams',         icon: FileText,     adminOnly: false },
+    { id: 'results', label: 'Results',        icon: ClipboardList, adminOnly: false },
+    { id: 'grades',  label: 'Grade Report',   icon: BarChart3,    adminOnly: false },
+    { id: 'config',  label: 'Configuration',  icon: Settings,     adminOnly: true  },
+  ].filter(t => !t.adminOnly || canCreate);
 
   /* ── Shared data loaded once at page level ── */
   const { data: yearsRaw } = useQuery({
@@ -94,13 +93,6 @@ export default function ExamsPage() {
                 <p className="text-blue-100 text-xs mt-0.5">Schedule exams, enter results and generate grade reports</p>
               </div>
             </div>
-            <a
-              href="/settings"
-              className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-white/80 hover:text-white bg-white/10 hover:bg-white/20 border border-white/30 px-3 py-1.5 rounded-lg transition"
-            >
-              <Settings size={12} />
-              Assessment Config
-            </a>
           </div>
 
           {/* ── Tab bar ── */}
@@ -147,6 +139,9 @@ export default function ExamsPage() {
           )}
           {tab === 'grades' && (
             <GradesTab key="grades" subjectsList={subjectsList} />
+          )}
+          {tab === 'config' && canCreate && (
+            <ConfigTab key="config" />
           )}
         </AnimatePresence>
       </div>
@@ -1187,6 +1182,237 @@ function CreateExamSlideOver({ years, assessmentWeights, subjectsList, onClose, 
         </div>
       </motion.div>
     </>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   CONFIGURATION TAB — Assessment types & weightings
+   Admin-only. Replaces the removed Settings → Academic tab.
+   ══════════════════════════════════════════════════════════════ */
+
+const ASSESSMENT_TYPE_OPTIONS = [
+  { key: 'classwork',  label: 'Classwork / CAT'  },
+  { key: 'homework',   label: 'Homework'          },
+  { key: 'project',    label: 'Project'           },
+  { key: 'test',       label: 'Test'              },
+  { key: 'midterm',    label: 'Mid-Term Exam'     },
+  { key: 'final',      label: 'End-Term Exam'     },
+  { key: 'coursework', label: 'Coursework'        },
+  { key: 'oral',       label: 'Oral Assessment'   },
+  { key: 'practical',  label: 'Practical'         },
+  { key: 'other',      label: 'Other'             },
+];
+
+function ConfigTab() {
+  const qc = useQueryClient();
+
+  const { data: acfgRaw, isLoading } = useQuery({
+    queryKey: ['academic-config', 'main'],
+    queryFn:  academicConfigApi.get,
+    staleTime: 5 * 60_000,
+  });
+  const savedWeights = acfgRaw?.data?.assessmentWeights
+    ?? acfgRaw?.assessmentWeights
+    ?? [
+      { assessmentType: 'classwork', label: 'Classwork / CAT', weight: 20 },
+      { assessmentType: 'midterm',   label: 'Mid-Term Exam',   weight: 30 },
+      { assessmentType: 'final',     label: 'End-Term Exam',   weight: 50 },
+    ];
+
+  /* null = not yet touched; truthy = local draft */
+  const [draft, setDraft] = useState(null);
+  const [saveErr, setSaveErr] = useState('');
+  const [saved, setSaved]     = useState(false);
+
+  const rows        = draft ?? savedWeights;
+  const totalWeight = rows.reduce((s, w) => s + (Number(w.weight) || 0), 0);
+  const weightOk    = Math.abs(totalWeight - 100) < 0.01;
+
+  const mutation = useMutation({
+    mutationFn: data => academicConfigApi.update({ assessmentWeights: data }),
+    onSuccess:  () => {
+      qc.invalidateQueries({ queryKey: ['academic-config', 'main'] });
+      setDraft(null);
+      setSaved(true);
+      setSaveErr('');
+      setTimeout(() => setSaved(false), 3000);
+    },
+    onError: err => setSaveErr(err?.message ?? 'Failed to save'),
+  });
+
+  function updateRow(i, field, val) {
+    setSaved(false);
+    setDraft(prev => {
+      const w = [...(prev ?? savedWeights)];
+      w[i] = { ...w[i], [field]: field === 'weight' ? (val === '' ? '' : Number(val)) : val };
+      return w;
+    });
+  }
+
+  function addRow() {
+    setDraft(prev => [...(prev ?? savedWeights), { assessmentType: 'other', label: 'New Assessment', weight: 0 }]);
+    setSaved(false);
+  }
+
+  function removeRow(i) {
+    setDraft(prev => { const w = [...(prev ?? savedWeights)]; w.splice(i, 1); return w; });
+    setSaved(false);
+  }
+
+  function resetToDefaults() {
+    setDraft([
+      { assessmentType: 'classwork', label: 'Classwork / CAT', weight: 20 },
+      { assessmentType: 'midterm',   label: 'Mid-Term Exam',   weight: 30 },
+      { assessmentType: 'final',     label: 'End-Term Exam',   weight: 50 },
+    ]);
+    setSaved(false);
+    setSaveErr('');
+  }
+
+  function save() {
+    if (!weightOk) { setSaveErr(`Weights must sum to exactly 100%. Current total: ${totalWeight}%`); return; }
+    setSaveErr('');
+    mutation.mutate(rows.map(w => ({ ...w, weight: Number(w.weight) || 0 })));
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-24">
+        <Loader2 size={24} className="animate-spin text-slate-400" />
+      </div>
+    );
+  }
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="space-y-5">
+
+      {/* ── Assessment Weights card ── */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="flex items-start justify-between px-6 py-5 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-indigo-50 flex items-center justify-center shrink-0">
+              <Percent size={16} className="text-indigo-600" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">Assessment Types & Weightings</h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Define your school's assessment categories and how much each contributes to the term grade.
+                These appear in the "Create Exam" form as the Assessment Type dropdown.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={resetToDefaults}
+            className="text-xs text-slate-400 hover:text-slate-600 underline shrink-0 ml-4 mt-0.5"
+          >
+            Reset to defaults
+          </button>
+        </div>
+
+        <div className="px-6 py-5">
+          {/* Weight sum indicator */}
+          <div className={`flex items-center gap-2 text-xs font-medium mb-5 px-3 py-2 rounded-lg border ${
+            weightOk
+              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+              : 'bg-amber-50 text-amber-700 border-amber-200'
+          }`}>
+            <Percent size={11} />
+            {weightOk
+              ? `Total: 100% — weights balanced`
+              : `Total: ${totalWeight}% — must equal exactly 100%`}
+          </div>
+
+          {/* Column headers */}
+          <div className="grid grid-cols-[1fr_1.4fr_80px_36px] gap-3 mb-2 px-0.5">
+            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Category</span>
+            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Display Label</span>
+            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-center">Weight %</span>
+            <span />
+          </div>
+
+          <div className="space-y-2">
+            {rows.map((w, i) => (
+              <div key={i} className="grid grid-cols-[1fr_1.4fr_80px_36px] gap-3 items-center">
+                <select
+                  value={w.assessmentType}
+                  onChange={e => updateRow(i, 'assessmentType', e.target.value)}
+                  className="text-sm px-2.5 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 text-slate-800"
+                >
+                  {ASSESSMENT_TYPE_OPTIONS.map(opt => (
+                    <option key={opt.key} value={opt.key}>{opt.label}</option>
+                  ))}
+                </select>
+                <input
+                  value={w.label}
+                  onChange={e => updateRow(i, 'label', e.target.value)}
+                  placeholder="e.g. CA 1, Mid-Term…"
+                  className="text-sm px-2.5 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 text-slate-800 placeholder-slate-400"
+                />
+                <input
+                  type="number" min="0" max="100"
+                  value={w.weight}
+                  onChange={e => updateRow(i, 'weight', e.target.value)}
+                  className="text-sm px-2.5 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 text-center text-slate-800"
+                />
+                <button
+                  onClick={() => removeRow(i)}
+                  className="text-slate-300 hover:text-red-500 transition flex items-center justify-center rounded-lg hover:bg-red-50 p-1.5"
+                  title="Remove"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <button
+            onClick={addRow}
+            className="mt-4 flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-800"
+          >
+            <Plus size={12} />
+            Add assessment type
+          </button>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+          <div className="text-xs">
+            {saveErr && (
+              <span className="text-red-600 flex items-center gap-1">
+                <AlertTriangle size={12} />{saveErr}
+              </span>
+            )}
+            {saved && (
+              <span className="text-emerald-600 flex items-center gap-1">
+                <Check size={12} />Saved
+              </span>
+            )}
+          </div>
+          <button
+            onClick={save}
+            disabled={mutation.isPending || !weightOk}
+            className="flex items-center gap-2 bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+          >
+            {mutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+            {mutation.isPending ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+
+      {/* ── How-it-works hint ── */}
+      <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-5 py-4 flex items-start gap-3">
+        <Info size={15} className="text-indigo-500 mt-0.5 shrink-0" />
+        <div>
+          <p className="text-sm font-medium text-indigo-800">How this is used</p>
+          <p className="text-xs text-indigo-600 mt-1 leading-relaxed">
+            The <strong>Display Label</strong> (e.g. "CA 1", "Mid-Term Exam") appears in the Assessment Type dropdown when creating exams.
+            The <strong>Weight %</strong> is automatically applied to the exam's contribution toward the student's term grade in report cards.
+            Multiple exams with the same category type average within that category weight.
+            All weights must sum to exactly 100%.
+          </p>
+        </div>
+      </div>
+    </motion.div>
   );
 }
 
