@@ -71,7 +71,7 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
     }
 
     const Students    = _model('students');
-    const Attendance  = _model('attendance_records');
+    const Attendance  = _model('attendance');
     const FeeInvoices = _model('invoices');
     const FeePayments = _model('payments');
     const Reports     = _model('report_card_snapshots');

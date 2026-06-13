@@ -191,11 +191,20 @@ router.post('/', authMiddleware, PLAN, rbac('teachers', 'create'), async (req, r
 
     const staffId = await nextStaffId(schoolId);
 
+    // Bind userId from the linked user account (if a user with this email already exists).
+    // This is required for timetable slot resolution and meeting-link lookups.
+    let linkedUserId = null;
+    if (data.email) {
+      const userDoc = await _model('users').findOne({ schoolId, email: data.email }).select('id').lean();
+      if (userDoc) linkedUserId = userDoc.id;
+    }
+
     const doc = await Teachers.create({
       ...data,
       id:         uuidv4(),
       schoolId,
       staffId,
+      userId:     linkedUserId,
       createdBy:  userId,
       updatedBy:  userId,
     });

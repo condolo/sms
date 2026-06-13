@@ -38,7 +38,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     const { schoolId, studentId } = req.jwtUser;
 
     const Students    = _model('students');
-    const Attendance  = _model('attendance_records');
+    const Attendance  = _model('attendance');
     const FeeInvoices = _model('invoices');
     const Reports     = _model('report_card_snapshots');
     const Coverage    = _model('lesson_coverage');
@@ -121,10 +121,16 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       const teacherIds = [...new Set(rawSlots.map(s => s.teacherId).filter(Boolean))];
       if (teacherIds.length > 0) {
         const Teachers = _model('teachers');
-        const teacherDocs = await Teachers.find({ schoolId, id: { $in: teacherIds } })
-          .select('id zoomPMILink zoomPasscode meetLink')
-          .lean();
-        const teacherMap = Object.fromEntries(teacherDocs.map(t => [t.id, t]));
+        const teacherDocs = await Teachers.find({
+          schoolId,
+          $or: [{ id: { $in: teacherIds } }, { userId: { $in: teacherIds } }],
+        }).select('id userId zoomPMILink zoomPasscode meetLink').lean();
+        // Build map keyed by BOTH id and userId so timetable slots resolve regardless of which was stored
+        const teacherMap = {};
+        for (const t of teacherDocs) {
+          if (t.id)     teacherMap[t.id]     = t;
+          if (t.userId) teacherMap[t.userId] = t;
+        }
 
         timetableToday = rawSlots.map(slot => {
           if (!slot.teacherId) return slot;
