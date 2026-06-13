@@ -7,12 +7,16 @@
    and writes a metadata row to backup_logs with source:'cron'.
 
    Config (env vars):
-     BACKUP_DIR        — directory to store JSON files
-                         default: <project_root>/backups
-     BACKUP_CRON_EXPR  — cron expression (Africa/Nairobi timezone)
-                         default: "0 23 * * *"  (02:00 Kenya = 23:00 UTC)
-     BACKUP_KEEP_DAYS  — number of daily files to retain per school
-                         default: 7
+     BACKUP_DIR             — directory to store backup files
+                              default: <project_root>/backups
+     BACKUP_CRON_EXPR       — cron expression (Africa/Nairobi timezone)
+                              default: "0 23 * * *"  (02:00 Kenya = 23:00 UTC)
+     BACKUP_KEEP_DAYS       — number of daily files to retain per school
+                              default: 7
+     BACKUP_ENCRYPTION_KEY  — 32-byte AES-256-GCM key, base64-encoded (REQUIRED for KDPA compliance)
+                              Generate: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+                              When set:  files written as <name>.json.enc (encrypted binary)
+                              When unset: files written as <name>.json  (plaintext — not compliant)
 
    The cron is registered at startup by server/index.js:
      const { startBackupCron } = require('./utils/backup-cron');
@@ -24,7 +28,8 @@ const cron   = require('node-cron');
 const path   = require('path');
 const fs     = require('fs');
 const crypto = require('crypto');
-const { _model } = require('./model');
+const { _model }                        = require('./model');
+const { encrypt, encryptReady }         = require('./backupEncrypt');
 
 /* ── Configuration ─────────────────────────────────────────── */
 const BACKUP_DIR  = process.env.BACKUP_DIR
@@ -111,7 +116,6 @@ async function _buildBackupForSchool(schoolId) {
   const schoolDoc  = (data['schools'] || [])[0];
   const schoolName = (schoolDoc?.name || schoolId).replace(/[^a-z0-9]/gi, '_');
   const dateStr    = now.slice(0, 10);
-  const filename   = `Msingi_Backup_${schoolName}_${dateStr}.json`;
   const label      = `Nightly auto-backup — ${dateStr}`;
   const id         = _uid();
 
@@ -132,7 +136,8 @@ async function _buildBackupForSchool(schoolId) {
     data,
   };
 
-  return { manifest, filename, schoolName, label, id, total, stats, now };
+  // Return the manifest object — caller handles serialisation, encryption, and filename
+  return { manifest, schoolName, dateStr, label, id, total, stats, now };
 }
 
 /* ── Prune old backup files for one school ─────────────────── */
@@ -140,7 +145,7 @@ function _pruneOldBackups(schoolNameSlug) {
   try {
     const prefix = `Msingi_Backup_${schoolNameSlug}_`;
     const all    = fs.readdirSync(BACKUP_DIR)
-      .filter(f => f.startsWith(prefix) && f.endsWith('.json'))
+      .filter(f => f.startsWith(prefix) && (f.endsWith('.json') || f.endsWith('.json.enc')))
       .sort()       // ISO date strings are lexicographically ordered → chronological
       .reverse();   // newest first
 
@@ -152,7 +157,12 @@ function _pruneOldBackups(schoolNameSlug) {
 
 /* ── Main nightly job ──────────────────────────────────────── */
 async function runNightlyBackup() {
-  console.log('[backup-cron] Starting nightly backup run…');
+  const encrypted = encryptReady();
+  if (!encrypted) {
+    console.warn('[backup-cron] WARNING: BACKUP_ENCRYPTION_KEY is not set — backups will be written as plaintext JSON. Set this env var for KDPA Section 41 compliance.');
+  }
+
+  console.log(`[backup-cron] Starting nightly backup run… (encryption: ${encrypted ? 'ON' : 'OFF'})`);
 
   // Ensure storage directory exists
   try {
@@ -183,12 +193,22 @@ async function runNightlyBackup() {
 
   for (const school of schools) {
     try {
-      const { manifest, filename, schoolName, label, id, total, stats, now } =
+      const { manifest, schoolName, dateStr, label, id, total, stats, now } =
         await _buildBackupForSchool(school.id);
 
-      // Write JSON file to disk
+      // Serialise then optionally encrypt before writing to disk
+      const json = JSON.stringify(manifest, null, 2);
+      let fileContent, filename;
+      if (encrypted) {
+        fileContent = encrypt(json);                                    // Buffer (binary)
+        filename    = `Msingi_Backup_${schoolName}_${dateStr}.json.enc`;
+      } else {
+        fileContent = json;                                             // string (plaintext)
+        filename    = `Msingi_Backup_${schoolName}_${dateStr}.json`;
+      }
+
       const filePath = path.join(BACKUP_DIR, filename);
-      fs.writeFileSync(filePath, JSON.stringify(manifest, null, 2), 'utf8');
+      fs.writeFileSync(filePath, fileContent);
 
       // Write metadata to backup_logs (same collection as manual exports)
       await Logs.create({
@@ -202,6 +222,7 @@ async function runNightlyBackup() {
         stats,
         filename,
         source:       'cron',
+        encrypted,
       });
 
       // Remove old files beyond the retention window
