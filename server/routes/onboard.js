@@ -198,12 +198,17 @@ async function _provisionInDB(data, res) {
     });
   }
 
-  /* Check email uniqueness */
-  const emailExists = await User.findOne({ email: adminEmail.toLowerCase() }).lean();
-  if (emailExists) {
-    return res.status(409).json({
-      error: 'An account with this email already exists. Please sign in instead.'
-    });
+  /* Check email uniqueness — only block if the existing user belongs to an active school.
+     A deleted or rejected school must not permanently prevent re-registration with the same email. */
+  const existingUser = await User.findOne({ email: adminEmail.toLowerCase() }).lean();
+  if (existingUser) {
+    const existingSchool = await School.findOne({ id: existingUser.schoolId, isActive: true }).lean();
+    if (existingSchool) {
+      return res.status(409).json({
+        error: 'An account with this email already exists. Please sign in instead.'
+      });
+    }
+    // User exists but their school is inactive/rejected — allow re-registration
   }
 
   const schoolId = `sch_${slug}_${Date.now().toString(36)}`;
@@ -250,7 +255,7 @@ async function _provisionInDB(data, res) {
   });
 
   /* Seed base data — sections, academic year, permissions */
-  await _seedBaseData(schoolId, sections || ['primary']);
+  await _seedBaseData(schoolId, sections || ['primary'], country || '');
 
   const schoolObj = school.toObject();
   const userObj   = { ...user.toObject(), password: undefined };
@@ -342,24 +347,83 @@ const ALL_SECTIONS = {
   alevel:    { key:'alevel',    name:'Sixth Form / A-Level', code:'AL',  order:4 },
 };
 
+/* ── Country sets for academic calendar selection ───────── */
+const _AFRICA = new Set(['KE','UG','TZ','RW','ET','NG','GH','ZA','ZM','ZW']);
+const _UK_AU  = new Set(['GB','AU']);
+const _US_CA  = new Set(['US','CA']);
+
+/* ── Build country-aware academic year config ───────────── */
+function _buildAcademicYear(schoolId, country) {
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  const month = today.getMonth() + 1; // 1-12
+  const yr    = today.getFullYear();
+
+  function _markCurrent(terms) {
+    return terms.map(t => ({ ...t, isCurrent: todayStr >= t.startDate && todayStr <= t.endDate }));
+  }
+
+  if (_UK_AU.has(country)) {
+    // Sept–July spanning two calendar years
+    // If we're in Jan-Aug, the academic year started last September
+    const startYr = month >= 9 ? yr : yr - 1;
+    const endYr   = startYr + 1;
+    const terms = _markCurrent([
+      { id: `t1_${schoolId}`, name: 'Term 1', startDate: `${startYr}-09-01`, endDate: `${startYr}-12-15` },
+      { id: `t2_${schoolId}`, name: 'Term 2', startDate: `${endYr}-01-08`,   endDate: `${endYr}-04-10`   },
+      { id: `t3_${schoolId}`, name: 'Term 3', startDate: `${endYr}-04-27`,   endDate: `${endYr}-07-11`   },
+    ]);
+    return {
+      ayId: `ay_${schoolId}_${startYr}`,
+      name: `${startYr}–${endYr}`,
+      startDate: `${startYr}-09-01`, endDate: `${endYr}-07-31`,
+      terms,
+    };
+  }
+
+  if (_US_CA.has(country)) {
+    // Aug–May spanning two calendar years
+    const startYr = month >= 8 ? yr : yr - 1;
+    const endYr   = startYr + 1;
+    const terms = _markCurrent([
+      { id: `t1_${schoolId}`, name: 'Semester 1', startDate: `${startYr}-08-20`, endDate: `${endYr}-01-15` },
+      { id: `t2_${schoolId}`, name: 'Semester 2', startDate: `${endYr}-01-16`,   endDate: `${endYr}-05-31` },
+    ]);
+    return {
+      ayId: `ay_${schoolId}_${startYr}`,
+      name: `${startYr}–${endYr}`,
+      startDate: `${startYr}-08-20`, endDate: `${endYr}-05-31`,
+      terms,
+    };
+  }
+
+  // Default: Africa and everywhere else — single calendar year, Jan–Dec, three terms
+  const terms = _markCurrent([
+    { id: `t1_${schoolId}`, name: 'Term 1', startDate: `${yr}-01-06`, endDate: `${yr}-04-03` },
+    { id: `t2_${schoolId}`, name: 'Term 2', startDate: `${yr}-05-05`, endDate: `${yr}-08-07` },
+    { id: `t3_${schoolId}`, name: 'Term 3', startDate: `${yr}-09-01`, endDate: `${yr}-11-13` },
+  ]);
+  return {
+    ayId: `ay_${schoolId}_${yr}`,
+    name: `${yr}`,
+    startDate: `${yr}-01-01`, endDate: `${yr}-12-31`,
+    terms,
+  };
+}
+
 /* ── Seed base data — only the sections the school selected ─ */
-async function _seedBaseData(schoolId, selectedSections = ['primary','secondary']) {
+async function _seedBaseData(schoolId, selectedSections = ['primary','secondary'], country = '') {
   const AY   = _model('academic_years');
   const Perm = _model('role_permissions');
   const Sec  = _model('sections');
 
-  const year = new Date().getFullYear();
-  const ayId = `ay_${schoolId}_${year}`;
+  const { ayId, name, startDate, endDate, terms } = _buildAcademicYear(schoolId, country);
 
   await AY.updateOne({ id: ayId }, { $set: {
     id: ayId, schoolId,
-    name: `${year}-${year + 1}`, isCurrent: true,
-    startDate: `${year}-09-01`, endDate: `${year + 1}-07-31`,
-    terms: [
-      { id: `t1_${schoolId}`, name: 'Term 1', startDate: `${year}-09-01`,     endDate: `${year}-12-15`,     isCurrent: false },
-      { id: `t2_${schoolId}`, name: 'Term 2', startDate: `${year + 1}-01-08`, endDate: `${year + 1}-04-10`, isCurrent: true  },
-      { id: `t3_${schoolId}`, name: 'Term 3', startDate: `${year + 1}-04-27`, endDate: `${year + 1}-07-11`, isCurrent: false },
-    ]
+    name, isCurrent: true,
+    startDate, endDate,
+    terms,
   }}, { upsert: true });
 
   /* Seed ONLY the sections this school selected */

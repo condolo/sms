@@ -173,16 +173,16 @@ const INDEXES = [
     ],
   },
 
-  /* ── bell_schedules ─────────────────────────────────────────
+  /* ── bell_schedule ──────────────────────────────────────────
      One document per (school, section).
      section: 'all' | 'kg' | 'primary' | 'secondary' | 'alevel'
      Primary: fetch by schoolId + section for the grid.
      Unique constraint: one schedule per school per section. */
   {
-    col: 'bell_schedules',
+    col: 'bell_schedule',
     indexes: [
-      { key: { schoolId: 1, section: 1 }, name: 'bs_school_section', unique: true, sparse: true },
-      { key: { id: 1 },                   name: 'bs_id', unique: true, sparse: true },
+      { key: { schoolId: 1, section: 1 }, name: 'bsched_school_section', unique: true, sparse: true },
+      { key: { id: 1 },                   name: 'bsched_id', unique: true, sparse: true },
     ],
   },
 
@@ -394,6 +394,172 @@ const INDEXES = [
       { key: { schoolId: 1, teacherId: 1, academicYear: 1 },           name: 'lc_teacher_year' },
       { key: { schoolId: 1, classId: 1, subjectId: 1, academicYear: 1 }, name: 'lc_class_sub_year' },
       { key: { id: 1 },                                                 name: 'lc_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── assessment_marks ───────────────────────────────────────
+     High-volume CA marks collection (replaces legacy grades for new CA system).
+     Primary: mark entry grid loads by class+subject+term simultaneously.
+     Secondary: report card aggregation per student.
+     Tertiary: lock guard $or query uses isLocked. */
+  {
+    col: 'assessment_marks',
+    indexes: [
+      { key: { schoolId: 1, classId: 1, subjectId: 1, termNumber: 1 }, name: 'am_class_sub_term' },
+      { key: { schoolId: 1, studentId: 1, termNumber: 1 },             name: 'am_student_term' },
+      { key: { schoolId: 1, academicYearId: 1, isPublished: 1 },       name: 'am_year_published' },
+      { key: { schoolId: 1, isLocked: 1 },                             name: 'am_locked', sparse: true },
+      { key: { id: 1 },                                                 name: 'am_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── assessment_config ──────────────────────────────────────
+     One config doc per school (academicYearId: null = global config).
+     Queried by { schoolId, academicYearId } on every mark operation. */
+  {
+    col: 'assessment_config',
+    indexes: [
+      { key: { schoolId: 1, academicYearId: 1 }, name: 'acfg_school_year', unique: true, sparse: true },
+      { key: { id: 1 },                          name: 'acfg_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── grade_boundaries ───────────────────────────────────────
+     Grading scale docs. Primary lookup: default scale for school.
+     Secondary: list all scales for school (admin config page). */
+  {
+    col: 'grade_boundaries',
+    indexes: [
+      { key: { schoolId: 1, isDefault: 1 }, name: 'gb_school_default', sparse: true },
+      { key: { schoolId: 1 },               name: 'gb_school' },
+      { key: { id: 1 },                     name: 'gb_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── mark_submissions ───────────────────────────────────────
+     Approval workflow. Unique composite = one submission per
+     class/subject/term/type/instance combination.
+     List view filtered by status for admin review queue. */
+  {
+    col: 'mark_submissions',
+    indexes: [
+      { key: { schoolId: 1, classId: 1, subjectId: 1, termNumber: 1, assessmentType: 1, instance: 1 }, name: 'mksub_composite', unique: true, sparse: true },
+      { key: { schoolId: 1, status: 1, createdAt: -1 }, name: 'mksub_status_date' },
+      { key: { id: 1 },                                  name: 'mksub_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── exam_series ────────────────────────────────────────────
+     Named groupings of formal exams. Filtered by status and term. */
+  {
+    col: 'exam_series',
+    indexes: [
+      { key: { schoolId: 1, status: 1 },  name: 'exs_school_status' },
+      { key: { schoolId: 1, termId: 1 },  name: 'exs_school_term', sparse: true },
+      { key: { id: 1 },                   name: 'exs_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── comment_banks ──────────────────────────────────────────
+     Pre-written remark templates. Filtered by category and subject. */
+  {
+    col: 'comment_banks',
+    indexes: [
+      { key: { schoolId: 1, category: 1 },  name: 'cb_school_category' },
+      { key: { schoolId: 1, subjectId: 1 }, name: 'cb_school_subject', sparse: true },
+      { key: { id: 1 },                     name: 'cb_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── growth_* ───────────────────────────────────────────────
+     All growth portfolio collections share the same access pattern:
+     list/count by schoolId + studentId, used by the profile summary
+     and individual record pages. */
+  {
+    col: 'growth_projects',
+    indexes: [
+      { key: { schoolId: 1, studentId: 1, createdAt: -1 }, name: 'gp_student_date' },
+      { key: { id: 1 },                                    name: 'gp_id', unique: true, sparse: true },
+    ],
+  },
+  {
+    col: 'growth_leadership',
+    indexes: [
+      { key: { schoolId: 1, studentId: 1, createdAt: -1 }, name: 'gl_student_date' },
+      { key: { id: 1 },                                    name: 'gl_id', unique: true, sparse: true },
+    ],
+  },
+  {
+    col: 'growth_activities',
+    indexes: [
+      { key: { schoolId: 1, studentId: 1, createdAt: -1 }, name: 'ga_student_date' },
+      { key: { id: 1 },                                    name: 'ga_id', unique: true, sparse: true },
+    ],
+  },
+  {
+    col: 'growth_service',
+    indexes: [
+      { key: { schoolId: 1, studentId: 1, createdAt: -1 }, name: 'gs_student_date' },
+      { key: { id: 1 },                                    name: 'gs_id', unique: true, sparse: true },
+    ],
+  },
+  {
+    col: 'growth_awards',
+    indexes: [
+      { key: { schoolId: 1, studentId: 1, createdAt: -1 }, name: 'gaw_student_date' },
+      { key: { id: 1 },                                    name: 'gaw_id', unique: true, sparse: true },
+    ],
+  },
+  {
+    col: 'growth_recommendations',
+    indexes: [
+      { key: { schoolId: 1, studentId: 1, createdAt: -1 }, name: 'gr_student_date' },
+      { key: { id: 1 },                                    name: 'gr_id', unique: true, sparse: true },
+    ],
+  },
+  {
+    col: 'growth_aspirations',
+    indexes: [
+      // One aspirations doc per student; profile summary does a findOne by schoolId+studentId
+      { key: { schoolId: 1, studentId: 1 }, name: 'gasp_student', unique: true, sparse: true },
+      { key: { id: 1 },                     name: 'gasp_id', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── elearning_* ────────────────────────────────────────────
+     elearning_tokens: looked up by userId (no schoolId in _getToken helper).
+     elearning_course_links: unique per school+gcCourseId (Google Classroom course).
+     elearning_coursework_links: callback uses gcCourseId+gcCourseWorkId (no schoolId).
+     elearning_sessions: listed by school+date; Zoom webhook lookup by zoomMeetingId. */
+  {
+    col: 'elearning_tokens',
+    indexes: [
+      { key: { userId: 1 },   name: 'elt_user',   unique: true, sparse: true },
+      { key: { schoolId: 1 }, name: 'elt_school' },
+    ],
+  },
+  {
+    col: 'elearning_course_links',
+    indexes: [
+      { key: { schoolId: 1, gcCourseId: 1 }, name: 'elcl_school_course', unique: true, sparse: true },
+      { key: { id: 1 },                      name: 'elcl_id', unique: true, sparse: true },
+    ],
+  },
+  {
+    col: 'elearning_coursework_links',
+    indexes: [
+      // Webhook callback has only gcCourseId + gcCourseWorkId — no schoolId available at that point
+      { key: { gcCourseId: 1, gcCourseWorkId: 1 }, name: 'elcwl_course_work', unique: true, sparse: true },
+      { key: { schoolId: 1 },                       name: 'elcwl_school' },
+    ],
+  },
+  {
+    col: 'elearning_sessions',
+    indexes: [
+      { key: { schoolId: 1, scheduledAt: -1 }, name: 'els_school_date' },
+      { key: { schoolId: 1, teacherId: 1 },    name: 'els_teacher' },
+      { key: { zoomMeetingId: 1 },             name: 'els_zoom', sparse: true },
+      { key: { id: 1 },                        name: 'els_id', unique: true, sparse: true },
     ],
   },
 ];
