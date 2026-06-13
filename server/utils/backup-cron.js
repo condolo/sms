@@ -7,16 +7,21 @@
    and writes a metadata row to backup_logs with source:'cron'.
 
    Config (env vars):
-     BACKUP_DIR             — directory to store backup files
-                              default: <project_root>/backups
      BACKUP_CRON_EXPR       — cron expression (Africa/Nairobi timezone)
                               default: "0 23 * * *"  (02:00 Kenya = 23:00 UTC)
      BACKUP_KEEP_DAYS       — number of daily files to retain per school
                               default: 7
      BACKUP_ENCRYPTION_KEY  — 32-byte AES-256-GCM key, base64-encoded (REQUIRED for KDPA compliance)
                               Generate: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
-                              When set:  files written as <name>.json.enc (encrypted binary)
-                              When unset: files written as <name>.json  (plaintext — not compliant)
+                              When set:  files are AES-256-GCM encrypted (.json.enc)
+                              When unset: plaintext .json written (not compliant — warns on startup)
+
+   Storage mode (checked in order):
+     Cloud (preferred): set BACKUP_S3_BUCKET + BACKUP_S3_REGION + AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY
+       Optional: BACKUP_S3_ENDPOINT (Cloudflare R2, Backblaze B2, DO Spaces)
+                 BACKUP_S3_FORCE_PATH=true (required for R2 and MinIO)
+     Local fallback: BACKUP_DIR (default: <project_root>/backups)
+                     WARNING: ephemeral on Render — use cloud storage in production.
 
    The cron is registered at startup by server/index.js:
      const { startBackupCron } = require('./utils/backup-cron');
@@ -28,8 +33,9 @@ const cron   = require('node-cron');
 const path   = require('path');
 const fs     = require('fs');
 const crypto = require('crypto');
-const { _model }                        = require('./model');
-const { encrypt, encryptReady }         = require('./backupEncrypt');
+const { _model }                                              = require('./model');
+const { encrypt, encryptReady }                               = require('./backupEncrypt');
+const { storageReady, uploadBackup, listBackups, deleteBackup } = require('./backupStorage');
 
 /* ── Configuration ─────────────────────────────────────────── */
 const BACKUP_DIR  = process.env.BACKUP_DIR
@@ -140,36 +146,51 @@ async function _buildBackupForSchool(schoolId) {
   return { manifest, schoolName, dateStr, label, id, total, stats, now };
 }
 
-/* ── Prune old backup files for one school ─────────────────── */
-function _pruneOldBackups(schoolNameSlug) {
+/* ── Prune old local backup files for one school ────────────── */
+function _pruneLocalBackups(schoolNameSlug) {
   try {
     const prefix = `Msingi_Backup_${schoolNameSlug}_`;
     const all    = fs.readdirSync(BACKUP_DIR)
       .filter(f => f.startsWith(prefix) && (f.endsWith('.json') || f.endsWith('.json.enc')))
-      .sort()       // ISO date strings are lexicographically ordered → chronological
-      .reverse();   // newest first
-
+      .sort()     // ISO date strings sort lexicographically = chronologically
+      .reverse(); // newest first
     for (const f of all.slice(KEEP_DAYS)) {
       try { fs.unlinkSync(path.join(BACKUP_DIR, f)); } catch (_) { /* best effort */ }
     }
-  } catch (_) { /* non-fatal — BACKUP_DIR may not exist yet on first run */ }
+  } catch (_) { /* non-fatal */ }
+}
+
+/* ── Prune old S3 backup objects for one school ─────────────── */
+async function _pruneCloudBackups(schoolNameSlug) {
+  try {
+    const objects = await listBackups(schoolNameSlug);  // newest first
+    const toDelete = objects.slice(KEEP_DAYS);
+    await Promise.all(toDelete.map(o => deleteBackup(o.key).catch(() => {})));
+  } catch (_) { /* non-fatal */ }
 }
 
 /* ── Main nightly job ──────────────────────────────────────── */
 async function runNightlyBackup() {
   const encrypted = encryptReady();
+  const cloud     = storageReady();
+
   if (!encrypted) {
-    console.warn('[backup-cron] WARNING: BACKUP_ENCRYPTION_KEY is not set — backups will be written as plaintext JSON. Set this env var for KDPA Section 41 compliance.');
+    console.warn('[backup-cron] WARNING: BACKUP_ENCRYPTION_KEY is not set — backups will be plaintext. Set for KDPA Section 41 compliance.');
+  }
+  if (!cloud) {
+    console.warn('[backup-cron] WARNING: Cloud storage env vars not set — falling back to local disk. Ephemeral on Render!');
   }
 
-  console.log(`[backup-cron] Starting nightly backup run… (encryption: ${encrypted ? 'ON' : 'OFF'})`);
+  console.log(`[backup-cron] Starting nightly backup… (encryption: ${encrypted ? 'ON' : 'OFF'}, storage: ${cloud ? 'cloud' : 'local'})`);
 
-  // Ensure storage directory exists
-  try {
-    fs.mkdirSync(BACKUP_DIR, { recursive: true });
-  } catch (err) {
-    console.error('[backup-cron] Cannot create BACKUP_DIR:', BACKUP_DIR, err.message);
-    return;
+  // Ensure local fallback directory exists (no-op when cloud is active)
+  if (!cloud) {
+    try {
+      fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    } catch (err) {
+      console.error('[backup-cron] Cannot create BACKUP_DIR:', BACKUP_DIR, err.message);
+      return;
+    }
   }
 
   const Schools = _model('schools');
@@ -196,21 +217,29 @@ async function runNightlyBackup() {
       const { manifest, schoolName, dateStr, label, id, total, stats, now } =
         await _buildBackupForSchool(school.id);
 
-      // Serialise then optionally encrypt before writing to disk
+      // Serialise then optionally encrypt
       const json = JSON.stringify(manifest, null, 2);
       let fileContent, filename;
       if (encrypted) {
-        fileContent = encrypt(json);                                    // Buffer (binary)
+        fileContent = encrypt(json);
         filename    = `Msingi_Backup_${schoolName}_${dateStr}.json.enc`;
       } else {
-        fileContent = json;                                             // string (plaintext)
+        fileContent = Buffer.from(json, 'utf8');
         filename    = `Msingi_Backup_${schoolName}_${dateStr}.json`;
       }
 
-      const filePath = path.join(BACKUP_DIR, filename);
-      fs.writeFileSync(filePath, fileContent);
+      // Upload to cloud or write to local disk
+      let storageRef;
+      if (cloud) {
+        storageRef = await uploadBackup(filename, fileContent, dateStr);
+        await _pruneCloudBackups(schoolName);
+      } else {
+        const filePath = path.join(BACKUP_DIR, filename);
+        fs.writeFileSync(filePath, fileContent);
+        storageRef = filePath;
+        _pruneLocalBackups(schoolName);
+      }
 
-      // Write metadata to backup_logs (same collection as manual exports)
       await Logs.create({
         id,
         schoolId:     school.id,
@@ -221,15 +250,14 @@ async function runNightlyBackup() {
         totalRecords: total,
         stats,
         filename,
+        storageRef,          // S3 object key (cloud) or absolute path (local)
         source:       'cron',
         encrypted,
+        cloudStorage: cloud,
       });
 
-      // Remove old files beyond the retention window
-      _pruneOldBackups(schoolName);
-
       succeeded++;
-      console.log(`[backup-cron] ✅ ${school.name || school.id} — ${total} records → ${filename}`);
+      console.log(`[backup-cron] ✅ ${school.name || school.id} — ${total} records → ${storageRef}`);
     } catch (err) {
       failed.push(school.id);
       console.error(`[backup-cron] ❌ ${school.id}: ${err.message}`);
@@ -238,7 +266,7 @@ async function runNightlyBackup() {
 
   const summary = `${succeeded}/${schools.length} succeeded` +
     (failed.length ? `; failed: ${failed.join(', ')}` : '');
-  console.log(`[backup-cron] Done — ${summary}. Storage: ${BACKUP_DIR}`);
+  console.log(`[backup-cron] Done — ${summary}.`);
 }
 
 /* ── Cron registration ─────────────────────────────────────── */
@@ -254,7 +282,10 @@ function startBackupCron() {
     );
   }, { timezone: 'Africa/Nairobi' });
 
-  console.log(`[backup-cron] Scheduled — "${BACKUP_CRON}" (Africa/Nairobi). Storage: ${BACKUP_DIR}`);
+  const storageDesc = storageReady()
+    ? `s3://${process.env.BACKUP_S3_BUCKET || '?'}/backups/`
+    : `local: ${BACKUP_DIR} (ephemeral on Render — set BACKUP_S3_* for production)`;
+  console.log(`[backup-cron] Scheduled — "${BACKUP_CRON}" (Africa/Nairobi). Storage: ${storageDesc}`);
 }
 
 module.exports = { startBackupCron, runNightlyBackup };
