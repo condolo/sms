@@ -6,6 +6,163 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.37.0] — Comment Banks, Grid Mark Entry, Exam Series, Approval Workflow, Mark Locking, Signatures/Stamp
+
+### Added
+
+#### 1. Comment Banks (`/api/comment-banks`)
+- New `comment_banks` collection — pre-written remark templates for class teachers and principals.
+- Full CRUD: `GET` (with `category` / `q` filters), `POST`, `PUT /:id`, `DELETE /:id`.
+- Categories: `academic`, `behaviour`, `general`, `subject`.
+- Plan-gated under `grades` (core). RBAC: `grades:{read,create,update,delete}`.
+- **ConfigTab** gets a new "Comment Bank" section at the bottom: search, filter by category, add/delete entries.
+
+#### 2. Spreadsheet/Grid Mark Entry (`MarkEntryTab.jsx`)
+- Replaced the one-subject-at-a-time list with an **Excel-like grid**.
+- Rows = students; columns = all assessment types × instances (e.g. CA 1, CA 2, HW 1, HW 2, MT, ET) for the selected class/subject/term.
+- All existing marks loaded in a single query across all types.
+- **Keyboard navigation**: Tab moves right, Enter/Arrow-Down moves down, Arrow-Up moves up, Arrow-Left/Right move horizontally.
+- **Clipboard paste**: paste TSV from Excel or Google Sheets starting from the focused cell.
+- **Column stats footer**: per-column average, entry count, and pass rate.
+- **Submit for review**: one-click "Submit for review" button sends all types to the approval workflow simultaneously.
+- Locked columns (post-approval) shown in amber with a Lock icon — inputs disabled.
+
+#### 3. Exam Series (`/api/exam-series`)
+- New `exam_series` collection grouping formal exams for a named exam period.
+- Status machine: `draft → open → moderation → closed`.
+- CRUD: list, get, create, update, delete (draft only).
+- Sub-routes: `POST /:id/exams` (add exam to series), `DELETE /:id/exams/:examId` (remove).
+- Plan-gated under `exam_series` (standard). RBAC: `exams:{read,create,update,delete}`.
+
+#### 4. Approval Workflow (`/api/mark-submissions`)
+- New `mark_submissions` collection — one document per class/subject/term/type/instance combination.
+- **Teacher** calls `POST /` to submit marks for review; a snapshot of current marks is stored for audit.
+- **Teacher** can `POST /:id/recall` while status is `submitted`.
+- **Admin / section head / principal** calls `POST /:id/review` with `action: approve | reject`.
+- Rejection returns to `draft` with a `rejectionReason`.
+- `POST /:id/lock` / `POST /:id/unlock` (admin only) handle post-publish locking.
+- Plan-gated under `mark_submissions` (standard). RBAC: `grades:{read,create,update}`.
+
+#### 5. Mark Locking (guard on `POST /api/assessment/marks/bulk`)
+- Before processing any bulk mark upsert, the endpoint now checks if any targeted `assessment_marks` records have `isLocked: true`.
+- If locked marks are detected, the whole batch is rejected with HTTP 403 and a message directing the teacher to submit an unlock request.
+- Unlock via `POST /api/mark-submissions/:id/unlock` (admin only, requires `reason`).
+- When a submission is locked (`POST /api/mark-submissions/:id/lock`), all corresponding `assessment_marks` documents get `isLocked: true`.
+- Unlocking clears `isLocked` on the underlying marks.
+
+#### 6. Signatures and School Stamp on PDFs
+- `principalSignatureUrl` and `schoolStampUrl` added to `SCHOOL_PROFILE_FIELDS` in `academic-config.js` — admins can store these via `PATCH /api/academic-config/school-profile`.
+- At publish time, both URLs are snapshotted into every `report_card_snapshots` document alongside other school fields.
+- At PDF generation time, `_fetchSignatureImages()` fetches both URLs as `Buffer`s (supports `https://`, `http://`, and `data:` URIs; 5 s timeout per image, non-fatal on failure).
+- Signature image renders above the principal's signature line at 28 pt height.
+- School stamp renders at top-right of the signature section at 36 pt height.
+- Both the single-student PDF (`GET /:id/pdf`) and bulk-class PDF (`GET /bulk-pdf`) benefit from this change.
+
+---
+
+## [v4.36.1] — Fix portal fee collection names
+
+### Fixed
+- **`server/routes/student-portal.js`** — Fee balance query was reading `fee_invoices` (a collection that does not exist). Changed to `invoices` (the canonical collection written by `finance.js`). Field selector updated from `totalAmount paidAmount` → `balance status`; balance now reads `inv.balance` directly instead of recomputing from component fields. Unused `FeePayments` model reference removed.
+- **`server/routes/parent-portal.js`** — Same `fee_invoices` → `invoices` fix for the balance query; same `fee_payments` → `payments` fix for the recent-payments query. Field selector updated: `totalAmount paidAmount dueDate termNumber` → `balance status dueDate termId` (invoices schema stores `termId`, not `termNumber`).
+
+Both portals previously returned `feeBalance: 0` for all students because no documents existed in the non-existent collections. They now correctly read from the finance module's actual collections.
+
+---
+
+## [v4.36.0] — Unified Assessment Pipeline (single source of truth)
+
+### What was fixed
+
+Two parallel assessment systems existed and never talked to each other:
+
+| System | Input | Config | Publisher |
+|--------|-------|--------|-----------|
+| **Old** | `grades` collection | `academic_config.assessmentWeights` + `.gradingSchema` | `academic-calc.js` → `report_card_snapshots` |
+| **New** | `assessment_marks` collection | `assessment_config.customTypes` + `grade_boundaries` | (preview only — never published) |
+
+Published report cards therefore showed old `grades` data, not the marks entered via MarkEntryTab. Portals could not see any published report cards at all (wrong collection name).
+
+### Fixes
+
+#### 1. `server/utils/academic-calc.js` — new `aggregateAssessmentMarks()`
+- Reads from `assessment_marks` (published only), produces the same `{ [studentId]: { [subjectId]: { [assessmentType]: avgPct } } }` shape as `aggregateGrades()`.
+- `rawScore` is already a percentage — no conversion needed.
+- Multiple instances of the same type are averaged (e.g. HW1 + HW2 = avg HW).
+- Exported alongside the other aggregators.
+- `computeFinalScores` validator updated: now accepts both `{ minScore }` (academic_config) and `{ min }` (grade_boundaries) band format — no more throw for the new format.
+
+#### 2. `server/routes/academic-config.js` — `resolveGrade()` dual-format support
+- Now accepts **both** band formats in the same call.
+- Old format `{ minScore, maxScore }`: range check (unchanged).
+- New format `{ min }` (grade_boundaries): threshold check — find the highest band whose `min` ≤ score. `descriptor` / `remarks` fall back to `label`.
+- Both formats return identical `{ grade, points, descriptor, remarks }` output.
+
+#### 3. `server/routes/report-cards.js` — unified data pipeline
+- New `termNumber` field added to both `GenerateSchema` and `PublishSchema` (optional `int 1–3`). Passed to `aggregateAssessmentMarks` so the right term's CA marks are included.
+- New helper `_loadCaConfig(schoolId)` — loads `assessment_config.customTypes` + `grade_boundaries` default scale in parallel.
+- New helper `_convertCustomTypesToWeights(customTypes)` — converts `[{ key, weight }]` → `[{ assessmentType, weight }]`.
+- New helper `_mergeGradeData(gradesData, caData)` — merges old `grades` data with new `assessment_marks` data; CA marks win on per-type conflict within the same student + subject.
+- **Priority rule** (both generate and publish):
+  - Weights: `assessment_config.customTypes` → fall back to `academic_config.assessmentWeights`.
+  - Grade schema: `grade_boundaries` default scale → fall back to `academic_config.gradingSchema`.
+- Published snapshots now include `termNumber` and use `activeWeights` / `activeSchema` (not the old `config.*` fields).
+
+#### 4. `server/routes/student-portal.js` — portal collection fix
+- Changed `_model('report_cards')` → `_model('report_card_snapshots')`.
+- Query now filters `superseded: { $ne: true }` and sorts by `publishedAt` (snapshots have no `termNumber` sort field).
+- `.select()` updated to real snapshot fields: `academicYear termName termNumber totalScore averageScore gpa rankings status publishedAt version termId academicYearId`.
+
+#### 5. `server/routes/parent-portal.js` — same portal fix
+- Same changes as student-portal above.
+
+#### 6. `server/routes/report-cards.js` — dynamic PDF columns
+- The PDF report card table previously had hardcoded column headers ("Classwork (%)", "Mid-Term (%)", "End-Term (%)") mapping to hardcoded assessment type groupings.
+- Now derives one column per entry in `snap.assessmentWeights` using the type's `label` field. A school that configures HW / CA / MT / ET will see exactly those four columns in the PDF, labelled from their own configuration.
+- Column widths are computed dynamically: Subject + Score + Grade + Remarks take fixed widths; the remaining horizontal space is divided equally among the type columns (minimum 36pt each).
+
+#### 7. `server/routes/report-cards.js` — `financialBlock` wired to fee balance
+- `financialBlock` was hardcoded `false` on every published snapshot.
+- **At publish time**: a single batch query (`invoices.distinct('studentId', { balance: { $gt: 0 } })`) now marks each student with an outstanding invoice balance as `financialBlock: true`. Best-effort — if the finance module is not in use, the query returns an empty set and all flags remain `false`.
+- **At PDF download time**: the flag is re-verified in real-time against `invoices.exists({ studentId, balance: { $gt: 0 } })`. This means a student who pays their fees after the report card was published can download immediately — no re-publish required. Falls back to `snap.financialBlock` on DB error.
+- Admin role and `?force=1` query param continue to bypass the block (unchanged).
+
+### Net effect
+Marks entered via MarkEntryTab → published via report-cards.js → visible in student and parent portals. PDF matches the school's custom assessment types. Financial block is live, not stale. One unified path, no forks.
+
+---
+
+## [v4.35.0] — Grade Boundaries + ExamsPage routing (Option B)
+
+### Added
+- **Grading Scales — full CRUD** (`grade_boundaries` collection, `/api/assessment/grade-scales`):
+  - Each school can define one or more named grading scales (e.g. "Standard KCSE", "Primary", "Cambridge").
+  - Each scale has an array of **bands**: `{ min%, grade, points, label }` — e.g. `{ min: 80, grade: 'A', points: 12, label: 'Excellent' }`.
+  - **Per-section scoping**: a scale can be scoped to a specific `sectionId`, allowing different grading scales for different school divisions (CBC lower primary vs. secondary, etc.).
+  - Exactly one scale per scope is `isDefault`; the default is attached to every report card response automatically.
+  - **Validation guards**: duplicate grade letters rejected, duplicate min% rejected, at least one band must start at 0% (covers all scores), cannot delete the last scale, cannot delete the default without re-assigning first.
+  - New API methods in `api/client.js`: `getGradeScales`, `createGradeScale`, `updateGradeScale`, `deleteGradeScale`.
+- **Grade letter column on Report Cards** — `StudentReportCard` now shows a "Grade" column (e.g. A, B+, C) next to the "Final grade %" column, computed from the school's default grading scale. Falls back to a built-in Kenya 8-4-4 reference scale when no custom scale is configured.
+- **`GradeScalesSection`** — new section in ConfigTab (Continuous Assessment → Configuration tab):
+  - Lists all scales with band preview pills (A ≥80%, B ≥70%, …)
+  - Inline band editor: expand any scale to edit all bands in a table (min%, grade, points, label)
+  - "Set as default" button for non-default scales
+  - "New scale" form with auto-seeded bands from the built-in reference
+- **`DEFAULT_GRADE_SCALE`** constant added to `grades/constants.js` — 12-band Kenya reference scale.
+- **`_gradeFromScale(score, bands)`** pure helper added to `grades/constants.js`.
+- **`GET /api/assessment/config`** — now includes `gradeScale: { id, name, bands }` for the school's default scale (null if none configured).
+- **`GET /api/assessment/report`** — now includes `config.gradeScale` so report cards receive the active scale in a single request.
+
+### Changed (Option B — ExamsPage routing)
+- **`/exams` route** — now mounts `ExamsPage.jsx` (formal exam scheduling, results, grade reports) instead of redirecting to `/grades`. ExamsPage was built in v4.33.0 but was orphaned until now.
+- **`/grades` route** — now exclusively serves the Continuous Assessment module (Mark Entry, Report Cards, Configuration, Reminders). The old "Exams" and "Results" tabs have been removed from `GradesPage`.
+- **Sidebar** — "Exams" entry added (FileText icon, `/exams`). "Exams & Assessment" renamed to "Assessment" (`/grades`).
+- **Breadcrumbs** (TopBar) — `/exams` → "Exams", `/grades` → "Assessment".
+- `GradesPage.jsx` — default tab changed from `'exams'` to `'entry'`; `ExamsListTab` and `ExamResultsTab` imports removed.
+- `grades/constants.js` TABS array — `exams` and `results` entries removed; unused `BookOpen` and `ClipboardList` imports removed.
+
+---
+
 ## [v4.34.0] — Assessment Types full CRUD (deep DB)
 
 ### Added

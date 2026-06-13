@@ -46,6 +46,7 @@ export default function ReportCardsTab() {
   const customTypes    = reportCfg.customTypes ?? DEFAULT_CUSTOM_TYPES;
   const weights        = reportCfg.weights ?? Object.fromEntries(customTypes.map(t => [t.key, t.weight]));
   const template       = reportCfg.reportTemplate ?? 'detailed';
+  const gradeScale     = reportCfg.gradeScale ?? null;
   const reportStudents = reportData?.students ?? (reportData?.student ? [reportData.student] : []);
 
   return (
@@ -116,6 +117,7 @@ export default function ReportCardsTab() {
               half={half}
               termNum={termNum}
               customTypes={customTypes}
+              gradeScale={gradeScale}
             />
           ))}
         </div>

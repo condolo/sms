@@ -226,6 +226,12 @@ export const assessment = {
   // Reminders
   reminders:    (params)     => _get('/assessment/reminders', params),
   notify:       (data)       => _post('/assessment/reminders/notify', data),
+
+  // Grade Scales (full CRUD — grade_boundaries collection)
+  getGradeScales:    (params)  => _get('/assessment/grade-scales', params),
+  createGradeScale:  (data)    => _post('/assessment/grade-scales', data),
+  updateGradeScale:  (id, data) => _put(`/assessment/grade-scales/${id}`, data),
+  deleteGradeScale:  (id)      => _delete(`/assessment/grade-scales/${id}`),
 };
 
 export const admissions = {
@@ -654,6 +660,33 @@ export const lessons = {
   pendingTeachers: (params) => _get('/lessons/pending-teachers', params),
 };
 
+export const commentBanks = {
+  list:   (params)     => _get('/comment-banks', params),
+  create: (data)       => _post('/comment-banks', data),
+  update: (id, data)   => _put(`/comment-banks/${id}`, data),
+  remove: (id)         => _delete(`/comment-banks/${id}`),
+};
+
+export const examSeries = {
+  list:        (params)         => _get('/exam-series', params),
+  get:         (id)             => _get(`/exam-series/${id}`),
+  create:      (data)           => _post('/exam-series', data),
+  update:      (id, data)       => _put(`/exam-series/${id}`, data),
+  remove:      (id)             => _delete(`/exam-series/${id}`),
+  addExam:     (id, examId)     => _post(`/exam-series/${id}/exams`, { examId }),
+  removeExam:  (id, examId)     => _delete(`/exam-series/${id}/exams/${examId}`),
+};
+
+export const markSubmissions = {
+  list:    (params) => _get('/mark-submissions', params),
+  get:     (id)     => _get(`/mark-submissions/${id}`),
+  submit:  (data)   => _post('/mark-submissions', data),
+  recall:  (id)     => _post(`/mark-submissions/${id}/recall`),
+  review:  (id, data) => _post(`/mark-submissions/${id}/review`, data),
+  lock:    (id)     => _post(`/mark-submissions/${id}/lock`),
+  unlock:  (id, reason) => _post(`/mark-submissions/${id}/unlock`, { reason }),
+};
+
 // Default export — single object for convenience
 const api = {
   auth,
@@ -690,6 +723,9 @@ const api = {
   transport,
   hostel,
   lessons,
+  commentBanks,
+  examSeries,
+  markSubmissions,
   APIError,
 };
 

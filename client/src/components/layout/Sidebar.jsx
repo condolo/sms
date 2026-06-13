@@ -20,7 +20,7 @@ import { useState } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, GraduationCap, Users, BookOpen, Calendar,
-  CheckSquare, BarChart3, ClipboardList, Scale,
+  CheckSquare, BarChart3, ClipboardList, Scale, FileText,
   Wallet, Settings, LogOut, Library,
   MessageSquare, UserCog, TrendingUp, Tag, HelpCircle,
   BookMarked, Bus, BedDouble, X, BookCheck, MonitorPlay,
@@ -37,7 +37,8 @@ const CONFIGURABLE_MODULES = [
   { key: 'classes',    to: '/classes',    Icon: BookOpen,        label: 'Classes',             section: 'Academic'   },
   { key: 'timetable',  to: '/timetable',  Icon: Calendar,       label: 'Timetable',           section: 'Academic'   },
   { key: 'attendance', to: '/attendance', Icon: CheckSquare,     label: 'Attendance',          section: 'Academic'   },
-  { key: 'grades',     to: '/grades',     Icon: BarChart3,       label: 'Exams & Assessment',  section: 'Academic'   },
+  { key: 'exams',      to: '/exams',      Icon: FileText,        label: 'Exams',               section: 'Academic'   },
+  { key: 'grades',     to: '/grades',     Icon: BarChart3,       label: 'Assessment',          section: 'Academic'   },
   { key: 'subjects',   to: '/subjects',   Icon: Library,         label: 'Subjects',            section: 'Academic'   },
   { key: 'admissions', to: '/admissions', Icon: ClipboardList,  label: 'Admissions',          section: 'Operations' },
   { key: 'behaviour',  to: '/behaviour',  Icon: Scale,          label: 'Behaviour',           section: 'Operations' },

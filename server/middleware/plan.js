@@ -36,6 +36,9 @@ const FEATURE_PLAN = {
   houses:             'standard',
   sections:           'standard',
   assessment:         'standard',   // CA/HW/MT/ET system (was implicitly gated via 'grades')
+  comment_banks:      'standard',   // pre-written comment templates for report card remarks
+  exam_series:        'standard',   // named groupings of formal exams per term
+  mark_submissions:   'standard',   // approval workflow for CA mark sign-off
 
   /* ── Standard (continued) ── */
   finance:            'standard',   // fee management is core African school need

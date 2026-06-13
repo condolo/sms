@@ -5,6 +5,8 @@
    Sub-routes:
      /config          — weights, template, instances (admin)
      /schedule        — date ranges per assessment (admin)
+     /types           — assessment type CRUD (admin)
+     /grade-scales    — grading boundary scales CRUD (admin)
      /marks           — mark entry & retrieval (teachers)
      /report          — computed report card data
      /reminders       — upcoming/overdue assessment alerts
@@ -114,8 +116,14 @@ router.get('/config', authMiddleware, PLAN, rbac('settings', 'read'), async (req
   try {
     const { schoolId } = req.jwtUser;
     const { academicYearId } = req.query;
-    const doc = await _getConfig(schoolId, academicYearId || null);
-    return _ok(res, doc);
+    const [doc, defaultScale] = await Promise.all([
+      _getConfig(schoolId, academicYearId || null),
+      _model('grade_boundaries').findOne({ schoolId, isDefault: true }).lean(),
+    ]);
+    return _ok(res, {
+      ...doc,
+      gradeScale: defaultScale ? { id: defaultScale.id, name: defaultScale.name, bands: defaultScale.bands } : null,
+    });
   } catch (err) {
     console.error('[assessment/config GET]', err);
     return E.serverError(res);
@@ -465,6 +473,220 @@ router.delete('/types/:key', authMiddleware, PLAN, rbac('settings', 'update'), a
 });
 
 /* ══════════════════════════════════════════════════════════════
+   GRADE SCALES  —  /api/assessment/grade-scales
+   Full CRUD for the school's grading boundary definitions.
+   Stored in the grade_boundaries collection.
+   Each document is one named scale (e.g. "Standard KCSE", "Primary").
+   A school can have many scales; exactly one can be isDefault=true.
+   Scales can optionally be scoped to a section (sectionId).
+   ══════════════════════════════════════════════════════════════ */
+
+const BandSchema = z.object({
+  min:    z.number().min(0).max(100),
+  grade:  z.string().min(1).max(10).trim(),
+  points: z.number().min(0).max(100).optional().default(0),
+  label:  z.string().max(100).trim().optional().default(''),
+});
+
+const GradeScaleSchema = z.object({
+  name:        z.string().min(1).max(100).trim(),
+  description: z.string().max(300).trim().optional().default(''),
+  sectionId:   z.string().optional().nullable(),
+  isDefault:   z.boolean().optional().default(false),
+  bands:       z.array(BandSchema).min(1).max(30),
+});
+
+/** Convert a percentage score to a grade letter using this scale's bands.
+ *  Returns { grade, points, label } or null if no matching band. */
+function _applyGradeScale(score, bands) {
+  if (!bands || !bands.length || score == null) return null;
+  const sorted = [...bands].sort((a, b) => b.min - a.min);
+  const band   = sorted.find(b => score >= b.min);
+  return band ? { grade: band.grade, points: band.points ?? 0, label: band.label ?? '' } : null;
+}
+
+/**
+ * GET /api/assessment/grade-scales
+ * Returns all grading scales for the school.
+ * Query param: sectionId (optional filter)
+ */
+router.get('/grade-scales', authMiddleware, PLAN, rbac('settings', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const filter = { schoolId };
+    if (req.query.sectionId) filter.sectionId = req.query.sectionId;
+
+    const docs = await _model('grade_boundaries')
+      .find(filter)
+      .sort({ isDefault: -1, name: 1 })
+      .limit(50)
+      .lean();
+    return _ok(res, docs);
+  } catch (err) {
+    console.error('[assessment/grade-scales GET]', err);
+    return E.serverError(res);
+  }
+});
+
+/**
+ * POST /api/assessment/grade-scales
+ * Create a new grading scale.
+ * If isDefault:true, clears isDefault on all other school-wide (or same-section) scales.
+ */
+router.post('/grade-scales', authMiddleware, PLAN, rbac('settings', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const parsed = GradeScaleSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return _err(res, parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; '));
+    }
+    const d = parsed.data;
+
+    // Validate bands: check for duplicate grade letters and overlapping mins
+    const gradeKeys = d.bands.map(b => b.grade.toUpperCase());
+    if (new Set(gradeKeys).size !== gradeKeys.length) {
+      return _err(res, 'Grade letters must be unique within a scale');
+    }
+    const mins = d.bands.map(b => b.min);
+    if (new Set(mins).size !== mins.length) {
+      return _err(res, 'Band minimum scores must be unique');
+    }
+    // Lowest band must start at 0 so every score resolves to a grade
+    if (!d.bands.some(b => b.min === 0)) {
+      return _err(res, 'At least one band must start at 0 (to cover the lowest possible score)');
+    }
+
+    const Scales = _model('grade_boundaries');
+
+    // If this scale is being set as default, clear previous default for the same scope
+    if (d.isDefault) {
+      const scopeFilter = { schoolId };
+      if (d.sectionId) scopeFilter.sectionId = d.sectionId;
+      else scopeFilter.$or = [{ sectionId: null }, { sectionId: { $exists: false } }];
+      await Scales.updateMany(scopeFilter, { $set: { isDefault: false } });
+    }
+
+    const doc = await Scales.create({
+      id:          uuidv4(),
+      schoolId,
+      name:        d.name,
+      description: d.description,
+      sectionId:   d.sectionId ?? null,
+      isDefault:   d.isDefault,
+      bands:       d.bands,
+      createdBy:   userId,
+      updatedBy:   userId,
+    });
+
+    // If this is the school's first scale, automatically make it default
+    const count = await Scales.countDocuments({ schoolId });
+    if (count === 1 && !d.isDefault) {
+      await Scales.updateOne({ id: doc.id }, { $set: { isDefault: true } });
+      doc.isDefault = true;
+    }
+
+    return created(res, doc.toObject ? doc.toObject() : doc);
+  } catch (err) {
+    console.error('[assessment/grade-scales POST]', err);
+    return E.serverError(res);
+  }
+});
+
+/**
+ * PUT /api/assessment/grade-scales/:id
+ * Update an existing scale's name, description, bands, sectionId, or isDefault.
+ */
+router.put('/grade-scales/:id', authMiddleware, PLAN, rbac('settings', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const Scales = _model('grade_boundaries');
+    const existing = await Scales.findOne({ id: req.params.id, schoolId }).lean();
+    if (!existing) return E.notFound(res, 'Grade scale not found');
+
+    const parsed = GradeScaleSchema.partial().safeParse(req.body);
+    if (!parsed.success) {
+      return _err(res, parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; '));
+    }
+    const d = parsed.data;
+
+    // Validate bands if provided
+    if (d.bands) {
+      const gradeKeys = d.bands.map(b => b.grade.toUpperCase());
+      if (new Set(gradeKeys).size !== gradeKeys.length) {
+        return _err(res, 'Grade letters must be unique within a scale');
+      }
+      const mins = d.bands.map(b => b.min);
+      if (new Set(mins).size !== mins.length) {
+        return _err(res, 'Band minimum scores must be unique');
+      }
+      if (!d.bands.some(b => b.min === 0)) {
+        return _err(res, 'At least one band must start at 0');
+      }
+    }
+
+    // If setting as default, clear others in same scope
+    if (d.isDefault === true) {
+      const scopeId  = d.sectionId !== undefined ? d.sectionId : existing.sectionId;
+      const scopeFilter = { schoolId, id: { $ne: req.params.id } };
+      if (scopeId) scopeFilter.sectionId = scopeId;
+      else scopeFilter.$or = [{ sectionId: null }, { sectionId: { $exists: false } }];
+      await Scales.updateMany(scopeFilter, { $set: { isDefault: false } });
+    }
+
+    const update = { updatedBy: userId };
+    if (d.name        !== undefined) update.name        = d.name;
+    if (d.description !== undefined) update.description = d.description;
+    if (d.sectionId   !== undefined) update.sectionId   = d.sectionId ?? null;
+    if (d.isDefault   !== undefined) update.isDefault   = d.isDefault;
+    if (d.bands       !== undefined) update.bands       = d.bands;
+
+    const doc = await Scales.findOneAndUpdate(
+      { id: req.params.id, schoolId },
+      { $set: update },
+      { new: true }
+    ).lean();
+
+    return _ok(res, doc);
+  } catch (err) {
+    console.error('[assessment/grade-scales PUT]', err);
+    return E.serverError(res);
+  }
+});
+
+/**
+ * DELETE /api/assessment/grade-scales/:id
+ * Delete a grade scale.
+ * Cannot delete the last scale for a school.
+ * Cannot delete the default scale if there are others — must re-assign default first.
+ */
+router.delete('/grade-scales/:id', authMiddleware, PLAN, rbac('settings', 'update'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const Scales = _model('grade_boundaries');
+    const doc = await Scales.findOne({ id: req.params.id, schoolId }).lean();
+    if (!doc) return E.notFound(res, 'Grade scale not found');
+
+    const total = await Scales.countDocuments({ schoolId });
+    if (total <= 1) {
+      return _err(res, 'Cannot delete the last grade scale. Add another scale before deleting this one.');
+    }
+    if (doc.isDefault) {
+      return _err(
+        res,
+        'Cannot delete the default scale. Set another scale as default first, then delete this one.',
+        409
+      );
+    }
+
+    await Scales.deleteOne({ id: req.params.id, schoolId });
+    return _ok(res, { id: req.params.id, deleted: true });
+  } catch (err) {
+    console.error('[assessment/grade-scales DELETE]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
    MARKS  —  /api/assessment/marks
    ══════════════════════════════════════════════════════════════ */
 
@@ -633,7 +855,22 @@ router.post('/marks/bulk', authMiddleware, PLAN, rbac('grades', 'create'), async
       }
     }
 
+    // Guard: reject if any target marks are locked (post-approval lock)
     const Marks = _model('assessment_marks');
+    const lockedSample = await Marks.findOne({
+      schoolId,
+      isLocked: true,
+      $or: marks.map(d => ({
+        studentId:      d.studentId,
+        subjectId:      d.subjectId,
+        termNumber:     d.termNumber,
+        assessmentType: d.assessmentType,
+        instance:       d.instance,
+      })),
+    }).lean();
+    if (lockedSample) {
+      return _err(res, 'Some marks in this batch are locked. Submit an unlock request via the approval workflow.', 403);
+    }
     const ops = marks.map(d => ({
       updateOne: {
         filter: {
@@ -723,8 +960,11 @@ router.get('/report', authMiddleware, PLAN, rbac('grades', 'read'), async (req, 
       return _err(res, 'studentId or classId is required');
     }
 
-    // Load config (weights, template)
-    const config  = await _getConfig(schoolId, academicYearId || null);
+    // Load config (weights, template) + default grade scale in parallel
+    const [config, defaultScale] = await Promise.all([
+      _getConfig(schoolId, academicYearId || null),
+      _model('grade_boundaries').findOne({ schoolId, isDefault: true }).lean(),
+    ]);
     // Derive weights from customTypes (new) or fall back to legacy weights map
     const weights = config.customTypes && config.customTypes.length > 0
       ? Object.fromEntries(config.customTypes.map(t => [t.key, t.weight]))
@@ -775,13 +1015,14 @@ router.get('/report', authMiddleware, PLAN, rbac('grades', 'read'), async (req, 
       }
     }
 
-    // Attach config so frontend knows template, weights, and types used
+    // Attach config so frontend knows template, weights, types, and grade scale used
     const result = {
       config: {
         weights,
         customTypes:    config.customTypes || DEFAULT_CUSTOM_TYPES,
         reportTemplate: config.reportTemplate,
         instances:      config.instances || DEFAULT_INSTANCES,
+        gradeScale:     defaultScale ? { id: defaultScale.id, name: defaultScale.name, bands: defaultScale.bands } : null,
       },
       students: Object.values(reportsByStudent),
     };

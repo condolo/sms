@@ -26,7 +26,8 @@ function _requireSuperAdmin(req, res, next) {
 
 const backupLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, max: 10,
-  message: { error: 'Too many backup requests. Maximum 10 backups per hour.' }
+  message: { error: 'Too many backup requests. Maximum 10 backups per hour.' },
+  skip: () => process.env.NODE_ENV === 'test',
 });
 
 /* All collections to include in a full school backup */

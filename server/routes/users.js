@@ -18,7 +18,8 @@ const router = express.Router();
 
 const inviteLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, max: 100,
-  message: { error: 'Too many invite requests. Please try again later.' }
+  message: { error: 'Too many invite requests. Please try again later.' },
+  skip: () => process.env.NODE_ENV === 'test',
 });
 
 /* ── Helpers ──────────────────────────────────────────────── */

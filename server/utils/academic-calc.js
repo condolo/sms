@@ -132,6 +132,53 @@ async function aggregateExamResults(schoolId, classId, termId, academicYearId, s
   return { data, examStatuses };
 }
 
+/**
+ * Aggregate published CA marks (assessment_marks collection) per student per subject
+ * per assessmentType.  assessment_marks.rawScore is already a percentage (0–100).
+ * Multiple instances of the same assessmentType are averaged across instances.
+ *
+ * Returns: { [studentId]: { [subjectId]: { [assessmentType]: avgPercentage } } }
+ *
+ * @param {string}      schoolId
+ * @param {string}      classId
+ * @param {number|null} termNumber     — 1, 2, or 3; pass null to include all terms
+ * @param {string|null} academicYearId
+ * @param {string|null} studentId      — pass to scope to one student
+ */
+async function aggregateAssessmentMarks(schoolId, classId, termNumber = null, academicYearId = null, studentId = null) {
+  const filter = { schoolId, classId, isPublished: true };
+  if (termNumber != null) filter.termNumber     = termNumber;
+  if (academicYearId)     filter.academicYearId = academicYearId;
+  if (studentId)          filter.studentId      = studentId;
+
+  // Safety ceiling: 10,000 marks ≈ 50 students × 14 subjects × 4 types × 3–4 instances
+  const marks = await _model('assessment_marks').find(filter).limit(10000).lean();
+  const grouped = {};
+
+  for (const m of marks) {
+    const { studentId: sid, subjectId, assessmentType, rawScore } = m;
+    if (rawScore == null || !subjectId || !assessmentType) continue;
+
+    grouped[sid]                            ??= {};
+    grouped[sid][subjectId]                 ??= {};
+    grouped[sid][subjectId][assessmentType] ??= [];
+    grouped[sid][subjectId][assessmentType].push(rawScore); // rawScore is already 0–100 pct
+  }
+
+  // Average within each assessmentType bucket (across instances)
+  const result = {};
+  for (const [sid, subjects] of Object.entries(grouped)) {
+    result[sid] = {};
+    for (const [sub, types] of Object.entries(subjects)) {
+      result[sid][sub] = {};
+      for (const [type, scores] of Object.entries(types)) {
+        result[sid][sub][type] = _round(scores.reduce((s, n) => s + n, 0) / scores.length);
+      }
+    }
+  }
+  return result;
+}
+
 /* ══════════════════════════════════════════════════════════════
    WEIGHTED SCORE CALCULATION
    ══════════════════════════════════════════════════════════════ */
@@ -170,8 +217,10 @@ function computeFinalScores(gradesData, examData, assessmentWeights, gradingSche
     }
   }
   for (const g of gradingSchema) {
-    if (typeof g.minScore !== 'number' || typeof g.maxScore !== 'number') {
-      throw new TypeError(`[academic-calc] gradingSchema band "${g.grade}" has non-numeric minScore/maxScore`);
+    // Accept both { minScore, maxScore } (academic_config format) and { min } (grade_boundaries format)
+    const minVal = g.minScore ?? g.min;
+    if (typeof minVal !== 'number') {
+      throw new TypeError(`[academic-calc] gradingSchema band "${g.grade}" is missing a numeric minScore or min value`);
     }
   }
 
@@ -317,6 +366,7 @@ function attachDeviations(studentReports) {
 module.exports = {
   aggregateGrades,
   aggregateExamResults,
+  aggregateAssessmentMarks,
   computeFinalScores,
   attendanceSummary,
   attachDeviations,

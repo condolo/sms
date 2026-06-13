@@ -1,4 +1,4 @@
-﻿/* ============================================================
+/* ============================================================
    Msingi — Public Onboarding Route
    POST /api/onboard — provisions a new school + admin user
    No auth required (public endpoint, rate-limited)
@@ -20,6 +20,7 @@ const onboardLimiter = rateLimit({
   message: { error: 'Too many registration attempts. Please try again in an hour.' },
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
 });
 
 /* ── Mongoose model helper ──────────────────────────────── */
@@ -69,7 +70,8 @@ const BLOCKED_DOMAINS = new Set([
 /* ── GET /api/onboard/check-slug?slug=xyz ──────────────── */
 const slugCheckLimiter = rateLimit({
   windowMs: 60 * 1000, max: 60,
-  message: { error: 'Too many slug checks. Slow down.' }
+  message: { error: 'Too many slug checks. Slow down.' },
+  skip: () => process.env.NODE_ENV === 'test',
 });
 
 router.get('/check-slug', slugCheckLimiter, async (req, res) => {

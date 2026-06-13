@@ -25,6 +25,7 @@ const AdmissionsPage = lazy(() => import('@/pages/admissions/AdmissionsPage.jsx'
 const TimetablePage  = lazy(() => import('@/pages/timetable/TimetablePage.jsx'));
 const SettingsPage      = lazy(() => import('@/pages/settings/SettingsPage.jsx'));
 const GradesPage        = lazy(() => import('@/pages/grades/GradesPage.jsx'));
+const ExamsPage         = lazy(() => import('@/pages/exams/ExamsPage.jsx'));
 // ImportExportPage dissolved into individual modules (v4.18.0)
 const SubjectsPage      = lazy(() => import('@/pages/subjects/SubjectsPage.jsx'));
 const MessagesPage      = lazy(() => import('@/pages/messages/MessagesPage.jsx'));
@@ -117,10 +118,11 @@ export const router = createBrowserRouter([
       // Behaviour
       { path: 'behaviour',             element: <SuspenseWrapper><BehaviourPage /></SuspenseWrapper> },
 
-      // Exams → redirect to unified module
-      { path: 'exams',                 element: <Navigate to="/grades" replace /> },
+      // Formal Exams (scheduling, results, grade report) — ExamsPage v4.33.0
+      { path: 'exams',                 element: <SuspenseWrapper><ExamsPage /></SuspenseWrapper> },
+      { path: 'exams/:tab',            element: <SuspenseWrapper><ExamsPage /></SuspenseWrapper> },
 
-      // Grades & Assessment (CA/HW/MT/ET system)
+      // Continuous Assessment (CA/HW/MT/ET mark entry + report cards)
       { path: 'grades',                element: <SuspenseWrapper><GradesPage /></SuspenseWrapper> },
       { path: 'grades/:tab',           element: <SuspenseWrapper><GradesPage /></SuspenseWrapper> },
 

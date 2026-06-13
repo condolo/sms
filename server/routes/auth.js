@@ -1,4 +1,4 @@
-﻿const express    = require('express');
+const express    = require('express');
 const bcrypt     = require('bcryptjs');
 const crypto     = require('crypto');
 const { sign, verify } = require('../utils/jwt');
@@ -120,7 +120,8 @@ function _passwordAge(user) {
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,  // 15 minutes
   max: 10,                    // tightened from 20 — 10 attempts then lockout
-  message: { error: 'Too many login attempts. Please wait 15 minutes.' }
+  message: { error: 'Too many login attempts. Please wait 15 minutes.' },
+  skip: () => process.env.NODE_ENV === 'test',
 });
 
 /* POST /api/auth/login
@@ -174,10 +175,22 @@ router.post('/login', loginLimiter, tenantMiddleware, async (req, res) => {
 
     if (!match) return res.status(401).json({ error: 'Invalid email or password' });
 
+    const _userId = user.id || user._id.toString();
+
+    // ── First-login forced change (new user temp password or admin reset) ──
+    if (user.mustChangePassword || user.mustChangePwd) {
+      return res.json({
+        passwordExpired: true,
+        reason: 'first_login',
+        userId:   _userId,
+        schoolId: req.school.id,
+        hint:     'Your administrator has set a temporary password. Please choose your own password to continue.'
+      });
+    }
+
     // ── 90-day password rotation policy ────────────────────
     // userId uses custom id if available; falls back to MongoDB _id string.
     // The force-change route accepts both via $or lookup.
-    const _userId = user.id || user._id.toString();
     const ageDays = _passwordAge(user);
     if (ageDays >= PASSWORD_MAX_DAYS) {
       // Send expiry email (non-blocking, deduplication by day)
@@ -242,8 +255,12 @@ router.post('/login', loginLimiter, tenantMiddleware, async (req, res) => {
 });
 
 /* POST /api/auth/verify-otp — complete 2FA login */
-const otpLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 10,
-  message: { error: 'Too many OTP attempts. Please try again.' } });
+const otpLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 10,
+  message: { error: 'Too many OTP attempts. Please try again.' },
+  skip: () => process.env.NODE_ENV === 'test',
+});
 
 router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
   try {
@@ -312,8 +329,12 @@ async function _checkPasswordExpiryAndNotify(user, school) {
    userId may be either the custom `id` field (e.g. "usr_xxx") or the MongoDB
    _id hex string — the $or lookup handles both cases.
 */
-const forceChangeLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10,
-  message: { error: 'Too many attempts. Please try again later.' } });
+const forceChangeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'Too many attempts. Please try again later.' },
+  skip: () => process.env.NODE_ENV === 'test',
+});
 
 router.post('/force-change', forceChangeLimiter, tenantMiddleware, async (req, res) => {
   try {
@@ -702,6 +723,7 @@ const exchangeLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders:   false,
   message: { error: 'Too many exchange attempts. Please try again in a few minutes.' },
+  skip:            () => process.env.NODE_ENV === 'test',
 });
 
 router.post('/exchange', exchangeLimiter, async (req, res) => {

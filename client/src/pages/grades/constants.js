@@ -66,15 +66,30 @@ export const EXAM_STATUS_CFG = {
   cancelled:   { label: 'Cancelled',   cls: 'bg-red-50    text-red-700   border-red-200'        },
 };
 
-import { BookOpen, ClipboardList, PenLine, FileText, Settings2, Bell } from 'lucide-react';
+import { PenLine, FileText, Settings2, Bell } from 'lucide-react';
 
 export const TABS = [
-  { key: 'exams',   label: 'Exams',         Icon: BookOpen,      roles: ['admin','superadmin','teacher','deputy','section_head','deputy_principal'] },
-  { key: 'results', label: 'Results',        Icon: ClipboardList, roles: ['admin','superadmin','teacher','deputy','section_head','deputy_principal'] },
   { key: 'entry',   label: 'Mark Entry',     Icon: PenLine,       roles: ['admin','superadmin','teacher','deputy','deputy_principal'] },
   { key: 'report',  label: 'Report Cards',   Icon: FileText,      roles: ['admin','superadmin','teacher','deputy','deputy_principal','parent','student'] },
   { key: 'config',  label: 'Configuration',  Icon: Settings2,     roles: ['admin','superadmin'] },
   { key: 'remind',  label: 'Reminders',      Icon: Bell,          roles: ['admin','superadmin','teacher','deputy','deputy_principal'] },
+];
+
+/** Built-in fallback grade scale (Kenya 8-4-4 / CBC reference).
+ *  Schools can replace this with their own via ConfigTab → Grade Scales. */
+export const DEFAULT_GRADE_SCALE = [
+  { min: 80, grade: 'A',  points: 12, label: 'Excellent'     },
+  { min: 75, grade: 'A-', points: 11, label: 'Very Good'     },
+  { min: 70, grade: 'B+', points: 10, label: 'Good'          },
+  { min: 65, grade: 'B',  points:  9, label: 'Above Average' },
+  { min: 60, grade: 'B-', points:  8, label: 'Average'       },
+  { min: 55, grade: 'C+', points:  7, label: 'Below Average' },
+  { min: 50, grade: 'C',  points:  6, label: 'Pass'          },
+  { min: 45, grade: 'C-', points:  5, label: 'Weak Pass'     },
+  { min: 40, grade: 'D+', points:  4, label: 'Poor'          },
+  { min: 35, grade: 'D',  points:  3, label: 'Very Poor'     },
+  { min: 30, grade: 'D-', points:  2, label: 'Fail'          },
+  { min:  0, grade: 'E',  points:  1, label: 'Very Fail'     },
 ];
 
 /* ── Pure helpers ────────────────────────────────────────────── */
@@ -85,4 +100,17 @@ export function _scoreColor(s) {
   if (s >= 70)   return 'text-emerald-600 font-semibold';
   if (s >= 50)   return 'text-amber-600 font-semibold';
   return 'text-red-500 font-semibold';
+}
+
+/**
+ * Resolve a percentage score to a grade letter using a bands array.
+ * Returns { grade, points, label } or null if score is null or no band matches.
+ * @param {number|null} score  — percentage 0–100
+ * @param {Array}       bands  — [{ min, grade, points, label }]
+ */
+export function _gradeFromScale(score, bands) {
+  if (score == null || !bands || !bands.length) return null;
+  const sorted = [...bands].sort((a, b) => b.min - a.min);
+  const band   = sorted.find(b => score >= b.min);
+  return band ? { grade: band.grade, points: band.points ?? 0, label: band.label ?? '' } : null;
 }

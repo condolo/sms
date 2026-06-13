@@ -72,9 +72,9 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
 
     const Students    = _model('students');
     const Attendance  = _model('attendance_records');
-    const FeeInvoices = _model('fee_invoices');
-    const FeePayments = _model('fee_payments');
-    const Reports     = _model('report_cards');
+    const FeeInvoices = _model('invoices');
+    const FeePayments = _model('payments');
+    const Reports     = _model('report_card_snapshots');
     const Coverage    = _model('lesson_coverage');
     const Topics      = _model('syllabus_topics');
     const Subjects    = _model('subjects');
@@ -107,8 +107,8 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
       .map(r => ({ date: r.date, status: r.status }));
 
     // ── Fee balance & recent payments ────────────────────────
-    const invoices = await FeeInvoices.find({ schoolId, studentId: childId }).select('totalAmount paidAmount dueDate termNumber').lean();
-    const feeBalance = invoices.reduce((acc, inv) => acc + ((inv.totalAmount || 0) - (inv.paidAmount || 0)), 0);
+    const invoices = await FeeInvoices.find({ schoolId, studentId: childId }).select('balance status dueDate termId').lean();
+    const feeBalance = invoices.reduce((acc, inv) => acc + (inv.balance || 0), 0);
 
     const recentPayments = await FeePayments.find({ schoolId, studentId: childId })
       .sort({ paidAt: -1 }).limit(5)
@@ -138,9 +138,10 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
     }
 
     // ── Published report cards ───────────────────────────────
-    const reportCards = await Reports.find({ schoolId, studentId: childId, status: 'published' })
-      .sort({ academicYear: -1, termNumber: -1 }).limit(6)
-      .select('academicYear termNumber totalMarks grade rank status publishedAt')
+    const reportCards = await Reports.find({
+      schoolId, studentId: childId, status: 'published', superseded: { $ne: true },
+    }).sort({ publishedAt: -1 }).limit(6)
+      .select('academicYear termName termNumber totalScore averageScore gpa rankings status publishedAt version termId academicYearId')
       .lean();
 
     return ok(res, {

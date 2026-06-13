@@ -1,27 +1,164 @@
 /* ============================================================
-   MarkEntryTab — continuous assessment mark entry
-   Supports CA / HW / MT / ET with multi-instance CA/HW
+   MarkEntryTab — spreadsheet/grid continuous assessment mark entry
+   v4.37.0: Excel-like grid (rows=students, cols=type×instance)
+   Supports Tab/Enter navigation + clipboard paste (TSV).
    ============================================================ */
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence } from 'framer-motion';
-import { Loader2, Save, PenLine, BookOpen } from 'lucide-react';
-import { assessment as api, classes as classesApi } from '@/api/client.js';
+import { Loader2, Save, PenLine, BookOpen, ClipboardPaste, Lock, Send } from 'lucide-react';
+import { assessment as api, classes as classesApi, markSubmissions as submissionsApi } from '@/api/client.js';
 import {
-  TERM_NUMBERS, DEFAULT_CUSTOM_TYPES,
-  _pct, _scoreColor,
+  TERM_NUMBERS, DEFAULT_CUSTOM_TYPES, _pct, _scoreColor,
 } from '../constants.js';
 import { Skeleton, Toast, SelField, iCls, TypePill } from './GradesPrimitives.jsx';
 
+/* ─── Column descriptor ────────────────────────────────────────────── */
+function buildCols(customTypes) {
+  return customTypes.flatMap(t =>
+    Array.from({ length: t.instances ?? 1 }, (_, i) => ({
+      typeKey:  t.key,
+      label:    t.label || t.key,
+      instance: i + 1,
+      colId:    t.instances > 1 ? `${t.key}_${i + 1}` : t.key,
+      colLabel: t.instances > 1 ? `${t.key} ${i + 1}` : t.key,
+      color:    t.color,
+      weight:   t.weight,
+    }))
+  );
+}
+
+/* ─── Cell component ─────────────────────────────────────────────── */
+function GridCell({ value, rowIdx, colIdx, isLocked, onChange, onNavigate, cellRef }) {
+  return (
+    <input
+      ref={cellRef}
+      type="number"
+      min="0"
+      max="100"
+      step="0.5"
+      disabled={isLocked}
+      value={value ?? ''}
+      onChange={e => {
+        const v = e.target.value === '' ? undefined : Number(e.target.value);
+        if (v === undefined || (v >= 0 && v <= 100)) onChange(v);
+      }}
+      onKeyDown={e => {
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          onNavigate(rowIdx, colIdx, e.shiftKey ? -1 : 1, 0);
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          onNavigate(rowIdx, colIdx, 0, 1);
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          onNavigate(rowIdx, colIdx, 1, 0);
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          onNavigate(rowIdx, colIdx, -1, 0);
+        } else if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          onNavigate(rowIdx, colIdx, 0, 1);
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          onNavigate(rowIdx, colIdx, 0, -1);
+        }
+      }}
+      className={`w-full rounded border px-2 py-1 text-right text-sm tabular-nums focus:outline-none transition
+        ${isLocked
+          ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+          : value == null
+            ? 'border-slate-200 bg-white focus:border-slate-400 focus:ring-1 focus:ring-slate-900/10'
+            : value >= 50
+              ? 'border-emerald-200 bg-emerald-50/40 focus:border-emerald-400'
+              : 'border-red-200 bg-red-50/40 focus:border-red-400'
+        }`}
+      placeholder="—"
+    />
+  );
+}
+
+/* ─── Submit/recall button ───────────────────────────────────────── */
+function SubmitPanel({ classId, subjectId, termNumber, customTypes, onSuccess }) {
+  const qc = useQueryClient();
+
+  // Load existing submissions for all types visible in the grid
+  const { data: subsData } = useQuery({
+    queryKey: ['mark-submissions', { classId, subjectId, termNumber }],
+    queryFn:  () => submissionsApi.list({ classId, subjectId, termNumber: Number(termNumber) }),
+    enabled:  !!(classId && subjectId && termNumber),
+    staleTime: 30_000,
+  });
+  const subs = subsData?.data ?? [];
+
+  const [toast, setToast] = useState(null);
+
+  const { mutate: submitAll, isPending: submitting } = useMutation({
+    mutationFn: async () => {
+      const types = customTypes;
+      await Promise.all(types.flatMap(t =>
+        Array.from({ length: t.instances ?? 1 }, (_, i) =>
+          submissionsApi.submit({
+            classId,
+            subjectId,
+            termNumber: Number(termNumber),
+            assessmentType: t.key,
+            instance: i + 1,
+          })
+        )
+      ));
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mark-submissions'] });
+      setToast({ msg: 'Marks submitted for review.', type: 'success' });
+      onSuccess?.();
+    },
+    onError: err => setToast({ msg: err?.message ?? 'Submission failed.', type: 'error' }),
+  });
+
+  const allLocked  = subs.length > 0 && subs.every(s => s.status === 'locked');
+  const anyPending = subs.some(s => s.status === 'submitted' || s.status === 'approved');
+  const statusText = allLocked ? 'Locked' : anyPending ? 'Awaiting review' : 'Draft';
+  const statusClr  = allLocked ? 'text-slate-500' : anyPending ? 'text-amber-600' : 'text-slate-400';
+
+  return (
+    <div className="flex items-center gap-3">
+      <AnimatePresence>
+        {toast && <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}
+      </AnimatePresence>
+      {subs.length > 0 && (
+        <span className={`text-xs font-medium ${statusClr} flex items-center gap-1`}>
+          {allLocked && <Lock size={11} />}
+          {statusText}
+        </span>
+      )}
+      {!allLocked && !anyPending && (
+        <button
+          onClick={() => submitAll()}
+          disabled={submitting}
+          className="flex items-center gap-1.5 border border-slate-200 hover:border-slate-400 text-slate-600 hover:text-slate-900 text-xs font-medium px-3 py-1.5 rounded-lg transition disabled:opacity-50"
+        >
+          {submitting ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />}
+          {submitting ? 'Submitting…' : 'Submit for review'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ─── Main component ─────────────────────────────────────────────── */
 export default function MarkEntryTab() {
   const qc = useQueryClient();
-  const [classId,        setClassId]        = useState('');
-  const [subjectId,      setSubjectId]      = useState('');
-  const [termNumber,     setTermNumber]      = useState('');
-  const [assessmentType, setAssessmentType]  = useState('');
-  const [instance,       setInstance]        = useState('1');
-  const [scores,         setScores]          = useState({});
-  const [toast,          setToast]           = useState(null);
+  const [classId,    setClassId]    = useState('');
+  const [subjectId,  setSubjectId]  = useState('');
+  const [termNumber, setTermNumber] = useState('');
+  const [toast,      setToast]      = useState(null);
+
+  // scores[studentId][colId] = rawScore | undefined
+  const [scores, setScores] = useState({});
+  const [dirty,  setDirty]  = useState(false);
+
+  const cellRefs = useRef({});  // keyed by `${rowIdx}_${colIdx}`
 
   const { data: classesData } = useQuery({
     queryKey: ['classes', 'list'],
@@ -35,10 +172,8 @@ export default function MarkEntryTab() {
     queryFn:  () => api.getConfig(),
     staleTime: 5 * 60_000,
   });
-  const cfg         = configData?.data ?? {};
-  const customTypes = cfg.customTypes ?? DEFAULT_CUSTOM_TYPES;
-  const activeType  = customTypes.find(t => t.key === assessmentType);
-  const maxInst     = activeType?.instances ?? 1;
+  const customTypes = configData?.data?.customTypes ?? DEFAULT_CUSTOM_TYPES;
+  const cols = useMemo(() => buildCols(customTypes), [customTypes]);
 
   const { data: studentsData, isLoading: studentsLoading } = useQuery({
     queryKey: ['classes', classId, 'students'],
@@ -48,51 +183,154 @@ export default function MarkEntryTab() {
   });
   const students = studentsData?.data ?? [];
 
-  const canQuery = !!(classId && subjectId && termNumber && assessmentType);
+  const canQuery = !!(classId && subjectId && termNumber);
+
+  // Load ALL existing marks for this class/subject/term (all types at once)
   const { data: existingData } = useQuery({
-    queryKey: ['assessment', 'marks', { classId, subjectId, termNumber, assessmentType, instance }],
-    queryFn:  () => api.getMarks({ classId, subjectId, termNumber: Number(termNumber), assessmentType }),
+    queryKey: ['assessment', 'marks', { classId, subjectId, termNumber }],
+    queryFn:  () => api.getMarks({ classId, subjectId, termNumber: Number(termNumber) }),
     enabled:  canQuery,
     staleTime: 30_000,
   });
 
-  useEffect(() => {
-    if (!existingData) return;
-    const map = {};
-    for (const m of (existingData?.data ?? [])) {
-      if (String(m.instance) === String(instance)) {
-        map[m.studentId] = m.rawScore;
+  // Load submission statuses to know which cells are locked
+  const { data: subsData } = useQuery({
+    queryKey: ['mark-submissions', { classId, subjectId, termNumber }],
+    queryFn:  () => submissionsApi.list({ classId, subjectId, termNumber: Number(termNumber) }),
+    enabled:  canQuery,
+    staleTime: 30_000,
+  });
+  const subs = subsData?.data ?? [];
+
+  const lockedColIds = useMemo(() => {
+    const locked = new Set();
+    for (const sub of subs) {
+      if (sub.status === 'locked') {
+        const colId = (sub.instance > 1) ? `${sub.assessmentType}_${sub.instance}` : sub.assessmentType;
+        locked.add(colId);
       }
     }
-    setScores(map);
-  }, [existingData, instance]);
+    return locked;
+  }, [subs]);
 
-  const { mutate: submitMarks, isPending: submitting } = useMutation({
-    mutationFn: () => api.bulkMarks({
-      marks: students
-        .filter(s => scores[s.id ?? s._id] != null)
-        .map(s => ({
-          studentId:      s.id ?? s._id,
-          subjectId,
-          classId,
-          termNumber:     Number(termNumber),
-          assessmentType,
-          instance:       Number(instance),
-          rawScore:       Number(scores[s.id ?? s._id]),
-        })),
-    }),
+  // Populate scores from loaded marks
+  useEffect(() => {
+    if (!existingData?.data) return;
+    const map = {};
+    for (const m of existingData.data) {
+      const colId = (m.instance > 1) ? `${m.assessmentType}_${m.instance}` : m.assessmentType;
+      map[m.studentId] ??= {};
+      map[m.studentId][colId] = m.rawScore;
+    }
+    setScores(map);
+    setDirty(false);
+  }, [existingData]);
+
+  // Reset when selection changes
+  useEffect(() => { setScores({}); setDirty(false); }, [classId, subjectId, termNumber]);
+
+  const setCell = useCallback((studentId, colId, value) => {
+    setScores(prev => ({
+      ...prev,
+      [studentId]: { ...(prev[studentId] ?? {}), [colId]: value },
+    }));
+    setDirty(true);
+  }, []);
+
+  // Keyboard navigation between cells
+  const navigate = useCallback((rowIdx, colIdx, dc, dr) => {
+    const newCol = colIdx + dc;
+    const newRow = rowIdx + dr;
+    const clampedCol = Math.max(0, Math.min(cols.length - 1, newCol));
+    const clampedRow = Math.max(0, Math.min(students.length - 1, newRow));
+    const key = `${clampedRow}_${clampedCol}`;
+    const el  = cellRefs.current[key];
+    if (el) { el.focus(); el.select(); }
+  }, [cols.length, students.length]);
+
+  // Clipboard paste handler (TSV format from Excel/Sheets)
+  const handlePaste = useCallback((e) => {
+    e.preventDefault();
+    const text = e.clipboardData.getData('text/plain');
+    if (!text.trim()) return;
+    const rows = text.trim().split('\n').map(r => r.split('\t'));
+    // Determine starting cell
+    const focusedKey = Object.keys(cellRefs.current).find(k => cellRefs.current[k] === document.activeElement);
+    if (!focusedKey) return;
+    const [startRow, startCol] = focusedKey.split('_').map(Number);
+    const newScores = { ...scores };
+    rows.forEach((cells, dr) => {
+      const rIdx = startRow + dr;
+      if (rIdx >= students.length) return;
+      const sid = students[rIdx]?.id ?? students[rIdx]?._id;
+      if (!sid) return;
+      newScores[sid] = { ...(newScores[sid] ?? {}) };
+      cells.forEach((cell, dc) => {
+        const cIdx  = startCol + dc;
+        if (cIdx >= cols.length) return;
+        const col   = cols[cIdx];
+        if (lockedColIds.has(col.colId)) return;
+        const v = parseFloat(cell.replace(',', '.'));
+        if (!isNaN(v) && v >= 0 && v <= 100) {
+          newScores[sid][col.colId] = v;
+        }
+      });
+    });
+    setScores(newScores);
+    setDirty(true);
+  }, [scores, students, cols, lockedColIds]);
+
+  const { mutate: saveAll, isPending: saving } = useMutation({
+    mutationFn: () => {
+      const marksToSave = [];
+      for (const s of students) {
+        const sid = s.id ?? s._id;
+        for (const col of cols) {
+          if (lockedColIds.has(col.colId)) continue;
+          const v = scores[sid]?.[col.colId];
+          if (v == null) continue;
+          marksToSave.push({
+            studentId:      sid,
+            subjectId,
+            classId,
+            termNumber:     Number(termNumber),
+            assessmentType: col.typeKey,
+            instance:       col.instance,
+            rawScore:       v,
+          });
+        }
+      }
+      return api.bulkMarks({ marks: marksToSave });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['assessment', 'marks'] });
       qc.invalidateQueries({ queryKey: ['assessment', 'report'] });
-      setToast({ msg: 'Marks saved successfully.', type: 'success' });
+      setDirty(false);
+      setToast({ msg: 'All marks saved.', type: 'success' });
     },
-    onError: err => setToast({ msg: err?.message ?? 'Failed to save marks.', type: 'error' }),
+    onError: err => setToast({ msg: err?.message ?? 'Save failed.', type: 'error' }),
   });
 
-  const vals  = useMemo(() => Object.values(scores).filter(v => v != null).map(Number), [scores]);
-  const avg   = vals.length ? vals.reduce((s, n) => s + n, 0) / vals.length : null;
-  const pass  = vals.filter(v => v >= 50).length;
   const ready = canQuery && students.length > 0;
+
+  // Per-column stats
+  const colStats = useMemo(() => {
+    if (!ready) return {};
+    const stats = {};
+    for (const col of cols) {
+      const vals = students
+        .map(s => scores[s.id ?? s._id]?.[col.colId])
+        .filter(v => v != null)
+        .map(Number);
+      if (!vals.length) { stats[col.colId] = null; continue; }
+      stats[col.colId] = {
+        avg:  vals.reduce((a, b) => a + b, 0) / vals.length,
+        pass: vals.filter(v => v >= 50).length,
+        n:    vals.length,
+      };
+    }
+    return stats;
+  }, [scores, students, cols, ready]);
 
   return (
     <div className="space-y-4">
@@ -102,32 +340,27 @@ export default function MarkEntryTab() {
         </AnimatePresence>
       </div>
 
+      {/* Selection header */}
       <div className="bg-white border border-slate-200 rounded-xl p-5">
         <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Select Assessment</p>
         <div className="flex flex-wrap gap-3">
-          <SelField label="Class" value={classId} onChange={setClassId}
+          <SelField label="Class" value={classId} onChange={v => { setClassId(v); setSubjectId(''); }}
             options={classesList.map(c => ({ value: c.id ?? c._id, label: c.name }))} placeholder="Select class" />
-          <div className="flex flex-col gap-1.5 min-w-[160px]">
+          <div className="flex flex-col gap-1.5 min-w-[180px]">
             <label className="text-xs font-medium text-slate-600">Subject</label>
             <input type="text" value={subjectId} onChange={e => setSubjectId(e.target.value)}
               placeholder="e.g. Mathematics" className={iCls()} />
           </div>
           <SelField label="Term" value={termNumber} onChange={setTermNumber}
             options={TERM_NUMBERS.map(n => ({ value: String(n), label: `Term ${n}` }))} placeholder="Select term" />
-          <SelField label="Assessment type" value={assessmentType}
-            onChange={v => { setAssessmentType(v); setInstance('1'); }}
-            options={customTypes.map(t => ({ value: t.key, label: `${t.key} — ${t.label}` }))} placeholder="Select type" />
-          {maxInst > 1 && (
-            <SelField label="Instance" value={instance} onChange={setInstance} placeholder=""
-              options={Array.from({ length: maxInst }, (_, i) => ({ value: String(i + 1), label: `${assessmentType} ${i + 1}` }))} />
-          )}
         </div>
       </div>
 
       {!ready ? (
         <div className="bg-white border border-slate-200 rounded-xl p-10 flex flex-col items-center gap-2">
           <PenLine size={24} className="text-slate-300" />
-          <p className="text-sm font-medium text-slate-500">Select class, subject, term and assessment type above</p>
+          <p className="text-sm font-medium text-slate-500">Select class, subject and term above to open the mark sheet</p>
+          <p className="text-xs text-slate-400">All assessment types appear as columns. Tab / Enter to navigate; paste from Excel/Sheets.</p>
         </div>
       ) : studentsLoading ? (
         <div className="space-y-2">{[...Array(6)].map((_, i) => <Skeleton key={i} className="h-12" />)}</div>
@@ -138,76 +371,107 @@ export default function MarkEntryTab() {
         </div>
       ) : (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          {/* Toolbar */}
           <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50/50">
-            <div>
-              <div className="flex items-center gap-2">
-                <TypePill type={assessmentType} color={activeType?.color} />
-                <span className="text-sm font-semibold text-slate-800">
-                  {activeType?.label ?? assessmentType} {maxInst > 1 ? instance : ''} — {subjectId} — Term {termNumber}
+            <div className="flex items-center gap-3">
+              <p className="text-sm font-semibold text-slate-800">{subjectId} — Term {termNumber}</p>
+              <span className="inline-flex items-center gap-1 text-xs text-slate-400">
+                <ClipboardPaste size={11} /> Paste from Excel
+              </span>
+              {lockedColIds.size > 0 && (
+                <span className="inline-flex items-center gap-1 text-xs text-amber-600">
+                  <Lock size={11} /> {lockedColIds.size} column{lockedColIds.size > 1 ? 's' : ''} locked
                 </span>
-              </div>
-              <p className="text-xs text-slate-400 mt-0.5">Enter marks out of 100</p>
+              )}
             </div>
-            <button onClick={() => submitMarks()} disabled={submitting || vals.length === 0}
-              className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition">
-              {submitting ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-              {submitting ? 'Saving…' : 'Save marks'}
-            </button>
+            <div className="flex items-center gap-2">
+              <SubmitPanel
+                classId={classId}
+                subjectId={subjectId}
+                termNumber={termNumber}
+                customTypes={customTypes}
+              />
+              <button
+                onClick={() => saveAll()}
+                disabled={saving || !dirty}
+                className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+              >
+                {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                {saving ? 'Saving…' : dirty ? 'Save marks' : 'Saved'}
+              </button>
+            </div>
           </div>
 
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-100">
-                <th className="text-left text-xs font-medium text-slate-500 px-5 py-2.5 w-8">#</th>
-                <th className="text-left text-xs font-medium text-slate-500 px-2 py-2.5">Student</th>
-                <th className="text-left text-xs font-medium text-slate-500 px-2 py-2.5 hidden sm:table-cell">Adm. No.</th>
-                <th className="text-right text-xs font-medium text-slate-500 px-5 py-2.5 w-32">Score /100</th>
-                <th className="text-right text-xs font-medium text-slate-500 px-5 py-2.5 w-20 hidden md:table-cell">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {students.map((s, i) => {
-                const sid   = s.id ?? s._id;
-                const score = scores[sid];
-                return (
-                  <tr key={sid} className="hover:bg-slate-50 transition">
-                    <td className="px-5 py-2.5 text-xs text-slate-400">{i + 1}</td>
-                    <td className="px-2 py-2.5 font-medium text-slate-800">{s.firstName} {s.lastName}</td>
-                    <td className="px-2 py-2.5 text-xs text-slate-400 hidden sm:table-cell">{s.admissionNumber ?? '—'}</td>
-                    <td className="px-5 py-2.5 text-right">
-                      <input type="number" min="0" max="100" step="0.5"
-                        value={score ?? ''}
-                        onChange={e => {
-                          const v = e.target.value === '' ? undefined : Number(e.target.value);
-                          setScores(prev => ({ ...prev, [sid]: v }));
-                        }}
-                        className="w-20 rounded-lg border border-slate-200 px-3 py-1.5 text-right text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 transition"
-                        placeholder="—" />
-                    </td>
-                    <td className="px-5 py-2.5 text-right hidden md:table-cell">
-                      {score == null ? (
-                        <span className="text-xs text-slate-300">—</span>
-                      ) : score >= 50 ? (
-                        <span className="inline-flex px-2 py-0.5 text-[11px] font-medium rounded border bg-emerald-50 text-emerald-700 border-emerald-200">Pass</span>
-                      ) : (
-                        <span className="inline-flex px-2 py-0.5 text-[11px] font-medium rounded border bg-red-50 text-red-600 border-red-200">Fail</span>
+          {/* Grid */}
+          <div className="overflow-x-auto" onPaste={handlePaste}>
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50">
+                  <th className="text-left text-xs font-medium text-slate-500 px-4 py-2.5 w-8 sticky left-0 bg-slate-50 z-10">#</th>
+                  <th className="text-left text-xs font-medium text-slate-500 px-3 py-2.5 sticky left-8 bg-slate-50 z-10 min-w-[160px]">Student</th>
+                  {cols.map(col => (
+                    <th key={col.colId} className="text-center text-xs font-medium text-slate-500 px-2 py-2.5 min-w-[76px]">
+                      <TypePill type={col.colLabel} color={col.color} />
+                      {lockedColIds.has(col.colId) && (
+                        <Lock size={9} className="inline ml-0.5 text-amber-400" />
                       )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {students.map((s, rowIdx) => {
+                  const sid = s.id ?? s._id;
+                  return (
+                    <tr key={sid} className="hover:bg-slate-50/60 transition">
+                      <td className="px-4 py-1.5 text-xs text-slate-400 sticky left-0 bg-white">{rowIdx + 1}</td>
+                      <td className="px-3 py-1.5 font-medium text-slate-800 sticky left-8 bg-white min-w-[160px]">
+                        <div className="text-sm leading-tight">{s.firstName} {s.lastName}</div>
+                        {s.admissionNumber && (
+                          <div className="text-[11px] text-slate-400">{s.admissionNumber}</div>
+                        )}
+                      </td>
+                      {cols.map((col, colIdx) => (
+                        <td key={col.colId} className="px-2 py-1.5">
+                          <GridCell
+                            value={scores[sid]?.[col.colId]}
+                            rowIdx={rowIdx}
+                            colIdx={colIdx}
+                            isLocked={lockedColIds.has(col.colId)}
+                            onChange={v => setCell(sid, col.colId, v)}
+                            onNavigate={navigate}
+                            cellRef={el => { cellRefs.current[`${rowIdx}_${colIdx}`] = el; }}
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
 
-          {vals.length > 0 && (
-            <div className="flex flex-wrap gap-x-6 gap-y-1 px-5 py-3 border-t border-slate-100 bg-slate-50/50 text-xs text-slate-500">
-              <span>Entered: <strong className="text-slate-700">{vals.length}/{students.length}</strong></span>
-              <span>Avg: <strong className={_scoreColor(avg)}>{_pct(avg)}</strong></span>
-              <span>Pass rate: <strong className="text-slate-700">{Math.round((pass / vals.length) * 100)}%</strong></span>
-              <span>Highest: <strong className="text-emerald-600">{Math.max(...vals)}%</strong></span>
-              <span>Lowest: <strong className="text-red-500">{Math.min(...vals)}%</strong></span>
-            </div>
-          )}
+              {/* Column stats footer */}
+              <tfoot>
+                <tr className="border-t border-slate-200 bg-slate-50/80">
+                  <td colSpan={2} className="px-4 py-2 text-xs text-slate-500 font-medium sticky left-0 bg-slate-50/80">Avg / Pass</td>
+                  {cols.map(col => {
+                    const st = colStats[col.colId];
+                    return (
+                      <td key={col.colId} className="px-2 py-2 text-center text-xs text-slate-500">
+                        {st ? (
+                          <>
+                            <span className={_scoreColor(st.avg)}>{_pct(st.avg)}</span>
+                            <span className="block text-[10px] text-slate-400">
+                              {st.n}/{students.length} · {Math.round((st.pass / st.n) * 100)}% pass
+                            </span>
+                          </>
+                        ) : <span className="text-slate-300">—</span>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              </tfoot>
+            </table>
+          </div>
         </div>
       )}
     </div>

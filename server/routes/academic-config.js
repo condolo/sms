@@ -687,6 +687,7 @@ const SCHOOL_PROFILE_FIELDS = [
   'name', 'shortName', 'systemEmail', 'phone', 'address',
   'logoUrl', 'website', 'timezone', 'currency', 'adminName', 'adminEmail',
   'primaryColor', 'accentColor',
+  'principalSignatureUrl', 'schoolStampUrl',   // used on report card PDFs
 ];
 
 /* GET /api/academic-config/school-profile */
@@ -758,11 +759,38 @@ router.patch('/school-profile', authMiddleware, async (req, res) => {
 });
 
 /* ── Exported helper: resolve score → grade band ────────────── */
+/**
+ * Accepts two band formats:
+ *  • academic_config format: { minScore, maxScore, grade, points, descriptor, remarks }
+ *  • grade_boundaries format: { min, grade, points, label }   ← no maxScore, threshold-based
+ *
+ * For the threshold format the algorithm finds the highest band whose `min` ≤ score,
+ * which is the standard "everything above this threshold" lookup.
+ */
 function resolveGrade(score, gradingSchema = DEFAULT_GRADING_SCHEMA) {
-  const sorted = [...gradingSchema].sort((a, b) => b.minScore - a.minScore);
-  const band   = sorted.find(g => score >= g.minScore && score <= g.maxScore);
+  if (!gradingSchema || !gradingSchema.length) {
+    return { grade: null, points: null, descriptor: null, remarks: null };
+  }
+  // Sort descending by whichever min field is present
+  const sorted = [...gradingSchema].sort((a, b) => {
+    const aMin = a.minScore ?? a.min ?? 0;
+    const bMin = b.minScore ?? b.min ?? 0;
+    return bMin - aMin;
+  });
+  const band = sorted.find(g => {
+    const minS = g.minScore ?? g.min ?? 0;
+    // If maxScore is defined, use inclusive range check; otherwise use threshold (≥ min)
+    return g.maxScore !== undefined
+      ? (score >= minS && score <= g.maxScore)
+      : score >= minS;
+  });
   return band
-    ? { grade: band.grade, points: band.points ?? null, descriptor: band.descriptor ?? null, remarks: band.remarks ?? null }
+    ? {
+        grade:      band.grade,
+        points:     band.points      ?? null,
+        descriptor: band.descriptor  ?? band.label ?? null,
+        remarks:    band.remarks     ?? band.label ?? null,
+      }
     : { grade: null, points: null, descriptor: null, remarks: null };
 }
 

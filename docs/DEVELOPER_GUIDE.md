@@ -1977,20 +1977,27 @@ The reporting engine aggregates grades and exam results through configured asses
 - `server/utils/ranking.js` — ranking calculation utilities
 - `server/routes/academic-config.js` — config + `resolveGrade()` helper
 
-### Data Flow
+### Data Flow (v4.36.0 — unified pipeline)
 
 ```
-grades collection (isPublished: true)          exam_results collection (markState: present)
-       ↓ group by studentId/subjectId/type            ↓ join exams → group same shape
-       ↓ average within type                          ↓
-       └───────────────────┬───────────────────────────┘
+assessment_marks (isPublished:true)   grades collection (isPublished:true)   exam_results
+  aggregateAssessmentMarks()            aggregateGrades()                     aggregateExamResults()
+  rawScore is already 0–100 pct        score/maxScore → pct                  score/maxScore → pct
+  avg across instances per type        avg within type                        avg within type
+       ↓                                      ↓                                      ↓
+       └────────────── _mergeGradeData() ─────┘                                      │
+                  (CA marks win on per-type conflict)                                 │
+                           ↓                                                          │
+               computeFinalScores(mergedGrades, examData, ...)                ←───────┘
+               × activeWeights   ← assessment_config.customTypes  (preferred)
+                                    academic_config.assessmentWeights (fallback)
+               × activeSchema    ← grade_boundaries default scale  (preferred)
+                                    academic_config.gradingSchema   (fallback)
+               → normalised finalScore per subject (0–100)
                            ↓
-               _computeFinalScores()
-               × assessmentWeights (from academic-config)
-               → normalised finalScore per subject (0-100)
-                           ↓
-               resolveGrade(finalScore, gradingSchema)
+               resolveGrade(finalScore, activeSchema)
                → { grade, points, descriptor, remarks }
+               ← accepts BOTH { minScore, maxScore } AND { min } band formats
                            ↓
                computeRankingScore(subjects, strategy, n)
                → rankingScore (filtered by strategy)
@@ -1999,7 +2006,31 @@ grades collection (isPublished: true)          exam_results collection (markStat
                → { rank, outOf } per student
                            ↓
                report_card_snapshots (immutable versioned record)
+               — stores termNumber, activeWeights, activeSchema
 ```
+
+#### Priority rule (weights + grade schema)
+
+| Setting | Primary (preferred) | Fallback |
+|---------|---------------------|---------|
+| Assessment weights | `assessment_config.customTypes` — the school's configured CA types | `academic_config.assessmentWeights` — legacy weight config |
+| Grading schema | `grade_boundaries` default scale (`.bands[]`) | `academic_config.gradingSchema` |
+
+Both formats are normalised by `resolveGrade()` — no conversion step required.
+
+#### `resolveGrade()` dual-format support (v4.36.0)
+
+| Field | `academic_config` format | `grade_boundaries` format |
+|-------|--------------------------|---------------------------|
+| Min threshold | `minScore` | `min` |
+| Max threshold | `maxScore` (range check) | _(absent — threshold check only)_ |
+| Description | `descriptor` / `remarks` | `label` |
+
+When `maxScore` is absent, the algorithm finds the highest band whose `min` ≤ score (standard threshold lookup). When `maxScore` is present, an inclusive range check is used.
+
+#### Portal queries (v4.36.0)
+
+Both `student-portal.js` and `parent-portal.js` now query `report_card_snapshots` (not `report_cards`) and filter `superseded: { $ne: true }`. Sorted by `publishedAt` (the snapshot's write timestamp).
 
 ### Endpoints
 
@@ -2609,8 +2640,16 @@ buildSubjectReport({ marks, weights })
 
 | Method | Endpoint | Auth | Purpose |
 |--------|---------|------|---------|
-| GET | `/api/assessment/config` | settings:read | Get weights, template, instances |
+| GET | `/api/assessment/config` | settings:read | Get weights, template, instances, default grade scale |
 | PATCH | `/api/assessment/config` | settings:update | Update config (validates sum=100%) |
+| GET | `/api/assessment/types` | settings:read | List custom assessment types |
+| POST | `/api/assessment/types` | settings:update | Add a type |
+| PUT | `/api/assessment/types` | settings:update | Bulk-replace all types |
+| DELETE | `/api/assessment/types/:key` | settings:update | Delete a type (409 if marks exist) |
+| GET | `/api/assessment/grade-scales` | settings:read | List grading scales |
+| POST | `/api/assessment/grade-scales` | settings:update | Create a grading scale |
+| PUT | `/api/assessment/grade-scales/:id` | settings:update | Update name/bands/isDefault |
+| DELETE | `/api/assessment/grade-scales/:id` | settings:update | Delete (cannot delete default or last) |
 | GET | `/api/assessment/schedule` | settings:read | List date ranges |
 | PUT | `/api/assessment/schedule` | settings:update | Upsert a schedule entry |
 | DELETE | `/api/assessment/schedule/:id` | settings:update | Remove schedule entry |
@@ -2619,9 +2658,38 @@ buildSubjectReport({ marks, weights })
 | POST | `/api/assessment/marks/bulk` | grades:create | Bulk upsert (whole class) |
 | DELETE | `/api/assessment/marks/:id` | grades:delete | Remove a mark |
 | GET | `/api/assessment/marks/summary` | grades:read | Class completion grid |
-| GET | `/api/assessment/report` | grades:read | Computed report card |
+| GET | `/api/assessment/report` | grades:read | Computed report card + grade scale |
 | GET | `/api/assessment/reminders` | grades:read | Upcoming/open/overdue list |
 | POST | `/api/assessment/reminders/notify` | settings:update | Trigger email + in-app notifications |
+
+### 29.3a Grade Boundaries (`grade_boundaries` collection)
+
+Each document is one named grading scale for a school:
+```js
+{
+  id:          uuid,
+  schoolId:    'sch_...',
+  name:        'Standard KCSE',
+  description: 'Kenya Certificate of Secondary Education grading',
+  isDefault:   true,          // school-wide default; exactly one per school (or per section)
+  sectionId:   null,          // null = school-wide; set to sectionId for section-specific scale
+  bands: [
+    { min: 80, grade: 'A',  points: 12, label: 'Excellent' },
+    { min: 70, grade: 'B+', points: 10, label: 'Good' },
+    // ...
+    { min:  0, grade: 'E',  points:  1, label: 'Fail' },  // must have a min=0 band
+  ],
+  createdBy, updatedBy, createdAt, updatedAt,
+}
+```
+
+**Rules:**
+- `min=0` band is required — ensures every score resolves to a grade.
+- Grade letters must be unique within a scale; mins must be unique.
+- Exactly one scale per scope (school-wide, or per sectionId) can have `isDefault: true`.
+- Cannot delete the default scale; cannot delete the last scale.
+- `GET /api/assessment/report` and `GET /api/assessment/config` both include `config.gradeScale` (name + bands) so the frontend can display grade letters without an extra round-trip.
+- **Frontend fallback**: `DEFAULT_GRADE_SCALE` in `grades/constants.js` is used when no school scale is configured.
 
 ### 29.4 Mark Entry Rules
 
@@ -2662,14 +2730,27 @@ buildSubjectReport({ marks, weights })
 }
 ```
 
-### 29.6 Frontend Tabs (`GradesPage.jsx`)
+### 29.6 Frontend — Module Routing (v4.35.0)
+
+The assessment system is split across **two separate pages** at `/grades` and `/exams`:
+
+**`/grades` — Continuous Assessment (`GradesPage.jsx`)**
 
 | Tab | Roles | Key Features |
 |-----|-------|-------------|
 | ✏️ Mark Entry | teacher, admin | Class grid, score inputs, bulk save, live stats |
-| 📊 Report Cards | all | Template A/B toggle, half-term toggle, colour-coded scores |
-| ⚙️ Configuration | admin only | Weight editor (live 100% validator), instance count, template, schedule |
+| 📊 Report Cards | all | Template A/B toggle, half-term toggle, colour-coded scores, grade letter column |
+| ⚙️ Configuration | admin only | Assessment types CRUD, grading scales CRUD, template selector, schedule |
 | 🔔 Reminders | teacher, admin | Overdue/open/upcoming cards, notify teachers button |
+
+**`/exams` — Formal Exam Management (`ExamsPage.jsx`, v4.33.0+)**
+
+| Tab | Roles | Key Features |
+|-----|-------|-------------|
+| 📄 Exams | teacher, admin | FK-connected subject/year/term, exam lifecycle (scheduled→published→archived) |
+| 📋 Results | teacher, admin | Per-exam result entry with mark states (ABS, MIS, EXM, INC) |
+| 📊 Grade Report | all | Cross-exam grade analysis |
+| ⚙️ Configuration | admin only | Assessment weights, exam type configuration |
 
 ### 29.7 Assessment Reminders Flow
 

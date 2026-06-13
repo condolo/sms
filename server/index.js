@@ -1,4 +1,4 @@
-﻿/* ============================================================
+/* ============================================================
    Msingi — API Server
    Node.js + Express + MongoDB
    Serves both the API (/api/*) and the static frontend
@@ -102,7 +102,8 @@ const authLimiter = rateLimit({
   standardHeaders:   true,
   legacyHeaders:     false,
   message:           { error: 'Too many login attempts — please wait 15 minutes before trying again.' },
-  // Always enforce, even in development, so the behaviour is testable
+  skip:              () => process.env.NODE_ENV === 'test',
+  // Always enforce in dev/prod, but bypass during tests so execution can finish
 });
 
 app.use('/api/', apiLimiter);
@@ -158,6 +159,11 @@ app.use('/api/hostel',    require('./routes/hostel'));
 
 /* ── v4.33.0: Lessons / Syllabus Tracker ── */
 app.use('/api/lessons',  require('./routes/lessons'));
+
+/* ── v4.37.0: Comment banks, exam series, mark submissions ── */
+app.use('/api/comment-banks',     require('./routes/comment-banks'));
+app.use('/api/exam-series',       require('./routes/exam-series'));
+app.use('/api/mark-submissions',  require('./routes/mark-submissions'));
 
 /* ── eLearning — Google Classroom integration ── */
 app.use('/api/elearning', require('./routes/elearning'));

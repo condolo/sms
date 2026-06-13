@@ -1,13 +1,25 @@
 /* ============================================================
    StudentReportCard — per-student report card with print support
-   Props: student, studentsList, template, half, termNum
+   Props: student, studentsList, template, half, termNum, customTypes, gradeScale
    ============================================================ */
 import { Printer } from 'lucide-react';
-import { TERM_NUMBERS, DEFAULT_CUSTOM_TYPES, _pct, _scoreColor } from '../constants.js';
+import { TERM_NUMBERS, DEFAULT_CUSTOM_TYPES, DEFAULT_GRADE_SCALE, _pct, _scoreColor, _gradeFromScale } from '../constants.js';
 
-export default function StudentReportCard({ student, studentsList, template, half, termNum, customTypes }) {
-  // Fall back to the school defaults if parent didn't pass customTypes
-  const activeTypes = customTypes ?? DEFAULT_CUSTOM_TYPES;
+/** Small grade-letter chip displayed next to a score */
+function GradeBadge({ score, bands }) {
+  const g = _gradeFromScale(score, bands);
+  if (!g) return null;
+  return (
+    <span className="ml-1 inline-flex items-center px-1.5 py-0 text-[10px] font-bold rounded border bg-slate-100 text-slate-600 border-slate-200 leading-5">
+      {g.grade}
+    </span>
+  );
+}
+
+export default function StudentReportCard({ student, studentsList, template, half, termNum, customTypes, gradeScale }) {
+  // Fall back to the school defaults if parent didn't pass customTypes / gradeScale
+  const activeTypes  = customTypes ?? DEFAULT_CUSTOM_TYPES;
+  const activeBands  = gradeScale?.bands ?? DEFAULT_GRADE_SCALE;
   // ET running average is only shown when an 'ET' type exists in the school's config
   const hasET = activeTypes.some(t => t.key === 'ET');
   const subjects    = Object.entries(student.subjects ?? {});
@@ -104,6 +116,7 @@ export default function StudentReportCard({ student, studentsList, template, hal
                     {half  && <th className="text-right text-xs font-medium text-amber-600 px-3 py-2.5 bg-amber-50/40">Half-term /100</th>}
                     {!half && termN >= 2 && hasET && <th className="text-right text-xs text-slate-400 px-3 py-2.5">ET avg (ref)</th>}
                     {!half && <th className="text-right text-xs font-bold text-slate-700 px-4 py-2.5 bg-slate-50/60">Final grade</th>}
+                    {!half && activeBands.length > 0 && <th className="text-center text-xs font-bold text-slate-700 px-3 py-2.5 bg-slate-100/60">Grade</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -130,6 +143,19 @@ export default function StudentReportCard({ student, studentsList, template, hal
                         {half  && <td className={`px-3 py-2.5 text-right tabular-nums font-semibold bg-amber-50/40 ${_scoreColor(t.halfTermTotal)}`}>{_pct(t.halfTermTotal)}</td>}
                         {!half && termN >= 2 && hasET && <td className={`px-3 py-2.5 text-right tabular-nums text-slate-400 ${_scoreColor(t.etRunningAvg)}`}>{_pct(t.etRunningAvg)}</td>}
                         {!half && <td className={`px-4 py-2.5 text-right tabular-nums font-bold bg-slate-50/60 ${_scoreColor(t.finalGrade)}`}>{_pct(t.finalGrade)}</td>}
+                        {!half && activeBands.length > 0 && (() => {
+                          const g = _gradeFromScale(t.finalGrade, activeBands);
+                          return (
+                            <td className="px-3 py-2.5 text-center bg-slate-100/60">
+                              {g ? (
+                                <span className="inline-flex flex-col items-center">
+                                  <span className="text-sm font-extrabold text-slate-800 leading-none">{g.grade}</span>
+                                  {g.label && <span className="text-[9px] text-slate-400 leading-none mt-0.5">{g.label}</span>}
+                                </span>
+                              ) : <span className="text-slate-300 text-xs">—</span>}
+                            </td>
+                          );
+                        })()}
                       </tr>
                     );
                   })}
