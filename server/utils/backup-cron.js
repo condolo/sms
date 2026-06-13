@@ -34,15 +34,49 @@ const BACKUP_DIR  = process.env.BACKUP_DIR
 const KEEP_DAYS   = Math.max(1, parseInt(process.env.BACKUP_KEEP_DAYS  || '7',        10));
 const BACKUP_CRON = process.env.BACKUP_CRON_EXPR || '0 23 * * *'; // 02:00 Kenya (UTC+3)
 
-/* ── Identical collection list to routes/backup.js ─────────── */
+/* ── Collection list — must stay in sync with routes/backup.js ─ */
 const BACKUP_COLLECTIONS = [
+  // Core
   'schools','users','students','teachers','classes','subjects',
-  'timetable','attendance','grades','exams','exam_results',
-  'invoices','payments','fee_structures','messages','events',
+  'academic_years','sections','role_permissions','admissions',
+  'events','messages','notifications','announcements',
+
+  // Timetable & structure
+  'timetable','bell_schedule','rooms','departments',
+  'class_subjects','student_subjects','subject_rules','teaching_assignments',
+
+  // Attendance & behaviour
+  'attendance',
   'behaviour_incidents','behaviour_appeals','behaviour_categories',
-  'merit_milestones','demerit_stages','houses','key_stages',
-  'detention_types','audit_log','academic_years','report_cards',
-  'role_permissions','admissions','sections','notifications',
+  'merit_milestones','demerit_stages','detention_types','houses','key_stages',
+
+  // Finance
+  'invoices','payments','fee_structures',
+
+  // Grades, exams & report cards
+  'grades','exams','exam_results',
+  'assessment_marks','assessment_config','grade_boundaries',
+  'report_card_snapshots','publish_batches',
+  'mark_audit_log','mark_submissions','exam_series',
+
+  // Curriculum / lessons
+  'lesson_coverage','syllabus_topics',
+
+  // Growth / co-curricular portfolio
+  'growth_projects','growth_leadership','growth_activities',
+  'growth_service','growth_awards','growth_recommendations','growth_aspirations',
+
+  // Library, hostel, transport
+  'library_books','library_loans',
+  'hostels','hostel_rooms','hostel_assignments',
+  'transport_routes','transport_assignments',
+
+  // E-learning
+  'elearning_tokens','elearning_course_links',
+  'elearning_coursework_links','elearning_sessions',
+
+  // Billing & misc
+  'billing_snapshots','comment_banks','user_photos',
 ];
 
 function _uid() {
