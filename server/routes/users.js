@@ -10,9 +10,10 @@ const mongoose = require('mongoose');
 const bcrypt   = require('bcryptjs');
 const crypto   = require('crypto');
 const rateLimit = require('express-rate-limit');
-const { authMiddleware } = require('../middleware/auth');
-const { _model }         = require('../utils/model');
-const email              = require('../utils/email');
+const { authMiddleware }   = require('../middleware/auth');
+const { _model }           = require('../utils/model');
+const { revokeUserTokens } = require('../utils/token-version');
+const email                = require('../utils/email');
 
 const router = express.Router();
 
@@ -222,6 +223,9 @@ router.post('/:id/role-change', authMiddleware, async (req, res) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const school = await School.findOne({ id: req.jwtUser.schoolId }).lean();
+
+    // Revoke all outstanding tokens for this user so the role change takes effect immediately.
+    await revokeUserTokens(user.id);
 
     await email.sendRoleChanged({
       name:        user.name,
