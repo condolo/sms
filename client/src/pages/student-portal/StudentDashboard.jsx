@@ -73,7 +73,10 @@ export default function StudentDashboard() {
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState('');
 
+  // Auth guard — must be logged in as a student
   useEffect(() => {
+    if (!session?.token) { navigate('/login', { replace: true }); return; }
+    if (session.user?.role !== 'student') { navigate('/dashboard', { replace: true }); return; }
     _fetch('/api/student-portal/dashboard')
       .then(d => { setData(d); setLoading(false); })
       .catch(e => { setError(e.message); setLoading(false); });

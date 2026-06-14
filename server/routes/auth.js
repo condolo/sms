@@ -247,6 +247,18 @@ router.post('/login', loginLimiter, tenantMiddleware, async (req, res) => {
     _checkTrialAndNotify(req.school).catch(() => {});
 
     const safeUser = { ...user, password: undefined };
+
+    // Attach role permissions so the client sidebar can filter by role.
+    // Stored in role_permissions collection keyed by roleKey + schoolId.
+    const RolePerms   = _model('role_permissions');
+    const rolePermsDoc = await RolePerms.findOne({
+      roleKey:  userRole,
+      schoolId: req.school.id,
+    }).lean();
+    if (rolePermsDoc?.permissions) {
+      safeUser.permissions = rolePermsDoc.permissions;
+    }
+
     res.json({ token, user: safeUser, school: req.school });
   } catch (err) {
     console.error('[auth/login]', err);

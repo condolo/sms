@@ -56,14 +56,35 @@ const CONFIGURABLE_MODULES = [
 
 const SECTION_ORDER = ['Academic', 'Operations', 'Insights'];
 
-/* Build nav sections from saved moduleConfig (or defaults if unset) */
-function computeNav(moduleConfig) {
+/* Build nav sections from saved moduleConfig (or defaults if unset).
+ * userRole and userPermissions come from the auth session.
+ * Rules:
+ *   admin / superadmin  → see all enabled modules (no permission check)
+ *   all other staff     → see enabled modules where their role has ≥ 1 permission
+ *                         (if a module has no entry in permissions, it defaults to visible)
+ *   student / parent    → never reach Sidebar (ProtectedRoute redirects them first)
+ */
+function computeNav(moduleConfig, userRole, userPermissions) {
+  const isAdminLevel = userRole === 'admin' || userRole === 'superadmin';
+
   const cfgMap = Object.fromEntries(
     (moduleConfig ?? []).map((m, i) => [m.key, { enabled: m.enabled ?? true, order: m.order ?? i }])
   );
 
   const visible = CONFIGURABLE_MODULES
     .filter(m => (cfgMap[m.key]?.enabled ?? true))
+    .filter(m => {
+      if (isAdminLevel) return true;
+      // No permissions loaded yet (e.g. cached session from before this fix) → show all
+      if (!userPermissions) return true;
+      // Module explicitly listed in permissions — must have at least one allowed action
+      if (m.key in userPermissions) {
+        const perms = userPermissions[m.key];
+        return Array.isArray(perms) && perms.length > 0;
+      }
+      // Module not in permissions map → visible by default for authenticated staff
+      return true;
+    })
     .sort((a, b) => (cfgMap[a.key]?.order ?? 999) - (cfgMap[b.key]?.order ?? 999));
 
   const grouped = {};
@@ -135,9 +156,11 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
     () => location.pathname.startsWith('/elearning')
   );
 
-  /* Dynamic nav — reacts to patchSchool({ moduleConfig }) instantly */
-  const moduleConfig = useAuthStore(s => s.session?.school?.moduleConfig);
-  const navSections  = computeNav(moduleConfig);
+  /* Dynamic nav — reacts to patchSchool({ moduleConfig }) and permission changes instantly */
+  const moduleConfig   = useAuthStore(s => s.session?.school?.moduleConfig);
+  const userRole       = user?.role;
+  const userPermissions = user?.permissions;
+  const navSections    = computeNav(moduleConfig, userRole, userPermissions);
 
   const schoolName     = school?.name ?? user?.schoolName ?? 'My School';
   const schoolInitials = schoolName

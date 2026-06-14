@@ -45,6 +45,7 @@ const ATT_STATUS_STYLE = {
 export default function ParentDashboard() {
   const navigate = useNavigate();
   const logout   = useAuthStore(s => s.logout);
+  const session  = useAuthStore(s => s.session);
 
   const [children, setChildren]       = useState([]);
   const [activeChild, setActiveChild] = useState(null);
@@ -54,8 +55,16 @@ export default function ParentDashboard() {
   const [childOpen,   setChildOpen]   = useState(false);
   const [error,       setError]       = useState('');
 
+  // Auth guard — must be logged in as parent or guardian
+  useEffect(() => {
+    if (!session?.token) { navigate('/login', { replace: true }); return; }
+    const role = session.user?.role;
+    if (role !== 'parent' && role !== 'guardian') { navigate('/dashboard', { replace: true }); return; }
+  }, []);
+
   // Load children list
   useEffect(() => {
+    if (!session?.token) return;
     _fetch('/api/parent-portal/children')
       .then(list => {
         setChildren(list);

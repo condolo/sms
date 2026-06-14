@@ -5,27 +5,29 @@ const SESSION_KEY = 'msingi_session';
 /**
  * What we persist to localStorage:
  *   token        — JWT (needed to re-authenticate on refresh)
- *   user (slim)  — id, name, role, schoolId, studentId, guardianOf
- *                  NO email, NO permissions — those stay in memory only
+ *   user (slim)  — id, name, role, schoolId, studentId, guardianOf, permissions
+ *                  NO email (PII) — stays in memory only
  *   school (slim)— id, name, slug, plan, logoUrl, faviconUrl, moduleConfig, primaryColor
  *                  NO tagline, address, mpesa keys, etc.
  *
- * Full objects (with PII / permissions) live in Zustand memory only.
- * XSS can still steal the token, but cannot read email/permissions from storage.
+ * permissions IS persisted (not PII — just module access flags) so the
+ * sidebar stays correctly filtered after a page refresh without a re-fetch.
+ * XSS can still steal the token, but cannot read email from storage.
  */
 function _slimUser(user) {
   if (!user) return null;
   return {
-    id:         user.id,
-    name:       user.name,
-    role:       user.role,
-    roles:      user.roles,
+    id:          user.id,
+    name:        user.name,
+    role:        user.role,
+    roles:       user.roles,
     primaryRole: user.primaryRole,
-    schoolId:   user.schoolId,
-    studentId:  user.studentId   ?? undefined,
-    guardianOf: user.guardianOf  ?? undefined,
-    studentIds: user.studentIds  ?? undefined,
-    photoUrl:   user.photoUrl    ?? undefined,
+    schoolId:    user.schoolId,
+    studentId:   user.studentId   ?? undefined,
+    guardianOf:  user.guardianOf  ?? undefined,
+    studentIds:  user.studentIds  ?? undefined,
+    photoUrl:    user.photoUrl    ?? undefined,
+    permissions: user.permissions ?? undefined,
   };
 }
 

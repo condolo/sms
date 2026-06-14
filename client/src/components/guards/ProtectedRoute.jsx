@@ -3,14 +3,27 @@ import useAuthStore from '@/store/auth.js';
 
 /**
  * Wraps children and redirects to /login if the user has no valid session.
- * After login, the server's /api/auth/login response sets the session.
+ * Students and parents have dedicated portals — they are redirected there
+ * rather than entering the staff AppShell.
  */
 export default function ProtectedRoute({ children }) {
-  const isAuthenticated = useAuthStore((s) => !!s.session?.token);
+  const session  = useAuthStore(s => s.session);
   const location = useLocation();
 
-  if (!isAuthenticated) {
+  if (!session?.token) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  const role = session.user?.role;
+
+  // Students belong in their own portal, never the staff shell
+  if (role === 'student') {
+    return <Navigate to="/student-dashboard" replace />;
+  }
+
+  // Parents / guardians belong in the parent portal
+  if (role === 'parent' || role === 'guardian') {
+    return <Navigate to="/parent-dashboard" replace />;
   }
 
   return children;
