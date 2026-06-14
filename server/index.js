@@ -34,14 +34,38 @@ const PORT = process.env.PORT || 3005;
    Required for M-Pesa IP allowlist and rate-limit IP accuracy.  */
 app.set('trust proxy', 1);
 
+/* ── Block sensitive path access ────────────────────────────── */
+app.use((req, res, next) => {
+  const p = req.path;
+  if (p.startsWith('/.git') || p.startsWith('/.env') || p.startsWith('/.htaccess')) {
+    return res.status(404).end();
+  }
+  next();
+});
+
 /* ── Security headers (helmet) ──────────────────────────────── */
 try {
   const helmet = require('helmet');
   app.use(helmet({
-    contentSecurityPolicy: false,  // allow inline scripts in SPA
-    crossOriginEmbedderPolicy: false
+    crossOriginEmbedderPolicy: false,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc:     ["'self'"],
+        scriptSrc:      ["'self'"],
+        styleSrc:       ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        fontSrc:        ["'self'", 'https://fonts.gstatic.com'],
+        imgSrc:         ["'self'", 'data:', 'blob:'],
+        connectSrc:     ["'self'"],
+        frameSrc:       ["'none'"],
+        frameAncestors: ["'none'"],
+        objectSrc:      ["'none'"],
+        baseUri:        ["'self'"],
+        formAction:     ["'self'"],
+        upgradeInsecureRequests: [],
+      },
+    },
   }));
-  console.log('[Security] helmet headers active');
+  console.log('[Security] helmet headers active (CSP enabled)');
 } catch {
   console.warn('[Security] helmet not installed — run: npm install helmet');
 }
