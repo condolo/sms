@@ -237,9 +237,15 @@ router.patch('/schools/:id', async (req, res) => {
 
 /* POST /api/platform/schools/:id/impersonate — get a JWT for any school's superadmin */
 router.post('/schools/:id/impersonate', async (req, res) => {
+  /* Gate: disabled in production unless ALLOW_IMPERSONATION=true is explicitly set */
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_IMPERSONATION !== 'true') {
+    return res.status(403).json({ error: 'Impersonation is disabled in production. Set ALLOW_IMPERSONATION=true to enable.' });
+  }
+
   try {
-    const School = _model('schools');
-    const User   = _model('users');
+    const School   = _model('schools');
+    const User     = _model('users');
+    const AuditLog = _model('platform_audit_log');
 
     /* Support both MongoDB _id and custom id string */
     const rid = req.params.id;
@@ -271,6 +277,18 @@ router.post('/schools/:id/impersonate', async (req, res) => {
       schoolName:  school.name,
       impersonated: true
     });
+
+    /* Audit log — non-fatal: a logging failure must never block the response */
+    AuditLog.create({
+      action:      'impersonate',
+      schoolId:    resolvedSchoolId,
+      schoolName:  school.name,
+      targetEmail: admin.email,
+      ip:          req.ip,
+      userAgent:   req.headers['user-agent'] || '',
+      at:          new Date(),
+    }).catch(err => console.error('[audit] impersonate log failed:', err.message));
+
     /* Merge schoolName into the user object so the React SPA sidebar can display it */
     res.json({
       token,

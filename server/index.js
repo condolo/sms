@@ -25,6 +25,20 @@ if (!process.env.JWT_SECRET) {
   console.warn('\n⚠️  [Security] JWT_SECRET env var is NOT set — using insecure default. Set it in your .env file or Render dashboard!\n');
 }
 
+/* ── Security: enforce PLATFORM_ADMIN_KEY strength ─────────── */
+{
+  const pak = process.env.PLATFORM_ADMIN_KEY || '';
+  if (pak.length < 32) {
+    const msg = `[Security] PLATFORM_ADMIN_KEY is ${pak.length === 0 ? 'not set' : 'too short (min 32 chars)'}. Generate one: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`;
+    if (process.env.NODE_ENV === 'production') {
+      console.error(`\n[FATAL] ${msg}\n`);
+      process.exit(1);
+    } else {
+      console.warn(`\n⚠️  ${msg}\n`);
+    }
+  }
+}
+
 const app  = express();
 const PORT = process.env.PORT || 3005;
 
@@ -130,10 +144,21 @@ const authLimiter = rateLimit({
   // Always enforce in dev/prod, but bypass during tests so execution can finish
 });
 
-app.use('/api/', apiLimiter);
-app.use('/api/auth', authLimiter);   // applied on top of the general limiter
+// Platform admin limiter: 50 req/15min — tighter than general (300) for key-protected admin API
+const platformLimiter = rateLimit({
+  windowMs:        15 * 60 * 1000,
+  max:             50,
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message:         { error: 'Too many platform admin requests.' },
+  skip:            () => process.env.NODE_ENV !== 'production',
+});
 
-console.log('[Security] rate limiting active — general: 300/15min, auth: 20/15min');
+app.use('/api/', apiLimiter);
+app.use('/api/auth',     authLimiter);     // applied on top of the general limiter
+app.use('/api/platform', platformLimiter); // tighter limit for platform admin key routes
+
+console.log('[Security] rate limiting active — general: 300/15min, auth: 20/15min, platform: 50/15min');
 
 /* ── API Routes ─────────────────────────────────────────────── */
 app.use('/api/public',      require('./routes/public'));   // no auth — school branding
