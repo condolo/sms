@@ -41,6 +41,7 @@
 33. [Staff Self-Edit Profile API (v4.29.0+)](#33-staff-self-edit-profile-api-v4290)
 34. [Admin Password Reset API (v4.29.0+)](#34-admin-password-reset-api-v4290)
 35. [Security — CSPRNG Enforcement (v4.29.0+)](#35-security--csprng-enforcement-v4290)
+36. [Public Site SEO & SSG (v4.42.0+)](#36-public-site-seo--ssg-v4420)
 
 ---
 
@@ -3179,3 +3180,69 @@ Stored on `schools.emergencyOnlineMode` (boolean). When `true`:
 | `client/src/pages/events/EventsPage.jsx` | `online_class` category, Join button in event modal |
 | `client/src/pages/settings/SettingsPage.jsx` | Emergency mode toggle, `patchSchool()` on save |
 | `client/src/store/auth.js` | `_slimSchool()` persists `emergencyOnlineMode` |
+
+---
+
+## 36. Public Site SEO & SSG (v4.42.0+)
+
+### Overview
+
+The Msingi public site is a React SPA served by Vite. Because AI bots (GPTBot, PerplexityBot, ClaudeBot) and many SEO crawlers do not execute JavaScript, a static pre-render step is run after every production build.
+
+### Public routes
+
+| Path | Page | Priority |
+|---|---|---|
+| `/` | Landing | 1.0 |
+| `/plans` | Plans | 0.9 |
+| `/faq` | FAQ | 0.8 |
+| `/contact` | Contact | 0.7 |
+| `/privacy` | Privacy Policy | 0.3 |
+| `/terms` | Terms of Service | 0.3 |
+
+All other routes are authenticated app routes — blocked in `client/public/robots.txt`.
+
+### Per-page metadata
+
+`react-helmet-async` is used for per-page SEO. `HelmetProvider` wraps the app in `client/src/main.jsx`. Each public page contains a `<Helmet>` block with:
+- `<title>` and `<meta name="description">`
+- `<link rel="canonical">`
+- Open Graph (`og:*`) and Twitter Card (`twitter:*`) tags
+- One or more `<script type="application/ld+json">` blocks
+
+### JSON-LD schemas
+
+| Page | Schema type |
+|---|---|
+| Landing | `SoftwareApplication` + `Organization` |
+| FAQ | `FAQPage` (one `Question`/`Answer` per FAQ item) |
+| Plans | `SoftwareApplication` + `PriceSpecification` |
+| Contact | `Organization` with `contactPoint` |
+
+### SSG pre-render
+
+**Script:** `client/scripts/prerender.mjs`  
+**Command:** `npm run build:ssg` (runs `vite build` then the prerender script)
+
+The script:
+1. Starts a local HTTP server on port 4174 serving `dist/` with SPA fallback.
+2. Launches headless Chromium via Puppeteer.
+3. Intercepts all `/api/` requests and returns `{}` (app falls back to `CMS_DEFAULTS`).
+4. Waits 900 ms per route for Framer Motion animations to settle.
+5. Writes rendered HTML to `dist/index.html`, `dist/plans/index.html`, etc.
+
+**Deploy requirement:** server/CDN must route `/plans` → `dist/plans/index.html` (not the SPA root). Render.com's static site rewrite rules handle this automatically if configured correctly.
+
+### FloatingActions component
+
+`client/src/components/landing/FloatingActions.jsx` — renders on every public page:
+- WhatsApp FAB (always visible) linking to `WA_URL` from `landingData.js`
+- Scroll-to-top button (appears after 400 px scroll)
+- Fixed bottom-right, `z-50`
+
+### Crawler discovery
+
+- `client/public/robots.txt` — allow/disallow rules + sitemap pointer
+- `client/public/sitemap.xml` — 6 URLs, `lastmod` dates, `changefreq`, `priority`
+
+Both files are copied to `dist/` by Vite's public directory handling and require no additional build step.

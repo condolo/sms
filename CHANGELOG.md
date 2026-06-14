@@ -6,6 +6,94 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.42.0] — 2026-06-14 — Public Site: SEO, SSG Pre-render, WhatsApp FAB, Mobile Nav, African Branding
+
+### Added
+
+- **`client/public/robots.txt`** — Allows 6 public routes; disallows all 20+ authenticated app routes; points to sitemap.
+- **`client/public/sitemap.xml`** — 6 URLs with priority weights (/ = 1.0, /plans = 0.9, /faq = 0.8, /contact = 0.7, legal = 0.3).
+- **`react-helmet-async`** — Per-page `<title>`, `<meta description>`, canonical, OG, Twitter Card tags on all 6 public pages.
+- **JSON-LD structured data** — `SoftwareApplication` + `Organization` on Landing; `FAQPage` on /faq; `PriceSpecification` on /plans.
+- **`client/scripts/prerender.mjs`** — Puppeteer SSG post-build script: renders all 6 public routes with headless Chromium and writes pre-rendered HTML to `dist/` so AI bots (GPTBot, PerplexityBot, ClaudeBot) see real content without JS.
+- **`build:ssg` script** in `client/package.json` — runs `vite build && node scripts/prerender.mjs`.
+- **WhatsApp FAB** (`FloatingActions` component) added to FAQ, Plans, Contact, PrivacyPolicy, TermsOfService (Landing already had it).
+- **Mobile hamburger menu** on Landing navbar — animated `AnimatePresence` dropdown with all nav links, Login, Book Demo, and Platform Live status. Closes on scroll.
+
+### Changed
+
+- All public-facing "Kenyan schools / administrators / leaders" copy updated to "African" across Landing.jsx, FAQ.jsx, and index.html. Legal references ("Kenyan law", "Kenyan Shilling") left unchanged.
+- `index.html` base `<title>` and `<meta description>` updated to serve as non-JS fallbacks for crawlers.
+- PrivacyPolicy and TermsOfService duplicate scroll-to-top logic removed; replaced with `FloatingActions`.
+
+---
+
+## [v4.41.0] — Landing Refactor + FAQ Page
+
+### Added
+
+- **`/faq` route** — Full FAQ page with categorized accordion UI, desktop sticky category nav, `FAQPage` JSON-LD schema, WhatsApp CTA, and footer.
+- **FAQ teaser section** on Landing page between Trust section and Final CTA.
+- **FAQ link** added to footer Company column.
+
+### Changed
+
+- **Landing.jsx** split from a 2100-line monolith into modular components (`client/src/components/landing/`) and data files (`client/src/data/landingData.js`, `faqData.js`). All imports and routes preserved.
+
+---
+
+## [v4.40.0] — Configurable Admission Numbers
+
+### Added
+
+- **Admission number prefix, padding, and counter** configurable per school via Settings → Admissions.
+- Admission numbers auto-generated on student creation using `{prefix}/{year}/{padded-counter}` format.
+- `schoolEmail` field added to student records.
+
+### Changed
+
+- Bulk import/export updated to include `admissionNumber` and `schoolEmail` columns.
+- Import tests updated to cover the new fields.
+
+---
+
+## [v4.39.0] — Student Portal Features + RBAC Wiring
+
+### Added
+
+- **`hideFeeFromStudents`** school setting — fee balance hidden from student dashboard when enabled.
+- **`studentCanViewReportCards`** school setting — report card access gated in student portal.
+- **School email field** (`schoolEmail`) on student profiles.
+- **Profile photo upload** on student profiles; photo rendered on report card PDFs.
+
+### Fixed
+
+- RBAC role permissions wired to sidebar — staff only see menu items their role grants access to.
+- Portal role bleed fixed — student/parent portal roles no longer inherit staff permissions.
+- Demo-student login alias (`demo-student`) preserved — no longer overwritten by admission number on seed.
+
+---
+
+## [v4.38.0] — Cloud Backup, Security, Legal Pages, Pricing Update
+
+### Added
+
+- **Cloud S3 backup** with AES-256-GCM encryption at rest (KDPA Section 41 compliance). Nightly cron via `backup-cron.js`.
+- **Privacy Policy** at `/privacy` and **Terms of Service** at `/terms` — full legal pages with sticky nav and mobile layout.
+
+### Changed
+
+- Pricing updated: Base = KES 150/student/term, Student portal = KES 200, Family portal = KES 250. Setup fee minimum KES 45,000.
+- All ERP modules enabled on all plan tiers (no module gating below enterprise).
+
+### Fixed
+
+- CSP headers enabled; `.git` directory access blocked.
+- Backup cron collection list synced with `backup.js`.
+- Demo school exempted from 2FA (demo accounts have no real email inboxes).
+- Student login fixed; plans-page tier labels corrected.
+
+---
+
 ## [v4.37.0] — Comment Banks, Grid Mark Entry, Exam Series, Approval Workflow, Mark Locking, Signatures/Stamp
 
 ### Added
