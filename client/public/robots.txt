@@ -1,0 +1,42 @@
+User-agent: *
+Allow: /
+Allow: /plans
+Allow: /faq
+Allow: /contact
+Allow: /privacy
+Allow: /terms
+
+# App routes — authenticated, no public value
+Disallow: /dashboard/
+Disallow: /dashboard
+Disallow: /student-dashboard/
+Disallow: /student-dashboard
+Disallow: /parent-dashboard/
+Disallow: /parent-dashboard
+Disallow: /students/
+Disallow: /teachers/
+Disallow: /classes/
+Disallow: /attendance/
+Disallow: /finance/
+Disallow: /grades/
+Disallow: /exams/
+Disallow: /admissions/
+Disallow: /timetable/
+Disallow: /settings/
+Disallow: /reports/
+Disallow: /messages/
+Disallow: /behaviour/
+Disallow: /hr/
+Disallow: /library/
+Disallow: /transport/
+Disallow: /hostel/
+Disallow: /elearning/
+Disallow: /events/
+Disallow: /subjects/
+Disallow: /lessons/
+Disallow: /profile/
+Disallow: /growth-profile/
+Disallow: /help/
+Disallow: /changelog/
+
+Sitemap: https://msingi.io/sitemap.xml

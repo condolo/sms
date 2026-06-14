@@ -4,6 +4,7 @@
  */
 import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, ArrowRight, ArrowUp, CheckCircle, MessageCircle,
@@ -198,6 +199,20 @@ export default function Contact() {
 
   return (
     <div className="min-h-screen bg-white text-zinc-900 antialiased">
+
+      <Helmet>
+        <title>Contact Us — Msingi School Management Platform</title>
+        <meta name="description" content="Book a demo or get in touch with the Msingi team. We'll walk through your school's specific setup, answer your questions, and have you live within 2–4 weeks." />
+        <link rel="canonical" href="https://msingi.io/contact" />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://msingi.io/contact" />
+        <meta property="og:title" content="Contact Us — Msingi School Management Platform" />
+        <meta property="og:description" content="Book a demo or get in touch with the Msingi team. Have you live within 2–4 weeks." />
+        <meta property="og:image" content="https://msingi.io/images/og-contact.png" />
+        <meta name="twitter:card" content="summary" />
+        <meta name="twitter:title" content="Contact Msingi" />
+        <meta name="twitter:description" content="Book a demo or get in touch. Have your school live within 2–4 weeks." />
+      </Helmet>
 
       {/* ── NAVBAR ── */}
       <nav className="fixed top-0 left-0 right-0 w-full z-50 bg-white/80 backdrop-blur-xl border-b border-zinc-100/80">

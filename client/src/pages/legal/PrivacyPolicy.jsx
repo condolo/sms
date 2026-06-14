@@ -6,6 +6,7 @@
  */
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
 import { ArrowLeft, Shield, ChevronRight, ArrowUp } from 'lucide-react';
 
 const LAST_UPDATED  = '14 June 2026';
@@ -108,6 +109,13 @@ export default function PrivacyPolicy() {
 
   return (
     <div className="min-h-screen bg-white text-slate-900 antialiased">
+
+      <Helmet>
+        <title>Privacy Policy — Msingi School Management Platform</title>
+        <meta name="description" content="Msingi privacy policy. How we collect, use, store, and protect school data in compliance with Kenya's Data Protection Act 2019 and East African data regulations." />
+        <link rel="canonical" href="https://msingi.io/privacy" />
+        <meta name="robots" content="noindex, follow" />
+      </Helmet>
 
       {/* Nav */}
       <nav className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-100 shadow-sm">

@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, ArrowRight, MessageCircle } from 'lucide-react';
 import { FAQ_CATEGORIES, ALL_FAQS_FLAT } from '@/data/faqData';
@@ -36,30 +37,35 @@ function FaqItem({ q, a }) {
   );
 }
 
-export default function FAQ() {
-  // Inject FAQPage JSON-LD for Google AI Mode
-  useEffect(() => {
-    const script = document.createElement('script');
-    script.type  = 'application/ld+json';
-    script.id    = 'faq-schema';
-    script.text  = JSON.stringify({
-      '@context':   'https://schema.org',
-      '@type':      'FAQPage',
-      mainEntity: ALL_FAQS_FLAT.map(({ q, a }) => ({
-        '@type':          'Question',
-        name:             q,
-        acceptedAnswer: {
-          '@type': 'Answer',
-          text:    a,
-        },
-      })),
-    });
-    document.head.appendChild(script);
-    return () => { document.getElementById('faq-schema')?.remove(); };
-  }, []);
+const FAQ_SCHEMA = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: ALL_FAQS_FLAT.map(({ q, a }) => ({
+    '@type': 'Question',
+    name: q,
+    acceptedAnswer: { '@type': 'Answer', text: a },
+  })),
+};
 
+export default function FAQ() {
   return (
     <div className="min-h-screen bg-white text-slate-900 antialiased">
+
+      <Helmet>
+        <title>FAQ — Msingi School Management Platform</title>
+        <meta name="description" content="Answers to the most common questions from Kenyan school administrators — M-Pesa fee collection, data security, CBC support, parent portals, and how to get started with Msingi." />
+        <link rel="canonical" href="https://msingi.io/faq" />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://msingi.io/faq" />
+        <meta property="og:title" content="FAQ — Msingi School Management Platform" />
+        <meta property="og:description" content="Answers to the most common questions from Kenyan school administrators — M-Pesa fees, data security, CBC support, and how to get started." />
+        <meta property="og:image" content="https://msingi.io/images/og-faq.png" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="FAQ — Msingi School Management Platform" />
+        <meta name="twitter:description" content="Answers to the most common questions from Kenyan school administrators." />
+        <meta name="twitter:image" content="https://msingi.io/images/og-faq.png" />
+        <script type="application/ld+json">{JSON.stringify(FAQ_SCHEMA)}</script>
+      </Helmet>
 
       {/* Navbar */}
       <nav className="border-b border-slate-100 bg-white/95 backdrop-blur-sm sticky top-0 z-50">

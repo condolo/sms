@@ -5,6 +5,7 @@
  */
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
 import { ArrowLeft, FileText, ArrowUp, ChevronRight } from 'lucide-react';
 
 const LAST_UPDATED  = '14 June 2026';
@@ -136,6 +137,13 @@ export default function TermsOfService() {
 
   return (
     <div className="min-h-screen bg-white text-slate-900 antialiased">
+
+      <Helmet>
+        <title>Terms of Service — Msingi School Management Platform</title>
+        <meta name="description" content="Msingi terms of service. Governing law: Republic of Kenya. Read the terms that apply to your school's use of the Msingi platform." />
+        <link rel="canonical" href="https://msingi.io/terms" />
+        <meta name="robots" content="noindex, follow" />
+      </Helmet>
 
       {/* Nav */}
       <nav className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-100 shadow-sm">

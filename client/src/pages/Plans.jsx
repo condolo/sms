@@ -5,6 +5,7 @@
  */
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Check, ArrowRight, Zap, Users, GraduationCap,
@@ -237,8 +238,36 @@ export default function Plans() {
   const navigate = useNavigate();
   useEffect(() => { window.scrollTo({ top: 0, behavior: 'instant' }); }, []);
 
+  const PRICING_SCHEMA = {
+    '@context': 'https://schema.org',
+    '@type': 'SoftwareApplication',
+    name: 'Msingi',
+    applicationCategory: 'EducationalApplication',
+    offers: [
+      { '@type': 'Offer', name: 'Base', price: '150.00', priceCurrency: 'KES', description: 'KES 150 per student per term — admin & teacher portals, full ERP' },
+      { '@type': 'Offer', name: 'Student', price: '200.00', priceCurrency: 'KES', description: 'KES 200 per student per term — adds dedicated student portal' },
+      { '@type': 'Offer', name: 'Family', price: '250.00', priceCurrency: 'KES', description: 'KES 250 per student per term — adds parent portal with M-Pesa payments' },
+    ],
+  };
+
   return (
     <div className="min-h-screen bg-white text-zinc-900 antialiased">
+
+      <Helmet>
+        <title>Pricing — Msingi School Management Platform</title>
+        <meta name="description" content="Simple per-student, per-term pricing for Msingi. Base at KES 150, Student portal at KES 200, Family portal at KES 250. One-time setup fee of KES 30,000–50,000. No hidden costs." />
+        <link rel="canonical" href="https://msingi.io/plans" />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://msingi.io/plans" />
+        <meta property="og:title" content="Pricing — Msingi School Management Platform" />
+        <meta property="og:description" content="Simple per-student, per-term pricing starting at KES 150. Base, Student, and Family portal tiers. No hidden costs." />
+        <meta property="og:image" content="https://msingi.io/images/og-plans.png" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="Pricing — Msingi School Management Platform" />
+        <meta name="twitter:description" content="Simple per-student, per-term pricing starting at KES 150. Base, Student, and Family portal tiers." />
+        <meta name="twitter:image" content="https://msingi.io/images/og-plans.png" />
+        <script type="application/ld+json">{JSON.stringify(PRICING_SCHEMA)}</script>
+      </Helmet>
 
       {/* ── NAVBAR ── */}
       <nav className="fixed top-0 left-0 right-0 w-full z-50 bg-white/80 backdrop-blur-xl border-b border-zinc-100/80">
