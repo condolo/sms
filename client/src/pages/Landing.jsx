@@ -65,10 +65,10 @@ const SIDEBAR_NAV = [
 ];
 
 const KPI_CARDS = [
-  { label: 'Total Students',    value: '1,247', delta: '+23 this term',        Icon: Users,      accent: 'text-indigo-600', bg: 'bg-indigo-50'  },
-  { label: 'Avg. Attendance',   value: '94.2%', delta: '↑ 2.1% vs last term', Icon: Calendar,   accent: 'text-emerald-600',bg: 'bg-emerald-50' },
-  { label: 'Outstanding Fees',  value: 'KSh 284k', delta: '38 open invoices', Icon: DollarSign, accent: 'text-amber-600',  bg: 'bg-amber-50'   },
-  { label: 'Reports Published', value: '3 of 4', delta: '1 pending approval', Icon: FileText,   accent: 'text-violet-600', bg: 'bg-violet-50'  },
+  { label: 'Total Students',    value: '1,247', delta: '+23 this term',        Icon: Users,      accent: 'text-indigo-600',  bg: 'bg-indigo-50',  bar: 'bg-indigo-500',  pct: 78 },
+  { label: 'Avg. Attendance',   value: '94.2%', delta: '↑ 2.1% vs last term', Icon: Calendar,   accent: 'text-emerald-600', bg: 'bg-emerald-50', bar: 'bg-emerald-500', pct: 94 },
+  { label: 'Fee Collection',    value: '78%',   delta: 'KSh 2.41M of 3.10M',  Icon: DollarSign, accent: 'text-amber-600',   bg: 'bg-amber-50',   bar: 'bg-amber-500',   pct: 78 },
+  { label: 'Reports Published', value: '3 of 4', delta: '1 pending approval', Icon: FileText,   accent: 'text-violet-600',  bg: 'bg-violet-50',  bar: 'bg-violet-500',  pct: 75 },
 ];
 
 const YEAR_BARS = [
@@ -80,100 +80,134 @@ const YEAR_BARS = [
 ];
 
 const ACTIVITY_FEED = [
-  { Icon: CheckCircle, accent: 'text-emerald-500', bg: 'bg-emerald-50', text: 'Report card published',  sub: 'Year 7 · Term 2',       time: '2m ago' },
-  { Icon: DollarSign,  accent: 'text-indigo-500',  bg: 'bg-indigo-50',  text: 'Fee payment recorded',  sub: 'S. Kimani · KSh 4,500',  time: '8m ago' },
-  { Icon: UserCheck,   accent: 'text-violet-500',  bg: 'bg-violet-50',  text: 'Admission enrolled',    sub: 'J. Osei — Year 7A',      time: '1h ago' },
-  { Icon: AlertCircle, accent: 'text-amber-500',   bg: 'bg-amber-50',   text: 'Attendance flagged',    sub: 'Class 9B · 82%',         time: '2h ago' },
+  { Icon: CheckCircle, accent: 'text-emerald-500', bg: 'bg-emerald-50', text: 'Year 8 reports published', sub: '28 reports · Term 2',      time: '4m ago'  },
+  { Icon: DollarSign,  accent: 'text-indigo-500',  bg: 'bg-indigo-50',  text: 'M-Pesa payment received',  sub: 'J. Kamau · KSh 18,500',    time: '12m ago' },
+  { Icon: UserCheck,   accent: 'text-violet-500',  bg: 'bg-violet-50',  text: 'New admission enrolled',   sub: 'A. Osei — Year 7A',        time: '1h ago'  },
+  { Icon: TrendingUp,  accent: 'text-sky-500',     bg: 'bg-sky-50',     text: 'Attendance alert resolved', sub: 'Class 9B improved → 91%', time: '2h ago'  },
 ];
+
+const BAR_COLORS = ['bg-indigo-500', 'bg-violet-500', 'bg-sky-500', 'bg-emerald-500', 'bg-amber-500'];
 
 function DashboardMockup() {
   return (
-    <div className="rounded-2xl overflow-hidden border border-slate-200/80 shadow-2xl shadow-slate-900/10 bg-white select-none pointer-events-none">
-      <div className="bg-slate-900 px-4 py-3 flex items-center gap-3">
+    <div className="rounded-2xl overflow-hidden border border-slate-200/80 shadow-2xl shadow-slate-900/12 bg-white select-none pointer-events-none">
+      {/* Browser chrome */}
+      <div className="bg-slate-900 px-4 py-2.5 flex items-center gap-3">
         <div className="flex gap-1.5">
-          <div className="w-3 h-3 rounded-full bg-red-400/80" />
-          <div className="w-3 h-3 rounded-full bg-yellow-400/80" />
-          <div className="w-3 h-3 rounded-full bg-green-400/80" />
+          <div className="w-2.5 h-2.5 rounded-full bg-red-400/80" />
+          <div className="w-2.5 h-2.5 rounded-full bg-yellow-400/80" />
+          <div className="w-2.5 h-2.5 rounded-full bg-green-400/80" />
         </div>
         <div className="flex-1 flex justify-center">
-          <div className="bg-slate-800 rounded-md px-5 py-1 text-xs text-slate-400 font-mono tracking-tight">
+          <div className="bg-slate-800 rounded-md px-5 py-1 text-[10px] text-slate-400 font-mono tracking-tight flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
             app.msingi.io / dashboard
           </div>
         </div>
         <div className="w-[52px]" />
       </div>
 
-      <div className="flex" style={{ height: '420px' }}>
+      <div className="flex" style={{ height: '460px' }}>
+        {/* Sidebar */}
         <div className="w-[54px] bg-slate-900 flex flex-col items-center py-4 gap-1 flex-shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white text-xs font-bold mb-3">M</div>
+          <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-[10px] font-bold mb-3 shadow-lg shadow-indigo-900/50">M</div>
           {SIDEBAR_NAV.map(({ Icon, label, active }) => (
             <div key={label} title={label}
-              className={`w-9 h-9 rounded-lg flex items-center justify-center ${active ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}>
+              className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
+                active ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/40' : 'text-slate-600 hover:text-slate-400'
+              }`}>
               <Icon size={15} />
             </div>
           ))}
         </div>
 
+        {/* Main content */}
         <div className="flex-1 bg-slate-50 flex flex-col overflow-hidden">
-          <div className="bg-white border-b border-slate-100 px-5 py-3 flex items-center justify-between flex-shrink-0">
+          {/* Top bar */}
+          <div className="bg-white border-b border-slate-100 px-5 py-2.5 flex items-center justify-between flex-shrink-0">
             <div>
               <p className="text-[10px] text-slate-400 font-medium tracking-wide uppercase">Greenwood Academy</p>
               <p className="text-sm font-semibold text-slate-800">Dashboard</p>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-[10px] text-slate-400 bg-slate-100 rounded px-2 py-1 font-medium">Term 2 · 2025–26</span>
-              <div className="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 text-[10px] font-bold">PM</div>
+              <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-100 rounded-full px-2.5 py-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
+                <span className="text-[10px] text-emerald-700 font-semibold">Live</span>
+              </div>
+              <span className="text-[10px] text-slate-400 bg-slate-100 rounded-lg px-2 py-1 font-medium">Term 2 · 2025–26</span>
+              <div className="w-7 h-7 rounded-full bg-indigo-600 flex items-center justify-center text-white text-[10px] font-bold">PM</div>
             </div>
           </div>
 
-          <div className="flex-1 p-4 overflow-hidden">
-            <div className="grid grid-cols-4 gap-2.5 mb-4">
-              {KPI_CARDS.map(({ label, value, delta, Icon, accent, bg }) => (
+          <div className="flex-1 p-4 overflow-hidden flex flex-col gap-3">
+            {/* Welcome banner */}
+            <div className="rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-600 to-violet-600 p-3 flex items-center justify-between flex-shrink-0 shadow-md shadow-indigo-500/20">
+              <div>
+                <p className="text-[10px] font-medium text-indigo-200 mb-0.5">Good morning, Principal Mwangi</p>
+                <p className="text-xs font-bold text-white">Term 2 — Week 8 of 13</p>
+              </div>
+              <div className="text-right">
+                <p className="text-[9px] text-indigo-300">Next school event</p>
+                <p className="text-[11px] font-semibold text-white">Parent Day · Sat 21 Jun</p>
+              </div>
+            </div>
+
+            {/* KPI cards */}
+            <div className="grid grid-cols-4 gap-2 flex-shrink-0">
+              {KPI_CARDS.map(({ label, value, delta, Icon, accent, bg, bar, pct }) => (
                 <div key={label} className="bg-white rounded-xl p-3 border border-slate-100 shadow-sm">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[10px] text-slate-400 font-medium leading-tight">{label}</span>
-                    <div className={`w-5 h-5 rounded-md ${bg} ${accent} flex items-center justify-center flex-shrink-0`}><Icon size={11} /></div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[9px] text-slate-400 font-medium leading-tight">{label}</span>
+                    <div className={`w-5 h-5 rounded-md ${bg} ${accent} flex items-center justify-center flex-shrink-0`}><Icon size={10} /></div>
                   </div>
-                  <p className="text-base font-bold text-slate-800 leading-none mb-1">{value}</p>
-                  <p className="text-[10px] text-slate-400">{delta}</p>
+                  <p className="text-sm font-bold text-slate-800 leading-none mb-1">{value}</p>
+                  <p className="text-[9px] text-slate-400 mb-1.5">{delta}</p>
+                  <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
+                    <div className={`h-full ${bar} rounded-full`} style={{ width: `${pct}%` }} />
+                  </div>
                 </div>
               ))}
             </div>
 
-            <div className="grid grid-cols-3 gap-2.5">
-              <div className="col-span-2 bg-white rounded-xl p-4 border border-slate-100 shadow-sm">
-                <div className="flex items-center justify-between mb-3">
+            {/* Charts row */}
+            <div className="grid grid-cols-3 gap-2.5 flex-1 min-h-0">
+              {/* Academic performance */}
+              <div className="col-span-2 bg-white rounded-xl p-3.5 border border-slate-100 shadow-sm flex flex-col">
+                <div className="flex items-center justify-between mb-2.5 flex-shrink-0">
                   <div>
                     <p className="text-[9px] text-slate-400 font-medium uppercase tracking-widest mb-0.5">Academic Performance</p>
-                    <p className="text-xs font-semibold text-slate-800">Year Group Summary · Term 2</p>
+                    <p className="text-[11px] font-semibold text-slate-800">Year Group Summary · Term 2</p>
                   </div>
-                  <span className="text-[10px] text-indigo-600 font-medium">View report →</span>
+                  <span className="text-[9px] text-indigo-600 font-semibold bg-indigo-50 px-2 py-0.5 rounded-full">View report →</span>
                 </div>
-                <div className="space-y-2.5">
-                  {YEAR_BARS.map(({ label, pct }) => (
-                    <div key={label} className="flex items-center gap-3">
-                      <span className="text-[10px] text-slate-500 w-12 font-medium flex-shrink-0">{label}</span>
+                <div className="space-y-2 flex-1">
+                  {YEAR_BARS.map(({ label, pct }, i) => (
+                    <div key={label} className="flex items-center gap-2.5">
+                      <span className="text-[9px] text-slate-500 w-12 font-medium flex-shrink-0">{label}</span>
                       <div className="flex-1 bg-slate-100 rounded-full h-1.5">
-                        <div className="bg-indigo-500 h-1.5 rounded-full" style={{ width: `${pct}%` }} />
+                        <div className={`${BAR_COLORS[i % BAR_COLORS.length]} h-1.5 rounded-full`} style={{ width: `${pct}%` }} />
                       </div>
-                      <span className="text-[10px] font-semibold text-slate-600 w-8 text-right flex-shrink-0">{pct}%</span>
+                      <span className="text-[9px] font-bold text-slate-600 w-7 text-right flex-shrink-0">{pct}%</span>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <div className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm">
-                <p className="text-[9px] text-slate-400 font-medium uppercase tracking-widest mb-0.5">Recent Activity</p>
-                <p className="text-xs font-semibold text-slate-800 mb-3">Live updates</p>
-                <div className="space-y-3">
+              {/* Activity feed */}
+              <div className="bg-white rounded-xl p-3.5 border border-slate-100 shadow-sm flex flex-col">
+                <div className="flex items-center justify-between mb-2.5 flex-shrink-0">
+                  <p className="text-[11px] font-semibold text-slate-800">Live Activity</p>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                </div>
+                <div className="space-y-2.5 flex-1">
                   {ACTIVITY_FEED.map(({ Icon, accent, bg, text, sub, time }, i) => (
                     <div key={i} className="flex items-start gap-2">
-                      <div className={`w-5 h-5 rounded-md ${bg} ${accent} flex items-center justify-center flex-shrink-0 mt-0.5`}><Icon size={10} /></div>
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-medium text-slate-700 truncate leading-tight">{text}</p>
-                        <p className="text-[10px] text-slate-400 truncate">{sub}</p>
-                        <p className="text-[9px] text-slate-300 mt-0.5">{time}</p>
+                      <div className={`w-5 h-5 rounded-lg ${bg} ${accent} flex items-center justify-center flex-shrink-0 mt-0.5`}><Icon size={9} /></div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[9px] font-semibold text-slate-700 truncate leading-tight">{text}</p>
+                        <p className="text-[9px] text-slate-400 truncate">{sub}</p>
                       </div>
+                      <span className="text-[8px] text-slate-300 flex-shrink-0 mt-0.5">{time}</span>
                     </div>
                   ))}
                 </div>
@@ -1533,36 +1567,53 @@ export default function Landing() {
       )}
 
       {/* ══════════════════════════════════════════
+          ANIMATED TOP STRIPE
+      ══════════════════════════════════════════ */}
+      <motion.div
+        className="fixed top-0 inset-x-0 z-[60] h-[3px]"
+        style={{ background: 'linear-gradient(90deg,#4f46e5,#7c3aed,#0ea5e9,#4f46e5)', backgroundSize: '200% 100%' }}
+        animate={{ backgroundPosition: ['0% 0%', '-200% 0%'] }}
+        transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}
+      />
+
+      {/* ══════════════════════════════════════════
           NAVBAR
       ══════════════════════════════════════════ */}
       <motion.nav
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: EASE }}
-        className={`fixed top-0 inset-x-0 z-50 transition-all duration-300 ${
-          navScrolled ? 'bg-white/95 backdrop-blur-md shadow-sm border-b border-slate-100' : 'bg-transparent'
+        className={`fixed top-[3px] inset-x-0 z-50 transition-all duration-300 ${
+          navScrolled
+            ? 'bg-white/95 backdrop-blur-md shadow-sm border-b border-indigo-100/60'
+            : 'bg-transparent'
         }`}
       >
         <div className="max-w-7xl mx-auto px-6 lg:px-8 h-16 flex items-center justify-between">
           {/* Logo */}
-          <Link to="/" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center text-white text-[10px] font-bold shadow-sm">M</div>
+          <Link to="/" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className="flex items-center gap-2.5 group">
+            <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center text-white text-[10px] font-bold shadow-sm group-hover:shadow-indigo-500/40 group-hover:scale-105 transition-all">M</div>
             <span className="text-sm font-bold text-slate-900 tracking-tight">Msingi</span>
           </Link>
 
           {/* Centre nav */}
           <div className="hidden md:flex items-center gap-1">
             {[
-              { label: 'Platform',        href: '#ecosystem'  },
-              { label: 'Solutions',       href: '#showcase'   },
-              { label: 'Plans',           href: '#plans'      },
-              { label: 'Infrastructure',  href: '#trust'      },
+              { label: 'Platform',       href: '#ecosystem' },
+              { label: 'Solutions',      href: '#showcase'  },
+              { label: 'Plans',          href: '#plans'     },
+              { label: 'Infrastructure', href: '#trust'     },
             ].map(({ label, href }) => (
               <a key={label} href={href}
-                className="px-3.5 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-all">
+                className="relative px-3.5 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-indigo-600 hover:bg-indigo-50/60 transition-all">
                 {label}
               </a>
             ))}
+            {/* Live indicator */}
+            <div className="ml-2 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-100">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
+              <span className="text-[10px] font-semibold text-emerald-700 hidden lg:block">Platform Live</span>
+            </div>
           </div>
 
           {/* Right actions */}
@@ -1572,14 +1623,14 @@ export default function Landing() {
               Login
             </Link>
             <Link to="/contact"
-              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition-colors shadow-sm">
+              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 transition-all shadow-md shadow-indigo-600/25 hover:shadow-indigo-500/40 hover:-translate-y-px">
               Book Demo
             </Link>
           </div>
         </div>
       </motion.nav>
 
-      <div className="h-16" />
+      <div className="h-[67px]" />
 
       {/* ══════════════════════════════════════════
           1. HERO
@@ -1916,40 +1967,131 @@ export default function Landing() {
       {/* ══════════════════════════════════════════
           FOOTER
       ══════════════════════════════════════════ */}
-      <footer className="border-t border-slate-100 pt-12 pb-8 bg-white">
-        <div className="max-w-7xl mx-auto px-6 lg:px-8">
+      <footer className="bg-slate-950 text-slate-400">
 
-          {/* Find School */}
-          <div className="max-w-md mx-auto text-center mb-10">
-            <p className="text-sm font-semibold text-slate-800 mb-1">Already have a school account?</p>
-            <p className="text-xs text-slate-400 mb-4">Enter your school slug to go to your portal.</p>
-            <form onSubmit={handleFindSchool} className="flex gap-2">
-              <input type="text" value={schoolInput}
-                onChange={(e) => { setSchoolInput(e.target.value); setFindError(''); }}
-                placeholder="e.g. greenwood-academy"
-                className="flex-1 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/20 transition shadow-sm" />
-              <button type="submit" disabled={finding || !schoolInput.trim()}
-                className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-40 transition-colors">
-                {finding ? '…' : 'Go'}
-              </button>
-            </form>
-            {findError && <p className="mt-2 text-xs text-red-500">{findError}</p>}
-          </div>
+        {/* Top gradient accent */}
+        <div className="h-px bg-gradient-to-r from-transparent via-indigo-800/60 to-transparent" />
 
-          {/* Bottom bar */}
-          <div className="border-t border-slate-100 pt-8 flex flex-col sm:flex-row items-center justify-between gap-5">
-            <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center text-white text-[10px] font-bold">M</div>
-              <span className="text-sm font-bold text-slate-900">Msingi</span>
-              <span className="text-xs text-slate-400 ml-1">· Decision Intelligence Platform</span>
+        {/* Main content */}
+        <div className="max-w-7xl mx-auto px-6 lg:px-8 pt-16 pb-10">
+          <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-10 lg:gap-6">
+
+            {/* Brand + school finder — 2 cols */}
+            <div className="lg:col-span-2">
+              <Link to="/" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className="inline-flex items-center gap-2.5 mb-4 group">
+                <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-sm font-bold shadow-lg shadow-indigo-900/50 group-hover:scale-105 transition-transform">M</div>
+                <span className="text-lg font-bold text-white tracking-tight">Msingi</span>
+              </Link>
+              <p className="text-sm text-slate-500 leading-relaxed mb-5 max-w-xs">
+                Decision Intelligence for Educational Leaders. Real-time visibility across admissions, academics, attendance, and finance — all in one institution-grade platform.
+              </p>
+
+              {/* Social links */}
+              <div className="mb-8">
+                <SocialLinks links={socialLinks} />
+              </div>
+
+              {/* School finder card */}
+              <div className="rounded-2xl bg-slate-900 border border-slate-800 p-4">
+                <p className="text-xs font-semibold text-slate-300 mb-0.5">Already have a school account?</p>
+                <p className="text-[11px] text-slate-600 mb-3">Enter your school slug to access your portal.</p>
+                <form onSubmit={handleFindSchool} className="flex gap-2">
+                  <input type="text" value={schoolInput}
+                    onChange={(e) => { setSchoolInput(e.target.value); setFindError(''); }}
+                    placeholder="e.g. greenwood-academy"
+                    className="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition" />
+                  <button type="submit" disabled={finding || !schoolInput.trim()}
+                    className="rounded-lg bg-indigo-600 hover:bg-indigo-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 transition-colors">
+                    {finding ? '…' : 'Go'}
+                  </button>
+                </form>
+                {findError && <p className="mt-2 text-xs text-red-400">{findError}</p>}
+              </div>
             </div>
-            <SocialLinks links={socialLinks} />
-            <div className="flex gap-5 text-xs text-slate-400">
-              <a href="mailto:hello@msingi.io" className="hover:text-slate-700 transition-colors">hello@msingi.io</a>
-              <Link to="/contact" className="hover:text-slate-700 transition-colors">Contact</Link>
+
+            {/* Platform links */}
+            <div>
+              <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-5">Platform</h4>
+              <ul className="space-y-3">
+                {['Students', 'Attendance', 'Grades & Exams', 'Finance', 'Timetable', 'Reports', 'E-Learning', 'Analytics'].map(item => (
+                  <li key={item}>
+                    <a href="#ecosystem" className="text-sm text-slate-500 hover:text-white transition-colors">{item}</a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Solutions + Company */}
+            <div>
+              <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-5">Solutions</h4>
+              <ul className="space-y-3 mb-8">
+                {['School Directors', 'Teaching Staff', 'Parents', 'Students'].map(item => (
+                  <li key={item}>
+                    <a href="#showcase" className="text-sm text-slate-500 hover:text-white transition-colors">{item}</a>
+                  </li>
+                ))}
+              </ul>
+              <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-5">Company</h4>
+              <ul className="space-y-3">
+                {[
+                  { label: 'Plans & Pricing', href: '#plans'    },
+                  { label: 'Infrastructure',  href: '#trust'    },
+                  { label: 'Contact Us',      href: '/contact'  },
+                ].map(({ label, href }) => (
+                  <li key={label}>
+                    <a href={href} className="text-sm text-slate-500 hover:text-white transition-colors">{label}</a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Get in touch */}
+            <div>
+              <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-5">Get in touch</h4>
+              <div className="space-y-3 mb-8">
+                <a href="mailto:hello@msingi.io"
+                  className="flex items-center gap-2.5 text-sm text-slate-500 hover:text-white transition-colors group">
+                  <span className="w-8 h-8 rounded-lg bg-slate-800 group-hover:bg-slate-700 flex items-center justify-center flex-shrink-0 text-[11px] font-bold transition-colors">@</span>
+                  hello@msingi.io
+                </a>
+                <a href={WA_URL} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-2.5 text-sm text-slate-500 hover:text-white transition-colors group">
+                  <span className="w-8 h-8 rounded-lg bg-slate-800 group-hover:bg-[#25D366]/20 flex items-center justify-center flex-shrink-0 transition-colors">
+                    <MessageCircle size={13} className="text-[#25D366]" />
+                  </span>
+                  WhatsApp us
+                </a>
+              </div>
+              <Link to="/contact"
+                className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-5 py-2.5 text-sm font-semibold text-white transition-all shadow-lg shadow-indigo-900/40 hover:-translate-y-px">
+                Book a Demo
+                <ArrowRight size={13} />
+              </Link>
+
+              {/* Security trust signal */}
+              <div className="mt-6 flex items-start gap-2 p-3 rounded-xl bg-slate-900 border border-slate-800">
+                <ShieldCheck size={14} className="text-emerald-500 flex-shrink-0 mt-0.5" />
+                <p className="text-[10px] text-slate-600 leading-relaxed">
+                  HTTPS · AES-256 encrypted backups · Tenant data isolation · Full audit trail
+                </p>
+              </div>
             </div>
           </div>
-          <p className="text-xs text-slate-400 text-center mt-6">© {new Date().getFullYear()} Msingi. All rights reserved.</p>
+        </div>
+
+        {/* Bottom bar */}
+        <div className="border-t border-slate-800/60">
+          <div className="max-w-7xl mx-auto px-6 lg:px-8 py-5 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <p className="text-xs text-slate-700">© {new Date().getFullYear()} Msingi. All rights reserved.</p>
+            <div className="flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-xs text-slate-700">All systems operational</span>
+            </div>
+            <div className="flex gap-5 text-xs text-slate-700">
+              <a href="#" className="hover:text-slate-400 transition-colors">Privacy Policy</a>
+              <a href="#" className="hover:text-slate-400 transition-colors">Terms of Service</a>
+            </div>
+          </div>
         </div>
       </footer>
 
