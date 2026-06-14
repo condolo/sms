@@ -107,40 +107,39 @@ function DemoPanel({ onPick }) {
       <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mb-3 text-center">
         Quick login — explore as any role
       </p>
-      <div className="grid grid-cols-1 gap-2">
+      <div className="grid grid-cols-2 gap-2">
         {DEMO_ACCOUNTS.map(({ role, email, color, bg, badge }) => (
           <button
             key={email}
             type="button"
             onClick={() => onPick(email, DEMO_PASSWORD)}
-            className="flex items-center gap-3 rounded-xl px-4 py-2.5 text-left transition-all hover:scale-[1.01] hover:shadow-md active:scale-100"
-            style={{ background: bg, border: `1px solid ${color}22` }}
+            className="flex flex-col items-start rounded-xl px-3 py-2.5 text-left transition-all hover:scale-[1.02] hover:shadow-md active:scale-100"
+            style={{ background: bg, border: `1px solid ${color}30` }}
           >
-            {/* Avatar */}
-            <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-              style={{ background: color }}
-            >
-              {role[0]}
+            {/* Avatar + badge row */}
+            <div className="flex items-center justify-between w-full mb-1.5">
+              <div
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0"
+                style={{ background: color }}
+              >
+                {role[0]}
+              </div>
+              <span
+                className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full"
+                style={{ background: `${color}18`, color }}
+              >
+                {badge}
+              </span>
             </div>
             {/* Label */}
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-slate-800 leading-tight">{role}</p>
-              <p className="text-[10px] text-slate-400 truncate">{email}</p>
-            </div>
-            {/* Badge */}
-            <span
-              className="text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0"
-              style={{ background: `${color}18`, color }}
-            >
-              {badge}
-            </span>
+            <p className="text-xs font-semibold text-slate-800 leading-tight">{role}</p>
+            <p className="text-[9px] text-slate-400 truncate w-full mt-0.5">{email}</p>
           </button>
         ))}
       </div>
       <p className="text-[10px] text-slate-400 text-center mt-3">
         Password: <span className="font-mono font-semibold text-slate-500">{DEMO_PASSWORD}</span>
-        {' · '}Demo data only, resets periodically.
+        {' · '}Demo data resets periodically.
       </p>
     </div>
   );

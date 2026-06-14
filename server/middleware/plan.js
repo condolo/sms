@@ -13,16 +13,25 @@ const { _model } = require('../utils/model');
 /* ── Plan hierarchy ─────────────────────────────────────────── */
 // Canonical names: base / student / family / enterprise
 // Legacy aliases (core/standard/premium) kept for backwards-compat with existing school records.
+//
+// IMPORTANT: The tier controls PORTAL ACCESS only — not ERP module access.
+//   base     → admin + teacher portals   (all ERP modules included)
+//   student  → + student portal
+//   family   → + parent portal
+//   enterprise → + API/SSO/white-label (custom sales)
+//
+// All ERP features are available on every paid plan. Only portal-specific
+// and enterprise platform features are gated at higher levels.
 const PLAN_LEVELS = {
   core: 1, base: 1,          // Tier 1 — staff portals only
   standard: 2, student: 2,   // Tier 2 — + student portal
   premium: 3,  family: 3,    // Tier 3 — + parent portal
-  enterprise: 4,             // Tier 4 — full access / custom SLAs
+  enterprise: 4,             // Tier 4 — API access / white-label / SSO
 };
 
 /* Feature → minimum plan required */
 const FEATURE_PLAN = {
-  /* ── Core (all plans) ── */
+  /* ── ALL ERP MODULES — available on every plan (base and above) ── */
   students:           'core',
   attendance:         'core',
   classes:            'core',
@@ -31,44 +40,38 @@ const FEATURE_PLAN = {
   subjects:           'core',
   events:             'core',
   messaging:          'core',
-  admissions:         'core',   // Intake pipeline available on all plans
+  admissions:         'core',
+  behaviour:          'core',
+  timetable:          'core',
+  bell_schedule:      'core',
+  rooms:              'core',
+  exams:              'core',
+  key_stages:         'core',
+  houses:             'core',
+  sections:           'core',
+  assessment:         'core',
+  comment_banks:      'core',
+  exam_series:        'core',
+  mark_submissions:   'core',
+  finance:            'core',
+  report_cards:       'core',
+  growth_profile:     'core',
+  library:            'core',
+  transport:          'core',
+  hostel:             'core',
+  lessons:            'core',
+  custom_smtp:        'core',
+  elearning:          'core',
+  analytics:          'core',
+  reports:            'core',
+  custom_roles:       'core',
+  hr:                 'core',
 
-  /* ── Standard ── */
-  behaviour:          'standard',
-  timetable:          'standard',
-  bell_schedule:      'standard',   // configurable bell/lesson schedule
-  rooms:              'standard',   // room inventory management
-  exams:              'standard',
-  key_stages:         'standard',
-  houses:             'standard',
-  sections:           'standard',
-  assessment:         'standard',   // CA/HW/MT/ET system (was implicitly gated via 'grades')
-  comment_banks:      'standard',   // pre-written comment templates for report card remarks
-  exam_series:        'standard',   // named groupings of formal exams per term
-  mark_submissions:   'standard',   // approval workflow for CA mark sign-off
+  /* ── Portal access — gated by tier ── */
+  student_portal:     'standard',   // student login accounts and dashboard
+  parent_portal:      'premium',    // parent login accounts and dashboard
 
-  /* ── Standard (continued) ── */
-  finance:            'standard',   // fee management is core African school need
-  report_cards:       'standard',   // aligned with landing page promise
-
-  /* ── Standard (continued) ── */
-  growth_profile:     'standard',   // verified learner development portfolio
-  library:            'standard',   // book catalogue, loans, and fines
-  transport:          'standard',   // route management and student assignments
-  lessons:            'standard',   // live syllabus/lesson coverage tracker
-
-  /* ── Premium ── */
-  analytics:          'premium',   // leadership analytics dashboard
-  reports:            'premium',
-  custom_roles:       'premium',
-  hr:                 'premium',
-  hostel:             'premium',   // boarding facility — rooms and residents
-
-  /* ── Standard (continued) ── */
-  custom_smtp:        'standard',   // per-school SMTP sending from own domain
-  elearning:          'standard',   // online meetings, emergency mode, PMI-based sessions
-
-  /* ── Enterprise ── */
+  /* ── Enterprise only — not sold via self-service ── */
   api_access:         'enterprise',
   sso:                'enterprise',
   advanced_analytics: 'enterprise',

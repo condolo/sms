@@ -37,7 +37,7 @@ const DEMO_USERS = [
   { id: 'u_demo_teacher',    name: 'Demo Teacher',        email: 'teacher@demo.msingi.io',    role: 'teacher'          },
   { id: 'u_demo_finance',    name: 'Demo Finance',        email: 'finance@demo.msingi.io',    role: 'finance'          },
   { id: 'u_demo_parent',     name: 'Demo Parent',         email: 'parent@demo.msingi.io',     role: 'parent'           },
-  { id: 'u_demo_student',    name: 'Demo Student',        email: null,                         role: 'student'          },
+  { id: 'u_demo_student',    name: 'Demo Student',        email: null,                         role: 'student',  username: 'demo-student', studentId: 'std_demo_1' },
 ];
 
 async function seedDemo() {
@@ -62,7 +62,7 @@ async function seedDemo() {
       id: schoolId, slug: DEMO_SLUG,
       name: 'Msingi Demo School', shortName: 'Demo',
       type: 'private', country: 'Kenya', city: 'Nairobi',
-      plan: 'enterprise', addOns: [], isActive: true, status: 'active',
+      plan: 'family', addOns: [], isActive: true, status: 'active',
       curriculum: ['cbc', 'cambridge'], sections: ['primary', 'secondary'],
       primaryColor: '#4f46e5', accentColor: '#7c3aed',
       trialEnds, currency: 'KES', currencySymbol: 'KSh',
@@ -79,9 +79,9 @@ async function seedDemo() {
   if (!saved) {
     throw new Error(`CRITICAL: demo school document not found after upsert (slug='${DEMO_SLUG}')`);
   }
-  if (saved.plan !== 'enterprise') {
+  if (saved.plan !== 'family') {
     throw new Error(
-      `CRITICAL: demo school plan is '${saved.plan}' after upsert — expected 'enterprise'. ` +
+      `CRITICAL: demo school plan is '${saved.plan}' after upsert — expected 'family'. ` +
       `DB schoolId: '${saved.id}'. This means the $set did not persist — check MongoDB write concern.`
     );
   }
@@ -106,7 +106,9 @@ async function seedDemo() {
       passwordChangedAt: now, updatedAt: now,
     };
     // Only set email if provided — student users log in by username, not email
-    if (u.email) fields.email = u.email;
+    if (u.email)     fields.email     = u.email;
+    if (u.username)  fields.username  = u.username;
+    if (u.studentId) fields.studentId = u.studentId;
     return User.updateOne({ id: u.id }, {
       $set: fields,
       $setOnInsert: { createdAt: now },
