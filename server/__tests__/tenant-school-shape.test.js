@@ -221,6 +221,8 @@ describe('_mapSchoolDoc — no undefined required fields', () => {
     'plan', 'addOns', 'isActive', 'planExpiresAt',
     'primaryColor', 'accentColor', 'themePreset', 'faviconUrl',
     'moduleConfig',
+    'portalConfig',
+    'admissionConfig',
     'currency', 'currencySymbol', 'timezone', 'country',
     'academicYear', 'termsPerYear',
   ];

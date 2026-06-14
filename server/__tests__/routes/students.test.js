@@ -31,7 +31,8 @@ jest.mock('../../middleware/plan', () => ({
 }));
 
 jest.mock('../../utils/counters', () => ({
-  nextAdmissionNumber: jest.fn().mockResolvedValue('ADM-001'),
+  nextAdmissionNumber:     jest.fn().mockResolvedValue('ADM-001'),
+  reserveAdmissionNumbers: jest.fn().mockResolvedValue(['ADM-001', 'ADM-002', 'ADM-003']),
 }));
 
 /* ── Mock _model — returns per-collection mock objects ─────── */
