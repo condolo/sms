@@ -108,7 +108,7 @@ export default function Landing() {
     applicationCategory: 'EducationalApplication',
     operatingSystem: 'All',
     url: 'https://msingi.io',
-    description: 'School management ERP for Kenyan schools — attendance, grades, M-Pesa fees, admissions, report cards, and parent portals in one platform.',
+    description: 'School management ERP for African schools — attendance, grades, M-Pesa fees, admissions, report cards, and parent portals in one platform.',
     offers: [
       { '@type': 'Offer', name: 'Base', price: '150.00', priceCurrency: 'KES', description: 'KES 150 per student per term — admin & teacher portals' },
       { '@type': 'Offer', name: 'Student', price: '200.00', priceCurrency: 'KES', description: 'KES 200 per student per term — adds student portal' },
@@ -147,21 +147,21 @@ export default function Landing() {
     <div className="min-h-screen bg-white text-slate-900 antialiased">
 
       <Helmet>
-        <title>Msingi — School Management Platform for Kenyan Schools</title>
-        <meta name="description" content="All-in-one school ERP for East African schools. M-Pesa fee collection, CBC & 8-4-4 grades, attendance, admissions, report cards, and parent portals — starting at KES 150 per student per term." />
-        <meta name="keywords" content="school management system Kenya, CBC school software, M-Pesa school fees, school ERP Kenya, student portal Kenya, school attendance software" />
+        <title>Msingi — School Management Platform for African Schools</title>
+        <meta name="description" content="All-in-one school ERP for African schools. M-Pesa fee collection, CBC & 8-4-4 grades, attendance, admissions, report cards, and parent portals — starting at KES 150 per student per term." />
+        <meta name="keywords" content="school management system Africa, school management software Kenya, CBC school software, M-Pesa school fees, school ERP Africa, student portal Africa, school attendance software" />
         <link rel="canonical" href="https://msingi.io/" />
         {/* OpenGraph */}
         <meta property="og:type" content="website" />
         <meta property="og:url" content="https://msingi.io/" />
-        <meta property="og:title" content="Msingi — School Management Platform for Kenyan Schools" />
-        <meta property="og:description" content="All-in-one school ERP for East African schools. M-Pesa fee collection, CBC & 8-4-4 grades, attendance, admissions, report cards, and parent portals." />
+        <meta property="og:title" content="Msingi — School Management Platform for African Schools" />
+        <meta property="og:description" content="All-in-one school ERP for African schools. M-Pesa fee collection, CBC & 8-4-4 grades, attendance, admissions, report cards, and parent portals." />
         <meta property="og:image" content="https://msingi.io/images/og-landing.png" />
         <meta property="og:site_name" content="Msingi" />
         {/* Twitter */}
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="Msingi — School Management Platform for Kenyan Schools" />
-        <meta name="twitter:description" content="All-in-one school ERP for East African schools. M-Pesa fee collection, CBC & 8-4-4 grades, attendance, admissions, report cards, and parent portals." />
+        <meta name="twitter:title" content="Msingi — School Management Platform for African Schools" />
+        <meta name="twitter:description" content="All-in-one school ERP for African schools. M-Pesa fee collection, CBC & 8-4-4 grades, attendance, admissions, report cards, and parent portals." />
         <meta name="twitter:image" content="https://msingi.io/images/og-landing.png" />
         {/* JSON-LD */}
         <script type="application/ld+json">{JSON.stringify(SOFTWARE_SCHEMA)}</script>

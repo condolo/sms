@@ -54,16 +54,16 @@ export default function FAQ() {
 
       <Helmet>
         <title>FAQ — Msingi School Management Platform</title>
-        <meta name="description" content="Answers to the most common questions from Kenyan school administrators — M-Pesa fee collection, data security, CBC support, parent portals, and how to get started with Msingi." />
+        <meta name="description" content="Answers to the most common questions from African school administrators — M-Pesa fee collection, data security, CBC support, parent portals, and how to get started with Msingi." />
         <link rel="canonical" href="https://msingi.io/faq" />
         <meta property="og:type" content="website" />
         <meta property="og:url" content="https://msingi.io/faq" />
         <meta property="og:title" content="FAQ — Msingi School Management Platform" />
-        <meta property="og:description" content="Answers to the most common questions from Kenyan school administrators — M-Pesa fees, data security, CBC support, and how to get started." />
+        <meta property="og:description" content="Answers to the most common questions from African school administrators — M-Pesa fees, data security, CBC support, and how to get started." />
         <meta property="og:image" content="https://msingi.io/images/og-faq.png" />
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content="FAQ — Msingi School Management Platform" />
-        <meta name="twitter:description" content="Answers to the most common questions from Kenyan school administrators." />
+        <meta name="twitter:description" content="Answers to the most common questions from African school administrators." />
         <meta name="twitter:image" content="https://msingi.io/images/og-faq.png" />
         <script type="application/ld+json">{JSON.stringify(FAQ_SCHEMA)}</script>
       </Helmet>
@@ -94,7 +94,7 @@ export default function FAQ() {
             Common questions from school administrators
           </motion.h1>
           <motion.p variants={fadeUp} className="text-base text-slate-500 max-w-xl leading-relaxed">
-            Real answers to the questions Kenyan school leaders ask before switching from spreadsheets, WhatsApp, and manual registers.
+            Real answers to the questions African school leaders ask before switching from spreadsheets, WhatsApp, and manual registers.
           </motion.p>
         </motion.div>
       </section>
