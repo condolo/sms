@@ -91,7 +91,7 @@ async function seedDemo() {
   // plan.js is always required by route files before seedDemo() runs, so this is always available
   const { invalidatePlanCache } = require('../middleware/plan');
   invalidatePlanCache(schoolId);
-  console.log('[seed-demo] ✅ Plan cache cleared — enterprise plan is live immediately');
+  console.log(`[seed-demo] ✅ Plan cache cleared — '${saved.plan}' plan is live immediately`);
 
   /* ── 2. Hash the shared demo password once ── */
   const hashed = await bcrypt.hash(DEMO_PASSWORD, 10);
@@ -166,7 +166,7 @@ async function seedDemo() {
     }, { upsert: true })
   ));
 
-  console.log('[seed-demo] ✅ Demo school fully provisioned — plan: enterprise');
+  console.log('[seed-demo] ✅ Demo school fully provisioned — plan: family');
 
   // Seed realistic demo data (students, teachers, behaviour, finance, timetable, admissions)
   await seedDemoData();
@@ -176,12 +176,12 @@ async function seedDemo() {
     const Students = _model('students');
     const firstStudent = await Students.findOne({ schoolId }).sort({ admissionNumber: 1 }).lean();
     if (firstStudent) {
-      // Student demo user: add studentId + username (admission number)
+      // Student demo user: link studentId — keep username as 'demo-student' (quick-login alias)
       await User.updateOne({ id: 'u_demo_student' }, {
         $set: {
-          studentId:  firstStudent.id,
-          username:   firstStudent.admissionNumber?.toLowerCase() || 'demo-student',
-          email:      null,  // student logins use username not email
+          studentId: firstStudent.id,
+          username:  'demo-student',  // fixed alias — quick-login always sends this
+          email:     null,            // student logins use username not email
         },
       });
       // Parent demo user: link to first student
@@ -195,7 +195,7 @@ async function seedDemo() {
       await Students.updateOne({ id: firstStudent.id }, {
         $set: { hasPortalAccount: true, hasParentAccount: true },
       });
-      console.log(`[seed-demo] ✅ Portal accounts linked — student: ${firstStudent.admissionNumber} (login: ${firstStudent.admissionNumber?.toLowerCase()})`);
+      console.log(`[seed-demo] ✅ Portal accounts linked — student: ${firstStudent.admissionNumber} (login alias: demo-student)`);
     }
   } catch (err) {
     console.warn('[seed-demo] Portal account linking failed:', err.message);
