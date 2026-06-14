@@ -12,6 +12,7 @@ import {
 import { schoolPortalUrl, storeSchoolSlug } from '@/utils/schoolDetect.js';
 import { ECOSYSTEM_NODES, CONVICTION_PAIRS, SHOWCASE_TAB_DATA, WA_URL } from '@/data/landingData';
 import { CMS_DEFAULTS } from '@/data/landingData';
+import { LANDING_FAQ_TEASER } from '@/data/faqData';
 import { EASE, fadeUp, stagger, VP } from '@/utils/animations';
 import { getLandingCMS, getPlatformSettings } from '@/utils/landingCMS';
 import GradientHeroBG        from '@/components/landing/GradientHeroBG';
@@ -53,6 +54,7 @@ const FOOTER_SOLUTIONS = ['School Directors', 'Teaching Staff', 'Parents', 'Stud
 const FOOTER_COMPANY   = [
   { label: 'Plans & Pricing', href: '#plans'   },
   { label: 'Infrastructure',  href: '#trust'   },
+  { label: 'FAQ',             href: '/faq'     },
   { label: 'Contact Us',      href: '/contact' },
 ];
 
@@ -406,6 +408,31 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* ══ FAQ TEASER ══════════════════════════════ */}
+      <section className="py-20 sm:py-24 bg-slate-50 border-y border-slate-100">
+        <div className="max-w-3xl mx-auto px-6 lg:px-8">
+          <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
+            <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Common questions</motion.p>
+            <motion.h2 variants={fadeUp} className="text-2xl font-bold tracking-tight text-slate-900 mb-10 leading-tight">
+              Questions school leaders ask before switching.
+            </motion.h2>
+            <div className="space-y-6">
+              {LANDING_FAQ_TEASER.map(({ q, a }, i) => (
+                <motion.div key={i} variants={fadeUp} className="border-b border-slate-200 pb-6 last:border-0">
+                  <p className="text-sm font-semibold text-slate-800 mb-2">{q}</p>
+                  <p className="text-sm text-slate-500 leading-relaxed">{a}</p>
+                </motion.div>
+              ))}
+            </div>
+            <motion.div variants={fadeUp} className="mt-8">
+              <Link to="/faq" className="inline-flex items-center gap-1.5 text-sm font-semibold text-indigo-600 hover:text-indigo-800 transition-colors">
+                See all questions <ArrowRight size={14} />
+              </Link>
+            </motion.div>
+          </motion.div>
+        </div>
+      </section>
+
       {/* ══ 7. FINAL CTA ════════════════════════════ */}
       <section className="py-24 sm:py-32 bg-white">
         <div className="max-w-3xl mx-auto px-6 lg:px-8 text-center">
@@ -496,7 +523,13 @@ export default function Landing() {
               <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-5">Company</h4>
               <ul className="space-y-3">
                 {FOOTER_COMPANY.map(({ label, href }) => (
-                  <li key={label}><a href={href} className="text-sm text-slate-500 hover:text-white transition-colors">{label}</a></li>
+                  <li key={label}>
+                    {href.startsWith('/') ? (
+                      <Link to={href} className="text-sm text-slate-500 hover:text-white transition-colors">{label}</Link>
+                    ) : (
+                      <a href={href} className="text-sm text-slate-500 hover:text-white transition-colors">{label}</a>
+                    )}
+                  </li>
                 ))}
               </ul>
             </div>

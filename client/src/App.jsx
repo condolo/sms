@@ -11,6 +11,7 @@ import Login   from '@/pages/Login.jsx';
 import Landing from '@/pages/Landing.jsx';
 import Contact       from '@/pages/Contact.jsx';
 import Plans         from '@/pages/Plans.jsx';
+import FAQ           from '@/pages/FAQ.jsx';
 import PrivacyPolicy from '@/pages/legal/PrivacyPolicy.jsx';
 import TermsOfService from '@/pages/legal/TermsOfService.jsx';
 
@@ -80,6 +81,9 @@ export const router = createBrowserRouter([
 
   // Plans — public pricing comparison
   { path: '/plans', element: <Plans /> },
+
+  // FAQ — public
+  { path: '/faq', element: <FAQ /> },
 
   // Legal — public, no auth required
   { path: '/privacy', element: <PrivacyPolicy /> },
