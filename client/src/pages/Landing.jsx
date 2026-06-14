@@ -2088,8 +2088,8 @@ export default function Landing() {
               <span className="text-xs text-slate-700">All systems operational</span>
             </div>
             <div className="flex gap-5 text-xs text-slate-700">
-              <a href="#" className="hover:text-slate-400 transition-colors">Privacy Policy</a>
-              <a href="#" className="hover:text-slate-400 transition-colors">Terms of Service</a>
+              <Link to="/privacy" className="hover:text-slate-400 transition-colors">Privacy Policy</Link>
+              <Link to="/terms" className="hover:text-slate-400 transition-colors">Terms of Service</Link>
             </div>
           </div>
         </div>

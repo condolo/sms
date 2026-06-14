@@ -9,8 +9,10 @@ import { detectSchool } from '@/utils/schoolDetect.js';
 // ─── Eager pages ──────────────────────────────────────────────────────────────
 import Login   from '@/pages/Login.jsx';
 import Landing from '@/pages/Landing.jsx';
-import Contact from '@/pages/Contact.jsx';
-import Plans   from '@/pages/Plans.jsx';
+import Contact       from '@/pages/Contact.jsx';
+import Plans         from '@/pages/Plans.jsx';
+import PrivacyPolicy from '@/pages/legal/PrivacyPolicy.jsx';
+import TermsOfService from '@/pages/legal/TermsOfService.jsx';
 
 // ─── Lazy pages ───────────────────────────────────────────────────────────────
 const Dashboard      = lazy(() => import('@/pages/Dashboard.jsx'));
@@ -78,6 +80,10 @@ export const router = createBrowserRouter([
 
   // Plans — public pricing comparison
   { path: '/plans', element: <Plans /> },
+
+  // Legal — public, no auth required
+  { path: '/privacy', element: <PrivacyPolicy /> },
+  { path: '/terms',   element: <TermsOfService /> },
 
   // Login — branded when on school subdomain, generic otherwise
   { path: '/login', element: <Login /> },
