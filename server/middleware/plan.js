@@ -11,7 +11,14 @@
 const { _model } = require('../utils/model');
 
 /* ── Plan hierarchy ─────────────────────────────────────────── */
-const PLAN_LEVELS = { core: 1, standard: 2, premium: 3, enterprise: 4 };
+// Canonical names: base / student / family / enterprise
+// Legacy aliases (core/standard/premium) kept for backwards-compat with existing school records.
+const PLAN_LEVELS = {
+  core: 1, base: 1,          // Tier 1 — staff portals only
+  standard: 2, student: 2,   // Tier 2 — + student portal
+  premium: 3,  family: 3,    // Tier 3 — + parent portal
+  enterprise: 4,             // Tier 4 — full access / custom SLAs
+};
 
 /* Feature → minimum plan required */
 const FEATURE_PLAN = {

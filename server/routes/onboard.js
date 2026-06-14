@@ -146,10 +146,11 @@ router.post('/', onboardLimiter, async (req, res) => {
     // ── Bootstrap mode ───────────────────────────────────────────────────
     // During the launch / go-to-market phase all onboarding schools receive
     // the enterprise plan so they experience the full platform.
-    // When billing goes live, set BOOTSTRAP_PLAN=standard (or the chosen
+    // When billing goes live, set BOOTSTRAP_PLAN=family (or the chosen
     // default) in the Render dashboard and redeploy — no code change needed.
     const BOOTSTRAP_PLAN  = process.env.BOOTSTRAP_PLAN || 'enterprise';
-    const validPlan       = ['core','standard','premium','enterprise'].includes(plan) ? plan : BOOTSTRAP_PLAN;
+    // Accept both canonical names (base/student/family) and legacy names (core/standard/premium)
+    const validPlan       = ['base','student','family','core','standard','premium','enterprise'].includes(plan) ? plan : BOOTSTRAP_PLAN;
     const validCurriculum = Array.isArray(curriculum) ? curriculum.filter(c => typeof c === 'string') : [];
     const VALID_SECTIONS  = ['kg','primary','secondary','alevel'];
     const validSections   = Array.isArray(sections)

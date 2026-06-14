@@ -5,7 +5,7 @@
    Currency: KES (Kenyan Shillings)
 
    ── Pricing model ────────────────────────────────────────────
-   • One-time setup fee   → KSh 30,000 – 50,000
+   • One-time setup fee   → minimum KSh 45,000
      Varies by: student count, number of active modules,
      data migration scope.
 
@@ -13,16 +13,16 @@
 
    ── Portal tiers ─────────────────────────────────────────────
    TIER 1 — BASE (staff portal only)
-     KSh 100 / student / term
+     KSh 150 / student / term
      Includes: admin + teacher dashboards, all ERP modules
 
    TIER 2 — STUDENT (+ student portal)
-     KSh 120 / student / term
+     KSh 200 / student / term
      Includes: Tier 1 + student login account + student dashboard
      (lessons progress, timetable, report cards, attendance)
 
    TIER 3 — FAMILY (+ student AND parent portal)
-     KSh 160 / student / term
+     KSh 250 / student / term
      Includes: Tier 2 + parent login accounts + parent dashboard
      (child progress, fees, attendance, curriculum coverage)
 
@@ -42,24 +42,24 @@
 
 /* ── Per-student per-term rates (KES) ───────────────────────── */
 const STUDENT_RATE = {
-  base:    100,   // staff dashboard only
-  student: 120,   // + student login & dashboard
-  family:  160,   // + student & parent login & dashboards
+  base:    150,   // staff dashboard only
+  student: 200,   // + student login & dashboard
+  family:  250,   // + student & parent login & dashboards
 };
 
 /* ── Setup fee range (KES) ──────────────────────────────────── */
 const SETUP_FEE = {
-  min: 30_000,
-  max: 50_000,
+  min: 45_000,
+  max: 75_000,
 };
 
 /* ── Setup fee bands (by student headcount) ─────────────────── */
 // These are reference bands; final fee agreed during onboarding call.
 const SETUP_FEE_BANDS = [
-  { maxStudents: 200,  fee: 30_000, label: 'Up to 200 students' },
-  { maxStudents: 500,  fee: 35_000, label: '201 – 500 students' },
-  { maxStudents: 1000, fee: 42_000, label: '501 – 1,000 students' },
-  { maxStudents: Infinity, fee: 50_000, label: 'Over 1,000 students' },
+  { maxStudents: 200,      fee: 45_000, label: 'Up to 200 students'   },
+  { maxStudents: 500,      fee: 50_000, label: '201 – 500 students'   },
+  { maxStudents: 1000,     fee: 60_000, label: '501 – 1,000 students' },
+  { maxStudents: Infinity, fee: 75_000, label: 'Over 1,000 students'  },
 ];
 
 /* ── Portal tier features ───────────────────────────────────── */

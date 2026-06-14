@@ -426,7 +426,7 @@ const SHOWCASE_TABS = [
 const PORTAL_TIERS_LANDING = [
   {
     name:     'Base',
-    rate:     100,
+    rate:     150,
     tagline:  'Full school ERP for admin and teaching staff',
     badge:    null,
     dark:     false,
@@ -442,7 +442,7 @@ const PORTAL_TIERS_LANDING = [
   },
   {
     name:     'Student',
-    rate:     120,
+    rate:     200,
     tagline:  'Base + dedicated student login and dashboard',
     badge:    'Popular',
     dark:     true,
@@ -457,7 +457,7 @@ const PORTAL_TIERS_LANDING = [
   },
   {
     name:     'Family',
-    rate:     160,
+    rate:     250,
     tagline:  'Student + parent portal with full family visibility',
     badge:    'Recommended',
     dark:     false,
@@ -586,17 +586,17 @@ function PlansSection() {
               className="overflow-hidden"
             >
               <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm max-w-2xl mx-auto">
-                <h4 className="font-bold text-slate-900 mb-2">One-time setup fee: KSh 30,000 – 50,000</h4>
+                <h4 className="font-bold text-slate-900 mb-2">One-time setup fee: from KSh 45,000</h4>
                 <p className="text-sm text-slate-500 mb-4">
                   Varies by student count and data migration scope.
                   Final amount agreed during the onboarding call.
                 </p>
                 <div className="grid sm:grid-cols-2 gap-2.5">
                   {[
-                    { band: 'Up to 200 students',  fee: 'KSh 30,000' },
-                    { band: '201 – 500 students',   fee: 'KSh 35,000' },
-                    { band: '501 – 1,000 students', fee: 'KSh 42,000' },
-                    { band: 'Over 1,000 students',  fee: 'KSh 50,000' },
+                    { band: 'Up to 200 students',  fee: 'KSh 45,000' },
+                    { band: '201 – 500 students',   fee: 'KSh 50,000' },
+                    { band: '501 – 1,000 students', fee: 'KSh 60,000' },
+                    { band: 'Over 1,000 students',  fee: 'KSh 75,000' },
                   ].map(({ band, fee }) => (
                     <div key={band} className="flex justify-between items-center bg-slate-50 rounded-xl px-4 py-3 text-sm">
                       <span className="text-slate-600">{band}</span>

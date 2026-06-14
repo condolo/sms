@@ -29,7 +29,7 @@ const TIERS = [
     key:     'base',
     name:    'Base',
     tagline: 'Full ERP for school staff',
-    rate:    100,
+    rate:    150,
     color:   'text-slate-700',
     ring:    'ring-slate-200',
     btn:     'bg-slate-900 text-white hover:bg-slate-700',
@@ -56,7 +56,7 @@ const TIERS = [
     key:     'student',
     name:    'Student',
     tagline: 'Base + dedicated student portal',
-    rate:    120,
+    rate:    200,
     color:   'text-indigo-700',
     ring:    'ring-indigo-300',
     btn:     'bg-indigo-600 text-white hover:bg-indigo-700',
@@ -74,7 +74,7 @@ const TIERS = [
     key:     'family',
     name:    'Family',
     tagline: 'Student + parent portal included',
-    rate:    160,
+    rate:    250,
     color:   'text-violet-700',
     ring:    'ring-violet-300',
     btn:     'bg-violet-600 text-white hover:bg-violet-700',
@@ -108,11 +108,11 @@ const ALL_MODULES = [
 const FAQS = [
   {
     q: 'How does the per-student pricing work?',
-    a: 'You pay per enrolled student at the start of each term. For example, a school with 300 students on the Family tier pays KSh 160 × 300 = KSh 48,000 per term.',
+    a: 'You pay per enrolled student at the start of each term. For example, a school with 300 students on the Family tier pays KSh 250 × 300 = KSh 75,000 per term.',
   },
   {
     q: 'What is the setup fee for?',
-    a: 'The one-time setup fee (KSh 30,000 – 50,000) covers system onboarding, data configuration, staff training, and custom module setup. The exact amount depends on your student count and the modules you need.',
+    a: 'The one-time setup fee (minimum KSh 45,000) covers system onboarding, data configuration, staff training, and custom module setup. The exact amount depends on your student count and the modules you need.',
   },
   {
     q: 'Can we start on Base and upgrade later?',
@@ -165,7 +165,7 @@ function FaqItem({ q, a }) {
 function PriceEstimator() {
   const [count,    setCount]    = useState(200);
   const [tier,     setTier]     = useState('family');
-  const rates = { base: 100, student: 120, family: 160 };
+  const rates = { base: 150, student: 200, family: 250 };
   const termTotal   = count * rates[tier];
   const annualTotal = termTotal * 3;
 
@@ -225,7 +225,7 @@ function PriceEstimator() {
           </div>
         </div>
         <p className="text-[11px] text-zinc-400 mt-3">
-          + one-time setup fee of KSh {count <= 200 ? '30,000' : count <= 500 ? '35,000' : count <= 1000 ? '42,000' : '50,000'}
+          + one-time setup fee of KSh {count <= 200 ? '45,000' : count <= 500 ? '50,000' : count <= 1000 ? '60,000' : '75,000'}
         </p>
       </div>
     </div>
@@ -270,7 +270,7 @@ export default function Plans() {
             <span className="text-indigo-600">your school actually uses.</span>
           </motion.h1>
           <motion.p variants={fadeUp} className="text-lg text-zinc-500 max-w-2xl mx-auto leading-relaxed">
-            One-time setup fee. Then KSh 100–160 per student per term — choose whether
+            One-time setup fee from KSh 45,000. Then KSh 150–250 per student per term — choose whether
             you need student and parent portals or just the staff dashboard.
           </motion.p>
         </motion.div>
@@ -349,7 +349,7 @@ export default function Plans() {
           <div className="inline-flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 text-sm text-amber-800">
             <Zap size={14} className="text-amber-500 shrink-0" />
             <span>
-              <strong>One-time setup fee:</strong> KSh 30,000 – 50,000 depending on student count and modules required.
+              <strong>One-time setup fee:</strong> Minimum KSh 45,000 — varies by student count and migration scope.
             </span>
           </div>
         </motion.div>
