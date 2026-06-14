@@ -37,6 +37,7 @@ const StudentCreateSchema = z.object({
   address:        z.string().max(500).optional(),
   medicalNotes:   z.string().max(2000).optional(),
   photo:          z.string().optional(),
+  schoolEmail:    z.string().email().optional().or(z.literal('')),
   enrollmentDate: z.string().optional(),
   status:         z.enum(['active', 'inactive', 'suspended', 'graduated', 'transferred']).default('active'),
   customFields:   z.record(z.unknown()).optional(),
@@ -353,7 +354,8 @@ router.post('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'updat
         role:               'student',
         name,
         username,
-        email:              null,
+        // schoolEmail becomes the portal login email (auth route accepts email OR username)
+        email:              student.schoolEmail || null,
         password:           hash,
         studentId:          student.id,
         isActive:           true,

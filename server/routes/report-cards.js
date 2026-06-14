@@ -380,6 +380,7 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
           studentId:      r.studentId,
           studentName:    [stu.firstName, stu.lastName].filter(Boolean).join(' ') || r.studentId,
           admissionNo:    stu.admissionNumber || stu.admissionNo || '',
+          studentPhotoUrl: stu.photo || null,
           classId,        className:   className   || '',
           termId:         termId         || null,  termName:    termName    || '',
           termNumber:     termNum        ?? null,
@@ -645,35 +646,33 @@ router.put('/:id/comments', authMiddleware, PLAN, rbac('grades', 'update'), asyn
 });
 
 /* ── PDF builder (shared between single and bulk) ───────────── */
-/* Fetch image URLs snapshotted on the report card and return as Buffers.
-   Only http/https URLs are fetched; data: URIs are decoded directly.
-   Returns {} if nothing is available (non-fatal). */
-async function _fetchSignatureImages(snap) {
-  async function fetchBuf(url) {
-    if (!url) return null;
-    if (url.startsWith('data:')) {
-      // base64 data URI
-      const b64 = url.split(',')[1];
-      if (!b64) return null;
-      return Buffer.from(b64, 'base64');
-    }
-    if (!url.startsWith('http://') && !url.startsWith('https://')) return null;
-    return new Promise((resolve) => {
-      const mod = url.startsWith('https://') ? require('https') : require('http');
-      const req = mod.get(url, { timeout: 5000 }, resp => {
-        const chunks = [];
-        resp.on('data', c => chunks.push(c));
-        resp.on('end', () => resolve(Buffer.concat(chunks)));
-        resp.on('error', () => resolve(null));
-      });
-      req.on('error', () => resolve(null));
-      req.on('timeout', () => { req.destroy(); resolve(null); });
-    });
-  }
 
+/* Decode a URL or data: URI to a Buffer. Non-fatal — returns null on any error. */
+async function _fetchImageBuf(url) {
+  if (!url) return null;
+  if (url.startsWith('data:')) {
+    const b64 = url.split(',')[1];
+    return b64 ? Buffer.from(b64, 'base64') : null;
+  }
+  if (!url.startsWith('http://') && !url.startsWith('https://')) return null;
+  return new Promise((resolve) => {
+    const mod = url.startsWith('https://') ? require('https') : require('http');
+    const req = mod.get(url, { timeout: 5000 }, resp => {
+      const chunks = [];
+      resp.on('data', c => chunks.push(c));
+      resp.on('end', () => resolve(Buffer.concat(chunks)));
+      resp.on('error', () => resolve(null));
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+  });
+}
+
+/* Fetch school-level images shared across all pages in a PDF batch. */
+async function _fetchSignatureImages(snap) {
   const [principalSignature, schoolStamp] = await Promise.all([
-    fetchBuf(snap.principalSignatureUrl).catch(() => null),
-    fetchBuf(snap.schoolStampUrl).catch(() => null),
+    _fetchImageBuf(snap.principalSignatureUrl).catch(() => null),
+    _fetchImageBuf(snap.schoolStampUrl).catch(() => null),
   ]);
   return { principalSignature, schoolStamp };
 }
@@ -704,36 +703,57 @@ function _buildPDFPage(doc, snap, config, attendance, isFirstPage, images = {}) 
      .text('ACADEMIC REPORT CARD' + (isDraft ? '   [DRAFT — NOT OFFICIAL]' : ''), 50, 75, { width: PAGE_WIDTH - 20 });
   doc.fillColor(DARK);
 
-  /* STUDENT INFO */
-  const infoTop = 115;
-  doc.rect(40, infoTop, PAGE_WIDTH, 70).fill(LIGHT_GRAY).stroke(BORDER);
+  /* STUDENT INFO — passport photo on right, text on left */
+  const infoTop    = 115;
+  const infoHeight = 90;
+  const PHOTO_W = 52, PHOTO_H = 68;
+  const photoX  = 40 + PAGE_WIDTH - PHOTO_W - 6;
+  const photoY  = infoTop + 11;
+  doc.rect(40, infoTop, PAGE_WIDTH, infoHeight).fill(LIGHT_GRAY).stroke(BORDER);
+
+  // Text columns — leave room for photo on the right
+  const textWidth = PAGE_WIDTH - PHOTO_W - 20;
   const c1 = 50, c2 = 280;
   doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('STUDENT NAME', c1, infoTop + 8);
-  doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold').text(snap.studentName || '—', c1, infoTop + 19, { width: 200 });
+  doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold').text(snap.studentName || '—', c1, infoTop + 19, { width: Math.min(200, textWidth - c1 + 40) });
   doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('ADMISSION NO.', c2, infoTop + 8);
-  doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold').text(snap.admissionNo || '—', c2, infoTop + 19);
-  doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('CLASS', c1, infoTop + 42);
-  doc.fillColor(DARK).fontSize(10).font('Helvetica').text(snap.className || '—', c1, infoTop + 52);
-  doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('TERM / ACADEMIC YEAR', c2, infoTop + 42);
+  doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold').text(snap.admissionNo || '—', c2, infoTop + 19, { width: 130 });
+  doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('CLASS', c1, infoTop + 50);
+  doc.fillColor(DARK).fontSize(10).font('Helvetica').text(snap.className || '—', c1, infoTop + 61);
+  doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('TERM / ACADEMIC YEAR', c2, infoTop + 50);
   doc.fillColor(DARK).fontSize(10).font('Helvetica')
-     .text([snap.termName, snap.academicYear].filter(Boolean).join(' — ') || '—', c2, infoTop + 52);
+     .text([snap.termName, snap.academicYear].filter(Boolean).join(' — ') || '—', c2, infoTop + 61, { width: 160 });
+
+  /* Passport photo — rendered if available, else a placeholder box */
+  doc.rect(photoX - 1, photoY - 1, PHOTO_W + 2, PHOTO_H + 2).stroke(BORDER);
+  if (images.studentPhoto) {
+    try {
+      doc.image(images.studentPhoto, photoX, photoY, { width: PHOTO_W, height: PHOTO_H, cover: [PHOTO_W, PHOTO_H] });
+    } catch (_) {
+      doc.rect(photoX, photoY, PHOTO_W, PHOTO_H).fill('#e2e8f0');
+    }
+  } else {
+    doc.rect(photoX, photoY, PHOTO_W, PHOTO_H).fill('#e2e8f0');
+    doc.fillColor('#94a3b8').fontSize(6.5).font('Helvetica')
+       .text('PHOTO', photoX, photoY + PHOTO_H / 2 - 4, { width: PHOTO_W, align: 'center' });
+  }
 
   /* VERSION BADGE */
   if (snap.version > 1 || snap.superseded) {
     doc.fillColor(snap.superseded ? '#dc2626' : '#059669').fontSize(8).font('Helvetica-Bold')
-       .text(`v${snap.version}${snap.superseded ? ' (Superseded)' : ''}`, PAGE_WIDTH - 40, infoTop + 8, { width: 70, align: 'right' });
+       .text(`v${snap.version}${snap.superseded ? ' (Superseded)' : ''}`, c2, infoTop + 37, { width: 130, align: 'left' });
   }
 
   /* MODERATION BYPASS WARNING */
   if (snap.moderationBypassed) {
-    const warnY = infoTop + 72;
+    const warnY = infoTop + infoHeight + 2;
     doc.rect(40, warnY, PAGE_WIDTH, 14).fill('#fef3c7');
     doc.fillColor('#92400e').fontSize(7.5).font('Helvetica-Bold')
        .text('⚠ Published with moderation check bypassed', 44, warnY + 3, { width: PAGE_WIDTH - 8 });
   }
 
   /* RESULTS TABLE — dynamic columns from snapshot's assessmentWeights */
-  const tableTop = infoTop + 88;
+  const tableTop = infoTop + infoHeight + (snap.moderationBypassed ? 20 : 6);
 
   const weights     = snap.assessmentWeights || config.assessmentWeights;
   // One column per assessment type, using the type's label (first word only to save space)
@@ -963,6 +983,7 @@ router.get('/:id/pdf', authMiddleware, PLAN, rbac('grades', 'read'), async (req,
     });
 
     const pdfImages = await _fetchSignatureImages(snap);
+    pdfImages.studentPhoto = await _fetchImageBuf(snap.studentPhotoUrl).catch(() => null);
     _buildPDFPage(doc, snap, config, attData, true, pdfImages);
     doc.end();
   } catch (err) { console.error('[report-cards/:id/pdf]', err); return E.serverError(res); }
@@ -1017,17 +1038,20 @@ router.get('/bulk-pdf', authMiddleware, PLAN, rbac('grades', 'read'), async (req
     let chunkBuf = [];
 
     const processChunk = async (chunk) => {
-      const attResults = await Promise.all(
-        chunk.map(s => s.attendanceSummary
+      const [attResults, photoBuffers] = await Promise.all([
+        Promise.all(chunk.map(s => s.attendanceSummary
           ? Promise.resolve(s.attendanceSummary)
           : attendanceSummary(schoolId, s.studentId, s.classId, s.termId, s.academicYearId)
-        )
-      );
+        )),
+        // Fetch each student's photo individually — different per student
+        Promise.all(chunk.map(s => _fetchImageBuf(s.studentPhotoUrl).catch(() => null))),
+      ]);
       chunk.forEach((snap, i) => {
         const isAdmin = ['admin', 'superadmin'].includes(role);
         if (snap.financialBlock && req.query.force !== '1' && !isAdmin) return; // skip blocked
         pdfDoc.addPage();
-        _buildPDFPage(pdfDoc, snap, config, attResults[i], false, bulkImages);
+        _buildPDFPage(pdfDoc, snap, config, attResults[i], false,
+          { ...bulkImages, studentPhoto: photoBuffers[i] });
         isFirst = false;
       });
     };

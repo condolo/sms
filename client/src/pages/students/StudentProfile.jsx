@@ -3,7 +3,7 @@
    /platform-audit: 5 tabs, BPS stage/milestone, house assignment,
    lucide icons, no emoji, currency from session, correct API shapes
    ============================================================ */
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -13,7 +13,7 @@ import {
   Star, ShieldAlert, TrendingUp, TrendingDown, Award,
   Hash, Mail, Phone, MapPin, Shield, BookOpen, Home,
   CheckCircle2, Clock, XCircle, CheckCheck, Heart, Printer,
-  KeyRound, UserX, UserCheck, Copy, RefreshCcw,
+  KeyRound, UserX, UserCheck, Copy, RefreshCcw, Camera,
 } from 'lucide-react';
 import {
   students  as studentsApi,
@@ -143,6 +143,59 @@ export default function StudentProfile() {
     },
   });
 
+  /* ── Photo upload ── */
+  const photoInputRef = useRef(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+
+  const resizeToDataUrl = useCallback((file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read file'));
+    reader.onload = e => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Image failed to load'));
+      img.onload = () => {
+        const MAX_W = 300, MAX_H = 375;
+        let w = img.width, h = img.height;
+        if (w > MAX_W) { h = Math.round(h * MAX_W / w); w = MAX_W; }
+        if (h > MAX_H) { w = Math.round(w * MAX_H / h); h = MAX_H; }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }), []);
+
+  async function handlePhotoChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { alert('Image must be under 5 MB'); return; }
+    setPhotoUploading(true);
+    try {
+      const dataUrl = await resizeToDataUrl(file);
+      await studentsApi.update(studentId, { photo: dataUrl });
+      qc.invalidateQueries({ queryKey: ['students', studentId] });
+    } catch (err) {
+      alert(err.message || 'Photo upload failed');
+    } finally {
+      setPhotoUploading(false);
+      if (photoInputRef.current) photoInputRef.current.value = '';
+    }
+  }
+
+  async function handleRemovePhoto() {
+    if (!window.confirm('Remove student photo?')) return;
+    setPhotoUploading(true);
+    try {
+      await studentsApi.update(studentId, { photo: '' });
+      qc.invalidateQueries({ queryKey: ['students', studentId] });
+    } finally {
+      setPhotoUploading(false);
+    }
+  }
+
   /* ── Loading ── */
   if (isLoading) return (
     <div className="min-h-screen bg-slate-50">
@@ -189,7 +242,8 @@ export default function StudentProfile() {
       ['Class',           student.className ?? '—'],
       ['House',           student.house ?? '—'],
       ['Status',          student.status ?? '—'],
-      ['Email',           student.email ?? '—'],
+      ['School Email',    student.schoolEmail ?? '—'],
+      ['Personal Email',  student.email ?? '—'],
       ['Phone',           student.phone ?? '—'],
       ['Parent/Guardian', student.parentName ?? '—'],
       ['Parent Phone',    student.parentPhone ?? '—'],
@@ -207,7 +261,7 @@ td{padding:8px 12px}td:first-child{color:#64748b;font-size:11px;text-transform:u
 td:last-child{font-weight:500}
 .footer{margin-top:32px;text-align:center;font-size:11px;color:#94a3b8}
 @media print{body{padding:20px}}</style></head><body>
-<div class="hdr"><div class="avatar">${initials}</div>
+<div class="hdr">${student.photo ? `<img src="${student.photo}" style="width:60px;height:60px;border-radius:14px;object-fit:cover;flex-shrink:0" alt="Photo" />` : `<div class="avatar">${initials}</div>`}
 <div><p class="name">${student.firstName} ${student.lastName}<span class="status">${student.status ?? 'active'}</span></p>
 <p class="sub">${student.className ? `${student.className} · ` : ''}${student.house ? `${student.house} · ` : ''}ID: ${student.admissionNumber ?? '—'}</p></div></div>
 <table>${rows.map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>
@@ -231,9 +285,40 @@ td:last-child{font-weight:500}
           </Link>
 
           <div className="flex items-start gap-4">
-            {/* Avatar */}
-            <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${grad} flex items-center justify-center text-white text-lg font-bold shrink-0 select-none`}>
-              {initials}
+            {/* Avatar / Photo */}
+            <div className="relative shrink-0 group">
+              {student.photo ? (
+                <img
+                  src={student.photo}
+                  alt={`${student.firstName} ${student.lastName}`}
+                  className="w-16 h-16 rounded-2xl object-cover border border-slate-200"
+                />
+              ) : (
+                <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${grad} flex items-center justify-center text-white text-lg font-bold select-none`}>
+                  {initials}
+                </div>
+              )}
+              {/* Upload overlay — visible on hover for users with edit rights */}
+              {can('students') && (
+                <button
+                  type="button"
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={photoUploading}
+                  className="absolute inset-0 flex flex-col items-center justify-center rounded-2xl bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                  title="Change photo"
+                >
+                  {photoUploading
+                    ? <Loader2 size={16} className="text-white animate-spin" />
+                    : <Camera size={16} className="text-white" />}
+                </button>
+              )}
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handlePhotoChange}
+              />
             </div>
 
             {/* Name + meta */}
@@ -254,10 +339,20 @@ td:last-child{font-weight:500}
                 {student.house && (
                   <span className="flex items-center gap-1"><Home size={11} />{student.house}</span>
                 )}
-                {student.email && (
-                  <span className="flex items-center gap-1"><Mail size={11} />{student.email}</span>
+                {student.schoolEmail && (
+                  <span className="flex items-center gap-1"><Mail size={11} />{student.schoolEmail}</span>
                 )}
               </div>
+              {/* Remove photo link — only when a photo exists */}
+              {student.photo && can('students') && (
+                <button
+                  type="button"
+                  onClick={handleRemovePhoto}
+                  className="mt-1 text-[11px] text-slate-400 hover:text-red-500 transition-colors"
+                >
+                  Remove photo
+                </button>
+              )}
             </div>
 
             {/* Action buttons */}
@@ -381,9 +476,10 @@ function OverviewTab({ student, editing, saving, onSave, onCancel }) {
         </InfoCard>
 
         <InfoCard title="Contact" icon={<Phone size={14} />}>
-          <InfoRow label="Email"   value={student.email} />
-          <InfoRow label="Phone"   value={student.phone} />
-          <InfoRow label="Address" value={student.address} />
+          <InfoRow label="School email" value={student.schoolEmail} />
+          <InfoRow label="Personal email" value={student.email} />
+          <InfoRow label="Phone"         value={student.phone} />
+          <InfoRow label="Address"       value={student.address} />
         </InfoCard>
 
         <InfoCard title="Academic" icon={<BookOpen size={14} />}>
@@ -441,7 +537,10 @@ function OverviewTab({ student, editing, saving, onSave, onCancel }) {
         {/* Contact */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
           <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Contact</h3>
-          <FField label="Email">
+          <FField label="School email" hint="School-issued email — used for student portal login">
+            <input type="email" className={iCls()} value={form.schoolEmail ?? ''} onChange={e => set('schoolEmail', e.target.value)} placeholder="firstname.lastname@school.ac.ke" />
+          </FField>
+          <FField label="Personal email">
             <input type="email" className={iCls()} value={form.email ?? ''} onChange={e => set('email', e.target.value)} />
           </FField>
           <FField label="Phone">
@@ -1101,11 +1200,12 @@ function InfoRow({ label, value }) {
   );
 }
 
-function FField({ label, children }) {
+function FField({ label, hint, children }) {
   return (
     <div className="space-y-1.5">
       <label className="block text-xs font-medium text-slate-600">{label}</label>
       {children}
+      {hint && <p className="text-[10px] text-slate-400">{hint}</p>}
     </div>
   );
 }
