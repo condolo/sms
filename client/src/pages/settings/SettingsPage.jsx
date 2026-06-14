@@ -547,6 +547,167 @@ function BrandingCard({ schoolId, logoUrl, faviconUrl, onSaved }) {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   ADMISSION NUMBERS SECTION
+   Lives inside SchoolTab; has its own counter API call.
+   ══════════════════════════════════════════════════════════════ */
+function AdmissionNumbersSection({ form: f, set }) {
+  const qc = useQueryClient();
+  const [counterInput, setCounterInput] = useState('');
+  const [counterMsg,   setCounterMsg]   = useState(null); // {ok, text}
+
+  const ac  = f.admissionConfig ?? {};
+  const prefix      = ac.prefix      ?? '';
+  const padding     = ac.padding      ?? 5;
+  const yearInPrefix = ac.yearInPrefix !== false; // default true
+
+  function setAC(k, v) { set('admissionConfig', { ...ac, [k]: v }); }
+
+  // Build a live preview of what the next number will look like
+  function preview(offset = 1) {
+    const num = String(offset).padStart(padding, '0');
+    if (prefix !== undefined) {
+      return yearInPrefix
+        ? `${prefix}${new Date().getFullYear()}-${num}`
+        : `${prefix}${num}`;
+    }
+    return `ADM-${new Date().getFullYear()}-${num}`;
+  }
+
+  // Fetch current counter from server (read-only display)
+  const { data: counterData, refetch: refetchCounter } = useQuery({
+    queryKey: ['settings', 'admission-counter'],
+    queryFn:  () => settingsApi.school.admissionCounter.get(),
+    staleTime: 0,
+  });
+  const currentSeq        = counterData?.data?.seq ?? 0;
+  const nextFormatted     = counterData?.data?.nextFormatted ?? preview(currentSeq + 1);
+
+  const { mutate: saveCounter, isPending: savingCounter } = useMutation({
+    mutationFn: () => settingsApi.school.admissionCounter.set(parseInt(counterInput, 10)),
+    onSuccess: () => {
+      setCounterMsg({ ok: true, text: 'Counter updated.' });
+      setCounterInput('');
+      refetchCounter();
+    },
+    onError: err => setCounterMsg({ ok: false, text: err?.message ?? 'Failed to set counter.' }),
+  });
+
+  const PADDING_OPTIONS = [3, 4, 5, 6, 7, 8];
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+      <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+        <KeyRound size={14} className="text-indigo-500" />
+        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Admission Numbers</h3>
+      </div>
+
+      {/* Live preview banner */}
+      <div className="flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3">
+        <span className="text-[11px] text-indigo-500 font-semibold uppercase tracking-wide">Next generated</span>
+        <span className="font-mono text-base font-bold text-indigo-700">{preview(currentSeq + 1)}</span>
+        <span className="ml-auto text-[10px] text-indigo-400">counter at {currentSeq}</span>
+      </div>
+
+      <div className="grid sm:grid-cols-2 gap-4">
+        {/* Prefix */}
+        <div>
+          <label className="text-xs font-medium text-slate-600 block mb-1.5">
+            Prefix <span className="font-normal text-slate-400">(leave blank for number-only)</span>
+          </label>
+          <input
+            value={prefix}
+            onChange={e => setAC('prefix', e.target.value)}
+            placeholder="e.g. MLA-33  or  KPS/  or leave blank"
+            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          />
+          <p className="text-[10px] text-slate-400 mt-1">
+            {prefix
+              ? yearInPrefix
+                ? `Format: ${prefix}{year}-{number}`
+                : `Format: ${prefix}{number}`
+              : yearInPrefix
+                ? 'Format: ADM-{year}-{number}  (legacy default)'
+                : 'Format: {number only}'
+            }
+          </p>
+        </div>
+
+        {/* Number length */}
+        <div>
+          <label className="text-xs font-medium text-slate-600 block mb-1.5">Number length (digits)</label>
+          <div className="flex gap-2 flex-wrap">
+            {PADDING_OPTIONS.map(n => (
+              <button key={n} type="button"
+                onClick={() => setAC('padding', n)}
+                className={`w-10 h-10 rounded-lg text-sm font-bold border transition-colors
+                  ${padding === n
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'}`}>
+                {n}
+              </button>
+            ))}
+          </div>
+          <p className="text-[10px] text-slate-400 mt-1.5">
+            {`${padding} digits → ${'0'.repeat(padding - 1)}1`}
+          </p>
+        </div>
+      </div>
+
+      {/* Year in prefix toggle */}
+      <div className="flex items-center justify-between gap-4 bg-slate-50 rounded-xl px-4 py-3 border border-slate-200">
+        <div>
+          <p className="text-sm font-semibold text-slate-700">Include year in admission number</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">
+            {yearInPrefix
+              ? `Counter resets each year — students from different years are easy to identify (e.g. MLA-33${new Date().getFullYear()}-0001)`
+              : 'Counter never resets — sequential for the life of the school (e.g. MLA-330298)'}
+          </p>
+        </div>
+        <button type="button"
+          onClick={() => setAC('yearInPrefix', !yearInPrefix)}
+          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none
+            ${yearInPrefix ? 'bg-indigo-600' : 'bg-slate-200'}`}>
+          <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transition duration-200
+            ${yearInPrefix ? 'translate-x-5' : 'translate-x-0'}`} />
+        </button>
+      </div>
+
+      {/* Counter management */}
+      <div className="border-t border-slate-100 pt-4 space-y-2">
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Counter (for migrations &amp; imports)</p>
+        <p className="text-[11px] text-slate-400 leading-relaxed">
+          Set this to the <strong>last used</strong> number from your previous system.
+          The next admission will be one higher.
+          Example: your last student was <strong>MLA-330297</strong> → enter <strong>297</strong>.
+        </p>
+        <div className="flex gap-2 items-center">
+          <input
+            type="number" min={0}
+            value={counterInput}
+            onChange={e => { setCounterInput(e.target.value); setCounterMsg(null); }}
+            placeholder={`Current: ${currentSeq} — next is ${currentSeq + 1}`}
+            className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          />
+          <button
+            type="button"
+            disabled={savingCounter || counterInput === ''}
+            onClick={() => saveCounter()}
+            className="px-4 py-2 text-xs font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition-colors whitespace-nowrap">
+            {savingCounter ? 'Saving…' : 'Set counter'}
+          </button>
+        </div>
+        {counterMsg && (
+          <p className={`text-[11px] font-medium ${counterMsg.ok ? 'text-emerald-600' : 'text-red-600'}`}>
+            {counterMsg.text}
+            {counterMsg.ok && ` Next number will be: ${nextFormatted}`}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
    SCHOOL SETTINGS TAB
    ══════════════════════════════════════════════════════════════ */
 function SchoolTab() {
@@ -595,6 +756,7 @@ function SchoolTab() {
       if (saved.emergencyOnlineMode !== undefined) patch.emergencyOnlineMode = saved.emergencyOnlineMode;
       if (saved.moduleConfig        !== undefined) patch.moduleConfig        = saved.moduleConfig;
       if (saved.portalConfig        !== undefined) patch.portalConfig        = saved.portalConfig;
+      if (saved.admissionConfig     !== undefined) patch.admissionConfig     = saved.admissionConfig;
       if (Object.keys(patch).length) patchSchool(patch);
     },
     onError: err => setToast({ msg: err?.message ?? 'Failed to save.', type: 'error' }),
@@ -958,6 +1120,9 @@ function SchoolTab() {
           </div>
         )}
       </div>
+
+      {/* Admission Numbers */}
+      <AdmissionNumbersSection form={f} set={set} />
 
       {/* Student & Parent Portal Settings */}
       {(() => {

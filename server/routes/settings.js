@@ -21,6 +21,7 @@ const emailUtil             = require('../utils/email');
 const { encrypt, smtpEncryptReady } = require('../utils/smtpEncrypt');
 const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY } = require('../utils/notif-settings');
 const { invalidatePermCache } = require('../middleware/rbac');
+const { peekAdmissionCounter, setAdmissionCounter } = require('../utils/counters');
 
 const router = express.Router();
 
@@ -90,6 +91,7 @@ const SCHOOL_UPDATABLE = [
   'hiddenSystemRoles',   // array of system role keys hidden from invite form / R&P sidebar
   'emergencyOnlineMode', // boolean — when true timetable embeds teacher meeting links for students
   'portalConfig',        // object — student/parent portal visibility toggles
+  'admissionConfig',     // object — prefix, padding, yearInPrefix for admission numbers
 ];
 
 /* ══════════════════════════════════════════════════════════════
@@ -947,6 +949,43 @@ router.delete('/custom-roles/:key', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('[settings] DELETE /custom-roles/:key:', err);
     res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to delete custom role' } });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   ADMISSION COUNTER  (admin only)
+   GET  /api/settings/admission-counter  — peek current seq + next preview
+   PUT  /api/settings/admission-counter  — set counter for migrations
+   ══════════════════════════════════════════════════════════════ */
+router.get('/admission-counter', authMiddleware, async (req, res) => {
+  try {
+    if (!_isAdmin(req)) return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Admin access required.' } });
+    const Schools  = _model('schools');
+    const school   = await Schools.findOne({ id: req.jwtUser.schoolId }, { admissionConfig: 1 }).lean();
+    const cfg      = school?.admissionConfig || {};
+    const result   = await peekAdmissionCounter(req.jwtUser.schoolId, cfg);
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    console.error('[settings] GET /admission-counter:', err);
+    return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to read counter.' } });
+  }
+});
+
+router.put('/admission-counter', authMiddleware, async (req, res) => {
+  try {
+    if (!_isAdmin(req)) return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Admin access required.' } });
+    const value = parseInt(req.body.value, 10);
+    if (isNaN(value) || value < 0) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'value must be a non-negative integer.' } });
+    }
+    const Schools = _model('schools');
+    const school  = await Schools.findOne({ id: req.jwtUser.schoolId }, { admissionConfig: 1 }).lean();
+    const cfg     = school?.admissionConfig || {};
+    const result  = await setAdmissionCounter(req.jwtUser.schoolId, value, cfg, true);
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    console.error('[settings] PUT /admission-counter:', err);
+    return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to set counter.' } });
   }
 });
 

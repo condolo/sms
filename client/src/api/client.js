@@ -356,6 +356,10 @@ export const settings = {
   school: {
     get:          ()     => _get('/settings/school'),
     update:       (data) => _put('/settings/school', data),
+    admissionCounter: {
+      get:  ()        => _get('/settings/admission-counter'),
+      set:  (value)   => _put('/settings/admission-counter', { value }),
+    },
     uploadLogo:   (b64)  => _put('/settings/school/logo',    { logoBase64: b64 }),
     deleteLogo:   ()     => _delete('/settings/school/logo'),
     uploadFavicon:(b64)  => _put('/settings/school/favicon', { faviconBase64: b64 }),

@@ -13,7 +13,7 @@ const { authMiddleware }        = require('../middleware/auth');
 const { rbac }                  = require('../middleware/rbac');
 const { planGate }              = require('../middleware/plan');
 const { _model }                = require('../utils/model');
-const { nextAdmissionNumber }   = require('../utils/counters');
+const { nextAdmissionNumber, reserveAdmissionNumbers } = require('../utils/counters');
 const { ok, created, fail, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
 
@@ -22,6 +22,7 @@ const PLAN   = planGate('students');
 
 /* ── Validation schemas ─────────────────────────────────────── */
 const StudentCreateSchema = z.object({
+  admissionNumber: z.string().max(50).trim().optional(), // manual override; server auto-generates if omitted
   firstName:      z.string().min(1).max(100).trim(),
   lastName:       z.string().min(1).max(100).trim(),
   middleName:     z.string().max(100).trim().optional(),
@@ -53,6 +54,11 @@ function _validate(schema, data) {
     return { error: result.error.issues.map(i => ({ field: i.path.join('.'), message: i.message })) };
   }
   return { data: result.data };
+}
+
+async function _getAdmConfig(schoolId) {
+  const doc = await _model('schools').findOne({ id: schoolId }, { admissionConfig: 1 }).lean();
+  return doc?.admissionConfig || {};
 }
 
 /* ── GET /api/students/stats ─ Aggregate overview for dashboard ─ */
@@ -162,8 +168,11 @@ router.post('/', authMiddleware, PLAN, rbac('students', 'create'), async (req, r
     const { data, error } = _validate(StudentCreateSchema, req.body);
     if (error) return E.validation(res, error);
 
-    // Server-generate the admission number atomically
-    const admissionNumber = await nextAdmissionNumber(schoolId);
+    // Use manually supplied number or auto-generate from school config
+    const admCfg         = await _getAdmConfig(schoolId);
+    const manualAdmNo    = data.admissionNumber?.trim();
+    const admissionNumber = manualAdmNo || await nextAdmissionNumber(schoolId, admCfg);
+    delete data.admissionNumber;
 
     const Students = _model('students');
     const doc = await Students.create({
@@ -252,15 +261,27 @@ router.post('/bulk', authMiddleware, PLAN, rbac('students', 'create'), async (re
     const results  = { created: 0, skipped: 0, errors: [] };
     const Students = _model('students');
     const toInsert = [];
+    const admCfg   = await _getAdmConfig(schoolId);
 
+    // Validate all rows first; collect those needing auto-generated numbers
+    const validated = [];
     for (let i = 0; i < students.length; i++) {
       const { data, error } = _validate(StudentCreateSchema, students[i]);
-      if (error) {
-        results.errors.push({ row: i + 1, issues: error });
-        results.skipped++;
-        continue;
-      }
-      const admissionNumber = await nextAdmissionNumber(schoolId);
+      if (error) { results.errors.push({ row: i + 1, issues: error }); results.skipped++; continue; }
+      validated.push({ row: i + 1, data });
+    }
+
+    // Reserve a block of numbers for rows that don't supply their own
+    const needsAuto  = validated.filter(v => !v.data.admissionNumber?.trim());
+    const autoNos    = needsAuto.length
+      ? await reserveAdmissionNumbers(schoolId, needsAuto.length, admCfg)
+      : [];
+    let autoIdx = 0;
+
+    for (const { data } of validated) {
+      const manualNo        = data.admissionNumber?.trim();
+      const admissionNumber = manualNo || autoNos[autoIdx++];
+      delete data.admissionNumber;
       toInsert.push({ ...data, id: uuidv4(), schoolId, admissionNumber, createdBy: userId, updatedBy: userId });
     }
 

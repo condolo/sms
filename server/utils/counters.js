@@ -52,14 +52,83 @@ async function peekId(name) {
   return doc?.seq || 0;
 }
 
+/* ── Admission number helpers ────────────────────────────────── */
+
 /**
- * Generate a formatted admission number for a student.
- * Format: ADM-{year}-{5-digit seq}, e.g. ADM-2026-00001
+ * admissionConfig shape (stored on school document):
+ *   prefix      {string}  — e.g. 'MLA-33' or '' for number-only  (default '')
+ *   padding     {number}  — digit count, e.g. 4 → '0298'         (default 5)
+ *   yearInPrefix{boolean} — append current year to prefix         (default true)
+ *
+ * Generated format examples:
+ *   prefix='MLA-33', padding=4                → MLA-330298
+ *   prefix='',       padding=5                → 00298
+ *   prefix='KPS/',   padding=5, yearInPrefix  → KPS/2026/00001  (if prefix already has slash)
+ *   no config (legacy)                        → ADM-2026-00001
  */
-async function nextAdmissionNumber(schoolId) {
-  const year = new Date().getFullYear();
-  const seq  = await nextId(`admission_${schoolId}_${year}`);
-  return `ADM-${year}-${String(seq).padStart(5, '0')}`;
+function _admCounterKey(schoolId, cfg = {}) {
+  if (cfg.yearInPrefix !== false) {
+    // Default behaviour (yearInPrefix true or unset): year-scoped counter — matches legacy keys
+    return `admission_${schoolId}_${new Date().getFullYear()}`;
+  }
+  return `admission_${schoolId}`;
+}
+
+function _formatAdmNo(seq, cfg = {}) {
+  const yearInPrefix = cfg.yearInPrefix !== false;
+  const padding      = cfg.padding ?? 5;
+  const num          = String(seq).padStart(padding, '0');
+
+  if (cfg.prefix !== undefined) {
+    // School has explicitly configured a prefix (may be empty string)
+    if (yearInPrefix) {
+      return `${cfg.prefix}${new Date().getFullYear()}-${num}`;
+    }
+    return `${cfg.prefix}${num}`;
+  }
+  // Legacy default: ADM-{year}-{num}
+  return `ADM-${new Date().getFullYear()}-${num}`;
+}
+
+/**
+ * Generate the next admission number for a school.
+ * Pass admissionConfig from school document to use custom prefix/padding.
+ * Omit cfg to use the legacy ADM-{year}-{seq} format.
+ */
+async function nextAdmissionNumber(schoolId, cfg = {}) {
+  const seq = await nextId(_admCounterKey(schoolId, cfg));
+  return _formatAdmNo(seq, cfg);
+}
+
+/**
+ * Peek at the current counter value without incrementing.
+ * Returns { seq, nextFormatted } for UI display.
+ */
+async function peekAdmissionCounter(schoolId, cfg = {}) {
+  const seq = await peekId(_admCounterKey(schoolId, cfg));
+  return { seq, nextFormatted: _formatAdmNo(seq + 1, cfg) };
+}
+
+/**
+ * Explicitly set the admission counter to a value (for migrations / imports).
+ * Only sets if value > current seq to prevent accidental resets; pass force=true to override.
+ */
+async function setAdmissionCounter(schoolId, value, cfg = {}, force = false) {
+  const Counter = _getModel();
+  const key     = _admCounterKey(schoolId, cfg);
+  if (force) {
+    await Counter.findOneAndUpdate({ _id: key }, { $set: { seq: value } }, { upsert: true });
+  } else {
+    // Only advance — never go backwards without explicit force flag
+    await Counter.findOneAndUpdate(
+      { _id: key, $or: [{ seq: { $lt: value } }, { seq: { $exists: false } }] },
+      { $set: { seq: value } },
+      { upsert: false }
+    );
+    // If doc didn't exist yet, create it
+    await Counter.findOneAndUpdate({ _id: key }, { $setOnInsert: { seq: value } }, { upsert: true });
+  }
+  return peekAdmissionCounter(schoolId, cfg);
 }
 
 /**
@@ -118,14 +187,11 @@ async function reserveRange(name, count) {
 
 /**
  * Reserve a batch of formatted admission numbers in one DB call.
- * Returns an array of { admissionNumber } objects — one per row.
+ * Pass admissionConfig from school document to use custom prefix/padding.
  */
-async function reserveAdmissionNumbers(schoolId, count) {
-  const year  = new Date().getFullYear();
-  const start = await reserveRange(`admission_${schoolId}_${year}`, count);
-  return Array.from({ length: count }, (_, i) =>
-    `ADM-${year}-${String(start + i).padStart(5, '0')}`
-  );
+async function reserveAdmissionNumbers(schoolId, count, cfg = {}) {
+  const start = await reserveRange(_admCounterKey(schoolId, cfg), count);
+  return Array.from({ length: count }, (_, i) => _formatAdmNo(start + i, cfg));
 }
 
 /**
@@ -152,6 +218,8 @@ async function reserveInvoiceNumbers(schoolId, count) {
 
 module.exports = {
   nextId,
+  peekAdmissionCounter,
+  setAdmissionCounter,
   peekId,
   nextAdmissionNumber,
   nextStaffId,

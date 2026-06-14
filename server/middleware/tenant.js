@@ -94,7 +94,9 @@ function _mapSchoolDoc(doc) {
     /* ── Module visibility ── */
     moduleConfig:   doc.moduleConfig  || null,
     /* ── Student/parent portal config ── */
-    portalConfig:   doc.portalConfig  || null,
+    portalConfig:    doc.portalConfig    || null,
+    /* ── Admission number config ── */
+    admissionConfig: doc.admissionConfig || null,
     /* ── Regional / financial ── */
     currency,
     currencySymbol: doc.currencySymbol || CURRENCY_SYMBOLS[currency] || currency,
