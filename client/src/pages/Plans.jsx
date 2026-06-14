@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
+import FloatingActions from '@/components/landing/FloatingActions';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Check, ArrowRight, Zap, Users, GraduationCap,
@@ -517,6 +518,8 @@ export default function Plans() {
           </div>
         </div>
       </footer>
+
+      <FloatingActions />
     </div>
   );
 }

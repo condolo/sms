@@ -7,7 +7,8 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
-import { ArrowLeft, Shield, ChevronRight, ArrowUp } from 'lucide-react';
+import { ArrowLeft, Shield, ChevronRight } from 'lucide-react';
+import FloatingActions from '@/components/landing/FloatingActions';
 
 const LAST_UPDATED  = '14 June 2026';
 const EFFECTIVE     = '14 June 2026';
@@ -88,8 +89,7 @@ function Callout({ color = 'indigo', children }) {
 }
 
 export default function PrivacyPolicy() {
-  const [active, setActive]   = useState('intro');
-  const [showTop, setShowTop] = useState(false);
+  const [active, setActive] = useState('intro');
 
   useEffect(() => {
     const obs = new IntersectionObserver(
@@ -102,9 +102,7 @@ export default function PrivacyPolicy() {
       const el = document.getElementById(s.id);
       if (el) obs.observe(el);
     });
-    function onScroll() { setShowTop(window.scrollY > 400); }
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => { obs.disconnect(); window.removeEventListener('scroll', onScroll); };
+    return () => { obs.disconnect(); };
   }, []);
 
   return (
@@ -556,13 +554,7 @@ export default function PrivacyPolicy() {
         </div>
       </footer>
 
-      {/* Back to top */}
-      {showTop && (
-        <button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-          className="fixed bottom-6 right-6 z-50 w-10 h-10 rounded-full bg-white border border-slate-200 shadow-md flex items-center justify-center text-slate-600 hover:bg-slate-50 transition-all">
-          <ArrowUp size={16} />
-        </button>
-      )}
+      <FloatingActions />
     </div>
   );
 }

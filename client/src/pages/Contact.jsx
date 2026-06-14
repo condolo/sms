@@ -5,6 +5,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
+import FloatingActions from '@/components/landing/FloatingActions';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, ArrowRight, ArrowUp, CheckCircle, MessageCircle,
@@ -526,6 +527,8 @@ export default function Contact() {
           <p className="text-xs text-zinc-400 text-center mt-6">© {new Date().getFullYear()} Msingi. All rights reserved.</p>
         </div>
       </footer>
+
+      <FloatingActions />
     </div>
   );
 }

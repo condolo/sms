@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
+import FloatingActions from '@/components/landing/FloatingActions';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, ArrowRight, MessageCircle } from 'lucide-react';
 import { FAQ_CATEGORIES, ALL_FAQS_FLAT } from '@/data/faqData';
@@ -202,6 +203,8 @@ export default function FAQ() {
           </div>
         </div>
       </footer>
+
+      <FloatingActions />
     </div>
   );
 }
