@@ -594,6 +594,7 @@ function SchoolTab() {
       if (saved.academicYear        !== undefined) patch.academicYear        = saved.academicYear;
       if (saved.emergencyOnlineMode !== undefined) patch.emergencyOnlineMode = saved.emergencyOnlineMode;
       if (saved.moduleConfig        !== undefined) patch.moduleConfig        = saved.moduleConfig;
+      if (saved.portalConfig        !== undefined) patch.portalConfig        = saved.portalConfig;
       if (Object.keys(patch).length) patchSchool(patch);
     },
     onError: err => setToast({ msg: err?.message ?? 'Failed to save.', type: 'error' }),
@@ -957,6 +958,79 @@ function SchoolTab() {
           </div>
         )}
       </div>
+
+      {/* Student & Parent Portal Settings */}
+      {(() => {
+        const pc = f.portalConfig ?? {};
+        const showFees = pc.studentCanSeeFees ?? false;
+        const threshold = pc.reportCardFeeThreshold ?? 100;
+        function setPC(k, v) { set('portalConfig', { ...pc, [k]: v }); }
+        return (
+          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+            <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+              <Users size={14} className="text-violet-500" />
+              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Student & Parent Portal</h3>
+            </div>
+
+            {/* Toggle: student fee visibility */}
+            <div className="flex items-center justify-between gap-4 bg-slate-50 rounded-xl px-4 py-3.5 border border-slate-200">
+              <div>
+                <p className="text-sm font-semibold text-slate-700">Show fee balance to students</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  When off, students cannot see their fee balance. Parents always see fees.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPC('studentCanSeeFees', !showFees)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none
+                  ${showFees ? 'bg-violet-600' : 'bg-slate-200'}`}
+              >
+                <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out
+                  ${showFees ? 'translate-x-5' : 'translate-x-0'}`} />
+              </button>
+            </div>
+
+            {/* Fee clearance threshold for report card access */}
+            <div className="bg-slate-50 rounded-xl px-4 py-3.5 border border-slate-200 space-y-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-700">Report card fee clearance threshold</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Minimum % of school fees that must be paid before a student or parent can view and download report cards.
+                  Set to <strong>0</strong> to always allow access. Set to <strong>100</strong> to require full payment.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min={0} max={100} step={5}
+                  value={threshold}
+                  onChange={e => setPC('reportCardFeeThreshold', Number(e.target.value))}
+                  className="flex-1 h-2 accent-violet-600"
+                />
+                <span className="w-14 text-center text-sm font-bold text-violet-700 bg-violet-50 border border-violet-200 rounded-lg py-1">
+                  {threshold}%
+                </span>
+              </div>
+              {threshold === 0 && (
+                <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                  Report cards are always accessible regardless of fee payment status.
+                </p>
+              )}
+              {threshold > 0 && threshold < 100 && (
+                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  Students/parents must have cleared at least <strong>{threshold}%</strong> of fees to view report cards.
+                </p>
+              )}
+              {threshold === 100 && (
+                <p className="text-[11px] text-slate-600 bg-slate-100 border border-slate-200 rounded-lg px-3 py-2">
+                  Students/parents must be <strong>fully paid</strong> to view and download report cards.
+                </p>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* M-Pesa Integration */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">

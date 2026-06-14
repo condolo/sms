@@ -92,7 +92,9 @@ function _mapSchoolDoc(doc) {
     themePreset:    doc.themePreset  || null,
     faviconUrl:     doc.faviconUrl   || null,
     /* ── Module visibility ── */
-    moduleConfig:   doc.moduleConfig || null,
+    moduleConfig:   doc.moduleConfig  || null,
+    /* ── Student/parent portal config ── */
+    portalConfig:   doc.portalConfig  || null,
     /* ── Regional / financial ── */
     currency,
     currencySymbol: doc.currencySymbol || CURRENCY_SYMBOLS[currency] || currency,

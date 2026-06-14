@@ -914,18 +914,31 @@ function _buildPDFPage(doc, snap, config, attendance, isFirstPage, images = {}) 
      .text(`Generated: ${new Date().toUTCString()}  |  v${snap.version || 1}  |  Batch: ${snap.batchId || '—'}`, 40, footerY + 18, { width: PAGE_WIDTH, align: 'center' });
 }
 
+/* ── Portal roles bypass RBAC; the handler does ownership + fee checks ── */
+function _pdfAccess(req, res, next) {
+  if (RESTRICTED_ROLES.includes(req.jwtUser?.role)) return next();
+  return rbac('grades', 'read')(req, res, next);
+}
+
 /* ══════════════════════════════════════════════════════════════
    GET /:id/pdf  — single student PDF
    ══════════════════════════════════════════════════════════════ */
-router.get('/:id/pdf', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
+router.get('/:id/pdf', authMiddleware, PLAN, _pdfAccess, async (req, res) => {
   try {
-    const { schoolId, role, guardianOf, userId } = req.jwtUser;
+    const { schoolId, role, guardianOf, studentId: jwtStudentId, userId } = req.jwtUser;
 
     const snap = await _model('report_card_snapshots').findOne({ id: req.params.id, schoolId }).lean();
     if (!snap) return E.notFound(res, 'Report card snapshot not found');
 
     if (snap.superseded && RESTRICTED_ROLES.includes(role)) {
       return E.forbidden(res, 'This report card has been superseded. Please download the latest version.');
+    }
+
+    // Student: can only download their own report card
+    if (role === 'student') {
+      if (snap.studentId !== jwtStudentId) {
+        return E.forbidden(res, 'You are not authorised to download this report card.');
+      }
     }
 
     // Guardian/parent: can only download their own linked children's PDFs
@@ -946,18 +959,33 @@ router.get('/:id/pdf', authMiddleware, PLAN, rbac('grades', 'read'), async (req,
       }
     }
 
-    // Re-verify fee block in real-time so payments made after publish are respected.
-    // Admins and force=1 always bypass. On DB error, fall back to the snapshot's stored value.
+    // Fee clearance check — uses school-configurable threshold (default 100 = fully paid).
+    // Admins and force=1 always bypass. Threshold 0 means always accessible.
     if (req.query.force !== '1' && !['admin', 'superadmin'].includes(role)) {
-      let feeBlocked = snap.financialBlock;
       try {
-        const unpaid = await _model('invoices').exists({
-          schoolId, studentId: snap.studentId, balance: { $gt: 0 },
-        });
-        feeBlocked = !!unpaid;
-      } catch (_) { /* non-fatal — use snapshot value */ }
-      if (feeBlocked) {
-        return res.status(403).json({ error: 'Download blocked — outstanding fee balance.', financialBlock: true });
+        const school    = await _model('schools').findOne({ id: schoolId }, { 'portalConfig.reportCardFeeThreshold': 1 }).lean();
+        const threshold = school?.portalConfig?.reportCardFeeThreshold ?? 100;
+        if (threshold > 0) {
+          const invoices    = await _model('invoices').find({ schoolId, studentId: snap.studentId }, { total: 1, balance: 1 }).lean();
+          const totalBilled = invoices.reduce((s, i) => s + (i.total || 0), 0);
+          const totalOwed   = invoices.reduce((s, i) => s + (i.balance || 0), 0);
+          const clearancePct = totalBilled > 0
+            ? Math.round(((totalBilled - totalOwed) / totalBilled) * 100)
+            : 100;
+          if (clearancePct < threshold) {
+            return res.status(403).json({
+              error: `Report card access blocked — ${clearancePct}% of fees cleared (${threshold}% required).`,
+              financialBlock: true,
+              clearancePct,
+              threshold,
+            });
+          }
+        }
+      } catch (_) {
+        // Non-fatal — fall back to the snapshot's stored flag
+        if (snap.financialBlock) {
+          return res.status(403).json({ error: 'Download blocked — outstanding fee balance.', financialBlock: true });
+        }
       }
     }
 

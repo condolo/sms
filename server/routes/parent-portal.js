@@ -85,7 +85,7 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
       .lean();
     if (!student) return E.notFound(res, 'Student record not found.');
 
-    const school       = await Schools.findOne({ id: schoolId }).select('academicYear name').lean();
+    const school       = await Schools.findOne({ id: schoolId }).select('academicYear name portalConfig').lean();
     const academicYear = school?.academicYear || '';
 
     // ── Attendance ───────────────────────────────────────────
@@ -106,9 +106,13 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
       .slice(0, 5)
       .map(r => ({ date: r.date, status: r.status }));
 
-    // ── Fee balance & recent payments ────────────────────────
-    const invoices = await FeeInvoices.find({ schoolId, studentId: childId }).select('balance status dueDate termId').lean();
-    const feeBalance = invoices.reduce((acc, inv) => acc + (inv.balance || 0), 0);
+    // ── Fee balance, clearance & recent payments ─────────────
+    const invoices     = await FeeInvoices.find({ schoolId, studentId: childId }).select('total balance status dueDate termId').lean();
+    const feeBalance   = invoices.reduce((acc, inv) => acc + (inv.balance || 0), 0);
+    const totalBilled  = invoices.reduce((acc, inv) => acc + (inv.total  || 0), 0);
+    const feeClearancePct = totalBilled > 0
+      ? Math.round(((totalBilled - feeBalance) / totalBilled) * 100)
+      : 100;
 
     const recentPayments = await FeePayments.find({ schoolId, studentId: childId })
       .sort({ paidAt: -1 }).limit(5)
@@ -155,10 +159,11 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
         gender:          student.gender,
         status:          student.status,
       },
-      school:           { name: school?.name, academicYear },
+      school:           { name: school?.name, academicYear, portalConfig: school?.portalConfig || null },
       attendance:       attSummary,
       recentAttendance,
       feeBalance,
+      feeClearancePct,
       recentPayments,
       lessonsCoverage,
       reportCards,

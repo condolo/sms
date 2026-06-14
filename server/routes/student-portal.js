@@ -54,7 +54,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     if (!student) return E.notFound(res, 'Student record not found.');
 
     const school = await Schools.findOne({ id: schoolId })
-      .select('academicYear termsPerYear name emergencyOnlineMode')
+      .select('academicYear termsPerYear name emergencyOnlineMode portalConfig')
       .lean();
 
     const academicYear = school?.academicYear || '';
@@ -74,9 +74,13 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       ? Math.round((attSummary.present / attSummary.total) * 100)
       : 0;
 
-    // ── Fee balance ──────────────────────────────────────────
-    const invoices = await FeeInvoices.find({ schoolId, studentId }).select('balance status').lean();
-    const feeBalance = invoices.reduce((acc, inv) => acc + (inv.balance || 0), 0);
+    // ── Fee balance & clearance ──────────────────────────────
+    const invoices     = await FeeInvoices.find({ schoolId, studentId }).select('total balance status').lean();
+    const feeBalance   = invoices.reduce((acc, inv) => acc + (inv.balance || 0), 0);
+    const totalBilled  = invoices.reduce((acc, inv) => acc + (inv.total  || 0), 0);
+    const feeClearancePct = totalBilled > 0
+      ? Math.round(((totalBilled - feeBalance) / totalBilled) * 100)
+      : 100;
 
     // ── Lessons / curriculum coverage ────────────────────────
     let lessonsCoverage = [];
@@ -163,9 +167,15 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
         photo:           student.photo || null,
         gender:          student.gender,
       },
-      school: { name: school?.name, academicYear, emergencyOnlineMode: emergencyMode },
-      attendance:      attSummary,
+      school: {
+        name: school?.name,
+        academicYear,
+        emergencyOnlineMode: emergencyMode,
+        portalConfig: school?.portalConfig || null,
+      },
+      attendance:       attSummary,
       feeBalance,
+      feeClearancePct,
       lessonsCoverage,
       timetableToday,
       reportCards,

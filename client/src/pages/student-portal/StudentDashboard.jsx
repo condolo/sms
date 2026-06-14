@@ -7,8 +7,8 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '@/store/auth.js';
 import {
-  BookCheck, Calendar, CheckCircle, Clock, FileText,
-  GraduationCap, LogOut, TrendingUp, User,
+  BookCheck, Calendar, CheckCircle, Clock, Download, FileText,
+  GraduationCap, LogOut, TrendingUp, User, Wallet,
   AlertCircle, BookOpen, ChevronRight, MonitorPlay, Play, Lock,
 } from 'lucide-react';
 
@@ -25,6 +25,23 @@ async function _fetch(path) {
   const json = await res.json();
   if (!json.success) throw new Error(json.error?.message || 'Failed to load');
   return json.data;
+}
+
+async function downloadReportCard(rcId, label) {
+  const res = await fetch(`${API_BASE}/api/report-cards/${rcId}/pdf`, {
+    headers: { Authorization: `Bearer ${_token()}` },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Download failed');
+  }
+  const blob = await res.blob();
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `report-card-${label}.pdf`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 /* ── Attendance ring ─────────────────────────────────────────── */
@@ -69,9 +86,11 @@ export default function StudentDashboard() {
   const logout     = useAuthStore(s => s.logout);
   const session    = useAuthStore(s => s.session);
 
-  const [data,    setData]    = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState('');
+  const [data,         setData]         = useState(null);
+  const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState('');
+  const [downloading,  setDownloading]  = useState(null); // rcId being downloaded
+  const [dlError,      setDlError]      = useState('');
 
   // Auth guard — must be logged in as a student
   useEffect(() => {
@@ -104,7 +123,11 @@ export default function StudentDashboard() {
     </div>
   );
 
-  const { student, school, attendance, lessonsCoverage, timetableToday, reportCards } = data;
+  const { student, school, attendance, feeBalance, feeClearancePct, lessonsCoverage, timetableToday, reportCards } = data;
+  const portalConfig      = school?.portalConfig ?? {};
+  const showFees          = portalConfig.studentCanSeeFees ?? false;
+  const rcThreshold       = portalConfig.reportCardFeeThreshold ?? 100;
+  const rcLocked          = rcThreshold > 0 && (feeClearancePct ?? 100) < rcThreshold;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -138,12 +161,13 @@ export default function StudentDashboard() {
         </motion.div>
 
         {/* ── Stats row ─────────────────────────────────────── */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <div className={`grid grid-cols-2 gap-3 ${showFees ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
           {[
-            { icon: CheckCircle,    label: 'Attendance',   value: `${attendance.percentage}%`, sub: `${attendance.present} / ${attendance.total} days`, color: 'text-emerald-600 bg-emerald-50' },
-            { icon: BookCheck,      label: 'Subjects',     value: lessonsCoverage.length, sub: 'in curriculum', color: 'text-indigo-600 bg-indigo-50' },
-            { icon: FileText,       label: 'Report Cards', value: reportCards.length, sub: 'published', color: 'text-violet-600 bg-violet-50' },
-          ].map(({ icon: Icon, label, value, sub, color }) => (
+            { icon: CheckCircle, label: 'Attendance',   value: `${attendance.percentage}%`, sub: `${attendance.present} / ${attendance.total} days`, color: 'text-emerald-600 bg-emerald-50' },
+            showFees && { icon: Wallet, label: 'Fee Balance', value: `KSh ${(feeBalance||0).toLocaleString()}`, sub: feeBalance <= 0 ? 'Fully paid' : 'Outstanding', color: feeBalance <= 0 ? 'text-emerald-600 bg-emerald-50' : 'text-amber-600 bg-amber-50' },
+            { icon: BookCheck, label: 'Subjects',     value: lessonsCoverage.length, sub: 'in curriculum', color: 'text-indigo-600 bg-indigo-50' },
+            { icon: FileText,  label: 'Report Cards', value: reportCards.length, sub: 'published', color: 'text-violet-600 bg-violet-50' },
+          ].filter(Boolean).map(({ icon: Icon, label, value, sub, color }) => (
             <motion.div key={label} initial={{ opacity:0, y:12 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.35 }}
               className="bg-white border border-slate-200 rounded-xl p-4">
               <div className={`w-8 h-8 rounded-lg flex items-center justify-center mb-2.5 ${color}`}>
@@ -258,19 +282,59 @@ export default function StudentDashboard() {
               <FileText size={14} className="text-violet-500" />
               <h2 className="text-sm font-semibold text-slate-800">Report Cards</h2>
             </div>
+
+            {/* Fee clearance warning */}
+            {rcLocked && (
+              <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-3 mb-4 text-xs text-amber-800">
+                <Lock size={13} className="mt-0.5 shrink-0 text-amber-500" />
+                <span>
+                  Your report cards are locked because only <strong>{feeClearancePct}%</strong> of your school fees have been cleared.
+                  A minimum of <strong>{rcThreshold}%</strong> clearance is required.
+                  Please contact the school bursar to settle your balance.
+                </span>
+              </div>
+            )}
+            {dlError && (
+              <p className="text-[11px] text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">{dlError}</p>
+            )}
+
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {reportCards.map((rc, i) => (
-                <div key={i} className="flex items-center gap-3 p-3.5 rounded-xl border border-slate-200">
-                  <div className="w-9 h-9 rounded-xl bg-violet-50 flex items-center justify-center shrink-0">
-                    <GraduationCap size={15} className="text-violet-600" />
+              {reportCards.map((rc) => {
+                const label = `${rc.academicYear}-term${rc.termNumber}`;
+                const isBusy = downloading === rc.id;
+                return (
+                  <div key={rc.id} className={`flex items-center gap-3 p-3.5 rounded-xl border ${rcLocked ? 'border-slate-200 bg-slate-50 opacity-75' : 'border-slate-200'}`}>
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${rcLocked ? 'bg-slate-100' : 'bg-violet-50'}`}>
+                      {rcLocked
+                        ? <Lock size={15} className="text-slate-400" />
+                        : <GraduationCap size={15} className="text-violet-600" />
+                      }
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-slate-700">{rc.academicYear} · Term {rc.termNumber}</p>
+                      {rc.termName && <p className="text-[10px] text-slate-400">{rc.termName}</p>}
+                    </div>
+                    {rcLocked ? (
+                      <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">Locked</span>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setDlError('');
+                          setDownloading(rc.id);
+                          downloadReportCard(rc.id, label)
+                            .catch(e => setDlError(e.message))
+                            .finally(() => setDownloading(null));
+                        }}
+                        disabled={isBusy}
+                        className="flex items-center gap-1 text-[10px] font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 px-2.5 py-1 rounded-full transition-colors disabled:opacity-50"
+                      >
+                        {isBusy ? <span className="w-3 h-3 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" /> : <Download size={10} />}
+                        {isBusy ? 'Saving…' : 'PDF'}
+                      </button>
+                    )}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-slate-700">{rc.academicYear} · Term {rc.termNumber}</p>
-                    {rc.grade && <p className="text-xs text-slate-400">Grade: <span className="font-bold text-slate-700">{rc.grade}</span></p>}
-                  </div>
-                  <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Published</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
