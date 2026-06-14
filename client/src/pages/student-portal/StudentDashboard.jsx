@@ -8,7 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import useAuthStore from '@/store/auth.js';
 import {
   BookCheck, Calendar, CheckCircle, Clock, FileText,
-  GraduationCap, LogOut, TrendingUp, User, Wallet,
+  GraduationCap, LogOut, TrendingUp, User,
   AlertCircle, BookOpen, ChevronRight, MonitorPlay, Play, Lock,
 } from 'lucide-react';
 
@@ -104,7 +104,7 @@ export default function StudentDashboard() {
     </div>
   );
 
-  const { student, school, attendance, feeBalance, lessonsCoverage, timetableToday, reportCards } = data;
+  const { student, school, attendance, lessonsCoverage, timetableToday, reportCards } = data;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -138,10 +138,9 @@ export default function StudentDashboard() {
         </motion.div>
 
         {/* ── Stats row ─────────────────────────────────────── */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {[
             { icon: CheckCircle,    label: 'Attendance',   value: `${attendance.percentage}%`, sub: `${attendance.present} / ${attendance.total} days`, color: 'text-emerald-600 bg-emerald-50' },
-            { icon: Wallet,         label: 'Fee Balance',  value: `KSh ${(feeBalance||0).toLocaleString()}`, sub: feeBalance <= 0 ? 'Fully paid' : 'Outstanding', color: feeBalance <= 0 ? 'text-emerald-600 bg-emerald-50' : 'text-amber-600 bg-amber-50' },
             { icon: BookCheck,      label: 'Subjects',     value: lessonsCoverage.length, sub: 'in curriculum', color: 'text-indigo-600 bg-indigo-50' },
             { icon: FileText,       label: 'Report Cards', value: reportCards.length, sub: 'published', color: 'text-violet-600 bg-violet-50' },
           ].map(({ icon: Icon, label, value, sub, color }) => (
