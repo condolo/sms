@@ -1,0 +1,562 @@
+﻿# Msingi — Platform Administrator Guide
+
+> **Audience:** The Msingi platform owner and operator. This guide covers everything needed to run the Msingi SaaS platform — provisioning schools, managing subscriptions, monitoring the system, and deploying updates.
+
+---
+
+## Table of Contents
+
+1. [Platform Overview](#1-platform-overview)
+2. [Architecture](#2-architecture)
+3. [Environment Setup](#3-environment-setup)
+4. [Deploying & Updating](#4-deploying--updating)
+5. [Provisioning a New School](#5-provisioning-a-new-school)
+6. [Managing Schools & Plans](#6-managing-schools--plans)
+7. [Platform Admin API Reference](#7-platform-admin-api-reference)
+8. [Revenue & MRR Monitoring](#8-revenue--mrr-monitoring)
+9. [Impersonating a School Admin](#9-impersonating-a-school-admin)
+10. [Security](#10-security)
+11. [Backup & Recovery](#11-backup--recovery)
+12. [Troubleshooting](#12-troubleshooting)
+13. [Demo School Management (v4.9.7+)](#13-demo-school-management-v497)
+14. [Social Links & Platform Settings (v4.9.5+)](#14-social-links--platform-settings-v495)
+
+---
+
+## 1. Platform Overview
+
+Msingi is a **multi-tenant SaaS** school management platform. Each school is an isolated tenant identified by a unique `schoolId`. All API calls are scoped to the authenticated school — no school can ever access another school's data.
+
+### Key roles at the platform level
+
+| Role | Who | What they can do |
+|---|---|---|
+| **Platform Owner** | You | Full access to all API routes, can provision/suspend/impersonate any school |
+| **School Super Admin** | School's IT admin | Full access within their own school only |
+| **School Admin** | Principal/HM | Full school access (same as super admin within the school) |
+| All other roles | Staff, parents, students | Scoped access per role_permissions table |
+
+---
+
+## 2. Architecture
+
+```
+InnoLearn.com / app.InnoLearn.com
+        │
+        ▼
+  Render Web Service
+  ┌─────────────────────────────────┐
+  │  Node.js + Express (server/)    │
+  │  ├── /api/auth          JWT auth│
+  │  ├── /api/onboard       signup  │
+  │  ├── /api/sync          data    │
+  │  ├── /api/collections   CRUD    │
+  │  ├── /api/users         invites │
+  │  ├── /api/backup        export  │
+  │  ├── /api/announcements notices │
+  │  └── /api/platform      admin   │
+  │  Static: index.html, onboard.html │
+  └─────────────────────────────────┘
+        │
+        ▼
+  MongoDB Atlas (cloud)
+  Collections: schools, users, students, teachers,
+               classes, subjects, timetable, attendance,
+               academics, exams, finance, hr, behaviour,
+               communication, events, admissions, reports,
+               role_permissions, academic_years, sections...
+```
+
+**Data flow:** The browser uses `localStorage` as a synchronous cache. On login, `GET /api/sync` populates localStorage. All writes mirror to MongoDB async via `_push()`. On next login, fresh data is loaded from the server.
+
+---
+
+## 3. Environment Setup
+
+### Required environment variables
+
+| Variable | Description | Example |
+|---|---|---|
+| `MONGODB_URI` | MongoDB Atlas connection string | `mongodb+srv://user:pass@cluster.mongodb.net/innolearn` |
+| `JWT_SECRET` | Secret for signing JWTs — **must be long and random** | `openssl rand -hex 64` |
+| `JWT_EXPIRES_IN` | Token lifetime | `7d` |
+| `PLATFORM_ADMIN_KEY` | Secret key for platform API — keep private | `openssl rand -hex 32` |
+| `SMTP_USER` | Gmail address for sending emails | `innolearnnetwork@gmail.com` |
+| `SMTP_PASS` | Gmail App Password (16 chars, spaces OK) | `xxxx xxxx xxxx xxxx` |
+| `PLATFORM_EMAIL` | Where to receive platform alerts (defaults to `SMTP_USER`) | `innolearnnetwork@gmail.com` |
+| `PORT` | Server port (Render sets this automatically) | `3005` |
+| `NODE_ENV` | `production` on Render, `development` locally | `production` |
+| `APP_URL` | Base URL of the app | `https://innolearn-ecosystem.onrender.com` |
+
+> **Gmail App Password**: Go to your Google Account → Security → 2-Step Verification → App Passwords. Generate one for "Mail / Other" and paste it as `SMTP_PASS`. Do not use your regular Gmail password.
+
+### Setting on Render
+
+1. Go to your Render dashboard → **innolearn-ecosystem** service
+2. Click **Environment** tab
+3. Add each variable above
+4. Click **Save Changes** — Render will redeploy automatically
+
+### Local development
+
+```bash
+cp .env.example .env
+# Edit .env with your values
+node server/index.js
+# or: npm run dev (if nodemon installed)
+```
+
+---
+
+## 4. Deploying & Updating
+
+Msingi is deployed via GitHub → Render (auto-deploy on push to `main`).
+
+### Update Safety Protocol (Zero-Interruption Updates)
+
+Before deploying any major or breaking change, follow this protocol to ensure no school loses data:
+
+**Step 1 — Create a system announcement**
+1. Open `https://innolearn-ecosystem.onrender.com/platform`
+2. Click **Announcements** in the left sidebar
+3. Click **New Announcement**
+4. Set type to **🔧 Scheduled Maintenance**, fill the title and description
+5. Set the scheduled date/time and an expiry time (typically 6 hours after the maintenance window)
+6. Tick **"Email all active school administrators immediately"**
+7. Click **Send Announcement**
+
+All school superadmins now see a dashboard banner with a **"Back Up My Data Now"** button, and receive an email with the same CTA.
+
+**Step 2 — Allow time for backups**
+Give schools at least 24–48 hours to export their data. They can click the banner or the "Backup Data" tile on their dashboard to download a full JSON export.
+
+**Step 3 — Deploy the update**
+```bash
+git add -A
+git commit -m "feat: describe what changed"
+git push origin main
+# Render auto-deploys within ~60 seconds
+```
+
+**Step 4 — Mark the announcement as completed**
+Back in the Platform dashboard → Announcements, click **Cancel** on the announcement (or let it expire naturally). Schools will no longer see the maintenance banner.
+
+> **Note**: Msingi updates never modify or delete existing school data. The backup protocol exists as a professional safeguard and to maintain school confidence in the platform.
+
+### Normal update flow (minor changes)
+
+```bash
+# Make your changes
+git add -A
+git commit -m "feat: describe what changed"
+git push origin main
+# Render auto-deploys within ~60 seconds
+```
+
+### Verify deployment
+
+```
+GET https://innolearn-ecosystem.onrender.com/api/health
+```
+
+Expected response:
+```json
+{
+  "status": "ok",
+  "version": "3.5.0",
+  "db": "connected"
+}
+```
+
+If `"db": "disconnected"` — check `MONGODB_URI` in Render environment.
+
+---
+
+## 5. Provisioning a New School
+
+Schools can self-register via `onboard.html`. You can also provision manually via the platform API. All self-registered schools go through the **approval workflow** described below.
+
+### Via the onboarding page (school-initiated)
+
+Direct the school to: `https://innolearn-ecosystem.onrender.com/onboard`
+
+They fill the 4-step wizard:
+1. School name, type, country, URL slug, curriculum (CBE / IB / British / American), sections
+2. Admin account details + password
+3. Plan selection (Core · Standard · Premium · Enterprise — all with 30-day free trial)
+4. Review + accept Terms of Service → Submit
+
+**What happens automatically:**
+- School record created with `status: 'pending'`, `isActive: false`
+- Superadmin user created with `isActive: false` (cannot log in yet)
+- Confirmation email sent to the school admin
+- Alert email sent to you at `PLATFORM_EMAIL` with all school details + link to the Platform dashboard
+
+**What you must do next:**
+1. Open `https://innolearn-ecosystem.onrender.com/platform`
+2. Enter your Platform Admin Key
+3. Click **Pending** in the left sidebar — you will see a red badge with the count
+4. Review the school details and click **Approve** or **Reject**
+
+On **Approve**: school + admin activated immediately; welcome email with login URL sent to school admin; confirmation sent to you.  
+On **Reject**: enter an optional reason; rejection email with explanation sent to school admin.
+
+### Via Platform API (manual, instant activation)
+
+Schools provisioned via the API are **immediately active** (no pending state):
+
+```bash
+curl -X POST https://innolearn-ecosystem.onrender.com/api/platform/schools \
+  -H "Content-Type: application/json" \
+  -H "X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY" \
+  -d '{
+    "name": "Sunrise Academy",
+    "shortName": "SA",
+    "slug": "sunrise",
+    "plan": "standard",
+    "adminName": "James Mwangi",
+    "adminEmail": "james@sunriseacademy.ke",
+    "adminPassword": "SecurePass@2026",
+    "currency": "KES",
+    "timezone": "Africa/Nairobi"
+  }'
+```
+
+### Via Platform API (manual)
+
+```bash
+curl -X POST https://innolearn-ecosystem.onrender.com/api/platform/schools \
+  -H "Content-Type: application/json" \
+  -H "X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY" \
+  -d '{
+    "name": "Sunrise Academy",
+    "shortName": "SA",
+    "slug": "sunrise",
+    "plan": "standard",
+    "adminName": "James Mwangi",
+    "adminEmail": "james@sunriseacademy.ke",
+    "adminPassword": "SecurePass@2026",
+    "currency": "KES",
+    "timezone": "Africa/Nairobi"
+  }'
+```
+
+Response:
+```json
+{
+  "school": { "id": "sch_sunrise_...", "slug": "sunrise", "plan": "standard", ... },
+  "adminUserId": "u_sunrise_admin"
+}
+```
+
+---
+
+## 6. Managing Schools & Plans
+
+### List all schools
+
+```bash
+curl https://innolearn-ecosystem.onrender.com/api/platform/schools \
+  -H "X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY"
+```
+
+Returns all schools with student/staff counts and plan info.
+
+### Upgrade / change a school's plan
+
+```bash
+curl -X PATCH https://innolearn-ecosystem.onrender.com/api/platform/schools/SCH_ID \
+  -H "Content-Type: application/json" \
+  -H "X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY" \
+  -d '{ "plan": "premium" }'
+```
+
+### Suspend a school
+
+```bash
+curl -X PATCH https://innolearn-ecosystem.onrender.com/api/platform/schools/SCH_ID \
+  -H "Content-Type: application/json" \
+  -H "X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY" \
+  -d '{ "isActive": false }'
+```
+
+### Reinstate a school
+
+```bash
+curl -X PATCH .../api/platform/schools/SCH_ID \
+  -H "X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY" \
+  -d '{ "isActive": true }'
+```
+
+### Set trial expiry
+
+```bash
+curl -X PATCH .../api/platform/schools/SCH_ID \
+  -H "X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY" \
+  -d '{ "planExpiry": "2026-06-30T00:00:00.000Z" }'
+```
+
+---
+
+## 7. Platform Admin API Reference
+
+All platform routes require the header:
+```
+X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY
+```
+
+**School management**
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/platform/schools` | List all schools with student/staff stats |
+| `GET` | `/api/platform/schools/pending` | List schools awaiting approval |
+| `POST` | `/api/platform/schools` | Provision a new school manually (immediately active) |
+| `POST` | `/api/platform/schools/:id/approve` | Approve a pending school — activates account + sends emails |
+| `POST` | `/api/platform/schools/:id/reject` | Reject a pending school — sends rejection email (body: `{ reason }`) |
+| `PATCH` | `/api/platform/schools/:id` | Update plan, addOns, isActive, planExpiry |
+| `POST` | `/api/platform/schools/:id/impersonate` | Get a JWT for any school's superadmin |
+| `GET` | `/api/platform/stats` | MRR, school counts, plan breakdown |
+
+**System announcements**
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/platform/announcements` | List all announcements (with notifiedCount, dismissedBy) |
+| `POST` | `/api/platform/announcements` | Create announcement; if `notifyAll: true` emails all school admins |
+| `PATCH` | `/api/platform/announcements/:id` | Update status (`active`/`cancelled`), title, description, expiresAt |
+| `DELETE` | `/api/platform/announcements/:id` | Delete announcement permanently |
+
+Announcement body fields:
+```json
+{
+  "title":       "Scheduled Maintenance — v3.6.0",
+  "description": "We will be upgrading the platform on Saturday 10 May at 02:00 UTC...",
+  "type":        "maintenance",
+  "scheduledAt": "2026-05-10T02:00:00Z",
+  "affectsAt":   "2026-05-10T02:00:00Z",
+  "expiresAt":   "2026-05-10T08:00:00Z",
+  "notifyAll":   true
+}
+```
+
+Types: `maintenance` | `update` | `security` | `info`
+
+---
+
+## 8. Revenue & MRR Monitoring
+
+```bash
+curl https://innolearn-ecosystem.onrender.com/api/platform/stats \
+  -H "X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY"
+```
+
+Response:
+```json
+{
+  "totalSchools": 12,
+  "activeSchools": 10,
+  "totalStudents": 4320,
+  "mrr": 525000,
+  "byPlan": {
+    "core": 2,
+    "standard": 6,
+    "premium": 3,
+    "enterprise": 1
+  }
+}
+```
+
+MRR is calculated as: `core × 15,000 + standard × 35,000 + premium × 65,000 + enterprise × 250,000` (KES).
+
+---
+
+## 9. Impersonating a School Admin
+
+Use this to troubleshoot a school's issue without needing their password.
+
+```bash
+curl -X POST https://.../api/platform/schools/SCH_ID/impersonate \
+  -H "X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY"
+```
+
+Response:
+```json
+{ "token": "eyJhbGci...", "user": { "name": "James Mwangi", ... } }
+```
+
+Use the token as a Bearer token in any API call, or set it in the browser console:
+```javascript
+localStorage.setItem('ss_jwt', 'eyJhbGci...');
+location.reload();
+```
+
+> ⚠️ **Audit trail:** Log impersonation sessions. Schools must be informed in your Terms of Service that platform admin access exists for support purposes.
+
+---
+
+## 10. Security
+
+### Current protections
+
+| Layer | Mechanism |
+|---|---|
+| **JWT auth** | All API routes require a valid JWT (RS/HS256) |
+| **School isolation** | Every query auto-filtered by `schoolId` from JWT |
+| **Platform key** | Admin API protected by separate secret header |
+| **Rate limiting** | Login: 20/15min per IP; Onboarding: 5/hour per IP |
+| **Honeypot** | Hidden form field on registration — bots fill it, humans don't |
+| **Timing check** | Registration rejected if form submitted in < 4 seconds |
+| **Disposable emails** | 25+ known disposable domains blocked at registration |
+| **bcrypt** | Passwords hashed at 12 rounds |
+| **CORS** | Configurable — tighten origin list for production |
+
+### Deferred (planned)
+
+- **2FA (TOTP)** — authenticator app support for Super Admin accounts
+- **reCAPTCHA v3** — invisible challenge on the onboarding form
+- **Email OTP verification** — verify email before provisioning (requires SMTP setup)
+- **Audit log** — every admin action recorded with timestamp + IP
+
+### Hardening checklist for production
+
+- [ ] `PLATFORM_ADMIN_KEY` is at least 32 random bytes
+- [ ] `JWT_SECRET` is at least 64 random bytes
+- [ ] `NODE_ENV=production` is set on Render
+- [ ] MongoDB Atlas network access restricted to Render IP
+- [ ] CORS origin list tightened to your domain(s)
+- [ ] HTTPS enforced (automatic on Render)
+
+---
+
+## 11. Backup & Recovery
+
+Msingi uses a **two-tier backup strategy**: school-level self-service exports and platform-level MongoDB snapshots.
+
+### Tier 1 — School self-service backup (built-in)
+
+Every school superadmin can export their own data at any time from the Msingi dashboard:
+
+- Dashboard → **"Data Backup & Export"** card → **Back Up Now**
+- Exports all collections for their school as a structured JSON file
+- File is downloaded directly to their browser — nothing stored on the Msingi server
+- Every export is logged in `backup_logs` collection (date, user, record count, version)
+
+**As platform admin**, before any major deployment:
+1. Follow the Update Safety Protocol in §4 to notify all schools
+2. Allow time for schools to self-backup
+3. Deploy the update — all data is untouched
+
+### Tier 2 — MongoDB Atlas automated backups (platform-level)
+
+1. Go to MongoDB Atlas → your cluster → **Backup**
+2. Enable **Continuous Cloud Backup** (recommended)
+3. Set a retention period of at least 14 days
+
+### Tier 2 — Manual MongoDB export
+
+```bash
+mongodump --uri="$MONGODB_URI" --out=./backup/$(date +%Y%m%d)
+```
+
+### MongoDB restore
+
+```bash
+mongorestore --uri="$MONGODB_URI" ./backup/20260430/
+```
+
+### School backup API reference
+
+| Method | Route | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/backup/export` | JWT (superadmin) | Full JSON export download |
+| `GET` | `/api/backup/history` | JWT (superadmin) | List backup log entries |
+| `GET` | `/api/backup/preview` | JWT (superadmin) | Record counts per collection |
+
+### localStorage data migration
+
+Use the sync endpoint to push a school's localStorage data to MongoDB:
+```bash
+POST /api/sync
+Authorization: Bearer SCHOOL_JWT
+Content-Type: application/json
+Body: { full localStorage payload }
+```
+
+---
+
+## 12. Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `/api/health` returns `"db": "disconnected"` | `MONGODB_URI` not set or wrong | Check Render Environment tab |
+| JWT errors on login | `JWT_SECRET` mismatch after env change | Have users log out and back in |
+| Platform API returns 403 | Wrong `PLATFORM_ADMIN_KEY` | Check the key in Render env |
+| Onboarding returns 429 | Rate limit hit (5/hour) | Wait or change IP for testing |
+| School data missing after reseed | `SEED_VERSION` bump wiped localStorage | Expected — re-login populates from server |
+| Render deploy fails | `npm install` error | Check `package.json` for missing deps |
+
+---
+
+---
+
+## 13. Demo School Management (v4.9.7+)
+
+The demo school (`demo.msingi.io`) is automatically provisioned on every server start. No manual setup is required.
+
+### Demo School Facts
+
+| Field | Value |
+|-------|-------|
+| Slug | `demo` |
+| School ID | `sch_demo` |
+| URL | `https://demo.msingi.io` |
+| Plan | `enterprise` (always forced) |
+| Password (all users) | `Demo2025!` |
+
+### Demo Users
+
+| Role | Email |
+|------|-------|
+| Admin | `admin@demo.msingi.io` |
+| Deputy Principal | `principal@demo.msingi.io` |
+| Teacher | `teacher@demo.msingi.io` |
+| Finance Officer | `finance@demo.msingi.io` |
+| Parent | `parent@demo.msingi.io` |
+| Student | `student@demo.msingi.io` |
+
+### Forcing a Demo Refresh
+
+The demo seed is idempotent — restarting the server refreshes the school document and users but does **not** overwrite content (students, behaviour records, etc.) because the data seed uses `$setOnInsert`. To fully reset demo data:
+
+1. Connect to MongoDB Atlas
+2. Delete all documents in collections where `schoolId = 'sch_demo'` (students, behaviour_incidents, timetable_slots, invoices, payments, admissions)
+3. Restart the server — `seedDemoData()` will re-seed everything
+
+### Plan Cache Note
+
+If the demo school shows a lower plan than enterprise in the UI, the 5-minute in-memory plan cache may be stale. A server restart forces a re-seed and cache invalidation. This should not occur in normal operation.
+
+---
+
+## 14. Social Links & Platform Settings (v4.9.5+)
+
+Platform-level social media links are configurable from the Platform Admin dashboard (`/platform`).
+
+### Configuring Social Links
+
+1. Navigate to `/platform` → **Settings** tab
+2. Fill in URLs for any social platforms (X/Twitter, LinkedIn, Facebook, Instagram, YouTube)
+3. Save — links are stored in `platform_settings` collection under the `socialLinks` object
+4. The Landing, Contact, and Plans public pages fetch these via `GET /api/platform/settings` and render only the links that have been configured
+
+### API
+
+```
+GET  /api/platform/settings   — no auth — returns public platform config (socialLinks, logo, colors)
+PATCH /api/platform/settings  — platform key required — update any settings fields
+```
+
+---
+
+*Last updated: 2026-05-19 — Msingi v4.9.9*

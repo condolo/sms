@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Msingi | School Management System for Modern African Schools</title>
+    <meta name="description" content="Msingi helps schools manage academics, finance, admissions, attendance, communication and reporting from one secure platform. Built for modern schools in Africa." />
+
+    <!-- Open Graph — fallback for crawlers that don't execute JS (WhatsApp, LinkedIn, Facebook) -->
+    <meta property="og:type"        content="website" />
+    <meta property="og:url"         content="https://msingi.io/" />
+    <meta property="og:title"       content="Msingi | School Management System for Modern African Schools" />
+    <meta property="og:description" content="Msingi helps schools manage academics, finance, admissions, attendance, communication and reporting from one secure platform. Built for modern schools in Africa." />
+    <meta property="og:image"       content="https://msingi.io/images/og-landing.png" />
+    <meta property="og:site_name"   content="Msingi" />
+
+    <!-- Twitter Card — fallback -->
+    <meta name="twitter:card"        content="summary_large_image" />
+    <meta name="twitter:title"       content="Msingi | School Management System for Modern African Schools" />
+    <meta name="twitter:description" content="Msingi helps schools manage academics, finance, admissions, attendance, communication and reporting from one secure platform. Built for modern schools in Africa." />
+    <meta name="twitter:image"       content="https://msingi.io/images/og-landing.png" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- Inter font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body class="h-full bg-surface-muted font-sans antialiased text-slate-800">
+    <!-- Pre-React crash catcher: shows a message if JS fatally errors before React mounts -->
+    <div id="root" class="h-full"></div>
+    <div id="pre-react-error" style="display:none;padding:40px;font-family:sans-serif;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;margin:20px;border-radius:8px;">
+      <strong>JavaScript failed to load.</strong><br>
+      <span id="pre-react-error-msg"></span>
+    </div>
+    <script src="/error-handler.js"></script>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

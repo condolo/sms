@@ -1,0 +1,39 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  security-patterns:
+    name: Dangerous Pattern Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run security pattern scan
+        run: node scripts/security-scan.js
+
+  rbac-coverage:
+    name: RBAC Coverage Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install server dependencies
+        run: npm install --omit=dev
+
+      - name: Check RBAC coverage (non-regression)
+        run: node scripts/verify-rbac-coverage.js
+        env:
+          CI: 'true'

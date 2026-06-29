@@ -1,0 +1,274 @@
+/* ============================================================
+   Msingi — Student Portal Routes
+   All endpoints require JWT with role === 'student'.
+   Data is always scoped to the student's own record (studentId from JWT).
+
+   GET /api/student-portal/dashboard  — full dashboard payload
+   GET /api/student-portal/me         — own profile + class
+   ============================================================ */
+'use strict';
+
+const express            = require('express');
+const { authMiddleware } = require('../middleware/auth');
+const { _model }         = require('../utils/model');
+const { ok, E }          = require('../utils/response');
+
+const router = express.Router();
+
+function _requireStudent(req, res) {
+  const role = req.jwtUser?.role;
+  if (role !== 'student') {
+    E.forbidden(res, 'This endpoint is for student accounts only.');
+    return false;
+  }
+  if (!req.jwtUser?.studentId) {
+    E.forbidden(res, 'Student account is not linked to a student record.');
+    return false;
+  }
+  return true;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   GET /api/student-portal/dashboard
+   Returns everything the student dashboard needs in one request.
+   ══════════════════════════════════════════════════════════════ */
+router.get('/dashboard', authMiddleware, async (req, res) => {
+  if (!_requireStudent(req, res)) return;
+  try {
+    const { schoolId, studentId } = req.jwtUser;
+
+    const Students      = _model('students');
+    const Attendance    = _model('attendance');
+    const FeeInvoices   = _model('invoices');
+    const Reports       = _model('report_card_snapshots');
+    const Coverage      = _model('lesson_coverage');
+    const Topics        = _model('syllabus_topics');
+    const Timetable     = _model('timetable_slots');
+    const Subjects      = _model('subjects');
+    const Schools       = _model('schools');
+    const Behaviour     = _model('behaviour');
+    const Exams         = _model('exams');
+    const Announcements = _model('announcements');
+    const Events        = _model('events');
+    const Classes       = _model('classes');
+    const Teachers      = _model('teachers');
+
+    const todayISO = new Date().toISOString().slice(0, 10);
+
+    // ── Student record ───────────────────────────────────────
+    const student = await Students.findOne({ id: studentId, schoolId })
+      .select('firstName lastName admissionNumber classId className photo status dateOfBirth gender')
+      .lean();
+    if (!student) return E.notFound(res, 'Student record not found.');
+
+    const school = await Schools.findOne({ id: schoolId })
+      .select('academicYear termsPerYear name emergencyOnlineMode portalConfig')
+      .lean();
+
+    const academicYear = school?.academicYear || '';
+
+    // ── Attendance this term ─────────────────────────────────
+    const attRecords = await Attendance.find({
+      schoolId, studentId, academicYear,
+    }).select('status').lean();
+
+    const attSummary = { present: 0, absent: 0, late: 0, total: attRecords.length };
+    attRecords.forEach(r => {
+      if (r.status === 'present') attSummary.present++;
+      else if (r.status === 'absent') attSummary.absent++;
+      else if (r.status === 'late') attSummary.late++;
+    });
+    attSummary.percentage = attSummary.total
+      ? Math.round((attSummary.present / attSummary.total) * 100)
+      : 0;
+
+    // ── Fee balance & clearance ──────────────────────────────
+    const invoices     = await FeeInvoices.find({ schoolId, studentId }).select('total balance status').lean();
+    const feeBalance   = invoices.reduce((acc, inv) => acc + (inv.balance || 0), 0);
+    const totalBilled  = invoices.reduce((acc, inv) => acc + (inv.total  || 0), 0);
+    const feeClearancePct = totalBilled > 0
+      ? Math.round(((totalBilled - feeBalance) / totalBilled) * 100)
+      : 100;
+
+    // ── Lessons / curriculum coverage ────────────────────────
+    let lessonsCoverage = [];
+    if (student.classId) {
+      const subjectIds = await Coverage.distinct('subjectId', { schoolId, classId: student.classId, academicYear });
+      const subjectDocs = await Subjects.find({ id: { $in: subjectIds }, schoolId }).select('id name code').lean();
+      const subjectMap  = Object.fromEntries(subjectDocs.map(s => [s.id, s]));
+
+      for (const subjectId of subjectIds) {
+        const totalTopics   = await Topics.countDocuments({ schoolId, subjectId, academicYear });
+        const coveredTopics = await Coverage.countDocuments({ schoolId, classId: student.classId, subjectId, academicYear, covered: true });
+        if (totalTopics === 0) continue;
+        lessonsCoverage.push({
+          subjectId,
+          subjectName: subjectMap[subjectId]?.name || subjectId,
+          subjectCode: subjectMap[subjectId]?.code || '',
+          coveredTopics,
+          totalTopics,
+          percentage: Math.round((coveredTopics / totalTopics) * 100),
+        });
+      }
+    }
+
+    // ── Today's timetable ────────────────────────────────────
+    const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    const today = DAY_NAMES[new Date().getDay()];
+
+    let rawSlots = student.classId
+      ? await Timetable.find({ schoolId, classId: student.classId, day: today })
+          .sort({ startTime: 1 })
+          .select('subjectId subjectName teacherName teacherId startTime endTime room day')
+          .lean()
+      : [];
+
+    // When Emergency Online Learning Mode is active, attach meeting link to each slot
+    // so students see a "Join" button with the correct teacher's link.
+    const emergencyMode = !!(school?.emergencyOnlineMode);
+    let timetableToday = rawSlots;
+
+    if (emergencyMode && rawSlots.length > 0) {
+      // Collect unique teacherIds present in today's slots
+      const teacherIds = [...new Set(rawSlots.map(s => s.teacherId).filter(Boolean))];
+      if (teacherIds.length > 0) {
+        const Teachers = _model('teachers');
+        const teacherDocs = await Teachers.find({
+          schoolId,
+          $or: [{ id: { $in: teacherIds } }, { userId: { $in: teacherIds } }],
+        }).select('id userId zoomPMILink zoomPasscode meetLink').lean();
+        // Build map keyed by BOTH id and userId so timetable slots resolve regardless of which was stored
+        const teacherMap = {};
+        for (const t of teacherDocs) {
+          if (t.id)     teacherMap[t.id]     = t;
+          if (t.userId) teacherMap[t.userId] = t;
+        }
+
+        timetableToday = rawSlots.map(slot => {
+          if (!slot.teacherId) return slot;
+          const teacher = teacherMap[slot.teacherId];
+          if (!teacher) return slot;
+          // Prefer Zoom PMI, fall back to Meet link
+          const meetingLink     = teacher.zoomPMILink || teacher.meetLink || null;
+          const meetingPasscode = teacher.zoomPMILink ? (teacher.zoomPasscode || null) : null;
+          const platform        = teacher.zoomPMILink ? 'zoom' : teacher.meetLink ? 'meet' : null;
+          if (!meetingLink) return slot;
+          return { ...slot, meetingLink, meetingPasscode, platform };
+        });
+      }
+    }
+
+    // ── Published report cards ───────────────────────────────
+    const reportCards = await Reports.find({
+      schoolId, studentId, status: 'published', superseded: { $ne: true },
+    }).sort({ publishedAt: -1 }).limit(6)
+      .select('academicYear termName termNumber totalScore averageScore gpa rankings status publishedAt version termId academicYearId')
+      .lean();
+
+    // ── Extended data (parallel) ─────────────────────────────
+    const [
+      bRecords,
+      upcomingExamsDocs,
+      announcementsDocs,
+      upcomingEventsDocs,
+      classDoc,
+      nextDueInvoice,
+    ] = await Promise.all([
+      Behaviour.find({ schoolId, studentId })
+        .sort({ date: -1, createdAt: -1 }).limit(50)
+        .select('points type category description date title').lean()
+        .catch(() => []),
+      student.classId
+        ? Exams.find({ schoolId, classId: student.classId, date: { $gte: todayISO } })
+            .sort({ date: 1 }).limit(4)
+            .select('subjectName date startTime type').lean()
+            .catch(() => [])
+        : [],
+      Announcements.find({
+        schoolId,
+        $or: [{ expiresAt: { $gte: new Date() } }, { expiresAt: { $exists: false } }, { expiresAt: null }],
+      }).sort({ createdAt: -1 }).limit(3)
+        .select('title body createdAt priority').lean()
+        .catch(() => []),
+      Events.find({ schoolId, date: { $gte: todayISO } })
+        .sort({ date: 1 }).limit(4)
+        .select('title date category').lean()
+        .catch(() => []),
+      student.classId
+        ? Classes.findOne({ id: student.classId, schoolId })
+            .select('formTeacherId name').lean().catch(() => null)
+        : null,
+      FeeInvoices.findOne({ schoolId, studentId, balance: { $gt: 0 }, dueDate: { $gte: todayISO } })
+        .sort({ dueDate: 1 }).select('dueDate').lean().catch(() => null),
+    ]);
+
+    // Behaviour summary
+    const totalPoints  = bRecords.reduce((sum, r) => sum + (Number(r.points) || 0), 0);
+    const latestReward = bRecords.find(r => (Number(r.points) || 0) > 0) || null;
+    const latestComment = bRecords[0] || null;
+    const badgeLevel   = totalPoints >= 500 ? 'gold' : totalPoints >= 200 ? 'silver' : totalPoints >= 50 ? 'bronze' : null;
+
+    // Class teacher name
+    let classTeacher = null;
+    if (classDoc?.formTeacherId) {
+      const t = await Teachers.findOne({ id: classDoc.formTeacherId, schoolId })
+        .select('firstName lastName title').lean().catch(() => null);
+      if (t) classTeacher = `${t.title ? t.title + ' ' : ''}${t.firstName} ${t.lastName}`.trim();
+    }
+
+    return ok(res, {
+      student: {
+        id:              studentId,
+        name:            `${student.firstName} ${student.lastName}`,
+        firstName:       student.firstName,
+        admissionNumber: student.admissionNumber,
+        classId:         student.classId,
+        className:       student.className,
+        photo:           student.photo || null,
+        gender:          student.gender,
+        dateOfBirth:     student.dateOfBirth || null,
+      },
+      school: {
+        name: school?.name,
+        academicYear,
+        emergencyOnlineMode: emergencyMode,
+        portalConfig: school?.portalConfig || null,
+      },
+      attendance:       attSummary,
+      feeBalance,
+      feeClearancePct,
+      nextFeeDueDate:   nextDueInvoice?.dueDate ?? null,
+      lessonsCoverage,
+      timetableToday,
+      reportCards,
+      classTeacher,
+      behaviourSummary: { totalPoints, badgeLevel, latestReward, latestComment },
+      upcomingExams:    upcomingExamsDocs,
+      announcements:    announcementsDocs,
+      upcomingEvents:   upcomingEventsDocs,
+    });
+  } catch (err) {
+    console.error('[student-portal GET /dashboard]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   GET /api/student-portal/me  — own profile only
+   ══════════════════════════════════════════════════════════════ */
+router.get('/me', authMiddleware, async (req, res) => {
+  if (!_requireStudent(req, res)) return;
+  try {
+    const { schoolId, studentId } = req.jwtUser;
+    const Students = _model('students');
+    const student  = await Students.findOne({ id: studentId, schoolId }).lean();
+    if (!student) return E.notFound(res, 'Student record not found.');
+    const { __v, _id, ...safe } = student;
+    return ok(res, safe);
+  } catch (err) {
+    console.error('[student-portal GET /me]', err);
+    return E.serverError(res);
+  }
+});
+
+module.exports = router;
