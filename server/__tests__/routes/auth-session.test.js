@@ -64,6 +64,27 @@ jest.mock('../../utils/email', () => ({
   sendTrialExpirySoon:    jest.fn().mockResolvedValue(undefined),
 }));
 
+/* ── Mock SessionService — prevents real DB session writes ──── */
+jest.mock('../../services/sessionService', () => ({
+  createSession:    jest.fn().mockResolvedValue({
+    sessionId:       'sess_test_001',
+    absoluteExpiry:  new Date(Date.now() + 86_400_000).toISOString(),
+  }),
+  terminateSession: jest.fn().mockResolvedValue(true),
+}));
+
+/* ── Mock SecurityService — prevents real rate-limit DB calls ─ */
+jest.mock('../../services/securityService', () => ({
+  checkAccountLock: jest.fn().mockResolvedValue(null),   // null = not locked
+  recordFail:       jest.fn().mockResolvedValue(undefined),
+  clearFail:        jest.fn().mockResolvedValue(undefined),
+}));
+
+/* ── Mock AuditService — prevents noise from non-fatal logging ─ */
+jest.mock('../../services/audit', () => ({
+  log: jest.fn().mockResolvedValue(undefined),
+}));
+
 /* ── Mock _model — returns test doubles for users + schools ─── */
 let mockUserDoc = null;  // set per test
 
@@ -87,6 +108,8 @@ jest.mock('../../utils/model', () => {
       }
       return {
         findOne:   jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }),
+        find:      jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }),
+        create:    jest.fn().mockResolvedValue({ _id: 'mock_id' }),
         updateOne: mockUpdateOne,
       };
     }),
