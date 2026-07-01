@@ -14,15 +14,13 @@ const { ok, created, E } = require('../utils/response');
 
 const router = express.Router();
 
-const VALID_SECTIONS = ['kg', 'primary', 'secondary', 'alevel', 'all'];
-
 /* ── Validation ─────────────────────────────────────────────── */
 const SubjectSchema = z.object({
   name:         z.string().min(1).max(100).trim(),
   code:         z.string().min(1).max(20).trim().toUpperCase(),
   shortName:    z.string().max(50).trim().optional(),
   departmentId: z.string().min(1),
-  sections:     z.array(z.enum(['kg','primary','secondary','alevel','all'])).optional().default(['all']),
+  sections:     z.array(z.string().min(1)).optional().default(['all']),
   isCompulsory: z.boolean().optional().default(false),
   color:        z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional().nullable(),
   order:        z.number().int().min(0).optional().default(0),
