@@ -19,6 +19,7 @@ import {
   students       as studentsApi,
   studentSubjects as enrollApi,
 } from '@/api/client.js';
+import { useSections } from '@/hooks/useSections.js';
 
 const SECTION_BADGE = {
   primary:   'bg-blue-100 text-blue-700',
@@ -31,6 +32,7 @@ const SECTION_LABELS = { kg: 'KG', primary: 'Primary', secondary: 'Secondary', a
 
 export default function EnrollmentTab({ flash }) {
   const qc = useQueryClient();
+  const { sections: schoolSections } = useSections();
   const [classId,    setClassId]    = useState('');
   const [subjectId,  setSubjectId]  = useState('');
   const [search,     setSearch]     = useState('');
@@ -98,7 +100,13 @@ export default function EnrollmentTab({ flash }) {
     acc[key].push(c);
     return acc;
   }, {});
-  const sectionOrder = ['kg','primary','secondary','alevel','other'];
+  const knownSectionKeys = new Set(schoolSections.map(s => s.key));
+  const sectionLabelMap  = Object.fromEntries(schoolSections.map(s => [s.key, s.name]));
+  const sectionOrder = [
+    ...schoolSections.map(s => s.key),
+    ...Object.keys(classBySection).filter(k => !knownSectionKeys.has(k) && k !== 'other'),
+    'other',
+  ];
 
   /* ── actions ─────────────────────────────────────────────── */
   function invalidateCounts() { qc.invalidateQueries({ queryKey: ['student-subjects-counts'] }); }
@@ -109,7 +117,7 @@ export default function EnrollmentTab({ flash }) {
       await enrollApi.enroll({ studentId, subjectId });
       refetchEnroll(); invalidateCounts(); setSearch('');
       flash('Student enrolled');
-    } catch (err) { flash(err.extra?.error || err.message || 'Enroll failed', 'error'); }
+    } catch (err) { flash(err.message || 'Enroll failed', 'error'); }
     finally { setEnrolling(null); }
   }
 
@@ -119,7 +127,7 @@ export default function EnrollmentTab({ flash }) {
       await enrollApi.unenroll(enrollmentId);
       refetchEnroll(); invalidateCounts();
       flash('Student unenrolled');
-    } catch (err) { flash(err.extra?.error || err.message || 'Unenroll failed', 'error'); }
+    } catch (err) { flash(err.message || 'Unenroll failed', 'error'); }
     finally { setUnenrolling(null); }
   }
 
@@ -129,7 +137,7 @@ export default function EnrollmentTab({ flash }) {
       const r = await enrollApi.bulk({ subjectId, classId });
       refetchEnroll(); invalidateCounts();
       flash(r?.message ?? `${selectedClass?.name} enrolled in ${selectedSubject?.subject?.name}`);
-    } catch (err) { flash(err.extra?.error || err.message || 'Bulk enroll failed', 'error'); }
+    } catch (err) { flash(err.message || 'Bulk enroll failed', 'error'); }
     finally { setBulking(false); }
   }
 
@@ -151,8 +159,9 @@ export default function EnrollmentTab({ flash }) {
             {sectionOrder.map(sec => {
               const group = classBySection[sec];
               if (!group?.length) return null;
+              const label = sectionLabelMap[sec] ?? SECTION_LABELS[sec] ?? sec;
               return (
-                <optgroup key={sec} label={SECTION_LABELS[sec] ?? sec}>
+                <optgroup key={sec} label={label}>
                   {group.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </optgroup>
               );

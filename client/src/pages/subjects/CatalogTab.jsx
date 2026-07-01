@@ -336,19 +336,19 @@ function EnrollSlideOver({ subject, onClose, flash }) {
     if (!classId) return;
     setBulking(true);
     try { const r = await enrollApi.bulk({ subjectId: subject.id, classId }); refetch(); invalidateCounts(); flash(r.message ?? 'Class enrolled'); }
-    catch (err) { flash(err.extra?.error || err.message || 'Bulk enroll failed', 'error'); }
+    catch (err) { flash(err.message || 'Bulk enroll failed', 'error'); }
     finally { setBulking(false); }
   }
   async function handleEnroll(studentId) {
     setEnrollingId(studentId);
     try { await enrollApi.enroll({ studentId, subjectId: subject.id }); refetch(); invalidateCounts(); setStudentSearch(''); }
-    catch (err) { flash(err.extra?.error || err.message || 'Enroll failed', 'error'); }
+    catch (err) { flash(err.message || 'Enroll failed', 'error'); }
     finally { setEnrollingId(null); }
   }
   async function handleUnenroll(enrollmentId) {
     setUnenrollingId(enrollmentId);
     try { await enrollApi.unenroll(enrollmentId); refetch(); invalidateCounts(); }
-    catch (err) { flash(err.extra?.error || err.message || 'Unenroll failed', 'error'); }
+    catch (err) { flash(err.message || 'Unenroll failed', 'error'); }
     finally { setUnenrollingId(null); }
   }
 

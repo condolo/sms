@@ -92,7 +92,7 @@ function ComposeSlideOver({ open, onClose, onSent }) {
       onSent?.();
       onClose();
     } catch (err) {
-      setError(err.extra?.error || err.message || 'Failed to send message');
+      setError(err.message || 'Failed to send message');
     } finally {
       setSending(false);
     }
@@ -397,7 +397,7 @@ export default function MessagesPage() {
       qc.invalidateQueries({ queryKey: ['messages'] });
       flash('Message deleted');
     },
-    onError: err => flash(err.extra?.error || err.message || 'Delete failed', 'error'),
+    onError: err => flash(err.message || 'Delete failed', 'error'),
   });
 
   /* ── select a message ────────────────────────────────────── */

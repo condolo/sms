@@ -21,6 +21,7 @@ import {
   departments    as deptsApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
+import { useSections } from '@/hooks/useSections.js';
 
 /* ── helpers ─────────────────────────────────────────────── */
 const SECTION_LABELS = { kg: 'KG', primary: 'Primary', secondary: 'Secondary', alevel: 'A-Level', all: 'All' };
@@ -110,6 +111,7 @@ export default function CurriculumTab({ flash }) {
   const role     = useAuthStore(s => s.session?.user?.role ?? '');
   const editable = canEdit(role);
   const qc       = useQueryClient();
+  const { sections: schoolSections } = useSections();
 
   const [classId,  setClassId]  = useState('');
   const [deptFilter, setDeptFilter] = useState('all');
@@ -165,7 +167,7 @@ export default function CurriculumTab({ flash }) {
       qc.invalidateQueries({ queryKey: ['subjects-with-curriculum', classId] });
       flash('Subject added to curriculum');
     } catch (err) {
-      flash(err.extra?.error || err.message || 'Failed to add subject', 'error');
+      flash(err.message || 'Failed to add subject', 'error');
     } finally { setAdding(null); }
   }
 
@@ -176,7 +178,7 @@ export default function CurriculumTab({ flash }) {
       qc.invalidateQueries({ queryKey: ['subjects-with-curriculum', classId] });
       flash('Subject removed from curriculum');
     } catch (err) {
-      flash(err.extra?.error || err.message || 'Cannot remove — students may still be enrolled', 'error');
+      flash(err.message || 'Cannot remove — students may still be enrolled', 'error');
     } finally { setRemoving(null); }
   }
 
@@ -186,19 +188,18 @@ export default function CurriculumTab({ flash }) {
       await csApi.update(classSubjectId, { isCompulsoryForClass: newValue });
       qc.invalidateQueries({ queryKey: ['subjects-with-curriculum', classId] });
     } catch (err) {
-      flash(err.extra?.error || err.message || 'Update failed', 'error');
+      flash(err.message || 'Update failed', 'error');
     } finally { setToggling(null); }
   }
 
   async function handleBulkAddSection() {
-    // Add all compatible subjects not yet in curriculum
     if (available.length === 0) return;
     try {
       await csApi.bulk({ classId, subjects: available.map(s => ({ subjectId: s.id, isCompulsoryForClass: false })) });
       qc.invalidateQueries({ queryKey: ['subjects-with-curriculum', classId] });
       flash(`Added ${available.length} subject${available.length !== 1 ? 's' : ''} to curriculum`);
     } catch (err) {
-      flash(err.extra?.error || err.message || 'Bulk add failed', 'error');
+      flash(err.message || 'Bulk add failed', 'error');
     }
   }
 
@@ -210,7 +211,15 @@ export default function CurriculumTab({ flash }) {
     return acc;
   }, {});
 
-  const sectionOrder = ['kg','primary','secondary','alevel','other'];
+  // Build section order from school-defined sections (respects admin ordering),
+  // then any custom keys not in that list, with 'other' always last.
+  const knownSectionKeys = new Set(schoolSections.map(s => s.key));
+  const sectionLabelMap  = Object.fromEntries(schoolSections.map(s => [s.key, s.name]));
+  const sectionOrder = [
+    ...schoolSections.map(s => s.key),
+    ...Object.keys(classBySection).filter(k => !knownSectionKeys.has(k) && k !== 'other'),
+    'other',
+  ];
 
   /* ── render ─────────────────────────────────────────────── */
   return (
@@ -229,8 +238,9 @@ export default function CurriculumTab({ flash }) {
             {sectionOrder.map(sec => {
               const group = classBySection[sec];
               if (!group?.length) return null;
+              const label = sectionLabelMap[sec] ?? SECTION_LABELS[sec] ?? sec;
               return (
-                <optgroup key={sec} label={SECTION_LABELS[sec] ?? sec}>
+                <optgroup key={sec} label={label}>
                   {group.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </optgroup>
               );
