@@ -251,6 +251,7 @@ app.use('/api/growth-projects',        require('./routes/growth-projects'));
 // Aspirations accessible at /api/growth-recommendations/aspirations/:studentId
 app.use('/api/growth-recommendations', require('./routes/growth-recommendations'));
 app.use('/api/ops',                    require('./routes/ops'));
+app.use('/api/audit',                  require('./routes/audit'));
 
 /* ── School-facing announcement routes (JWT auth, not platform key) ── */
 const { authMiddleware } = require('./middleware/auth');

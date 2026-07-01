@@ -7,6 +7,7 @@ const crypto   = require('crypto');
 const mongoose = require('mongoose');
 const bcrypt   = require('bcryptjs');
 const { platformAdmin } = require('../middleware/auth');
+const AuditService      = require('../services/audit');
 const { sign } = require('../utils/jwt');
 const email    = require('../utils/email');
 
@@ -258,7 +259,6 @@ router.post('/schools/:id/impersonate', async (req, res) => {
   try {
     const School   = _model('schools');
     const User     = _model('users');
-    const AuditLog = _model('platform_audit_log');
 
     /* Support both MongoDB _id and custom id string */
     const rid = req.params.id;
@@ -291,16 +291,7 @@ router.post('/schools/:id/impersonate', async (req, res) => {
       impersonated: true
     });
 
-    /* Audit log — non-fatal: a logging failure must never block the response */
-    AuditLog.create({
-      action:      'impersonate',
-      schoolId:    resolvedSchoolId,
-      schoolName:  school.name,
-      targetEmail: admin.email,
-      ip:          req.ip,
-      userAgent:   req.headers['user-agent'] || '',
-      at:          new Date(),
-    }).catch(err => console.error('[audit] impersonate log failed:', err.message));
+    AuditService.log({ action: 'platform.impersonate', actor: { userId: 'platform', role: 'platform', email: null }, schoolId: resolvedSchoolId, target: { type: 'school', id: resolvedSchoolId, label: school.name }, details: { targetEmail: admin.email }, req });
 
     /* Merge schoolName into the user object so the React SPA sidebar can display it */
     res.json({

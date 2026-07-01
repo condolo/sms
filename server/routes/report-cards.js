@@ -35,6 +35,7 @@ const { ok, created, paginate, parsePagination, E } = require('../utils/response
 const { rankStudents, mergeRankings, bestPerSubject, computeRankingScore } = require('../utils/ranking');
 const { mergeConfig }    = require('./academic-config');
 const { isYearArchived } = require('../utils/archival');
+const AuditService       = require('../services/audit');
 const {
   aggregateGrades,
   aggregateExamResults,
@@ -580,6 +581,7 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
     }
 
     console.log(`[REPORT-CARDS] Batch ${batchId}: ${newSnaps.length} published (${finalStatus}) by ${userId}`);
+    AuditService.log({ action: 'report_card.publish', actor: req.jwtUser, schoolId, target: { type: 'class', id: classId, label: className }, details: { batchId, termId, studentCount: newSnaps.length, status: finalStatus }, req });
     return ok(res, response, null, 201);
 
   } catch (err) {

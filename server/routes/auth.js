@@ -10,6 +10,7 @@ const rateLimit  = require('express-rate-limit');
 const email      = require('../utils/email');
 const SessionService       = require('../services/sessionService');
 const { revokeUserTokens } = require('../utils/token-version');
+const AuditService         = require('../services/audit');
 
 const router = express.Router();
 
@@ -279,6 +280,8 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
 
     // Update last login
     await _model('users').updateOne({ _id: user._id }, { lastLogin: new Date().toISOString() });
+
+    AuditService.log({ action: 'auth.login', actor: { userId: user.id, role: userRole, email: user.email }, schoolId: req.school.id, req });
 
     // Create platform session record (device tracking, admin revocation, audit trail)
     const { sessionId, absoluteExpiry } = await SessionService.createSession(

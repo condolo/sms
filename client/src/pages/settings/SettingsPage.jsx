@@ -17,7 +17,7 @@ import {
   Bell, MessageSquare, BookOpen, Calendar, CalendarDays, Clock,
   Upload, ImageIcon, KeyRound, Copy,
   PlusCircle, ChevronRight, AlertCircle, Archive,
-  MonitorPlay, WifiOff, LayoutTemplate,
+  MonitorPlay, WifiOff, LayoutTemplate, ClipboardList,
 } from 'lucide-react';
 import RCTemplatesSection from './RCTemplatesSection.jsx';
 import { sections as sectionsApi, teachers as teachersApi } from '@/api/client.js';
@@ -36,6 +36,7 @@ const TABS = [
   { id: 'rc_templates',   label: 'Report Templates',    Icon: LayoutTemplate, adminOnly: true  },
   { id: 'notifications',  label: 'Notifications',       Icon: Bell,           adminOnly: true  },
   { id: 'system',         label: 'System',              Icon: Database,       adminOnly: true  },
+  { id: 'audit_log',      label: 'Audit Log',           Icon: ClipboardList,  adminOnly: true  },
   { id: 'account',        label: 'Account',             Icon: User,           adminOnly: false },
 ];
 
@@ -4893,6 +4894,120 @@ function ModulesTab() {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   AUDIT LOG TAB
+   ══════════════════════════════════════════════════════════════ */
+const SEVERITY_BADGE = {
+  info:     'bg-sky-100 text-sky-700',
+  warn:     'bg-amber-100 text-amber-700',
+  critical: 'bg-red-100 text-red-700',
+};
+
+function AuditLogTab() {
+  const [page, setPage]         = useState(1);
+  const [action, setAction]     = useState('');
+  const [severity, setSeverity] = useState('');
+  const [from, setFrom]         = useState('');
+  const [to, setTo]             = useState('');
+
+  const params = new URLSearchParams({ page, limit: 50, ...(action && { action }), ...(severity && { severity }), ...(from && { from }), ...(to && { to }) }).toString();
+
+  const { data: actionsData } = useQuery({
+    queryKey: ['audit-actions'],
+    queryFn: () => fetch('/api/audit/actions', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(r => r.json()),
+    staleTime: Infinity,
+  });
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['audit-logs', page, action, severity, from, to],
+    queryFn: () => fetch(`/api/audit?${params}`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(r => r.json()),
+    staleTime: 30_000,
+    keepPreviousData: true,
+  });
+
+  const logs       = data?.data ?? [];
+  const pagination = data?.pagination;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold text-slate-800">Audit Log</h2>
+        <p className="text-sm text-slate-500 mt-1">High-impact actions performed by users in your school, in reverse chronological order.</p>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3">
+        <select value={action} onChange={e => { setAction(e.target.value); setPage(1); }} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <option value="">All actions</option>
+          {(actionsData?.data ?? []).map(a => (
+            <option key={a.action} value={a.action}>{a.action}</option>
+          ))}
+        </select>
+        <select value={severity} onChange={e => { setSeverity(e.target.value); setPage(1); }} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <option value="">All severities</option>
+          <option value="info">Info</option>
+          <option value="warn">Warn</option>
+          <option value="critical">Critical</option>
+        </select>
+        <input type="date" value={from} onChange={e => { setFrom(e.target.value); setPage(1); }} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" title="From date" />
+        <input type="date" value={to} onChange={e => { setTo(e.target.value); setPage(1); }} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" title="To date" />
+        {(action || severity || from || to) && (
+          <button onClick={() => { setAction(''); setSeverity(''); setFrom(''); setTo(''); setPage(1); }} className="text-sm text-slate-500 hover:text-slate-700 px-3 py-2 rounded-lg border border-slate-200 bg-white">Clear filters</button>
+        )}
+      </div>
+
+      {/* Table */}
+      {isLoading ? (
+        <div className="flex items-center gap-2 text-slate-400 py-8"><Loader2 className="w-4 h-4 animate-spin" />Loading…</div>
+      ) : isError ? (
+        <div className="text-red-500 text-sm py-4">Failed to load audit logs. Please try again.</div>
+      ) : logs.length === 0 ? (
+        <div className="text-slate-400 text-sm py-8 text-center">No audit events found.</div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-100 text-xs font-medium text-slate-500 uppercase tracking-wide">
+                <th className="text-left px-4 py-3">Time</th>
+                <th className="text-left px-4 py-3">Action</th>
+                <th className="text-left px-4 py-3">Severity</th>
+                <th className="text-left px-4 py-3">Actor</th>
+                <th className="text-left px-4 py-3">Target</th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map((log, i) => (
+                <tr key={log._id ?? i} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                  <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{new Date(log.createdAt).toLocaleString()}</td>
+                  <td className="px-4 py-3 font-mono text-slate-700">{log.action}</td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${SEVERITY_BADGE[log.severity] ?? 'bg-slate-100 text-slate-600'}`}>
+                      {log.severity}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-slate-600">{log.actor?.email ?? log.actor?.userId ?? '—'}</td>
+                  <td className="px-4 py-3 text-slate-500">{log.target?.label ?? log.target?.id ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Pagination */}
+      {pagination && pagination.pages > 1 && (
+        <div className="flex items-center justify-between text-sm text-slate-500">
+          <span>Page {pagination.page} of {pagination.pages} ({pagination.total} events)</span>
+          <div className="flex gap-2">
+            <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white disabled:opacity-40">Previous</button>
+            <button disabled={page >= pagination.pages} onClick={() => setPage(p => p + 1)} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white disabled:opacity-40">Next</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
    MAIN PAGE
    ══════════════════════════════════════════════════════════════ */
 export default function SettingsPage() {
@@ -4947,6 +5062,7 @@ export default function SettingsPage() {
             {tab === 'rc_templates'   && <RCTemplatesSection />}
             {tab === 'notifications'  && <NotificationsTab />}
             {tab === 'system'         && <SystemTab />}
+            {tab === 'audit_log'      && <AuditLogTab />}
             {tab === 'account'        && <AccountTab />}
           </motion.div>
         </AnimatePresence>

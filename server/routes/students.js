@@ -18,6 +18,7 @@ const { _model }                = require('../utils/model');
 const { nextAdmissionNumber, reserveAdmissionNumbers } = require('../utils/counters');
 const { ok, created, fail, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
+const AuditService            = require('../services/audit');
 
 const router = express.Router();
 const PLAN   = planGate('students');
@@ -380,6 +381,7 @@ router.delete('/:id', authMiddleware, PLAN, rbac('students', 'delete'), async (r
     }
 
     if (!doc) return E.notFound(res, 'Student not found');
+    AuditService.log({ action: 'student.deleted', actor: req.jwtUser, schoolId, target: { type: 'student', id: req.params.id, label: `${doc.firstName} ${doc.lastName}` }, req });
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) {
     console.error('[students DELETE/:id]', err);
@@ -812,6 +814,7 @@ router.patch('/:id/deactivate', authMiddleware, PLAN, rbac('students', 'update')
     );
 
     console.log(`[students] Deactivated ${req.params.id} (${doc.firstName} ${doc.lastName}) → ${finalStatus} by ${userId}`);
+    AuditService.log({ action: 'student.deactivated', actor: req.jwtUser, schoolId, target: { type: 'student', id: req.params.id, label: `${doc.firstName} ${doc.lastName}` }, details: { status: finalStatus, reason }, req });
     return ok(res, { id: req.params.id, status: finalStatus, reason, deactivatedAt: effectiveDate || now });
   } catch (err) {
     console.error('[students PATCH/:id/deactivate]', err);

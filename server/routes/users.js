@@ -14,6 +14,7 @@ const { authMiddleware }   = require('../middleware/auth');
 const { _model }           = require('../utils/model');
 const { revokeUserTokens } = require('../utils/token-version');
 const email                = require('../utils/email');
+const AuditService         = require('../services/audit');
 
 const router = express.Router();
 
@@ -252,6 +253,7 @@ router.post('/:id/role-change', authMiddleware, async (req, res) => {
       changedBy:   req.jwtUser.email
     });
 
+    AuditService.log({ action: 'user.role_changed', actor: req.jwtUser, schoolId: req.jwtUser.schoolId, target: { type: 'user', id: user.id, label: user.email }, details: { oldRole: oldRole || user.role, newRole, note }, req });
     res.json({ success: true });
   } catch (err) {
     console.error('[users/role-change]', err);

@@ -38,6 +38,20 @@ const INDEXES = [
     ],
   },
 
+  /* ── audit_logs ─────────────────────────────────────────────
+     Append-only. Primary query: school + date desc.
+     Secondary: filter by action, actor, severity. */
+  {
+    col: 'audit_logs',
+    indexes: [
+      { key: { schoolId: 1, createdAt: -1 }, name: 'al_school_date' },
+      { key: { action: 1,   createdAt: -1 }, name: 'al_action_date' },
+      { key: { 'actor.userId': 1 },          name: 'al_actor' },
+      { key: { severity: 1,  createdAt: -1 }, name: 'al_severity_date' },
+      { key: { createdAt: -1 },               name: 'al_date_desc' },
+    ],
+  },
+
   /* ── release_certificates ───────────────────────────────────
      Append-only audit trail of every release certification.
      certId is globally unique; version indexed for trend queries. */
