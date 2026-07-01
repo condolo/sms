@@ -6,6 +6,205 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.59.0',
+    date: '2026-07-01',
+    label: 'AuditService — Governance Subsystem Foundation',
+    changes: [
+      { type: 'new', text: 'AuditService (server/services/audit.js) — append-only audit log with non-fatal log() and paginated query(). A broken audit log never blocks a school workflow.' },
+      { type: 'new', text: '16-action catalogue: auth.login, auth.login_failed, user.role_changed, student.deleted, student.deactivated, report_card.publish, platform.impersonate, and more — each with a default severity (info / warn / critical).' },
+      { type: 'new', text: 'GET /api/audit — filterable by action, severity, actor, and date range. School admins see only their school; superadmin gets platform-wide view.' },
+      { type: 'new', text: 'Settings → Audit Log tab — admin-only view with filter bar (action, severity, date range) and paginated table showing time, action, severity badge, actor, and target.' },
+      { type: 'new', text: 'Platform Console → Recent Critical Events — superadmin section showing last 20 critical events across all schools.' },
+      { type: 'improvement', text: 'auth.login instrumented — every successful login now recorded with actor, school, IP, and user-agent.' },
+      { type: 'improvement', text: 'student.deleted and student.deactivated instrumented on the student soft-delete and deactivate routes.' },
+      { type: 'improvement', text: 'report_card.publish instrumented — batch publish records batchId, class, term, and student count.' },
+      { type: 'improvement', text: 'platform.impersonate instrumented — replaces the old ad-hoc platform_audit_log collection write with the formal AuditService.' },
+      { type: 'improvement', text: 'user.role_changed instrumented on the role-change notification route.' },
+    ],
+  },
+  {
+    version: '4.58.0',
+    date: '2026-06-19',
+    label: 'DataScope Engine — Third Authorization Layer',
+    changes: [
+      { type: 'new', text: 'DataScope engine (scopeMiddleware + ScopeEngine) — third authorization layer that sits after RBAC and determines which records within a permitted module the user can see, based on teaching assignments.' },
+      { type: 'new', text: 'Teachers see only students, attendance, and grades for their assigned classes. A teacher with zero assignments sees zero records.' },
+      { type: 'new', text: 'ScopeEngine.applyToFilter(req, module, filter) — single call that enforces scope on any MongoDB filter. Supports students, classes, attendance, grades, assessment, report_cards, growth_records, lessons, exams, timetable.' },
+      { type: 'new', text: 'Behaviour, events, messages, and announcements are scope-exempt — teachers can act across the whole school for these modules.' },
+      { type: 'improvement', text: 'Scope cache invalidates immediately when teaching assignments are created, updated, or deleted — no stale data window on assignment changes.' },
+      { type: 'improvement', text: 'Frontend receives meta.noAssignments: true when a teacher has no classes configured, instead of a silent empty list.' },
+    ],
+  },
+  {
+    version: '4.57.0',
+    date: '2026-06-19',
+    label: 'Settings Fully Governed — RBAC Coverage 80.18%',
+    changes: [
+      { type: 'improvement', text: 'All 22 Settings endpoints converted from scattered inline admin checks to formal rbac() middleware — settings module is now tracked by the CI coverage gate.' },
+      { type: 'improvement', text: 'RBAC coverage: 73.48% → 80.18% (+6.70%). 263 governed endpoints.' },
+      { type: 'fix', text: 'Removed _isAdmin() helper — all callers now use rbac() middleware. No behaviour change for end users.' },
+    ],
+  },
+  {
+    version: '4.56.0',
+    date: '2026-06-19',
+    label: 'Fix: School Tab Hidden from Non-Admin Users',
+    changes: [
+      { type: 'fix', text: 'Settings → School tab was visible to teachers and other non-admin roles. Changed adminOnly flag to true — only admin and superadmin can see it.' },
+      { type: 'fix', text: 'Non-admin users opening Settings now land on the Account tab instead of a blank inactive School tab.' },
+    ],
+  },
+  {
+    version: '4.55.0',
+    date: '2026-06-19',
+    label: 'Risk Classification + Eight Production-Readiness Gates',
+    changes: [
+      { type: 'new', text: 'Eight Production-Readiness Gates defined in PLATFORM_ROADMAP.md: functional correctness, authentication, RBAC, tenant isolation, audit logging, rate limiting, regression tests, platform health. Critical endpoints require all 8.' },
+      { type: 'new', text: 'Risk classifier assigns critical/high/medium/low to every endpoint based on path, method, and pattern. 107 critical, 92 high, 155 medium, 96 low.' },
+      { type: 'improvement', text: 'Platform Architecture Manifest now shows risk level per endpoint and a critical-gaps list — highest-priority Sprint 1 targets.' },
+    ],
+  },
+  {
+    version: '4.54.0',
+    date: '2026-06-19',
+    label: 'Platform Maturity Roadmap + Engineering Tooling',
+    changes: [
+      { type: 'new', text: 'PLATFORM_ROADMAP.md — 6-phase platform maturity plan (Security → Accountability → Authorization → Governance → Observability → Enterprise). Primary Sprint 1 target: AuditService.' },
+      { type: 'new', text: 'npm run platform:health — unified platform health check. Reports RBAC coverage, audit status, rate limiting, tenant isolation, identity health. Exits 1 on critical failures.' },
+      { type: 'new', text: 'RBAC coverage history log (.rbac-history) — tracks quality metrics per release so progress is visible over time.' },
+      { type: 'improvement', text: 'platform:coverage, platform:manifest, platform:health npm scripts added for operator and CI use.' },
+    ],
+  },
+  {
+    version: '4.53.0',
+    date: '2026-06-19',
+    label: 'Sprint 0 Sign-off: Non-Regression Gate + Security Manifest',
+    changes: [
+      { type: 'new', text: 'RBAC non-regression ratchet — CI blocks any push that drops coverage below the committed baseline. Once improved, the floor can only go up.' },
+      { type: 'new', text: 'Platform Architecture Manifest (generate-endpoint-inventory.js) — every endpoint classified with rbac, tenant scope, audit status, plan gate. Current: 407/450 tenant-scoped, 0/450 audit-logged.' },
+      { type: 'improvement', text: 'Identity repair framework generalised to cover teachers and students — links userId fields and back-fills missing permissions for schools onboarded before hr/analytics modules existed.' },
+    ],
+  },
+  {
+    version: '4.52.0',
+    date: '2026-06-19',
+    label: 'Security Integrity Audit Sprint 0: RBAC Hardening',
+    changes: [
+      { type: 'fix', text: 'Finance: wrong permission action on fee-structure edit (create → update) — roles with only update permission were incorrectly blocked.' },
+      { type: 'improvement', text: 'HR, assessment, timetable, analytics, report-cards, students, and import/export: replaced scattered inline role-Set checks with formal rbac() middleware.' },
+      { type: 'fix', text: 'Import/export: any authenticated user could bulk-import or export all school data. Now gated by RBAC per resource type.' },
+      { type: 'improvement', text: 'Teacher import now auto-links userId back to the teachers collection so teacher-facing routes resolve correctly on first use.' },
+      { type: 'improvement', text: 'Permissions sync uses per-field $set — non-RBAC modules (library, hostel, transport) are no longer wiped when an admin saves the Roles tab.' },
+    ],
+  },
+  {
+    version: '4.51.0',
+    date: '2026-06-16',
+    label: 'Bulk Student Portal Access',
+    changes: [
+      { type: 'new', text: 'Bulk portal account creation — select multiple students in the list and grant portal access in one action. Returns created/skipped/error counts.' },
+      { type: 'new', text: 'Portal account badge on student rows (key icon) when a student has an active portal login.' },
+      { type: 'improvement', text: 'Demo school now ships with 5 student logins and 5 parent logins pre-seeded for realistic portal testing.' },
+    ],
+  },
+  {
+    version: '4.50.0',
+    date: '2026-06-16',
+    label: 'Configurable Staff Roles & Responsibilities',
+    changes: [
+      { type: 'new', text: 'Schools can define their own staff responsibility labels (HOD, Form Teacher, KS Coordinator, Pastoral Lead, etc.) in Settings → School.' },
+      { type: 'improvement', text: 'HR staff forms and staff cards use the school\'s custom responsibility list instead of a hardcoded set. Old labels display correctly via a legacy fallback map.' },
+    ],
+  },
+  {
+    version: '4.49.0',
+    date: '2026-06-16',
+    label: 'Enforce Unique Teacher Email at Database Level',
+    changes: [
+      { type: 'improvement', text: 'Compound unique index {schoolId, email} added to teachers collection — email uniqueness is now enforced at the DB level, not just application level, closing any race-condition gap.' },
+    ],
+  },
+  {
+    version: '4.48.0',
+    date: '2026-06-16',
+    label: 'Teacher Import: Auto-Create Login Accounts',
+    changes: [
+      { type: 'new', text: 'Teacher CSV import now automatically creates a login account and sends a welcome email for each imported teacher. usersCreated count returned in the import summary.' },
+      { type: 'improvement', text: 'Login account creation is non-fatal — teacher records are preserved even if the email step fails. Admin can re-invite manually from Settings.' },
+    ],
+  },
+  {
+    version: '4.47.0',
+    date: '2026-06-16',
+    label: 'Students: Rich Filters + Filtered CSV Export',
+    changes: [
+      { type: 'new', text: 'Filter students by Section and Enrolment Year in the student list. Active filters shown as dismissible chips.' },
+      { type: 'improvement', text: 'CSV export now respects all active filters — what you see on screen is what gets exported. Filename encodes the active filter set.' },
+      { type: 'new', text: 'Section and Stream Name columns added to the student CSV export.' },
+    ],
+  },
+  {
+    version: '4.46.0',
+    date: '2026-06-16',
+    label: 'Classes & Streams Two-Level Architecture',
+    changes: [
+      { type: 'new', text: 'Classes now represent year groups; Streams are teaching groups within a class (e.g. Year 7 → Stream A, B, East). Each stream has its own teacher, room, and capacity.' },
+      { type: 'new', text: 'Class detail page (/classes/:id) shows all streams with teacher, capacity fill bar, and student count. Add streams inline.' },
+      { type: 'improvement', text: 'Student add form cascades class → stream selection. Stream filter available when a class filter is active.' },
+      { type: 'improvement', text: 'Student CSV import now supports streamName column and records streamId on the student.' },
+    ],
+  },
+  {
+    version: '4.45.0',
+    date: '2026-06-16',
+    label: 'Students: Bulk Select, Deactivate & Permanent Delete',
+    changes: [
+      { type: 'new', text: 'Bulk selection in student list — select all on page or individual rows. Bulk action bar shows count with Deactivate and Permanently Delete options.' },
+      { type: 'new', text: 'Permanent delete (admin only) cascades to invoices and payments. Requires explicit confirmation modal.' },
+      { type: 'improvement', text: 'Deactivate icon changed to UserMinus (amber hover) to visually distinguish it from delete.' },
+    ],
+  },
+  {
+    version: '4.44.0',
+    date: '2026-06-16',
+    label: 'Import: Opening Balances for Students & Finance',
+    changes: [
+      { type: 'new', text: 'Student CSV import supports opening fee columns — openingFeeTitle, openingFeeAmount, openingFeePaid, openingFeeDueDate. Creates an invoice and payment record per student.' },
+      { type: 'new', text: 'Finance CSV import supports amountPaid column — creates a matching payment record so the balance stays consistent with the payments collection.' },
+    ],
+  },
+  {
+    version: '4.43.0',
+    date: '2026-06-15',
+    label: 'Landing: Full 21-Module Ecosystem Grid',
+    changes: [
+      { type: 'fix', text: 'Ecosystem grid corrected to 21 real modules — removed the non-existent Sport module; added Teachers, Exams, Subjects, Messages, Events, HR & Staff, eLearning.' },
+      { type: 'improvement', text: 'Click-panel content (tagline, outcomes, results, badges, connected modules) added for all 7 new modules.' },
+    ],
+  },
+  {
+    version: '4.42.0',
+    date: '2026-06-14',
+    label: 'Public Site: SEO, Pre-render, WhatsApp FAB, Mobile Nav',
+    changes: [
+      { type: 'new', text: 'robots.txt, sitemap.xml, per-page meta/OG/Twitter tags, and JSON-LD structured data (SoftwareApplication, FAQPage, PriceSpecification) on all 6 public pages.' },
+      { type: 'new', text: 'SSG pre-render script — Puppeteer renders all public routes to static HTML so AI crawlers (GPTBot, ClaudeBot, PerplexityBot) see real content without JavaScript.' },
+      { type: 'new', text: 'WhatsApp floating action button added to FAQ, Plans, Contact, Privacy Policy, and Terms pages.' },
+      { type: 'new', text: 'Mobile hamburger menu on Landing navbar — animated dropdown with all nav links, Login, and Book Demo. Closes on scroll.' },
+      { type: 'improvement', text: 'Public-facing copy updated from "Kenyan" to "African" to reflect the platform\'s broader target market.' },
+    ],
+  },
+  {
+    version: '4.41.0',
+    date: '2026-06-13',
+    label: 'Landing Refactor + FAQ Page',
+    changes: [
+      { type: 'new', text: '/faq route — full FAQ page with categorized accordion, sticky desktop category nav, JSON-LD schema, WhatsApp CTA, and footer.' },
+      { type: 'new', text: 'FAQ teaser section added to Landing between the Trust section and Final CTA.' },
+      { type: 'improvement', text: 'Landing.jsx refactored from a 2100-line monolith into modular components and data files — easier to maintain and extend.' },
+    ],
+  },
+  {
     version: '4.40.0',
     date: '2026-06-23',
     label: 'Permission-Aware Dashboard & Teacher Portal Integration',
