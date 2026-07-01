@@ -130,7 +130,7 @@ router.delete('/:id', authMiddleware, PLAN, rbac('growth_profile', 'delete'), as
 });
 
 /* ── PATCH /api/growth-projects/:id/verify ──────────────────── */
-router.patch('/:id/verify', authMiddleware, PLAN, async (req, res) => {
+router.patch('/:id/verify', authMiddleware, PLAN, async (req, res) => { // rbac: staff/admin (inline role check)
   try {
     const { schoolId, userId, role } = req.jwtUser;
 

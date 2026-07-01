@@ -184,7 +184,7 @@ const AnnounceSittingSchema = z.object({
   termLabel:       z.string().optional(),
 });
 
-router.post('/announce', authMiddleware, PLAN, async (req, res) => {
+router.post('/announce', authMiddleware, PLAN, async (req, res) => { // rbac: teacher-only (inline role check)
   try {
     const { schoolId, userId, role } = req.jwtUser;
     if (role !== 'teacher') {

@@ -15,6 +15,8 @@ const ALLOWLISTED_FILES = new Set([
   'auth.js', 'mpesa.js', 'platform.js', 'public.js', 'portals.js',
   'sync.js', 'onboard.js', 'backup.js', 'billing.js', 'health.js',
   'parent-portal.js', 'student-portal.js',
+  // teacher-portal uses _requireTeacher() role guard — same portal pattern
+  'teacher-portal.js',
 ]);
 
 const OWN_ACCOUNT_PATTERNS = [
@@ -25,7 +27,14 @@ const OWN_ACCOUNT_PATTERNS = [
 ];
 
 const ROUTE_RE = /router\.(get|post|put|patch|delete)\s*\(\s*['"`]([^'"`]+)['"`]/g;
-const RBAC_RE  = /rbac\s*\(|\/[/*] rbac:/;
+// Recognised protection patterns:
+//   rbac(         — standard RBAC middleware
+//   // rbac:      — manual annotation for intentional non-rbac guards
+//   planGate(     — plan-tier gate (bell-schedule, elearning, etc.)
+//   _pdfAccess    — custom PDF access guard (report-cards /:id/pdf)
+//   _can(         — teacher/admin inline guard (lesson-plans)
+//   _typeGuard    — growth-records type-based access guard
+const RBAC_RE  = /rbac\s*\(|\/[/*] rbac:|planGate\(|_pdfAccess|_can\(|_typeGuard/;
 const AUTH_RE  = /authMiddleware/;
 
 /**

@@ -378,7 +378,7 @@ function _yearStatus(year, archivedIds = []) {
  * GET /api/academic-config/years
  * Returns all academic years for this school, enriched with status.
  */
-router.get('/years', authMiddleware, async (req, res) => {
+router.get('/years', authMiddleware, async (req, res) => { // rbac: all-authenticated (teachers need year list for mark entry)
   try {
     const { schoolId } = req.jwtUser;
     // All authenticated users may READ academic years (teachers need this
@@ -405,7 +405,7 @@ router.get('/years', authMiddleware, async (req, res) => {
  * Create a new draft academic year.
  * Body: { name, startDate, endDate, terms? }
  */
-router.post('/years', authMiddleware, async (req, res) => {
+router.post('/years', authMiddleware, async (req, res) => { // rbac: admin-only (inline role check)
   try {
     const { schoolId, role, userId } = req.jwtUser;
     if (!['superadmin', 'admin'].includes(role)) {
@@ -451,7 +451,7 @@ router.post('/years', authMiddleware, async (req, res) => {
  * Update name, dates, or term dates on a draft or active year.
  * Locked (archived) years are immutable — returns 403.
  */
-router.put('/years/:id', authMiddleware, async (req, res) => {
+router.put('/years/:id', authMiddleware, async (req, res) => { // rbac: admin-only (inline role check)
   try {
     const { schoolId, role, userId } = req.jwtUser;
     if (!['superadmin', 'admin'].includes(role)) {
@@ -505,7 +505,7 @@ router.put('/years/:id', authMiddleware, async (req, res) => {
  * DELETE /api/academic-config/years/:id
  * Delete a draft year only — active and locked years cannot be deleted.
  */
-router.delete('/years/:id', authMiddleware, async (req, res) => {
+router.delete('/years/:id', authMiddleware, async (req, res) => { // rbac: admin-only (inline role check)
   try {
     const { schoolId, role, userId } = req.jwtUser;
     if (!['superadmin', 'admin'].includes(role)) {
@@ -545,7 +545,7 @@ router.delete('/years/:id', authMiddleware, async (req, res) => {
  * Body: { targetYearId, reason? }
  * Only superadmin/admin. Irreversible.
  */
-router.post('/transition-year', authMiddleware, async (req, res) => {
+router.post('/transition-year', authMiddleware, async (req, res) => { // rbac: superadmin/admin only (inline role check)
   try {
     const { schoolId, role, userId } = req.jwtUser;
     if (!['superadmin', 'admin'].includes(role)) {
@@ -691,7 +691,7 @@ const SCHOOL_PROFILE_FIELDS = [
 ];
 
 /* GET /api/academic-config/school-profile */
-router.get('/school-profile', authMiddleware, async (req, res) => {
+router.get('/school-profile', authMiddleware, async (req, res) => { // rbac: admin-only (inline role check)
   try {
     const { schoolId, role } = req.jwtUser;
     if (!['superadmin', 'admin'].includes(role)) {
@@ -711,7 +711,7 @@ router.get('/school-profile', authMiddleware, async (req, res) => {
 });
 
 /* PATCH /api/academic-config/school-profile */
-router.patch('/school-profile', authMiddleware, async (req, res) => {
+router.patch('/school-profile', authMiddleware, async (req, res) => { // rbac: admin-only (inline role check)
   try {
     const { schoolId, role } = req.jwtUser;
     if (!['superadmin', 'admin'].includes(role)) {
