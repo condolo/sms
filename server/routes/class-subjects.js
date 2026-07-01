@@ -33,6 +33,14 @@ function _classQuery(schoolId, classId) {
     : { schoolId, id: classId };
 }
 
+/* Same pattern for class_subjects docs — some legacy docs may only have _id */
+function _linkQuery(schoolId, linkId) {
+  const isOid = /^[a-f\d]{24}$/i.test(linkId);
+  return isOid
+    ? { schoolId, $or: [{ id: linkId }, { _id: linkId }] }
+    : { schoolId, id: linkId };
+}
+
 /* ── GET /api/class-subjects/counts ─────────────────────────────
    Returns { [classId]: subjectCount }
    Used by class cards and the class dropdown to show curriculum size. */
@@ -377,7 +385,7 @@ router.put('/:id', authMiddleware, rbac('subjects', 'update'), async (req, res) 
     }
 
     const doc = await _model('class_subjects').findOneAndUpdate(
-      { id: req.params.id, schoolId },
+      _linkQuery(schoolId, req.params.id),
       { isCompulsoryForClass: Boolean(isCompulsoryForClass), updatedBy: userId },
       { new: true },
     );
@@ -396,7 +404,7 @@ router.delete('/:id', authMiddleware, rbac('subjects', 'update'), async (req, re
     const { schoolId } = req.jwtUser;
 
     const link = await _model('class_subjects')
-      .findOne({ id: req.params.id, schoolId })
+      .findOne(_linkQuery(schoolId, req.params.id))
       .lean();
     if (!link) return E.notFound(res, 'Class-subject link not found');
 
@@ -413,7 +421,7 @@ router.delete('/:id', authMiddleware, rbac('subjects', 'update'), async (req, re
       );
     }
 
-    await _model('class_subjects').deleteOne({ id: req.params.id, schoolId });
+    await _model('class_subjects').deleteOne(_linkQuery(schoolId, req.params.id));
     return ok(res, { message: 'Subject removed from class curriculum' });
   } catch (err) {
     console.error('[class-subjects DELETE /:id]', err);
