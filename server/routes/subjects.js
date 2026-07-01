@@ -52,16 +52,21 @@ router.get('/', authMiddleware, async (req, res) => {
     // Used by the curriculum editor to show "in curriculum / not in curriculum" state per subject.
     if (req.query.withClassCurriculum) {
       const classId = req.query.withClassCurriculum;
+      // Fetch without .select() so the stored `id` UUID field is not filtered out.
+      // (The schema uses id:false which makes Mongoose treat .select('id') as the
+      //  disabled virtual, silently dropping the real stored id field from lean results.)
       const links = await _model('class_subjects')
         .find({ schoolId, classId, isActive: { $ne: false } })
-        .select('subjectId isCompulsoryForClass id')
         .lean();
       const linkMap = Object.fromEntries(links.map(l => [l.subjectId, l]));
       return ok(res, docs.map(d => ({
         ...d,
         inCurriculum:         !!linkMap[d.id],
         isCompulsoryForClass: linkMap[d.id]?.isCompulsoryForClass ?? false,
-        classSubjectId:       linkMap[d.id]?.id ?? null,
+        // Prefer the stored UUID id; fall back to _id string for legacy docs
+        classSubjectId:       linkMap[d.id]
+          ? (linkMap[d.id].id ?? linkMap[d.id]._id?.toString() ?? null)
+          : null,
       })));
     }
 
