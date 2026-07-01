@@ -6,6 +6,58 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.59.0] — 2026-07-01 — feat(governance): AuditService — Governance subsystem foundation
+
+### Added
+
+- **`server/services/audit.js`** — `AuditService` with two public methods:
+  - `log({ action, actor, schoolId, target, details, severity, req })` — append-only, non-fatal (exceptions are caught and printed; a broken audit log never blocks a school workflow).
+  - `query({ schoolId, action, actorId, severity, from, to, page, limit })` — paginated, filterable. School admins are scoped to their own school; superadmin queries platform-wide.
+  - `ACTIONS` catalogue — 16 named action types with default severities: `auth.login`, `auth.login_failed`, `auth.logout`, `auth.password_changed`, `auth.mfa_verified`, `user.role_changed`, `user.created`, `user.deactivated`, `student.deleted`, `student.deactivated`, `student.promoted`, `report_card.publish`, `report_card.unpublish`, `report_card.moderation_bypassed`, `platform.impersonate`, `platform.school_deleted`, `platform.backup_restored`.
+
+- **`server/routes/audit.js`** — `/api/audit` endpoints, admin + superadmin only:
+  - `GET /api/audit` — paginated audit log list with filters: `action`, `severity`, `actorId`, `from`, `to`, `page`, `limit`. School admins see only their school; superadmin can pass `?schoolId=` or omit for platform-wide.
+  - `GET /api/audit/actions` — returns the ACTIONS catalogue for filter dropdown population.
+
+- **`server/utils/indexes.js`** — `audit_logs` collection indexes: `al_school_date` (`schoolId + createdAt -1`), `al_action_date` (`action + createdAt -1`), `al_actor` (`actor.userId`), `al_severity_date` (`severity + createdAt -1`), `al_date_desc` (`createdAt -1`).
+
+- **Settings → Audit Log tab** (`SettingsPage.jsx`) — admin-only tab with:
+  - Filter bar: action dropdown (populated from `/api/audit/actions`), severity dropdown, from/to date pickers, Clear button.
+  - Paginated table: time, action (monospace), severity badge, actor email, target label.
+  - Severity badge colours: info → sky, warn → amber, critical → red.
+
+- **Platform Console → Recent Critical Events section** (`PlatformConsole.jsx`) — superadmin-only section showing the last 20 critical events platform-wide in a compact table.
+
+### Changed
+
+- **`server/routes/auth.js`** — `POST /api/auth/login` logs `auth.login` after the `lastLogin` update (successful password login path only).
+- **`server/routes/students.js`** — `DELETE /:id` logs `student.deleted`; `PATCH /:id/deactivate` logs `student.deactivated` with `{ status, reason }` in details.
+- **`server/routes/report-cards.js`** — `POST /publish` logs `report_card.publish` with `{ batchId, termId, studentCount, status }` after batch completion.
+- **`server/routes/platform.js`** — `POST /schools/:id/impersonate` replaces the ad-hoc `platform_audit_log` collection write with `AuditService.log('platform.impersonate', ...)`. The `platform_audit_log` collection is deprecated — reads still work but no new writes go there.
+- **`server/routes/users.js`** — `POST /:id/role-change` logs `user.role_changed` with `{ oldRole, newRole, note }` after the role-change email is sent successfully.
+- **`server/index.js`** — registers `app.use('/api/audit', require('./routes/audit'))`.
+
+### Architecture
+
+AuditService is the foundation of the **Governance subsystem** (Platform Kernel §2.7). The collection is append-only by convention — no `updateOne` or `deleteOne` calls are permitted against `audit_logs`. Instrumentation follows the "high-impact first" principle: publish, delete, deactivate, impersonate, role change are the actions that matter most for accountability and regulatory compliance.
+
+**Subsystem state after this release:**
+
+| Subsystem | State |
+| :-------- | :---- |
+| Identity | Instrumented — `auth.login`, `user.role_changed` now in audit log |
+| Governance | **Active** — `audit_logs` collection live, AuditService deployed |
+| Compliance | Next: `audit_log_completeness` check in compliance engine |
+
+**Not yet instrumented** (Phase 1 continuation):
+- `auth.login_failed` (failed login path in auth.js)
+- `auth.password_changed` (change-password route)
+- Finance mutations (invoice create, receipt, fee-structure change)
+- Bulk import/export
+- Permission matrix changes (`PUT /api/settings/roles`)
+
+---
+
 ## [v4.58.0] — 2026-06-19 — feat(scope): DataScope engine — third authorization layer
 
 ### Added

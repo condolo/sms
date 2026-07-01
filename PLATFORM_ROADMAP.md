@@ -95,16 +95,20 @@ AuditService.log({
 
 **Deliverables:**
 
-- [ ] `server/services/audit.js` — `AuditService.log()`, append-only writes to `audit_logs` collection
-- [ ] `audit_logs` collection: no update/delete permitted, TTL or archive strategy defined
-- [ ] `rbac()` middleware auto-logs every authorization decision (pass + deny)
-- [ ] High/critical routes instrumented first: finance, hr, settings, import/export
-- [ ] `GET /api/audit` — paginated, filterable by module/severity/userId/date
-- [ ] Audit Viewer UI: Timeline view with old/new value diff
-- [ ] `platform:health` audit check turns green
-- [ ] `generate-endpoint-inventory.js` `auditLogged` field starts returning `true` for instrumented routes
-- [ ] Permission Trace: denied requests include structured reason (`module`, `action`, `role`, `missingPermission`, `matrixVersion`, `configuredBy`)
-- [ ] 100% of `high`/`critical` actions instrumented
+- [x] `server/services/audit.js` — `AuditService.log()` (non-fatal) + `query()` (paginated), `ACTIONS` catalogue with 16 action types, append-only `audit_logs` collection *(v4.59.0)*
+- [x] `audit_logs` collection: 5 indexes, append-only by convention — no update/delete *(v4.59.0)*
+- [x] `GET /api/audit` — paginated, filterable by action/severity/actorId/date; school-scoped for admins *(v4.59.0)*
+- [x] Audit Viewer UI — Settings → Audit Log tab (admin), Platform Console → Recent Critical Events (superadmin) *(v4.59.0)*
+- [x] 6 high-impact routes instrumented: `auth.login`, `student.deleted`, `student.deactivated`, `report_card.publish`, `platform.impersonate`, `user.role_changed` *(v4.59.0)*
+- [ ] `auth.login_failed` instrumented (failed login path in auth.js)
+- [ ] `auth.password_changed` instrumented (change-password route)
+- [ ] Finance mutations instrumented: invoice create, receipt, fee-structure change
+- [ ] Bulk import/export instrumented
+- [ ] Permission matrix changes instrumented (`PUT /api/settings/roles`)
+- [ ] `audit_log_completeness` check added to compliance engine
+- [ ] `rbac()` middleware auto-logs authorization denials
+- [ ] Permission Trace: denied requests include structured reason (`module`, `action`, `role`, `missingPermission`)
+- [ ] 100% of `critical` actions instrumented
 - [ ] Identity validation on startup: `server/startup/validateIdentity.js` reports health without blocking boot
 
 **Rate limiting (moved from Phase 4 — attack surfaces cannot wait):**

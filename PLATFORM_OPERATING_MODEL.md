@@ -69,7 +69,7 @@ Owns: authentication, session management, JWT signing, role assignment, multi-te
 Source of truth: `users`, `sessions`, `role_permissions` collections.
 
 Current state: implemented (`auth.js`, `rbac.js`, `tenant.js`).  
-Next: AuditService instrumentation for login, role changes, impersonation.
+AuditService: `auth.login` and `user.role_changed` are now instrumented. `auth.login_failed` and `auth.password_changed` are the next instrumentation targets.
 
 ---
 
@@ -150,8 +150,8 @@ Owns: RBAC non-regression, tenant isolation verification, GDPR/data retention po
 
 Source of truth: `scripts/.rbac-baseline`, `server/services/ops/engines/compliance.js`.
 
-Current state: RBAC gate + compliance engine implemented.  
-Next: AuditService (`server/services/audit.js`) — log every high-impact action (publish report card, delete student, impersonate school, change role). This is the Phase 1 primary deliverable.
+Current state: RBAC gate + compliance engine implemented. AuditService deployed.  
+Next: add `audit_log_completeness` check to the compliance engine — verify that critical routes are emitting audit events and flag any gaps.
 
 ---
 
@@ -160,8 +160,9 @@ Owns: audit logs, data retention schedules, multi-tenant data isolation enforcem
 
 Source of truth: `audit_logs` collection (to be created with AuditService).
 
-Current state: not yet implemented.  
-Next: AuditService is the gateway to this subsystem.
+Current state: **active** — `AuditService` deployed (`server/services/audit.js`), `audit_logs` collection live with 5 indexes, `/api/audit` endpoint serving paginated queries.  
+Instrumented actions: `auth.login`, `user.role_changed`, `student.deleted`, `student.deactivated`, `report_card.publish`, `platform.impersonate`.  
+Next: instrument `auth.login_failed`, `auth.password_changed`, finance mutations, bulk import/export, permission matrix changes.
 
 ---
 
@@ -244,7 +245,7 @@ Integrity rules are grouped into packs. Each pack is owned by its application mo
 | Exams & Grades | `exam_results`, `grade_entries` | `server/routes/exams.js`, `grades.js` |
 | Report Cards | `report_card_snapshots`, `publish_batches`, `report_card_counters` | `server/routes/report-cards.js` |
 | Release History | `release_certificates` | `server/services/ops/engines/release.js` |
-| Audit Log | `audit_logs` (planned) | `server/services/audit.js` (planned) |
+| Audit Log | `audit_logs` | `server/services/audit.js`, `server/routes/audit.js` |
 | Platform Health | live queries | `server/services/ops/engines/health.js` |
 | RBAC Baseline | `scripts/.rbac-baseline` | `scripts/_rbac-scan.js` |
 
@@ -319,7 +320,7 @@ Every subsystem has a named owner. Today that is one person. The structure survi
 | Monitoring | Platform Team | `/api/ops/metrics` (planned) | Platform Console → Monitoring |
 | Deployment | Platform Team | `/api/ops/certs`, CI pipelines | Platform Console → Releases |
 | Compliance | Platform Team | `/api/ops/health` (compliance engine) | Platform Console → Compliance |
-| Governance | Platform Team | `/api/audit` (planned) | Platform Console → Governance |
+| Governance | Platform Team | `/api/audit` | Platform Console → Governance, Settings → Audit Log |
 | **Academic Records** | Academic Team | `/api/report-cards`, `/api/grades`, `/api/exams` | Grades, Report Cards |
 | **Finance** | Finance Team | `/api/finance`, `/api/billing` | Finance |
 | **Students** | Academic Team | `/api/students`, `/api/admissions` | Students |
