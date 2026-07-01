@@ -3504,6 +3504,9 @@ function RolesTab() {
       qc.invalidateQueries({ queryKey: ['settings','school'] });
       setDirty(false);
       setToast({ msg: 'Permissions saved.', type: 'success' });
+      // Signal all open tabs to re-fetch permissions immediately
+      window.dispatchEvent(new CustomEvent('permissions:changed'));
+      try { new BroadcastChannel('msingi:permissions').postMessage('refresh'); } catch { /* ignore */ }
     },
     onError: err => setToast({ msg: err?.message ?? 'Save failed.', type: 'error' }),
   });

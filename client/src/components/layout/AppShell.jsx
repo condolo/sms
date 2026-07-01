@@ -27,9 +27,8 @@ export default function AppShell() {
   const faviconUrl    = school?.faviconUrl ?? null;
   const schoolName    = school?.name ?? null;
 
-  // Refresh role permissions from the server on mount and whenever the window
-  // regains focus. This keeps the sidebar in sync with Settings changes made
-  // by an admin without requiring users to log out and back in.
+  // Refresh role permissions from the server on mount, window focus, and whenever
+  // the admin broadcasts a permissions change via BroadcastChannel or custom event.
   const refreshPermissions = useCallback(() => {
     if (!sessionUser) return;
     authApi.permissions()
@@ -39,8 +38,26 @@ export default function AppShell() {
 
   useEffect(() => {
     refreshPermissions();
+
+    // Re-fetch on window focus (covers tab-switching)
     window.addEventListener('focus', refreshPermissions);
-    return () => window.removeEventListener('focus', refreshPermissions);
+
+    // Re-fetch when any tab (including this one) signals a permissions change.
+    // The Settings R&P tab dispatches 'permissions:changed' after a successful save.
+    window.addEventListener('permissions:changed', refreshPermissions);
+
+    // BroadcastChannel syncs across all open tabs on the same origin.
+    let bc;
+    try {
+      bc = new BroadcastChannel('msingi:permissions');
+      bc.onmessage = () => refreshPermissions();
+    } catch { /* BroadcastChannel not available in all envs */ }
+
+    return () => {
+      window.removeEventListener('focus', refreshPermissions);
+      window.removeEventListener('permissions:changed', refreshPermissions);
+      bc?.close();
+    };
   }, [refreshPermissions]);
 
   // Close mobile overlay on navigation

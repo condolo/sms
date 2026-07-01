@@ -297,15 +297,12 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
 
     const safeUser = { ...user, password: undefined };
 
-    // Attach role permissions so the client sidebar can filter by role.
-    // Stored in role_permissions collection keyed by roleKey + schoolId.
-    const RolePerms   = _model('role_permissions');
-    const rolePermsDoc = await RolePerms.findOne({
-      roleKey:  userRole,
-      schoolId: req.school.id,
-    }).lean();
-    if (rolePermsDoc?.permissions) {
-      safeUser.permissions = rolePermsDoc.permissions;
+    // Attach merged role permissions so the client sidebar can filter correctly.
+    // Merges across all roles the user holds (union of actions per module).
+    const allRoles = Array.isArray(user.roles) && user.roles.length ? user.roles : [userRole];
+    const mergedPerms = await _loadMergedPermissions(req.school.id, allRoles);
+    if (mergedPerms !== null) {
+      safeUser.permissions = mergedPerms;
     }
 
     SecurityService.clearFail(req.school.id, loginId).catch(() => {});
@@ -367,13 +364,11 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
 
     const token = sign({ ..._buildTokenPayload(user, user.schoolId), sessionId: otpSessionId, absoluteExpiry: otpAbsExpiry });
 
-    // Attach role permissions so sidebar filters correctly (same as regular login)
+    // Attach merged role permissions so sidebar filters correctly (same as regular login)
     const safeUser = { ...user, password: undefined, mfaOtp: undefined, mfaExpiry: undefined };
-    const userRoleOtp = safeUser.primaryRole || safeUser.role;
-    const rolePermsDocOtp = await _model('role_permissions').findOne({
-      roleKey: userRoleOtp, schoolId: user.schoolId,
-    }).lean();
-    if (rolePermsDocOtp?.permissions) safeUser.permissions = rolePermsDocOtp.permissions;
+    const otpAllRoles = Array.isArray(user.roles) && user.roles.length ? user.roles : [_otpUserRole];
+    const otpMergedPerms = await _loadMergedPermissions(user.schoolId, otpAllRoles);
+    if (otpMergedPerms !== null) safeUser.permissions = otpMergedPerms;
 
     _checkTrialAndNotify(school).catch(() => {});
     res.json({ token, user: safeUser, school, absoluteExpiry: otpAbsExpiry });
@@ -383,21 +378,45 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
   }
 });
 
-/* GET /api/auth/permissions — return current role's live permissions
+/* ── Merge role_permissions across multiple roles ──────────── */
+// Takes the union of actions per module across all roles a user holds.
+// deputy is an alias for deputy_principal — normalise before lookup.
+async function _loadMergedPermissions(schoolId, roles) {
+  const ADMIN_BYPASS = new Set(['superadmin', 'admin']);
+  if (roles.some(r => ADMIN_BYPASS.has(r))) return null; // null = full access
+
+  // Normalise aliases
+  const keys = [...new Set(roles.map(r => r === 'deputy' ? 'deputy_principal' : r))];
+
+  const RolePerms = _model('role_permissions');
+  const docs = await RolePerms.find({ schoolId, roleKey: { $in: keys } }).lean();
+
+  // Union of actions per module — most permissive wins
+  const merged = {};
+  for (const doc of docs) {
+    for (const [mod, actions] of Object.entries(doc.permissions ?? {})) {
+      if (!merged[mod]) merged[mod] = new Set();
+      (Array.isArray(actions) ? actions : []).forEach(a => merged[mod].add(a));
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(merged).map(([mod, set]) => [mod, [...set]])
+  );
+}
+
+/* GET /api/auth/permissions — return merged live permissions for all user roles.
    Called by the client on mount + window focus to keep the sidebar current
    without requiring a full logout/login after an admin changes Settings.    */
 router.get('/permissions', authMiddleware, async (req, res) => {
   try {
-    const { schoolId, role } = req.jwtUser;
+    const { schoolId, role, roles } = req.jwtUser;
     if (['superadmin', 'admin'].includes(role)) {
       return res.json({ permissions: null }); // null = full access, no sidebar filtering
     }
-    const RolePerms = _model('role_permissions');
-    let doc = await RolePerms.findOne({ schoolId, roleKey: role }).lean();
-    if (!doc && role === 'deputy') {
-      doc = await RolePerms.findOne({ schoolId, roleKey: 'deputy_principal' }).lean();
-    }
-    res.json({ permissions: doc?.permissions ?? {} });
+    // Use all roles the user holds so secondary roles are honoured
+    const allRoles = Array.isArray(roles) && roles.length ? roles : [role];
+    const permissions = await _loadMergedPermissions(schoolId, allRoles);
+    res.json({ permissions: permissions ?? {} });
   } catch (err) {
     console.error('[auth/permissions]', err);
     res.status(500).json({ error: 'Failed to load permissions' });

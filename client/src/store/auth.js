@@ -133,13 +133,17 @@ const useAuthStore = create((set, get) => ({
   setError(error)       { set({ error }); },
   clearError()          { set({ error: null }); },
 
-  /** Permission check helper — true if role is admin/superadmin or has feature */
+  /** Permission check helper — true if role is admin/superadmin or has ≥1 action for feature */
   can(feature) {
     const { session } = get();
     if (!session) return false;
     const { role, permissions = {} } = session.user ?? {};
     if (role === 'superadmin' || role === 'admin') return true;
-    return !!permissions[feature];
+    const p = permissions[feature];
+    // permissions[feature] is always an array (from _deriveApiPerms).
+    // Empty array [] means no access — !![] is incorrectly truthy, so check length explicitly.
+    if (Array.isArray(p)) return p.length > 0;
+    return !!p;
   },
 }));
 
