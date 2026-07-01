@@ -25,6 +25,7 @@ const express   = require('express');
 const { z }     = require('zod');
 const { v4: uuidv4 } = require('uuid');
 const mongoose  = require('mongoose');
+const crypto    = require('crypto');
 
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
@@ -50,6 +51,39 @@ const PLAN   = planGate('grades');
 async function _loadConfig(schoolId) {
   const saved = await _model('academic_config').findOne({ schoolId }).lean();
   return mergeConfig(saved);
+}
+
+/* ── Report ID generator — RC-YYYY-TN-XXXXXX ───────────────── */
+async function _nextReportId(schoolId, termNumber, academicYear) {
+  const year = academicYear ? String(academicYear).slice(0, 4) : String(new Date().getFullYear());
+  const tn   = String(termNumber || 1).padStart(1, '0');
+  const key  = `rc_${schoolId}_${year}_${tn}`;
+  const ctr  = await _model('report_card_counters').findOneAndUpdate(
+    { key },
+    { $inc: { seq: 1 }, $setOnInsert: { schoolId, year, termNumber: tn } },
+    { upsert: true, new: true }
+  ).lean();
+  const seq = String(ctr.seq).padStart(6, '0');
+  return `RC-${year}-${tn}-${seq}`;
+}
+
+/* ── SHA-256 hash of immutable snapshot content ─────────────── */
+function _hashSnapshot(snap) {
+  const payload = JSON.stringify({
+    studentId:   snap.studentId,
+    studentName: snap.studentName,
+    admissionNo: snap.admissionNo,
+    classId:     snap.classId,
+    termNumber:  snap.termNumber,
+    academicYear: snap.academicYear,
+    subjects:    snap.subjects,
+    totalScore:  snap.totalScore,
+    averageScore: snap.averageScore,
+    gpa:         snap.gpa,
+    rankings:    snap.rankings,
+    publishedAt: snap.publishedAt,
+  });
+  return crypto.createHash('sha256').update(payload).digest('hex');
 }
 
 /* ── CA config loader (assessment_config + grade_boundaries) ── */
@@ -467,6 +501,10 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
           updatedBy:         userId,
         };
 
+        // RC-3: assign unique reportId + SHA-256 integrity hash
+        snap.reportId   = await _nextReportId(schoolId, termNum, academicYear);
+        snap.sha256Hash = _hashSnapshot(snap);
+
         newSnaps.push(snap);
 
         if (prev) {
@@ -589,6 +627,7 @@ router.get('/', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) =
 
     if (req.query.classId)        filter.classId        = req.query.classId;
     if (req.query.termId)         filter.termId         = req.query.termId;
+    if (req.query.termNumber)     filter.termNumber     = Number(req.query.termNumber);
     if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
     if (req.query.studentId)      filter.studentId      = req.query.studentId;
     if (req.query.status)         filter.status         = req.query.status;
@@ -600,6 +639,43 @@ router.get('/', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) =
     ]);
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) { console.error('[report-cards GET]', err); return E.serverError(res); }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   GET /verify/:reportId  — public authenticity check (no auth)
+   Must be before GET /:id so Express doesn't capture "verify" as :id
+   ══════════════════════════════════════════════════════════════ */
+router.get('/verify/:reportId', async (req, res) => {
+  try {
+    const snap = await _model('report_card_snapshots')
+      .findOne({ reportId: req.params.reportId })
+      .lean();
+    if (!snap) {
+      return res.status(404).json({ verified: false, error: 'Report ID not found. This document may be fraudulent.' });
+    }
+
+    const computed = _hashSnapshot(snap);
+    const isAuthentic = computed === snap.sha256Hash;
+
+    return res.json({
+      verified:     true,
+      isAuthentic,
+      reportId:     snap.reportId,
+      studentName:  snap.studentName,
+      admissionNo:  snap.admissionNo,
+      className:    snap.className,
+      termName:     snap.termName,
+      termNumber:   snap.termNumber,
+      academicYear: snap.academicYear,
+      schoolName:   snap.schoolName,
+      publishedAt:  snap.publishedAt,
+      version:      snap.version,
+      status:       isAuthentic ? 'Authentic' : 'INTEGRITY CHECK FAILED — document may have been tampered with',
+    });
+  } catch (err) {
+    console.error('[report-cards/verify]', err);
+    return res.status(500).json({ verified: false, error: 'Verification service error.' });
+  }
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -946,8 +1022,20 @@ function _buildPDFPage(doc, snap, config, attendance, isFirstPage, images = {}) 
   const footerY = doc.page.height - 55;
   doc.rect(40, footerY, PAGE_WIDTH, 0.5).fill(BORDER);
   doc.fillColor(GRAY).fontSize(7.5).font('Helvetica')
-     .text(config.footerNote || 'This report card is computer-generated.', 40, footerY + 6, { width: PAGE_WIDTH, align: 'center' })
-     .text(`Generated: ${new Date().toUTCString()}  |  v${snap.version || 1}  |  Batch: ${snap.batchId || '—'}`, 40, footerY + 18, { width: PAGE_WIDTH, align: 'center' });
+     .text(config.footerNote || 'This report card is computer-generated.', 40, footerY + 6, { width: PAGE_WIDTH, align: 'center' });
+  const genLine = `Generated: ${new Date().toUTCString()}  |  v${snap.version || 1}  |  Batch: ${snap.batchId || '—'}`;
+  if (snap.reportId) {
+    const verifyRow = footerY + 18;
+    doc.fillColor(DARK).fontSize(7).font('Helvetica-Bold')
+       .text(`Report ID: ${snap.reportId}`, 40, verifyRow, { width: PAGE_WIDTH / 2 });
+    doc.fillColor(GRAY).fontSize(7).font('Helvetica')
+       .text(`Verify at: /verify/${snap.reportId}`, 40 + PAGE_WIDTH / 2, verifyRow, { width: PAGE_WIDTH / 2, align: 'right' });
+    doc.fillColor(GRAY).fontSize(6.5).font('Helvetica')
+       .text(genLine, 40, footerY + 28, { width: PAGE_WIDTH, align: 'center' });
+  } else {
+    doc.fillColor(GRAY).fontSize(7.5).font('Helvetica')
+       .text(genLine, 40, footerY + 18, { width: PAGE_WIDTH, align: 'center' });
+  }
 }
 
 /* ── Portal roles bypass RBAC; the handler does ownership + fee checks ── */

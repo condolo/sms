@@ -758,6 +758,12 @@ export const markSubmissions = {
 
 export const reportCards = {
   generate: (data) => _post('/report-cards/generate', data),
+  publish:  (data) => _post('/report-cards/publish', data),
+  snapshots: {
+    list:   (params) => _get('/report-cards', params),
+    get:    (id)     => _get(`/report-cards/${id}`),
+  },
+  verify: (reportId) => _get(`/report-cards/verify/${reportId}`),
   draftComments: {
     list:         (params)                     => _get('/report-cards/draft-comments', params),
     upsert:       (studentId, data)            => _put(`/report-cards/draft-comments/${studentId}`, data),

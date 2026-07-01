@@ -3,7 +3,7 @@
    ============================================================ */
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ClipboardList, FileText } from 'lucide-react';
+import { AlertTriangle, ClipboardList, FileText, Send, CheckCircle, Loader2 } from 'lucide-react';
 import {
   assessment as assessmentApi,
   classes as classesApi,
@@ -21,8 +21,11 @@ export default function ReportCardsTab() {
   const [termNum, setTermNum] = useState('');
   const qc = useQueryClient();
 
+  const [publishError, setPublishError] = useState('');
+
   const school      = useAuthStore(s => s.session?.school);
   const academicYear = school?.academicYear ?? '';
+  const role        = useAuthStore(s => s.session?.user?.role ?? '');
 
   /* ── Data queries ─────────────────────────────────────── */
 
@@ -99,6 +102,27 @@ export default function ReportCardsTab() {
     enabled:  !!classId,
     staleTime: 5 * 60_000,
     select: (res) => Object.fromEntries((res?.data ?? []).map(b => [b._id, b])),
+  });
+
+  // Published snapshots for this class/term — keyed by studentId
+  const { data: snapshotsMap } = useQuery({
+    queryKey: ['reportCards', 'snapshots', { classId, termNum }],
+    queryFn:  () => reportCardsApi.snapshots.list({ classId, termNumber: Number(termNum), limit: 200 }),
+    enabled:  canQuery,
+    staleTime: 30_000,
+    select: (res) => Object.fromEntries(
+      (res?.data ?? []).filter(s => !s.superseded).map(s => [s.studentId, s])
+    ),
+  });
+
+  /* ── Publish mutation ─────────────────────────────────── */
+  const { mutate: publishBatch, isPending: isPublishing } = useMutation({
+    mutationFn: () => reportCardsApi.publish({ classId, termNumber: Number(termNum) }),
+    onSuccess: () => {
+      setPublishError('');
+      qc.invalidateQueries({ queryKey: ['reportCards', 'snapshots', { classId, termNum }] });
+    },
+    onError: (err) => setPublishError(err?.message ?? 'Publish failed'),
   });
 
   /* ── Comment save mutation ────────────────────────────── */
@@ -184,6 +208,22 @@ export default function ReportCardsTab() {
             options={TERM_NUMBERS.map(n => ({ value: String(n), label: `Term ${n}` }))}
             placeholder="Select term"
           />
+          {canQuery && ['admin', 'superadmin'].includes(role) && (
+            <div className="flex flex-col gap-1 ml-auto">
+              <button
+                onClick={() => { setPublishError(''); publishBatch(); }}
+                disabled={isPublishing || !students.length}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {isPublishing
+                  ? <><Loader2 size={14} className="animate-spin" /> Publishing…</>
+                  : <><Send size={14} /> Publish Report Cards</>}
+              </button>
+              {publishError && (
+                <p className="text-xs text-red-500">{publishError}</p>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -231,6 +271,7 @@ export default function ReportCardsTab() {
               academicYear={academicYear}
               studentDeviations={deviationMap[student.studentId] ?? null}
               behaviourSummary={behaviourMap?.[student.studentId] ?? null}
+              snapshot={snapshotsMap?.[student.studentId] ?? null}
             />
           ))}
         </div>

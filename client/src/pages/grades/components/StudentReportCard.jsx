@@ -23,7 +23,7 @@
      behaviourSummary — { merits, demerits, points, total } | null
    ============================================================ */
 import { Fragment, useState, useCallback, useEffect } from 'react';
-import { Printer, Save, Check, BarChart2, MessageSquare, Award } from 'lucide-react';
+import { Printer, Save, Check, BarChart2, MessageSquare, Award, CheckCircle } from 'lucide-react';
 import { DEFAULT_GRADE_SCALE, DEFAULT_CUSTOM_TYPES, _gradeFromScale } from '../constants.js';
 
 /* ── Helpers ─────────────────────────────────────────────── */
@@ -88,7 +88,7 @@ export default function StudentReportCard({
   student, studentInfo, className, subjectMap,
   customTypes, gradeScale, instanceMarks,
   draftComment, onSaveComment, termNum, school, academicYear,
-  studentDeviations, behaviourSummary,
+  studentDeviations, behaviourSummary, snapshot,
 }) {
   const types      = customTypes ?? DEFAULT_CUSTOM_TYPES;
   const bands      = [...(gradeScale?.bands ?? DEFAULT_GRADE_SCALE)].sort((a, b) => b.min - a.min);
@@ -393,6 +393,11 @@ ${behHtml}
           </p>
         </div>
         <div className="flex items-center gap-3 shrink-0">
+          {snapshot?.reportId && (
+            <span className="hidden sm:flex items-center gap-1 text-[10px] font-mono font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-0.5" title="Published report ID">
+              <CheckCircle size={10} /> {snapshot.reportId}
+            </span>
+          )}
           <div className="text-right hidden sm:block">
             <p className="text-xs text-slate-500">Mean</p>
             <p className="text-sm font-bold text-slate-800">

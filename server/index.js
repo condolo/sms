@@ -448,6 +448,62 @@ async function _migrateSectionHeadId() {
   }
 }
 
+/**
+ * _migrateReportIds — backfills reportId + sha256Hash on published snapshots
+ * that pre-date RC-3. Uses a per-school/year/term counter so IDs remain unique.
+ */
+async function _migrateReportIds() {
+  try {
+    const crypto = require('crypto');
+    const { _model } = require('./utils/model');
+    const Snaps    = _model('report_card_snapshots');
+    const Counters = _model('report_card_counters');
+
+    const cursor = Snaps.find({ reportId: { $exists: false } }).lean().cursor();
+    let count = 0;
+
+    for await (const snap of cursor) {
+      const year = snap.academicYear ? String(snap.academicYear).slice(0, 4) : String(new Date().getFullYear());
+      const tn   = String(snap.termNumber || 1);
+      const key  = `rc_${snap.schoolId}_${year}_${tn}`;
+
+      const ctr = await Counters.findOneAndUpdate(
+        { key },
+        { $inc: { seq: 1 }, $setOnInsert: { schoolId: snap.schoolId, year, termNumber: tn } },
+        { upsert: true, new: true }
+      ).lean();
+
+      const reportId = `RC-${year}-${tn}-${String(ctr.seq).padStart(6, '0')}`;
+
+      // Rebuild hash using the same fields as _hashSnapshot
+      const payload = JSON.stringify({
+        studentId:   snap.studentId,
+        studentName: snap.studentName,
+        admissionNo: snap.admissionNo,
+        classId:     snap.classId,
+        termNumber:  snap.termNumber,
+        academicYear: snap.academicYear,
+        subjects:    snap.subjects,
+        totalScore:  snap.totalScore,
+        averageScore: snap.averageScore,
+        gpa:         snap.gpa,
+        rankings:    snap.rankings,
+        publishedAt: snap.publishedAt,
+      });
+      const sha256Hash = crypto.createHash('sha256').update(payload).digest('hex');
+
+      await Snaps.updateOne({ _id: snap._id }, { $set: { reportId, sha256Hash } });
+      count++;
+    }
+
+    if (count > 0) {
+      console.log(`[Migration] reportId: backfilled for ${count} snapshot(s)`);
+    }
+  } catch (err) {
+    console.error('[Migration] _migrateReportIds failed:', err.message);
+  }
+}
+
 /* ── Start ──────────────────────────────────────────────────── */
 async function start() {
   await connect();        // Connect to MongoDB (no-op if MONGODB_URI not set)
@@ -479,6 +535,10 @@ async function start() {
     // Backfill sectionHeadId: null on all existing sections docs
     _migrateSectionHeadId()
       .catch(err => console.error('[_migrateSectionHeadId] Unhandled error:', err));
+
+    // Backfill reportId + sha256Hash on existing published snapshots that pre-date RC-3
+    _migrateReportIds()
+      .catch(err => console.error('[_migrateReportIds] Unhandled error:', err));
 
     // Lesson coverage reminder cron jobs (Friday + Saturday)
     try {

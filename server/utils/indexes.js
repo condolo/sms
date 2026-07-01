@@ -26,6 +26,15 @@ const INDEXES = [
       { key: { batchId: 1 },                                           name: 'snap_batch' },
       { key: { schoolId: 1, publishedAt: -1 },                         name: 'snap_school_published' },
       { key: { schoolId: 1, classId: 1, studentId: 1, version: -1 },   name: 'snap_version_chain' },
+      { key: { reportId: 1 },                                           name: 'snap_report_id',    unique: true, sparse: true },
+    ],
+  },
+  /* ── report_card_counters ───────────────────────────────────
+     One doc per school/year/term combo; seq incremented atomically */
+  {
+    col: 'report_card_counters',
+    indexes: [
+      { key: { key: 1 }, name: 'rcc_key', unique: true },
     ],
   },
 
