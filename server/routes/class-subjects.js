@@ -22,6 +22,17 @@ const { ok, created, E } = require('../utils/response');
 
 const router = express.Router();
 
+/* ── Helper: find a class by either custom id (UUID) or _id (ObjectId string) ─
+   Classes created before the id field was added only have _id. The GET /classes
+   route normalises both into `id` for the frontend, but writes in other routes
+   must tolerate the legacy _id-as-id case. */
+function _classQuery(schoolId, classId) {
+  const isOid = /^[a-f\d]{24}$/i.test(classId);
+  return isOid
+    ? { schoolId, $or: [{ id: classId }, { _id: classId }] }
+    : { schoolId, id: classId };
+}
+
 /* ── GET /api/class-subjects/counts ─────────────────────────────
    Returns { [classId]: subjectCount }
    Used by class cards and the class dropdown to show curriculum size. */
@@ -265,7 +276,7 @@ router.post('/', authMiddleware, rbac('subjects', 'update'), async (req, res) =>
 
     /* Validate both entities exist in this school */
     const [cls, subject] = await Promise.all([
-      _model('classes').findOne({ schoolId, id: classId }).lean(),
+      _model('classes').findOne(_classQuery(schoolId, classId)).lean(),
       _model('subjects').findOne({ schoolId, id: subjectId, isActive: { $ne: false } }).lean(),
     ]);
     if (!cls)     return E.notFound(res, 'Class not found');
@@ -306,7 +317,7 @@ router.post('/bulk', authMiddleware, rbac('subjects', 'update'), async (req, res
       return E.badRequest(res, 'classId and subjects[] required');
     }
 
-    const cls = await _model('classes').findOne({ schoolId, id: classId }).lean();
+    const cls = await _model('classes').findOne(_classQuery(schoolId, classId)).lean();
     if (!cls) return E.notFound(res, 'Class not found');
 
     const subjectIds = [...new Set(subjects.map(s => s.subjectId).filter(Boolean))];
