@@ -427,6 +427,27 @@ async function _migrateAcademicYears() {
   }
 }
 
+/**
+ * _migrateSectionHeadId — idempotent startup migration.
+ * Backfills sectionHeadId: null on all existing sections documents
+ * that were created before the field was added.
+ */
+async function _migrateSectionHeadId() {
+  try {
+    const { _model } = require('./utils/model');
+    const Sections = _model('sections');
+    const result = await Sections.updateMany(
+      { sectionHeadId: { $exists: false } },
+      { $set: { sectionHeadId: null } }
+    );
+    if (result.modifiedCount > 0) {
+      console.log(`[Migration] sectionHeadId: initialised for ${result.modifiedCount} section(s)`);
+    }
+  } catch (err) {
+    console.error('[Migration] _migrateSectionHeadId failed:', err.message);
+  }
+}
+
 /* ── Start ──────────────────────────────────────────────────── */
 async function start() {
   await connect();        // Connect to MongoDB (no-op if MONGODB_URI not set)
@@ -454,6 +475,10 @@ async function start() {
     // Ensure all academic_years docs have id + isCurrent fields
     _migrateAcademicYears()
       .catch(err => console.error('[_migrateAcademicYears] Unhandled error:', err));
+
+    // Backfill sectionHeadId: null on all existing sections docs
+    _migrateSectionHeadId()
+      .catch(err => console.error('[_migrateSectionHeadId] Unhandled error:', err));
 
     // Lesson coverage reminder cron jobs (Friday + Saturday)
     try {

@@ -20,7 +20,7 @@ import {
   MonitorPlay, WifiOff, LayoutTemplate,
 } from 'lucide-react';
 import RCTemplatesSection from './RCTemplatesSection.jsx';
-import { sections as sectionsApi } from '@/api/client.js';
+import { sections as sectionsApi, teachers as teachersApi } from '@/api/client.js';
 import { settings as settingsApi } from '@/api/client.js';
 import { academicConfig as academicConfigApi } from '@/api/client.js';
 import { billing as billingApi, mpesa as mpesaApi } from '@/api/client.js';
@@ -183,7 +183,7 @@ function SectionsPanel() {
   const qc = useQueryClient();
   const [toast,    setToast]    = useState(null);
   const [editId,   setEditId]   = useState(null);   // which row is being edited
-  const [editForm, setEditForm] = useState({});      // { name, color }
+  const [editForm, setEditForm] = useState({});      // { name, color, sectionHeadId }
   const [addForm,  setAddForm]  = useState({ key: '', name: '', color: SECTION_PALETTE[0] });
   const [adding,   setAdding]   = useState(false);
 
@@ -195,6 +195,17 @@ function SectionsPanel() {
     staleTime: 10 * 60_000,
   });
   const rows = data?.data ?? [];
+
+  const { data: teachersData } = useQuery({
+    queryKey: ['teachers-list-for-sections'],
+    queryFn:  () => teachersApi.list({ limit: 500 }),
+    staleTime: 5 * 60_000,
+  });
+  const allTeachers = teachersData?.data ?? [];
+  const teacherOptions = allTeachers.map(t => ({
+    value: t.id,
+    label: [t.title, t.firstName, t.lastName].filter(Boolean).join(' '),
+  }));
 
   /* Create */
   const { mutate: createSec, isPending: creating } = useMutation({
@@ -274,42 +285,61 @@ function SectionsPanel() {
             <div className="w-4 h-4 rounded-full shrink-0 ring-2 ring-offset-1" style={{ backgroundColor: sec.color, ringColor: sec.color }} />
 
             {editId === sec.id ? (
-              /* Inline edit row */
-              <>
-                <input
-                  value={editForm.name ?? ''}
-                  onChange={e => setEditForm(p => ({ ...p, name: e.target.value }))}
-                  className="flex-1 text-sm px-2 py-1 rounded border border-slate-200 focus:outline-none focus:border-indigo-400 bg-white"
-                  placeholder="Section name"
-                  autoFocus
-                />
-                <div className="flex gap-1 items-center">
-                  {SECTION_PALETTE.map(c => (
-                    <button key={c} type="button" onClick={() => setEditForm(p => ({ ...p, color: c }))}
-                      className={`w-4 h-4 rounded-full transition ${editForm.color === c ? 'ring-2 ring-offset-1 ring-slate-700' : ''}`}
-                      style={{ backgroundColor: c }} />
-                  ))}
-                  <input type="color" value={editForm.color ?? '#6366f1'}
-                    onChange={e => setEditForm(p => ({ ...p, color: e.target.value }))}
-                    className="w-5 h-5 rounded cursor-pointer border-0 p-0" title="Custom colour" />
+              /* Inline edit row — wraps to multi-line */
+              <div className="flex-1 flex flex-col gap-2 py-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    value={editForm.name ?? ''}
+                    onChange={e => setEditForm(p => ({ ...p, name: e.target.value }))}
+                    className="flex-1 text-sm px-2 py-1 rounded border border-slate-200 focus:outline-none focus:border-indigo-400 bg-white"
+                    placeholder="Section name"
+                    autoFocus
+                  />
+                  <div className="flex gap-1 items-center">
+                    {SECTION_PALETTE.map(c => (
+                      <button key={c} type="button" onClick={() => setEditForm(p => ({ ...p, color: c }))}
+                        className={`w-4 h-4 rounded-full transition ${editForm.color === c ? 'ring-2 ring-offset-1 ring-slate-700' : ''}`}
+                        style={{ backgroundColor: c }} />
+                    ))}
+                    <input type="color" value={editForm.color ?? '#6366f1'}
+                      onChange={e => setEditForm(p => ({ ...p, color: e.target.value }))}
+                      className="w-5 h-5 rounded cursor-pointer border-0 p-0" title="Custom colour" />
+                  </div>
                 </div>
-                <button type="button" onClick={() => updateSec({ id: sec.id, data: editForm })} disabled={updating}
-                  className="text-xs font-medium text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded-lg transition disabled:opacity-50">
-                  {updating ? <Loader2 size={11} className="animate-spin" /> : 'Save'}
-                </button>
-                <button type="button" onClick={() => setEditId(null)}
-                  className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg transition">
-                  Cancel
-                </button>
-              </>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={editForm.sectionHeadId ?? ''}
+                    onChange={e => setEditForm(p => ({ ...p, sectionHeadId: e.target.value || null }))}
+                    className="flex-1 text-sm px-2 py-1 rounded border border-slate-200 focus:outline-none focus:border-indigo-400 bg-white"
+                  >
+                    <option value="">— No Section Head —</option>
+                    {teacherOptions.map(t => (
+                      <option key={t.value} value={t.value}>{t.label}</option>
+                    ))}
+                  </select>
+                  <button type="button" onClick={() => updateSec({ id: sec.id, data: editForm })} disabled={updating}
+                    className="text-xs font-medium text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded-lg transition disabled:opacity-50">
+                    {updating ? <Loader2 size={11} className="animate-spin" /> : 'Save'}
+                  </button>
+                  <button type="button" onClick={() => setEditId(null)}
+                    className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg transition">
+                    Cancel
+                  </button>
+                </div>
+              </div>
             ) : (
               /* Display row */
               <>
-                <span className="flex-1 text-sm font-medium text-slate-800">{sec.name}</span>
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-medium text-slate-800">{sec.name}</span>
+                  {sec.sectionHeadName && (
+                    <span className="block text-[11px] text-slate-400 truncate">Head: {sec.sectionHeadName}</span>
+                  )}
+                </div>
                 <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{sec.key}</span>
                 <button type="button"
-                  onClick={() => { setEditId(sec.id); setEditForm({ name: sec.name, color: sec.color }); }}
-                  className="text-slate-400 hover:text-slate-700 p-1 rounded transition" title="Rename">
+                  onClick={() => { setEditId(sec.id); setEditForm({ name: sec.name, color: sec.color, sectionHeadId: sec.sectionHeadId ?? null }); }}
+                  className="text-slate-400 hover:text-slate-700 p-1 rounded transition" title="Edit">
                   <Pencil size={13} />
                 </button>
                 <button type="button" onClick={() => { if (window.confirm(`Delete section "${sec.name}"?`)) deleteSec(sec.id); }}

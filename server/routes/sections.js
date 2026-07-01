@@ -40,12 +40,13 @@ const DEFAULT_SECTIONS = [
 
 /* ── Validation ─────────────────────────────────────────────── */
 const SectionSchema = z.object({
-  key:   z.string().min(1).max(30)
-            .regex(/^[a-z0-9_]+$/, 'Key must be lowercase letters, numbers, or underscores')
-            .trim(),
-  name:  z.string().min(1).max(60).trim(),
-  color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Must be a hex colour (#rrggbb)').default('#6366f1'),
-  order: z.number().int().min(0).max(999).default(99),
+  key:           z.string().min(1).max(30)
+                   .regex(/^[a-z0-9_]+$/, 'Key must be lowercase letters, numbers, or underscores')
+                   .trim(),
+  name:          z.string().min(1).max(60).trim(),
+  color:         z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Must be a hex colour (#rrggbb)').default('#6366f1'),
+  order:         z.number().int().min(0).max(999).default(99),
+  sectionHeadId: z.string().nullable().optional(),
 });
 
 function _validate(schema, data) {
@@ -101,6 +102,24 @@ router.get('/', authMiddleware, async (req, res) => {
       }
     }
 
+    // Enrich with section head teacher name where sectionHeadId is set
+    const headIds = docs.map(d => d.sectionHeadId).filter(Boolean);
+    if (headIds.length) {
+      const Teachers = _model('teachers');
+      const teachers = await Teachers.find({ schoolId, id: { $in: headIds } })
+        .select('id title firstName lastName').lean();
+      const tMap = {};
+      teachers.forEach(t => {
+        tMap[t.id] = [t.title, t.firstName, t.lastName].filter(Boolean).join(' ');
+      });
+      docs = docs.map(d => ({
+        ...d,
+        sectionHeadName: d.sectionHeadId ? (tMap[d.sectionHeadId] || null) : null,
+      }));
+    } else {
+      docs = docs.map(d => ({ ...d, sectionHeadName: null }));
+    }
+
     return ok(res, docs);
   } catch (err) {
     console.error('[sections GET]', err);
@@ -139,7 +158,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
 
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(
-      SectionSchema.pick({ name: true, color: true, order: true }).partial(),
+      SectionSchema.pick({ name: true, color: true, order: true, sectionHeadId: true }).partial(),
       req.body,
     );
     if (error) return E.validation(res, error);

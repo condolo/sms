@@ -138,7 +138,7 @@ async function seedDemo() {
   ];
   await Promise.all(SECTIONS.map(s =>
     Sec.updateOne({ id: `sec_${s.key}_${schoolId}` }, {
-      $set: { id: `sec_${s.key}_${schoolId}`, schoolId, ...s }
+      $set: { id: `sec_${s.key}_${schoolId}`, schoolId, sectionHeadId: null, ...s }
     }, { upsert: true })
   ));
 

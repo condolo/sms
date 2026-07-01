@@ -17,10 +17,10 @@ import { sections as sectionsApi } from '@/api/client.js';
 
 /* ── Fallback used while loading / on error ─────────────────── */
 export const DEFAULT_SECTIONS = [
-  { id: 'kg_default',        key: 'kg',        name: 'Kindergarten', color: '#10b981', order: 1 },
-  { id: 'primary_default',   key: 'primary',   name: 'Primary',      color: '#3b82f6', order: 2 },
-  { id: 'secondary_default', key: 'secondary', name: 'Secondary',    color: '#8b5cf6', order: 3 },
-  { id: 'alevel_default',    key: 'alevel',    name: 'A-Level',      color: '#f59e0b', order: 4 },
+  { id: 'kg_default',        key: 'kg',        name: 'Kindergarten', color: '#10b981', order: 1, sectionHeadId: null, sectionHeadName: null },
+  { id: 'primary_default',   key: 'primary',   name: 'Primary',      color: '#3b82f6', order: 2, sectionHeadId: null, sectionHeadName: null },
+  { id: 'secondary_default', key: 'secondary', name: 'Secondary',    color: '#8b5cf6', order: 3, sectionHeadId: null, sectionHeadName: null },
+  { id: 'alevel_default',    key: 'alevel',    name: 'A-Level',      color: '#f59e0b', order: 4, sectionHeadId: null, sectionHeadName: null },
 ];
 
 export function useSections() {
