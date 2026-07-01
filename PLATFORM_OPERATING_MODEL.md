@@ -1,10 +1,37 @@
 # Msingi Platform Operating Model
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Status:** Active  
 **Last updated:** 2026-07-01  
 
-This document defines the authoritative architecture of the Msingi platform. Every future capability — service, route, UI page, script, or database collection — should have a clear home here before it is built. If a feature does not fit cleanly into one of the subsystems below, the model should be updated first.
+This document defines the authoritative architecture of the Msingi platform. Every future capability — service, route, UI page, script, or database collection — should have a natural home here before it is built. If a feature does not fit cleanly into one of the subsystems below, the model should be updated first.
+
+---
+
+## 0. Architectural Principles
+
+These principles are the constitution above every future decision. They do not change with individual features. If a proposed change violates a principle, the change is reconsidered — not the principle.
+
+**P1 — School data is immutable once committed**  
+Records are versioned, not overwritten. Published report cards, submitted attendance, and receipted invoices are append-only. Corrections create new versions; they do not destroy history.
+
+**P2 — Tenant isolation is never compromised**  
+No query, API response, background job, or export may cross school boundaries. `schoolId` scoping is enforced at the data layer, not assumed at the route layer. Tenant middleware is the last line of defence, not the only one.
+
+**P3 — Backward compatibility takes precedence over convenience**  
+Live schools cannot be broken by a deployment. Migrations are additive and idempotent. Removing a field, renaming a route, or changing a response shape requires a deprecation period, not an immediate cut-over.
+
+**P4 — Platform services are additive before they are substitutive**  
+New capabilities extend what exists. They do not replace working systems until the replacement has been proven in production. The old path stays alive until the new one has 100% parity.
+
+**P5 — Every architectural change must preserve live-school continuity**  
+No kernel change may cause a school to lose access to its data or break a workflow mid-term. Infrastructure changes are tested against the Golden School (§8) before production.
+
+**P6 — One authoritative source per piece of information**  
+Every datum has exactly one system of record. Consumers read from the authority; they do not re-derive or re-store what the authority owns. Duplication is tolerated only when denormalized for performance and explicitly documented.
+
+**P7 — Operational complexity is earned, not designed in advance**  
+Event buses, microservices, distributed tracing, and CQRS are introduced only when a concrete, measured constraint requires them. Premature complexity is treated as technical debt.
 
 ---
 
@@ -280,7 +307,92 @@ The Platform Console is the operator's single pane of glass. Every platform subs
 
 ---
 
-## 8. What this model prevents
+## 8. Subsystem ownership
+
+Every subsystem has a named owner. Today that is one person. The structure survives growth — when a second engineer joins, ownership transfers cleanly because the boundary is already defined.
+
+| Subsystem | Owner Role | API namespace | UI location |
+|-----------|-----------|---------------|-------------|
+| Identity | Identity Team | `/api/auth`, `/api/users` | Login, Profile, Settings → Users |
+| Security | Platform Team | `/api/platform` (partial), CI scripts | Platform Console → Security |
+| Operations | Platform Team | `/api/ops` | Platform Console → Health, Integrity |
+| Monitoring | Platform Team | `/api/ops/metrics` (planned) | Platform Console → Monitoring |
+| Deployment | Platform Team | `/api/ops/certs`, CI pipelines | Platform Console → Releases |
+| Compliance | Platform Team | `/api/ops/health` (compliance engine) | Platform Console → Compliance |
+| Governance | Platform Team | `/api/audit` (planned) | Platform Console → Governance |
+| **Academic Records** | Academic Team | `/api/report-cards`, `/api/grades`, `/api/exams` | Grades, Report Cards |
+| **Finance** | Finance Team | `/api/finance`, `/api/billing` | Finance |
+| **Students** | Academic Team | `/api/students`, `/api/admissions` | Students |
+| **Attendance** | Academic Team | `/api/attendance` | Attendance |
+| **Behaviour** | Academic Team | `/api/behaviour` | Behaviour |
+
+**Ownership rule:** the owning team makes final decisions on schema changes, API contracts, and data model for their subsystem. Other teams consume via documented APIs — they do not write directly to another team's collections.
+
+---
+
+## 9. Platform contracts
+
+Each subsystem publishes a contract: what it guarantees to other subsystems. Contracts do not change without a deprecation notice. Consuming a subsystem means accepting its contract, not its internals.
+
+**Identity guarantees:**
+- A valid JWT contains `userId`, `schoolId`, `role`, `roles[]`
+- `authMiddleware` always sets `req.jwtUser` before route handlers run
+- A user belongs to exactly one school (schoolId immutable after creation)
+- Role changes take effect on next token refresh (not immediately)
+
+**Operations guarantees:**
+- `GET /api/ops/health` returns within 10 seconds regardless of DB state
+- `release_certificates` is append-only — no document is ever updated or deleted
+- Integrity rules run read-only against the DB — they never write
+
+**Academic Records (Report Cards) guarantees:**
+- Published snapshots are immutable — fields signed in the SHA-256 hash are never modified
+- `reportId` is globally unique across all schools and years
+- `superseded` snapshots are retained indefinitely — never deleted
+
+**Finance guarantees:**
+- Invoice IDs are globally unique within a school
+- A receipt references exactly one invoice
+- Financial totals are always computed from line items — never stored as a denormalized sum without a corresponding line-item audit trail
+
+**Students guarantees:**
+- `admissionNumber` is unique within a school
+- A student record is never deleted — only archived (soft delete with `isArchived: true`)
+- `studentId` (the `id` field, not `_id`) is the stable external reference used by all consuming modules
+
+---
+
+## 10. Change governance
+
+Not every change is equal. The review process matches the risk.
+
+| Change class | Examples | Process |
+|---|---|---|
+| **Patch** | Bug fix, UI copy, a new integrity rule | Code review + CI green |
+| **Minor** | New API endpoint, new collection field, new UI page | Code review + CI + regression checklist |
+| **Major** | New subsystem, new collection, schema migration, route rename | Architecture Decision Record (ADR) + code review + CI + staging validation |
+| **Kernel** | Changing how auth works, modifying tenant middleware, changing release cert format, modifying RBAC scanning | Architecture Review (written) + ADR + code review + CI + full regression + Principal sign-off |
+
+**Architecture Decision Records (ADRs)**  
+Stored in `docs/adr/`. Filename format: `ADR-NNNN-short-title.md`. Template:
+```
+# ADR-NNNN: Title
+Status: Proposed | Accepted | Deprecated | Superseded by ADR-XXXX
+Date: YYYY-MM-DD
+
+## Context
+What situation or constraint drove this decision?
+
+## Decision
+What was decided?
+
+## Consequences
+What becomes easier? What becomes harder? What is now not permitted?
+```
+
+---
+
+## 11. What this model prevents
 
 - **Feature homeless-ness**: every future feature has a named subsystem home before a line is written
 - **Settings pollution**: operational features never live inside school Settings again
@@ -290,7 +402,7 @@ The Platform Console is the operator's single pane of glass. Every platform subs
 
 ---
 
-## 9. Definition of done for platform features
+## 12. Definition of done for platform features
 
 Before any platform feature (not school feature) is shipped, it must answer:
 
