@@ -6,8 +6,10 @@ import {
   Search, ChevronDown, ChevronRight,
   BookOpen, Users, Wallet, CalendarDays, FileText, Scale,
   BarChart3, Settings, GraduationCap, MessageSquare, HelpCircle,
-  Clock, ClipboardList, MonitorPlay, Award, BookCheck,
-  ClipboardCheck, Layers, UserCog, Trophy,
+  Clock, ClipboardList, MonitorPlay, BookCheck,
+  ClipboardCheck, Layers, UserCog, Database,
+  BookMarked, Bus, BedDouble, TrendingUp, Library,
+  Sprout,
 } from 'lucide-react';
 import { useSchoolTheme, withOpacity } from '@/hooks/useSchoolTheme.js';
 import useAuthStore from '@/store/auth.js';
@@ -22,13 +24,13 @@ const SECTIONS = [
   /* ── Getting Started ──────────────────────────────────────── */
   {
     id: 'getting-started',
-    moduleKey: null,          // visible to all roles
+    moduleKey: null,
     Icon: BookOpen,
     title: 'Getting Started',
     articles: [
       {
         q: 'How do I sign in?',
-        a: 'Open your school portal (e.g. mascitlabacademy.msingi.io), enter your email and password, then click Sign In. First-time users are prompted to set a new password immediately.',
+        a: 'Open your school portal, enter your email (or admission number for students) and password, then click Sign In. First-time users are prompted to set a new password immediately.',
       },
       {
         q: 'I forgot my password. What do I do?',
@@ -40,7 +42,7 @@ const SECTIONS = [
       },
       {
         q: 'I have multiple roles. What do I see?',
-        a: 'If your account has multiple roles (e.g. Teacher + Finance Officer), you see all modules your highest role can access. The sidebar shows only the modules relevant to your combined permissions.',
+        a: 'Your sidebar shows only the modules your role has permission to access. If you have multiple roles (e.g. Teacher + Finance Officer), you see the union of all modules those roles can reach.',
       },
       {
         q: 'What browsers does Msingi support?',
@@ -52,7 +54,7 @@ const SECTIONS = [
       },
       {
         q: 'How is my data stored and who can see it?',
-        a: "All data is stored in a secure cloud database (MongoDB Atlas). Each school's data is completely isolated — other schools cannot access your records. Data is encrypted in transit and at rest.",
+        a: "All data is stored in a secure cloud database. Each school's data is completely isolated — other schools cannot access your records. Data is encrypted in transit and at rest.",
       },
       {
         q: 'What is the academic year context?',
@@ -61,28 +63,58 @@ const SECTIONS = [
     ],
   },
 
-  /* ── Classes & Subjects ───────────────────────────────────── */
+  /* ── Classes ──────────────────────────────────────────────── */
   {
     id: 'classes',
     moduleKey: 'classes',
     Icon: Layers,
-    title: 'Classes & Subjects',
+    title: 'Classes & Streams',
     articles: [
       {
-        q: 'How do I create a new class?',
-        a: 'Go to Classes → click "Add Class". Enter the class name (e.g. Grade 4A, Form 2B), select a section if applicable, assign a homeroom teacher, and click Save.',
+        q: 'How does the Classes → Streams architecture work?',
+        a: 'Classes represent year groups (e.g. Form 3, Year 8). Streams are teaching groups within a class (e.g. Form 3A, Form 3B, Form 3 East). Students, timetable slots, and marks are tracked at the stream level.',
       },
       {
-        q: 'How do I add subjects to a class?',
-        a: 'Go to Subjects → "Add Subject". Enter the subject name and code, assign it to one or more classes, and set the teacher responsible. Subjects drive both the timetable and the markbook.',
+        q: 'How do I create a class?',
+        a: 'Go to Classes → "Add Class". Enter the class name, select a section (e.g. Primary, Secondary), set the year, and save. Then open the class card to add streams inside it.',
+      },
+      {
+        q: 'How do I add streams to a class?',
+        a: 'Open a class card → click "Add Stream". Enter the stream name (e.g. A, B, East), assign a class teacher and room, set capacity, then save. Repeat for each teaching group in that year.',
       },
       {
         q: 'What are Sections?',
-        a: 'Sections let you group classes (e.g. "Primary" contains Grades 1–6; "Secondary" contains Forms 1–4). Sections are optional but help with reporting and permission scoping for Section Heads.',
+        a: 'Sections group classes by school division (e.g. "Primary" contains Years 1–6; "Secondary" contains Forms 1–4). They are optional but help with reporting and permission scoping for Section Heads.',
       },
       {
-        q: 'Can I have streaming within a year group?',
-        a: 'Yes. Create multiple classes with the same year label but different streams — e.g. Form 3A, Form 3B, Form 3C. Students, timetable slots, and marks are tracked separately per stream.',
+        q: 'Can I delete a class that has students?',
+        a: 'No. A class with active streams cannot be deleted, and a stream with active students cannot be deleted. Move or deactivate students first, then remove the stream, then the class.',
+      },
+    ],
+  },
+
+  /* ── Subjects ─────────────────────────────────────────────── */
+  {
+    id: 'subjects',
+    moduleKey: 'subjects',
+    Icon: Library,
+    title: 'Subjects',
+    articles: [
+      {
+        q: 'How do I add a subject?',
+        a: 'Go to Subjects → "Add Subject". Enter the subject name, code, and assign the teacher responsible. Subjects must be linked to classes before they appear in the timetable and markbook.',
+      },
+      {
+        q: 'How do subjects link to the timetable and grades?',
+        a: 'A subject assigned to a class drives both the timetable (which periods it occupies) and the markbook (which assessment components exist for it). Deleting a subject will affect both.',
+      },
+      {
+        q: 'Can the same subject be taught by different teachers in different classes?',
+        a: 'Yes. Create the subject once, then assign it to each class with the appropriate teacher. Each class-subject link is independent.',
+      },
+      {
+        q: 'What is a class-subject?',
+        a: 'A class-subject is the combination of a subject and a class — e.g. Mathematics in Form 3A. This is the unit that holds the syllabus, timetable slots, and the gradebook for that group.',
       },
     ],
   },
@@ -96,27 +128,35 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I add a new student?',
-        a: 'Go to Students → click "Add Student". Fill in the required fields (first name, last name, class, admission number) and any optional details like date of birth, guardian contacts, and photo. Click Save.',
+        a: 'Go to Students → "Add Student". Fill in the required fields (first name, last name, class, stream) and optional details like date of birth, guardian contacts, and photo. An admission number is generated automatically based on your school\'s configured format.',
       },
       {
         q: 'How do I import students in bulk?',
-        a: 'Go to Students → click the Import button → download the CSV template → fill in your student data following the column headers exactly → upload the file. The system validates each row and reports any errors.',
+        a: 'Go to Students → Import → download the CSV template → fill in your student data → upload the file. The system validates each row and reports errors. You can include opening fee balances in the same import.',
       },
       {
-        q: 'Can I move a student to a different class?',
-        a: "Yes. Open the student's profile → click Edit → change the Class field → Save. All historical data (attendance, grades, fees) remains linked to the student.",
+        q: 'How do I filter and search students?',
+        a: 'Use the filter bar to narrow by Section, Class, Stream, Gender, Status, or Enrolment Year. All active filters are shown as chips. The Export button respects the active filters — what you see is what gets exported.',
+      },
+      {
+        q: 'How do I bulk-select and act on multiple students?',
+        a: 'Click the checkbox on any row to select it (or the header checkbox to select the whole page). A bulk action bar appears with options to Deactivate or Permanently Delete selected students. Permanent delete requires admin role and an explicit confirmation.',
       },
       {
         q: 'How do I mark a student as transferred or graduated?',
-        a: 'Open the student\'s profile → Edit → set Status to "Transferred", "Graduated", or "Withdrawn" → Save. The student moves out of the active roll but their record is preserved.',
+        a: 'Open the student\'s profile → Edit → set Status to "Transferred", "Graduated", or "Withdrawn" → Save. The student leaves the active roll but their full record is preserved.',
       },
       {
         q: 'Can a student have a portal login?',
-        a: "Yes. An admin can create a student portal account from the student's profile page. The student receives login credentials and can view their own timetable, attendance, grades, behaviour history, and report cards.",
+        a: "Yes. An admin creates a student portal account from the student's profile → Portal tab. The student logs in with their admission number and a password, and can view their timetable, attendance, grades, behaviour history, and report cards.",
       },
       {
-        q: 'How do I add a parent or guardian?',
-        a: "Add guardian contact details in the student's profile. An admin can also create a separate Parent portal account linked to that student, giving the parent their own secure login.",
+        q: 'How do I set up a parent portal account?',
+        a: "From the student's profile → Portal tab → click 'Create Parent Account'. This creates a login linked to the student's parent email. Parents see their child's attendance, grades, fees, report cards, and can message teachers.",
+      },
+      {
+        q: 'Can I grant portal access to many students at once?',
+        a: 'Yes. Select multiple students in the list → the bulk action bar shows "Grant Portal Access". This creates login accounts for all selected students who do not already have one and returns a created/skipped summary.',
       },
     ],
   },
@@ -134,11 +174,11 @@ const SECTIONS = [
       },
       {
         q: 'How do I create a new application?',
-        a: 'Go to Admissions → "New Application". Fill in the applicant\'s details, select the target class and academic year, and submit. A unique application reference is generated automatically.',
+        a: "Go to Admissions → 'New Application'. Fill in the applicant's details, select the target class and academic year, and submit. A unique application reference is generated automatically.",
       },
       {
         q: 'How do I enrol an accepted applicant as a student?',
-        a: 'Open the application and move it to the "Acceptance" or "Enrolled" stage. Click "Enrol as Student" — this automatically creates a student record with all details pre-filled from the application.',
+        a: "Open the application and move it to 'Acceptance' or 'Enrolled'. Click 'Enrol as Student' — this creates a student record pre-filled from the application.",
       },
       {
         q: 'Can I track notes and communication per application?',
@@ -146,7 +186,7 @@ const SECTIONS = [
       },
       {
         q: 'Where do I see the admissions funnel overview?',
-        a: 'The Dashboard → Admissions Pipeline bar chart shows counts by stage at a glance. For full detail, go to Admissions → the board view shows all active applications grouped by stage.',
+        a: 'The Dashboard → Admissions Pipeline bar chart shows counts by stage. For full detail, go to Admissions — the board view shows all active applications grouped by stage.',
       },
     ],
   },
@@ -164,7 +204,7 @@ const SECTIONS = [
       },
       {
         q: 'Can I mark the whole class present at once?',
-        a: 'Yes. Click "Mark All Present" to set all students to Present in one click, then adjust any exceptions individually before saving.',
+        a: 'Yes. Click "Mark All Present" to set all students to Present in one action, then adjust any exceptions individually before saving.',
       },
       {
         q: "Where can I see a student's full attendance history?",
@@ -172,11 +212,15 @@ const SECTIONS = [
       },
       {
         q: 'What does the attendance percentage mean?',
-        a: 'The percentage shows Present days ÷ Total school days recorded. A rate below 80% is highlighted in amber and below 60% in red — these are the "at risk" thresholds shown in Leadership Analytics.',
+        a: 'The percentage shows Present days ÷ Total school days recorded. Below 80% is highlighted amber; below 60% is red. These thresholds also drive the "at-risk students" panel in Leadership Analytics.',
       },
       {
         q: 'Can I edit attendance after saving?',
-        a: 'Yes, if your role has edit permission for attendance. Reopen the register for that date and class, make the changes, and save again. All edits are logged in the audit trail.',
+        a: 'Yes, if your role has edit permission for attendance. Reopen the register for that date and class, make the changes, and save again.',
+      },
+      {
+        q: 'Do teachers only see their own classes?',
+        a: "Yes. Teachers see only the classes they are assigned to teach. Admins and deputy principals see all classes. Section Heads see classes within their section.",
       },
     ],
   },
@@ -190,28 +234,28 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I build a class timetable?',
-        a: 'Go to Timetable → select a class from the dropdown → click any empty cell in the grid → choose subject, teacher, and room → Save. Repeat for each period across the week.',
+        a: 'Go to Timetable → select a class → click any empty cell in the grid → choose subject, teacher, and room → Save. Repeat for each period across the week.',
       },
       {
         q: 'Does the system detect teacher or room conflicts?',
-        a: 'Yes. If you try to assign a teacher or room to two classes at the same day and period, the system returns a 409 conflict error and prevents the save.',
+        a: 'Yes. Assigning a teacher or room already in use at the same period returns a 409 conflict error and blocks the save.',
       },
       {
         q: 'Can I bulk-load a timetable?',
-        a: 'Yes. Use the Import button to upload a CSV of all slots at once. Download the timetable template for the correct column format.',
+        a: 'Yes. Use the Import button to upload a CSV of all slots. Download the timetable template for the correct column format.',
       },
       {
         q: 'What is Emergency Online Learning Mode?',
-        a: 'When enabled by an admin (Settings → Emergency Online Learning Mode), every timetable slot shows a "Join Zoom / Meet" button using the assigned teacher\'s saved personal meeting link. Students see the same Join buttons in their portal.',
+        a: "When enabled in Settings → School Profile, every timetable slot shows a 'Join Zoom / Meet' button using each teacher's saved meeting link. Students see the same Join buttons in their portal.",
       },
       {
-        q: 'How do teachers save their meeting links for the timetable?',
-        a: 'Each teacher goes to their Profile → Online Meeting Links → pastes their Zoom PMI URL and/or Google Meet URL → Save. These links appear automatically when Emergency Mode is active.',
+        q: 'How do teachers save their meeting links?',
+        a: 'Go to Profile → Online Meeting Links → paste your Zoom PMI URL and/or Google Meet URL → Save. These links appear automatically when Emergency Mode is active.',
       },
     ],
   },
 
-  /* ── eLearning & Online Sessions ─────────────────────────── */
+  /* ── eLearning ────────────────────────────────────────────── */
   {
     id: 'elearning',
     moduleKey: 'elearning',
@@ -220,23 +264,23 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I schedule an online class?',
-        a: 'Go to eLearning → Online Sessions → "Schedule Session". Choose the audience (a class, an individual student, or a parent), select your platform (Zoom or Google Meet), set the date, time, and duration, then click Schedule. The session is added to the school calendar automatically.',
+        a: "Go to eLearning → Online Sessions → 'Schedule Session'. Choose the audience (class, student, or parent), platform (Zoom or Google Meet), date, time, and duration, then click Schedule. A calendar event is created automatically.",
       },
       {
-        q: 'Do I need to sign in to Zoom or Google from Msingi?',
-        a: 'No. Msingi does not connect to Zoom or Google APIs. You simply save your personal meeting room link once in your Profile → Online Meeting Links. That link is used every time you schedule a session — no sign-in or tokens required.',
+        q: 'Do I need to connect Zoom or Google to Msingi?',
+        a: 'No. Save your personal meeting room link once in Profile → Online Meeting Links. That link is used every time — no API connection, tokens, or sign-in required.',
       },
       {
-        q: 'Where do scheduled sessions appear for students?',
-        a: 'Scheduled sessions appear in the school calendar as "Online Class" events with a Join Meeting button. Students in the target class can also see Join buttons in their Student Portal dashboard when Emergency Online Learning Mode is active.',
+        q: 'Where do students see scheduled sessions?',
+        a: 'In the school calendar as "Online Class" events with a Join button. Students also see Join buttons in their Student Portal dashboard when Emergency Online Learning Mode is active.',
       },
       {
         q: 'Can I cancel a session?',
-        a: 'Yes. Go to eLearning → Online Sessions → find the upcoming session → click the × (cancel) button. This removes the session and its calendar event.',
+        a: "Yes. Go to eLearning → Online Sessions → find the upcoming session → click × (cancel). This removes the session and its calendar event.",
       },
       {
         q: "What if I haven't saved my meeting link yet?",
-        a: 'The scheduling modal will show a yellow warning. Click "Add it in Profile →" to go directly to your profile and save your Zoom PMI or Google Meet URL. You must save a link before you can schedule sessions.',
+        a: "The scheduling modal shows a yellow warning. Click 'Add it in Profile →' to save your link first. You must have a meeting link saved before scheduling sessions.",
       },
     ],
   },
@@ -250,7 +294,7 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I set up fee structures?',
-        a: 'Go to Finance → Fee Structures → "Add Structure". Define the fee type (tuition, boarding, transport, etc.), amount, and which classes it applies to. Fee structures are templates you can apply when creating invoices.',
+        a: 'Go to Finance → Fee Structures → "Add Structure". Define the fee type (tuition, boarding, transport, etc.), amount, and which classes it applies to. Fee structures are reusable templates for creating invoices.',
       },
       {
         q: 'How do I create a fee invoice for a student?',
@@ -258,11 +302,11 @@ const SECTIONS = [
       },
       {
         q: 'How do I record a payment?',
-        a: 'Open the invoice → click "Record Payment" → enter the amount, payment date, method (M-Pesa, bank transfer, cash, cheque), and reference/receipt number → Save. The invoice status updates automatically.',
+        a: 'Open the invoice → "Record Payment" → enter the amount, date, method (M-Pesa, bank transfer, cash, cheque), and reference number → Save. The invoice status and balance update automatically.',
       },
       {
         q: 'What do the invoice statuses mean?',
-        a: 'Draft = not yet sent. Pending = sent, awaiting payment. Partial = some amount paid but balance remains. Paid = fully settled. Overdue = past due date with an outstanding balance. Void = cancelled.',
+        a: 'Draft = not yet issued. Pending = issued, awaiting payment. Partial = some amount paid, balance remains. Paid = fully settled. Overdue = past due date with outstanding balance. Void = cancelled.',
       },
       {
         q: 'How do I accept M-Pesa payments?',
@@ -270,7 +314,11 @@ const SECTIONS = [
       },
       {
         q: 'How do I generate a fee statement for a parent?',
-        a: "Open the student's Finance tab in their profile. You can print or download a PDF fee statement showing all invoices and payment history.",
+        a: "Open the student's Finance tab in their profile. Print or download a PDF fee statement showing all invoices and payment history.",
+      },
+      {
+        q: 'Can I import opening balances for students?',
+        a: 'Yes. The student CSV import supports opening fee columns: openingFeeTitle, openingFeeAmount, openingFeePaid, and openingFeeDueDate. The system creates an invoice and payment record per student automatically.',
       },
     ],
   },
@@ -291,16 +339,20 @@ const SECTIONS = [
         a: 'The BPS tracks cumulative merit and demerit points per student. Demerits trigger escalating stages (Verbal Warning → Written Warning → Suspension). Merits award milestone badges at set thresholds.',
       },
       {
-        q: 'How do students reach milestones?',
-        a: 'When a student accumulates enough merit points they earn a milestone badge (e.g. Bronze, Silver, Gold). Milestones are visible on the student profile and in the Behaviour module dashboard.',
+        q: 'How do students earn milestone badges?',
+        a: 'When a student accumulates enough merit points they earn a milestone badge (Bronze, Silver, Gold). Milestones are visible on the student profile and the Behaviour dashboard.',
       },
       {
         q: 'How do students or parents appeal a demerit?',
-        a: 'A teacher or admin submits an appeal from the incident detail page. Parents can add a note to the appeal from their portal. An admin or discipline committee member resolves it — the outcome is logged permanently.',
+        a: 'A teacher or admin submits an appeal from the incident detail page. Parents can add a note from their portal. An admin or discipline committee member resolves it — the outcome is permanently logged.',
       },
       {
         q: 'What is a Rolling Half-Term window?',
-        a: 'Demerit stages are calculated over a rolling half-term window, not the full year. This means a student can "reset" after sufficient time passes without new demerits, preventing unfair carry-over from long ago incidents.',
+        a: 'Demerit stages are calculated over a rolling half-term window, not the full year. A student can reset after sufficient time without new demerits — preventing unfair carry-over from old incidents.',
+      },
+      {
+        q: 'Can all teachers record behaviour for any student?',
+        a: 'Yes. Behaviour is school-wide — teachers can record merits and demerits for any student, not just those in their assigned classes. This is by design to support pastoral care across the school.',
       },
     ],
   },
@@ -308,7 +360,7 @@ const SECTIONS = [
   /* ── Exams ────────────────────────────────────────────────── */
   {
     id: 'exams',
-    moduleKey: 'grades',     // exams live under the grades/assessment module key
+    moduleKey: 'grades',
     Icon: ClipboardCheck,
     title: 'Exams',
     articles: [
@@ -317,16 +369,24 @@ const SECTIONS = [
         a: 'Go to Exams → "New Exam". Enter the exam name, subject, class, date, total marks, and term. The exam appears in the markbook once created.',
       },
       {
+        q: 'What is an Exam Series?',
+        a: 'An Exam Series groups multiple exams together (e.g. End-of-Term 1 Series). Results across all exams in a series feed into the report card for that term. Series can span multiple subjects.',
+      },
+      {
         q: 'How do I enter exam results?',
-        a: 'Go to Exams → open the exam → click "Enter Results". Enter each student\'s raw score. The system calculates percentages and letter grades automatically based on your grading scale.',
+        a: "Go to Exams → open the exam → 'Enter Results'. Enter each student's raw score. The system calculates percentages and letter grades automatically based on your grading scale.",
+      },
+      {
+        q: 'What is the exam approval workflow?',
+        a: 'Exams follow a status flow: Draft → Submitted → Approved → Published. Teachers submit completed mark entries. An exam officer or admin approves, then publishes. Each stage change is logged.',
       },
       {
         q: 'Can I lock exam results after entry?',
-        a: 'Yes. Once results are reviewed and correct, click "Lock Exam". Locked exams cannot be edited without an unlock request that requires an admin to provide a reason — this is logged in the audit trail.',
+        a: 'Yes. Once results are reviewed and correct, click "Lock Exam". Locked exams cannot be edited without an unlock request from an admin. Unlock reasons are logged in the audit trail.',
       },
       {
         q: 'How are grades calculated from multiple assessments?',
-        a: 'The final grade is a weighted average of all assessment components (CA, Homework, Mid-Term, End-Term). Weights are configured per subject in Academic Config. The system calculates this automatically.',
+        a: 'The final grade is a weighted average of all assessment components (CA, Homework, Mid-Term, End-Term). Weights are configured per subject in Academic Config → Assessment Settings.',
       },
     ],
   },
@@ -340,11 +400,11 @@ const SECTIONS = [
     articles: [
       {
         q: 'What is the CA / HW / MT / ET system?',
-        a: 'CA = Continuous Assessment, HW = Homework, MT = Mid-Term test, ET = End-Term exam. Each has a configurable percentage weight that adds up to 100% of the final grade for a subject.',
+        a: 'CA = Continuous Assessment, HW = Homework, MT = Mid-Term test, ET = End-Term exam. Each component has a configurable percentage weight that adds up to 100% of the final grade.',
       },
       {
         q: 'How do I enter marks in the markbook?',
-        a: "Go to Grades → Markbook → select the term, class, and subject → enter each student's score for each assessment task → Save. Scores are validated against the maximum marks you set.",
+        a: "Go to Grades → Markbook → select the term, class, and subject → enter each student's score per assessment component → Save. Scores are validated against the maximum marks configured.",
       },
       {
         q: 'How are grade letters assigned?',
@@ -352,7 +412,11 @@ const SECTIONS = [
       },
       {
         q: 'What is the Academic Health dashboard?',
-        a: 'Leadership Analytics includes an Academic Health panel showing the average score per class for published grades, sorted from lowest to highest. Classes below 50% are flagged.',
+        a: 'Leadership Analytics shows average scores per class for published grades, sorted lowest to highest. Classes below 50% average are flagged for attention.',
+      },
+      {
+        q: 'What is grid mark entry?',
+        a: 'Grid mark entry lets you enter marks for an entire class at once in a spreadsheet-style table — one row per student, one column per assessment. This is faster than opening each student individually.',
       },
     ],
   },
@@ -366,19 +430,27 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I generate report cards?',
-        a: 'Go to Reports → Report Cards. Select the academic year and term. Click "Generate" to produce cards for all students in a class, or open an individual student to generate theirs.',
+        a: 'Go to Reports → Report Cards. Select the class and term. Click "Generate" — the system compiles grades, attendance, and behaviour data into a card for every student in the class.',
       },
       {
-        q: 'How do I publish a report card?',
-        a: 'Once a report card is reviewed and correct, click "Publish". Published cards are visible to the student in their portal and to linked parents. Unpublished cards are only visible to staff.',
+        q: 'How do I publish report cards?',
+        a: "Click 'Publish All' for a class. A confirmation shows how many cards will go live. Once published, students and linked parents can view and download PDFs from their portals. Publishing is logged with who did it and when.",
       },
       {
-        q: 'Can I bulk-publish all report cards for a class?',
-        a: "Yes. In the class report card view, click 'Publish All'. A confirmation dialog shows how many cards will be published. A publish audit trail records who published and when.",
+        q: 'What is a Report ID?',
+        a: 'Every published report card is assigned a unique Report ID (e.g. RC-000142). This ID is printed on the PDF and can be used to verify the report card is authentic and unmodified.',
+      },
+      {
+        q: 'How does report card verification work?',
+        a: 'Each published report card is sealed with a SHA-256 hash. Anyone — including parents and universities — can visit the verification URL on the report card to confirm it is genuine and has not been altered.',
+      },
+      {
+        q: 'What is moderation and when does it apply?',
+        a: 'Moderation checks that all exams in the series have been approved before publishing. If any exam is still in Draft or Submitted status, the system blocks publishing to prevent incomplete report cards.',
       },
       {
         q: 'Can parents download report cards as a PDF?',
-        a: 'Yes. Once published, a student or parent can download their report card as a PDF from the Student Portal or Parent Portal.',
+        a: 'Yes. Once published, students and parents can download their report card PDF from their portal. The PDF includes the Report ID, QR code for verification, and the school stamp and signature.',
       },
     ],
   },
@@ -396,11 +468,15 @@ const SECTIONS = [
       },
       {
         q: 'How do I log a lesson as covered?',
-        a: 'Go to Lessons → select your class and subject → find the topic in the syllabus list → click "Mark as covered". Add optional notes on what was taught.',
+        a: 'Go to Lessons → select your class and subject → find the topic → click "Mark as covered". Add optional notes on what was taught and how.',
       },
       {
-        q: 'Where do students see their curriculum coverage?',
-        a: "Students see a per-subject coverage bar on their Student Dashboard showing the percentage of topics covered so far. This gives them visibility into learning progress throughout the term.",
+        q: 'Where do students see curriculum coverage?',
+        a: "Students see a per-subject coverage bar on their Student Dashboard showing the percentage of topics covered so far in the term.",
+      },
+      {
+        q: 'Do teachers only see their assigned classes in Lessons?',
+        a: 'Yes. Teachers can only view and update coverage for classes they are assigned to teach. Admins and section heads have broader access.',
       },
     ],
   },
@@ -418,15 +494,15 @@ const SECTIONS = [
       },
       {
         q: 'What is an Online Class event?',
-        a: 'When you schedule a session in eLearning → Online Sessions, an "Online Class" calendar event is created automatically. Opening the event shows the meeting link and passcode with a "Join Meeting" button.',
+        a: 'When you schedule a session in eLearning → Online Sessions, an "Online Class" event is created in the calendar automatically with the meeting link and a Join button.',
       },
       {
-        q: 'How do birthday indicators work on the calendar?',
-        a: 'Days with student or staff birthdays are marked with a 🎂 icon. Clicking it shows a popup listing everyone celebrating that day with their name, class/role, and the age they are turning.',
+        q: 'How do birthday indicators work?',
+        a: 'Days with student or staff birthdays show a 🎂 icon. Clicking it lists everyone celebrating that day with their name, class/role, and the age they are turning.',
       },
       {
-        q: 'Can I view events by week or list view?',
-        a: 'Yes. Use the Month / Week / List toggle at the top of the Events page to switch views. The list view is useful for quickly scanning upcoming events.',
+        q: 'Can I switch between month, week, and list view?',
+        a: 'Yes. Use the Month / Week / List toggle at the top of the Events page. List view is useful for scanning upcoming events chronologically.',
       },
     ],
   },
@@ -440,19 +516,27 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I add a staff member?',
-        a: 'Go to HR → "Add Staff" (or use Settings → Users → Invite User). Enter their name, email, role, and department. They will receive a welcome email with login instructions.',
+        a: 'Go to HR → "Add Staff". Enter their name, email, role, and department. A welcome email with login instructions is sent automatically. You can also bulk-import staff from a CSV.',
+      },
+      {
+        q: 'Does teacher import create login accounts automatically?',
+        a: 'Yes. When importing teachers via CSV, Msingi automatically creates a user account and sends a welcome email for each imported teacher who does not already have one.',
       },
       {
         q: 'What can a teacher edit on their own profile?',
-        a: 'Teachers can update their phone, address, qualifications, specialization, next-of-kin contact, and personal meeting links (Zoom PMI / Google Meet) from their Profile page — no admin approval required.',
+        a: 'Teachers can update their phone, address, qualifications, specialization, next-of-kin contact, and personal meeting links (Zoom PMI / Google Meet) from Profile — no admin approval required.',
       },
       {
-        q: 'How do I reset a staff member\'s password?',
-        a: 'Go to Settings → Users → find the staff member → click "Reset Password". Enter and confirm a new password. The staff member will be prompted to change it on their next login.',
+        q: 'How do I configure staff roles and responsibilities?',
+        a: "Go to Settings → School → Staff Responsibilities. Add custom responsibility labels (e.g. HOD, KS Coordinator, Pastoral Lead). These appear as checkboxes in staff profiles and HR forms.",
+      },
+      {
+        q: 'How do I reset a staff password?',
+        a: 'Go to Settings → Users → find the staff member → "Reset Password". The staff member will be prompted to change it on their next login.',
       },
       {
         q: 'Can a staff member have multiple roles?',
-        a: 'Yes. In Settings → Users → open the user → you can assign multiple roles (e.g. Teacher + Finance Officer). The user sees all modules accessible to any of their roles.',
+        a: 'Yes. In Settings → Users → open the user → assign multiple roles (e.g. Teacher + Finance Officer). The user sees all modules accessible to any of their combined roles.',
       },
     ],
   },
@@ -470,15 +554,165 @@ const SECTIONS = [
       },
       {
         q: 'Are messages private?',
-        a: 'Yes. Messages are only visible to the sender and recipient(s). Admins can review all conversations for safeguarding and audit purposes.',
+        a: 'Yes. Messages are only visible to the sender and recipient(s). Admins can review all conversations for safeguarding and compliance purposes.',
       },
       {
         q: 'Can I message an entire class at once?',
-        a: 'Yes. When composing a message, select "Class" as the recipient type and choose the class. All students or parents in that class will receive the message.',
+        a: 'Yes. When composing a message, select "Class" as the recipient type and choose the class. All students or parents in that class receive the message.',
       },
       {
         q: 'Will I be notified of new messages?',
-        a: 'Yes. An unread badge appears on the Messages icon in the sidebar. Email notifications for messages depend on whether your school has configured SMTP in Settings.',
+        a: 'An unread badge appears on the Messages icon in the sidebar. Email notifications depend on whether your school has configured SMTP in Settings.',
+      },
+    ],
+  },
+
+  /* ── Growth Profile ───────────────────────────────────────── */
+  {
+    id: 'growth',
+    moduleKey: 'growth_profile',
+    Icon: Sprout,
+    title: 'Growth Profile',
+    articles: [
+      {
+        q: 'What is the Growth Profile module?',
+        a: 'Growth Profile tracks student development beyond academic grades — aspirations, personal goals, skills, extra-curricular activities, and holistic growth markers across terms and years.',
+      },
+      {
+        q: 'How do I add a growth record for a student?',
+        a: "Open the student's profile → Growth tab → 'Add Record'. Select the growth area, term, and add notes or a rating. Records are visible to the student and their parents.",
+      },
+      {
+        q: 'What are growth aspirations?',
+        a: 'Aspirations let students or teachers record career goals, subject interests, and personal ambitions. These are referenced when writing teacher comments on report cards and pastoral notes.',
+      },
+      {
+        q: 'How does Growth Profile link to report cards?',
+        a: 'Teacher comments on report cards can reference a student\'s growth records and aspirations. This makes comments more personal and evidence-based rather than generic.',
+      },
+    ],
+  },
+
+  /* ── Library ──────────────────────────────────────────────── */
+  {
+    id: 'library',
+    moduleKey: 'library',
+    Icon: BookMarked,
+    title: 'Library',
+    articles: [
+      {
+        q: 'How do I add a book to the library catalogue?',
+        a: 'Go to Library → "Add Book". Enter the title, author, ISBN, category, and number of copies. The book is immediately searchable and available for borrowing.',
+      },
+      {
+        q: 'How do I issue a book to a student?',
+        a: "Go to Library → Issue Book. Search for the student, select the book, set the due date, and confirm. The book's available copy count decreases automatically.",
+      },
+      {
+        q: 'How do I record a book return?',
+        a: "Go to Library → Returns. Find the active loan by student or book → click 'Return'. The system records the return date and restores the available copy count.",
+      },
+      {
+        q: 'Can I see which books are overdue?',
+        a: 'Yes. Library → Overdue shows all loans past their due date, with the student name, book title, due date, and number of days overdue.',
+      },
+      {
+        q: 'Can I search the catalogue?',
+        a: 'Yes. Use the search bar in Library to find books by title, author, ISBN, or category. The result shows total copies and how many are currently available.',
+      },
+    ],
+  },
+
+  /* ── Transport ────────────────────────────────────────────── */
+  {
+    id: 'transport',
+    moduleKey: 'transport',
+    Icon: Bus,
+    title: 'Transport',
+    articles: [
+      {
+        q: 'How do I add a transport route?',
+        a: "Go to Transport → Routes → 'Add Route'. Enter the route name, stops (in order), and assign a vehicle and driver. Students are then assigned to routes from their profile.",
+      },
+      {
+        q: 'How do I assign a student to a route?',
+        a: "Open the student's profile → Transport tab → select their route and boarding stop. The student appears on the route manifest for that stop.",
+      },
+      {
+        q: 'How do I manage vehicles and drivers?',
+        a: "Go to Transport → Vehicles to add and manage school vehicles (number plate, capacity, type). Go to Transport → Drivers to record driver details and assign them to vehicles.",
+      },
+      {
+        q: 'Can I see a route manifest?',
+        a: 'Yes. Open a route to see a full passenger list grouped by stop, with student names and class. This is useful for drivers and transport coordinators.',
+      },
+      {
+        q: 'How does transport link to fees?',
+        a: 'Transport fees can be set up in Finance → Fee Structures as a "Transport" fee type and invoiced to students assigned to a route, just like any other fee.',
+      },
+    ],
+  },
+
+  /* ── Hostel ───────────────────────────────────────────────── */
+  {
+    id: 'hostel',
+    moduleKey: 'hostel',
+    Icon: BedDouble,
+    title: 'Hostel',
+    articles: [
+      {
+        q: 'How do I add a hostel block and rooms?',
+        a: "Go to Hostel → Blocks → 'Add Block'. Enter the block name and gender assignment. Then open the block and add rooms with their bed capacity.",
+      },
+      {
+        q: 'How do I assign a student to a room?',
+        a: "Go to Hostel → Allocations → 'Allocate Student'. Select the student, block, room, and bed number. The room's occupancy count updates automatically.",
+      },
+      {
+        q: 'How do I manage hostel capacity?',
+        a: "Each room shows its capacity and current occupancy. The block overview shows total beds, occupied beds, and available spaces across all rooms.",
+      },
+      {
+        q: 'How do hostel fees work?',
+        a: 'Boarding fees are set up in Finance → Fee Structures as a "Boarding" fee type and invoiced to students allocated to the hostel, the same way as tuition fees.',
+      },
+      {
+        q: 'Can I see which students are in which rooms?',
+        a: 'Yes. Open any room to see the full occupancy list with student names, class, and stream. You can also see a student\'s hostel allocation from their profile → Hostel tab.',
+      },
+    ],
+  },
+
+  /* ── Reports & Analytics ──────────────────────────────────── */
+  {
+    id: 'reports',
+    moduleKey: 'reports',
+    Icon: TrendingUp,
+    title: 'Reports & Analytics',
+    articles: [
+      {
+        q: 'Who can access Reports & Analytics?',
+        a: 'Reports & Analytics is visible to roles with the analytics permission — typically Admin, Deputy Principal, and Section Head. Teachers see their own class data only.',
+      },
+      {
+        q: 'What does the Academic Health panel show?',
+        a: 'Average score per class for published grades, sorted from lowest to highest. Classes below 50% average are flagged so leadership can identify where intervention is needed.',
+      },
+      {
+        q: 'What does the Attendance analytics section show?',
+        a: 'School-wide attendance rate, per-class breakdown, and a list of at-risk students (below 80% attendance). Clicking a student opens their full attendance history.',
+      },
+      {
+        q: 'What does the Finance summary show?',
+        a: 'Total fees invoiced vs. collected, outstanding balance by class, and a list of students with overdue invoices. Useful for fee collection follow-up.',
+      },
+      {
+        q: 'Can I export analytics reports?',
+        a: 'Yes. Most analytics panels have a Download or Export button that produces a CSV or PDF summary of the visible data.',
+      },
+      {
+        q: 'What is the Admissions Pipeline chart?',
+        a: 'A bar chart on the dashboard showing the count of active applications at each stage (Enquiry → Enrolled). It updates in real time as applications move through stages.',
       },
     ],
   },
@@ -486,7 +720,7 @@ const SECTIONS = [
   /* ── Settings ─────────────────────────────────────────────── */
   {
     id: 'settings',
-    moduleKey: null,             // all staff can read settings guidance
+    moduleKey: null,
     Icon: Settings,
     title: 'Settings',
     articles: [
@@ -496,19 +730,23 @@ const SECTIONS = [
       },
       {
         q: 'How do I customise the school logo and colours?',
-        a: 'Go to Settings → Branding. Upload your school logo (PNG or JPG), set a Primary Colour and Accent Colour using the colour pickers, and save. These colours are applied across all dashboards and module pages.',
+        a: 'Go to Settings → Branding. Upload your school logo (PNG or JPG), set a Primary Colour and Accent Colour using the colour pickers, and save. These colours apply across all dashboards.',
       },
       {
         q: 'How do I configure custom SMTP email sending?',
-        a: "By default, all system emails come from Msingi's platform address. To send from your own domain (e.g. noreply@yourschool.ke), go to Settings → Email / SMTP and enter your SMTP server credentials.",
+        a: "By default, system emails come from Msingi's platform address. To send from your own domain (e.g. noreply@yourschool.ke), go to Settings → Email / SMTP and enter your SMTP credentials.",
       },
       {
         q: 'What is Emergency Online Learning Mode?',
-        a: 'Found in Settings → School Profile. When toggled ON, all timetable slots show Join buttons using each teacher\'s saved meeting link, and students see Join buttons on their dashboard. Useful for unexpected school closures.',
+        a: "Found in Settings → School Profile. When toggled ON, all timetable slots show Join buttons using each teacher's saved meeting link. Useful for unexpected school closures.",
       },
       {
         q: 'How do I back up my school data?',
-        a: 'Go to Settings → Data → "Download Backup". This exports all your school data as a JSON archive. Store the file securely — it can be used to restore data if needed.',
+        a: 'Go to Settings → System → "Download Backup". This exports all your school data as a JSON archive. Store the file securely.',
+      },
+      {
+        q: 'Where can I see the Audit Log?',
+        a: 'Go to Settings → Audit Log (admin only). This shows a filterable, paginated list of high-impact actions — logins, student deletions, report card publishes, role changes — with the actor, target, and timestamp.',
       },
     ],
   },
@@ -516,29 +754,33 @@ const SECTIONS = [
   /* ── Roles & Permissions ──────────────────────────────────── */
   {
     id: 'roles',
-    moduleKey: null,             // role information is universal reference
+    moduleKey: null,
     Icon: Users,
     title: 'Roles & Permissions',
     articles: [
       {
         q: 'What roles are available in Msingi?',
-        a: 'Superadmin, Admin, Deputy Principal, Section Head, Teacher, Finance Officer, HR, Admissions Officer, Discipline Committee, Exams Officer, Timetabler, Parent, and Student.',
+        a: 'Superadmin, Admin, Deputy Principal, Section Head, Teacher, Finance Officer, HR, Admissions Officer, Discipline Committee, Exams Officer, Timetabler, Parent, and Student. Custom roles can be created in Settings → Role Permissions.',
       },
       {
         q: 'What is the difference between Superadmin and Admin?',
-        a: 'Superadmin is the school owner account — it has full access including billing, branding, and platform settings. Admin has full operational access but cannot change billing or delete the school.',
+        a: 'Superadmin is the school owner account with full access including billing and branding. Admin has full operational access but cannot change billing or delete the school.',
       },
       {
         q: 'Can I create custom permission sets?',
-        a: 'Yes. Go to Settings → Role Permissions. You can adjust which modules each role can Read, Create, Update, or Delete. Changes apply immediately for all users with that role.',
+        a: 'Yes. Go to Settings → Role Permissions. Adjust which modules each role can Read, Create, Update, or Delete. Changes apply immediately for all users with that role.',
+      },
+      {
+        q: 'Why can I only see certain modules in the sidebar?',
+        a: "The sidebar shows only modules your role has permission to access. If a module you expect to see is missing, ask your administrator to check your role's permissions in Settings → Role Permissions.",
       },
       {
         q: 'What can a parent account see?',
-        a: "Parents can view their child's attendance, grades, behaviour history, fee balance, report cards, timetable, and messages from staff. They cannot see other students' records.",
+        a: "Parents see their child's attendance, grades, behaviour history, fee balance, report cards, timetable, and messages from staff. They cannot view other students' records.",
       },
       {
         q: 'What can a student account see?',
-        a: "Students access the Student Portal — a dedicated dashboard showing today's timetable (with Join buttons during online learning), attendance %, curriculum coverage, fee balance, report cards, and behaviour history.",
+        a: "Students access the Student Portal — showing today's timetable (with Join buttons during online learning), attendance %, curriculum coverage, fee balance, report cards, and behaviour history.",
       },
     ],
   },
@@ -546,17 +788,17 @@ const SECTIONS = [
   /* ── Data & Import/Export ─────────────────────────────────── */
   {
     id: 'data',
-    moduleKey: null,             // data help visible to all (admin-only features explained in body)
-    Icon: Trophy,
+    moduleKey: null,
+    Icon: Database,
     title: 'Data & Import/Export',
     articles: [
       {
         q: 'What file format does Msingi import?',
-        a: 'Msingi imports CSV files. Download the template from the Import button inside each module (Students, Teachers, Classes, Timetable, Finance) to get the exact column headers required.',
+        a: 'Msingi imports CSV files. Download the template from the Import button inside each module (Students, Teachers, Timetable, Finance) to get the exact column headers required.',
       },
       {
         q: 'Can I export my data?',
-        a: 'Yes. Each module has an Export button in the toolbar. Click it to download all records as a CSV spreadsheet. You can also do a full school data backup from Settings → Data.',
+        a: 'Yes. Each module has an Export button. Click it to download all records as a CSV. Exports respect active filters — filter to a class or date range and the export matches exactly what is on screen.',
       },
       {
         q: 'What happens if my import has errors?',
@@ -564,7 +806,11 @@ const SECTIONS = [
       },
       {
         q: 'Can I undo a bulk import?',
-        a: 'There is no automatic undo for bulk imports. For students: you can change their status to Inactive individually. For timetable slots: use the bulk-delete option. Always preview your CSV data before importing.',
+        a: 'There is no automatic undo for bulk imports. For students: change their status to Inactive individually. For timetable slots: use the bulk-delete option. Always review your CSV before importing.',
+      },
+      {
+        q: 'Can I import opening fee balances for students?',
+        a: 'Yes. The student CSV template includes columns for opening fee title, amount, amount paid, and due date. This creates invoice and payment records for each student in the same import operation.',
       },
     ],
   },
