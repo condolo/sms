@@ -301,13 +301,53 @@ router.put('/me', authMiddleware, async (req, res) => {
     for (const key of allowed) {
       if (req.body[key] !== undefined) updates[key] = String(req.body[key]).trim();
     }
-    if (updates.name && !updates.name) return res.status(400).json({ error: 'Name cannot be empty' });
+    if (updates.name !== undefined && !updates.name) return res.status(400).json({ error: 'Name cannot be empty' });
     if (!Object.keys(updates).length) return res.status(400).json({ error: 'No valid fields to update' });
 
     updates.updatedAt = new Date().toISOString();
     const { userId, schoolId } = req.jwtUser;
     const User = _model('users');
     await User.updateOne(_meFilter(userId, schoolId), { $set: updates });
+
+    // Cascade name change to the teachers record and all denormalized teacherName fields.
+    // This ensures timetable, lesson plans, substitutions etc. all reflect the new name.
+    if (updates.name) {
+      const nameParts   = updates.name.split(' ');
+      const newFirst    = nameParts[0];
+      const newLast     = nameParts.slice(1).join(' ') || '';
+      const newFullName = updates.name;
+      const now         = updates.updatedAt;
+
+      const Teachers = _model('teachers');
+      const teacherExists = await Teachers.findOne({ schoolId, userId }).lean();
+      if (teacherExists) {
+        await Teachers.updateOne({ schoolId, userId }, { $set: { firstName: newFirst, lastName: newLast, updatedAt: now } });
+      }
+
+      // Cascade to every collection that denormalises teacherName
+      await Promise.all([
+        _model('timetable').updateMany(
+          { schoolId, teacherId: userId },
+          { $set: { teacherName: newFullName } }
+        ),
+        _model('lesson_plans').updateMany(
+          { schoolId, teacherId: userId },
+          { $set: { teacherName: newFullName } }
+        ),
+        _model('substitutions').updateMany(
+          { schoolId, originalTeacherId: userId },
+          { $set: { originalTeacherName: newFullName } }
+        ),
+        _model('substitutions').updateMany(
+          { schoolId, substituteTeacherId: userId },
+          { $set: { substituteTeacherName: newFullName } }
+        ),
+        _model('lesson_coverage').updateMany(
+          { schoolId, teacherId: userId },
+          { $set: { teacherName: newFullName } }
+        ),
+      ]);
+    }
 
     const Photos  = _model('user_photos');
     const user    = await User.findOne(_meFilter(userId, schoolId)).lean();
@@ -385,14 +425,20 @@ router.put('/me/photo', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Image too large. Please upload under 300 KB after resizing.' });
     }
 
+    // Resolve the same canonical uid used everywhere else (user.id preferred over _id)
+    const { userId, schoolId } = req.jwtUser;
+    const User = _model('users');
+    const user = await User.findOne(_meFilter(userId, schoolId)).lean();
+    const uid  = user?.id || user?._id?.toString() || userId;
+
     const Photos = _model('user_photos');
     await Photos.updateOne(
-      { userId: req.jwtUser.userId },
-      { $set: { userId: req.jwtUser.userId, schoolId: req.jwtUser.schoolId, photoBase64, updatedAt: new Date().toISOString() } },
+      { userId: uid, schoolId },
+      { $set: { userId: uid, schoolId, photoBase64, updatedAt: new Date().toISOString() } },
       { upsert: true }
     );
 
-    res.json({ success: true, photoUrl: `/api/users/${req.jwtUser.userId}/photo?schoolId=${encodeURIComponent(req.jwtUser.schoolId)}` });
+    res.json({ success: true, photoUrl: `/api/users/${uid}/photo?schoolId=${encodeURIComponent(schoolId)}` });
   } catch (err) {
     console.error('[users/me/photo PUT]', err);
     res.status(500).json({ error: 'Failed to upload photo' });
@@ -402,8 +448,13 @@ router.put('/me/photo', authMiddleware, async (req, res) => {
 /* DELETE /api/users/me/photo */
 router.delete('/me/photo', authMiddleware, async (req, res) => {
   try {
+    const { userId, schoolId } = req.jwtUser;
+    const User = _model('users');
+    const user = await User.findOne(_meFilter(userId, schoolId)).lean();
+    const uid  = user?.id || user?._id?.toString() || userId;
+
     const Photos = _model('user_photos');
-    await Photos.deleteOne({ userId: req.jwtUser.userId, schoolId: req.jwtUser.schoolId });
+    await Photos.deleteOne({ userId: uid, schoolId });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to remove photo' });

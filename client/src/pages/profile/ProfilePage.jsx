@@ -166,9 +166,11 @@ export default function ProfilePage() {
     setPhotoBanner({ type: '', msg: '' });
 
     try {
-      const base64 = await resizeImageToBase64(file, 256, 0.82);
-      await profileApi.uploadPhoto({ photoBase64: base64 });
-      const freshUrl = `/api/users/${user.id}/photo?schoolId=${encodeURIComponent(user.schoolId)}&t=${Date.now()}`;
+      const base64  = await resizeImageToBase64(file, 256, 0.82);
+      const result  = await profileApi.uploadPhoto({ photoBase64: base64 });
+      // Use the URL the server returns — it uses the exact same key the photo is stored under.
+      // Append a timestamp to bust the browser's 1-hour cache for this path.
+      const freshUrl = `${result.photoUrl}&t=${Date.now()}`;
       setPhotoUrl(freshUrl);
       setSession({ ...session, user: { ...user, photoUrl: freshUrl } });
       setPhotoBanner({ type: 'success', msg: `Photo updated. (Original: ${originalSize} → resized to 256×256)` });
