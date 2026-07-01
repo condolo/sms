@@ -1,0 +1,32 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit-tests:
+    name: Unit & Integration Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install --omit=dev && npm install --save-dev jest supertest
+
+      - name: Run tests
+        run: npm test -- --ci --coverage --coverageReporters=text-summary
+
+      - name: Upload coverage summary
+        if: always()
+        run: |
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "Tests completed. See logs above for coverage summary." >> $GITHUB_STEP_SUMMARY
