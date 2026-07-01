@@ -20,6 +20,7 @@ import {
   MonitorPlay, WifiOff, LayoutTemplate,
 } from 'lucide-react';
 import RCTemplatesSection from './RCTemplatesSection.jsx';
+import PlatformQATab from './PlatformQATab.jsx';
 import { sections as sectionsApi, teachers as teachersApi } from '@/api/client.js';
 import { settings as settingsApi } from '@/api/client.js';
 import { academicConfig as academicConfigApi } from '@/api/client.js';
@@ -36,6 +37,7 @@ const TABS = [
   { id: 'rc_templates',   label: 'Report Templates',    Icon: LayoutTemplate, adminOnly: true  },
   { id: 'notifications',  label: 'Notifications',       Icon: Bell,           adminOnly: true  },
   { id: 'system',         label: 'System',              Icon: Database,       adminOnly: true  },
+  { id: 'platform_qa',   label: 'Platform QA',         Icon: ShieldCheck,    adminOnly: true, superadminOnly: true },
   { id: 'account',        label: 'Account',             Icon: User,           adminOnly: false },
 ];
 
@@ -4880,7 +4882,12 @@ export default function SettingsPage() {
   const isAdmin = ['admin', 'superadmin'].includes(role);
   const [tab, setTab] = useState(() => isAdmin ? 'school' : 'account');
 
-  const visibleTabs = TABS.filter(t => !t.adminOnly || isAdmin);
+  const isSuperadmin = role === 'superadmin';
+  const visibleTabs = TABS.filter(t => {
+    if (t.superadminOnly) return isSuperadmin;
+    if (t.adminOnly) return isAdmin;
+    return true;
+  });
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -4927,6 +4934,7 @@ export default function SettingsPage() {
             {tab === 'rc_templates'   && <RCTemplatesSection />}
             {tab === 'notifications'  && <NotificationsTab />}
             {tab === 'system'         && <SystemTab />}
+            {tab === 'platform_qa'   && <PlatformQATab />}
             {tab === 'account'        && <AccountTab />}
           </motion.div>
         </AnimatePresence>

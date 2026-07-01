@@ -16,7 +16,8 @@
     "platform:health": "node scripts/platform-health.js",
     "platform:manifest": "node scripts/generate-endpoint-inventory.js",
     "platform:coverage": "node scripts/verify-rbac-coverage.js",
-    "platform:release-gate": "node scripts/release-gate.js"
+    "platform:release-gate": "node scripts/release-gate.js",
+    "platform:release-cert": "node scripts/release-cert.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1068.0",

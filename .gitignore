@@ -24,3 +24,5 @@ logs/
 # ── Build output ──────────────────────────────────────────────
 dist/
 build/
+.release-certs/
+release-cert.json

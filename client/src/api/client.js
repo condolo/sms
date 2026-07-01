@@ -88,7 +88,7 @@ async function _req(method, path, body = null, params = null) {
 
 // ─── Method helpers ───────────────────────────────────────────────────────────
 
-const _get    = (path, params)       => _req('GET',    path, null, params);
+export const _get = (path, params)       => _req('GET',    path, null, params);
 const _post   = (path, body)         => _req('POST',   path, body);
 const _put    = (path, body)         => _req('PUT',    path, body);
 const _patch  = (path, body)         => _req('PATCH',  path, body);
