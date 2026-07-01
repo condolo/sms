@@ -20,7 +20,6 @@ import {
   MonitorPlay, WifiOff, LayoutTemplate,
 } from 'lucide-react';
 import RCTemplatesSection from './RCTemplatesSection.jsx';
-import PlatformQATab from './PlatformQATab.jsx';
 import { sections as sectionsApi, teachers as teachersApi } from '@/api/client.js';
 import { settings as settingsApi } from '@/api/client.js';
 import { academicConfig as academicConfigApi } from '@/api/client.js';
@@ -37,7 +36,6 @@ const TABS = [
   { id: 'rc_templates',   label: 'Report Templates',    Icon: LayoutTemplate, adminOnly: true  },
   { id: 'notifications',  label: 'Notifications',       Icon: Bell,           adminOnly: true  },
   { id: 'system',         label: 'System',              Icon: Database,       adminOnly: true  },
-  { id: 'platform_qa',   label: 'Platform QA',         Icon: ShieldCheck,    adminOnly: true, superadminOnly: true },
   { id: 'account',        label: 'Account',             Icon: User,           adminOnly: false },
 ];
 
@@ -4214,6 +4212,26 @@ function SystemTab() {
         </div>
       </div>
 
+      {/* Platform Console link — superadmin only */}
+      {user?.role === 'superadmin' && (
+        <div className="bg-violet-50 border border-violet-200 rounded-xl p-5">
+          <div className="flex items-center gap-2 pb-2 border-b border-violet-100">
+            <MonitorPlay size={14} className="text-violet-500" />
+            <h3 className="text-xs font-semibold text-violet-600 uppercase tracking-wider">Platform Operations</h3>
+          </div>
+          <p className="text-sm text-slate-600 mt-3">
+            Platform-level health monitoring, data integrity scans, compliance checks, and release history are managed in the Platform Console.
+          </p>
+          <a
+            href="/ops"
+            className="inline-flex items-center gap-1.5 mt-3 text-xs font-semibold px-3 py-1.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors"
+          >
+            Open Platform Console
+            <ArrowRight size={12} />
+          </a>
+        </div>
+      )}
+
       {/* Danger zone */}
       <div className="bg-white border border-red-200 rounded-xl p-5 space-y-4">
         <div className="flex items-center gap-2 pb-2 border-b border-red-100">
@@ -4882,12 +4900,7 @@ export default function SettingsPage() {
   const isAdmin = ['admin', 'superadmin'].includes(role);
   const [tab, setTab] = useState(() => isAdmin ? 'school' : 'account');
 
-  const isSuperadmin = role === 'superadmin';
-  const visibleTabs = TABS.filter(t => {
-    if (t.superadminOnly) return isSuperadmin;
-    if (t.adminOnly) return isAdmin;
-    return true;
-  });
+  const visibleTabs = TABS.filter(t => !t.adminOnly || isAdmin);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -4934,7 +4947,6 @@ export default function SettingsPage() {
             {tab === 'rc_templates'   && <RCTemplatesSection />}
             {tab === 'notifications'  && <NotificationsTab />}
             {tab === 'system'         && <SystemTab />}
-            {tab === 'platform_qa'   && <PlatformQATab />}
             {tab === 'account'        && <AccountTab />}
           </motion.div>
         </AnimatePresence>

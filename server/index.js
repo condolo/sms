@@ -250,7 +250,7 @@ app.use('/api/growth-projects',        require('./routes/growth-projects'));
 // Recommendations + Aspirations share one route file.
 // Aspirations accessible at /api/growth-recommendations/aspirations/:studentId
 app.use('/api/growth-recommendations', require('./routes/growth-recommendations'));
-app.use('/api/qa',                     require('./routes/qa-health'));
+app.use('/api/ops',                    require('./routes/ops'));
 
 /* ── School-facing announcement routes (JWT auth, not platform key) ── */
 const { authMiddleware } = require('./middleware/auth');

@@ -38,6 +38,18 @@ const INDEXES = [
     ],
   },
 
+  /* ── release_certificates ───────────────────────────────────
+     Append-only audit trail of every release certification.
+     certId is globally unique; version indexed for trend queries. */
+  {
+    col: 'release_certificates',
+    indexes: [
+      { key: { certId: 1 },      name: 'rc_cert_id',  unique: true },
+      { key: { version: 1 },     name: 'rc_version' },
+      { key: { _createdAt: -1 }, name: 'rc_created_desc' },
+    ],
+  },
+
   /* ── publish_batches ────────────────────────────────────────
      Primary: list batches for a school/class
      Secondary: find stuck 'running' batches for recovery */
