@@ -6,8 +6,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence } from 'framer-motion';
-import { Loader2, Save, PenLine, BookOpen, ClipboardPaste, Lock, Send } from 'lucide-react';
-import { assessment as api, classes as classesApi, markSubmissions as submissionsApi } from '@/api/client.js';
+import { Loader2, Save, PenLine, BookOpen, ClipboardPaste, Lock, Send, MessageSquare } from 'lucide-react';
+import { assessment as api, classes as classesApi, markSubmissions as submissionsApi, reportCards as reportCardsApi } from '@/api/client.js';
 import {
   TERM_NUMBERS, DEFAULT_CUSTOM_TYPES, _pct, _scoreColor,
 } from '../constants.js';
@@ -155,8 +155,11 @@ export default function MarkEntryTab() {
   const [toast,      setToast]      = useState(null);
 
   // scores[studentId][colId] = rawScore | undefined
-  const [scores, setScores] = useState({});
-  const [dirty,  setDirty]  = useState(false);
+  const [scores,        setScores]        = useState({});
+  const [dirty,         setDirty]         = useState(false);
+  // comments[studentId] = string
+  const [comments,      setComments]      = useState({});
+  const [commentsDirty, setCommentsDirty] = useState(false);
 
   const cellRefs = useRef({});  // keyed by `${rowIdx}_${colIdx}`
 
@@ -202,6 +205,14 @@ export default function MarkEntryTab() {
   });
   const subs = subsData?.data ?? [];
 
+  // Load existing subject comments for all students in this class/term
+  const { data: commentsData } = useQuery({
+    queryKey: ['draft-comments', { classId, termNumber }],
+    queryFn:  () => reportCardsApi.draftComments.list({ classId, termNumber: Number(termNumber) }),
+    enabled:  canQuery,
+    staleTime: 30_000,
+  });
+
   const lockedColIds = useMemo(() => {
     const locked = new Set();
     for (const sub of subs) {
@@ -227,7 +238,18 @@ export default function MarkEntryTab() {
   }, [existingData]);
 
   // Reset when selection changes
-  useEffect(() => { setScores({}); setDirty(false); }, [classId, subjectId, termNumber]);
+  useEffect(() => { setScores({}); setDirty(false); setComments({}); setCommentsDirty(false); }, [classId, subjectId, termNumber]);
+
+  // Populate comments from loaded draft-comments (keyed by studentId → subjectComments[subjectId])
+  useEffect(() => {
+    if (!commentsData?.data || !subjectId) return;
+    const map = {};
+    for (const doc of commentsData.data) {
+      map[doc.studentId] = doc.subjectComments?.[subjectId] ?? '';
+    }
+    setComments(map);
+    setCommentsDirty(false);
+  }, [commentsData, subjectId]);
 
   const setCell = useCallback((studentId, colId, value) => {
     setScores(prev => ({
@@ -279,6 +301,28 @@ export default function MarkEntryTab() {
     setScores(newScores);
     setDirty(true);
   }, [scores, students, cols, lockedColIds]);
+
+  const { mutate: saveComments, isPending: savingComments } = useMutation({
+    mutationFn: async () => {
+      await Promise.all(
+        students.map(s => {
+          const sid     = s.id ?? s._id;
+          const comment = comments[sid] ?? '';
+          return reportCardsApi.draftComments.saveSubject(sid, subjectId, {
+            classId,
+            termNumber: Number(termNumber),
+            comment,
+          });
+        })
+      );
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['draft-comments', { classId, termNumber }] });
+      setCommentsDirty(false);
+      setToast({ msg: 'Comments saved.', type: 'success' });
+    },
+    onError: err => setToast({ msg: err?.message ?? 'Failed to save comments.', type: 'error' }),
+  });
 
   const { mutate: saveAll, isPending: saving } = useMutation({
     mutationFn: () => {
@@ -392,6 +436,14 @@ export default function MarkEntryTab() {
                 customTypes={customTypes}
               />
               <button
+                onClick={() => saveComments()}
+                disabled={savingComments || !commentsDirty}
+                className="flex items-center gap-1.5 border border-indigo-200 hover:border-indigo-400 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-40 text-indigo-700 text-sm font-medium px-4 py-2 rounded-lg transition"
+              >
+                {savingComments ? <Loader2 size={13} className="animate-spin" /> : <MessageSquare size={13} />}
+                {savingComments ? 'Saving…' : commentsDirty ? 'Save comments' : 'Comments saved'}
+              </button>
+              <button
                 onClick={() => saveAll()}
                 disabled={saving || !dirty}
                 className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
@@ -417,6 +469,9 @@ export default function MarkEntryTab() {
                       )}
                     </th>
                   ))}
+                  <th className="text-left text-xs font-medium text-slate-500 px-3 py-2.5 min-w-[220px]">
+                    <span className="flex items-center gap-1"><MessageSquare size={10} className="text-indigo-400" /> Comment</span>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -444,6 +499,18 @@ export default function MarkEntryTab() {
                           />
                         </td>
                       ))}
+                      <td className="px-2 py-1.5">
+                        <input
+                          type="text"
+                          value={comments[sid] ?? ''}
+                          onChange={e => {
+                            setComments(prev => ({ ...prev, [sid]: e.target.value }));
+                            setCommentsDirty(true);
+                          }}
+                          placeholder="Teacher comment…"
+                          className="w-full rounded border border-slate-200 px-2 py-1 text-sm text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400/20 bg-white placeholder-slate-300"
+                        />
+                      </td>
                     </tr>
                   );
                 })}
@@ -468,6 +535,9 @@ export default function MarkEntryTab() {
                       </td>
                     );
                   })}
+                  <td className="px-3 py-2 text-xs text-slate-400 italic">
+                    {Object.values(comments).filter(c => c?.trim()).length}/{students.length} commented
+                  </td>
                 </tr>
               </tfoot>
             </table>

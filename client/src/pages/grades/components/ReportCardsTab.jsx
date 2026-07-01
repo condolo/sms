@@ -9,6 +9,7 @@ import {
   classes as classesApi,
   subjects as subjectsApi,
   reportCards as reportCardsApi,
+  behaviour as behaviourApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { TERM_NUMBERS, DEFAULT_CUSTOM_TYPES } from '../constants.js';
@@ -89,6 +90,15 @@ export default function ReportCardsTab() {
     enabled:  canQuery,
     staleTime: 30_000,
     select: (res) => Object.fromEntries((res?.data ?? []).map(c => [c.studentId, c])),
+  });
+
+  // Behaviour summary indexed by studentId for this class
+  const { data: behaviourMap } = useQuery({
+    queryKey: ['behaviour', 'summary', { classId }],
+    queryFn:  () => behaviourApi.summary({ classId }),
+    enabled:  !!classId,
+    staleTime: 5 * 60_000,
+    select: (res) => Object.fromEntries((res?.data ?? []).map(b => [b._id, b])),
   });
 
   /* ── Comment save mutation ────────────────────────────── */
@@ -220,6 +230,7 @@ export default function ReportCardsTab() {
               school={school}
               academicYear={academicYear}
               studentDeviations={deviationMap[student.studentId] ?? null}
+              behaviourSummary={behaviourMap?.[student.studentId] ?? null}
             />
           ))}
         </div>

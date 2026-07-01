@@ -190,11 +190,45 @@ router.post('/generate', authMiddleware, PLAN, rbac('grades', 'read'), async (re
       ? (allReports[studentId] ? { [studentId]: allReports[studentId] } : {})
       : allReports;
 
-    const students = Object.values(targets).map(r => ({
+    const studentsWithRanks = Object.values(targets).map(r => ({
       ...r,
       rankingScore: computeRankingScore(r.subjects, config.rankingSubjectStrategy, config.rankingN, config.compulsorySubjects).rankingScore,
       rankings: config.rankingEnabled ? mergeRankings(r.studentId, { class: classRanks }) : {},
     }));
+
+    // Resolve class teacher name: student → stream (formTeacherId) → teacher name
+    const studentIds  = studentsWithRanks.map(s => s.studentId);
+    const Students    = _model('students');
+    const Streams     = _model('streams');
+    const Teachers    = _model('teachers');
+
+    const studentDocs = await Students
+      .find({ schoolId, id: { $in: studentIds } })
+      .select('id streamId').lean();
+
+    const streamIds = [...new Set(studentDocs.map(d => d.streamId).filter(Boolean))];
+    const streamDocs = streamIds.length
+      ? await Streams.find({ schoolId, id: { $in: streamIds } }).select('id formTeacherId').lean()
+      : [];
+
+    const teacherIds = [...new Set(streamDocs.map(d => d.formTeacherId).filter(Boolean))];
+    const teacherDocs = teacherIds.length
+      ? await Teachers.find({ schoolId, id: { $in: teacherIds } }).select('id title firstName lastName').lean()
+      : [];
+
+    const streamMap  = Object.fromEntries(streamDocs.map(d => [d.id, d.formTeacherId]));
+    const teacherMap = Object.fromEntries(teacherDocs.map(t => [
+      t.id,
+      [t.title, t.firstName, t.lastName].filter(Boolean).join(' '),
+    ]));
+    const studentStreamMap = Object.fromEntries(studentDocs.map(d => [d.id, d.streamId]));
+
+    const students = studentsWithRanks.map(r => {
+      const streamId       = studentStreamMap[r.studentId];
+      const formTeacherId  = streamId ? streamMap[streamId] : null;
+      const classTeacherName = formTeacherId ? (teacherMap[formTeacherId] ?? null) : null;
+      return { ...r, classTeacherId: formTeacherId ?? null, classTeacherName: classTeacherName ?? null };
+    });
 
     return ok(res, {
       generated: students.length,
@@ -1123,25 +1157,68 @@ router.get('/draft-comments', authMiddleware, PLAN, rbac('report_cards', 'read')
 });
 
 // PUT /draft-comments/:studentId — upsert comment record for a student
+// subjectComments: { [subjectId]: string } — merged per-key (each teacher only touches their own subject)
 router.put('/draft-comments/:studentId', authMiddleware, PLAN, rbac('report_cards', 'update'), async (req, res) => {
   try {
     const { schoolId, userId: updatedBy } = req.jwtUser;
     const { studentId } = req.params;
     const { classId, termNumber, classTeacherName, classTeacherRemark,
-            sportsAndTalent, principalName, principalRemark, closingDate, nextTermBegin } = req.body;
+            sportsAndTalent, principalName, principalRemark, closingDate, nextTermBegin,
+            subjectComments } = req.body;
     if (!termNumber) return E.badRequest(res, 'termNumber is required');
+
+    // Base fields always updated together
+    const setFields = {
+      schoolId, studentId, classId,
+      termNumber:         Number(termNumber),
+      classTeacherName:   classTeacherName   ?? '',
+      classTeacherRemark: classTeacherRemark ?? '',
+      sportsAndTalent:    sportsAndTalent    ?? '',
+      principalName:      principalName      ?? '',
+      principalRemark:    principalRemark    ?? '',
+      closingDate:        closingDate        ?? '',
+      nextTermBegin:      nextTermBegin      ?? '',
+      updatedBy,
+      updatedAt: new Date(),
+    };
+
+    // Merge subject comments with dot-notation $set so each teacher only touches their own subject
+    // without wiping other teachers' comments on the same student record.
+    if (subjectComments && typeof subjectComments === 'object') {
+      for (const [subjectId, comment] of Object.entries(subjectComments)) {
+        if (typeof comment === 'string') {
+          setFields[`subjectComments.${subjectId}`] = comment;
+        }
+      }
+    }
+
+    const doc = await _model('report_card_draft_comments').findOneAndUpdate(
+      { schoolId, studentId, termNumber: Number(termNumber) },
+      { $set: setFields },
+      { upsert: true, new: true }
+    ).lean();
+    return ok(res, doc);
+  } catch (err) {
+    console.error('[report-cards/draft-comments PUT]', err);
+    return E.serverError(res);
+  }
+});
+
+// PUT /draft-comments/:studentId/subject/:subjectId — update one subject comment only (teacher-safe merge)
+router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN, rbac('report_cards', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId: updatedBy } = req.jwtUser;
+    const { studentId, subjectId } = req.params;
+    const { classId, termNumber, comment } = req.body;
+    if (!termNumber) return E.badRequest(res, 'termNumber is required');
+    if (typeof comment !== 'string') return E.badRequest(res, 'comment must be a string');
+
     const doc = await _model('report_card_draft_comments').findOneAndUpdate(
       { schoolId, studentId, termNumber: Number(termNumber) },
       { $set: {
           schoolId, studentId, classId,
           termNumber: Number(termNumber),
-          classTeacherName:   classTeacherName   ?? '',
-          classTeacherRemark: classTeacherRemark ?? '',
-          sportsAndTalent:    sportsAndTalent    ?? '',
-          principalName:      principalName      ?? '',
-          principalRemark:    principalRemark    ?? '',
-          closingDate:        closingDate        ?? '',
-          nextTermBegin:      nextTermBegin      ?? '',
+          [`subjectComments.${subjectId}`]: comment,
           updatedBy,
           updatedAt: new Date(),
         },
@@ -1150,7 +1227,7 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, rbac('report_card
     ).lean();
     return ok(res, doc);
   } catch (err) {
-    console.error('[report-cards/draft-comments PUT]', err);
+    console.error('[report-cards/draft-comments/subject PUT]', err);
     return E.serverError(res);
   }
 });

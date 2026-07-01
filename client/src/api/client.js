@@ -759,8 +759,9 @@ export const markSubmissions = {
 export const reportCards = {
   generate: (data) => _post('/report-cards/generate', data),
   draftComments: {
-    list:   (params)          => _get('/report-cards/draft-comments', params),
-    upsert: (studentId, data) => _put(`/report-cards/draft-comments/${studentId}`, data),
+    list:         (params)                     => _get('/report-cards/draft-comments', params),
+    upsert:       (studentId, data)            => _put(`/report-cards/draft-comments/${studentId}`, data),
+    saveSubject:  (studentId, subjectId, data) => _put(`/report-cards/draft-comments/${studentId}/subject/${subjectId}`, data),
   },
 };
 
