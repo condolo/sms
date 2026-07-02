@@ -94,6 +94,15 @@ const ACTIONS = {
   'report_card.publish':     { severity: 'critical' },
   'report_card.unpublish':   { severity: 'critical' },
   'report_card.moderation_bypassed': { severity: 'critical' },
+  // Finance
+  'finance.invoice_created':         { severity: 'info' },
+  'finance.invoice_updated':         { severity: 'info' },
+  'finance.invoice_voided':          { severity: 'warn' },
+  'finance.payment_recorded':        { severity: 'info' },
+  'finance.fee_structure_created':   { severity: 'info' },
+  'finance.fee_structure_updated':   { severity: 'info' },
+  'finance.fee_structure_deleted':   { severity: 'warn' },
+  'finance.bulk_invoices_generated': { severity: 'info' },
   // Platform (operator-level)
   'platform.impersonate':    { severity: 'critical' },
   'platform.school_deleted': { severity: 'critical' },

@@ -15,6 +15,7 @@ const { _model }                       = require('../utils/model');
 const { nextInvoiceNumber, nextReceiptNumber } = require('../utils/counters');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
+const AuditService = require('../services/audit');
 
 const router = express.Router();
 const PLAN   = planGate('finance');
@@ -165,6 +166,7 @@ router.post('/invoices', authMiddleware, PLAN, rbac('finance', 'create'), async 
       updatedBy:     userId,
     });
 
+    AuditService.log({ action: 'finance.invoice_created', actor: req.jwtUser, schoolId, target: { type: 'invoice', id: doc.id, label: invoiceNumber }, details: { studentId: data.studentId, total: totals.total, currency: data.currency }, req });
     return created(res, doc.toObject ? doc.toObject() : doc);
   } catch (err) {
     console.error('[finance POST /invoices]', err);
@@ -210,6 +212,7 @@ router.put('/invoices/:id', authMiddleware, PLAN, rbac('finance', 'update'), asy
 
     if (conflict) return E.conflict(res, 'This invoice was edited by someone else. Please refresh and try again.');
     if (!doc)     return E.notFound(res, 'Invoice not found');
+    AuditService.log({ action: 'finance.invoice_updated', actor: req.jwtUser, schoolId, target: { type: 'invoice', id: req.params.id }, details: { total: doc.total }, req });
     return ok(res, doc);
   } catch (err) {
     console.error('[finance PUT /invoices/:id]', err);
@@ -234,6 +237,7 @@ router.delete('/invoices/:id', authMiddleware, PLAN, rbac('finance', 'delete'), 
       { status: 'voided', voidedAt: new Date().toISOString(), voidedBy: userId }
     );
 
+    AuditService.log({ action: 'finance.invoice_voided', actor: req.jwtUser, schoolId, target: { type: 'invoice', id: req.params.id, label: doc.invoiceNumber }, details: { studentId: doc.studentId, total: doc.total }, req });
     return ok(res, { id: req.params.id, voided: true });
   } catch (err) {
     console.error('[finance DELETE /invoices/:id]', err);
@@ -334,6 +338,7 @@ router.post('/payments', authMiddleware, PLAN, rbac('finance', 'create'), async 
       { amountPaid: bal.paid, balance: bal.balance, status: bal.status, updatedBy: userId }
     );
 
+    AuditService.log({ action: 'finance.payment_recorded', actor: req.jwtUser, schoolId, target: { type: 'payment', id: payment.id, label: receiptNumber }, details: { invoiceId: data.invoiceId, amount: data.amount, method: data.method, invoiceStatus: bal.status }, req });
     return created(res, {
       payment: payment.toObject ? payment.toObject() : payment,
       invoiceStatus:  bal.status,
@@ -388,6 +393,7 @@ router.post('/fee-structures', authMiddleware, PLAN, rbac('finance', 'create'), 
       ...data,
       total: totals.total,
     });
+    AuditService.log({ action: 'finance.fee_structure_created', actor: req.jwtUser, schoolId, target: { type: 'fee_structure', id: doc.id, label: data.name }, details: { total: totals.total }, req });
     return created(res, doc.toObject ? doc.toObject() : doc);
   } catch (err) {
     console.error('[finance POST /fee-structures]', err);
@@ -410,6 +416,7 @@ router.put('/fee-structures/:id', authMiddleware, PLAN, rbac('finance', 'update'
       { new: true }
     ).lean();
     if (!doc) return E.notFound(res, 'Fee structure not found');
+    AuditService.log({ action: 'finance.fee_structure_updated', actor: req.jwtUser, schoolId, target: { type: 'fee_structure', id: req.params.id, label: doc.name }, req });
     return ok(res, doc);
   } catch (err) {
     console.error('[finance PUT /fee-structures/:id]', err);
@@ -424,6 +431,7 @@ router.delete('/fee-structures/:id', authMiddleware, PLAN, rbac('finance', 'dele
     const FeeStructures = _model('fee_structures');
     const doc = await FeeStructures.findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Fee structure not found');
+    AuditService.log({ action: 'finance.fee_structure_deleted', actor: req.jwtUser, schoolId, target: { type: 'fee_structure', id: req.params.id, label: doc.name }, req });
     return ok(res, { deleted: true });
   } catch (err) {
     console.error('[finance DELETE /fee-structures/:id]', err);
@@ -482,6 +490,7 @@ router.post('/fee-structures/:id/generate', authMiddleware, PLAN, rbac('finance'
       created_docs.push(inv.toObject ? inv.toObject() : inv);
     }
 
+    AuditService.log({ action: 'finance.bulk_invoices_generated', actor: req.jwtUser, schoolId, target: { type: 'fee_structure', id: req.params.id, label: fs.name }, details: { invoicesCreated: created_docs.length }, req });
     return created(res, { created: created_docs.length, invoices: created_docs });
   } catch (err) {
     console.error('[finance POST /fee-structures/:id/generate]', err);
