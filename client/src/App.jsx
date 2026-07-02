@@ -28,6 +28,7 @@ import WhyChoosePage  from '@/pages/website/WhyChoosePage.jsx';
 import RoadmapPage    from '@/pages/website/RoadmapPage.jsx';
 import ImplementationPage from '@/pages/website/ImplementationPage.jsx';
 import SolutionPage   from '@/pages/website/SolutionPage.jsx';
+import KnowledgeCentre from '@/pages/website/KnowledgeCentre.jsx';
 
 // ─── Lazy pages ───────────────────────────────────────────────────────────────
 const Dashboard      = lazy(() => import('@/pages/Dashboard.jsx'));
@@ -163,6 +164,7 @@ export const router = createBrowserRouter([
   { path: '/roadmap',        element: <RoadmapPage /> },
   { path: '/implementation', element: <ImplementationPage /> },
   { path: '/solutions/:role', element: <SolutionPage /> },
+  { path: '/knowledge',      element: <KnowledgeCentre /> },
 
   // Login — branded when on school subdomain, generic otherwise
   { path: '/login', element: <Login /> },

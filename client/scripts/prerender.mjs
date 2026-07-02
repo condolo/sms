@@ -32,6 +32,7 @@ const ROUTES = [
   '/solutions/parent', '/solutions/admissions',
   '/plans', '/faq', '/contact', '/privacy', '/terms',
   '/legal/dpa', '/legal/sla', '/legal/accessibility', '/legal/responsible-ai',
+  '/knowledge',
 ];
 
 const MIME_MAP = {
