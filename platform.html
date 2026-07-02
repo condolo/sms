@@ -731,7 +731,13 @@ async function doImpersonate(schoolId) {
     sessionStorage.clear();
 
     // ── Store session for the React SPA (key: msingi_session, used by auth store) ──
-    const sessionPayload = { token: data.token, user: data.user || {}, school: {} };
+    // Token is NOT stored here — it lives in the HttpOnly cookie set by the server.
+    // Normalise _id → id so isSessionActive() can read user.id.
+    const u = data.user || {};
+    const sessionPayload = {
+      user:   { ...u, id: u.id || (u._id ? String(u._id) : undefined), password: undefined },
+      school: {},
+    };
     localStorage.setItem('msingi_session', JSON.stringify(sessionPayload));
 
     toast('Redirecting to school portal…', 'success');

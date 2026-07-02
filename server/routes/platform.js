@@ -293,6 +293,14 @@ router.post('/schools/:id/impersonate', async (req, res) => {
 
     AuditService.log({ action: 'platform.impersonate', actor: { userId: 'platform', role: 'platform', email: null }, schoolId: resolvedSchoolId, target: { type: 'school', id: resolvedSchoolId, label: school.name }, details: { targetEmail: admin.email }, req });
 
+    /* Set HttpOnly cookie so the React SPA's authMiddleware accepts subsequent requests */
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure:   process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge:   8 * 60 * 60 * 1000,
+    });
+
     /* Merge schoolName into the user object so the React SPA sidebar can display it */
     res.json({
       token,
