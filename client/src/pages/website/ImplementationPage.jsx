@@ -5,6 +5,7 @@ import { ArrowRight, CheckCircle2 } from 'lucide-react';
 import { fadeUp, stagger, VP } from '@/utils/animations';
 import PublicNav from '@/components/landing/PublicNav';
 import PublicFooter from '@/components/landing/PublicFooter';
+import BreadcrumbSchema from '@/components/landing/BreadcrumbSchema';
 
 const PHASES = [
   {
@@ -59,6 +60,7 @@ export default function ImplementationPage() {
         <meta property="og:url" content="https://msingi.io/implementation" />
       </Helmet>
 
+      <BreadcrumbSchema items={[{ name: 'Implementation', href: '/implementation' }]} />
       <PublicNav />
 
       <main>

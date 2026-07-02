@@ -5,6 +5,7 @@ import { ArrowRight } from 'lucide-react';
 import { fadeUp, stagger, VP } from '@/utils/animations';
 import PublicNav from '@/components/landing/PublicNav';
 import PublicFooter from '@/components/landing/PublicFooter';
+import BreadcrumbSchema from '@/components/landing/BreadcrumbSchema';
 
 const COMPARISON = [
   {
@@ -44,6 +45,7 @@ export default function DifferencePage() {
         <meta property="og:url" content="https://msingi.io/difference" />
       </Helmet>
 
+      <BreadcrumbSchema items={[{ name: 'The Msingi Difference', href: '/difference' }]} />
       <PublicNav />
 
       <main>

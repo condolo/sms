@@ -5,6 +5,7 @@ import { ArrowRight, CheckCircle2, Clock, Compass } from 'lucide-react';
 import { fadeUp, stagger, VP } from '@/utils/animations';
 import PublicNav from '@/components/landing/PublicNav';
 import PublicFooter from '@/components/landing/PublicFooter';
+import BreadcrumbSchema from '@/components/landing/BreadcrumbSchema';
 
 const HORIZONS = [
   {
@@ -79,6 +80,7 @@ export default function RoadmapPage() {
         <meta property="og:url" content="https://msingi.io/roadmap" />
       </Helmet>
 
+      <BreadcrumbSchema items={[{ name: 'Vision Roadmap', href: '/roadmap' }]} />
       <PublicNav />
 
       <main>

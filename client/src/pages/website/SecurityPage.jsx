@@ -5,6 +5,7 @@ import { ShieldCheck, Lock, Globe, Server, Eye, FileText, Brain } from 'lucide-r
 import { fadeUp, stagger, VP } from '@/utils/animations';
 import PublicNav from '@/components/landing/PublicNav';
 import PublicFooter from '@/components/landing/PublicFooter';
+import BreadcrumbSchema from '@/components/landing/BreadcrumbSchema';
 
 const PILLARS = [
   {
@@ -49,6 +50,7 @@ export default function SecurityPage() {
         <meta property="og:url" content="https://msingi.io/security" />
       </Helmet>
 
+      <BreadcrumbSchema items={[{ name: 'Trust Centre', href: '/security' }]} />
       <PublicNav />
 
       <main>

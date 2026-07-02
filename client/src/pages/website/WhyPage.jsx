@@ -5,6 +5,7 @@ import { ArrowRight } from 'lucide-react';
 import { fadeUp, stagger, VP } from '@/utils/animations';
 import PublicNav from '@/components/landing/PublicNav';
 import PublicFooter from '@/components/landing/PublicFooter';
+import BreadcrumbSchema from '@/components/landing/BreadcrumbSchema';
 
 const BELIEFS = [
   'Technology should never replace educators — it should give them time back.',
@@ -27,6 +28,7 @@ export default function WhyPage() {
         <meta property="og:url" content="https://msingi.io/why" />
       </Helmet>
 
+      <BreadcrumbSchema items={[{ name: 'Why Msingi Exists', href: '/why' }]} />
       <PublicNav />
 
       <main>

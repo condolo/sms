@@ -6,6 +6,7 @@ import { ArrowRight, CheckCircle2 } from 'lucide-react';
 import { fadeUp, stagger, VP } from '@/utils/animations';
 import PublicNav from '@/components/landing/PublicNav';
 import PublicFooter from '@/components/landing/PublicFooter';
+import BreadcrumbSchema from '@/components/landing/BreadcrumbSchema';
 
 const TIERS = [
   {
@@ -92,6 +93,7 @@ export default function PricingPage() {
         <script type="application/ld+json">{JSON.stringify(PRICING_SCHEMA)}</script>
       </Helmet>
 
+      <BreadcrumbSchema items={[{ name: 'Pricing', href: '/pricing' }]} />
       <PublicNav />
 
       <main>

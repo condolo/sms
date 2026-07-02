@@ -5,6 +5,7 @@ import { ArrowRight } from 'lucide-react';
 import { fadeUp, stagger, VP } from '@/utils/animations';
 import PublicNav from '@/components/landing/PublicNav';
 import PublicFooter from '@/components/landing/PublicFooter';
+import BreadcrumbSchema from '@/components/landing/BreadcrumbSchema';
 
 const SECTIONS = [
   {
@@ -76,6 +77,7 @@ export default function WhyChoosePage() {
         <meta property="og:url" content="https://msingi.io/why-choose" />
       </Helmet>
 
+      <BreadcrumbSchema items={[{ name: 'Why Schools Choose Msingi', href: '/why-choose' }]} />
       <PublicNav />
 
       <main>

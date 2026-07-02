@@ -5,6 +5,7 @@ import { ArrowRight } from 'lucide-react';
 import { fadeUp, stagger, VP } from '@/utils/animations';
 import PublicNav from '@/components/landing/PublicNav';
 import PublicFooter from '@/components/landing/PublicFooter';
+import BreadcrumbSchema from '@/components/landing/BreadcrumbSchema';
 
 const JOURNEY = [
   { role: 'Physics Teacher',        desc: 'Teaching secondary school physics and seeing first-hand how administrative overhead cuts into teaching time.' },
@@ -34,6 +35,7 @@ export default function AboutPage() {
         })}</script>
       </Helmet>
 
+      <BreadcrumbSchema items={[{ name: 'Founder Story', href: '/about' }]} />
       <PublicNav />
 
       <main>

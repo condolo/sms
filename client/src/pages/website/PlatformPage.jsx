@@ -6,6 +6,7 @@ import { fadeUp, stagger, VP } from '@/utils/animations';
 import { ECOSYSTEM_NODES } from '@/data/landingData';
 import PublicNav from '@/components/landing/PublicNav';
 import PublicFooter from '@/components/landing/PublicFooter';
+import BreadcrumbSchema from '@/components/landing/BreadcrumbSchema';
 
 const CURRICULUM = ['CBC', 'CAIE', 'IB', 'British', 'American', 'WASSCE', 'Custom'];
 
@@ -38,6 +39,7 @@ export default function PlatformPage() {
         <meta property="og:url" content="https://msingi.io/platform" />
       </Helmet>
 
+      <BreadcrumbSchema items={[{ name: 'Platform', href: '/platform' }]} />
       <PublicNav />
 
       <main>

@@ -5,6 +5,7 @@ import { ArrowRight, CheckCircle2 } from 'lucide-react';
 import { fadeUp, stagger, VP } from '@/utils/animations';
 import PublicNav from '@/components/landing/PublicNav';
 import PublicFooter from '@/components/landing/PublicFooter';
+import BreadcrumbSchema from '@/components/landing/BreadcrumbSchema';
 
 const SOLUTIONS = {
   principal: {
@@ -139,6 +140,10 @@ export default function SolutionPage() {
         <meta property="og:url" content={`https://msingi.io/solutions/${role}`} />
       </Helmet>
 
+      <BreadcrumbSchema items={[
+        { name: 'Solutions', href: '/platform' },
+        { name: sol.role, href: `/solutions/${role}` },
+      ]} />
       <PublicNav />
 
       <main>
