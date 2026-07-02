@@ -40,6 +40,8 @@ export default function PublicNav() {
   const [openDropdown, setOpenDropdown] = useState(null);
   const location = useLocation();
 
+  useEffect(() => { window.scrollTo({ top: 0, behavior: 'instant' }); }, [location.pathname]);
+
   useEffect(() => {
     function onScroll() {
       setScrolled(window.scrollY > 20);
