@@ -7,6 +7,21 @@ import { HelmetProvider } from 'react-helmet-async';
 
 import { router } from './App.jsx';
 import ErrorBoundary from '@/components/guards/ErrorBoundary.jsx';
+
+// Fire a GA4 page_view on every client-side navigation.
+// The first call is skipped because gtag('config') in index.html already
+// fires the initial page_view on hard load.
+let _gaInitialSkipped = false;
+router.subscribe((state) => {
+  if (!_gaInitialSkipped) { _gaInitialSkipped = true; return; }
+  if (typeof window.gtag === 'function') {
+    window.gtag('event', 'page_view', {
+      page_path:     state.location.pathname + state.location.search,
+      page_location: window.location.href,
+      page_title:    document.title,
+    });
+  }
+});
 import './index.css';
 
 // Auto-reload when a lazy chunk 404s after a new deploy.
