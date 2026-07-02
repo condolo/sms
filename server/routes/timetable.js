@@ -35,6 +35,7 @@ const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { resolveBellSchedule } = require('./bell-schedule');
+const { sanitisePdfStr }      = require('../utils/sanitisePdf');
 
 const router = express.Router();
 const PLAN   = planGate('timetable');
@@ -672,8 +673,8 @@ router.get('/substitutions/cover-pdf', authMiddleware, PLAN, rbac('timetable', '
     try { PDFDocument = require('pdfkit'); }
     catch { return res.status(501).json({ error: 'pdfkit not installed. Run: npm install pdfkit' }); }
 
-    const schoolName    = school?.name ?? 'School';
-    const schoolAddress = [school?.address, school?.town ?? school?.city, school?.country].filter(Boolean).join(' · ');
+    const schoolName    = sanitisePdfStr(school?.name ?? 'School');
+    const schoolAddress = sanitisePdfStr([school?.address, school?.town ?? school?.city, school?.country].filter(Boolean).join(' · '));
 
     const dateLabel = (() => {
       try {

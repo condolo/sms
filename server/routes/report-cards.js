@@ -36,6 +36,7 @@ const { rankStudents, mergeRankings, bestPerSubject, computeRankingScore } = req
 const { mergeConfig }    = require('./academic-config');
 const { isYearArchived } = require('../utils/archival');
 const AuditService       = require('../services/audit');
+const { sanitisePdfStr } = require('../utils/sanitisePdf');
 const {
   aggregateGrades,
   aggregateExamResults,
@@ -987,14 +988,14 @@ function _buildPDFPage(doc, snap, config, attendance, isFirstPage, images = {}) 
   rowY += 12;
   doc.rect(40, rowY, PAGE_WIDTH, 30).fill('white').stroke(BORDER);
   doc.fillColor(DARK).fontSize(9).font('Helvetica')
-     .text(comments.classTeacherRemark || '— No remark entered —', 46, rowY + 9, { width: PAGE_WIDTH - 12 });
+     .text(sanitisePdfStr(comments.classTeacherRemark) || '— No remark entered —', 46, rowY + 9, { width: PAGE_WIDTH - 12 });
   rowY += 38;
 
   doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text("PRINCIPAL'S COMMENT:", 40, rowY);
   rowY += 12;
   doc.rect(40, rowY, PAGE_WIDTH, 30).fill('white').stroke(BORDER);
   doc.fillColor(DARK).fontSize(9).font('Helvetica')
-     .text(comments.principalRemark || '— No comment entered —', 46, rowY + 9, { width: PAGE_WIDTH - 12 });
+     .text(sanitisePdfStr(comments.principalRemark) || '— No comment entered —', 46, rowY + 9, { width: PAGE_WIDTH - 12 });
   rowY += 42;
 
   /* SIGNATURES */
