@@ -6,6 +6,71 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.60.0] — 2026-07-02 — feat(rbac): Settings as control centre — MODULE_REGISTRY, principal role, per-user permission enforcement
+
+### Added
+
+- **`server/config/moduleRegistry.js`** — single authoritative list of all 22 platform modules. Exports `MODULE_REGISTRY` (full spec with keys, labels, sections, sub-permissions) and `MODULE_KEYS` (string array). All consumers — `onboard.js`, `repairPermissions.js`, `settings.js _deriveApiPerms`, and the Settings UI — now derive from this one file. Adding a module here automatically propagates to the R&P permission matrix, the Modules toggle tab, and the RBAC enforcement layer.
+
+- **`principal` system role** — new built-in role above `deputy_principal`. Same default permissions as `deputy_principal`; admin can adjust from Settings → Roles & Permissions at any time. Added to: `SYSTEM_ROLES`, `SYSTEM_ROLE_LABELS`, `SYSTEM_ROLE_COLORS`, `_makeDefaultPerms`, `onboard.js` role seeding, `repairPermissions.js` defaults, and `BUILTIN_INVITE_ROLES`.
+
+- **Per-user permission overrides — now fully enforced** at every layer of the stack. Previously, the "Per User" tab in Settings → Roles & Permissions stored overrides in `school.modulePermissions.byUser` (UI display only) but they were never translated to actual RBAC enforcement. Now:
+  - `PUT /api/settings/school`: when `modulePermissions.byUser` is saved, server derives action arrays from each user's V/E/D cell map and writes a `role_permissions` document keyed by `userId` (not `roleKey`) for each user.
+  - **RBAC middleware** (`server/middleware/rbac.js`): `_loadUserPerms(schoolId, userId)` loads the user-specific doc (5-minute cache) and merges it on top of role permissions. User overrides win per module.
+  - **`_loadMergedPermissions`** (`server/routes/auth.js`): accepts `userId` param; applies user-specific doc overrides at login and on every `GET /api/auth/permissions` call, so the JWT session and sidebar filtering honour user-level overrides immediately.
+
+### Changed
+
+- **`admin` role removed from RBAC bypass** (`server/middleware/rbac.js`). `SUPERROLES` now contains only `superadmin`. Admin reads from its `role_permissions` document just like every other role. Out of the box, admin still has RCUD for all modules (seeded at onboarding), so behaviour is unchanged for existing schools — but superadmin can now restrict admin access to specific modules from Settings → Roles & Permissions.
+
+- **`server/routes/auth.js`** — `GET /api/auth/permissions` no longer short-circuits for admin with `null` (full access). Admin receives its real permission map from the database. `_loadMergedPermissions` signature extended to `(schoolId, roles, userId)`.
+
+- **`client/src/store/auth.js`** — `can(feature)` no longer hardcodes `role === 'admin'` as full access. Only `role === 'superadmin'` or `permissions === null` returns true unconditionally. Admin's sidebar and `can()` calls now reflect its actual `role_permissions` document, which superadmin can edit.
+
+- **ModulesTab** (`SettingsPage.jsx`) — hardcoded `MODULES_MASTER` list removed. Tab now fetches from `GET /api/settings/modules` (MODULE_REGISTRY). Any module added to the server registry auto-appears in the toggle list without a client deploy.
+
+- **Settings R&P tab** — removed the silent background auto-sync that fired `settingsApi.school.update()` every time the tab was opened. Replaced with an amber "New modules detected" banner that appears only when the registry has modules not yet saved in the school's permission matrix, prompting the admin to click "Apply & Save" explicitly.
+
+- **`server/routes/settings.js` school save handler** — `SKIP_ROLES` reduced from `['superadmin', 'admin']` to `['superadmin']` so admin's V/E/D matrix is now written to `role_permissions` when saved.
+
+- **`server/utils/repairPermissions.js`** — `principal` added to `ROLE_DEFAULTS`; `repairPermissions()` will seed/patch the `principal` doc for all existing schools on next server restart.
+
+### Architecture
+
+This release makes **Settings the single control centre** for the entire permission model:
+
+| Layer | Before | After |
+| :---- | :------ | :----- |
+| RBAC middleware | superadmin + admin bypass | superadmin only bypasses |
+| Per-user overrides | stored in school doc (UI only) | enforced at RBAC + login |
+| Module list | 4–5 separate hardcoded lists | one `moduleRegistry.js` |
+| ModulesTab | hardcoded 18-module list | live from MODULE_REGISTRY |
+| Settings auto-sync | fired silently on tab open | explicit Save with banner |
+
+**Permission enforcement chain (complete):**
+
+```
+Admin saves Settings → PUT /settings/school
+  → byRole cells → _deriveApiPerms → role_permissions (per roleKey)
+  → byUser cells  → _deriveApiPerms → role_permissions (per userId)
+  → invalidatePermCache(schoolId)
+
+User requests any API → RBAC middleware
+  → superadmin? bypass
+  → load role_permissions[roleKey] + role_permissions[userId]
+  → merge (user overrides win per module)
+  → check module+action → 403 or next()
+
+User login / window focus → _loadMergedPermissions(schoolId, roles, userId)
+  → union of all role docs → merge user-specific doc on top
+  → attach to user.permissions in JWT / GET /permissions response
+  → AppShell refreshes sidebar computeNav()
+```
+
+Custom roles and per-user overrides are both first-class citizens at every layer.
+
+---
+
 ## [v4.59.0] — 2026-07-01 — feat(governance): AuditService — Governance subsystem foundation
 
 ### Added

@@ -387,7 +387,8 @@ Each module entry lists:
 ### `middleware/rbac.js`
 - **Used by:** every protected route
 - **Queries:** `role_permissions` collection with 5-min in-memory cache
-- `superadmin` and `admin` bypass all permission checks
+- Only `superadmin` bypasses all permission checks. `admin` goes through RBAC (superadmin can restrict via Settings)
+- Per-user overrides: also loads `role_permissions` doc keyed by `userId`; user permissions are merged on top of role permissions (user wins per module). Cache key: `schoolId::user::userId`
 - Cache must be busted (`invalidatePermCache(schoolId)`) after role_permissions changes
 
 ### `middleware/plan.js`
@@ -409,6 +410,7 @@ Each module entry lists:
 | `academic_config.schoolId` | grades, report_card_snapshots | `schools.id` | Grade calculations use wrong weights |
 | `academic_years.id` | archival guard | `academic_config.academicYears[]` | Archival blocks fail/pass incorrectly |
 | `role_permissions.schoolId+roleKey` | rbac middleware | `schools.id` + role string | Permission escalation or lockout |
+| `role_permissions.schoolId+userId` | rbac middleware (per-user overrides) | `schools.id` + `users.id` | User-level override not applied |
 
 ---
 

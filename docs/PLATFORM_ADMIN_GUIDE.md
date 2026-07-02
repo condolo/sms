@@ -31,10 +31,11 @@ Msingi is a **multi-tenant SaaS** school management platform. Each school is an 
 
 | Role | Who | What they can do |
 |---|---|---|
-| **Platform Owner** | You | Full access to all API routes, can provision/suspend/impersonate any school |
-| **School Super Admin** | School's IT admin | Full access within their own school only |
-| **School Admin** | Principal/HM | Full school access (same as super admin within the school) |
-| All other roles | Staff, parents, students | Scoped access per role_permissions table |
+| **Platform Owner** (`superadmin`) | You | Full access to all API routes, bypasses RBAC entirely, can provision/suspend/impersonate any school |
+| **School Admin** (`admin`) | School IT admin | Full access by default; superadmin can restrict specific modules via Settings → Roles & Permissions |
+| **Principal** (`principal`) | Head of school | Same defaults as deputy_principal; admin can adjust per-module |
+| **Deputy Principal** | Deputy head | Academic modules, behaviour, admissions — not finance/HR payroll |
+| All other roles | Staff, parents, students | Scoped access per `role_permissions` collection; configurable in Settings |
 
 ---
 

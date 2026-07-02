@@ -298,16 +298,23 @@ Auth.primaryRoleLabel()     // → human-readable role label
 
 ### Roles
 ```
-superadmin          Full system access
-admin               All modules, no system config
-deputy_principal    Behaviour, Students, HR (view)
+superadmin           Full system access — bypasses RBAC entirely (cannot be restricted)
+admin                All modules by default — goes through RBAC (superadmin can restrict)
+principal            Senior leadership — same defaults as deputy_principal
+deputy_principal     Behaviour, Students, HR (view), most academic modules
+section_head         Own section: students, attendance, behaviour, academics
 discipline_committee Behaviour, Students (view)
-section_head        Own section: students, attendance, behaviour, academics
-teacher             Own classes: attendance, marks, behaviour, communication
-finance             Finance (full), Students/Reports (read)
-parent              Own children only
-student             Own record only
+teacher              Own classes: attendance, marks, behaviour, communication
+timetabler           Timetable (full), classes/subjects/students (read)
+exams_officer        Grades + Exams (full), report_cards (read)
+admissions_officer   Admissions (full), students (edit)
+finance              Finance (full), Students/Reports (read)
+hr                   HR (full), teachers (full)
+parent               Own children only
+student              Own record only
 ```
+
+Custom roles can be created in Settings → Roles & Permissions. They inherit a base role's defaults and are fully enforced through the same RBAC chain as system roles. Individual users can also have per-user permission overrides set in the "Per User" tab — these override their role's permissions at the module level and are enforced at both login and API request time.
 
 ### Permission Check Pattern
 ```js
@@ -1188,8 +1195,10 @@ authMiddleware → planGate(feature) → rbac(module, action) → handler
 }
 ```
 
-- `superadmin` and `admin` bypass the DB check — always granted access
-- Cache TTL: 5 minutes per `schoolId::role` pair
+- Only `superadmin` bypasses the DB check — always granted access
+- `admin` goes through RBAC so superadmin can restrict it from Settings → R&P tab
+- Per-user overrides: docs keyed by `{ schoolId, userId }` (no `roleKey`) are merged on top of role permissions — user overrides win per module
+- Cache TTL: 5 minutes per `schoolId::role` pair; user-specific entries cached as `schoolId::user::userId`
 - Call `invalidatePermCache(schoolId)` after any `role_permissions` update
 
 ### Plan Tier Map
@@ -1508,7 +1517,7 @@ The InnoLearn International School demo seed has students, teachers, and classes
 authMiddleware → planGate(feature) → rbac(module, action) → handler
 ```
 
-`superadmin` and `admin` roles bypass the RBAC DB check. Plan cache and RBAC cache both TTL at 5 minutes.
+Only `superadmin` bypasses the RBAC DB check. `admin` goes through RBAC so superadmin can restrict it via Settings. Plan cache and RBAC cache both TTL at 5 minutes.
 
 ### Frontend API Client (`js/api.js`)
 
