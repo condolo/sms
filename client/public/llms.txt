@@ -1,0 +1,79 @@
+# Msingi
+
+> School management platform built for African schools. 22 connected modules covering attendance, grades, finance, admissions, report cards, timetabling, HR, parent portals, and student portals.
+
+## What Msingi is
+
+Msingi is a school operating system — not a collection of tools. It is built specifically for East African schools managing CBC, CAIE, IB, British, American, or WASSCE curricula. M-Pesa Paybill integration is native. Every module connects to the same institutional record. Data entered once flows everywhere it needs to be.
+
+## Who built it
+
+Collins Ndolo — Physics teacher, academic coordinator, STEM educator, AI in Education trainer, and founder. Msingi was built from inside the problem, not looking at it from outside.
+
+## Pricing
+
+- Base: KES 150 per student per term (full admin + teacher access, all 22 modules)
+- Student Portal: KES 200 per student per term (adds student-facing portal)
+- Family Portal: KES 250 per student per term (adds parent-facing portal)
+
+No setup fee. No lock-in. No module-by-module pricing.
+
+## Where Msingi operates
+
+Kenya, Uganda, Tanzania, Rwanda. Expansion to Nigeria, Ghana, and South Africa on the roadmap.
+
+## Key capabilities
+
+- Attendance (daily and per-period)
+- Grades and examinations
+- Report card generation (CBC, CAIE, IB, British, American, WASSCE, custom)
+- Fee management with M-Pesa Paybill reconciliation
+- Admissions pipeline (Kanban)
+- Timetable builder
+- HR and staff management
+- Parent portal (live attendance, grades, fee statements)
+- Student portal (timetable, grades, e-learning, growth profile)
+- Behaviour and discipline management
+- Analytics and reports
+- Library, Hostel, Transport modules
+- Growth profile (digital student portfolio)
+- Report card signing with SHA-256 and QR verification
+- RBAC — role-based access control, per-user permission overrides
+- Full audit trail
+
+## Security and compliance
+
+- African data residency — data stays in Africa
+- Tenant isolation at database layer
+- Kenya Data Protection Act 2019 compliant
+- Nigeria NDPR, South Africa POPIA, GDPR
+- Immutable academic records
+- Full permanent audit log
+
+## Current status
+
+Live at Mascit Lab Academy. Actively onboarding partner schools for 2026.
+
+## Contact
+
+hello@msingi.io
+https://msingi.io/contact
+
+## Pages
+
+- /why — Philosophy and manifesto
+- /about — Founder story (Collins Ndolo)
+- /platform — 22-module platform overview
+- /pricing — Transparent per-student pricing
+- /security — Trust Centre, compliance, responsible AI
+- /difference — The Msingi Difference (vs generic ERPs and point solutions)
+- /why-choose — Why schools choose Msingi (eight narrative sections)
+- /roadmap — Vision roadmap (Now / Near / Future)
+- /implementation — Deployment process and data migration
+- /solutions/principal — For school principals
+- /solutions/teacher — For teachers
+- /solutions/finance — For finance officers
+- /solutions/parent — For parents
+- /solutions/admissions — For admissions officers
+- /faq — Frequently asked questions
+- /contact — Book a discovery session
