@@ -3614,7 +3614,7 @@ function RolesTab() {
       {/* New-module banner — shown when modules were added to the registry after last Save */}
       {hasNewModules && isAdmin && (
         <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm">
-          <span className="text-amber-800 font-medium">New modules detected — review permissions below and click Save to apply.</span>
+          <span className="text-amber-800 font-medium">New modules added to the platform — default permissions have been set. Save to write them to the database.</span>
           <button
             onClick={() => { setDirty(true); savePerms(); }}
             disabled={saving}
@@ -4945,13 +4945,13 @@ function AuditLogTab() {
 
   const { data: actionsData } = useQuery({
     queryKey: ['audit-actions'],
-    queryFn: () => fetch('/api/audit/actions', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(r => r.json()),
+    queryFn: () => fetch('/api/audit/actions', { credentials: 'include' }).then(r => r.json()),
     staleTime: Infinity,
   });
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['audit-logs', page, action, severity, from, to],
-    queryFn: () => fetch(`/api/audit?${params}`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(r => r.json()),
+    queryFn: () => fetch(`/api/audit?${params}`, { credentials: 'include' }).then(r => r.json()),
     staleTime: 30_000,
     keepPreviousData: true,
   });

@@ -34,9 +34,8 @@ const EVENT_COLORS = {
 
 /* ── API helpers ──────────────────────────────────────────── */
 const API_BASE = import.meta.env.VITE_API_BASE || '';
-function _token() { return useAuthStore.getState().session?.token || ''; }
 async function _fetch(path) {
-  const res  = await fetch(`${API_BASE}${path}`, { headers: { Authorization: `Bearer ${_token()}` } });
+  const res  = await fetch(`${API_BASE}${path}`, { credentials: 'include' });
   const json = await res.json();
   if (res.status === 401 || res.status === 403) {
     const err = new Error(json.error?.message || 'Session expired — please sign in again');
@@ -48,7 +47,7 @@ async function _fetch(path) {
 }
 async function _downloadRC(rcId, label) {
   const res = await fetch(`${API_BASE}/api/report-cards/${rcId}/pdf`, {
-    headers: { Authorization: `Bearer ${_token()}` },
+    credentials: 'include',
   });
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error || 'Download failed'); }
   const blob = await res.blob();
@@ -156,14 +155,14 @@ export default function ParentDashboard() {
 
   /* ── Auth guard ── */
   useEffect(() => {
-    if (!session?.token) { navigate('/login', { replace: true }); return; }
+    if (!session?.user) { navigate('/login', { replace: true }); return; }
     const role = session.user?.role;
     if (role !== 'parent' && role !== 'guardian') { navigate('/dashboard', { replace: true }); return; }
   }, []);
 
   /* ── Load children list + family summary in parallel ── */
   useEffect(() => {
-    if (!session?.token) return;
+    if (!session?.user) return;
     Promise.all([
       _fetch('/api/parent-portal/children'),
       _fetch('/api/parent-portal/family-summary').catch(() => null),

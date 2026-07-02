@@ -14,6 +14,22 @@ const AuditService         = require('../services/audit');
 
 const router = express.Router();
 
+/* ── Auth cookie helper ──────────────────────────────────
+   Sets the JWT as an HttpOnly cookie so JS (and XSS) cannot
+   read it. Uses SameSite=Strict to block CSRF.
+   maxAge mirrors absoluteExpiry when available (8 h default). */
+function _setAuthCookie(res, token, absoluteExpiry) {
+  const maxAge = absoluteExpiry
+    ? Math.max(0, new Date(absoluteExpiry) - Date.now())
+    : 8 * 60 * 60 * 1000;
+  res.cookie('token', token, {
+    httpOnly: true,
+    secure:   process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge,
+  });
+}
+
 /* ── OAuth exchange-code store ───────────────────────────
    Single-use, 30-second codes replace JWT-in-URL.
    Map<code (64-char hex), { token, expiresAt }>
@@ -306,7 +322,8 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
     }
 
     SecurityService.clearFail(req.school.id, loginId).catch(() => {});
-    res.json({ token, user: safeUser, school: req.school, absoluteExpiry });
+    _setAuthCookie(res, token, absoluteExpiry);
+    res.json({ user: safeUser, school: req.school, absoluteExpiry });
   } catch (err) {
     console.error('[auth/login]', err);
     res.status(500).json({ error: 'Login failed' });
@@ -371,7 +388,8 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
     if (otpMergedPerms !== null) safeUser.permissions = otpMergedPerms;
 
     _checkTrialAndNotify(school).catch(() => {});
-    res.json({ token, user: safeUser, school, absoluteExpiry: otpAbsExpiry });
+    _setAuthCookie(res, token, otpAbsExpiry);
+    res.json({ user: safeUser, school, absoluteExpiry: otpAbsExpiry });
   } catch (err) {
     console.error('[auth/verify-otp]', err);
     res.status(500).json({ error: 'Verification failed' });
@@ -529,7 +547,8 @@ router.post('/force-change', forceChangeLimiter, tenantMiddleware, async (req, r
 
     const safeUser = { ...user, password: undefined, mfaOtp: undefined, mfaExpiry: undefined,
                        passwordChangedAt: now, mustChangePassword: false };
-    res.json({ token, user: safeUser, school, absoluteExpiry: fcAbsExpiry });
+    _setAuthCookie(res, token, fcAbsExpiry);
+    res.json({ user: safeUser, school, absoluteExpiry: fcAbsExpiry });
   } catch (err) {
     console.error('[auth/force-change]', err);
     res.status(500).json({ error: 'Password change failed' });
@@ -575,10 +594,12 @@ router.post('/logout', authMiddleware, async (req, res) => {
   try {
     const { sessionId } = req.jwtUser;
     await SessionService.terminateCurrentSession(sessionId);
+    res.clearCookie('token', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
     return res.json({ success: true });
   } catch (err) {
     console.error('[auth/logout]', err);
-    return res.json({ success: true }); // client clears token regardless
+    res.clearCookie('token', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
+    return res.json({ success: true }); // client clears session regardless
   }
 });
 
@@ -1005,7 +1026,8 @@ router.post('/exchange', exchangeLimiter, async (req, res) => {
       ? `/api/users/${user.id}/photo?schoolId=${encodeURIComponent(payload.schoolId)}`
       : null;
 
-    return res.json({ token: entry.token, user: safeUser, school });
+    _setAuthCookie(res, entry.token);
+    return res.json({ user: safeUser, school });
   } catch (err) {
     console.error('[auth/exchange]', err);
     res.status(500).json({ error: 'Exchange failed' });

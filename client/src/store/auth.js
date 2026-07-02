@@ -68,9 +68,8 @@ function saveSession(session) {
     localStorage.removeItem(SESSION_KEY);
     return;
   }
-  // Only persist slim (non-sensitive) fields
+  // token is NOT persisted — it lives in an HttpOnly cookie (inaccessible to JS/XSS)
   const slim = {
-    token:           session.token,
     user:            _slimUser(session.user),
     school:          _slimSchool(session.school),
     absoluteExpiry:  session.absoluteExpiry ?? undefined,
@@ -85,9 +84,9 @@ const useAuthStore = create((set, get) => ({
   error:        null,
 
   // ─── Derived getters ────────────────────────────────────────────────────────
-  get isAuthenticated() { return !!get().session?.token; },
+  get isAuthenticated() { return !!get().session?.user; },
   get user()            { return get().session?.user ?? null; },
-  get token()           { return get().session?.token ?? null; },
+  get token()           { return null; }, // token lives in HttpOnly cookie — not accessible to JS
   get schoolId()        { return get().session?.user?.schoolId ?? null; },
   get role()            { return get().session?.user?.role ?? null; },
   get plan()            { return get().session?.school?.plan ?? get().session?.user?.plan ?? 'core'; },

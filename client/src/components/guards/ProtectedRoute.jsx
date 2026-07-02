@@ -10,7 +10,7 @@ export default function ProtectedRoute({ children }) {
   const session  = useAuthStore(s => s.session);
   const location = useLocation();
 
-  if (!session?.token) {
+  if (!session?.user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 

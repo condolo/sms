@@ -18,18 +18,16 @@ import {
   students as studentsApi,
   profile as profileApi,
 } from '@/api/client.js';
-import useAuthStore from '@/store/auth.js';
 
 /* ── API helpers ─────────────────────────────────────────────── */
 const BASE = '/api/elearning';
 
 async function apiFetch(path, opts = {}) {
-  const token = useAuthStore.getState().session?.token ?? null;
   const res   = await fetch(`${BASE}${path}`, {
     ...opts,
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(opts.headers || {}),
     },
     body: opts.body ? JSON.stringify(opts.body) : undefined,

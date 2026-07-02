@@ -28,9 +28,8 @@ const EVENT_COLORS = {
 
 /* ── API ────────────────────────────────────────────────────── */
 const API_BASE = import.meta.env.VITE_API_BASE || '';
-function _token() { return useAuthStore.getState().session?.token || ''; }
 async function _fetch(path) {
-  const res  = await fetch(`${API_BASE}${path}`, { headers: { Authorization: `Bearer ${_token()}` } });
+  const res  = await fetch(`${API_BASE}${path}`, { credentials: 'include' });
   const json = await res.json();
   if (res.status === 401 || res.status === 403) {
     const err = new Error(json.error?.message || 'Session expired — please sign in again');
@@ -74,7 +73,7 @@ function _findNextSlot(slots = []) {
 
 async function _downloadReport(rcId, label) {
   const res = await fetch(`${API_BASE}/api/report-cards/${rcId}/pdf`, {
-    headers: { Authorization: `Bearer ${_token()}` },
+    credentials: 'include',
   });
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error || 'Download failed'); }
   const blob = await res.blob();
@@ -170,7 +169,7 @@ export default function StudentDashboard() {
   const [dlError,     setDlError]     = useState('');
 
   useEffect(() => {
-    if (!session?.token)                    { navigate('/login',     { replace: true }); return; }
+    if (!session?.user)                    { navigate('/login',     { replace: true }); return; }
     if (session.user?.role !== 'student')   { navigate('/dashboard', { replace: true }); return; }
     _fetch('/api/student-portal/dashboard')
       .then(d  => { setData(d); setLoading(false); })

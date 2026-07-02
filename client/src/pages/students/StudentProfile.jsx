@@ -1225,7 +1225,6 @@ function pctColor(pct) {
    PORTAL TAB — Create / manage student & parent portal accounts
    ══════════════════════════════════════════════════════════════ */
 function PortalTab({ student, canEdit }) {
-  const token = useAuthStore(s => s.token);
   const role  = useAuthStore(s => s.session?.user?.role);
 
   const [studentAccResult, setStudentAccResult] = useState(null);
@@ -1241,7 +1240,8 @@ function PortalTab({ student, canEdit }) {
     try {
       const res  = await fetch(`/api/students/${student.id}${path}`, {
         method,
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error?.message || 'Request failed');
@@ -1258,7 +1258,8 @@ function PortalTab({ student, canEdit }) {
     try {
       const res  = await fetch(`/api/students/${student.id}/deactivate`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ reason: 'withdrawn', notes: '' }),
       });
       const json = await res.json();
@@ -1398,8 +1399,7 @@ function PortalTab({ student, canEdit }) {
             <button
               onClick={async () => {
                 try {
-                  const token2 = useAuthStore.getState().token;
-                  await fetch(`/api/students/${student.id}/reactivate`, { method: 'PATCH', headers: { Authorization: `Bearer ${token2}` } });
+                  await fetch(`/api/students/${student.id}/reactivate`, { method: 'PATCH', credentials: 'include' });
                   window.location.reload();
                 } catch {}
               }}

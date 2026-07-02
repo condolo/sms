@@ -123,6 +123,7 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));   // 10MB for bulk sync payloads
 app.use(express.urlencoded({ extended: true }));
+app.use(require('cookie-parser')());
 
 /* ── NoSQL injection sanitisation ───────────────────────────
    Strips MongoDB operator keys ($gt, $ne, $regex, etc.) from

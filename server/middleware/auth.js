@@ -26,8 +26,10 @@ function _touchActivity(sessionId, userId) {
    Also enforces token version — tokens issued before a role change are rejected. */
 async function authMiddleware(req, res, next) {
   try {
+    // Read from HttpOnly cookie first (XSS-safe), fall back to Authorization header
+    const cookie = req.cookies?.token;
     const header = req.headers.authorization || '';
-    const token  = header.startsWith('Bearer ') ? header.slice(7) : null;
+    const token  = cookie || (header.startsWith('Bearer ') ? header.slice(7) : null);
     if (!token) return _unauth(res, 'UNAUTHENTICATED', 'No token provided');
 
     const payload = verify(token);

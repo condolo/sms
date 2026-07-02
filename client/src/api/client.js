@@ -18,24 +18,24 @@ export class APIError extends Error {
   }
 }
 
-// ─── Token helper ─────────────────────────────────────────────────────────────
+// ─── Session helper ───────────────────────────────────────────────────────────
+// Returns true when a user object is present in the local session store.
+// Used to differentiate a session-expiry 401 from an unauthenticated 401.
+// The JWT itself lives in an HttpOnly cookie and is never read by JS.
 
-function getToken() {
+function isSessionActive() {
   try {
     const raw = localStorage.getItem('msingi_session');
-    if (!raw) return null;
-    return JSON.parse(raw)?.token ?? null;
+    return !!(raw && JSON.parse(raw)?.user?.id);
   } catch {
-    return null;
+    return false;
   }
 }
 
 // ─── Core fetch ───────────────────────────────────────────────────────────────
 
 async function _req(method, path, body = null, params = null) {
-  const token = getToken();
   const headers = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
 
   // Auto-send the school slug on every request so the server can resolve
   // the tenant without the user typing it. Detected from subdomain first,
@@ -54,21 +54,22 @@ async function _req(method, path, body = null, params = null) {
   const res = await fetch(url, {
     method,
     headers,
+    credentials: 'include', // send HttpOnly auth cookie automatically
     body: body ? JSON.stringify(body) : undefined,
   });
 
   const json = await res.json().catch(() => null);
 
   if (res.status === 401) {
-    // Only treat as session expiry if the request was made with a token.
+    // Only treat as session expiry if a session was active.
     // Unauthenticated requests (login, OTP verify, etc.) should show the
     // actual server error ("Invalid email or password") — not "Session expired".
-    if (token) {
+    if (isSessionActive()) {
       localStorage.removeItem('msingi_session');
       window.dispatchEvent(new CustomEvent('api:unauthorized'));
       throw new APIError('UNAUTHORIZED', 'Session expired. Please log in again.', 401);
     }
-    // No token — pass through the actual server error message
+    // No session — pass through the actual server error message
     const msg = typeof json?.error === 'string' ? json.error
               : json?.error?.message ?? json?.message ?? 'Invalid credentials.';
     throw new APIError('UNAUTHORIZED', msg, 401, json ?? {});
@@ -284,15 +285,13 @@ export const timetable = {
     remove:      (id)       => _delete(`/timetable/substitutions/${id}`),
     autoAssign:  (data)     => _post('/timetable/substitutions/auto-assign', data),
     coverPdf:    async (params = {}) => {
-      const token = getToken();
       const { slug } = detectSchool();
       const headers = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      if (slug)  headers['X-School-Slug'] = slug;
+      if (slug) headers['X-School-Slug'] = slug;
       const qs = new URLSearchParams(
         Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
       ).toString();
-      const res = await fetch(`${BASE}/timetable/substitutions/cover-pdf${qs ? `?${qs}` : ''}`, { headers });
+      const res = await fetch(`${BASE}/timetable/substitutions/cover-pdf${qs ? `?${qs}` : ''}`, { headers, credentials: 'include' });
       if (!res.ok) {
         const json = await res.json().catch(() => null);
         throw new APIError('PDF_FAILED', json?.error?.message ?? 'Failed to generate cover sheet PDF', res.status);
@@ -321,20 +320,17 @@ export const announcements = {
 
 // ─── Import / Export ──────────────────────────────────────────────────────────
 
-function _getToken() { return getToken(); }
-
 export const importExport = {
   /** Import a CSV file for the given type (students | teachers) */
   importCSV: async (type, csvText) => {
-    const token = _getToken();
     const { slug } = detectSchool();
     const headers = { 'Content-Type': 'text/csv' };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    if (slug)  headers['X-School-Slug'] = slug;
+    if (slug) headers['X-School-Slug'] = slug;
 
     const res = await fetch(`${BASE}/import-export/${type}`, {
       method: 'POST',
       headers,
+      credentials: 'include',
       body: csvText,
     });
 
@@ -350,11 +346,9 @@ export const importExport = {
   /** Export records for the given type as a CSV download.
    *  Pass an optional params object to filter the export (mirrors the list API). */
   exportCSV: async (type, params = {}) => {
-    const token = _getToken();
     const { slug } = detectSchool();
     const headers = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    if (slug)  headers['X-School-Slug'] = slug;
+    if (slug) headers['X-School-Slug'] = slug;
 
     let url = `${BASE}/import-export/export/${type}`;
     const qs = new URLSearchParams(
@@ -362,7 +356,7 @@ export const importExport = {
     ).toString();
     if (qs) url += `?${qs}`;
 
-    const res = await fetch(url, { headers });
+    const res = await fetch(url, { headers, credentials: 'include' });
     if (!res.ok) throw new APIError('EXPORT_FAILED', 'Export failed', res.status);
 
     // Use server-provided filename when available (reflects active filters)
@@ -383,13 +377,11 @@ export const importExport = {
 
   /** Download a blank demo template for the given type */
   downloadTemplate: async (type) => {
-    const token = _getToken();
     const { slug } = detectSchool();
     const headers = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    if (slug)  headers['X-School-Slug'] = slug;
+    if (slug) headers['X-School-Slug'] = slug;
 
-    const res = await fetch(`${BASE}/import-export/template/${type}`, { headers });
+    const res = await fetch(`${BASE}/import-export/template/${type}`, { headers, credentials: 'include' });
     if (!res.ok) throw new APIError('TEMPLATE_FAILED', 'Failed to download template', res.status);
 
     const blob = await res.blob();

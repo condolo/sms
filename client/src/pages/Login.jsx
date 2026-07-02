@@ -380,7 +380,7 @@ export default function Login() {
   const navigate           = useNavigate();
   const location           = useLocation();
   const setSession         = useAuthStore((s) => s.setSession);
-  const isAuthenticated    = useAuthStore((s) => !!s.session?.token);
+  const isAuthenticated    = useAuthStore((s) => !!s.session?.user);
 
   // Role-aware default destination
   function _defaultDest(role) {
@@ -433,14 +433,15 @@ export default function Login() {
       window.history.replaceState({}, '', location.pathname);
 
       fetch('/api/auth/exchange', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ code: oauthCode }),
+        method:      'POST',
+        headers:     { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body:        JSON.stringify({ code: oauthCode }),
       })
         .then(r => r.json())
         .then(res => {
-          if (!res.token || !res.user) throw new Error('Invalid exchange response');
-          setSession({ token: res.token, user: res.user, school: res.school });
+          if (!res.user) throw new Error('Invalid exchange response');
+          setSession({ user: res.user, school: res.school });
           navigate(from || _defaultDest(res.user?.role), { replace: true });
         })
         .catch(() => {
@@ -512,7 +513,7 @@ export default function Login() {
       const res = await authApi.login({ email: demoEmail.toLowerCase(), password: demoPassword });
       if (res?.mfaRequired) { setPendingMfa({ userId: res.userId, schoolId: res.schoolId }); setMode(MODES.OTP); setLoading(false); return; }
       if (res?.passwordExpired) { setPendingPw({ userId: res.userId, schoolId: res.schoolId, reason: res.reason }); setMode(MODES.CHANGE_PASSWORD); setLoading(false); return; }
-      setSession({ token: res.token, user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry });
+      setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry });
       navigate(from || _defaultDest(res.user?.role), { replace: true });
     } catch (err) {
       setError(err instanceof APIError ? err.message : 'Demo login failed — please try again.');
@@ -545,7 +546,7 @@ export default function Login() {
         return;
       }
 
-      setSession({ token: res.token, user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry });
+      setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry });
       navigate(from || _defaultDest(res.user?.role), { replace: true });
     } catch (err) {
       if (err instanceof APIError && err.status === 429 && err.extra?.retryAfter) {
@@ -568,7 +569,7 @@ export default function Login() {
         schoolId: pendingMfa.schoolId,
         otp:      otp.trim(),
       });
-      setSession({ token: res.token, user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry });
+      setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry });
       navigate(from || _defaultDest(res.user?.role), { replace: true });
     } catch (err) {
       setError(err instanceof APIError ? err.message : 'Invalid code. Please try again.');
@@ -589,7 +590,7 @@ export default function Login() {
         schoolId:    pendingPw.schoolId,
         newPassword,
       });
-      setSession({ token: res.token, user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry });
+      setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry });
       navigate(from || _defaultDest(res.user?.role), { replace: true });
     } catch (err) {
       setError(err instanceof APIError ? err.message : 'Password change failed.');

@@ -77,7 +77,7 @@ export default function useIdleTimer() {
 
   /* ── Mount: wire activity listeners and timers ────────── */
   useEffect(() => {
-    if (!session?.token) return;
+    if (!session?.user) return;
     isLoggedOutRef.current = false;
 
     resetTimers();
@@ -92,7 +92,7 @@ export default function useIdleTimer() {
       ACTIVITY_EVENTS.forEach(e => window.removeEventListener(e, handleActivity));
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.token]);  // re-run only when the token itself changes (new login)
+  }, [session?.user?.id]);  // re-run only when the user changes (new login)
 
   /* ── Warning countdown ticker ─────────────────────────── */
   useEffect(() => {
