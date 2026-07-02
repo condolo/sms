@@ -54,6 +54,11 @@ app.use((req, res, next) => {
   if (p.startsWith('/.git') || p.startsWith('/.env') || p.startsWith('/.htaccess')) {
     return res.status(404).end();
   }
+  // Block direct HTTP access to backup files regardless of where BACKUP_DIR points.
+  // Backups should only be accessed via the /api/backup route (authenticated + RBAC).
+  if (p.startsWith('/backups')) {
+    return res.status(403).end();
+  }
   next();
 });
 
@@ -119,6 +124,14 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));   // 10MB for bulk sync payloads
 app.use(express.urlencoded({ extended: true }));
 
+/* ── NoSQL injection sanitisation ───────────────────────────
+   Strips MongoDB operator keys ($gt, $ne, $regex, etc.) from
+   req.body, req.params, and req.query before any route handler
+   sees them. Prevents operator-injection attacks on auth routes
+   and any route that passes user input into MongoDB filters.   */
+const mongoSanitize = require('express-mongo-sanitize');
+app.use(mongoSanitize());
+
 /* ── Monitoring: request context (Sentry, if active) ───────── */
 app.use(monitoring.requestHandler());
 
@@ -147,10 +160,10 @@ const authLimiter = rateLimit({
   skip:              () => process.env.NODE_ENV === 'test',
 });
 
-// Platform admin limiter: 50 req/15min — tighter than general for key-protected admin API
+// Platform admin limiter: 10 req/15min — strict; this key grants full platform access
 const platformLimiter = rateLimit({
   windowMs:        15 * 60 * 1000,
-  max:             50,
+  max:             10,
   standardHeaders: true,
   legacyHeaders:   false,
   message:         { success: false, error: { code: 'RATE_LIMIT', message: 'Too many platform admin requests.' } },

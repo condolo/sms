@@ -24,6 +24,51 @@
 
 const { _model } = require('../utils/model');
 
+/* ── Critical-event alert actions ───────────────────────────────
+   These fire a webhook alert in addition to writing the audit log.
+   They represent actions that must never go unnoticed.            */
+const ALERT_ACTIONS = new Set([
+  'platform.impersonate',
+  'platform.school_deleted',
+  'platform.backup_restored',
+  'student.deleted',
+  'report_card.moderation_bypassed',
+]);
+
+function _sendSecurityAlert({ action, actor, schoolId, target, details }) {
+  const webhook = process.env.ALERT_WEBHOOK_URL;
+  if (!webhook) return;
+  try {
+    const https = require('https');
+    const http  = require('http');
+    const lines = [
+      `🔴 **Security Alert — ${action}**`,
+      `School: \`${schoolId ?? 'unknown'}\``,
+      `Actor: \`${actor?.email ?? actor?.userId ?? 'unknown'}\` (${actor?.role ?? '?'})`,
+      target ? `Target: \`${target.type}/${target.id}\`` : null,
+      details ? `Details: \`${JSON.stringify(details).slice(0, 200)}\`` : null,
+      `Time: ${new Date().toISOString()}`,
+    ].filter(Boolean).join('\n');
+
+    const body = JSON.stringify({ content: lines });
+    let url;
+    try { url = new URL(webhook); } catch (_) { return; }
+
+    const lib  = url.protocol === 'https:' ? https : http;
+    const opts = {
+      hostname: url.hostname,
+      port:     url.port || (url.protocol === 'https:' ? 443 : 80),
+      path:     url.pathname + url.search,
+      method:   'POST',
+      headers:  { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+    };
+    const req = lib.request(opts, (res) => { res.resume(); });
+    req.on('error', () => { /* non-fatal */ });
+    req.write(body);
+    req.end();
+  } catch (_) { /* non-fatal — alerts must never block a workflow */ }
+}
+
 const COLLECTION = 'audit_logs';
 
 /**
@@ -79,6 +124,10 @@ async function log({ action, actor, schoolId, target, details, severity, req } =
       userAgent: req?.headers?.['user-agent'] ?? null,
       createdAt: new Date().toISOString(),
     });
+    // Fire webhook alert for critical security actions (non-blocking)
+    if (ALERT_ACTIONS.has(action)) {
+      _sendSecurityAlert({ action, actor, schoolId, target, details });
+    }
   } catch (err) {
     // Non-fatal — logging must never break a school workflow
     console.error(`[AuditService] Failed to log action "${action}":`, err.message);

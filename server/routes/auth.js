@@ -56,7 +56,7 @@ function _verifyOTP(input, storedHash) {
 }
 
 /* Roles that require 2FA */
-const MFA_ROLES = new Set(['superadmin', 'admin', 'deputy', 'finance']);
+const MFA_ROLES = new Set(['superadmin', 'admin', 'deputy', 'principal', 'finance']);
 
 /**
  * Build the JWT payload from a user document + school.

@@ -41,6 +41,10 @@ const DEMO_USERS = [
 ];
 
 async function seedDemo() {
+  if (process.env.NODE_ENV === 'production' && !process.env.ALLOW_DEMO_SEED) {
+    console.log('[seed-demo] Skipped — NODE_ENV=production. Set ALLOW_DEMO_SEED=1 to force.');
+    return;
+  }
   if (!mongoose.connection || mongoose.connection.readyState !== 1) {
     console.warn('[seed-demo] DB not connected — skipping.');
     return;
