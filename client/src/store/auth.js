@@ -138,7 +138,10 @@ const useAuthStore = create((set, get) => ({
     const { session } = get();
     if (!session) return false;
     const { role, permissions = {} } = session.user ?? {};
-    if (role === 'superadmin' || role === 'admin') return true;
+    if (role === 'superadmin') return true;
+    // null permissions means full access (superadmin path above handles this,
+    // but guard here too in case permissions arrives as null from the server)
+    if (permissions === null) return true;
     const p = permissions[feature];
     // permissions[feature] is always an array (from _deriveApiPerms).
     // Empty array [] means no access — !![] is incorrectly truthy, so check length explicitly.

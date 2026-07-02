@@ -300,7 +300,7 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
     // Attach merged role permissions so the client sidebar can filter correctly.
     // Merges across all roles the user holds (union of actions per module).
     const allRoles = Array.isArray(user.roles) && user.roles.length ? user.roles : [userRole];
-    const mergedPerms = await _loadMergedPermissions(req.school.id, allRoles);
+    const mergedPerms = await _loadMergedPermissions(req.school.id, allRoles, user.id);
     if (mergedPerms !== null) {
       safeUser.permissions = mergedPerms;
     }
@@ -367,7 +367,7 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
     // Attach merged role permissions so sidebar filters correctly (same as regular login)
     const safeUser = { ...user, password: undefined, mfaOtp: undefined, mfaExpiry: undefined };
     const otpAllRoles = Array.isArray(user.roles) && user.roles.length ? user.roles : [_otpUserRole];
-    const otpMergedPerms = await _loadMergedPermissions(user.schoolId, otpAllRoles);
+    const otpMergedPerms = await _loadMergedPermissions(user.schoolId, otpAllRoles, user.id);
     if (otpMergedPerms !== null) safeUser.permissions = otpMergedPerms;
 
     _checkTrialAndNotify(school).catch(() => {});
@@ -381,9 +381,8 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
 /* ── Merge role_permissions across multiple roles ──────────── */
 // Takes the union of actions per module across all roles a user holds.
 // deputy is an alias for deputy_principal — normalise before lookup.
-async function _loadMergedPermissions(schoolId, roles) {
-  const ADMIN_BYPASS = new Set(['superadmin', 'admin']);
-  if (roles.some(r => ADMIN_BYPASS.has(r))) return null; // null = full access
+async function _loadMergedPermissions(schoolId, roles, userId = null) {
+  if (roles.some(r => r === 'superadmin')) return null; // null = full access
 
   // Normalise aliases
   const keys = [...new Set(roles.map(r => r === 'deputy' ? 'deputy_principal' : r))];
@@ -391,7 +390,7 @@ async function _loadMergedPermissions(schoolId, roles) {
   const RolePerms = _model('role_permissions');
   const docs = await RolePerms.find({ schoolId, roleKey: { $in: keys } }).lean();
 
-  // Union of actions per module — most permissive wins
+  // Union of actions per module across all roles — most permissive wins
   const merged = {};
   for (const doc of docs) {
     for (const [mod, actions] of Object.entries(doc.permissions ?? {})) {
@@ -399,9 +398,18 @@ async function _loadMergedPermissions(schoolId, roles) {
       (Array.isArray(actions) ? actions : []).forEach(a => merged[mod].add(a));
     }
   }
-  return Object.fromEntries(
+  const roleResult = Object.fromEntries(
     Object.entries(merged).map(([mod, set]) => [mod, [...set]])
   );
+
+  // Apply per-user overrides on top of role permissions (user overrides win per module)
+  if (userId) {
+    const userDoc = await RolePerms.findOne({ schoolId, userId }).lean();
+    if (userDoc?.permissions) {
+      return { ...roleResult, ...userDoc.permissions };
+    }
+  }
+  return roleResult;
 }
 
 /* GET /api/auth/permissions — return merged live permissions for all user roles.
@@ -409,13 +417,13 @@ async function _loadMergedPermissions(schoolId, roles) {
    without requiring a full logout/login after an admin changes Settings.    */
 router.get('/permissions', authMiddleware, async (req, res) => {
   try {
-    const { schoolId, role, roles } = req.jwtUser;
-    if (['superadmin', 'admin'].includes(role)) {
+    const { userId, schoolId, role, roles } = req.jwtUser;
+    if (role === 'superadmin') {
       return res.json({ permissions: null }); // null = full access, no sidebar filtering
     }
     // Use all roles the user holds so secondary roles are honoured
     const allRoles = Array.isArray(roles) && roles.length ? roles : [role];
-    const permissions = await _loadMergedPermissions(schoolId, allRoles);
+    const permissions = await _loadMergedPermissions(schoolId, allRoles, userId);
     res.json({ permissions: permissions ?? {} });
   } catch (err) {
     console.error('[auth/permissions]', err);

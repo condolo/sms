@@ -444,7 +444,7 @@ async function _seedBaseData(schoolId, selectedSections = ['primary','secondary'
   ));
 
   /* Default role permissions */
-  const roles = ['superadmin','admin','teacher','finance','hr','admissions_officer',
+  const roles = ['superadmin','admin','principal','teacher','finance','hr','admissions_officer',
                  'exams_officer','timetabler','section_head','deputy_principal',
                  'discipline_committee','parent','student'];
 
@@ -549,6 +549,7 @@ function _defaultPerms(role) {
         admissions:   R,   lessons:      RCU, analytics:    R,
       };
 
+    case 'principal':
     case 'deputy_principal':
       return {
         students:     RCUD, teachers:     RCU,  classes:      RCUD,

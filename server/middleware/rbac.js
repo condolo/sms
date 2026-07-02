@@ -13,7 +13,8 @@
      }
    }
 
-   Superadmin and admin bypass the DB check — they get all access.
+   Only superadmin bypasses the DB check (full access always).
+   Admin goes through RBAC so superadmin can restrict it from Settings.
    Cache TTL: 5 minutes per schoolId::role pair.
    ============================================================ */
 const { _model } = require('../utils/model');
@@ -43,7 +44,7 @@ function invalidatePermCache(schoolId) {
 }
 
 /* ── Roles that always have full access ─────────────────────── */
-const SUPERROLES = new Set(['superadmin', 'admin']);
+const SUPERROLES = new Set(['superadmin']);
 
 function _isSuperRole(role, roles = []) {
   return SUPERROLES.has(role) || roles.some(r => SUPERROLES.has(r));
@@ -73,6 +74,23 @@ async function _loadPerms(schoolId, role) {
   return perms;
 }
 
+/* Load per-user permission overrides (keyed by userId, not roleKey) */
+async function _loadUserPerms(schoolId, userId) {
+  if (!userId) return null;
+  const cacheKey = `${schoolId}::user::${userId}`;
+  const entry = _cache.get(cacheKey);
+  if (entry) {
+    if (Date.now() > entry.expiresAt) { _cache.delete(cacheKey); }
+    else return entry.perms;
+  }
+  const doc = await _model('role_permissions').findOne({ schoolId, userId }).lean();
+  const perms = doc ? doc.permissions || {} : null;
+  if (perms !== null) {
+    _cache.set(cacheKey, { perms, expiresAt: Date.now() + CACHE_TTL_MS });
+  }
+  return perms;
+}
+
 /* ── Middleware factory ──────────────────────────────────────── */
 /**
  * rbac(module, action)
@@ -91,10 +109,14 @@ function rbac(mod, action) {
         return res.status(401).json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Authentication required' } });
       }
 
-      // Superadmin / admin bypass all permission checks
+      // Superadmin bypass all permission checks
       if (_isSuperRole(role, roles)) return next();
 
-      const perms = await _loadPerms(schoolId, role);
+      const rolePerms = await _loadPerms(schoolId, role);
+      const userPerms = await _loadUserPerms(schoolId, userId);
+
+      // User-level overrides win for any module they specify; role perms fill the rest
+      const perms = userPerms ? { ...rolePerms, ...userPerms } : rolePerms;
 
       // Check if the module+action is permitted
       const allowed = Array.isArray(perms[mod]) && perms[mod].includes(action);

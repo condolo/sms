@@ -44,6 +44,7 @@ const TABS = [
 const SYSTEM_ROLE_LABELS = {
   superadmin:           'Super Admin',
   admin:                'Admin',
+  principal:            'Principal',
   deputy_principal:     'Deputy Principal',
   deputy:               'Deputy',               // legacy alias
   section_head:         'Section Head',
@@ -60,6 +61,7 @@ const SYSTEM_ROLE_LABELS = {
 const SYSTEM_ROLE_COLORS = {
   superadmin:           { sel:'bg-red-600 text-white ring-red-600',          idle:'ring-slate-200 bg-white text-red-700'        },
   admin:                { sel:'bg-violet-600 text-white ring-violet-600',     idle:'ring-slate-200 bg-white text-violet-700'     },
+  principal:            { sel:'bg-indigo-700 text-white ring-indigo-700',     idle:'ring-slate-200 bg-white text-indigo-800'     },
   deputy_principal:     { sel:'bg-indigo-600 text-white ring-indigo-600',     idle:'ring-slate-200 bg-white text-indigo-700'     },
   section_head:         { sel:'bg-purple-600 text-white ring-purple-600',     idle:'ring-slate-200 bg-white text-purple-700'     },
   teacher:              { sel:'bg-blue-600 text-white ring-blue-600',         idle:'ring-slate-200 bg-white text-blue-700'       },
@@ -1744,7 +1746,7 @@ function SmtpCard({ school = {}, onSaved }) {
    but does NOT appear in the UI — it is merged with deputy_principal.
    ─────────────────────────────────────────────────────────────── */
 const SYSTEM_ROLES = [
-  'superadmin', 'admin', 'deputy_principal', 'section_head', 'teacher',
+  'superadmin', 'admin', 'principal', 'deputy_principal', 'section_head', 'teacher',
   'exams_officer', 'timetabler', 'admissions_officer', 'finance', 'hr',
   'discipline_committee', 'parent', 'student',
 ];
@@ -3232,7 +3234,7 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
     superadmin: ()      => T,
     admin:      ()      => T,
 
-    /* deputy_principal — canonical key; deputy kept as alias below */
+    /* deputy_principal — canonical key; deputy + principal kept as aliases */
     deputy_principal: (m, s) => {
       if (m==='finance'    && ['void_invoice','record_payment','payroll_view','payroll_export','mpesa'].includes(s)) return N;
       if (m==='finance'    && s==='fee_structure') return E;
@@ -3241,7 +3243,8 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='analytics') return V;
       return E;
     },
-    deputy: (m, s) => DEFS.deputy_principal(m, s),  // legacy alias
+    principal: (m, s) => DEFS.deputy_principal(m, s),  // same defaults as deputy_principal; admin can adjust
+    deputy:    (m, s) => DEFS.deputy_principal(m, s),  // legacy alias
 
     section_head: (m, s) => {
       if (['finance','hr','admissions'].includes(m)) return N;
@@ -3413,7 +3416,7 @@ function RolesTab() {
   const [perms,          setPerms]          = useState(null);
   const [dirty,          setDirty]          = useState(false);
   const [toast,          setToast]          = useState(null);
-  const _autoSynced = useRef(false);
+  const [hasNewModules,  setHasNewModules]  = useState(false);
   const [showCreateRole, setShowCreateRole] = useState(false);
   const [editingRole,    setEditingRole]    = useState(null);   // null | custom_role doc
 
@@ -3503,18 +3506,20 @@ function RolesTab() {
   useEffect(() => {
     if (!schoolData) return;
     const saved = schoolData.data?.modulePermissions;
-    const computed = saved ? _mergePerms(_makeDefaultPerms(permModules), saved) : _makeDefaultPerms(permModules);
-    setPerms(computed);
-    // First-load background sync: write computed defaults to role_permissions so that the
-    // RBAC middleware matches exactly what this UI shows — even before the admin clicks Save.
-    // This closes the gap when the DB was seeded at onboarding with permissions that differ
-    // from the current Settings defaults, because without an explicit Save the DB and UI
-    // are never reconciled.
-    if (!_autoSynced.current) {
-      _autoSynced.current = true;
-      settingsApi.school.update({ modulePermissions: computed }).catch(() => {});
+    const defaults = _makeDefaultPerms(permModules);
+    if (saved) {
+      const computed = _mergePerms(defaults, saved);
+      setPerms(computed);
+      // Detect modules added to the registry after the last explicit Save
+      // so we can show the admin a banner prompting them to apply the new defaults.
+      const savedKeys = Object.keys(saved.byRole?.admin ?? {});
+      const defaultKeys = Object.keys(defaults.byRole?.admin ?? {});
+      const hasNew = defaultKeys.some(k => !savedKeys.includes(k));
+      setHasNewModules(hasNew);
+    } else {
+      setPerms(defaults);
     }
-  }, [schoolData]);
+  }, [schoolData, permModules]);
 
   /* Save mutation */
   const { mutate: savePerms, isPending: saving } = useMutation({
@@ -3601,10 +3606,22 @@ function RolesTab() {
             }`}
           >
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-            {saving ? 'Saving…' : dirty ? 'Save Permissions' : 'Sync Permissions'}
+            {saving ? 'Saving…' : dirty ? 'Save Permissions' : 'Save Permissions'}
           </button>
         )}
       </div>
+
+      {/* New-module banner — shown when modules were added to the registry after last Save */}
+      {hasNewModules && isAdmin && (
+        <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm">
+          <span className="text-amber-800 font-medium">New modules detected — review permissions below and click Save to apply.</span>
+          <button
+            onClick={() => { setDirty(true); savePerms(); }}
+            disabled={saving}
+            className="shrink-0 text-xs font-semibold px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition disabled:opacity-50"
+          >Apply & Save</button>
+        </div>
+      )}
 
       <div className="flex gap-4 items-start">
 
@@ -4738,39 +4755,19 @@ function NotificationsTab() {
    Changes saved to school.moduleConfig and apply to all users
    ══════════════════════════════════════════════════════════════ */
 
-const MODULES_MASTER = [
-  { key: 'students',   label: 'Students',            section: 'Academic'   },
-  { key: 'teachers',   label: 'Teachers',            section: 'Academic'   },
-  { key: 'classes',    label: 'Classes',             section: 'Academic'   },
-  { key: 'timetable',  label: 'Timetable',           section: 'Academic'   },
-  { key: 'attendance', label: 'Attendance',          section: 'Academic'   },
-  { key: 'exams',      label: 'Exams & Assessment',  section: 'Academic'   },
-  { key: 'subjects',   label: 'Subjects',            section: 'Academic'   },
-  { key: 'lessons',    label: 'Lessons',             section: 'Academic'   },
-  { key: 'admissions', label: 'Admissions',          section: 'Operations' },
-  { key: 'behaviour',  label: 'Behaviour',           section: 'Operations' },
-  { key: 'finance',    label: 'Finance',             section: 'Operations' },
-  { key: 'messages',   label: 'Messages',            section: 'Operations' },
-  { key: 'events',     label: 'Events',              section: 'Operations' },
-  { key: 'hr',         label: 'HR & Staff',          section: 'Operations' },
-  { key: 'library',    label: 'Library',             section: 'Operations' },
-  { key: 'transport',  label: 'Transport',           section: 'Operations' },
-  { key: 'hostel',     label: 'Hostel',              section: 'Operations' },
-  { key: 'reports',    label: 'Reports & Analytics', section: 'Insights'   },
-];
-
 const SEC_BADGE = {
   Academic:   'bg-blue-50 text-blue-700 border-blue-200',
   Operations: 'bg-violet-50 text-violet-700 border-violet-200',
   Insights:   'bg-emerald-50 text-emerald-700 border-emerald-200',
 };
 
-function initModuleList(savedConfig) {
+function initModuleList(registry, savedConfig) {
   const cfgMap = Object.fromEntries(
     (savedConfig ?? []).map((m, i) => [m.key, { enabled: m.enabled ?? true, order: m.order ?? i }])
   );
-  return MODULES_MASTER
-    .map((m, i) => ({ ...m, enabled: cfgMap[m.key]?.enabled ?? true, order: cfgMap[m.key]?.order ?? i }))
+  return registry
+    .map((m, i) => ({ key: m.key, label: m.label, section: m.section,
+      enabled: cfgMap[m.key]?.enabled ?? true, order: cfgMap[m.key]?.order ?? i }))
     .sort((a, b) => a.order - b.order);
 }
 
@@ -4778,8 +4775,21 @@ function ModulesTab() {
   const patchSchool = useAuthStore(s => s.patchSchool);
   const savedConfig = useAuthStore(s => s.session?.school?.moduleConfig);
 
-  const [modules, setModules] = useState(() => initModuleList(savedConfig));
+  /* Live module registry from server — single source of truth */
+  const { data: registryData } = useQuery({
+    queryKey: ['settings','modules'],
+    queryFn:  () => settingsApi.modules(),
+    staleTime: Infinity,
+  });
+  const registry = registryData?.data ?? [];
+
+  const [modules, setModules] = useState([]);
   const [toast,   setToast]   = useState(null);
+
+  /* Re-seed list whenever registry or saved config changes */
+  useEffect(() => {
+    if (registry.length) setModules(initModuleList(registry, savedConfig));
+  }, [registry, savedConfig]);
   const showT = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500); };
 
   const { mutate: save, isPending: saving } = useMutation({

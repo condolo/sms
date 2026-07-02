@@ -41,6 +41,14 @@ const ROLE_DEFAULTS = {
     report_cards: R,    exams:        R,    lessons:      RCUD,
   },
 
+  principal: {
+    students:     RCUD, teachers:     RCU,  classes:      RCUD,
+    attendance:   RCUD, grades:       RCUD, assessment:   RCUD,
+    exams:        RCUD, behaviour:    RCUD, timetable:    RCUD,
+    messages:     RCUD, events:       RCUD, report_cards: RCU,
+    admissions:   RCU,  lessons:      RCUD,
+  },
+
   deputy_principal: {
     students:     RCUD, teachers:     RCU,  classes:      RCUD,
     attendance:   RCUD, grades:       RCUD, assessment:   RCUD,

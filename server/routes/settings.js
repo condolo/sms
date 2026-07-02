@@ -232,10 +232,11 @@ router.put('/school', authMiddleware, rbac('settings', 'update'), async (req, re
     }
 
     // Sync role_permissions for all roles whose V/E/D matrix was just saved.
-    // superadmin and admin bypass RBAC entirely so we never overwrite their permissions.
+    // Only superadmin is exempt — admin now goes through RBAC and should have its
+    // permissions written so superadmin can restrict it from Settings.
     if (update.modulePermissions?.byRole) {
       try {
-        const SKIP_ROLES = new Set(['superadmin', 'admin']);
+        const SKIP_ROLES = new Set(['superadmin']);
         const syncOps = [];
         for (const [roleKey, rolePerms] of Object.entries(update.modulePermissions.byRole)) {
           if (SKIP_ROLES.has(roleKey)) continue;
@@ -259,6 +260,31 @@ router.put('/school', authMiddleware, rbac('settings', 'update'), async (req, re
         }
       } catch (syncErr) {
         console.warn('[settings] role perm sync (non-fatal):', syncErr.message);
+      }
+    }
+
+    // Sync per-user permission overrides — written to role_permissions with userId instead of roleKey.
+    // RBAC middleware checks these first and merges on top of role permissions.
+    if (update.modulePermissions?.byUser) {
+      try {
+        const userOps = [];
+        for (const [userId, userPerms] of Object.entries(update.modulePermissions.byUser)) {
+          const derived = _deriveApiPerms(userPerms);
+          const permFields = Object.fromEntries(
+            Object.entries(derived).map(([mod, actions]) => [`permissions.${mod}`, actions])
+          );
+          userOps.push(_model('role_permissions').updateOne(
+            { schoolId: req.jwtUser.schoolId, userId },
+            { $set: { ...permFields, updatedAt: new Date().toISOString() } },
+            { upsert: true }
+          ));
+        }
+        if (userOps.length) {
+          await Promise.all(userOps);
+          invalidatePermCache(req.jwtUser.schoolId);
+        }
+      } catch (userSyncErr) {
+        console.warn('[settings] per-user perm sync (non-fatal):', userSyncErr.message);
       }
     }
 
@@ -385,7 +411,7 @@ router.post('/users/invite', authMiddleware, rbac('settings', 'create'), async (
 
     /* All canonical system roles (+ legacy deputy alias) that can be invited */
     const BUILTIN_INVITE_ROLES = new Set([
-      'admin', 'deputy_principal', 'deputy', 'section_head', 'teacher',
+      'admin', 'principal', 'deputy_principal', 'deputy', 'section_head', 'teacher',
       'exams_officer', 'timetabler', 'admissions_officer',
       'finance', 'hr', 'discipline_committee', 'parent', 'student',
     ]);
