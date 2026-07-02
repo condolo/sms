@@ -155,15 +155,13 @@ async function login() {
       passwordEl.value = '';   // clear sensitive field
       _showApp();
     } else if (res.status === 429) {
-      err.textContent   = 'Too many failed attempts. Please wait 15 minutes before trying again.';
-      err.style.display = 'block';
+      _showErr(err, 'Too many failed attempts. Please wait 15 minutes before trying again.');
     } else {
-      err.textContent   = data?.error?.message || data?.error || 'Invalid credentials.';
-      err.style.display = 'block';
+      var msg = (data && data.error && data.error.message) || (data && typeof data.error === 'string' && data.error) || 'Invalid credentials.';
+      _showErr(err, msg);
     }
-  } catch {
-    err.textContent   = 'Could not reach the server. Please check your connection.';
-    err.style.display = 'block';
+  } catch (e) {
+    _showErr(err, 'Could not reach the server. Please check your connection. (' + (e && e.message ? e.message : 'network error') + ')');
   }
 
   btn.disabled  = false;
@@ -197,8 +195,14 @@ function _updateClock() {
 }
 
 async function logout() {
-  try { await fetch('/api/platform/auth/logout', { method: 'POST', credentials: 'include' }); } catch {}
+  try { await fetch('/api/platform/auth/logout', { method: 'POST', credentials: 'include' }); } catch (e) {}
   _showLogin();
+}
+
+function _showErr(el, msg) {
+  el.textContent   = msg;
+  el.style.display = 'block';
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function togglePasswordVis(btn) {
@@ -1718,7 +1722,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     const res = await fetch('/api/platform/stats', { credentials: 'include' });
     if (res.ok) { _showApp(); }
     // 401/403 → stay on login screen (default)
-  } catch {
+  } catch (e) {
     // Server unreachable — stay on login screen
   }
 });
