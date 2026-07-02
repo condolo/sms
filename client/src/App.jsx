@@ -14,6 +14,16 @@ import Plans         from '@/pages/Plans.jsx';
 import FAQ           from '@/pages/FAQ.jsx';
 import PrivacyPolicy from '@/pages/legal/PrivacyPolicy.jsx';
 import TermsOfService from '@/pages/legal/TermsOfService.jsx';
+import WhyPage        from '@/pages/website/WhyPage.jsx';
+import AboutPage      from '@/pages/website/AboutPage.jsx';
+import PlatformPage   from '@/pages/website/PlatformPage.jsx';
+import PricingPage    from '@/pages/website/PricingPage.jsx';
+import SecurityPage   from '@/pages/website/SecurityPage.jsx';
+import DifferencePage from '@/pages/website/DifferencePage.jsx';
+import WhyChoosePage  from '@/pages/website/WhyChoosePage.jsx';
+import RoadmapPage    from '@/pages/website/RoadmapPage.jsx';
+import ImplementationPage from '@/pages/website/ImplementationPage.jsx';
+import SolutionPage   from '@/pages/website/SolutionPage.jsx';
 
 // ─── Lazy pages ───────────────────────────────────────────────────────────────
 const Dashboard      = lazy(() => import('@/pages/Dashboard.jsx'));
@@ -124,7 +134,7 @@ export const router = createBrowserRouter([
   // Contact — public, no auth required
   { path: '/contact', element: <Contact /> },
 
-  // Plans — public pricing comparison
+  // Plans — public pricing comparison (legacy route, keep for backlinks)
   { path: '/plans', element: <Plans /> },
 
   // FAQ — public
@@ -133,6 +143,18 @@ export const router = createBrowserRouter([
   // Legal — public, no auth required
   { path: '/privacy', element: <PrivacyPolicy /> },
   { path: '/terms',   element: <TermsOfService /> },
+
+  // ── Website v2 — public marketing pages ──────────────────────────────────
+  { path: '/why',            element: <WhyPage /> },
+  { path: '/about',          element: <AboutPage /> },
+  { path: '/platform',       element: <PlatformPage /> },
+  { path: '/pricing',        element: <PricingPage /> },
+  { path: '/security',       element: <SecurityPage /> },
+  { path: '/difference',     element: <DifferencePage /> },
+  { path: '/why-choose',     element: <WhyChoosePage /> },
+  { path: '/roadmap',        element: <RoadmapPage /> },
+  { path: '/implementation', element: <ImplementationPage /> },
+  { path: '/solutions/:role', element: <SolutionPage /> },
 
   // Login — branded when on school subdomain, generic otherwise
   { path: '/login', element: <Login /> },

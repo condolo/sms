@@ -1,86 +1,135 @@
 /**
- * Msingi — Landing Page
- * 7-section flow: Hero → Conviction → Ecosystem → Showcase → Plans → Trust → CTA + Footer
+ * Msingi — Homepage (Website v2)
+ * Narrative-first: purpose → morning hook → platform → solutions → pricing → trust → CTA
  */
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ArrowRight, CheckCircle, CheckCircle2, ChevronRight,
-  Globe, Layers, Lock, Menu, MessageCircle, ShieldCheck, X,
+  ArrowRight, CheckCircle2, ChevronRight,
+  Globe, Layers, Lock, ShieldCheck, Menu, X,
 } from 'lucide-react';
-import { schoolPortalUrl, storeSchoolSlug } from '@/utils/schoolDetect.js';
-import { ECOSYSTEM_NODES, CONVICTION_PAIRS, SHOWCASE_TAB_DATA, WA_URL } from '@/data/landingData';
-import { CMS_DEFAULTS } from '@/data/landingData';
-import { LANDING_FAQ_TEASER } from '@/data/faqData';
+import { ECOSYSTEM_NODES, WA_URL } from '@/data/landingData';
 import { EASE, fadeUp, stagger, VP } from '@/utils/animations';
+import { schoolPortalUrl, storeSchoolSlug } from '@/utils/schoolDetect.js';
 import { getLandingCMS, getPlatformSettings } from '@/utils/landingCMS';
-import GradientHeroBG        from '@/components/landing/GradientHeroBG';
-import DashboardMockup       from '@/components/landing/DashboardMockup';
-import ReportGovernanceMockup from '@/components/landing/ReportGovernanceMockup';
-import FeeRegisterMockup     from '@/components/landing/FeeRegisterMockup';
-import ModulePreviewPanel    from '@/components/landing/ModulePreviewPanel';
-import PlansSection          from '@/components/landing/PlansSection';
-import FloatingActions       from '@/components/landing/FloatingActions';
-import SocialLinks           from '@/components/landing/SocialLinks';
+import { CMS_DEFAULTS } from '@/data/landingData';
+import PublicNav    from '@/components/landing/PublicNav';
+import PublicFooter from '@/components/landing/PublicFooter';
+import DashboardMockup from '@/components/landing/DashboardMockup';
+import PlansSection    from '@/components/landing/PlansSection';
+import FloatingActions from '@/components/landing/FloatingActions';
+import ModulePreviewPanel from '@/components/landing/ModulePreviewPanel';
 
-// Wire showcase tab data to their mockup components
-const SHOWCASE_TABS = SHOWCASE_TAB_DATA.map((tab, i) => ({
-  ...tab,
-  Mockup: [DashboardMockup, ReportGovernanceMockup, FeeRegisterMockup][i],
-}));
-
-const NAV_LINKS = [
-  { label: 'Platform',       href: '#ecosystem' },
-  { label: 'Solutions',      href: '#showcase'  },
-  { label: 'Plans',          href: '#plans'     },
-  { label: 'Infrastructure', href: '#trust'     },
+const MORNING_MOMENTS = [
+  { time: '6:45 AM', action: 'The term register is already updated.' },
+  { time: '7:02 AM', action: 'Attendance marks begin arriving from classrooms.' },
+  { time: '7:18 AM', action: 'Three fee payments reconcile automatically from M-Pesa.' },
+  { time: '7:31 AM', action: 'The CBC report card drafts are ready for teacher review.' },
+  { time: '7:45 AM', action: 'The principal opens one dashboard. The school is visible.' },
 ];
 
 const TRUST_SIGNALS = [
-  '99.9% uptime SLA', 'Automated daily backups', 'Full audit log on all actions',
-  'Tenant data isolation', 'RBAC at API layer', 'Immutable academic records', 'M-Pesa STK Push & Paybill',
+  '99.9% uptime SLA',
+  'Automated daily backups',
+  'Full audit trail on all actions',
+  'Tenant data isolation',
+  'RBAC at API layer',
+  'Immutable academic records',
+  'M-Pesa STK Push & Paybill',
+  'African data residency',
 ];
 
-const PILLAR_CARDS = [
-  { Icon: Layers,      title: 'Tenant isolation',       desc: "Every school's data is architecturally isolated at the database layer. No cross-tenant reads, no data bleed." },
-  { Icon: ShieldCheck, title: 'Role-based governance',  desc: 'Granular, per-module permissions enforced server-side. Teachers see their classes. Parents see their children.' },
-  { Icon: Lock,        title: 'Permanent audit trail',  desc: 'Every login, grade entry, payment, and approval is permanently logged with attribution, timestamp, and context.' },
-  { Icon: Globe,       title: 'Multi-curriculum native', desc: 'CBC, Cambridge, IB, British, American, and fully custom frameworks — built into the academic engine from day one.' },
+const INFRA_PILLARS = [
+  {
+    Icon: Layers,
+    title: 'Tenant isolation',
+    desc: "Every school's data is architecturally isolated at the database layer. No cross-tenant reads. No data bleed.",
+  },
+  {
+    Icon: ShieldCheck,
+    title: 'Role-based governance',
+    desc: 'Granular, per-module permissions enforced server-side. Teachers see their classes. Parents see their children.',
+  },
+  {
+    Icon: Lock,
+    title: 'Permanent audit trail',
+    desc: 'Every login, grade entry, payment, and approval is permanently logged with attribution, timestamp, and context.',
+  },
+  {
+    Icon: Globe,
+    title: 'Multi-curriculum native',
+    desc: 'CBC, CAIE, IB, British, American, and custom frameworks — built into the academic engine from day one.',
+  },
 ];
 
-const FOOTER_PLATFORM = ['Students', 'Attendance', 'Grades & Exams', 'Finance', 'Timetable', 'Reports', 'E-Learning', 'Analytics'];
-const FOOTER_SOLUTIONS = ['School Directors', 'Teaching Staff', 'Parents', 'Students'];
-const FOOTER_COMPANY   = [
-  { label: 'Plans & Pricing', href: '#plans'   },
-  { label: 'Infrastructure',  href: '#trust'   },
-  { label: 'FAQ',             href: '/faq'     },
-  { label: 'Contact Us',      href: '/contact' },
+const STAKEHOLDERS = [
+  { role: 'Principals',      href: '/solutions/principal',  line: 'One dashboard. Every department. Real time.' },
+  { role: 'Teachers',        href: '/solutions/teacher',    line: 'Mark attendance in 90 seconds. Grade faster.' },
+  { role: 'Finance officers',href: '/solutions/finance',    line: 'M-Pesa reconciliation in minutes, not mornings.' },
+  { role: 'Parents',         href: '/solutions/parent',     line: 'Know how your child is doing before report day.' },
+  { role: 'Admissions',      href: '/solutions/admissions', line: 'From enquiry to enrolled in one workflow.' },
 ];
+
+const SOFTWARE_SCHEMA = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'Msingi',
+  applicationCategory: 'EducationalApplication',
+  operatingSystem: 'All',
+  url: 'https://msingi.io',
+  description: 'School management platform for African schools — attendance, grades, M-Pesa fees, admissions, report cards, and parent portals in one connected system.',
+  offers: [
+    { '@type': 'Offer', name: 'Base',           price: '150.00', priceCurrency: 'KES', description: 'KES 150 per student per term — full admin & teacher access' },
+    { '@type': 'Offer', name: 'Student Portal', price: '200.00', priceCurrency: 'KES', description: 'KES 200 per student per term — adds student portal' },
+    { '@type': 'Offer', name: 'Family Portal',  price: '250.00', priceCurrency: 'KES', description: 'KES 250 per student per term — adds parent portal' },
+  ],
+  audience: { '@type': 'EducationalAudience', educationalRole: 'administrator' },
+  provider: {
+    '@type': 'Organization',
+    name: 'Msingi',
+    url: 'https://msingi.io',
+    logo: 'https://msingi.io/favicon.svg',
+    email: 'hello@msingi.io',
+    areaServed: ['KE', 'UG', 'TZ', 'RW'],
+    founder: { '@type': 'Person', name: 'Collins Ndolo' },
+  },
+};
+
+const ORG_SCHEMA = {
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  name: 'Msingi',
+  url: 'https://msingi.io',
+  logo: 'https://msingi.io/favicon.svg',
+  email: 'hello@msingi.io',
+  description: 'School management platform built for East African schools — CBC, CAIE, IB, M-Pesa, attendance, grades, admissions, and parent portals in one institution-grade system.',
+  areaServed: ['Kenya', 'Uganda', 'Tanzania', 'Rwanda'],
+  founder: { '@type': 'Person', name: 'Collins Ndolo', jobTitle: 'Founder' },
+  contactPoint: {
+    '@type': 'ContactPoint',
+    contactType: 'sales',
+    email: 'hello@msingi.io',
+    availableLanguage: ['English', 'Swahili'],
+  },
+};
 
 export default function Landing() {
-  const [schoolInput,  setSchoolInput]  = useState('');
-  const [finding,      setFinding]      = useState(false);
-  const [findError,    setFindError]    = useState('');
-  const [socialLinks,  setSocialLinks]  = useState({});
-  const [navScrolled,    setNavScrolled]    = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [showcaseTab,    setShowcaseTab]    = useState(0);
   const [cms,          setCms]          = useState(CMS_DEFAULTS);
   const [activeModule, setActiveModule] = useState(null);
+  const [activeMoment, setActiveMoment] = useState(0);
 
   const closePanel = useCallback(() => setActiveModule(null), []);
 
   useEffect(() => {
     getLandingCMS().then(c => setCms(c));
-    getPlatformSettings().then(s => setSocialLinks(s.socialLinks || {}));
-    function onScroll() {
-      setNavScrolled(window.scrollY > 20);
-      if (window.scrollY > 10) setMobileMenuOpen(false);
-    }
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Cycle through morning moments
+  useEffect(() => {
+    const id = setInterval(() => setActiveMoment(i => (i + 1) % MORNING_MOMENTS.length), 2800);
+    return () => clearInterval(id);
   }, []);
 
   function goToSchool(slug) {
@@ -88,86 +137,23 @@ export default function Landing() {
     window.open(schoolPortalUrl(slug), '_blank', 'noopener,noreferrer');
   }
 
-  async function handleFindSchool(e) {
-    e.preventDefault();
-    const slug = schoolInput.trim().toLowerCase().replace(/\s+/g, '-');
-    if (!slug) return;
-    setFinding(true); setFindError('');
-    try {
-      const res = await fetch(`/api/public/school-info?slug=${slug}`);
-      if (!res.ok) { setFindError(`No school found for "${slug}".`); setFinding(false); return; }
-      goToSchool(slug);
-    } catch {
-      setFindError('Could not connect. Please try again.');
-      setFinding(false);
-    }
-  }
-
-  const ActiveMockup = SHOWCASE_TABS[showcaseTab].Mockup;
-
-  const SOFTWARE_SCHEMA = {
-    '@context': 'https://schema.org',
-    '@type': 'SoftwareApplication',
-    name: 'Msingi',
-    applicationCategory: 'EducationalApplication',
-    operatingSystem: 'All',
-    url: 'https://msingi.io',
-    description: 'School management ERP for African schools — attendance, grades, M-Pesa fees, admissions, report cards, and parent portals in one platform.',
-    offers: [
-      { '@type': 'Offer', name: 'Base', price: '150.00', priceCurrency: 'KES', description: 'KES 150 per student per term — admin & teacher portals' },
-      { '@type': 'Offer', name: 'Student', price: '200.00', priceCurrency: 'KES', description: 'KES 200 per student per term — adds student portal' },
-      { '@type': 'Offer', name: 'Family', price: '250.00', priceCurrency: 'KES', description: 'KES 250 per student per term — adds parent portal' },
-    ],
-    audience: { '@type': 'EducationalAudience', educationalRole: 'administrator' },
-    provider: {
-      '@type': 'Organization',
-      name: 'Msingi',
-      url: 'https://msingi.io',
-      logo: 'https://msingi.io/favicon.svg',
-      email: 'hello@msingi.io',
-      areaServed: ['KE', 'UG', 'TZ', 'RW'],
-      sameAs: [],
-    },
-  };
-
-  const ORG_SCHEMA = {
-    '@context': 'https://schema.org',
-    '@type': 'Organization',
-    name: 'Msingi',
-    url: 'https://msingi.io',
-    logo: 'https://msingi.io/favicon.svg',
-    email: 'hello@msingi.io',
-    description: 'Msingi builds school management software for East African schools — combining attendance, finance, academics, and parent communication in one institution-grade platform.',
-    areaServed: ['Kenya', 'Uganda', 'Tanzania', 'Rwanda'],
-    contactPoint: {
-      '@type': 'ContactPoint',
-      contactType: 'sales',
-      email: 'hello@msingi.io',
-      availableLanguage: ['English', 'Swahili'],
-    },
-  };
-
   return (
     <div className="min-h-screen bg-white text-slate-900 antialiased">
-
       <Helmet>
-        <title>Msingi | School Management System for Modern African Schools</title>
-        <meta name="description" content="Msingi helps schools manage academics, finance, admissions, attendance, communication and reporting from one secure platform. Built for modern schools in Africa." />
-        <meta name="keywords" content="school management system Africa, school ERP Africa, school management software Kenya, CBC school software, M-Pesa school fees, student portal Africa, school attendance software, school admissions software" />
+        <title>Msingi | School Management Platform Built for Africa</title>
+        <meta name="description" content="The school management platform built for Africa — by someone who taught here. CBC, CAIE, IB, M-Pesa, attendance, grades, report cards, and parent portals in one connected system." />
+        <meta name="keywords" content="school management system Africa, school ERP Kenya, CBC school software, M-Pesa school fees, school management Kenya, school ERP Uganda Tanzania, student portal Africa, school admissions software" />
         <link rel="canonical" href="https://msingi.io/" />
-        {/* OpenGraph */}
-        <meta property="og:type" content="website" />
-        <meta property="og:url" content="https://msingi.io/" />
-        <meta property="og:title" content="Msingi | School Management System for Modern African Schools" />
-        <meta property="og:description" content="Msingi helps schools manage academics, finance, admissions, attendance, communication and reporting from one secure platform. Built for modern schools in Africa." />
-        <meta property="og:image" content="https://msingi.io/images/og-landing.png" />
-        <meta property="og:site_name" content="Msingi" />
-        {/* Twitter */}
-        <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="Msingi | School Management System for Modern African Schools" />
-        <meta name="twitter:description" content="Msingi helps schools manage academics, finance, admissions, attendance, communication and reporting from one secure platform. Built for modern schools in Africa." />
-        <meta name="twitter:image" content="https://msingi.io/images/og-landing.png" />
-        {/* JSON-LD */}
+        <meta property="og:type"        content="website" />
+        <meta property="og:url"         content="https://msingi.io/" />
+        <meta property="og:title"       content="Msingi | School Management Platform Built for Africa" />
+        <meta property="og:description" content="The school management platform built for Africa — by someone who taught here. CBC, CAIE, IB, M-Pesa, attendance, grades, and parent portals in one system." />
+        <meta property="og:image"       content="https://msingi.io/images/og-landing.png" />
+        <meta property="og:site_name"   content="Msingi" />
+        <meta name="twitter:card"        content="summary_large_image" />
+        <meta name="twitter:title"       content="Msingi | School Management Platform Built for Africa" />
+        <meta name="twitter:description" content="CBC, CAIE, IB, M-Pesa, attendance, grades, report cards, and parent portals in one connected school platform." />
+        <meta name="twitter:image"       content="https://msingi.io/images/og-landing.png" />
         <script type="application/ld+json">{JSON.stringify(SOFTWARE_SCHEMA)}</script>
         <script type="application/ld+json">{JSON.stringify(ORG_SCHEMA)}</script>
       </Helmet>
@@ -176,532 +162,403 @@ export default function Landing() {
         <ModulePreviewPanel node={activeModule} onClose={closePanel} onNavigate={setActiveModule} />
       )}
 
-      {/* ── Animated top stripe ─────────────────── */}
-      <motion.div
-        className="fixed top-0 inset-x-0 z-[60] h-[3px]"
-        style={{ background: 'linear-gradient(90deg,#4f46e5,#7c3aed,#0ea5e9,#4f46e5)', backgroundSize: '200% 100%' }}
-        animate={{ backgroundPosition: ['0% 0%', '-200% 0%'] }}
-        transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}
-      />
-
-      {/* ── Navbar ──────────────────────────────── */}
-      <motion.nav
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: EASE }}
-        className={`fixed top-[3px] inset-x-0 z-50 transition-all duration-300 ${
-          navScrolled || mobileMenuOpen
-            ? 'bg-white/95 backdrop-blur-md shadow-sm border-b border-indigo-100/60'
-            : 'bg-transparent'
-        }`}
-      >
-        {/* ── Main bar ── */}
-        <div className="max-w-7xl mx-auto px-6 lg:px-8 h-16 flex items-center justify-between">
-          <Link to="/" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className="flex items-center gap-2.5 group">
-            <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center text-white text-[10px] font-bold shadow-sm group-hover:shadow-indigo-500/40 group-hover:scale-105 transition-all">M</div>
-            <span className="text-sm font-bold text-slate-900 tracking-tight">Msingi</span>
-          </Link>
-
-          {/* Desktop links */}
-          <div className="hidden md:flex items-center gap-1">
-            {NAV_LINKS.map(({ label, href }) => (
-              <a key={label} href={href}
-                className="relative px-3.5 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-indigo-600 hover:bg-indigo-50/60 transition-all">
-                {label}
-              </a>
-            ))}
-            <div className="ml-2 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-100">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
-              <span className="text-[10px] font-semibold text-emerald-700 hidden lg:block">Platform Live</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {/* Hamburger — mobile only */}
-            <button
-              onClick={() => setMobileMenuOpen(o => !o)}
-              aria-label="Toggle menu"
-              aria-expanded={mobileMenuOpen}
-              className="md:hidden w-9 h-9 rounded-lg flex items-center justify-center text-slate-600 hover:bg-slate-100 transition-colors">
-              {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
-            </button>
-            <Link to="/login" className="hidden md:block px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors">
-              Login
-            </Link>
-            <Link to="/contact"
-              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 transition-all shadow-md shadow-indigo-600/25 hover:shadow-indigo-500/40 hover:-translate-y-px">
-              Book Demo
-            </Link>
-          </div>
-        </div>
-
-        {/* ── Mobile dropdown ── */}
-        <AnimatePresence>
-          {mobileMenuOpen && (
-            <motion.div
-              key="mobile-menu"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.22, ease: EASE }}
-              className="md:hidden overflow-hidden border-t border-slate-100">
-              <div className="px-5 py-4 flex flex-col gap-1 bg-white/98">
-                {NAV_LINKS.map(({ label, href }) => (
-                  <a key={label} href={href}
-                    onClick={() => setMobileMenuOpen(false)}
-                    className="px-3 py-3 rounded-xl text-sm font-medium text-slate-700 hover:text-indigo-600 hover:bg-indigo-50/60 transition-all">
-                    {label}
-                  </a>
-                ))}
-                <div className="h-px bg-slate-100 my-2" />
-                <Link to="/login"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="px-3 py-3 rounded-xl text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-all">
-                  Login
-                </Link>
-                <Link to="/contact"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white text-center hover:bg-indigo-500 transition-all shadow-md shadow-indigo-600/25">
-                  Book Demo
-                </Link>
-                <div className="flex items-center gap-1.5 px-3 pt-2 pb-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-[10px] font-semibold text-emerald-700">Platform Live</span>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </motion.nav>
+      <PublicNav />
 
       <main>
-      <div className="h-[67px]" />
 
-      {/* ══ 1. HERO ═════════════════════════════════ */}
-      <section className="relative max-w-7xl mx-auto px-6 lg:px-8 pt-20 pb-16 overflow-hidden">
-        <div className="absolute inset-0 -z-10 pointer-events-none" style={{ height: '110%' }}>
-          <GradientHeroBG />
-          <div className="absolute inset-0 bg-gradient-to-b from-white/40 via-white/20 to-white/95" />
-        </div>
-
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: EASE }}
-          className="flex justify-center mb-8">
-          <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 backdrop-blur-sm px-3.5 py-1.5 text-xs font-medium text-slate-600 shadow-sm">
-            <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-            {cms.hero.tagline}
+        {/* ══ 1. HERO ══════════════════════════════════════════════════════════ */}
+        <section className="relative pt-32 pb-20 bg-slate-950 overflow-hidden">
+          {/* Subtle background texture */}
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute top-0 left-1/4 w-96 h-96 bg-indigo-900/20 rounded-full blur-3xl" />
+            <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-indigo-950/40 rounded-full blur-3xl" />
           </div>
-        </motion.div>
 
-        <motion.div initial="hidden" animate="visible" variants={stagger(0.07)} className="text-center max-w-4xl mx-auto">
-          <motion.h1 variants={fadeUp}
-            className="text-5xl sm:text-6xl lg:text-[72px] font-bold tracking-tighter text-slate-900 leading-[1.04] mb-6">
-            {cms.hero.headline.split('\n').map((line, i, arr) => (
-              i < arr.length - 1
-                ? <span key={i}>{line}<br /></span>
-                : <span key={i} className="text-indigo-600">{line}</span>
-            ))}
-          </motion.h1>
+          <div className="relative max-w-5xl mx-auto px-6 lg:px-8 text-center">
+            <motion.div initial="hidden" animate="visible" variants={stagger(0.07)}>
 
-          <motion.p variants={fadeUp} className="text-lg sm:text-xl text-slate-500 max-w-2xl mx-auto leading-relaxed mb-3">
-            {cms.hero.subheadline}
-          </motion.p>
+              {/* Purpose-first label */}
+              <motion.div variants={fadeUp} className="flex justify-center mb-8">
+                <Link to="/why"
+                  className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 backdrop-blur-sm px-4 py-1.5 text-xs font-medium text-slate-400 hover:border-slate-500 hover:text-slate-200 transition-all">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0" />
+                  Built by an educator who taught in these schools
+                  <ChevronRight size={12} className="text-slate-600" />
+                </Link>
+              </motion.div>
 
-          <motion.p variants={fadeUp} className="text-base text-slate-500 italic mb-10">
-            {cms.hero.italic}
-          </motion.p>
+              <motion.h1 variants={fadeUp}
+                className="text-5xl sm:text-6xl lg:text-[72px] font-bold tracking-tighter text-white leading-[1.03] mb-6">
+                The school management platform
+                <br />
+                <span className="text-slate-400">built for Africa.</span>
+              </motion.h1>
 
-          <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center gap-3">
-            <Link to="/contact"
-              className="group inline-flex items-center gap-2 rounded-xl bg-slate-900 px-7 py-3.5 text-sm font-semibold text-white hover:bg-slate-700 transition-all shadow-lg shadow-slate-900/20">
-              Book a Demo
-              <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" />
-            </Link>
-            <button onClick={() => goToSchool('demo')}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white/80 backdrop-blur-sm px-7 py-3.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all">
-              Explore the Platform
-              <ChevronRight size={15} className="text-slate-400" />
-            </button>
-          </motion.div>
-        </motion.div>
+              <motion.p variants={fadeUp} className="text-lg sm:text-xl text-slate-400 max-w-2xl mx-auto leading-relaxed mb-3">
+                22 connected modules. One institutional record. CBC, CAIE, IB, M-Pesa — native.
+              </motion.p>
+              <motion.p variants={fadeUp} className="text-base text-slate-500 italic mb-10">
+                Not adapted for Africa. Built for it.
+              </motion.p>
 
-        <motion.div initial={{ opacity: 0, y: 48, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ duration: 0.9, delay: 0.25, ease: EASE }} className="mt-16 relative">
-          <div className="absolute -inset-x-4 top-0 h-40 bg-gradient-to-b from-indigo-50/40 via-transparent to-transparent -z-10" />
-          <DashboardMockup />
-        </motion.div>
-      </section>
-
-      {/* ── Trust band ──────────────────────────── */}
-      <section className="py-10 bg-white border-y border-slate-100">
-        <div className="max-w-7xl mx-auto px-6 lg:px-8 text-center">
-          <p className="text-xs font-medium uppercase tracking-widest text-slate-400 mb-6">
-            {cms.trust.tagline}
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-8 lg:gap-14">
-            {(cms.trust.schools || []).map(name => (
-              <span key={name} className="text-slate-300 font-bold text-sm tracking-widest uppercase select-none">{name}</span>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ══ 2. CONVICTION ═══════════════════════════ */}
-      <section className="py-20 sm:py-28 bg-slate-50 border-b border-slate-100">
-        <div className="max-w-5xl mx-auto px-6 lg:px-8">
-          <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-            <motion.div variants={fadeUp} className="mb-12">
-              <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">The Leadership Gap</p>
-              <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 leading-tight">
-                The information exists.<br />
-                <span className="text-slate-500">Leaders rarely see it when it matters.</span>
-              </h2>
+              <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                <Link to="/contact"
+                  className="group inline-flex items-center gap-2 rounded-xl bg-white px-7 py-3.5 text-sm font-semibold text-slate-900 hover:bg-slate-100 transition-all shadow-lg">
+                  Book a 30-min session
+                  <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" />
+                </Link>
+                <button onClick={() => goToSchool('demo')}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-700 px-7 py-3.5 text-sm font-semibold text-slate-300 hover:border-slate-500 hover:text-white transition-all">
+                  Explore the platform
+                  <ChevronRight size={15} className="text-slate-600" />
+                </button>
+              </motion.div>
             </motion.div>
 
-            <div className="space-y-3">
-              {(cms.conviction || CONVICTION_PAIRS).map(({ before, after }, i) => (
-                <motion.div key={i} variants={fadeUp}
-                  className="grid sm:grid-cols-[1fr_auto_1fr] gap-3 sm:gap-5 items-center">
-                  <div className="flex items-start gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3.5">
-                    <div className="w-4 h-4 rounded-full border-2 border-slate-300 shrink-0 mt-0.5" />
-                    <p className="text-sm text-slate-500 leading-snug">{before}</p>
-                  </div>
-                  <div className="hidden sm:flex items-center justify-center">
-                    <ArrowRight size={16} className="text-indigo-400" />
-                  </div>
-                  <div className="flex items-start gap-3 bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3.5">
-                    <div className="w-4 h-4 rounded-full bg-indigo-600 flex items-center justify-center shrink-0 mt-0.5">
-                      <CheckCircle size={9} className="text-white" />
-                    </div>
-                    <p className="text-sm font-medium text-slate-800 leading-snug">{after}</p>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
-          </motion.div>
-        </div>
-      </section>
+            {/* Dashboard mockup */}
+            <motion.div
+              initial={{ opacity: 0, y: 48, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.9, delay: 0.3, ease: EASE }}
+              className="mt-16">
+              <DashboardMockup />
+            </motion.div>
+          </div>
+        </section>
 
-      {/* ══ 3. ECOSYSTEM ════════════════════════════ */}
-      <section id="ecosystem" className="py-24 sm:py-32 bg-slate-950 overflow-hidden">
-        <div className="max-w-7xl mx-auto px-6 lg:px-8">
-          <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()} className="text-center mb-16">
-            <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-4">Platform Architecture</motion.p>
-            <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-bold tracking-tight text-white mb-4 leading-tight">
-              {cms.ecosystem.heading}
-            </motion.h2>
-            <motion.p variants={fadeUp} className="text-base text-slate-400 max-w-xl mx-auto leading-relaxed">
-              {cms.ecosystem.subheading}
-            </motion.p>
-            <motion.p variants={fadeUp} className="text-xs text-slate-600 mt-3 flex items-center justify-center gap-1.5">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-slate-600 animate-pulse" />
+        {/* ══ 2. MORNING NARRATIVE ════════════════════════════════════════════ */}
+        <section className="py-20 bg-white border-b border-slate-100">
+          <div className="max-w-5xl mx-auto px-6 lg:px-8">
+            <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
+              <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">
+                A new term begins
+              </motion.p>
+              <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 leading-tight mb-10">
+                Before the first student arrives,<br />
+                <span className="text-slate-400">Msingi has already done its work.</span>
+              </motion.h2>
+            </motion.div>
+
+            <div className="grid lg:grid-cols-2 gap-12 items-start">
+              {/* Animated timeline */}
+              <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger(0.08)}
+                className="space-y-3">
+                {MORNING_MOMENTS.map((m, i) => (
+                  <motion.div key={i} variants={fadeUp}
+                    onClick={() => setActiveMoment(i)}
+                    className={`flex gap-4 p-4 rounded-xl cursor-pointer transition-all duration-300 ${
+                      activeMoment === i
+                        ? 'bg-slate-900 border border-slate-700'
+                        : 'bg-slate-50 border border-slate-100 hover:bg-slate-100'
+                    }`}>
+                    <span className={`text-xs font-mono font-semibold flex-shrink-0 mt-0.5 ${
+                      activeMoment === i ? 'text-indigo-400' : 'text-slate-400'
+                    }`}>
+                      {m.time}
+                    </span>
+                    <p className={`text-sm leading-snug ${
+                      activeMoment === i ? 'text-white font-medium' : 'text-slate-600'
+                    }`}>
+                      {m.action}
+                    </p>
+                  </motion.div>
+                ))}
+              </motion.div>
+
+              {/* Narrative text */}
+              <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}
+                className="space-y-5 text-base text-slate-600 leading-relaxed">
+                <motion.p variants={fadeUp}>
+                  Every morning, before the first lesson begins, a school leader is already making dozens of decisions. Admissions. Attendance. Parent queries. Teacher coverage. Fee balances.
+                </motion.p>
+                <motion.p variants={fadeUp}>
+                  The information needed to make those decisions exists — in registers, in spreadsheets, in WhatsApp threads, in the finance office. It exists everywhere except where it needs to be: in one place, in real time.
+                </motion.p>
+                <motion.p variants={fadeUp}>
+                  Msingi is that one place.
+                </motion.p>
+                <motion.div variants={fadeUp}>
+                  <Link to="/why"
+                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-900 hover:text-indigo-600 transition-colors">
+                    Read why we built it <ArrowRight size={13} />
+                  </Link>
+                </motion.div>
+              </motion.div>
+            </div>
+          </div>
+        </section>
+
+        {/* ══ 3. PLATFORM — MODULE ECOSYSTEM ═════════════════════════════════ */}
+        <section id="platform" className="py-24 sm:py-32 bg-slate-950 overflow-hidden">
+          <div className="max-w-7xl mx-auto px-6 lg:px-8">
+            <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()} className="mb-16">
+              <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-4">
+                Platform
+              </motion.p>
+              <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-bold tracking-tight text-white mb-4 leading-tight">
+                22 modules. One record. No reconciliation.
+              </motion.h2>
+              <motion.p variants={fadeUp} className="text-base text-slate-400 max-w-xl leading-relaxed">
+                Data entered once flows everywhere it needs to be — without re-entry, without a spreadsheet to bridge the gap.
+              </motion.p>
+              <motion.div variants={fadeUp} className="mt-5">
+                <Link to="/platform"
+                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-400 hover:text-white transition-colors">
+                  See the full platform overview <ArrowRight size={13} />
+                </Link>
+              </motion.div>
+            </motion.div>
+
+            <div className="relative rounded-3xl border border-slate-800/60 bg-slate-900/40 p-6 sm:p-8 lg:p-10">
+              <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-indigo-950/30 via-transparent to-slate-950/30 pointer-events-none" />
+              <motion.div
+                initial="hidden" whileInView="visible" viewport={VP} variants={stagger(0.04)}
+                className="relative grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 gap-y-8 gap-x-4 sm:gap-x-6">
+                {ECOSYSTEM_NODES.map(node => (
+                  <motion.button
+                    key={node.label}
+                    variants={fadeUp}
+                    onClick={() => setActiveModule(node)}
+                    aria-label={`Preview ${node.label} module`}
+                    className={`flex flex-col items-center gap-2.5 group cursor-pointer rounded-2xl p-2 -m-2 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${
+                      activeModule?.label === node.label ? 'opacity-100' : 'hover:opacity-100 opacity-80'
+                    }`}>
+                    <div className={`w-12 h-12 rounded-2xl ${node.color} flex items-center justify-center shadow-lg group-hover:scale-110 group-hover:shadow-xl transition-all duration-200 ${
+                      activeModule?.label === node.label ? 'ring-2 ring-white/50 scale-110' : ''
+                    }`}>
+                      <node.Icon size={22} className="text-white" />
+                    </div>
+                    <p className="text-xs font-semibold text-white text-center leading-tight">{node.label}</p>
+                    <p className="text-[10px] text-slate-500 text-center leading-tight">{node.desc}</p>
+                  </motion.button>
+                ))}
+              </motion.div>
+            </div>
+
+            <motion.p initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }}
+              transition={{ delay: 0.5, duration: 0.6 }}
+              className="text-center text-slate-600 text-sm mt-8 font-medium tracking-wide">
               Click any module to explore its features
             </motion.p>
-          </motion.div>
+          </div>
+        </section>
 
-          <div className="relative rounded-3xl border border-slate-800/60 bg-slate-900/40 p-6 sm:p-8 lg:p-10">
-            <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-indigo-950/30 via-transparent to-slate-950/30 pointer-events-none" />
-            <motion.div
-              initial="hidden" whileInView="visible" viewport={VP} variants={stagger(0.045)}
-              className="relative grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 gap-y-8 gap-x-4 sm:gap-x-6">
-              {ECOSYSTEM_NODES.filter(n => (cms.ecosystem.enabledNodes || []).includes(n.label)).map((node) => (
-                <motion.button
-                  key={node.label}
-                  variants={fadeUp}
-                  onClick={() => setActiveModule(node)}
-                  aria-label={`Preview ${node.label} module`}
-                  className={`flex flex-col items-center gap-2.5 group cursor-pointer rounded-2xl p-2 -m-2 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${
-                    activeModule?.label === node.label ? 'opacity-100' : 'hover:opacity-100 opacity-85'
-                  }`}>
-                  <div className={`w-12 h-12 rounded-2xl ${node.color} flex items-center justify-center shadow-lg group-hover:scale-110 group-hover:shadow-xl transition-all duration-200 ${
-                    activeModule?.label === node.label ? 'ring-2 ring-white/50 scale-110' : ''
-                  }`}>
-                    <node.Icon size={22} className="text-white" />
-                  </div>
-                  <p className="text-xs font-semibold text-white text-center leading-tight">{node.label}</p>
-                  <p className="text-[10px] text-slate-500 text-center leading-tight">{cms.ecosystem.nodeDescs?.[node.label] ?? node.desc}</p>
-                </motion.button>
-              ))}
+        {/* ══ 4. CURRICULUM STRIP ════════════════════════════════════════════ */}
+        <section className="py-12 bg-white border-b border-slate-100">
+          <div className="max-w-5xl mx-auto px-6 lg:px-8">
+            <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}
+              className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-8">
+              <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 flex-shrink-0">
+                Curriculum support
+              </motion.p>
+              <motion.div variants={fadeUp} className="flex flex-wrap gap-3">
+                {['CBC', 'CAIE', 'IB', 'British', 'American', 'WASSCE', 'Custom'].map(c => (
+                  <span key={c} className="px-3.5 py-1.5 border border-slate-200 rounded-lg text-sm font-semibold text-slate-700 bg-slate-50">
+                    {c}
+                  </span>
+                ))}
+              </motion.div>
+              <motion.div variants={fadeUp} className="sm:ml-auto flex-shrink-0">
+                <Link to="/platform" className="text-xs font-semibold text-slate-400 hover:text-slate-700 transition-colors">
+                  No extra charge →
+                </Link>
+              </motion.div>
             </motion.div>
           </div>
+        </section>
 
-          <motion.p initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }}
-            transition={{ delay: 0.6, duration: 0.6 }}
-            className="text-center text-slate-600 text-sm mt-8 font-medium tracking-wide">
-            No data re-entry. No reconciliation. No manual handoff.
-          </motion.p>
-        </div>
-      </section>
+        {/* ══ 5. SOLUTIONS ───────────────────────────────────────────────────── */}
+        <section id="solutions" className="py-24 sm:py-28 bg-slate-50 border-b border-slate-100">
+          <div className="max-w-5xl mx-auto px-6 lg:px-8">
+            <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
+              <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">
+                Solutions
+              </motion.p>
+              <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 leading-tight mb-12">
+                Different people. Different outcomes.<br />
+                <span className="text-slate-400">One platform.</span>
+              </motion.h2>
 
-      {/* ══ 4. SHOWCASE ═════════════════════════════ */}
-      <section id="showcase" className="py-24 sm:py-32 bg-white">
-        <div className="max-w-7xl mx-auto px-6 lg:px-8">
-          <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()} className="mb-12">
-            <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Platform Intelligence</motion.p>
-            <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 leading-tight">
-              Three ways leaders see<br />
-              <span className="text-slate-500">what was invisible before.</span>
-            </motion.h2>
-          </motion.div>
-
-          <div className="flex items-center gap-2 mb-10 flex-wrap">
-            {SHOWCASE_TABS.map((tab, i) => (
-              <button key={tab.id} onClick={() => setShowcaseTab(i)}
-                className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${
-                  showcaseTab === i ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
-                }`}>
-                <tab.Icon size={14} />
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          <AnimatePresence mode="wait">
-            <motion.div key={showcaseTab}
-              initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.35, ease: EASE }}
-              className="grid lg:grid-cols-[1fr_2fr] gap-10 lg:gap-16 items-start">
-              <div className="lg:pt-4">
-                <h3 className="text-xl sm:text-2xl font-bold text-slate-900 mb-5 leading-tight">
-                  {SHOWCASE_TABS[showcaseTab].headline}
-                </h3>
-                <ul className="space-y-3.5">
-                  {SHOWCASE_TABS[showcaseTab].bullets.map((b, i) => (
-                    <li key={i} className="flex items-start gap-3">
-                      <div className="w-5 h-5 rounded-full bg-slate-900 flex items-center justify-center shrink-0 mt-0.5">
-                        <CheckCircle size={10} className="text-white" />
-                      </div>
-                      <p className="text-sm text-slate-600 leading-relaxed">{b}</p>
-                    </li>
-                  ))}
-                </ul>
-                <div className="mt-8">
-                  <Link to="/contact" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900 hover:text-indigo-600 transition-colors">
-                    See it in a demo <ArrowRight size={14} />
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {STAKEHOLDERS.map((s, i) => (
+                  <motion.div key={i} variants={fadeUp}>
+                    <Link to={s.href}
+                      className="group flex flex-col gap-2 p-5 bg-white border border-slate-200 rounded-2xl hover:border-slate-400 hover:shadow-sm transition-all">
+                      <p className="text-sm font-semibold text-slate-900 group-hover:text-indigo-600 transition-colors">
+                        {s.role}
+                      </p>
+                      <p className="text-sm text-slate-500 leading-relaxed flex-1">{s.line}</p>
+                      <span className="text-xs font-semibold text-slate-400 group-hover:text-indigo-500 transition-colors flex items-center gap-1 mt-1">
+                        See how it works <ArrowRight size={11} />
+                      </span>
+                    </Link>
+                  </motion.div>
+                ))}
+                {/* Overflow card */}
+                <motion.div variants={fadeUp}>
+                  <Link to="/platform"
+                    className="group flex flex-col gap-2 p-5 bg-slate-900 border border-slate-800 rounded-2xl hover:bg-slate-800 transition-all">
+                    <p className="text-sm font-semibold text-white">Full platform overview</p>
+                    <p className="text-sm text-slate-400 leading-relaxed flex-1">22 modules. How they connect. What they replace.</p>
+                    <span className="text-xs font-semibold text-slate-500 group-hover:text-slate-300 transition-colors flex items-center gap-1 mt-1">
+                      Explore <ArrowRight size={11} />
+                    </span>
                   </Link>
-                </div>
+                </motion.div>
               </div>
-              <div><ActiveMockup /></div>
             </motion.div>
-          </AnimatePresence>
-        </div>
-      </section>
+          </div>
+        </section>
 
-      {/* ══ 5. PLANS ════════════════════════════════ */}
-      <PlansSection />
+        {/* ══ 6. PRICING TEASER ══════════════════════════════════════════════ */}
+        <section id="pricing" className="py-20 sm:py-24 bg-white border-b border-slate-100">
+          <div className="max-w-5xl mx-auto px-6 lg:px-8">
+            <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
+              <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Pricing</motion.p>
+              <motion.h2 variants={fadeUp} className="text-3xl font-bold tracking-tight text-slate-900 mb-3">
+                Transparent pricing. No surprises.
+              </motion.h2>
+              <motion.p variants={fadeUp} className="text-slate-500 mb-10 max-w-lg">
+                Per student, per term. Published, not negotiated. No setup fee. No lock-in.
+              </motion.p>
 
-      {/* ══ 6. TRUST / INFRASTRUCTURE ═══════════════ */}
-      <section id="trust" className="py-24 sm:py-32 bg-slate-950">
-        <div className="max-w-7xl mx-auto px-6 lg:px-8">
-          <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-            <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-4">Trust Architecture</motion.p>
-            <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-bold tracking-tight text-white mb-4 leading-tight">
-              Built for institutional trust.<br />
-              <span className="text-slate-500">Not a startup experiment.</span>
-            </motion.h2>
-            <motion.p variants={fadeUp} className="text-base text-slate-400 max-w-xl mb-6 leading-relaxed">
-              School directors are asked to trust a platform with their most sensitive operational and academic data.
-              Msingi is engineered specifically for that responsibility.
-            </motion.p>
-
-            <motion.div variants={fadeUp} className="flex flex-wrap gap-2.5 mb-14">
-              {TRUST_SIGNALS.map(t => (
-                <span key={t} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-700 text-xs text-slate-400 font-medium">
-                  <CheckCircle2 size={10} className="text-emerald-500" />{t}
-                </span>
-              ))}
-            </motion.div>
-
-            <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger(0.08)}
-              className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {PILLAR_CARDS.map(({ Icon, title, desc }, i) => (
-                <motion.div key={i} variants={fadeUp}
-                  className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 hover:border-slate-700 hover:bg-slate-900 transition-all duration-300">
-                  <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center mb-4">
-                    <Icon size={15} className="text-slate-400" />
+              <motion.div variants={fadeUp} className="grid sm:grid-cols-3 gap-4 mb-8">
+                {[
+                  { name: 'Base',           price: 'KES 150', note: 'Admin + teacher access' },
+                  { name: 'Student Portal', price: 'KES 200', note: 'Adds student portal', highlight: true },
+                  { name: 'Family Portal',  price: 'KES 250', note: 'Adds parent portal' },
+                ].map(tier => (
+                  <div key={tier.name}
+                    className={`rounded-2xl border p-6 ${
+                      tier.highlight
+                        ? 'border-indigo-200 bg-indigo-50'
+                        : 'border-slate-200 bg-slate-50'
+                    }`}>
+                    <p className="text-xs font-semibold text-slate-500 mb-2">{tier.name}</p>
+                    <p className="text-3xl font-bold text-slate-900 mb-1">{tier.price}</p>
+                    <p className="text-xs text-slate-400">per student · per term</p>
+                    <p className="text-xs text-slate-500 mt-3">{tier.note}</p>
                   </div>
-                  <h3 className="text-sm font-semibold text-white mb-2">{title}</h3>
-                  <p className="text-sm text-slate-500 leading-relaxed">{desc}</p>
-                </motion.div>
-              ))}
-            </motion.div>
-          </motion.div>
-        </div>
-      </section>
+                ))}
+              </motion.div>
 
-      {/* ══ FAQ TEASER ══════════════════════════════ */}
-      <section className="py-20 sm:py-24 bg-slate-50 border-y border-slate-100">
-        <div className="max-w-3xl mx-auto px-6 lg:px-8">
-          <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-            <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Common questions</motion.p>
-            <motion.h2 variants={fadeUp} className="text-2xl font-bold tracking-tight text-slate-900 mb-10 leading-tight">
-              Questions school leaders ask before switching.
-            </motion.h2>
-            <div className="space-y-6">
-              {LANDING_FAQ_TEASER.map(({ q, a }, i) => (
-                <motion.div key={i} variants={fadeUp} className="border-b border-slate-200 pb-6 last:border-0">
-                  <p className="text-sm font-semibold text-slate-800 mb-2">{q}</p>
-                  <p className="text-sm text-slate-500 leading-relaxed">{a}</p>
-                </motion.div>
-              ))}
-            </div>
-            <motion.div variants={fadeUp} className="mt-8">
-              <Link to="/faq" className="inline-flex items-center gap-1.5 text-sm font-semibold text-indigo-600 hover:text-indigo-800 transition-colors">
-                See all questions <ArrowRight size={14} />
-              </Link>
+              <motion.div variants={fadeUp}>
+                <Link to="/pricing"
+                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-900 hover:text-indigo-600 transition-colors">
+                  See full pricing and estimate your cost <ArrowRight size={13} />
+                </Link>
+              </motion.div>
             </motion.div>
-          </motion.div>
-        </div>
-      </section>
+          </div>
+        </section>
 
-      {/* ══ 7. FINAL CTA ════════════════════════════ */}
-      <section className="py-24 sm:py-32 bg-white">
-        <div className="max-w-3xl mx-auto px-6 lg:px-8 text-center">
-          <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-            <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-6">The next step</motion.p>
-            <motion.h2 variants={fadeUp}
-              className="text-4xl sm:text-5xl lg:text-[56px] font-bold tracking-tighter text-slate-900 leading-[1.05] mb-6">
-              Give your leadership team<br />the clarity they need.
-            </motion.h2>
-            <motion.p variants={fadeUp} className="text-base text-slate-500 leading-relaxed mb-3 max-w-lg mx-auto">
-              The institutions running on Msingi don't patch workflows with WhatsApp groups and spreadsheets.
-              They have the intelligence to act quickly, govern carefully, and lead with confidence.
-            </motion.p>
-            <motion.blockquote variants={fadeUp} className="text-sm italic text-slate-500 border-l-2 border-slate-200 pl-4 text-left max-w-md mx-auto mb-10">
-              "Our principal now makes the same decisions in minutes that used to take a week of follow-up emails."
-              <cite className="block mt-1 not-italic font-medium text-slate-500 text-xs">— School Director, Greenwood Academy</cite>
-            </motion.blockquote>
-            <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center gap-3">
-              <Link to="/contact"
-                className="group inline-flex items-center gap-2 rounded-xl bg-slate-900 px-8 py-4 text-sm font-semibold text-white hover:bg-slate-700 transition-all shadow-lg shadow-slate-900/20">
-                Book a Demo <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" />
-              </Link>
-              <button onClick={() => goToSchool('demo')}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-8 py-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all">
-                Explore the Platform <ChevronRight size={15} className="text-slate-400" />
-              </button>
+        {/* ══ 7. PLANS SECTION (existing component, keep for full plan detail) */}
+        <PlansSection />
+
+        {/* ══ 8. TRUST / INFRASTRUCTURE ══════════════════════════════════════ */}
+        <section id="security" className="py-24 sm:py-32 bg-slate-950">
+          <div className="max-w-7xl mx-auto px-6 lg:px-8">
+            <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
+              <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-4">Security</motion.p>
+              <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-bold tracking-tight text-white mb-4 leading-tight">
+                Built for institutional trust.<br />
+                <span className="text-slate-500">Not a startup experiment.</span>
+              </motion.h2>
+              <motion.p variants={fadeUp} className="text-base text-slate-400 max-w-xl mb-6 leading-relaxed">
+                Schools are asked to trust a platform with their most sensitive operational and academic data. Msingi is engineered for that responsibility.
+              </motion.p>
+
+              <motion.div variants={fadeUp} className="flex flex-wrap gap-2.5 mb-12">
+                {TRUST_SIGNALS.map(t => (
+                  <span key={t} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-700 text-xs text-slate-400 font-medium">
+                    <CheckCircle2 size={10} className="text-emerald-500" />{t}
+                  </span>
+                ))}
+              </motion.div>
+
+              <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger(0.07)}
+                className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                {INFRA_PILLARS.map(({ Icon, title, desc }, i) => (
+                  <motion.div key={i} variants={fadeUp}
+                    className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 hover:border-slate-700 hover:bg-slate-900 transition-all duration-300">
+                    <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center mb-4">
+                      <Icon size={15} className="text-slate-400" />
+                    </div>
+                    <h3 className="text-sm font-semibold text-white mb-2">{title}</h3>
+                    <p className="text-sm text-slate-500 leading-relaxed">{desc}</p>
+                  </motion.div>
+                ))}
+              </motion.div>
+
+              <motion.div variants={fadeUp}>
+                <Link to="/security"
+                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-400 hover:text-white transition-colors">
+                  Visit the Trust Centre <ArrowRight size={13} />
+                </Link>
+              </motion.div>
             </motion.div>
-          </motion.div>
-        </div>
-      </section>
+          </div>
+        </section>
+
+        {/* ══ 9. HONEST SOCIAL PROOF ════════════════════════════════════════ */}
+        <section className="py-16 bg-white border-b border-slate-100">
+          <div className="max-w-4xl mx-auto px-6 lg:px-8">
+            <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}
+              className="flex flex-col sm:flex-row gap-8 items-start sm:items-center">
+              <motion.div variants={fadeUp} className="flex-1">
+                <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Where Msingi is live</p>
+                <p className="text-2xl font-bold text-slate-900 mb-2">
+                  Live at Mascit Lab Academy.
+                </p>
+                <p className="text-slate-500 text-sm leading-relaxed">
+                  We are actively onboarding partner schools for the 2026 academic year. Early schools have direct input into the product roadmap.
+                </p>
+              </motion.div>
+              <motion.div variants={fadeUp} className="flex-shrink-0">
+                <Link to="/contact"
+                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white hover:bg-indigo-600 transition-all">
+                  Enquire about early access <ArrowRight size={14} />
+                </Link>
+              </motion.div>
+            </motion.div>
+          </div>
+        </section>
+
+        {/* ══ 10. FINAL CTA ═════════════════════════════════════════════════ */}
+        <section className="py-24 sm:py-32 bg-slate-50">
+          <div className="max-w-3xl mx-auto px-6 lg:px-8 text-center">
+            <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
+              <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-6">
+                The next step
+              </motion.p>
+              <motion.h2 variants={fadeUp}
+                className="text-4xl sm:text-5xl font-bold tracking-tighter text-slate-900 leading-[1.05] mb-6">
+                A 30-minute session.<br />No commitment required.
+              </motion.h2>
+              <motion.p variants={fadeUp} className="text-base text-slate-500 leading-relaxed mb-3 max-w-lg mx-auto">
+                Our discovery sessions are led by educators, not salespeople. We ask about your school. You ask about us. No demo pressure.
+              </motion.p>
+              <motion.p variants={fadeUp} className="text-sm text-slate-400 mb-10 max-w-sm mx-auto">
+                Every school gets a named implementation contact before signing anything.
+              </motion.p>
+              <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                <Link to="/contact"
+                  className="group inline-flex items-center gap-2 rounded-xl bg-slate-900 px-8 py-4 text-sm font-semibold text-white hover:bg-indigo-600 transition-all shadow-lg">
+                  Book a discovery session
+                  <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" />
+                </Link>
+                <button onClick={() => goToSchool('demo')}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-8 py-4 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-all">
+                  Explore the platform <ChevronRight size={15} className="text-slate-400" />
+                </button>
+              </motion.div>
+            </motion.div>
+          </div>
+        </section>
 
       </main>
 
-      {/* ── Footer ──────────────────────────────── */}
-      <footer className="bg-slate-950 text-slate-400">
-        <div className="h-px bg-gradient-to-r from-transparent via-indigo-800/60 to-transparent" />
-
-        <div className="max-w-7xl mx-auto px-6 lg:px-8 pt-16 pb-10">
-          <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-10 lg:gap-6">
-
-            {/* Brand + school finder */}
-            <div className="lg:col-span-2">
-              <Link to="/" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className="inline-flex items-center gap-2.5 mb-4 group">
-                <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-sm font-bold shadow-lg shadow-indigo-900/50 group-hover:scale-105 transition-transform">M</div>
-                <span className="text-lg font-bold text-white tracking-tight">Msingi</span>
-              </Link>
-              <p className="text-sm text-slate-500 leading-relaxed mb-5 max-w-xs">
-                Decision Intelligence for Educational Leaders. Real-time visibility across admissions, academics, attendance, and finance — all in one institution-grade platform.
-              </p>
-              <div className="mb-8">
-                <SocialLinks links={socialLinks} />
-              </div>
-
-              {/* School finder */}
-              <div className="rounded-2xl bg-slate-900 border border-slate-800 p-4">
-                <p className="text-xs font-semibold text-slate-300 mb-0.5">Already have a school account?</p>
-                <p className="text-[11px] text-slate-600 mb-3">Enter your school slug to access your portal.</p>
-                <form onSubmit={handleFindSchool} className="flex gap-2">
-                  <input type="text" value={schoolInput}
-                    onChange={(e) => { setSchoolInput(e.target.value); setFindError(''); }}
-                    placeholder="e.g. greenwood-academy"
-                    className="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition" />
-                  <button type="submit" disabled={finding || !schoolInput.trim()}
-                    className="rounded-lg bg-indigo-600 hover:bg-indigo-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 transition-colors">
-                    {finding ? '…' : 'Go'}
-                  </button>
-                </form>
-                {findError && <p className="mt-2 text-xs text-red-400">{findError}</p>}
-              </div>
-            </div>
-
-            {/* Platform links */}
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-5">Platform</p>
-              <ul className="space-y-3">
-                {FOOTER_PLATFORM.map(item => (
-                  <li key={item}><a href="#ecosystem" className="text-sm text-slate-500 hover:text-white transition-colors">{item}</a></li>
-                ))}
-              </ul>
-            </div>
-
-            {/* Solutions + Company */}
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-5">Solutions</p>
-              <ul className="space-y-3 mb-8">
-                {FOOTER_SOLUTIONS.map(item => (
-                  <li key={item}><a href="#showcase" className="text-sm text-slate-500 hover:text-white transition-colors">{item}</a></li>
-                ))}
-              </ul>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-5">Company</p>
-              <ul className="space-y-3">
-                {FOOTER_COMPANY.map(({ label, href }) => (
-                  <li key={label}>
-                    {href.startsWith('/') ? (
-                      <Link to={href} className="text-sm text-slate-500 hover:text-white transition-colors">{label}</Link>
-                    ) : (
-                      <a href={href} className="text-sm text-slate-500 hover:text-white transition-colors">{label}</a>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {/* Get in touch */}
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-5">Get in touch</p>
-              <div className="space-y-3 mb-8">
-                <a href="mailto:hello@msingi.io"
-                  className="flex items-center gap-2.5 text-sm text-slate-500 hover:text-white transition-colors group">
-                  <span className="w-8 h-8 rounded-lg bg-slate-800 group-hover:bg-slate-700 flex items-center justify-center flex-shrink-0 text-[11px] font-bold transition-colors">@</span>
-                  hello@msingi.io
-                </a>
-                <a href={WA_URL} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-2.5 text-sm text-slate-500 hover:text-white transition-colors group">
-                  <span className="w-8 h-8 rounded-lg bg-slate-800 group-hover:bg-[#25D366]/20 flex items-center justify-center flex-shrink-0 transition-colors">
-                    <MessageCircle size={13} className="text-[#25D366]" />
-                  </span>
-                  WhatsApp us
-                </a>
-              </div>
-              <Link to="/contact"
-                className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-5 py-2.5 text-sm font-semibold text-white transition-all shadow-lg shadow-indigo-900/40 hover:-translate-y-px">
-                Book a Demo <ArrowRight size={13} />
-              </Link>
-              <div className="mt-6 flex items-start gap-2 p-3 rounded-xl bg-slate-900 border border-slate-800">
-                <ShieldCheck size={14} className="text-emerald-500 flex-shrink-0 mt-0.5" />
-                <p className="text-[10px] text-slate-600 leading-relaxed">
-                  HTTPS · AES-256 encrypted backups · Tenant data isolation · Full audit trail
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="border-t border-slate-800/60">
-          <div className="max-w-7xl mx-auto px-6 lg:px-8 py-5 flex flex-col sm:flex-row items-center justify-between gap-3">
-            <p className="text-xs text-slate-700">© {new Date().getFullYear()} Msingi. All rights reserved.</p>
-            <div className="flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-xs text-slate-700">All systems operational</span>
-            </div>
-            <div className="flex gap-5 text-xs text-slate-700">
-              <Link to="/privacy" className="hover:text-slate-400 transition-colors">Privacy Policy</Link>
-              <Link to="/terms"   className="hover:text-slate-400 transition-colors">Terms of Service</Link>
-            </div>
-          </div>
-        </div>
-      </footer>
-
+      <PublicFooter />
       <FloatingActions />
     </div>
   );

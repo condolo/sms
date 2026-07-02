@@ -25,7 +25,7 @@ export default function FeeRegisterMockup() {
       <div className="px-5 pt-4 pb-3 border-b border-slate-100">
         <div className="flex items-center justify-between mb-2">
           <div>
-            <p className="text-[10px] text-slate-400 uppercase tracking-widest font-medium mb-0.5">Greenwood Academy</p>
+            <p className="text-[10px] text-slate-400 uppercase tracking-widest font-medium mb-0.5">Mascit Lab Academy</p>
             <p className="text-sm font-semibold text-slate-900">Term 3 Fee Register</p>
           </div>
           <span className="px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-semibold">Live</span>

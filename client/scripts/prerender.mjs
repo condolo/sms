@@ -24,7 +24,14 @@ const DIST_DIR  = path.resolve(__dirname, '../dist');
 const PORT      = 4174; // avoid conflict with vite preview (4173)
 
 // Public routes to pre-render
-const ROUTES = ['/', '/plans', '/faq', '/contact', '/privacy', '/terms'];
+const ROUTES = [
+  '/',
+  '/why', '/about', '/platform', '/pricing', '/security',
+  '/difference', '/why-choose', '/roadmap', '/implementation',
+  '/solutions/principal', '/solutions/teacher', '/solutions/finance',
+  '/solutions/parent', '/solutions/admissions',
+  '/plans', '/faq', '/contact', '/privacy', '/terms',
+];
 
 const MIME_MAP = {
   '.html':  'text/html; charset=utf-8',
