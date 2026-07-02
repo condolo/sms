@@ -11,6 +11,7 @@ const bcrypt   = require('bcryptjs');
 const crypto   = require('crypto');
 const rateLimit = require('express-rate-limit');
 const { authMiddleware }   = require('../middleware/auth');
+const { rbac }             = require('../middleware/rbac');
 const { _model }           = require('../utils/model');
 const { revokeUserTokens } = require('../utils/token-version');
 const email                = require('../utils/email');
@@ -59,12 +60,6 @@ function _uid() {
   return Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
 }
 
-function _isAdmin(req) {
-  const r = req.jwtUser?.role || '';
-  const rs = req.jwtUser?.roles || [];
-  return r === 'superadmin' || r === 'admin' || rs.includes('superadmin') || rs.includes('admin');
-}
-
 function _isSuperAdmin(req) {
   const r = req.jwtUser?.role || '';
   const rs = req.jwtUser?.roles || [];
@@ -76,8 +71,7 @@ function _isSuperAdmin(req) {
    Creates user in MongoDB with temp password, sends welcome email.
    Returns: { user (no password), tempPassword (shown once to admin) }
 */
-router.post('/invite', authMiddleware, inviteLimiter, async (req, res) => {
-  if (!_isAdmin(req)) return res.status(403).json({ error: 'Admin access required' });
+router.post('/invite', authMiddleware, inviteLimiter, rbac('settings', 'users'), async (req, res) => {
 
   const { name, email: userEmail, role, phone, staffId, ...extra } = req.body;
   if (!name || !userEmail) return res.status(400).json({ error: 'name and email are required' });
@@ -152,8 +146,7 @@ router.post('/invite', authMiddleware, inviteLimiter, async (req, res) => {
    Processes each sequentially, skips duplicates.
    Returns: { created, skipped, errors }
 */
-router.post('/bulk-invite', authMiddleware, inviteLimiter, async (req, res) => {
-  if (!_isAdmin(req)) return res.status(403).json({ error: 'Admin access required' });
+router.post('/bulk-invite', authMiddleware, inviteLimiter, rbac('settings', 'users'), async (req, res) => {
 
   const rows = req.body;
   if (!Array.isArray(rows) || !rows.length) {
@@ -225,8 +218,7 @@ router.post('/bulk-invite', authMiddleware, inviteLimiter, async (req, res) => {
    Body: { newRole, oldRole?, note? }
    Sends role-change email to the user.
 */
-router.post('/:id/role-change', authMiddleware, async (req, res) => {
-  if (!_isAdmin(req)) return res.status(403).json({ error: 'Admin access required' });
+router.post('/:id/role-change', authMiddleware, rbac('settings', 'users'), async (req, res) => {
 
   const { newRole, oldRole, note } = req.body;
   if (!newRole) return res.status(400).json({ error: 'newRole is required' });

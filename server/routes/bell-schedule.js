@@ -23,6 +23,7 @@ const crypto  = require('crypto');
 const { z }   = require('zod');
 const { authMiddleware } = require('../middleware/auth');
 const { planGate }       = require('../middleware/plan');
+const { rbac }           = require('../middleware/rbac');
 const { _model }         = require('../utils/model');
 
 const router = express.Router();
@@ -59,11 +60,6 @@ const BellBodySchema = z.object({
 });
 
 /* ── Helpers ──────────────────────────────────────────────────── */
-function _isAdmin(req) {
-  const r  = req.jwtUser?.role  || '';
-  const rs = req.jwtUser?.roles || [];
-  return r === 'superadmin' || r === 'admin' || rs.includes('superadmin') || rs.includes('admin');
-}
 function _uid() {
   return 'bs_' + Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
 }
@@ -135,12 +131,8 @@ router.get('/', authMiddleware, planGate('bell_schedule'), async (req, res) => {
 });
 
 /* PUT /api/bell-schedule ─ save or create section schedule ───── */
-router.put('/', authMiddleware, planGate('bell_schedule'), async (req, res) => {
+router.put('/', authMiddleware, planGate('bell_schedule'), rbac('timetable', 'bell_schedule'), async (req, res) => {
   try {
-    if (!_isAdmin(req)) {
-      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Admin access required to update bell schedule.' } });
-    }
-
     const parsed = BellBodySchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({
@@ -175,11 +167,8 @@ router.put('/', authMiddleware, planGate('bell_schedule'), async (req, res) => {
 });
 
 /* DELETE /api/bell-schedule?section=primary — revert to default ─ */
-router.delete('/', authMiddleware, planGate('bell_schedule'), async (req, res) => {
+router.delete('/', authMiddleware, planGate('bell_schedule'), rbac('timetable', 'bell_schedule'), async (req, res) => {
   try {
-    if (!_isAdmin(req)) {
-      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Admin access required.' } });
-    }
     const section = req.query.section;
     if (!section || section === 'all') {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: "Cannot delete the 'all' schedule. Use PUT to update it." } });

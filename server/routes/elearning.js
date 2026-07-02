@@ -33,6 +33,7 @@
 const express        = require('express');
 const crypto         = require('crypto');
 const { authMiddleware } = require('../middleware/auth');
+const { rbac }           = require('../middleware/rbac');
 const { _model }         = require('../utils/model');
 
 const router = express.Router();
@@ -252,7 +253,7 @@ router.get('/gc/courses', authMiddleware, async (req, res) => {
 });
 
 /* GET /api/elearning/courses — list courses linked in Msingi */
-router.get('/courses', authMiddleware, async (req, res) => {
+router.get('/courses', authMiddleware, rbac('elearning', 'view'), async (req, res) => {
   try {
     const Links = _model('elearning_course_links');
     const links = await Links.find({
@@ -266,7 +267,7 @@ router.get('/courses', authMiddleware, async (req, res) => {
 });
 
 /* POST /api/elearning/courses/link — link a GC course to a Msingi class + subject */
-router.post('/courses/link', authMiddleware, async (req, res) => {
+router.post('/courses/link', authMiddleware, rbac('elearning', 'create'), async (req, res) => {
   try {
     const { gcCourseId, gcCourseName, subjectId, classId, className, subjectName } = req.body;
     if (!gcCourseId || !subjectId || !classId) {
@@ -300,7 +301,7 @@ router.post('/courses/link', authMiddleware, async (req, res) => {
 });
 
 /* DELETE /api/elearning/courses/:id — unlink a course */
-router.delete('/courses/:id', authMiddleware, async (req, res) => {
+router.delete('/courses/:id', authMiddleware, rbac('elearning', 'delete'), async (req, res) => {
   try {
     const Links = _model('elearning_course_links');
     await Links.deleteOne({ _id: req.params.id, schoolId: req.jwtUser.schoolId });
@@ -315,7 +316,7 @@ router.delete('/courses/:id', authMiddleware, async (req, res) => {
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/elearning/courses/:id/coursework — list coursework from GC */
-router.get('/courses/:id/coursework', authMiddleware, async (req, res) => {
+router.get('/courses/:id/coursework', authMiddleware, rbac('elearning', 'view'), async (req, res) => {
   try {
     const tok = await _getToken(req.jwtUser.userId);
     if (!tok) return res.status(403).json({ error: 'Google Classroom not connected.' });
@@ -343,7 +344,7 @@ router.get('/courses/:id/coursework', authMiddleware, async (req, res) => {
      driveFileName: string,
    }
 */
-router.post('/courses/:id/coursework', authMiddleware, async (req, res) => {
+router.post('/courses/:id/coursework', authMiddleware, rbac('elearning', 'create'), async (req, res) => {
   try {
     const tok = await _getToken(req.jwtUser.userId);
     if (!tok) return res.status(403).json({ error: 'Google Classroom not connected.' });
@@ -424,7 +425,7 @@ router.post('/courses/:id/coursework', authMiddleware, async (req, res) => {
 });
 
 /* DELETE /api/elearning/courses/:id/coursework/:cwId */
-router.delete('/courses/:id/coursework/:cwId', authMiddleware, async (req, res) => {
+router.delete('/courses/:id/coursework/:cwId', authMiddleware, rbac('elearning', 'delete'), async (req, res) => {
   try {
     const tok = await _getToken(req.jwtUser.userId);
     if (!tok) return res.status(403).json({ error: 'Google Classroom not connected.' });
@@ -452,7 +453,7 @@ router.delete('/courses/:id/coursework/:cwId', authMiddleware, async (req, res) 
    Body: multipart — field "file" (the raw file)
    Returns: { fileId, fileName, webViewLink }
 */
-router.post('/drive/upload', authMiddleware, async (req, res) => {
+router.post('/drive/upload', authMiddleware, rbac('elearning', 'create'), async (req, res) => {
   try {
     const tok = await _getToken(req.jwtUser.userId);
     if (!tok) return res.status(403).json({ error: 'Google Classroom not connected.' });
@@ -508,7 +509,7 @@ router.post('/drive/upload', authMiddleware, async (req, res) => {
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/elearning/courses/:id/coursework/:cwId/submissions */
-router.get('/courses/:id/coursework/:cwId/submissions', authMiddleware, async (req, res) => {
+router.get('/courses/:id/coursework/:cwId/submissions', authMiddleware, rbac('elearning', 'view'), async (req, res) => {
   try {
     const tok = await _getToken(req.jwtUser.userId);
     if (!tok) return res.status(403).json({ error: 'Google Classroom not connected.' });
@@ -614,7 +615,7 @@ router.post('/gc-webhook', async (req, res) => {
 });
 
 /* GET /api/elearning/gc/students/:courseId — list students in a GC course */
-router.get('/gc/students/:courseId', authMiddleware, async (req, res) => {
+router.get('/gc/students/:courseId', authMiddleware, rbac('elearning', 'view'), async (req, res) => {
   try {
     const tok = await _getToken(req.jwtUser.userId);
     if (!tok) return res.status(403).json({ error: 'Google Classroom not connected.' });
@@ -780,7 +781,7 @@ router.get('/zoom/status', authMiddleware, (req, res) => {
 /* ── List ALL sessions for this teacher (across all courses) ─────
    GET /api/elearning/sessions?platform=meet|zoom  (optional filter)
 */
-router.get('/sessions', authMiddleware, async (req, res) => {
+router.get('/sessions', authMiddleware, rbac('elearning', 'view'), async (req, res) => {
   try {
     const Sessions = _model('elearning_sessions');
     const query    = { schoolId: req.jwtUser.schoolId, teacherId: req.jwtUser.userId };
@@ -818,7 +819,7 @@ router.get('/sessions', authMiddleware, async (req, res) => {
 */
 const { planGate } = require('../middleware/plan');
 
-router.post('/sessions', authMiddleware, planGate('elearning'), async (req, res) => {
+router.post('/sessions', authMiddleware, planGate('elearning'), rbac('elearning', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { platform = 'zoom', title, scheduledAt, duration = 60, agenda = '', audience } = req.body;
@@ -910,7 +911,7 @@ router.post('/sessions', authMiddleware, planGate('elearning'), async (req, res)
 });
 
 /* ── List sessions for a course ──────────────────────────────── */
-router.get('/courses/:id/sessions', authMiddleware, async (req, res) => {
+router.get('/courses/:id/sessions', authMiddleware, rbac('elearning', 'view'), async (req, res) => {
   try {
     const Sessions = _model('elearning_sessions');
     const sessions = await Sessions.find({
@@ -927,7 +928,7 @@ router.get('/courses/:id/sessions', authMiddleware, async (req, res) => {
 /* POST /api/elearning/courses/:id/sessions
    Body: { platform: 'zoom'|'meet', title, scheduledAt, duration, agenda }
 */
-router.post('/courses/:id/sessions', authMiddleware, async (req, res) => {
+router.post('/courses/:id/sessions', authMiddleware, rbac('elearning', 'create'), async (req, res) => {
   try {
     const { platform = 'zoom', title, scheduledAt, duration = 60, agenda = '' } = req.body;
     if (!title || !scheduledAt) {
@@ -1018,7 +1019,7 @@ router.post('/courses/:id/sessions', authMiddleware, async (req, res) => {
 });
 
 /* ── Get single session ──────────────────────────────────────── */
-router.get('/sessions/:sessionId', authMiddleware, async (req, res) => {
+router.get('/sessions/:sessionId', authMiddleware, rbac('elearning', 'view'), async (req, res) => {
   try {
     const Sessions = _model('elearning_sessions');
     const session  = await Sessions.findOne({
@@ -1033,7 +1034,7 @@ router.get('/sessions/:sessionId', authMiddleware, async (req, res) => {
 });
 
 /* ── Update session (reschedule) ─────────────────────────────── */
-router.patch('/sessions/:sessionId', authMiddleware, async (req, res) => {
+router.patch('/sessions/:sessionId', authMiddleware, rbac('elearning', 'edit'), async (req, res) => {
   try {
     const Sessions = _model('elearning_sessions');
     const session  = await Sessions.findOne({
@@ -1071,7 +1072,7 @@ router.patch('/sessions/:sessionId', authMiddleware, async (req, res) => {
 });
 
 /* ── Cancel / delete session ─────────────────────────────────── */
-router.delete('/sessions/:sessionId', authMiddleware, async (req, res) => {
+router.delete('/sessions/:sessionId', authMiddleware, rbac('elearning', 'delete'), async (req, res) => {
   try {
     const Sessions = _model('elearning_sessions');
     const session  = await Sessions.findOne({
