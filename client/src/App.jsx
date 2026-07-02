@@ -14,6 +14,10 @@ import Plans         from '@/pages/Plans.jsx';
 import FAQ           from '@/pages/FAQ.jsx';
 import PrivacyPolicy from '@/pages/legal/PrivacyPolicy.jsx';
 import TermsOfService from '@/pages/legal/TermsOfService.jsx';
+import DataProcessingAgreement from '@/pages/legal/DataProcessingAgreement.jsx';
+import ServiceLevelAgreement from '@/pages/legal/ServiceLevelAgreement.jsx';
+import AccessibilityStatement from '@/pages/legal/AccessibilityStatement.jsx';
+import ResponsibleAI from '@/pages/legal/ResponsibleAI.jsx';
 import WhyPage        from '@/pages/website/WhyPage.jsx';
 import AboutPage      from '@/pages/website/AboutPage.jsx';
 import PlatformPage   from '@/pages/website/PlatformPage.jsx';
@@ -141,8 +145,12 @@ export const router = createBrowserRouter([
   { path: '/faq', element: <FAQ /> },
 
   // Legal — public, no auth required
-  { path: '/privacy', element: <PrivacyPolicy /> },
-  { path: '/terms',   element: <TermsOfService /> },
+  { path: '/privacy',               element: <PrivacyPolicy /> },
+  { path: '/terms',                 element: <TermsOfService /> },
+  { path: '/legal/dpa',             element: <DataProcessingAgreement /> },
+  { path: '/legal/sla',             element: <ServiceLevelAgreement /> },
+  { path: '/legal/accessibility',   element: <AccessibilityStatement /> },
+  { path: '/legal/responsible-ai',  element: <ResponsibleAI /> },
 
   // ── Website v2 — public marketing pages ──────────────────────────────────
   { path: '/why',            element: <WhyPage /> },

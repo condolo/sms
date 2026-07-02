@@ -21,11 +21,40 @@ const FLOW = [
   'M-Pesa payment reconciled',
 ];
 
+const MODULES = {
+  // Academic
+  'Students':        'Complete student profiles — personal details, admission number, class, stream, photo, and full academic history in one record.',
+  'Attendance':      'Daily and per-period register marking on any device in under 90 seconds. Absent students trigger parent notifications automatically.',
+  'Grades & Exams':  'Assessment entry against curriculum criteria (CBC, CAIE, IB, WASSCE, custom). Totals, averages, and grades calculated automatically.',
+  'Report Cards':    'Auto-generated from grade data. Five-stage approval chain: Teacher → HOD → Principal → verified → Parent Portal. SHA-256 signed with QR verification.',
+  'Timetable':       'Drag-and-drop timetable builder with clash detection. Links directly to lesson records and teacher workload views.',
+  'Subjects':        'Curriculum mapping per class, stream, and year group. Subjects link to assessments, grading schemes, and syllabus coverage.',
+  'Lessons':         'Lesson planning linked to schemes of work and CBC/CAIE objectives. Syllabus coverage tracked live — no notebook required.',
+  'E-Learning':      'Lessons, notes, videos, and assignments published online. Student progress tracked per module. Feeds directly into Grades.',
+  'Academic Records':'Immutable term-by-term academic archive. Every grade, every report, every approval — permanent and attributable.',
+  'Growth Profile':  'Digital student portfolio tracking co-curricular achievements, competencies, and development across the full school journey.',
+  'Admissions':      'Kanban pipeline from enquiry to enrolled. Offer tracking, waiting list management, and automatic student record creation on enrolment.',
+  // Operations
+  'Finance':         'M-Pesa Paybill reconciliation built in. Fee structures, bursary management, arrears tracking, and term statements in one module.',
+  'HR':              'Staff records, leave requests, payroll preparation, and appraisal tracking. Leave balances updated automatically on approval.',
+  'Library':         'Book catalogue, member management, borrowing records, and overdue alerts. No separate system needed.',
+  'Hostel':          'Boarder records, room allocation, and term boarding fee management integrated with the Finance module.',
+  'Transport':       'Route management, vehicle allocation, and student transport records. Parents can see route status through the portal.',
+  'Events':          'School calendar with audience targeting — notices to parents, staff, or the whole school. Links to Messages and Finance for fee deadlines.',
+  'Messages':        'Structured institutional messaging between staff. Replaces informal WhatsApp for school communications with a permanent audit trail.',
+  // Insights
+  'Analytics':       'Live director dashboard: attendance rates, fee collection velocity, academic performance trends, and staff metrics — no spreadsheet required.',
+  'Reports':         'Governed report publishing with full attribution. Every report generation logged. Finance, academic, and HR reports in one place.',
+  // Portals
+  'Student Portal':  'Student access to timetable, grades, assignments, fee balance, and school notices. Available on any device.',
+  'Parent Portal':   'Live attendance, grades, fee statements, M-Pesa receipts, and school announcements — updated as data is entered, not at end of term.',
+};
+
 const GROUPS = [
-  { label: 'Academic',    nodes: ['Students', 'Attendance', 'Grades & Exams', 'Report Cards', 'Timetable', 'Subjects', 'Lessons', 'E-Learning', 'Academic Records', 'Growth Profile', 'Admissions'] },
-  { label: 'Operations',  nodes: ['Finance', 'HR', 'Library', 'Hostel', 'Transport', 'Events', 'Messages'] },
-  { label: 'Insights',    nodes: ['Analytics', 'Reports'] },
-  { label: 'Portals',     nodes: ['Student Portal', 'Parent Portal'] },
+  { label: 'Academic',   nodes: ['Students', 'Attendance', 'Grades & Exams', 'Report Cards', 'Timetable', 'Subjects', 'Lessons', 'E-Learning', 'Academic Records', 'Growth Profile', 'Admissions'] },
+  { label: 'Operations', nodes: ['Finance', 'HR', 'Library', 'Hostel', 'Transport', 'Events', 'Messages'] },
+  { label: 'Insights',   nodes: ['Analytics', 'Reports'] },
+  { label: 'Portals',    nodes: ['Student Portal', 'Parent Portal'] },
 ];
 
 export default function PlatformPage() {
@@ -73,22 +102,24 @@ export default function PlatformPage() {
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">22 modules</motion.p>
               <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-12">Organised across four functional areas.</motion.h2>
-              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="grid sm:grid-cols-2 gap-8">
                 {GROUPS.map(group => (
-                  <motion.div key={group.label} variants={fadeUp}
-                    className="border border-slate-200 rounded-xl p-5">
-                    <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4">{group.label}</p>
-                    <ul className="space-y-2">
+                  <motion.div key={group.label} variants={fadeUp}>
+                    <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-5">{group.label}</p>
+                    <ul className="space-y-4">
                       {group.nodes.map(n => {
                         const node = ECOSYSTEM_NODES.find(x => x.label === n);
                         return (
-                          <li key={n} className="flex items-center gap-2.5 text-sm text-slate-700">
+                          <li key={n} className="flex items-start gap-3">
                             {node && (
-                              <span className={`w-5 h-5 rounded-md ${node.color} flex items-center justify-center flex-shrink-0`}>
-                                <node.Icon size={10} className="text-white" />
+                              <span className={`w-6 h-6 rounded-md ${node.color} flex items-center justify-center flex-shrink-0 mt-0.5`}>
+                                <node.Icon size={11} className="text-white" />
                               </span>
                             )}
-                            {n}
+                            <div>
+                              <p className="text-sm font-semibold text-slate-900">{n}</p>
+                              {MODULES[n] && <p className="text-xs text-slate-500 leading-relaxed mt-0.5">{MODULES[n]}</p>}
+                            </div>
                           </li>
                         );
                       })}
