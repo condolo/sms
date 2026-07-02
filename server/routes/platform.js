@@ -2,11 +2,13 @@
    Platform Admin Routes — YOUR private dashboard API
    Protected by X-Platform-Key header (not school JWT)
    ============================================================ */
-const express  = require('express');
-const crypto   = require('crypto');
-const mongoose = require('mongoose');
-const bcrypt   = require('bcryptjs');
-const { platformAdmin } = require('../middleware/auth');
+const express    = require('express');
+const crypto     = require('crypto');
+const mongoose   = require('mongoose');
+const bcrypt     = require('bcryptjs');
+const jwt        = require('jsonwebtoken');
+const rateLimit  = require('express-rate-limit');
+const { platformSession } = require('../middleware/auth');
 const AuditService      = require('../services/audit');
 const { sign } = require('../utils/jwt');
 const email    = require('../utils/email');
@@ -51,8 +53,74 @@ router.get('/landing-content', async (req, res) => {
   }
 });
 
-// All routes below require the platform admin key
-router.use(platformAdmin);
+/* ── Platform admin authentication ──────────────────────────
+   Login / logout are public (no platformSession required).
+   All routes BELOW router.use(platformSession) are protected.
+   ─────────────────────────────────────────────────────────── */
+
+// 5 failed attempts per IP per 15 min — only counts failures
+const _loginLimiter = rateLimit({
+  windowMs:               15 * 60 * 1000,
+  max:                    5,
+  standardHeaders:        true,
+  legacyHeaders:          false,
+  skipSuccessfulRequests: true,
+  message: { success: false, error: { code: 'RATE_LIMIT', message: 'Too many failed login attempts. Please wait 15 minutes before trying again.' } },
+});
+
+/* POST /api/platform/auth/login */
+router.post('/auth/login', _loginLimiter, async (req, res) => {
+  const { username, password } = req.body || {};
+
+  const expectedUser = process.env.PLATFORM_ADMIN_USER      || '';
+  const passHash     = process.env.PLATFORM_ADMIN_PASS_HASH || '';
+  const secret       = process.env.PLATFORM_JWT_SECRET      || '';
+
+  if (!expectedUser || !passHash || !secret) {
+    console.error('[platform/login] Missing env vars: PLATFORM_ADMIN_USER, PLATFORM_ADMIN_PASS_HASH, PLATFORM_JWT_SECRET');
+    return res.status(503).json({ success: false, error: { code: 'MISCONFIGURED', message: 'Platform admin credentials are not configured on this server.' } });
+  }
+
+  if (!username || !password) {
+    return res.status(401).json({ success: false, error: { code: 'INVALID_CREDENTIALS', message: 'Username and password are required.' } });
+  }
+
+  // Constant-time username comparison (pad to same length to avoid length oracle)
+  const uBuf  = Buffer.from(username.trim());
+  const eBuf  = Buffer.from(expectedUser);
+  const len   = Math.max(uBuf.length, eBuf.length, 1);
+  const uPad  = Buffer.concat([uBuf, Buffer.alloc(len - uBuf.length)]);
+  const ePad  = Buffer.concat([eBuf, Buffer.alloc(len - eBuf.length)]);
+  const userMatch = crypto.timingSafeEqual(uPad, ePad) && uBuf.length === eBuf.length;
+
+  // bcrypt.compare is inherently constant-time
+  const passMatch = await bcrypt.compare(password, passHash);
+
+  if (!userMatch || !passMatch) {
+    AuditService.log({ action: 'platform.login.failed', actor: { userId: 'platform', role: 'platform', email: null }, schoolId: null, target: { type: 'platform', id: null, label: 'platform-admin' }, details: { attemptedUser: (username || '').slice(0, 32) }, req });
+    return res.status(401).json({ success: false, error: { code: 'INVALID_CREDENTIALS', message: 'Invalid username or password.' } });
+  }
+
+  const token = jwt.sign({ sub: 'platform-admin' }, secret, { expiresIn: '2h' });
+  res.cookie('platform_token', token, {
+    httpOnly: true,
+    secure:   process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge:   2 * 60 * 60 * 1000,
+  });
+
+  AuditService.log({ action: 'platform.login.success', actor: { userId: 'platform', role: 'platform', email: null }, schoolId: null, target: { type: 'platform', id: null, label: 'platform-admin' }, details: {}, req });
+  return res.json({ success: true });
+});
+
+/* POST /api/platform/auth/logout */
+router.post('/auth/logout', (req, res) => {
+  res.clearCookie('platform_token', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
+  return res.json({ success: true });
+});
+
+// All routes below require a valid platform session cookie
+router.use(platformSession);
 
 function _model(col) {
   const name = col.replace(/_([a-z])/g, (_, c) => c.toUpperCase())

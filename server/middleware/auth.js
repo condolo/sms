@@ -1,4 +1,5 @@
 const crypto               = require('crypto');
+const jwt                  = require('jsonwebtoken');
 const { verify }           = require('../utils/jwt');
 const { getTokenVersion }  = require('../utils/token-version');
 const { _model }           = require('../utils/model');
@@ -62,7 +63,7 @@ async function authMiddleware(req, res, next) {
   }
 }
 
-/* Platform admin check — uses PLATFORM_ADMIN_KEY header (timing-safe) */
+/* Platform admin check — legacy X-Platform-Key header (kept for backward compat, not used on new routes) */
 function platformAdmin(req, res, next) {
   const key    = req.headers['x-platform-key'] || '';
   const secret = process.env.PLATFORM_ADMIN_KEY || '';
@@ -75,4 +76,27 @@ function platformAdmin(req, res, next) {
   next();
 }
 
-module.exports = { authMiddleware, platformAdmin };
+/* Platform session middleware — verifies the HttpOnly platform_token cookie.
+   Issued by POST /api/platform/auth/login; separate from school JWT. */
+function platformSession(req, res, next) {
+  const token  = req.cookies?.platform_token;
+  const secret = process.env.PLATFORM_JWT_SECRET;
+
+  if (!secret) {
+    console.error('[platform] PLATFORM_JWT_SECRET env var is not set');
+    return res.status(503).json({ success: false, error: { code: 'MISCONFIGURED', message: 'Platform admin is not configured on this server.' } });
+  }
+  if (!token) {
+    return res.status(401).json({ success: false, error: { code: 'PLATFORM_UNAUTHENTICATED', message: 'Platform session required.' } });
+  }
+  try {
+    const payload = jwt.verify(token, secret);
+    if (payload.sub !== 'platform-admin') throw new Error('invalid subject');
+    req.platformAdmin = true;
+    next();
+  } catch {
+    return res.status(401).json({ success: false, error: { code: 'PLATFORM_SESSION_EXPIRED', message: 'Platform session expired. Please sign in again.' } });
+  }
+}
+
+module.exports = { authMiddleware, platformAdmin, platformSession };
