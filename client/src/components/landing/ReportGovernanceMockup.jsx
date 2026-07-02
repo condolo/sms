@@ -33,7 +33,7 @@ export default function ReportGovernanceMockup() {
 
       <div className="px-5 pt-4 pb-3 border-b border-slate-100 flex items-start justify-between">
         <div>
-          <p className="text-[10px] text-slate-400 uppercase tracking-widest font-medium mb-0.5">Greenwood Academy · Year 8</p>
+          <p className="text-[10px] text-slate-400 uppercase tracking-widest font-medium mb-0.5">Mascit Lab Academy · Year 8</p>
           <p className="text-sm font-semibold text-slate-900">Report Cards · Term 2 · 2025–26</p>
           <p className="text-[10px] text-slate-400 mt-0.5">28 reports · 9 subjects · Initiated 14 May · Target publish: 23 May</p>
         </div>

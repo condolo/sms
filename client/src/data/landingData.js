@@ -736,8 +736,8 @@ export const CMS_DEFAULTS = {
     bullets:  t.bullets,
   })),
   trust: {
-    schools: ['Greenwood Academy', 'Sunrise School', 'TestSync Academy', 'MLA', 'Westbrook College', 'Horizon Institute'],
-    tagline: 'Built for institutions that require operational clarity and academic accountability',
+    schools: ['Mascit Lab Academy'],
+    tagline: 'Now live · actively onboarding partner schools for 2026',
   },
   footer: {
     tagline: 'Decision Intelligence for Educational Leaders.',
