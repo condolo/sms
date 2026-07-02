@@ -3250,6 +3250,8 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='timetable' && ['rooms','bell_schedule','assignments'].includes(s)) return V;
       if (m==='behaviour' && ['delete'].includes(s)) return N;
       if (m==='growth_profile' && ['delete_records','aspirations'].includes(s)) return N;
+      if (m==='library')                        return V;   // view catalogue, not manage
+      if (['transport','hostel'].includes(m))   return N;   // operational, not academic scope
       if (s==='import') return N;
       return E;
     },
@@ -3265,6 +3267,10 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
         if (s==='verify') return E;
         return E;
       }
+      if (m==='lessons')                        { if (s==='delete') return N; return E; }   // teachers write plans, not delete others'
+      if (m==='elearning')                      { if (s==='delete') return N; return E; }   // teachers upload content, not delete
+      if (m==='library')                        return V;   // view catalogue only
+      if (['transport','hostel'].includes(m))   return N;   // not their domain
       if (s==='import') return N;
       if (m==='classes'   && ['section','delete'].includes(s)) return N;
       if (m==='timetable' && ['rooms','bell_schedule','assignments'].includes(s)) return V;
@@ -3290,6 +3296,7 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='subjects')  return V;
       if (m==='classes')   return V;
       if (m==='students')  return V;
+      if (m==='lessons')   return V;   // see lesson plans to schedule accurately
       return N;
     },
 
@@ -3301,6 +3308,7 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='classes')    return V;
       if (m==='events')     return V;
       if (m==='messages')   return s==='delete' ? N : E;
+      if (m==='hostel')     return V;   // see room availability when processing boarding students
       return N;
     },
 
@@ -3310,6 +3318,7 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='finance')  return T;
       if (m==='students') return V;
       if (m==='reports')  return V;
+      if (m==='hostel')   return V;   // hostel assignments drive boarding fee invoicing
       return N;
     },
 
@@ -3335,14 +3344,16 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
     },
 
     parent: (m, s) => {
-      if (!['students','finance','attendance','grades','behaviour','events','messages','growth_profile'].includes(m)) return N;
+      if (!['students','finance','attendance','grades','behaviour','events','messages','growth_profile',
+            'elearning','transport','hostel'].includes(m)) return N;
       if (m==='finance' && ['fee_structure','mpesa','import','create_invoice','void_invoice','record_payment'].includes(s)) return N;
       if (m==='growth_profile' && s !== 'view') return N;
       return V;
     },
 
     student: (m, s) => {
-      if (['students','timetable','grades','events'].includes(m)) return V;
+      if (['students','timetable','grades','events',
+           'elearning','library','transport','hostel'].includes(m)) return V;
       if (m==='growth_profile') {
         if (s==='view') return V;
         if (s==='aspirations') return E;
