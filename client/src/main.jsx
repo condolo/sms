@@ -7,6 +7,7 @@ import { HelmetProvider } from 'react-helmet-async';
 
 import { router } from './App.jsx';
 import ErrorBoundary from '@/components/guards/ErrorBoundary.jsx';
+import FloatingWidgets from '@/components/FloatingWidgets.jsx';
 
 // Fire a GA4 page_view on every client-side navigation.
 // The first call is skipped because gtag('config') in index.html already
@@ -62,6 +63,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       <ErrorBoundary>
         <QueryClientProvider client={queryClient}>
           <RouterProvider router={router} />
+          <FloatingWidgets />
           {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
         </QueryClientProvider>
       </ErrorBoundary>
