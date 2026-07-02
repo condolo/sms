@@ -3223,7 +3223,7 @@ const PERM_MODULES = [
   ]},
 ];
 
-function _makeDefaultPerms() {
+function _makeDefaultPerms(modules = PERM_MODULES) {
   const T = { v:true,  e:true,  d:true  };
   const V = { v:true,  e:false, d:false };
   const E = { v:true,  e:true,  d:false };
@@ -3356,7 +3356,7 @@ function _makeDefaultPerms() {
   [...SYSTEM_ROLES, 'deputy'].forEach(role => {
     if (!DEFS[role]) return;   // skip any unknown key
     perms.byRole[role] = {};
-    PERM_MODULES.forEach(mod => mod.subs.forEach(sub => {
+    modules.forEach(mod => mod.subs.forEach(sub => {
       perms.byRole[role][`${mod.key}__${sub.key}`] = DEFS[role](mod.key, sub.key);
     }));
   });
@@ -3412,6 +3412,14 @@ function RolesTab() {
     queryFn:  () => settingsApi.school.get(),
     staleTime: 30_000,
   });
+
+  /* Load module registry from server — single source of truth */
+  const { data: modulesData } = useQuery({
+    queryKey: ['settings','modules'],
+    queryFn:  () => settingsApi.modules(),
+    staleTime: Infinity,  // registry only changes on deploy
+  });
+  const permModules = modulesData?.data ?? PERM_MODULES;
 
   /* Load custom roles */
   const { data: customRolesData } = useQuery({
@@ -3480,11 +3488,11 @@ function RolesTab() {
   });
   const users = usersData?.data ?? [];
 
-  /* Initialise permission state once school data arrives */
+  /* Initialise permission state once school data + module registry arrive */
   useEffect(() => {
     if (!schoolData) return;
     const saved = schoolData.data?.modulePermissions;
-    const computed = saved ? _mergePerms(_makeDefaultPerms(), saved) : _makeDefaultPerms();
+    const computed = saved ? _mergePerms(_makeDefaultPerms(permModules), saved) : _makeDefaultPerms(permModules);
     setPerms(computed);
     // First-load background sync: write computed defaults to role_permissions so that the
     // RBAC middleware matches exactly what this UI shows — even before the admin clicks Save.
@@ -3726,7 +3734,7 @@ function RolesTab() {
               </div>
 
               {/* Module accordion rows */}
-              {PERM_MODULES.map(mod => {
+              {permModules.map(mod => {
                 const isOpen = expanded[mod.key] !== false; // default open
                 return (
                   <div key={mod.key} className="bg-white border border-slate-200 rounded-xl overflow-hidden">

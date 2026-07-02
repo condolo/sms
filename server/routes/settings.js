@@ -23,6 +23,7 @@ const { encrypt, smtpEncryptReady } = require('../utils/smtpEncrypt');
 const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY } = require('../utils/notif-settings');
 const { rbac, invalidatePermCache } = require('../middleware/rbac');
 const { peekAdmissionCounter, setAdmissionCounter } = require('../utils/counters');
+const { MODULE_REGISTRY, MODULE_KEYS } = require('../config/moduleRegistry');
 
 const router = express.Router();
 
@@ -57,13 +58,8 @@ function _genTempPassword() {
 /* ── Derive backend API permissions from the V/E/D matrix ─── */
 // Used when a custom role's module-permissions are saved to also update role_permissions.
 function _deriveApiPerms(byRoleCell) {
-  const MODS = [
-    'students','teachers','classes','attendance','finance',
-    'behaviour','grades','admissions','messages','events',
-    'hr','reports','timetable','subjects','growth_profile','settings','analytics',
-  ];
   const perms = {};
-  for (const mod of MODS) {
+  for (const mod of MODULE_KEYS) {
     const actions = new Set();
     for (const [key, cell] of Object.entries(byRoleCell ?? {})) {
       if (!key.startsWith(`${mod}__`)) continue;
@@ -90,6 +86,13 @@ const SCHOOL_UPDATABLE = [
   'admissionConfig',     // object — prefix, padding, yearInPrefix for admission numbers
   'staffResponsibilities', // [{value,label}] — configurable HR responsibility options per school
 ];
+
+/* ── GET /api/settings/modules — return the full module registry ─
+   Returns the same structure as MODULE_REGISTRY (key, label, section, subs).
+   Used by the R&P UI so the module list is always in sync with the server. */
+router.get('/modules', authMiddleware, (req, res) => {
+  return res.json({ success: true, data: MODULE_REGISTRY });
+});
 
 /* ══════════════════════════════════════════════════════════════
    ACCOUNT — current user

@@ -20,18 +20,15 @@
  * and returns in < 1ms. You can leave it wired in forever.
  */
 'use strict';
-const mongoose = require('mongoose');
+const mongoose    = require('mongoose');
+const { MODULE_KEYS } = require('../config/moduleRegistry');
 
 /* ── Permission definitions ──────────────────────────────────── */
 const R    = ['read'];
 const RCU  = ['read', 'create', 'update'];
 const RCUD = ['read', 'create', 'update', 'delete'];
 
-const ALL_MODULES = [
-  'students', 'teachers', 'classes', 'attendance', 'finance', 'behaviour',
-  'exams', 'grades', 'admissions', 'timetable', 'messages', 'settings',
-  'assessment', 'report_cards', 'lessons',
-];
+const ALL_MODULES = MODULE_KEYS;
 
 const ROLE_DEFAULTS = {
   superadmin: Object.fromEntries(ALL_MODULES.map(m => [m, RCUD])),

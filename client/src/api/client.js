@@ -405,8 +405,9 @@ export const importExport = {
 };
 
 export const settings = {
-  get:    ()       => _get('/settings'),
-  update: (data)   => _put('/settings', data),
+  get:     ()       => _get('/settings'),
+  update:  (data)   => _put('/settings', data),
+  modules: ()       => _get('/settings/modules'),
   school: {
     get:          ()     => _get('/settings/school'),
     update:       (data) => _put('/settings/school', data),

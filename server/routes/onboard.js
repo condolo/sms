@@ -8,6 +8,7 @@ const mongoose   = require('mongoose');
 const bcrypt     = require('bcryptjs');
 const crypto     = require('crypto');
 const rateLimit  = require('express-rate-limit');
+const { MODULE_KEYS } = require('../config/moduleRegistry');
 const { sign }   = require('../utils/jwt');
 const email      = require('../utils/email');
 
@@ -448,11 +449,7 @@ async function _seedBaseData(schoolId, selectedSections = ['primary','secondary'
                  'discipline_committee','parent','student'];
 
   const FULL_ACTIONS = ['read', 'create', 'update', 'delete'];
-  const ALL_MODULES  = [
-    'students', 'teachers', 'classes', 'attendance', 'finance', 'behaviour',
-    'exams', 'grades', 'admissions', 'timetable', 'messages', 'settings',
-    'assessment', 'report_cards', 'lessons', 'hr', 'analytics',
-  ];
+  const ALL_MODULES  = MODULE_KEYS;
 
   const permDocs = roles.map(roleKey => ({
     id: `rp_${roleKey}_${schoolId}`,

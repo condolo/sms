@@ -37,7 +37,7 @@ const CONFIGURABLE_MODULES = [
   { key: 'classes',    to: '/classes',    Icon: BookOpen,        label: 'Classes',             section: 'Academic'   },
   { key: 'timetable',  to: '/timetable',  Icon: Calendar,       label: 'Timetable',           section: 'Academic'   },
   { key: 'attendance', to: '/attendance', Icon: CheckSquare,     label: 'Attendance',          section: 'Academic'   },
-  { key: 'exams',      to: '/exams',      Icon: FileText,        label: 'Exams',               section: 'Academic'   },
+  { key: 'grades',     to: '/exams',      Icon: FileText,        label: 'Exams',               section: 'Academic'   },
   { key: 'subjects',   to: '/subjects',   Icon: Library,         label: 'Subjects',            section: 'Academic'   },
   { key: 'admissions', to: '/admissions', Icon: ClipboardList,  label: 'Admissions',          section: 'Operations' },
   { key: 'behaviour',  to: '/behaviour',  Icon: Scale,          label: 'Behaviour',           section: 'Operations' },
