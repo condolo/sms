@@ -134,7 +134,10 @@ router.get('/:id/students', authMiddleware, PLAN, rbac('students', 'read'), asyn
     if (!cls) return E.notFound(res, 'Class not found');
 
     const Students = _model('students');
-    const filter   = { schoolId, classId: req.params.id };
+    // Match students stored under ANY identifier form of this class —
+    // UUID `id` or Mongo `_id` string (pre-migration / imported records)
+    const classIdForms = [...new Set([cls.id, String(cls._id), req.params.id].filter(Boolean))];
+    const filter   = { schoolId, classId: { $in: classIdForms } };
     if (req.query.status) filter.status = req.query.status;
 
     const [docs, total] = await Promise.all([

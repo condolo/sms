@@ -124,7 +124,10 @@ router.get('/:id/students', authMiddleware, PLAN, rbac('students', 'read'), asyn
     if (!stream) return E.notFound(res, 'Stream not found');
 
     const Students = _model('students');
-    const filter   = { schoolId, streamId: req.params.id };
+    // Match students stored under ANY identifier form of this stream —
+    // UUID `id` or Mongo `_id` string (pre-migration / imported records)
+    const streamIdForms = [...new Set([stream.id, String(stream._id), req.params.id].filter(Boolean))];
+    const filter   = { schoolId, streamId: { $in: streamIdForms } };
     if (req.query.status) filter.status = req.query.status;
 
     const [docs, total] = await Promise.all([

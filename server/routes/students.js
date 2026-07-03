@@ -68,6 +68,26 @@ async function _getAdmConfig(schoolId) {
   return doc?.admissionConfig || {};
 }
 
+/* ── Identifier-form resolver ───────────────────────────────────
+   Student docs reference classes/streams by whichever identifier was
+   current when they were written: UUID `id` (post-migration) or Mongo
+   `_id` string (pre-migration / imports). A filter that compares one
+   form misses docs written under the other. Given one form, return
+   EVERY form the entity is known by so filters can $in-match all. */
+async function _entityIdForms(col, schoolId, value) {
+  const mongoose = require('mongoose');
+  const or = [{ id: value }];
+  if (mongoose.Types.ObjectId.isValid(value) && String(value).length === 24) {
+    or.push({ _id: value });
+  }
+  let doc = null;
+  try { doc = await _model(col).findOne({ schoolId, $or: or }).select('id').lean(); } catch (_) {}
+  const forms = new Set([value]);
+  if (doc?.id)  forms.add(doc.id);
+  if (doc?._id) forms.add(String(doc._id));
+  return [...forms];
+}
+
 /* ── GET /api/students/stats ─ Aggregate overview for dashboard ─ */
 router.get('/stats', authMiddleware, PLAN, rbac('students', 'read'), async (req, res) => {
   try {
@@ -149,17 +169,22 @@ router.get('/', authMiddleware, PLAN, rbac('students', 'read'), scopeMiddleware,
     const keyStageId    = strParam(req.query.keyStageId);
     const gender        = strParam(req.query.gender);
 
-    if (streamId)   filter.streamId   = streamId;
+    // Stream/class references may be stored on student docs as either the UUID
+    // `id` or the Mongo `_id` string (pre-migration / imported records), so
+    // every filter matches ALL identifier forms of the selected entity.
+    if (streamId)   filter.streamId   = { $in: await _entityIdForms('streams', schoolId, streamId) };
     if (houseId)    filter.houseId    = houseId;
     if (keyStageId) filter.keyStageId = keyStageId;
     if (gender)     filter.gender     = gender;
 
     // Section filter — resolve sectionKey → list of classIds, then filter students
     if (sectionKey) {
+      // Include BOTH identifier forms of every class in the section — and note
+      // `_id` is always present, so classes without a UUID are not dropped.
       const sectionClassIds = await _model('classes')
         .find({ schoolId, sectionKey })
         .select('id').lean()
-        .then(docs => docs.map(d => d.id).filter(Boolean));
+        .then(docs => docs.flatMap(d => [d.id, String(d._id)].filter(Boolean)));
 
       if (sectionClassIds.length === 0) {
         // No classes in this section → return empty immediately
@@ -167,12 +192,14 @@ router.get('/', authMiddleware, PLAN, rbac('students', 'read'), scopeMiddleware,
       }
       // If classId is also set, honour it only if it belongs to the section
       if (classId) {
-        filter.classId = sectionClassIds.includes(classId) ? classId : '__no_match__';
+        const classForms = await _entityIdForms('classes', schoolId, classId);
+        const within = classForms.filter(f => sectionClassIds.includes(f));
+        filter.classId = within.length ? { $in: within } : '__no_match__';
       } else {
         filter.classId = { $in: sectionClassIds };
       }
     } else if (classId) {
-      filter.classId = classId;
+      filter.classId = { $in: await _entityIdForms('classes', schoolId, classId) };
     }
 
     // Enrolment year — ISO date strings sort lexicographically so range works
