@@ -25,14 +25,15 @@ if (!process.env.JWT_SECRET) {
   console.warn('\n⚠️  [Security] JWT_SECRET env var is NOT set — using insecure default. Set it in your .env file or Render dashboard!\n');
 }
 
-/* ── Security: enforce PLATFORM_ADMIN_KEY strength ─────────── */
+/* ── Security: enforce platform admin credentials are configured ── */
 {
-  const pak = process.env.PLATFORM_ADMIN_KEY || '';
-  if (pak.length < 32) {
-    const msg = `[Security] PLATFORM_ADMIN_KEY is ${pak.length === 0 ? 'not set' : 'too short (min 32 chars)'}. Generate one: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`;
+  const missingVars = ['PLATFORM_ADMIN_USER', 'PLATFORM_ADMIN_PASS_HASH', 'PLATFORM_JWT_SECRET']
+    .filter(v => !process.env[v]);
+  if (missingVars.length > 0) {
+    const msg = `[Security] Missing platform admin env vars: ${missingVars.join(', ')}. Platform admin login will be unavailable until these are set.`;
     if (process.env.NODE_ENV === 'production') {
-      console.error(`\n[FATAL] ${msg}\n`);
-      process.exit(1);
+      console.warn(`\n⚠️  ${msg}\n`);
+      // Warn but do NOT exit — the app still works; only /platform login is affected
     } else {
       console.warn(`\n⚠️  ${msg}\n`);
     }
