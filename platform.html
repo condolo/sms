@@ -1663,9 +1663,7 @@ async function renderBillingOverview() {
   el.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading billing data…</div>';
 
   try {
-    const res  = await fetch('/api/platform/billing/all', { credentials: 'include' });
-    const json = await res.json();
-    if (!json.success) throw new Error(json.error?.message || json.error || 'Failed to fetch billing data');
+    const json = await api('GET', '/billing/all');
 
     const snapshots = json.data || [];
     const total     = snapshots.reduce((s, x) => s + (x.totalAmount || 0), 0);
