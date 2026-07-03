@@ -1238,7 +1238,8 @@ function PortalTab({ student, canEdit }) {
   async function _call(method, path, setResult) {
     setWorking(path); setError('');
     try {
-      const res  = await fetch(`/api/students/${student.id}${path}`, {
+      const sid = student.id || student._id;
+      const res  = await fetch(`/api/students/${sid}${path}`, {
         method,
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

@@ -566,7 +566,10 @@ router.post('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'updat
     const Users    = _model('users');
     const Schools  = _model('schools');
 
-    const student = await Students.findOne({ id: req.params.id, schoolId }).lean();
+    let student = await Students.findOne({ id: req.params.id, schoolId }).lean();
+    if (!student) {
+      try { student = await Students.findOne({ _id: req.params.id, schoolId }).lean(); } catch (_) {}
+    }
     if (!student) return E.notFound(res, 'Student not found.');
     if (['withdrawn', 'graduated', 'transferred'].includes(student.status)) {
       return E.badRequest(res, `Cannot create portal account for a ${student.status} student.`);
@@ -581,7 +584,7 @@ router.post('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'updat
       return E.badRequest(res, 'This student has no admission number. Assign one before creating a portal account.');
     }
 
-    // Generate temp password — shown once to admin
+    const studentDocId = student.id || String(student._id);
     const tempPassword = _genTempPassword();
     const hash = await bcrypt.hash(tempPassword, 12);
 
@@ -589,41 +592,39 @@ router.post('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'updat
     const name      = `${student.firstName} ${student.lastName}`;
     const now       = new Date().toISOString();
 
-    // Upsert: find any existing account for this student.
-    // The $or catches:
-    //   a) accounts created with studentId properly set (primary path)
-    //   b) accounts created before studentId was consistently stored (username fallback)
-    // Without the username fallback, Users.create() would throw E11000 on the
-    // unique { schoolId, username } index, producing an opaque 500.
+    // Broad lookup: covers studentId match, username match, and schoolEmail match.
+    // This ensures we never hit a duplicate-key conflict when the account already
+    // exists but was created under a different studentId (e.g. after re-import).
+    const emailFilter = student.schoolEmail
+      ? [{ email: student.schoolEmail.toLowerCase() }]
+      : [];
     const existing = await Users.findOne({
       schoolId,
-      $or: [{ studentId: student.id }, { username }],
+      $or: [{ studentId: studentDocId }, { username }, ...emailFilter],
     }).lean();
 
     if (existing) {
-      // Update password and back-fill studentId if it was missing.
-      await Users.updateOne({ id: existing.id }, {
+      // Account already exists — reset password and back-fill studentId.
+      await Users.updateOne({ _id: existing._id }, {
         $set: {
           password:           hash,
           mustChangePassword: true,
           isActive:           true,
-          studentId:          student.id,
+          studentId:          studentDocId,
           updatedAt:          now,
           updatedBy:          userId,
         },
       });
     } else {
-      // No existing account — create fresh.
       const userDoc = {
         id:                 uuidv4(),
         schoolId,
         role:               'student',
         name,
         username,
-        // schoolEmail as the login email; auth accepts email OR username
         email:              student.schoolEmail || null,
         password:           hash,
-        studentId:          student.id,
+        studentId:          studentDocId,
         isActive:           true,
         mustChangePassword: true,
         createdAt:          now,
@@ -633,10 +634,22 @@ router.post('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'updat
       try {
         await Users.create(userDoc);
       } catch (createErr) {
-        // Rare case: schoolEmail already in use by another account in this school.
-        // Fall back to username-only login (no email on the account).
-        if (createErr.code === 11000 && createErr.keyPattern?.email) {
-          await Users.create({ ...userDoc, id: uuidv4(), email: null });
+        if (createErr.code === 11000) {
+          if (createErr.keyPattern?.email) {
+            // Email already in use — retry without email (username login still works).
+            await Users.create({ ...userDoc, id: uuidv4(), email: null });
+          } else {
+            // Username conflict — another account exists with this username.
+            // Find it and reset instead of failing.
+            const conflicting = await Users.findOne({ schoolId, username }).lean();
+            if (conflicting) {
+              await Users.updateOne({ _id: conflicting._id }, {
+                $set: { password: hash, mustChangePassword: true, isActive: true, studentId: studentDocId, updatedAt: now, updatedBy: userId },
+              });
+            } else {
+              throw createErr;
+            }
+          }
         } else {
           throw createErr;
         }
@@ -644,10 +657,10 @@ router.post('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'updat
     }
 
     // Mark student record as having a portal account
-    await Students.updateOne({ id: student.id }, { $set: { hasPortalAccount: true, updatedAt: now } });
+    await Students.updateOne({ _id: student._id }, { $set: { hasPortalAccount: true, updatedAt: now } });
 
-    console.log(`[students] Portal account ${existing ? 'reset' : 'created'} for student ${student.id} (${name}) by ${userId}`);
-    return ok(res, { username, tempPassword, name, studentId: student.id, action: existing ? 'reset' : 'created' });
+    console.log(`[students] Portal account ${existing ? 'reset' : 'created'} for student ${studentDocId} (${name}) by ${userId}`);
+    return ok(res, { username, tempPassword, name, studentId: studentDocId, action: existing ? 'reset' : 'created' });
   } catch (err) {
     console.error('[students POST/:id/portal-account]', err);
     return E.serverError(res);
@@ -690,7 +703,10 @@ router.post('/:id/parent-account', authMiddleware, PLAN, rbac('students', 'updat
     const Users    = _model('users');
     const Schools  = _model('schools');
 
-    const student = await Students.findOne({ id: req.params.id, schoolId }).lean();
+    let student = await Students.findOne({ id: req.params.id, schoolId }).lean();
+    if (!student) {
+      try { student = await Students.findOne({ _id: req.params.id, schoolId }).lean(); } catch (_) {}
+    }
     if (!student) return E.notFound(res, 'Student not found.');
     if (!student.parentEmail) return E.badRequest(res, 'Student has no parent email on record. Add a parent email first.');
 
@@ -699,6 +715,7 @@ router.post('/:id/parent-account', authMiddleware, PLAN, rbac('students', 'updat
       return E.badRequest(res, 'Parent portal requires the Family tier. Upgrade your subscription to enable parent logins.');
     }
 
+    const studentDocId = student.id || String(student._id);
     const parentEmail = student.parentEmail.toLowerCase().trim();
     const parentName  = student.parentName || 'Parent';
     const now         = new Date().toISOString();
@@ -711,14 +728,14 @@ router.post('/:id/parent-account', authMiddleware, PLAN, rbac('students', 'updat
     if (existing) {
       // Add this student to their children if not already there
       const currentIds = Array.isArray(existing.studentIds) ? existing.studentIds : [];
-      if (!currentIds.includes(student.id)) {
-        await Users.updateOne({ id: existing.id }, {
-          $addToSet: { studentIds: student.id, guardianOf: student.id },
+      if (!currentIds.includes(studentDocId)) {
+        await Users.updateOne({ _id: existing._id }, {
+          $addToSet: { studentIds: studentDocId, guardianOf: studentDocId },
           $set: { updatedAt: now },
         });
       }
       // Reset password and send new credentials
-      await Users.updateOne({ id: existing.id }, {
+      await Users.updateOne({ _id: existing._id }, {
         $set: { password: hash, isActive: true, updatedAt: now },
       });
     } else {
@@ -729,8 +746,8 @@ router.post('/:id/parent-account', authMiddleware, PLAN, rbac('students', 'updat
         name:       parentName,
         email:      parentEmail,
         password:   hash,
-        studentIds: [student.id],
-        guardianOf: [student.id],
+        studentIds: [studentDocId],
+        guardianOf: [studentDocId],
         isActive:   true,
         mustChangePassword: false,
         createdAt:  now,
@@ -740,7 +757,7 @@ router.post('/:id/parent-account', authMiddleware, PLAN, rbac('students', 'updat
     }
 
     // Mark student as having a parent portal account
-    await Students.updateOne({ id: student.id }, { $set: { hasParentAccount: true, updatedAt: now } });
+    await Students.updateOne({ _id: student._id }, { $set: { hasParentAccount: true, updatedAt: now } });
 
     // Send welcome email to parent
     const emailUtil = require('../utils/email');
@@ -754,11 +771,11 @@ router.post('/:id/parent-account', authMiddleware, PLAN, rbac('students', 'updat
       loginUrl:    `https://msingi.io/platform`,
     }).catch(err => console.error('[parent-account] Email send failed:', err.message));
 
-    console.log(`[students] Parent account ${existing ? 'updated' : 'created'} for ${parentEmail} (student: ${student.id}) by ${userId}`);
+    console.log(`[students] Parent account ${existing ? 'updated' : 'created'} for ${parentEmail} (student: ${studentDocId}) by ${userId}`);
     return ok(res, {
       email:     parentEmail,
       name:      parentName,
-      studentId: student.id,
+      studentId: studentDocId,
       action:    existing ? 'updated' : 'created',
       emailSent: true,
     });
