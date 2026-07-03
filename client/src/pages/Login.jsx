@@ -4,7 +4,7 @@ import { Spinner } from '@/components/ui/Spinner.jsx';
 import useAuthStore from '@/store/auth.js';
 import { auth as authApi, publicApi, APIError } from '@/api/client.js';
 import { detectSchool, storeSchoolSlug } from '@/utils/schoolDetect.js';
-import { Loader2 as Loader2Icon, Search } from 'lucide-react';
+import { Loader2 as Loader2Icon, Search, Mail, KeyRound, Eye, EyeOff, AlertTriangle } from 'lucide-react';
 
 /* ── School branding hook ──────────────────────────────────────
    Fetches public school info once on mount. Used to brand the
@@ -616,7 +616,7 @@ export default function Login() {
     if (!error) return null;
     return (
       <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-start gap-2">
-        <span className="shrink-0 mt-0.5">⚠</span>
+        <AlertTriangle size={14} className="shrink-0 mt-0.5" />
         <span>{error}</span>
       </div>
     );
@@ -765,7 +765,7 @@ export default function Login() {
                     tabIndex={-1}
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
                   >
-                    {showPassword ? '🙈' : '👁'}
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
               </div>
@@ -797,7 +797,10 @@ export default function Login() {
         {/* ── OTP MODE ── */}
         {mode === MODES.OTP && (
           <>
-            <h2 className="text-xl font-bold text-slate-800 text-center mb-1">Check your email 📬</h2>
+            <div className="flex flex-col items-center gap-2 mb-1">
+              <Mail size={28} className="text-slate-400" />
+              <h2 className="text-xl font-bold text-slate-800 text-center">Check your email</h2>
+            </div>
             <p className="text-sm text-slate-500 text-center mb-6">
               A 6-digit code was sent to <strong>{email}</strong>.
             </p>
@@ -841,7 +844,10 @@ export default function Login() {
         {/* ── CHANGE PASSWORD MODE ── */}
         {mode === MODES.CHANGE_PASSWORD && (
           <>
-            <h2 className="text-xl font-bold text-slate-800 text-center mb-1">Password expired 🔑</h2>
+            <div className="flex flex-col items-center gap-2 mb-1">
+              <KeyRound size={28} className="text-slate-400" />
+              <h2 className="text-xl font-bold text-slate-800 text-center">Password expired</h2>
+            </div>
             <p className="text-sm text-slate-500 text-center mb-6">
               Your password is more than 90 days old. Please choose a new one to continue.
             </p>
