@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getPlatformSettings } from '@/utils/landingCMS';
-import { useAuthStore } from '@/store/auth';
+import useAuthStore from '@/store/auth';
 
 const WA_MESSAGE = encodeURIComponent('Hello Msingi, I would like to learn more about the platform.');
 const SCROLL_THRESHOLD = 300;
