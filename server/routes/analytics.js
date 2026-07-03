@@ -173,12 +173,23 @@ router.get('/leadership', authMiddleware, PLAN, rbac('analytics', 'read'), async
       ]),
 
       /* 5. CLASS NAME LOOKUP ──────────────────────────────
-         Batch-fetch all class names to enrich the results.        */
-      _model('classes').find({ schoolId }, { id: 1, name: 1, _id: 0 }).lean(),
+         Batch-fetch all class names to enrich the results.
+         Include _id so we can map both UUID 'id' and ObjectId strings
+         — older attendance records may have been saved with either.  */
+      _model('classes').find({ schoolId }, { id: 1, name: 1 }).lean(),
     ]);
 
     /* ── Build classId → name map ─────────────────────── */
-    const classMap = Object.fromEntries((classesResult ?? []).map(c => [c.id, c.name]));
+    // Support both UUID (c.id) and MongoDB ObjectId (c._id) as classId values,
+    // because attendance records created before the UUID migration used ObjectIds.
+    const classMap = Object.fromEntries(
+      (classesResult ?? []).flatMap(c => {
+        const entries = [];
+        if (c.id)   entries.push([c.id,         c.name]);
+        if (c._id)  entries.push([String(c._id), c.name]);
+        return entries;
+      })
+    );
 
     /* ── Enrich attendance results ────────────────────── */
     const attendanceRisk = attendanceResult.map(r => ({
