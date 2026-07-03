@@ -350,6 +350,24 @@ app.get('*', (req, res) => {
     return res.sendFile(path.join(ROOT_DIR, 'onboard.html'));
   }
   if (req.path === '/platform' || req.path === '/platform/') {
+    // platform.html uses inline <script> and Font Awesome from cdnjs CDN.
+    // Override the global Helmet CSP for this route only — the React SPA
+    // retains the strict policy.  'unsafe-inline' is acceptable here because:
+    //   (a) this page is only accessed by one operator,
+    //   (b) it sits behind its own HttpOnly-cookie session (platform_token),
+    //   (c) it serves no user-generated content.
+    res.setHeader('Content-Security-Policy', [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com",
+      "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com",
+      "img-src 'self' data: blob:",
+      "connect-src 'self'",
+      "frame-src 'none'",
+      "frame-ancestors 'none'",
+      "object-src 'none'",
+      "base-uri 'self'",
+    ].join('; '));
     return res.sendFile(path.join(ROOT_DIR, 'platform.html'));
   }
   // React SPA — serve index.html with no-cache so browsers always fetch
