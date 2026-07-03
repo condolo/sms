@@ -456,7 +456,9 @@ router.post('/bulk', authMiddleware, PLAN, rbac('students', 'create'), async (re
 /* ── POST /api/students/bulk-portal-accounts ────────────────────
    Grant student portal access to multiple students at once.
    Skips withdrawn/graduated and those whose plan doesn't allow it.
-   Returns { created, skipped, errors } summary.
+   Returns { created, skipped, errors, credentials } — credentials
+   is the ONE-TIME plaintext temp password list (admin downloads it
+   as a CSV to print and distribute; never stored or shown again).
    ──────────────────────────────────────────────────────────────── */
 router.post('/bulk-portal-accounts', authMiddleware, PLAN, rbac('students', 'update'), async (req, res) => {
   try {
@@ -479,13 +481,24 @@ router.post('/bulk-portal-accounts', authMiddleware, PLAN, rbac('students', 'upd
       return E.badRequest(res, 'Student portal requires the Student or Family tier. Upgrade your subscription to enable student logins.');
     }
 
-    const docs = await Students.find({ id: { $in: studentIds }, schoolId }).lean();
+    // Dual lookup — client may send UUID `id` or Mongo `_id` (pre-migration records)
+    const mongoose = require('mongoose');
+    const validObjectIds = studentIds.filter(id => mongoose.Types.ObjectId.isValid(id) && String(id).length === 24);
+    const docs = await Students.find({
+      schoolId,
+      $or: [
+        { id: { $in: studentIds } },
+        ...(validObjectIds.length ? [{ _id: { $in: validObjectIds } }] : []),
+      ],
+    }).lean();
     const now  = new Date().toISOString();
 
     let created = 0, skipped = 0;
-    const errors = [];
+    const errors      = [];
+    const credentials = [];  // one-time plaintext list returned to the admin
 
     await Promise.all(docs.map(async student => {
+      const studentDocId = student.id || String(student._id);
       try {
         if (['withdrawn', 'graduated', 'transferred'].includes(student.status)) {
           skipped++;
@@ -495,20 +508,25 @@ router.post('/bulk-portal-accounts', authMiddleware, PLAN, rbac('students', 'upd
           skipped++;
           return;
         }
+        if (!student.admissionNumber) {
+          errors.push({ studentId: studentDocId, message: `${student.firstName} ${student.lastName}: no admission number — assign one first.` });
+          return;
+        }
         const tempPassword = _genTempPassword();
         const hash = await bcrypt.hash(tempPassword, 10);
         const username = student.admissionNumber.toLowerCase();
         const name     = `${student.firstName} ${student.lastName}`;
 
-        const existing = await Users.findOne({ studentId: student.id, schoolId }).lean();
+        // Match by studentId OR username — covers accounts orphaned by re-import
+        const existing = await Users.findOne({ schoolId, $or: [{ studentId: studentDocId }, { username }] }).lean();
         if (existing) {
-          await Users.updateOne({ id: existing.id }, {
-            $set: { password: hash, mustChangePassword: true, isActive: true, updatedAt: now, updatedBy: userId },
+          await Users.updateOne({ _id: existing._id }, {
+            $set: { password: hash, mustChangePassword: true, isActive: true, studentId: studentDocId, updatedAt: now, updatedBy: userId },
           });
         } else {
           const bulkDoc = {
             id: uuidv4(), schoolId, role: 'student', name, username,
-            password: hash, studentId: student.id,
+            password: hash, studentId: studentDocId,
             isActive: true, mustChangePassword: true,
             createdAt: now, updatedAt: now, createdBy: userId,
           };
@@ -516,18 +534,19 @@ router.post('/bulk-portal-accounts', authMiddleware, PLAN, rbac('students', 'upd
           if (student.schoolEmail) bulkDoc.email = student.schoolEmail.toLowerCase();
           await Users.create(bulkDoc);
         }
-        await Students.updateOne({ id: student.id }, { $set: { hasPortalAccount: true, updatedAt: now } });
+        await Students.updateOne({ _id: student._id }, { $set: { hasPortalAccount: true, updatedAt: now } });
+        credentials.push({ name, admissionNumber: student.admissionNumber, username, tempPassword, action: existing ? 'reset' : 'created' });
         created++;
       } catch (e) {
-        errors.push({ studentId: student.id, message: e.message });
+        errors.push({ studentId: studentDocId, message: e.message });
       }
     }));
 
     // studentIds not found in DB count as skipped
-    skipped += studentIds.length - docs.length;
+    skipped += Math.max(0, studentIds.length - docs.length);
 
     console.log(`[students] Bulk portal accounts: ${created} created, ${skipped} skipped, ${errors.length} errors — by ${userId}`);
-    return ok(res, { created, skipped, errors });
+    return ok(res, { created, skipped, errors, credentials });
   } catch (err) {
     console.error('[students POST/bulk-portal-accounts]', err);
     return E.serverError(res);

@@ -236,14 +236,25 @@ export default function StudentList() {
     setDeactivateTarget(null);
   }
 
-  /* Bulk grant portal access */
+  /* Bulk grant portal access — chunks of 200 (server batch limit), so any
+     selection size works in one click. Credentials come back once; the admin
+     downloads them as a CSV to print/distribute. */
   async function bulkGrantPortal() {
     const ids = Array.from(selectedIds);
     setBulkPortalLoading(true);
     setBulkPortalResult(null);
     try {
-      const res = await studentsApi.bulkPortalAccounts(ids);
-      setBulkPortalResult(res.data ?? res);
+      const merged = { created: 0, skipped: 0, errors: [], credentials: [] };
+      for (let i = 0; i < ids.length; i += 200) {
+        const res  = await studentsApi.bulkPortalAccounts(ids.slice(i, i + 200));
+        const data = res.data ?? res;
+        merged.created += data.created ?? 0;
+        merged.skipped += data.skipped ?? 0;
+        if (Array.isArray(data.errors))      merged.errors.push(...data.errors);
+        if (Array.isArray(data.credentials)) merged.credentials.push(...data.credentials);
+      }
+      setBulkPortalResult(merged);
+      if (merged.credentials.length > 0) downloadCredentialsCsv(merged.credentials);
       clearSelection();
       qc.invalidateQueries({ queryKey: ['students'] });
     } catch (err) {
@@ -251,6 +262,28 @@ export default function StudentList() {
     } finally {
       setBulkPortalLoading(false);
     }
+  }
+
+  /* One-time credentials CSV — passwords are never retrievable again after
+     this download, so it fires automatically and stays re-downloadable from
+     the result banner until it's dismissed. */
+  function downloadCredentialsCsv(credentials) {
+    const esc  = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = [
+      ['Student Name', 'Admission Number (Username)', 'Temporary Password'],
+      ...credentials.map(c => [c.name, c.admissionNumber, c.tempPassword]),
+    ];
+    // ﻿ BOM so Excel opens it as UTF-8
+    const csv  = '﻿' + rows.map(r => r.map(esc).join(',')).join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `student-portal-credentials-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
 
   /* Bulk purge — hard-delete (admin/superadmin only) */
@@ -619,9 +652,20 @@ export default function StudentList() {
                 {bulkPortalResult.errors?.length > 0 && <span className="text-amber-700"> · {bulkPortalResult.errors.length} failed</span>}
               </span>
             </div>
-            <button onClick={() => setBulkPortalResult(null)} className="text-emerald-500 hover:text-emerald-800 transition">
-              <X size={13} />
-            </button>
+            <div className="flex items-center gap-3 shrink-0">
+              {bulkPortalResult.credentials?.length > 0 && (
+                <button
+                  onClick={() => downloadCredentialsCsv(bulkPortalResult.credentials)}
+                  className="text-xs font-semibold text-emerald-700 hover:text-emerald-900 underline underline-offset-2 transition"
+                  title="Passwords are shown once — save this file before dismissing"
+                >
+                  Download credentials (CSV)
+                </button>
+              )}
+              <button onClick={() => setBulkPortalResult(null)} className="text-emerald-500 hover:text-emerald-800 transition">
+                <X size={13} />
+              </button>
+            </div>
           </div>
         )}
 
