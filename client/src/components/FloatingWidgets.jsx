@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react';
 import { getPlatformSettings } from '@/utils/landingCMS';
+import { useAuthStore } from '@/store/auth';
 
 const WA_MESSAGE = encodeURIComponent('Hello Msingi, I would like to learn more about the platform.');
 const SCROLL_THRESHOLD = 300;
 
 export default function FloatingWidgets() {
+  // Hide on any authenticated school/portal dashboard — widget is for marketing only
+  const isAuthenticated = useAuthStore(s => !!s.session?.user);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [waUrl, setWaUrl] = useState(null);
 
@@ -23,6 +26,9 @@ export default function FloatingWidgets() {
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
+
+  // Early return after all hooks — authenticated users are in the school dashboard
+  if (isAuthenticated) return null;
 
   function scrollToTop() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
