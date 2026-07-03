@@ -4,7 +4,7 @@
    Upcoming Events · Attendance KPI · Quick Actions
    ============================================================ */
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -100,6 +100,7 @@ function ChartTip({ active, payload }) {
    MAIN DASHBOARD
    ══════════════════════════════════════════════════════════ */
 export default function Dashboard() {
+  const navigate = useNavigate();
   const qc     = useQueryClient();
   const user   = useAuthStore(s => s.session?.user);
   const school = useAuthStore(s => s.session?.school);
@@ -305,31 +306,37 @@ export default function Dashboard() {
       </AnimatePresence>
 
       {/* ── Page header ─────────────────────────────────── */}
-      <div className="bg-white border-b border-slate-200 px-6 py-6">
-        <div className="max-w-screen-2xl mx-auto flex items-end justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <Sparkles size={14} style={{ color: primary }} />
-              <span className="text-xs font-medium text-slate-400">
-                {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-              </span>
-            </div>
-            <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">
-              {greeting()}, {firstName(user?.name)} 👋
-            </h1>
-            <p className="text-sm text-slate-500 mt-1">
-              {school?.name ?? user?.schoolName ?? 'Your School'} ·{' '}
-              <span style={{ color: primary }}>{role.charAt(0).toUpperCase() + role.slice(1)} Dashboard</span>
-            </p>
-          </div>
-          <div className="hidden sm:flex items-center gap-2 text-xs rounded-full px-3 py-1.5 border" style={{ color: primary, borderColor: withOpacity(primary, 0.25), background: withOpacity(primary, 0.06) }}>
-            <Clock size={12} />
-            <span className="font-medium">Live data</span>
-          </div>
+      <div id="dashboard-topbar" className="bg-white border-b border-slate-200 h-14 flex items-center px-6 gap-4">
+        <h1 id="dashboard-greeting" className="text-[16px] font-bold text-slate-900 flex-1">
+          {greeting()}, {firstName(user?.name)} 👋
+        </h1>
+        <span id="dashboard-term-badge" className="hidden sm:block text-[12px] font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap">
+          {school?.currentTerm
+            ? `${school.currentTerm} · ${school?.academicYear ?? ''}`
+            : school?.academicYear
+              ? school.academicYear
+              : new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            id="btn-dashboard-reports"
+            onClick={() => navigate('/reports')}
+            className="px-3.5 py-[7px] rounded-[7px] bg-slate-100 text-slate-600 text-[12px] font-semibold hover:bg-slate-200 transition"
+          >
+            Reports
+          </button>
+          <button
+            id="btn-dashboard-quick-action"
+            onClick={() => navigate(canViewStudents ? '/students' : '/attendance')}
+            className="px-3.5 py-[7px] rounded-[7px] text-white text-[12px] font-semibold transition hover:opacity-90"
+            style={{ background: primary }}
+          >
+            + Quick Action
+          </button>
         </div>
       </div>
 
-      <div className="max-w-screen-2xl mx-auto px-6 py-6 space-y-6">
+      <div id="dashboard-content" className="max-w-screen-2xl mx-auto px-6 py-6 space-y-6">
 
         {isTeacher ? (
           <TeacherView data={teacherPortalData?.data ?? null} loading={teacherLoading} primary={primary} />
@@ -345,7 +352,7 @@ export default function Dashboard() {
         )}
 
         {/* ── KPI Cards ─────────────────────────────────── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div id="dashboard-kpi-row" className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {canViewStudents ? (
             <KpiCard
               variant="filled" colorIndex={0}
@@ -428,8 +435,156 @@ export default function Dashboard() {
           )}
         </div>
 
+        {/* ── Term Overview + Attendance strip ──────────── */}
+        <div id="dashboard-term-strip" className="grid lg:grid-cols-2 gap-4">
+
+          {/* Attendance today */}
+          <div id="term-strip-attendance" className="bg-white rounded-[10px] border border-slate-200 shadow-sm p-4">
+            <div className="flex items-center gap-2 mb-3 pb-3 border-b border-slate-100">
+              <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: withOpacity(primary, 0.1) }}>
+                <Activity size={13} style={{ color: primary }} />
+              </div>
+              <h2 className="text-[13px] font-bold text-slate-800 flex-1">Today's Attendance</h2>
+              <span id="attendance-today-rate" className={`text-[13px] font-extrabold ${attRate == null ? 'text-slate-400' : attRate >= 80 ? 'text-emerald-600' : 'text-amber-500'}`}>
+                {attRate != null ? `${attRate}%` : '—'}
+              </span>
+            </div>
+            <div className="space-y-2">
+              {[
+                { id: 'att-strip-present', label: 'Present', value: attPresent, color: '#10b981', bg: 'bg-emerald-500' },
+                { id: 'att-strip-absent',  label: 'Absent',  value: attTotal != null && attPresent != null ? attTotal - attPresent : null, color: '#ef4444', bg: 'bg-red-400' },
+              ].map(({ id, label, value, bg }) => (
+                <div key={id} id={id}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] text-slate-500">{label}</span>
+                    <span className="text-[11px] font-bold text-slate-700">{value != null ? value.toLocaleString() : '—'}</span>
+                  </div>
+                  <div className="h-[6px] bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${bg}`}
+                      style={{ width: attTotal > 0 && value != null ? `${Math.round((value / attTotal) * 100)}%` : '0%', transition: 'width 0.7s ease' }}
+                    />
+                  </div>
+                </div>
+              ))}
+              <p className="text-[10px] text-slate-400 pt-1">
+                {attTotal != null ? `${attTotal.toLocaleString()} students tracked` : 'No attendance taken today'}
+              </p>
+            </div>
+          </div>
+
+          {/* Term overview */}
+          <div id="term-strip-overview" className="bg-white rounded-[10px] border border-slate-200 shadow-sm p-4">
+            <div className="flex items-center gap-2 mb-3 pb-3 border-b border-slate-100">
+              <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: withOpacity(primary, 0.1) }}>
+                <TrendingUp size={13} style={{ color: primary }} />
+              </div>
+              <h2 className="text-[13px] font-bold text-slate-800 flex-1">Term Overview</h2>
+              <Link to="/reports" className="text-[11px] font-medium flex items-center gap-0.5" style={{ color: primary }}>
+                Details <ArrowRight size={10} />
+              </Link>
+            </div>
+            <div className="space-y-2.5">
+              {[
+                {
+                  id:    'term-bar-fees',
+                  label: 'Fees Collected',
+                  pct:   totalPaid != null && totalInvoiced > 0 ? Math.min(100, Math.round((totalPaid / totalInvoiced) * 100)) : null,
+                  color: '#4f46e5',
+                },
+                {
+                  id:    'term-bar-adm',
+                  label: 'Enrolled (vs applications)',
+                  pct:   (() => {
+                    const total = admData?.data?.byStage?.reduce((s, x) => s + (x.count ?? 0), 0) ?? 0;
+                    const enrolled = admData?.data?.byStage?.find(s => s.stage === 'enrolled')?.count ?? 0;
+                    return total > 0 ? Math.min(100, Math.round((enrolled / total) * 100)) : null;
+                  })(),
+                  color: '#22c55e',
+                },
+                {
+                  id:    'term-bar-att',
+                  label: 'Monthly Avg. Attendance',
+                  pct:   attRate,
+                  color: '#f59e0b',
+                },
+              ].map(({ id, label, pct, color }) => (
+                <div key={id} id={id}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] text-slate-500">{label}</span>
+                    <span className="text-[11px] font-bold text-slate-700">{pct != null ? `${pct}%` : '—'}</span>
+                  </div>
+                  <div className="h-[6px] bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full"
+                      style={{ width: pct != null ? `${pct}%` : '0%', background: color, transition: 'width 0.7s ease' }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Recent Activity timeline ───────────────────── */}
+        <div id="dashboard-recent-activity" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: withOpacity(primary, 0.1) }}>
+                <Zap size={13} style={{ color: primary }} />
+              </div>
+              <h2 className="text-[13px] font-bold text-slate-800">Recent Activity</h2>
+            </div>
+            <span className="text-[11px] font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+              Today
+            </span>
+          </div>
+          <div id="recent-activity-list" className="divide-y divide-slate-50">
+            {[
+              ...recentStudents.slice(0, 2).map((s, i) => ({
+                key: `student-${s.id ?? i}`,
+                id:  `activity-enrolment-${s.id ?? i}`,
+                dot: '#6366f1',
+                title: `New student enrolled — ${s.firstName} ${s.lastName}${s.className ? ` (${s.className})` : ''}`,
+                meta:  s.admissionNumber ? `Adm: ${s.admissionNumber} · ${formatDate(s.createdAt)}` : formatDate(s.createdAt),
+              })),
+              ...(announcs ?? []).slice(0, 2).map((a, i) => ({
+                key:   `ann-${a.id ?? i}`,
+                id:    `activity-announcement-${a.id ?? i}`,
+                dot:   primary,
+                title: a.title,
+                meta:  a.body?.slice(0, 80) ?? '',
+              })),
+              ...upcomingEvents.slice(0, 2).map((ev, i) => ({
+                key:   `ev-${ev._id ?? i}`,
+                id:    `activity-event-${ev._id ?? i}`,
+                dot:   EVENT_CATEGORY_COLORS[ev.category] ?? '#64748b',
+                title: ev.title,
+                meta:  `${ev.category ?? 'event'} · ${formatDate(ev.date)}`,
+              })),
+            ]
+              .filter(Boolean)
+              .slice(0, 5)
+              .map(item => (
+                <div key={item.key} id={item.id} className="flex items-start gap-3 px-5 py-3.5">
+                  <div className="w-2 h-2 rounded-full mt-[5px] flex-shrink-0" style={{ background: item.dot }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-semibold text-slate-800 leading-snug truncate">{item.title}</p>
+                    {item.meta && <p className="text-[11px] text-slate-400 mt-0.5 truncate">{item.meta}</p>}
+                  </div>
+                </div>
+              ))}
+            {recentStudents.length === 0 && announcs.length === 0 && upcomingEvents.length === 0 && (
+              <div id="activity-empty" className="flex flex-col items-center justify-center py-8 text-slate-400">
+                <Activity size={24} className="mb-2 opacity-40" />
+                <p className="text-xs">No recent activity</p>
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* ── Charts row ────────────────────────────────── */}
-        <div className="grid lg:grid-cols-3 gap-6">
+        <div id="dashboard-charts-row" className="grid lg:grid-cols-3 gap-6">
 
           {/* Gender pie — student access only */}
           {canViewStudents && (
@@ -552,7 +707,7 @@ export default function Dashboard() {
 
         {/* ── Admissions funnel bar chart ─────────────────── */}
         {canViewAdm && admBarData.length > 0 && (
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div id="dashboard-admissions-funnel" className="bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: withOpacity(primary, 0.1) }}>
@@ -582,7 +737,7 @@ export default function Dashboard() {
         )}
 
         {/* ── Birthday + Events row ─────────────────────── */}
-        <div className="grid lg:grid-cols-3 gap-6">
+        <div id="dashboard-birthday-events-row" className="grid lg:grid-cols-3 gap-6">
 
           {/* Birthday Widget — 1/3 */}
           <BirthdayWidget
@@ -649,7 +804,7 @@ export default function Dashboard() {
         </div>
 
         {/* ── Bottom grid ───────────────────────────────── */}
-        <div className={`grid gap-6 ${canViewStudents ? 'lg:grid-cols-3' : ''}`}>
+        <div id="dashboard-bottom-grid" className={`grid gap-6 ${canViewStudents ? 'lg:grid-cols-3' : ''}`}>
 
           {/* Recent Students — only for roles with student access */}
           {canViewStudents && (

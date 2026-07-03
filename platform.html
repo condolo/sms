@@ -775,8 +775,14 @@ async function doImpersonate(schoolId) {
 
 /* ── Change Plan ────────────────────────────────────────── */
 function changePlan(schoolId, currentPlan, schoolName) {
+  const PLAN_LABELS = {
+    base:       'Base — KSh 150/student/term',
+    student:    'Student Portal — KSh 200/student/term',
+    family:     'Family Portal — KSh 250/student/term',
+    enterprise: 'Enterprise — KSh 250/student/term (all portals)',
+  };
   const opts = ['base','student','family','enterprise']
-    .map(p => `<option value="${p}" ${p===currentPlan?'selected':''}>${p.charAt(0).toUpperCase()+p.slice(1)}</option>`)
+    .map(p => `<option value="${p}" ${p===currentPlan?'selected':''}>${PLAN_LABELS[p]||p}</option>`)
     .join('');
 
   showModal(
@@ -914,10 +920,10 @@ function renderProvision() {
           <div class="pa-field">
             <label>Plan</label>
             <select id="p-plan">
-              <option value="base">Base — KES 15,000/mo</option>
-              <option value="student" selected>Student — KES 35,000/mo</option>
-              <option value="family">Family — KES 65,000/mo</option>
-              <option value="enterprise">Enterprise — KES 250,000/mo</option>
+              <option value="base">Base — KSh 150/student/term</option>
+              <option value="student" selected>Student Portal — KSh 200/student/term</option>
+              <option value="family">Family Portal — KSh 250/student/term</option>
+              <option value="enterprise">Enterprise — KSh 250/student/term (all portals)</option>
             </select>
           </div>
         </div>
@@ -1122,12 +1128,12 @@ async function submitAnnouncement() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, description: desc, type, scheduledAt: sched || null, expiresAt: expires || null, notifyAll: notify })
     });
-    if (!res.ok) { const e = await res.json(); errEl.textContent = e.error || 'Failed'; errEl.style.display='block'; return; }
+    if (!res.ok) { const e = await res.json().catch(() => ({})); errEl.textContent = (typeof e.error === 'string' ? e.error : e.error?.message) || 'Request failed'; errEl.style.display='block'; return; }
     closeModal();
     toast(`Announcement created${notify ? ' — emails sent to all schools' : ''}.`, 'success');
     renderAnnouncements();
   } catch (err) {
-    errEl.textContent = err.message; errEl.style.display='block';
+    errEl.textContent = err.message || 'Unexpected error'; errEl.style.display='block';
   }
 }
 
@@ -1657,9 +1663,9 @@ async function renderBillingOverview() {
   el.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading billing data…</div>';
 
   try {
-    const res  = await fetch('/api/billing/all', { credentials: 'include' });
+    const res  = await fetch('/api/platform/billing/all', { credentials: 'include' });
     const json = await res.json();
-    if (!json.success) throw new Error(json.error || 'Failed to fetch billing data');
+    if (!json.success) throw new Error(json.error?.message || json.error || 'Failed to fetch billing data');
 
     const snapshots = json.data || [];
     const total     = snapshots.reduce((s, x) => s + (x.totalAmount || 0), 0);

@@ -534,6 +534,34 @@ router.delete('/schools/:id', async (req, res) => {
   }
 });
 
+/* GET /api/platform/billing/all — all billing snapshots (platform admin) */
+router.get('/billing/all', async (req, res) => {
+  try {
+    const Snapshot = _model('billing_snapshots');
+    const School   = _model('schools');
+
+    const snapshots = await Snapshot.find({})
+      .sort({ generatedAt: -1 })
+      .limit(500)
+      .lean();
+
+    const schoolIds = [...new Set(snapshots.map(s => s.schoolId))];
+    const schools   = await School.find({ id: { $in: schoolIds } }).select('id name slug').lean();
+    const schoolMap = Object.fromEntries(schools.map(s => [s.id, s]));
+
+    const enriched = snapshots.map(s => ({
+      ...s,
+      schoolName: schoolMap[s.schoolId]?.name ?? s.schoolId,
+      schoolSlug: schoolMap[s.schoolId]?.slug ?? '',
+    }));
+
+    return ok(res, enriched);
+  } catch (err) {
+    console.error('[platform GET /billing/all]', err);
+    return E.serverError(res);
+  }
+});
+
 /* GET /api/platform/stats — MRR, school counts, plan breakdown */
 router.get('/stats', async (req, res) => {
   try {
