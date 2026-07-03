@@ -1256,7 +1256,8 @@ function PortalTab({ student, canEdit }) {
   async function handleDeactivateStudent() {
     setDeactivating(true); setError('');
     try {
-      const res  = await fetch(`/api/students/${student.id}/deactivate`, {
+      const sid = student.id || student._id;
+      const res  = await fetch(`/api/students/${sid}/deactivate`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -1398,10 +1399,16 @@ function PortalTab({ student, canEdit }) {
             </div>
             <button
               onClick={async () => {
+                setError('');
                 try {
-                  await fetch(`/api/students/${student.id}/reactivate`, { method: 'PATCH', credentials: 'include' });
+                  const sid = student.id || student._id;
+                  const res  = await fetch(`/api/students/${sid}/reactivate`, { method: 'PATCH', credentials: 'include' });
+                  const json = await res.json();
+                  if (!json.success) { setError(json.error?.message || 'Failed to reactivate'); return; }
                   window.location.reload();
-                } catch {}
+                } catch (err) {
+                  setError(err.message || 'Failed to reactivate');
+                }
               }}
               className="flex items-center gap-2 px-4 py-2.5 bg-amber-500 text-white text-sm font-semibold rounded-lg hover:bg-amber-600 transition-colors"
             >

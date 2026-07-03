@@ -791,15 +791,20 @@ router.patch('/:id/deactivate', authMiddleware, PLAN, rbac('students', 'update')
         : 'withdrawn';
 
     const Students = _model('students');
-    const doc = await Students.findOne({ id: req.params.id, schoolId }).lean();
+    let doc = await Students.findOne({ id: req.params.id, schoolId }).lean();
+    if (!doc) {
+      try { doc = await Students.findOne({ _id: req.params.id, schoolId }).lean(); } catch (_) {}
+    }
     if (!doc) return E.notFound(res, 'Student not found');
     if (['withdrawn', 'graduated', 'transferred'].includes(doc.status)) {
       return E.badRequest(res, `Student is already ${doc.status}.`);
     }
 
+    // Use the stored uuid id field when available; fall back to _id string for pre-migration records
+    const studentId = doc.id || String(doc._id);
     const now = new Date().toISOString();
     await Students.updateOne(
-      { id: req.params.id, schoolId },
+      { _id: doc._id },
       {
         $set: {
           status:          finalStatus,
@@ -813,9 +818,9 @@ router.patch('/:id/deactivate', authMiddleware, PLAN, rbac('students', 'update')
       }
     );
 
-    console.log(`[students] Deactivated ${req.params.id} (${doc.firstName} ${doc.lastName}) → ${finalStatus} by ${userId}`);
-    AuditService.log({ action: 'student.deactivated', actor: req.jwtUser, schoolId, target: { type: 'student', id: req.params.id, label: `${doc.firstName} ${doc.lastName}` }, details: { status: finalStatus, reason }, req });
-    return ok(res, { id: req.params.id, status: finalStatus, reason, deactivatedAt: effectiveDate || now });
+    console.log(`[students] Deactivated ${studentId} (${doc.firstName} ${doc.lastName}) → ${finalStatus} by ${userId}`);
+    AuditService.log({ action: 'student.deactivated', actor: req.jwtUser, schoolId, target: { type: 'student', id: studentId, label: `${doc.firstName} ${doc.lastName}` }, details: { status: finalStatus, reason }, req });
+    return ok(res, { id: studentId, status: finalStatus, reason, deactivatedAt: effectiveDate || now });
   } catch (err) {
     console.error('[students PATCH/:id/deactivate]', err);
     return E.serverError(res);
@@ -832,21 +837,25 @@ router.patch('/:id/reactivate', authMiddleware, PLAN, rbac('students', 'update')
     if (!allowed.includes(role)) return E.forbidden(res, 'Only admin or principal can reactivate students.');
 
     const Students = _model('students');
-    const doc = await Students.findOne({ id: req.params.id, schoolId }).lean();
+    let doc = await Students.findOne({ id: req.params.id, schoolId }).lean();
+    if (!doc) {
+      try { doc = await Students.findOne({ _id: req.params.id, schoolId }).lean(); } catch (_) {}
+    }
     if (!doc) return E.notFound(res, 'Student not found');
     if (doc.status === 'active') return E.badRequest(res, 'Student is already active.');
 
+    const studentId = doc.id || String(doc._id);
     const now = new Date().toISOString();
     await Students.updateOne(
-      { id: req.params.id, schoolId },
+      { _id: doc._id },
       {
         $set:   { status: 'active', updatedAt: now, updatedBy: userId },
         $unset: { deactivatedAt: '', deactivatedBy: '', deactivationReason: '', deactivationNotes: '' },
       }
     );
 
-    console.log(`[students] Reactivated ${req.params.id} (${doc.firstName} ${doc.lastName}) by ${userId}`);
-    return ok(res, { id: req.params.id, status: 'active' });
+    console.log(`[students] Reactivated ${studentId} (${doc.firstName} ${doc.lastName}) by ${userId}`);
+    return ok(res, { id: studentId, status: 'active' });
   } catch (err) {
     console.error('[students PATCH/:id/reactivate]', err);
     return E.serverError(res);
