@@ -506,13 +506,15 @@ router.post('/bulk-portal-accounts', authMiddleware, PLAN, rbac('students', 'upd
             $set: { password: hash, mustChangePassword: true, isActive: true, updatedAt: now, updatedBy: userId },
           });
         } else {
-          await Users.create({
+          const bulkDoc = {
             id: uuidv4(), schoolId, role: 'student', name, username,
-            email: student.schoolEmail || null,
             password: hash, studentId: student.id,
             isActive: true, mustChangePassword: true,
             createdAt: now, updatedAt: now, createdBy: userId,
-          });
+          };
+          // Omit email when absent — email: null collides on the unique (schoolId, email) index
+          if (student.schoolEmail) bulkDoc.email = student.schoolEmail.toLowerCase();
+          await Users.create(bulkDoc);
         }
         await Students.updateOne({ id: student.id }, { $set: { hasPortalAccount: true, updatedAt: now } });
         created++;
@@ -628,13 +630,15 @@ router.post('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'updat
         },
       });
     } else {
+      // Omit `email` entirely when the student has no school email — never
+      // store email: null, which collides on the unique (schoolId, email)
+      // index for the second email-less account in a school.
       const userDoc = {
         id:                 uuidv4(),
         schoolId,
         role:               'student',
         name,
         username,
-        email:              student.schoolEmail || null,
         password:           hash,
         studentId:          studentDocId,
         isActive:           true,
@@ -643,14 +647,17 @@ router.post('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'updat
         updatedAt:          now,
         createdBy:          userId,
       };
+      if (student.schoolEmail) userDoc.email = student.schoolEmail.toLowerCase();
       try {
         await Users.create(userDoc);
       } catch (createErr) {
         if (createErr.code === 11000) {
-          if (createErr.keyPattern?.email) {
-            // Email already in use — retry without email (username login still works).
-            await Users.create({ ...userDoc, id: uuidv4(), email: null });
-          } else {
+          if (createErr.keyPattern?.email && userDoc.email) {
+            // Email already in use by another account — retry without email
+            // (username login still works).
+            const { email, ...noEmailDoc } = userDoc;
+            await Users.create({ ...noEmailDoc, id: uuidv4() });
+          } else if (createErr.keyPattern?.username) {
             // Username conflict — another account exists with this username.
             // Find it and reset instead of failing.
             const conflicting = await Users.findOne({ schoolId, username }).lean();
@@ -661,6 +668,8 @@ router.post('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'updat
             } else {
               throw createErr;
             }
+          } else {
+            throw createErr;
           }
         } else {
           throw createErr;
@@ -675,7 +684,13 @@ router.post('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'updat
     return ok(res, { username, tempPassword, name, studentId: studentDocId, action: existing ? 'reset' : 'created' });
   } catch (err) {
     console.error('[students POST/:id/portal-account]', err);
-    return E.serverError(res);
+    if (err.code === 11000) {
+      // Surface duplicate-key conflicts clearly instead of an opaque 500 —
+      // tells the admin WHICH constraint blocked the account.
+      const field = Object.keys(err.keyPattern || {}).filter(k => k !== 'schoolId').join(', ') || 'account';
+      return E.conflict(res, `An account with this ${field} already exists in your school. If this student was re-imported, the old account may still exist — contact support or check Users.`);
+    }
+    return E.serverError(res, 'Could not create the portal account. Please try again — if it persists, contact support.');
   }
 });
 

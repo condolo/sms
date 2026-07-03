@@ -141,12 +141,19 @@ const INDEXES = [
 
   /* ── users ──────────────────────────────────────────────────
      CRITICAL: login path queries by schoolId + email on every login.
-     Also: id lookup used by JWT verification path. */
+     Also: id lookup used by JWT verification path.
+
+     NOTE: email/username uniqueness uses PARTIAL indexes, not sparse.
+     A sparse COMPOUND index still indexes any doc that has schoolId,
+     so { email: null } docs collide — only one email-less user per
+     school could exist (student accounts have no email, parent
+     accounts have no username). Partial indexes enforce uniqueness
+     only when the field is an actual string. */
   {
     col: 'users',
     indexes: [
-      { key: { schoolId: 1, email: 1 },    name: 'users_school_email',    unique: true, sparse: true },
-      { key: { schoolId: 1, username: 1 }, name: 'users_school_username', unique: true, sparse: true },
+      { key: { schoolId: 1, email: 1 },    name: 'users_school_email_str',    unique: true, partialFilterExpression: { email: { $type: 'string' } } },
+      { key: { schoolId: 1, username: 1 }, name: 'users_school_username_str', unique: true, partialFilterExpression: { username: { $type: 'string' } } },
       { key: { studentId: 1 },             name: 'users_student_id',      sparse: true },
       { key: { id: 1 },                    name: 'users_id',              unique: true, sparse: true },
     ],
@@ -159,7 +166,7 @@ const INDEXES = [
     col: 'teachers',
     indexes: [
       { key: { schoolId: 1, status: 1 },  name: 'teachers_school_status' },
-      { key: { schoolId: 1, email: 1 },   name: 'teachers_school_email', unique: true, sparse: true },
+      { key: { schoolId: 1, email: 1 },   name: 'teachers_school_email_str', unique: true, partialFilterExpression: { email: { $type: 'string' } } },
       { key: { id: 1 },                   name: 'teachers_id', unique: true, sparse: true },
     ],
   },
@@ -601,6 +608,25 @@ const INDEXES = [
   },
 ];
 
+/* ── One-time index migrations ──────────────────────────────────
+   Old indexes that must be DROPPED before their replacements can be
+   created. MongoDB rejects createIndex when an index with the same
+   key pattern exists with different options (error 85), so simply
+   redefining an index above is not enough — the stale one wins.
+
+   users_school_email / users_school_username / teachers_school_email:
+   were unique+sparse compound indexes. Sparse compound indexes still
+   index docs that have ANY of the keys, so every user (all have
+   schoolId) was indexed — meaning only one email-less user could
+   exist per school. Student portal accounts (no email) and parent
+   accounts (no username) hit E11000 from the second one onward.
+   Replaced by partial indexes that only apply to string values.     */
+const DROP_INDEXES = [
+  { col: 'users',    name: 'users_school_email' },
+  { col: 'users',    name: 'users_school_username' },
+  { col: 'teachers', name: 'teachers_school_email' },
+];
+
 /**
  * Create all defined indexes.
  * Safe to call on every startup — MongoDB ignores already-existing indexes.
@@ -609,17 +635,30 @@ const INDEXES = [
 async function ensureIndexes() {
   const results = { created: 0, skipped: 0, errors: [] };
 
+  // Drop superseded indexes first — ignore "index not found" (already migrated)
+  for (const { col, name } of DROP_INDEXES) {
+    try {
+      await _model(col).collection.dropIndex(name);
+      console.log(`[DB] Dropped superseded index ${col}.${name}`);
+    } catch (err) {
+      // 27 = IndexNotFound — already dropped on a previous startup; anything else is logged
+      if (err.code !== 27 && !/index not found/i.test(err.message || '')) {
+        results.errors.push({ col, name: `drop:${name}`, message: err.message });
+      }
+    }
+  }
+
   for (const { col, indexes } of INDEXES) {
     try {
       const model = _model(col);
-      for (const { key, name, unique = false, sparse = false } of indexes) {
+      for (const { key, name, unique = false, sparse = false, partialFilterExpression } of indexes) {
         try {
-          await model.collection.createIndex(key, {
-            name,
-            unique,
-            sparse,
-            background: true,
-          });
+          const opts = { name, unique, background: true };
+          // sparse and partialFilterExpression are mutually exclusive in MongoDB
+          if (partialFilterExpression) opts.partialFilterExpression = partialFilterExpression;
+          else if (sparse)             opts.sparse = true;
+
+          await model.collection.createIndex(key, opts);
           results.created++;
         } catch (err) {
           // Code 85 = IndexOptionsConflict, 86 = IndexKeySpecsConflict — already exists with different options
