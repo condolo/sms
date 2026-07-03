@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowUp, MessageCircle } from 'lucide-react';
-import { WA_URL } from '@/data/landingData';
+import { useWaUrl } from '@/hooks/useWaUrl';
 
 export default function FloatingActions() {
+  const waUrl    = useWaUrl();
   const [showTop, setShowTop] = useState(false);
 
   useEffect(() => {
@@ -27,7 +28,7 @@ export default function FloatingActions() {
           </motion.button>
         )}
       </AnimatePresence>
-      <a href={WA_URL} target="_blank" rel="noopener noreferrer"
+      <a href={waUrl} target="_blank" rel="noopener noreferrer"
         aria-label="Chat with us on WhatsApp"
         className="w-12 h-12 rounded-full bg-[#25D366] flex items-center justify-center shadow-lg shadow-green-500/30 hover:scale-110 transition-all">
         <MessageCircle size={22} className="text-white" />

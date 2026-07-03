@@ -393,8 +393,11 @@ body {
   text-transform: capitalize;
 }
 
+.plan-pill.base       { background: #e0f2fe; color: #0369a1; }
 .plan-pill.core       { background: #e0f2fe; color: #0369a1; }
+.plan-pill.student    { background: #eef0ff; color: #4757e8; }
 .plan-pill.standard   { background: #eef0ff; color: #4757e8; }
+.plan-pill.family     { background: #faf5ff; color: #7c3aed; }
 .plan-pill.premium    { background: #faf5ff; color: #7c3aed; }
 .plan-pill.enterprise { background: #f0fdf4; color: #166534; }
 .plan-pill.trial      { background: #fff7ed; color: #c2410c; }

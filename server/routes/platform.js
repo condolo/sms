@@ -9,6 +9,7 @@ const bcrypt     = require('bcryptjs');
 const jwt        = require('jsonwebtoken');
 const rateLimit  = require('express-rate-limit');
 const { platformSession } = require('../middleware/auth');
+const { invalidatePlanCache } = require('../middleware/plan');
 const AuditService      = require('../services/audit');
 const { sign } = require('../utils/jwt');
 const email    = require('../utils/email');
@@ -313,6 +314,8 @@ router.patch('/schools/:id', async (req, res) => {
 
     const doc = await School.findOneAndUpdate(query, { $set: update }, { new: true }).lean();
     if (!doc) return res.status(404).json({ error: 'School not found' });
+    // Bust plan cache immediately so active sessions see the new plan right away
+    if (update.plan && doc.id) invalidatePlanCache(doc.id);
     res.json(doc);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -534,33 +537,42 @@ router.delete('/schools/:id', async (req, res) => {
 /* GET /api/platform/stats — MRR, school counts, plan breakdown */
 router.get('/stats', async (req, res) => {
   try {
-    const School  = _model('schools');
-    const Student = _model('students');
+    const School   = _model('schools');
+    const Student  = _model('students');
+    const Snapshot = _model('billing_snapshots');
 
-    const [allSchools, totalStudents] = await Promise.all([
-      School.find({}).select('plan isActive').lean(),   // only fields needed for MRR calc
-      Student.countDocuments({ status: 'active' })
+    const [allSchools, totalStudents, recentSnapshots] = await Promise.all([
+      School.find({}).select('plan isActive id').lean(),
+      Student.countDocuments({ status: 'active' }),
+      // Most recent billing snapshot per school — actual invoiced amounts
+      Snapshot.find({ status: { $ne: 'cancelled' } })
+        .sort({ generatedAt: -1 })
+        .limit(500)
+        .lean(),
     ]);
 
-    const PLAN_PRICE = {
-      base: 15000,     core: 15000,       // tier 1
-      student: 35000,  standard: 35000,   // tier 2
-      family: 65000,   premium: 65000,    // tier 3
-      enterprise: 250000,                 // tier 4
-    };
-    const byPlan = {};
-    let mrr = 0;
+    // MRR = latest termly invoice per school ÷ 4 months (one term ≈ 4 months)
+    const latestBySchool = {};
+    recentSnapshots.forEach(s => {
+      if (!latestBySchool[s.schoolId]) latestBySchool[s.schoolId] = s;
+    });
+    const mrr = Object.values(latestBySchool).reduce((sum, s) => {
+      return sum + Math.round((s.totalAmount || 0) / 4);
+    }, 0);
 
+    const byPlan = {};
     allSchools.forEach(s => {
-      if (!byPlan[s.plan]) byPlan[s.plan] = 0;
-      byPlan[s.plan]++;
-      if (s.isActive) mrr += PLAN_PRICE[s.plan] || 0;
+      const plan = s.plan || 'base';
+      if (!byPlan[plan]) byPlan[plan] = 0;
+      byPlan[plan]++;
     });
 
     res.json({
-      totalSchools: allSchools.length,
+      totalSchools:  allSchools.length,
       activeSchools: allSchools.filter(s => s.isActive).length,
-      totalStudents, mrr, byPlan
+      totalStudents,
+      mrr,
+      byPlan,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

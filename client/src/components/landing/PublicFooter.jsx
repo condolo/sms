@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { ArrowRight, MessageCircle, ShieldCheck } from 'lucide-react';
-import { WA_URL } from '@/data/landingData';
+import { useWaUrl } from '@/hooks/useWaUrl';
 
 const COLS = [
   {
@@ -48,6 +48,7 @@ const COLS = [
 ];
 
 export default function PublicFooter() {
+  const waUrl = useWaUrl();
   return (
     <footer className="bg-slate-950 text-slate-400">
       <div className="h-px bg-gradient-to-r from-transparent via-slate-800 to-transparent" />
@@ -71,7 +72,7 @@ export default function PublicFooter() {
                 <span className="w-8 h-8 rounded-lg bg-slate-800 group-hover:bg-slate-700 flex items-center justify-center text-[11px] font-bold transition-colors">@</span>
                 hello@msingi.io
               </a>
-              <a href={WA_URL} target="_blank" rel="noopener noreferrer"
+              <a href={waUrl} target="_blank" rel="noopener noreferrer"
                 className="flex items-center gap-3 text-sm text-slate-500 hover:text-white transition-colors group">
                 <span className="w-8 h-8 rounded-lg bg-slate-800 group-hover:bg-[#25D366]/20 flex items-center justify-center transition-colors">
                   <MessageCircle size={13} className="text-[#25D366]" />

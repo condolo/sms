@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Msingi — Dashboard Screenshots</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',sans-serif;background:#f8fafc;color:#1e293b}
+
+/* NAV */
+.nav{position:fixed;top:0;left:0;right:0;background:#0f172a;z-index:100;display:flex;align-items:center;gap:8px;padding:10px 20px;flex-wrap:wrap}
+.nav a{color:#c7d2fe;text-decoration:none;font-size:12px;font-weight:500;padding:5px 12px;border-radius:6px;border:1px solid #2e2a6e;white-space:nowrap}
+.nav a:hover,.nav a.active{background:#4338ca;color:#fff;border-color:#4338ca}
+.nav-label{color:#818cf8;font-size:11px;font-weight:600;margin-right:4px}
+
+/* SHELL */
+.screen{display:none;width:1280px;height:800px;overflow:hidden;position:relative;background:#f8fafc}
+.screen.active{display:flex}
+.wrapper{margin-top:44px;display:flex;width:1280px;height:756px}
+
+/* SIDEBAR */
+.sidebar{width:220px;background:#1e1b4b;display:flex;flex-direction:column;flex-shrink:0;height:100%}
+.sb-brand{padding:20px 16px 16px;border-bottom:1px solid #2e2a6e}
+.sb-logo{display:flex;align-items:center;gap:10px}
+.sb-icon{width:34px;height:34px;background:linear-gradient(135deg,#6366f1,#4338ca);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;color:#fff;font-weight:800}
+.sb-name{font-size:15px;font-weight:700;color:#fff}
+.sb-school{font-size:11px;color:#818cf8;margin-top:2px}
+.sb-nav{padding:12px 8px;flex:1;overflow-y:auto}
+.sb-section{font-size:10px;font-weight:600;color:#818cf8;text-transform:uppercase;letter-spacing:.06em;padding:8px 8px 4px}
+.sb-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;cursor:pointer;margin-bottom:1px;color:#c7d2fe;font-size:13px;font-weight:500}
+.sb-item:hover{background:#2e2a6e}
+.sb-item.active{background:#4338ca;color:#fff}
+.sb-item svg{width:15px;height:15px;flex-shrink:0;opacity:.85}
+.sb-badge{margin-left:auto;background:#ef4444;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px}
+.sb-footer{padding:12px 8px;border-top:1px solid #2e2a6e}
+.sb-user{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px}
+.sb-avatar{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;flex-shrink:0}
+.sb-uname{font-size:12px;font-weight:600;color:#e2e8f0}
+.sb-urole{font-size:10px;color:#818cf8}
+
+/* MAIN */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.topbar{background:#fff;border-bottom:1px solid #e2e8f0;padding:0 24px;display:flex;align-items:center;height:56px;gap:16px;flex-shrink:0}
+.topbar-title{font-size:16px;font-weight:700;color:#0f172a;flex:1}
+.topbar-badge{background:#f1f5f9;color:#64748b;font-size:12px;padding:4px 10px;border-radius:20px;font-weight:500}
+.topbar-actions{display:flex;align-items:center;gap:8px}
+.tb-btn{padding:7px 14px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;border:none}
+.tb-btn.primary{background:#4f46e5;color:#fff}
+.tb-btn.ghost{background:#f1f5f9;color:#475569}
+.tb-icon{width:34px;height:34px;border-radius:7px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#64748b}
+.content{flex:1;overflow-y:auto;padding:20px 24px}
+
+/* CARDS */
+.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
+.stat-card{background:#fff;border-radius:10px;padding:18px;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.stat-label{font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px}
+.stat-value{font-size:26px;font-weight:800;color:#0f172a;line-height:1}
+.stat-sub{font-size:12px;color:#64748b;margin-top:6px}
+.stat-up{color:#22c55e;font-weight:600}
+.stat-down{color:#ef4444;font-weight:600}
+.stat-icon{width:38px;height:38px;border-radius:9px;display:flex;align-items:center;justify-content:center;margin-bottom:12px}
+
+/* GRID */
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.grid-3{display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-bottom:14px}
+.card{background:#fff;border-radius:10px;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,.05);overflow:hidden}
+.card-head{padding:14px 18px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between}
+.card-title{font-size:13px;font-weight:700;color:#0f172a}
+.card-sub{font-size:11px;color:#94a3b8}
+.card-body{padding:16px 18px}
+
+/* TABLE */
+table{width:100%;border-collapse:collapse}
+th{font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.04em;padding:8px 12px;text-align:left;background:#f8fafc;border-bottom:1px solid #e2e8f0}
+td{padding:9px 12px;font-size:12px;color:#334155;border-bottom:1px solid #f1f5f9}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#fafbff}
+.pill{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600}
+.pill.green{background:#dcfce7;color:#16a34a}
+.pill.red{background:#fee2e2;color:#dc2626}
+.pill.yellow{background:#fef9c3;color:#ca8a04}
+.pill.blue{background:#dbeafe;color:#2563eb}
+.pill.purple{background:#ede9fe;color:#7c3aed}
+.pill.gray{background:#f1f5f9;color:#475569}
+
+/* BAR CHART */
+.bar-chart{display:flex;align-items:flex-end;gap:6px;height:100px;padding:4px 0}
+.bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px}
+.bar{width:100%;border-radius:4px 4px 0 0;transition:.3s}
+.bar-label{font-size:10px;color:#94a3b8;text-align:center}
+.bar-val{font-size:10px;font-weight:600;color:#475569}
+
+/* DONUT PLACEHOLDER */
+.donut{width:100px;height:100px;border-radius:50%;margin:0 auto;position:relative}
+
+/* PROGRESS BAR */
+.progress-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.progress-label{font-size:12px;color:#475569;width:100px;flex-shrink:0}
+.progress-bar{flex:1;height:7px;background:#f1f5f9;border-radius:10px;overflow:hidden}
+.progress-fill{height:100%;border-radius:10px}
+.progress-val{font-size:12px;font-weight:600;color:#0f172a;width:36px;text-align:right;flex-shrink:0}
+
+/* TIMELINE */
+.timeline-item{display:flex;gap:12px;margin-bottom:12px}
+.tl-dot{width:8px;height:8px;border-radius:50%;margin-top:5px;flex-shrink:0}
+.tl-body{flex:1}
+.tl-title{font-size:12px;font-weight:600;color:#1e293b}
+.tl-meta{font-size:11px;color:#94a3b8;margin-top:1px}
+
+/* AVATAR ROW */
+.avatar{width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0}
+
+/* TIMETABLE */
+.tt-grid{display:grid;grid-template-columns:60px repeat(5,1fr);gap:2px;font-size:11px}
+.tt-head{background:#f8fafc;padding:6px;text-align:center;font-weight:600;color:#64748b;border-radius:4px}
+.tt-time{padding:4px 6px;font-size:10px;color:#94a3b8;display:flex;align-items:center;justify-content:flex-end}
+.tt-cell{padding:5px 7px;border-radius:6px;min-height:46px;display:flex;flex-direction:column;justify-content:center}
+.tt-subj{font-size:11px;font-weight:600;color:#1e293b}
+.tt-room{font-size:10px;color:#64748b;margin-top:1px}
+.tt-teacher{font-size:10px;color:#94a3b8}
+.tt-empty{background:#f8fafc;border-radius:6px;min-height:46px}
+
+/* METRIC BIG */
+.big-metric{text-align:center;padding:16px}
+.big-num{font-size:40px;font-weight:800;color:#0f172a;line-height:1}
+.big-label{font-size:12px;color:#64748b;margin-top:4px}
+.big-delta{font-size:13px;font-weight:600;margin-top:6px}
+
+/* ADMISSION FUNNEL */
+.funnel-step{margin-bottom:10px}
+.funnel-label{display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px}
+.funnel-name{font-weight:500;color:#334155}
+.funnel-cnt{font-weight:700;color:#0f172a}
+</style>
+</head>
+<body>
+
+<!-- NAVIGATION -->
+<div class="nav">
+  <span class="nav-label">SCREENS:</span>
+  <a href="#overview" class="active" onclick="show('overview',this)">① Overview</a>
+  <a href="#attendance" onclick="show('attendance',this)">② Attendance</a>
+  <a href="#grades" onclick="show('grades',this)">③ Grades & Reports</a>
+  <a href="#finance" onclick="show('finance',this)">④ Finance</a>
+  <a href="#timetable" onclick="show('timetable',this)">⑤ Timetable</a>
+  <a href="#admissions" onclick="show('admissions',this)">⑥ Admissions</a>
+  <a href="#students" onclick="show('students',this)">⑦ Students</a>
+  <a href="#messaging" onclick="show('messaging',this)">⑧ Messaging</a>
+</div>
+
+<!-- ══ SCREEN 1: OVERVIEW ══════════════════════════════════════════ -->
+<div class="screen active" id="s-overview">
+<div class="wrapper">
+  <!-- sidebar -->
+  <div class="sidebar">
+    <div class="sb-brand">
+      <div class="sb-logo"><div class="sb-icon">M</div><div><div class="sb-name">Msingi</div><div class="sb-school">Greenfield Academy</div></div></div>
+    </div>
+    <div class="sb-nav">
+      <div class="sb-section">Main</div>
+      <div class="sb-item active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Dashboard
+      </div>
+      <div class="sb-section">Academics</div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Students</div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Attendance</div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Grades</div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Timetable</div>
+      <div class="sb-section">Operations</div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Finance</div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Messaging <span class="sb-badge">4</span></div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>Admissions</div>
+    </div>
+    <div class="sb-footer">
+      <div class="sb-user"><div class="sb-avatar">JM</div><div><div class="sb-uname">James Mwangi</div><div class="sb-urole">Superadmin</div></div></div>
+    </div>
+  </div>
+  <!-- main -->
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-title">Good morning, James 👋</div>
+      <span class="topbar-badge">Term 2 · 2025/2026</span>
+      <div class="topbar-actions">
+        <button class="tb-btn ghost">Reports</button>
+        <button class="tb-btn primary">+ Quick Action</button>
+      </div>
+    </div>
+    <div class="content">
+      <!-- stats -->
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-icon" style="background:#ede9fe"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+          <div class="stat-label">Total Students</div>
+          <div class="stat-value">1,247</div>
+          <div class="stat-sub"><span class="stat-up">↑ 43</span> enrolled this term</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background:#dcfce7"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2"><polyline points="22 4 12 14.01 9 11.01"/></svg></div>
+          <div class="stat-label">Today's Attendance</div>
+          <div class="stat-value">94.2%</div>
+          <div class="stat-sub"><span class="stat-up">↑ 1.8%</span> vs yesterday</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background:#dbeafe"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+          <div class="stat-label">Fees Collected</div>
+          <div class="stat-value">KSh 4.2M</div>
+          <div class="stat-sub"><span class="stat-up">87%</span> of term target</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background:#fef9c3"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ca8a04" stroke-width="2"><path d="M22 17H2a3 3 0 0 0 3-3V9a7 7 0 0 1 14 0v5a3 3 0 0 0 3 3z"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></div>
+          <div class="stat-label">Pending Actions</div>
+          <div class="stat-value">12</div>
+          <div class="stat-sub"><span class="stat-down">4 urgent</span> require attention</div>
+        </div>
+      </div>
+
+      <div class="grid-3">
+        <!-- attendance chart -->
+        <div class="card">
+          <div class="card-head"><div><div class="card-title">Weekly Attendance</div><div class="card-sub">Mon–Fri this week</div></div></div>
+          <div class="card-body">
+            <div class="bar-chart">
+              <div class="bar-wrap"><div class="bar-val">96%</div><div class="bar" style="height:96px;background:#4f46e5;opacity:.85"></div><div class="bar-label">Mon</div></div>
+              <div class="bar-wrap"><div class="bar-val">94%</div><div class="bar" style="height:94px;background:#4f46e5;opacity:.85"></div><div class="bar-label">Tue</div></div>
+              <div class="bar-wrap"><div class="bar-val">91%</div><div class="bar" style="height:91px;background:#4f46e5;opacity:.85"></div><div class="bar-label">Wed</div></div>
+              <div class="bar-wrap"><div class="bar-val">95%</div><div class="bar" style="height:95px;background:#4f46e5;opacity:.85"></div><div class="bar-label">Thu</div></div>
+              <div class="bar-wrap"><div class="bar-val">94%</div><div class="bar" style="height:94px;background:#6366f1"></div><div class="bar-label">Fri</div></div>
+            </div>
+          </div>
+        </div>
+        <!-- quick stats -->
+        <div class="card">
+          <div class="card-head"><div class="card-title">Term Overview</div></div>
+          <div class="card-body" style="padding-top:12px">
+            <div class="progress-row"><span class="progress-label">Fees Collected</span><div class="progress-bar"><div class="progress-fill" style="width:87%;background:#4f46e5"></div></div><span class="progress-val">87%</span></div>
+            <div class="progress-row"><span class="progress-label">Syllabus Coverage</span><div class="progress-bar"><div class="progress-fill" style="width:72%;background:#22c55e"></div></div><span class="progress-val">72%</span></div>
+            <div class="progress-row"><span class="progress-label">Assignments Graded</span><div class="progress-bar"><div class="progress-fill" style="width:91%;background:#f59e0b"></div></div><span class="progress-val">91%</span></div>
+            <div class="progress-row"><span class="progress-label">Reports Released</span><div class="progress-bar"><div class="progress-fill" style="width:0%;background:#ef4444"></div></div><span class="progress-val">—</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- recent activity -->
+      <div class="card">
+        <div class="card-head"><div class="card-title">Recent Activity</div><span class="topbar-badge">Today</span></div>
+        <div class="card-body" style="padding-top:12px">
+          <div class="timeline-item"><div class="tl-dot" style="background:#22c55e"></div><div class="tl-body"><div class="tl-title">Fees payment received — KSh 18,500 · David Otieno (Form 3A)</div><div class="tl-meta">M-Pesa · 2 minutes ago</div></div></div>
+          <div class="timeline-item"><div class="tl-dot" style="background:#4f46e5"></div><div class="tl-body"><div class="tl-title">Attendance recorded — Form 2B · 38/40 present</div><div class="tl-meta">Homeroom · 7:45 AM</div></div></div>
+          <div class="timeline-item"><div class="tl-dot" style="background:#f59e0b"></div><div class="tl-body"><div class="tl-title">New admission enquiry — Grace Wanjiku (Form 1)</div><div class="tl-meta">Online form · 6:30 AM</div></div></div>
+          <div class="timeline-item"><div class="tl-dot" style="background:#6366f1"></div><div class="tl-body"><div class="tl-title">Report cards approved for release — Form 4 (End of Term 1)</div><div class="tl-meta">Principal Okello · Yesterday, 5:12 PM</div></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══ SCREEN 2: ATTENDANCE ════════════════════════════════════════ -->
+<div class="screen" id="s-attendance">
+<div class="wrapper">
+  <div class="sidebar">
+    <div class="sb-brand"><div class="sb-logo"><div class="sb-icon">M</div><div><div class="sb-name">Msingi</div><div class="sb-school">Greenfield Academy</div></div></div></div>
+    <div class="sb-nav">
+      <div class="sb-section">Academics</div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Dashboard</div>
+      <div class="sb-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Attendance</div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Grades</div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Timetable</div>
+    </div>
+    <div class="sb-footer"><div class="sb-user"><div class="sb-avatar">JM</div><div><div class="sb-uname">James Mwangi</div><div class="sb-urole">Superadmin</div></div></div></div>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-title">Attendance</div>
+      <span class="topbar-badge">Thursday, 3 July 2025</span>
+      <div class="topbar-actions"><button class="tb-btn ghost">Export</button><button class="tb-btn primary">Mark Attendance</button></div>
+    </div>
+    <div class="content">
+      <div class="stats-row">
+        <div class="stat-card"><div class="stat-label">School-wide</div><div class="stat-value" style="color:#22c55e">94.2%</div><div class="stat-sub">1,174 / 1,247 present</div></div>
+        <div class="stat-card"><div class="stat-label">Absent Today</div><div class="stat-value" style="color:#ef4444">73</div><div class="stat-sub">14 excused · 59 unexcused</div></div>
+        <div class="stat-card"><div class="stat-label">Late Arrivals</div><div class="stat-value" style="color:#f59e0b">18</div><div class="stat-sub">After 7:30 AM cut-off</div></div>
+        <div class="stat-card"><div class="stat-label">Monthly Average</div><div class="stat-value">92.8%</div><div class="stat-sub"><span class="stat-up">↑ 0.4%</span> vs last month</div></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><div class="card-title">Class Attendance Today</div></div>
+          <table>
+            <thead><tr><th>Class</th><th>Present</th><th>Absent</th><th>Rate</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr><td><b>Form 1A</b></td><td>40</td><td>2</td><td>95.2%</td><td><span class="pill green">Recorded</span></td></tr>
+              <tr><td><b>Form 1B</b></td><td>38</td><td>4</td><td>90.5%</td><td><span class="pill green">Recorded</span></td></tr>
+              <tr><td><b>Form 2A</b></td><td>42</td><td>1</td><td>97.7%</td><td><span class="pill green">Recorded</span></td></tr>
+              <tr><td><b>Form 2B</b></td><td>38</td><td>3</td><td>92.7%</td><td><span class="pill green">Recorded</span></td></tr>
+              <tr><td><b>Form 3A</b></td><td>37</td><td>5</td><td>88.1%</td><td><span class="pill yellow">Pending</span></td></tr>
+              <tr><td><b>Form 3B</b></td><td>39</td><td>2</td><td>95.1%</td><td><span class="pill green">Recorded</span></td></tr>
+              <tr><td><b>Form 4A</b></td><td>35</td><td>6</td><td>85.4%</td><td><span class="pill red">Not Taken</span></td></tr>
+              <tr><td><b>Form 4B</b></td><td>36</td><td>4</td><td>90.0%</td><td><span class="pill green">Recorded</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="card-title">30-Day Trend</div></div>
+          <div class="card-body">
+            <div class="bar-chart" style="height:130px">
+              <div class="bar-wrap"><div class="bar" style="height:90px;background:#e0e7ff;border-radius:3px 3px 0 0"></div><div class="bar-label">3 Jun</div></div>
+              <div class="bar-wrap"><div class="bar" style="height:88px;background:#e0e7ff;border-radius:3px 3px 0 0"></div><div class="bar-label"></div></div>
+              <div class="bar-wrap"><div class="bar" style="height:93px;background:#c7d2fe;border-radius:3px 3px 0 0"></div><div class="bar-label"></div></div>
+              <div class="bar-wrap"><div class="bar" style="height:91px;background:#c7d2fe;border-radius:3px 3px 0 0"></div><div class="bar-label"></div></div>
+              <div class="bar-wrap"><div class="bar" style="height:94px;background:#a5b4fc;border-radius:3px 3px 0 0"></div><div class="bar-label"></div></div>
+              <div class="bar-wrap"><div class="bar" style="height:89px;background:#a5b4fc;border-radius:3px 3px 0 0"></div><div class="bar-label"></div></div>
+              <div class="bar-wrap"><div class="bar" style="height:95px;background:#818cf8;border-radius:3px 3px 0 0"></div><div class="bar-label"></div></div>
+              <div class="bar-wrap"><div class="bar" style="height:96px;background:#818cf8;border-radius:3px 3px 0 0"></div><div class="bar-label"></div></div>
+              <div class="bar-wrap"><div class="bar" style="height:93px;background:#6366f1;border-radius:3px 3px 0 0"></div><div class="bar-label"></div></div>
+              <div class="bar-wrap"><div class="bar" style="height:94px;background:#4f46e5;border-radius:3px 3px 0 0"></div><div class="bar-label">3 Jul</div></div>
+            </div>
+            <div style="margin-top:16px">
+              <div class="progress-row"><span class="progress-label">Form 1</span><div class="progress-bar"><div class="progress-fill" style="width:95%;background:#4f46e5"></div></div><span class="progress-val">95%</span></div>
+              <div class="progress-row"><span class="progress-label">Form 2</span><div class="progress-bar"><div class="progress-fill" style="width:93%;background:#6366f1"></div></div><span class="progress-val">93%</span></div>
+              <div class="progress-row"><span class="progress-label">Form 3</span><div class="progress-bar"><div class="progress-fill" style="width:91%;background:#818cf8"></div></div><span class="progress-val">91%</span></div>
+              <div class="progress-row"><span class="progress-label">Form 4</span><div class="progress-bar"><div class="progress-fill" style="width:88%;background:#a5b4fc"></div></div><span class="progress-val">88%</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══ SCREEN 3: GRADES ════════════════════════════════════════════ -->
+<div class="screen" id="s-grades">
+<div class="wrapper">
+  <div class="sidebar">
+    <div class="sb-brand"><div class="sb-logo"><div class="sb-icon">M</div><div><div class="sb-name">Msingi</div><div class="sb-school">Greenfield Academy</div></div></div></div>
+    <div class="sb-nav">
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Dashboard</div>
+      <div class="sb-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Grades & Reports</div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2"/></svg>Attendance</div>
+    </div>
+    <div class="sb-footer"><div class="sb-user"><div class="sb-avatar">JM</div><div><div class="sb-uname">James Mwangi</div><div class="sb-urole">Superadmin</div></div></div></div>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-title">Grades & Report Cards</div>
+      <span class="topbar-badge">Term 2 · 2025/2026</span>
+      <div class="topbar-actions"><button class="tb-btn ghost">Generate Reports</button><button class="tb-btn primary">Release to Parents</button></div>
+    </div>
+    <div class="content">
+      <div class="stats-row">
+        <div class="stat-card"><div class="stat-label">Subjects Graded</div><div class="stat-value">9/9</div><div class="stat-sub" style="color:#22c55e">All complete for Form 4</div></div>
+        <div class="stat-card"><div class="stat-label">Class Average</div><div class="stat-value">68.4%</div><div class="stat-sub"><span class="stat-up">↑ 3.2%</span> vs Term 1</div></div>
+        <div class="stat-card"><div class="stat-label">Top Score</div><div class="stat-value">97.5%</div><div class="stat-sub">Faith Njeri · Mathematics</div></div>
+        <div class="stat-card"><div class="stat-label">Reports Released</div><div class="stat-value">0/4</div><div class="stat-sub">Pending principal approval</div></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><div class="card-title">Form 4A — End of Term Scores</div><span class="pill blue">CBC · KCSE Track</span></div>
+          <table>
+            <thead><tr><th>Student</th><th>Maths</th><th>English</th><th>Biology</th><th>Physics</th><th>Average</th><th>Grade</th></tr></thead>
+            <tbody>
+              <tr><td><b>Faith Njeri</b></td><td>97</td><td>88</td><td>92</td><td>95</td><td><b>93.0</b></td><td><span class="pill green">A</span></td></tr>
+              <tr><td><b>Kevin Ouma</b></td><td>82</td><td>79</td><td>85</td><td>80</td><td><b>81.5</b></td><td><span class="pill blue">B+</span></td></tr>
+              <tr><td><b>Amina Hassan</b></td><td>78</td><td>84</td><td>76</td><td>72</td><td><b>77.5</b></td><td><span class="pill blue">B</span></td></tr>
+              <tr><td><b>Peter Kamau</b></td><td>65</td><td>71</td><td>68</td><td>63</td><td><b>66.8</b></td><td><span class="pill yellow">C+</span></td></tr>
+              <tr><td><b>Sarah Wangui</b></td><td>88</td><td>91</td><td>87</td><td>89</td><td><b>88.8</b></td><td><span class="pill green">A-</span></td></tr>
+              <tr><td><b>Brian Muthoni</b></td><td>54</td><td>62</td><td>58</td><td>51</td><td><b>56.3</b></td><td><span class="pill yellow">C</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="card-title">Grade Distribution</div></div>
+          <div class="card-body">
+            <div class="progress-row"><span class="progress-label">A (80–100%)</span><div class="progress-bar"><div class="progress-fill" style="width:18%;background:#22c55e"></div></div><span class="progress-val">18%</span></div>
+            <div class="progress-row"><span class="progress-label">B (65–79%)</span><div class="progress-bar"><div class="progress-fill" style="width:35%;background:#4f46e5"></div></div><span class="progress-val">35%</span></div>
+            <div class="progress-row"><span class="progress-label">C (50–64%)</span><div class="progress-bar"><div class="progress-fill" style="width:30%;background:#f59e0b"></div></div><span class="progress-val">30%</span></div>
+            <div class="progress-row"><span class="progress-label">D (40–49%)</span><div class="progress-bar"><div class="progress-fill" style="width:12%;background:#f97316"></div></div><span class="progress-val">12%</span></div>
+            <div class="progress-row"><span class="progress-label">E (Below 40%)</span><div class="progress-bar"><div class="progress-fill" style="width:5%;background:#ef4444"></div></div><span class="progress-val">5%</span></div>
+            <div style="margin-top:16px;padding:12px;background:#f8fafc;border-radius:8px">
+              <div style="font-size:11px;color:#64748b;margin-bottom:6px;font-weight:600">SUBJECT AVERAGES</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+                <div style="font-size:12px;color:#334155">Mathematics <b style="float:right;color:#4f46e5">72.4%</b></div>
+                <div style="font-size:12px;color:#334155">English <b style="float:right;color:#4f46e5">74.1%</b></div>
+                <div style="font-size:12px;color:#334155">Biology <b style="float:right;color:#4f46e5">69.8%</b></div>
+                <div style="font-size:12px;color:#334155">Physics <b style="float:right;color:#4f46e5">67.2%</b></div>
+                <div style="font-size:12px;color:#334155">Chemistry <b style="float:right;color:#4f46e5">65.9%</b></div>
+                <div style="font-size:12px;color:#334155">History <b style="float:right;color:#4f46e5">71.3%</b></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══ SCREEN 4: FINANCE ═══════════════════════════════════════════ -->
+<div class="screen" id="s-finance">
+<div class="wrapper">
+  <div class="sidebar">
+    <div class="sb-brand"><div class="sb-logo"><div class="sb-icon">M</div><div><div class="sb-name">Msingi</div><div class="sb-school">Greenfield Academy</div></div></div></div>
+    <div class="sb-nav">
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Dashboard</div>
+      <div class="sb-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Finance</div>
+      <div class="sb-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>Students</div>
+    </div>
+    <div class="sb-footer"><div class="sb-user"><div class="sb-avatar">JM</div><div><div class="sb-uname">James Mwangi</div><div class="sb-urole">Superadmin</div></div></div></div>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-title">Finance & Billing</div>
+      <span class="topbar-badge">Term 2 · 2025/2026</span>
+      <div class="topbar-actions"><button class="tb-btn ghost">Download Statement</button><button class="tb-btn primary">Record Payment</button></div>
+    </div>
+    <div class="content">
+      <div class="stats-row">
+        <div class="stat-card"><div class="stat-label">Term Target</div><div class="stat-value">KSh 4.8M</div><div class="stat-sub">1,247 students billed</div></div>
+        <div class="stat-card"><div class="stat-label">Collected</div><div class="stat-value" style="color:#22c55e">KSh 4.18M</div><div class="stat-sub"><span class="stat-up">87%</span> collection rate</div></div>
+        <div class="stat-card"><div class="stat-label">Outstanding</div><div class="stat-value" style="color:#ef4444">KSh 624K</div><div class="stat-sub">342 students with balance</div></div>
+        <div class="stat-card"><div class="stat-label">M-Pesa Today</div><div class="stat-value">KSh 42,500</div><div class="stat-sub">14 transactions</div></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><div class="card-title">Recent Transactions</div><span class="pill green">Live</span></div>
+          <table>
+            <thead><tr><th>Student</th><th>Class</th><th>Amount</th><th>Method</th><th>Time</th></tr></thead>
+            <tbody>
+              <tr><td><b>David Otieno</b></td><td>Form 3A</td><td><b>KSh 18,500</b></td><td><span class="pill green">M-Pesa</span></td><td>09:14 AM</td></tr>
+              <tr><td><b>Mary Akinyi</b></td><td>Form 1B</td><td><b>KSh 22,000</b></td><td><span class="pill blue">Bank</span></td><td>08:52 AM</td></tr>
+              <tr><td><b>John Kipchoge</b></td><td>Form 2A</td><td><b>KSh 15,000</b></td><td><span class="pill green">M-Pesa</span></td><td>08:30 AM</td></tr>
+              <tr><td><b>Fatuma Omar</b></td><td>Form 4B</td><td><b>KSh 5,500</b></td><td><span class="pill green">M-Pesa</span></td><td>07:55 AM</td></tr>
+              <tr><td><b>Daniel Mugo</b></td><td>Form 1A</td><td><b>KSh 22,000</b></td><td><span class="pill purple">Cash</span></td><td>07:40 AM</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="card-title">Collection by Form</div></div>
+          <div class="card-body">
+            <div class="progress-row"><span class="progress-label">Form 1 (2 classes)</span><div class="progress-bar"><div class="progress-fill" style="width:91%;background:#22c55e"></div></div><span class="progress-val">91%</span></div>
+            <div class="progress-row"><span class="progress-label">Form 2 (2 classes)</span><div class="progress-bar"><div class="progress-fill" style="width:88%;background:#4f46e5"></div></div><span class="progress-val">88%</span></div>
+            <div class="progress-row"><span class="progress-label">Form 3 (2 classes)</span><div class="progress-bar"><div class="progress-fill" style="width:85%;background:#f59e0b"></div></div><span class="progress-val">85%</span></div>
+            <div class="progress-row"><span class="progress-label">Form 4 (2 classes)</span><div class="progress-bar"><div class="progress-fill" style="width:79%;background:#ef4444"></div></div><span class="progress-val">79%</span></div>
+            <div style="margin-top:12px;padding:10px;background:#f0fdf4;border-radius:8px;border:1px solid #bbf7d0">
+              <div style="font-size:12px;font-weight:600;color:#16a34a">✓ M-Pesa STK Push Active</div>
+              <div style="font-size:11px;color:#15803d;margin-top:2px">Parents can pay directly from SMS prompt · Paybill 522522</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══ SCREEN 5: TIMETABLE ════════════════════════════════════════ -->
+<div class="screen" id="s-timetable">
+<div class="wrapper">
+  <div class="sidebar">
+    <div class="sb-brand"><div class="sb-logo"><div class="sb-icon">M</div><div><div class="sb-name">Msingi</div><div class="sb-school">Greenfield Academy</div></div></div></div>
+    <div class="sb-nav">
+      <div class="sb-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Timetable</div>
+    </div>
+    <div class="sb-footer"><div class="sb-user"><div class="sb-avatar">JM</div><div><div class="sb-uname">James Mwangi</div><div class="sb-urole">Superadmin</div></div></div></div>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-title">School Timetable</div>
+      <span class="topbar-badge">Form 3A · Week 8</span>
+      <div class="topbar-actions"><button class="tb-btn ghost">Print</button><button class="tb-btn primary">Edit Schedule</button></div>
+    </div>
+    <div class="content" style="padding:16px 20px">
+      <div class="tt-grid">
+        <div class="tt-head"></div>
+        <div class="tt-head">Monday</div><div class="tt-head">Tuesday</div><div class="tt-head">Wednesday</div><div class="tt-head">Thursday</div><div class="tt-head">Friday</div>
+        <!-- Row 1 -->
+        <div class="tt-time">7:30</div>
+        <div class="tt-cell" style="background:#ede9fe"><div class="tt-subj">Mathematics</div><div class="tt-room">Room 12</div><div class="tt-teacher">Mr. Odhiambo</div></div>
+        <div class="tt-cell" style="background:#dbeafe"><div class="tt-subj">English</div><div class="tt-room">Room 12</div><div class="tt-teacher">Ms. Wambui</div></div>
+        <div class="tt-cell" style="background:#dcfce7"><div class="tt-subj">Biology</div><div class="tt-room">Lab 2</div><div class="tt-teacher">Mr. Kipng'eno</div></div>
+        <div class="tt-cell" style="background:#ede9fe"><div class="tt-subj">Mathematics</div><div class="tt-room">Room 12</div><div class="tt-teacher">Mr. Odhiambo</div></div>
+        <div class="tt-cell" style="background:#fef9c3"><div class="tt-subj">History</div><div class="tt-room">Room 12</div><div class="tt-teacher">Ms. Njoroge</div></div>
+        <!-- Row 2 -->
+        <div class="tt-time">8:45</div>
+        <div class="tt-cell" style="background:#dbeafe"><div class="tt-subj">English</div><div class="tt-room">Room 12</div><div class="tt-teacher">Ms. Wambui</div></div>
+        <div class="tt-cell" style="background:#fee2e2"><div class="tt-subj">Chemistry</div><div class="tt-room">Lab 1</div><div class="tt-teacher">Dr. Mutua</div></div>
+        <div class="tt-cell" style="background:#ede9fe"><div class="tt-subj">Mathematics</div><div class="tt-room">Room 12</div><div class="tt-teacher">Mr. Odhiambo</div></div>
+        <div class="tt-cell" style="background:#dcfce7"><div class="tt-subj">Biology</div><div class="tt-room">Lab 2</div><div class="tt-teacher">Mr. Kipng'eno</div></div>
+        <div class="tt-cell" style="background:#dbeafe"><div class="tt-subj">English</div><div class="tt-room">Room 12</div><div class="tt-teacher">Ms. Wambui</div></div>
+        <!-- Break -->
+        <div class="tt-time" style="color:#4f46e5;font-weight:600">10:00</div>
+        <div style="grid-column:span 5;background:#f8fafc;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:#94a3b8;padding:6px">☕ SHORT BREAK — 30 MINUTES</div>
+        <!-- Row 3 -->
+        <div class="tt-time">10:30</div>
+        <div class="tt-cell" style="background:#fee2e2"><div class="tt-subj">Chemistry</div><div class="tt-room">Lab 1</div><div class="tt-teacher">Dr. Mutua</div></div>
+        <div class="tt-cell" style="background:#fef9c3"><div class="tt-subj">History</div><div class="tt-room">Room 12</div><div class="tt-teacher">Ms. Njoroge</div></div>
+        <div class="tt-cell" style="background:#dbeafe"><div class="tt-subj">English</div><div class="tt-room">Room 12</div><div class="tt-teacher">Ms. Wambui</div></div>
+        <div class="tt-cell" style="background:#fee2e2"><div class="tt-subj">Chemistry</div><div class="tt-room">Lab 1</div><div class="tt-teacher">Dr. Mutua</div></div>
+        <div class="tt-cell" style="background:#dcfce7"><div class="tt-subj">Biology</div><div class="tt-room">Lab 2</div><div class="tt-teacher">Mr. Kipng'eno</div></div>
+        <!-- Row 4 -->
+        <div class="tt-time">11:45</div>
+        <div class="tt-cell" style="background:#fef9c3"><div class="tt-subj">Geography</div><div class="tt-room">Room 12</div><div class="tt-teacher">Mr. Kamande</div></div>
+        <div class="tt-cell" style="background:#ede9fe"><div class="tt-subj">Mathematics</div><div class="tt-room">Room 12</div><div class="tt-teacher">Mr. Odhiambo</div></div>
+        <div class="tt-cell" style="background:#fef9c3"><div class="tt-subj">Geography</div><div class="tt-room">Room 12</div><div class="tt-teacher">Mr. Kamande</div></div>
+        <div class="tt-cell" style="background:#f0f9ff"><div class="tt-subj">CRE / IRE</div><div class="tt-room">Room 12</div><div class="tt-teacher">Rev. Ndegwa</div></div>
+        <div class="tt-cell" style="background:#ede9fe"><div class="tt-subj">Mathematics</div><div class="tt-room">Room 12</div><div class="tt-teacher">Mr. Odhiambo</div></div>
+        <!-- Lunch -->
+        <div class="tt-time" style="color:#4f46e5;font-weight:600">1:00</div>
+        <div style="grid-column:span 5;background:#f8fafc;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:#94a3b8;padding:6px">🍽️ LUNCH BREAK — 1 HOUR</div>
+        <!-- Row 5 -->
+        <div class="tt-time">2:00</div>
+        <div class="tt-cell" style="background:#fce7f3"><div class="tt-subj">PE / Sports</div><div class="tt-room">Field</div><div class="tt-teacher">Coach Omondi</div></div>
+        <div class="tt-cell" style="background:#fef9c3"><div class="tt-subj">Geography</div><div class="tt-room">Room 12</div><div class="tt-teacher">Mr. Kamande</div></div>
+        <div class="tt-cell" style="background:#f0f9ff"><div class="tt-subj">CRE / IRE</div><div class="tt-room">Room 12</div><div class="tt-teacher">Rev. Ndegwa</div></div>
+        <div class="tt-cell" style="background:#fce7f3"><div class="tt-subj">PE / Sports</div><div class="tt-room">Field</div><div class="tt-teacher">Coach Omondi</div></div>
+        <div class="tt-cell" style="background:#fef9c3"><div class="tt-subj">Life Skills</div><div class="tt-room">Room 12</div><div class="tt-teacher">Ms. Achieng</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══ SCREEN 6: ADMISSIONS ═══════════════════════════════════════ -->
+<div class="screen" id="s-admissions">
+<div class="wrapper">
+  <div class="sidebar">
+    <div class="sb-brand"><div class="sb-logo"><div class="sb-icon">M</div><div><div class="sb-name">Msingi</div><div class="sb-school">Greenfield Academy</div></div></div></div>
+    <div class="sb-nav">
+      <div class="sb-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>Admissions</div>
+    </div>
+    <div class="sb-footer"><div class="sb-user"><div class="sb-avatar">JM</div><div><div class="sb-uname">James Mwangi</div><div class="sb-urole">Superadmin</div></div></div></div>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-title">Admissions Pipeline</div>
+      <span class="topbar-badge">2026 Intake · Form 1</span>
+      <div class="topbar-actions"><button class="tb-btn ghost">Export List</button><button class="tb-btn primary">+ New Application</button></div>
+    </div>
+    <div class="content">
+      <div class="stats-row">
+        <div class="stat-card"><div class="stat-label">Total Applications</div><div class="stat-value">184</div><div class="stat-sub">Form 1 · 2026 intake</div></div>
+        <div class="stat-card"><div class="stat-label">Accepted</div><div class="stat-value" style="color:#22c55e">112</div><div class="stat-sub">Places offered</div></div>
+        <div class="stat-card"><div class="stat-label">Enrolled (Paid)</div><div class="stat-value" style="color:#4f46e5">78</div><div class="stat-sub">Fees deposit confirmed</div></div>
+        <div class="stat-card"><div class="stat-label">Pending Review</div><div class="stat-value" style="color:#f59e0b">31</div><div class="stat-sub">Awaiting documents</div></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><div class="card-title">Applications — Recent</div></div>
+          <table>
+            <thead><tr><th>Applicant</th><th>KCPE Score</th><th>Date Applied</th><th>Status</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr><td><b>Grace Wanjiku</b></td><td>387 / 500</td><td>Jul 1, 2025</td><td><span class="pill yellow">Under Review</span></td><td style="color:#4f46e5;font-size:11px;font-weight:600;cursor:pointer">Review →</td></tr>
+              <tr><td><b>Omar Salim</b></td><td>401 / 500</td><td>Jun 30, 2025</td><td><span class="pill green">Accepted</span></td><td style="color:#4f46e5;font-size:11px;font-weight:600;cursor:pointer">View →</td></tr>
+              <tr><td><b>Cynthia Mutua</b></td><td>376 / 500</td><td>Jun 29, 2025</td><td><span class="pill green">Accepted</span></td><td style="color:#4f46e5;font-size:11px;font-weight:600;cursor:pointer">View →</td></tr>
+              <tr><td><b>James Ndirangu</b></td><td>412 / 500</td><td>Jun 28, 2025</td><td><span class="pill blue">Enrolled</span></td><td style="color:#4f46e5;font-size:11px;font-weight:600;cursor:pointer">View →</td></tr>
+              <tr><td><b>Sharon Adhiambo</b></td><td>359 / 500</td><td>Jun 27, 2025</td><td><span class="pill red">Waitlisted</span></td><td style="color:#4f46e5;font-size:11px;font-weight:600;cursor:pointer">Review →</td></tr>
+              <tr><td><b>Brian Koech</b></td><td>398 / 500</td><td>Jun 26, 2025</td><td><span class="pill blue">Enrolled</span></td><td style="color:#4f46e5;font-size:11px;font-weight:600;cursor:pointer">View →</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="card-title">Intake Funnel</div></div>
+          <div class="card-body">
+            <div class="funnel-step"><div class="funnel-label"><span class="funnel-name">🗂 Enquiries received</span><span class="funnel-cnt">284</span></div><div class="progress-bar" style="height:10px"><div class="progress-fill" style="width:100%;background:#c7d2fe"></div></div></div>
+            <div class="funnel-step"><div class="funnel-label"><span class="funnel-name">📋 Applications submitted</span><span class="funnel-cnt">184</span></div><div class="progress-bar" style="height:10px"><div class="progress-fill" style="width:65%;background:#818cf8"></div></div></div>
+            <div class="funnel-step"><div class="funnel-label"><span class="funnel-name">✅ Offers made</span><span class="funnel-cnt">112</span></div><div class="progress-bar" style="height:10px"><div class="progress-fill" style="width:39%;background:#6366f1"></div></div></div>
+            <div class="funnel-step"><div class="funnel-label"><span class="funnel-name">💳 Deposit paid</span><span class="funnel-cnt">78</span></div><div class="progress-bar" style="height:10px"><div class="progress-fill" style="width:27%;background:#4f46e5"></div></div></div>
+            <div class="funnel-step"><div class="funnel-label"><span class="funnel-name">🏫 Fully enrolled</span><span class="funnel-cnt">62</span></div><div class="progress-bar" style="height:10px"><div class="progress-fill" style="width:22%;background:#4338ca"></div></div></div>
+            <div style="margin-top:14px;padding:10px;background:#f0fdf4;border-radius:8px;border:1px solid #bbf7d0">
+              <div style="font-size:12px;font-weight:600;color:#16a34a">🎯 Capacity: 80 students</div>
+              <div style="font-size:11px;color:#15803d;margin-top:2px">62 enrolled · 18 spots remaining · closes Dec 31</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══ SCREEN 7: STUDENTS ══════════════════════════════════════════ -->
+<div class="screen" id="s-students">
+<div class="wrapper">
+  <div class="sidebar">
+    <div class="sb-brand"><div class="sb-logo"><div class="sb-icon">M</div><div><div class="sb-name">Msingi</div><div class="sb-school">Greenfield Academy</div></div></div></div>
+    <div class="sb-nav">
+      <div class="sb-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>Students</div>
+    </div>
+    <div class="sb-footer"><div class="sb-user"><div class="sb-avatar">JM</div><div><div class="sb-uname">James Mwangi</div><div class="sb-urole">Superadmin</div></div></div></div>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-title">Student Management</div>
+      <span class="topbar-badge">1,247 Students · 8 Classes</span>
+      <div class="topbar-actions"><button class="tb-btn ghost">Import CSV</button><button class="tb-btn primary">+ Add Student</button></div>
+    </div>
+    <div class="content">
+      <div class="stats-row">
+        <div class="stat-card"><div class="stat-label">Total Enrolled</div><div class="stat-value">1,247</div><div class="stat-sub">Across Form 1–4</div></div>
+        <div class="stat-card"><div class="stat-label">Active This Term</div><div class="stat-value">1,231</div><div class="stat-sub">16 on leave / transfer</div></div>
+        <div class="stat-card"><div class="stat-label">With Guardians</div><div class="stat-value" style="color:#22c55e">1,189</div><div class="stat-sub">Parent portal connected</div></div>
+        <div class="stat-card"><div class="stat-label">Fees Outstanding</div><div class="stat-value" style="color:#ef4444">342</div><div class="stat-sub">KSh 624K total balance</div></div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">Student Directory</div>
+          <div style="display:flex;gap:8px">
+            <div style="background:#f1f5f9;border-radius:7px;padding:6px 12px;font-size:12px;color:#475569">🔍 Search students…</div>
+            <select style="border:1px solid #e2e8f0;border-radius:7px;padding:5px 10px;font-size:12px;color:#475569;background:#fff"><option>All Classes</option></select>
+          </div>
+        </div>
+        <table>
+          <thead><tr><th>Student</th><th>Adm. No.</th><th>Class</th><th>Guardian</th><th>Fees Balance</th><th>Attendance</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td><div style="display:flex;align-items:center;gap:8px"><div class="avatar" style="background:linear-gradient(135deg,#6366f1,#8b5cf6)">FN</div><div><div style="font-weight:600;font-size:12px">Faith Njeri</div><div style="font-size:10px;color:#94a3b8">faith.njeri@student.ms</div></div></div></td><td>GRN-2022-0041</td><td>Form 4A</td><td>Mrs. Njeri</td><td style="color:#22c55e;font-weight:600">Cleared</td><td><span class="pill green">96%</span></td><td><span class="pill green">Active</span></td></tr>
+            <tr><td><div style="display:flex;align-items:center;gap:8px"><div class="avatar" style="background:linear-gradient(135deg,#0ea5e9,#6366f1)">KO</div><div><div style="font-weight:600;font-size:12px">Kevin Ouma</div><div style="font-size:10px;color:#94a3b8">kevin.ouma@student.ms</div></div></div></td><td>GRN-2022-0058</td><td>Form 4A</td><td>Mr. Ouma</td><td style="color:#ef4444;font-weight:600">KSh 6,500</td><td><span class="pill blue">89%</span></td><td><span class="pill green">Active</span></td></tr>
+            <tr><td><div style="display:flex;align-items:center;gap:8px"><div class="avatar" style="background:linear-gradient(135deg,#f59e0b,#ef4444)">AH</div><div><div style="font-weight:600;font-size:12px">Amina Hassan</div><div style="font-size:10px;color:#94a3b8">amina.hassan@student.ms</div></div></div></td><td>GRN-2022-0023</td><td>Form 4A</td><td>Mr. Hassan</td><td style="color:#22c55e;font-weight:600">Cleared</td><td><span class="pill green">94%</span></td><td><span class="pill green">Active</span></td></tr>
+            <tr><td><div style="display:flex;align-items:center;gap:8px"><div class="avatar" style="background:linear-gradient(135deg,#22c55e,#0ea5e9)">SW</div><div><div style="font-weight:600;font-size:12px">Sarah Wangui</div><div style="font-size:10px;color:#94a3b8">sarah.wangui@student.ms</div></div></div></td><td>GRN-2022-0077</td><td>Form 4B</td><td>Mrs. Wangui</td><td style="color:#22c55e;font-weight:600">Cleared</td><td><span class="pill green">97%</span></td><td><span class="pill green">Active</span></td></tr>
+            <tr><td><div style="display:flex;align-items:center;gap:8px"><div class="avatar" style="background:linear-gradient(135deg,#a855f7,#ec4899)">PK</div><div><div style="font-weight:600;font-size:12px">Peter Kamau</div><div style="font-size:10px;color:#94a3b8">peter.kamau@student.ms</div></div></div></td><td>GRN-2022-0034</td><td>Form 4A</td><td>Mr. Kamau</td><td style="color:#f59e0b;font-weight:600">KSh 12,000</td><td><span class="pill yellow">82%</span></td><td><span class="pill green">Active</span></td></tr>
+            <tr><td><div style="display:flex;align-items:center;gap:8px"><div class="avatar" style="background:linear-gradient(135deg,#0f172a,#334155)">DO</div><div><div style="font-weight:600;font-size:12px">David Otieno</div><div style="font-size:10px;color:#94a3b8">david.otieno@student.ms</div></div></div></td><td>GRN-2023-0012</td><td>Form 3A</td><td>Mrs. Otieno</td><td style="color:#22c55e;font-weight:600">Cleared</td><td><span class="pill green">91%</span></td><td><span class="pill green">Active</span></td></tr>
+            <tr><td><div style="display:flex;align-items:center;gap:8px"><div class="avatar" style="background:linear-gradient(135deg,#dc2626,#f97316)">MA</div><div><div style="font-weight:600;font-size:12px">Mary Akinyi</div><div style="font-size:10px;color:#94a3b8">mary.akinyi@student.ms</div></div></div></td><td>GRN-2024-0089</td><td>Form 1B</td><td>Mr. Akinyi</td><td style="color:#22c55e;font-weight:600">Cleared</td><td><span class="pill green">95%</span></td><td><span class="pill green">Active</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══ SCREEN 8: MESSAGING ════════════════════════════════════════ -->
+<div class="screen" id="s-messaging">
+<div class="wrapper">
+  <div class="sidebar">
+    <div class="sb-brand"><div class="sb-logo"><div class="sb-icon">M</div><div><div class="sb-name">Msingi</div><div class="sb-school">Greenfield Academy</div></div></div></div>
+    <div class="sb-nav">
+      <div class="sb-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Messaging</div>
+    </div>
+    <div class="sb-footer"><div class="sb-user"><div class="sb-avatar">JM</div><div><div class="sb-uname">James Mwangi</div><div class="sb-urole">Superadmin</div></div></div></div>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-title">School Messaging</div>
+      <span class="topbar-badge">4 unread</span>
+      <div class="topbar-actions"><button class="tb-btn ghost">Announcements</button><button class="tb-btn primary">+ Compose</button></div>
+    </div>
+    <div class="content">
+      <div class="stats-row">
+        <div class="stat-card"><div class="stat-label">Messages Sent</div><div class="stat-value">2,841</div><div class="stat-sub">This term</div></div>
+        <div class="stat-card"><div class="stat-label">Parents Reached</div><div class="stat-value" style="color:#22c55e">1,189</div><div class="stat-sub">95% delivery rate</div></div>
+        <div class="stat-card"><div class="stat-label">Announcements</div><div class="stat-value">14</div><div class="stat-sub">Sent this term</div></div>
+        <div class="stat-card"><div class="stat-label">Unread (Staff)</div><div class="stat-value" style="color:#f59e0b">4</div><div class="stat-sub">Require response</div></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><div class="card-title">Recent Messages</div></div>
+          <div class="card-body" style="padding:0">
+            <div style="border-bottom:1px solid #f1f5f9;padding:12px 16px;background:#fafbff">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><div class="avatar" style="width:24px;height:24px;font-size:10px;background:linear-gradient(135deg,#f59e0b,#ef4444)">PO</div><span style="font-size:12px;font-weight:600;color:#0f172a">Mr. Peter Otieno</span><span style="font-size:10px;color:#94a3b8;margin-left:auto">2 min ago</span></div>
+              <div style="font-size:12px;color:#334155">Regarding Form 3A chemistry lab — requesting additional reagents before next Friday's practical.</div>
+              <span class="pill blue" style="margin-top:6px">Staff · Unread</span>
+            </div>
+            <div style="border-bottom:1px solid #f1f5f9;padding:12px 16px">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><div class="avatar" style="width:24px;height:24px;font-size:10px;background:linear-gradient(135deg,#22c55e,#0ea5e9)">WN</div><span style="font-size:12px;font-weight:600;color:#0f172a">Mrs. Wanjiku Njoroge</span><span style="font-size:10px;color:#94a3b8;margin-left:auto">1 hr ago</span></div>
+              <div style="font-size:12px;color:#334155">My daughter Grace (Form 1A) will be absent tomorrow due to a medical appointment. Please excuse her.</div>
+              <span class="pill yellow" style="margin-top:6px">Parent · Unread</span>
+            </div>
+            <div style="border-bottom:1px solid #f1f5f9;padding:12px 16px">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><div class="avatar" style="width:24px;height:24px;font-size:10px;background:linear-gradient(135deg,#6366f1,#8b5cf6)">AO</div><span style="font-size:12px;font-weight:600;color:#0f172a">Deputy Principal Auma</span><span style="font-size:10px;color:#94a3b8;margin-left:auto">3 hr ago</span></div>
+              <div style="font-size:12px;color:#334155">Staff meeting rescheduled to Friday 4PM in the main hall. Attendance mandatory for all teaching staff.</div>
+              <span class="pill purple" style="margin-top:6px">Internal</span>
+            </div>
+            <div style="padding:12px 16px">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><div class="avatar" style="width:24px;height:24px;font-size:10px;background:#334155">SY</div><span style="font-size:12px;font-weight:600;color:#0f172a">System</span><span style="font-size:10px;color:#94a3b8;margin-left:auto">Yesterday</span></div>
+              <div style="font-size:12px;color:#334155">Fees reminder sent to 342 parents with outstanding balances. 89 have responded with payment confirmation.</div>
+              <span class="pill gray" style="margin-top:6px">Automated</span>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="card-title">Send Announcement</div></div>
+          <div class="card-body">
+            <div style="margin-bottom:12px"><label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:5px">TO</label><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;padding:8px 12px;font-size:12px;color:#475569">All Parents & Guardians (1,189 recipients)</div></div>
+            <div style="margin-bottom:12px"><label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:5px">SUBJECT</label><div style="background:#fff;border:1.5px solid #6366f1;border-radius:7px;padding:8px 12px;font-size:12px;color:#1e293b">End of Term 2 Examination Notice</div></div>
+            <div style="margin-bottom:16px"><label style="font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:5px">MESSAGE</label><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;padding:10px 12px;font-size:12px;color:#475569;min-height:80px">Dear Parent/Guardian, please note that End of Term 2 examinations will commence on July 14, 2025. Students are expected to report by 7:00 AM daily. Full uniform is required...</div></div>
+            <div style="display:flex;gap:8px"><button class="tb-btn ghost" style="flex:1;padding:10px">Preview</button><button class="tb-btn primary" style="flex:1;padding:10px">Send to All</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+function show(id, el) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav a').forEach(a => a.classList.remove('active'));
+  document.getElementById('s-' + id).classList.add('active');
+  el.classList.add('active');
+}
+// Hide nav for clean screenshots — press 'H'
+document.addEventListener('keydown', e => {
+  if (e.key === 'h' || e.key === 'H') {
+    const n = document.querySelector('.nav');
+    n.style.display = n.style.display === 'none' ? 'flex' : 'none';
+    document.querySelectorAll('.wrapper').forEach(w => w.style.marginTop = n.style.display === 'none' ? '0' : '44px');
+  }
+});
+</script>
+</body>
+</html>

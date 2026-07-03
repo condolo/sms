@@ -5,7 +5,7 @@ import FloatingActions from '@/components/landing/FloatingActions';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, ArrowRight, MessageCircle } from 'lucide-react';
 import { FAQ_CATEGORIES, ALL_FAQS_FLAT } from '@/data/faqData';
-import { WA_URL } from '@/data/landingData';
+import { useWaUrl } from '@/hooks/useWaUrl';
 import { fadeUp, stagger, VP, EASE } from '@/utils/animations';
 
 function FaqItem({ q, a }) {
@@ -49,6 +49,7 @@ const FAQ_SCHEMA = {
 };
 
 export default function FAQ() {
+  const waUrl = useWaUrl();
   return (
     <div className="min-h-screen bg-white text-slate-900 antialiased">
 
@@ -115,7 +116,7 @@ export default function FAQ() {
               </a>
             ))}
             <div className="pt-4 border-t border-slate-100 mt-4">
-              <a href={WA_URL} target="_blank" rel="noopener noreferrer"
+              <a href={waUrl} target="_blank" rel="noopener noreferrer"
                 className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-700 transition-colors">
                 <MessageCircle size={13} />
                 Ask on WhatsApp
@@ -176,7 +177,7 @@ export default function FAQ() {
             <p className="text-sm text-slate-400">Book a 30-minute call and we'll walk through your school's specific setup.</p>
           </div>
           <div className="flex items-center gap-3 shrink-0">
-            <a href={WA_URL} target="_blank" rel="noopener noreferrer"
+            <a href={waUrl} target="_blank" rel="noopener noreferrer"
               className="inline-flex items-center gap-2 rounded-xl border border-slate-700 px-5 py-2.5 text-sm font-semibold text-slate-300 hover:text-white hover:border-slate-500 transition-colors">
               <MessageCircle size={14} />
               WhatsApp us

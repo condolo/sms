@@ -10,7 +10,7 @@ import {
   ArrowRight, CheckCircle2, ChevronRight,
   Globe, Layers, Lock, ShieldCheck, Menu, X,
 } from 'lucide-react';
-import { ECOSYSTEM_NODES, WA_URL } from '@/data/landingData';
+import { ECOSYSTEM_NODES } from '@/data/landingData';
 import { EASE, fadeUp, stagger, VP } from '@/utils/animations';
 import { schoolPortalUrl, storeSchoolSlug } from '@/utils/schoolDetect.js';
 import { getLandingCMS, getPlatformSettings } from '@/utils/landingCMS';

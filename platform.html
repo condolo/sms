@@ -257,7 +257,15 @@ async function renderOverview() {
 
   try {
     const stats = await api('GET', '/stats');
-    const PLAN_PRICE = { core:15000, standard:35000, premium:65000, enterprise:250000 };
+    // Per-student per-term rates (source of truth: server/config/pricing.js)
+    const STUDENT_RATE = { base: 150, student: 200, family: 250 };
+    // Canonical plan labels — Base (staff only), Student (+student portal), Family (+parent portal)
+    const PLAN_META = {
+      base:       { label: 'Base',       desc: 'KSh 150 / student / term', sub: 'Staff portals only' },
+      student:    { label: 'Student',    desc: 'KSh 200 / student / term', sub: '+ Student portal' },
+      family:     { label: 'Family',     desc: 'KSh 250 / student / term', sub: '+ Parent portal' },
+      enterprise: { label: 'Enterprise', desc: 'Custom rate',              sub: 'API / SSO / white-label' },
+    };
 
     el.innerHTML = `
       <div class="pa-stats">
@@ -272,9 +280,9 @@ async function renderOverview() {
           <div class="pa-stat-sub">across all schools</div>
         </div>
         <div class="pa-stat-card">
-          <div class="pa-stat-label">Monthly Revenue</div>
+          <div class="pa-stat-label">Est. Monthly Revenue</div>
           <div class="pa-stat-value">KES ${((stats.mrr||0)/1000).toFixed(0)}K</div>
-          <div class="pa-stat-sub">MRR (active schools)</div>
+          <div class="pa-stat-sub">from billing snapshots</div>
         </div>
         <div class="pa-stat-card">
           <div class="pa-stat-label">Annual Run Rate</div>
@@ -286,14 +294,15 @@ async function renderOverview() {
       <div class="pa-card">
         <div class="pa-card-header"><h3>Plan Breakdown</h3></div>
         <div class="mrr-grid">
-          ${['core','standard','premium','enterprise'].map(plan => {
+          ${['base','student','family','enterprise'].map(plan => {
             const count = (stats.byPlan||{})[plan] || 0;
-            const rev   = count * (PLAN_PRICE[plan] || 0);
+            const meta  = PLAN_META[plan];
             return `
               <div class="mrr-item">
                 <div class="mrr-item-count">${count}</div>
-                <div class="mrr-item-plan">${plan}</div>
-                <div class="mrr-item-rev">${rev > 0 ? 'KES ' + rev.toLocaleString() + '/mo' : '—'}</div>
+                <div class="mrr-item-plan">${meta.label}</div>
+                <div class="mrr-item-rev">${meta.desc}</div>
+                <div style="font-size:10px;color:var(--gray-400);margin-top:2px">${meta.sub}</div>
               </div>`;
           }).join('')}
         </div>
@@ -321,7 +330,7 @@ function _offlineStatsHTML() {
       <div class="pa-stat-card">
         <div class="pa-stat-label">Monthly Revenue</div>
         <div class="pa-stat-value">KES 35K</div>
-        <div class="pa-stat-sub">1 × Standard plan</div>
+        <div class="pa-stat-sub">1 × Student plan</div>
       </div>
       <div class="pa-stat-card">
         <div class="pa-stat-label">Annual Run Rate</div>
@@ -766,7 +775,7 @@ async function doImpersonate(schoolId) {
 
 /* ── Change Plan ────────────────────────────────────────── */
 function changePlan(schoolId, currentPlan, schoolName) {
-  const opts = ['core','standard','premium','enterprise']
+  const opts = ['base','student','family','enterprise']
     .map(p => `<option value="${p}" ${p===currentPlan?'selected':''}>${p.charAt(0).toUpperCase()+p.slice(1)}</option>`)
     .join('');
 
@@ -905,10 +914,10 @@ function renderProvision() {
           <div class="pa-field">
             <label>Plan</label>
             <select id="p-plan">
-              <option value="core">Core — KES 5,000/mo</option>
-              <option value="standard" selected>Standard — KES 12,000/mo</option>
-              <option value="premium">Premium — KES 25,000/mo</option>
-              <option value="enterprise">Enterprise — Custom</option>
+              <option value="base">Base — KES 15,000/mo</option>
+              <option value="student" selected>Student — KES 35,000/mo</option>
+              <option value="family">Family — KES 65,000/mo</option>
+              <option value="enterprise">Enterprise — KES 250,000/mo</option>
             </select>
           </div>
         </div>
@@ -1115,7 +1124,7 @@ async function submitAnnouncement() {
     });
     if (!res.ok) { const e = await res.json(); errEl.textContent = e.error || 'Failed'; errEl.style.display='block'; return; }
     closeModal();
-    showToast(`Announcement created${notify ? ' — emails sent to all schools' : ''}.`, 'success');
+    toast(`Announcement created${notify ? ' — emails sent to all schools' : ''}.`, 'success');
     renderAnnouncements();
   } catch (err) {
     errEl.textContent = err.message; errEl.style.display='block';
@@ -1185,7 +1194,7 @@ function toast(msg, type = 'info') {
 
 /* ── Branding & Platform Settings ───────────────────────── */
 async function renderBranding() {
-  const main = document.getElementById('main-content');
+  const main = document.getElementById('pa-content');
   main.innerHTML = `<div style="max-width:720px">
     <p style="color:#6b7280;font-size:14px;margin-bottom:24px">
       Manage platform-level branding, social media links, and contact information.
@@ -1324,11 +1333,10 @@ async function saveBranding() {
       facebook:  document.getElementById('ps-facebook').value,
       instagram: document.getElementById('ps-instagram').value,
       youtube:   document.getElementById('ps-youtube').value,
-      whatsapp:  document.getElementById('ps-phone').value,
     }
   };
   try {
-    const res = await _api('PUT', '/platform/settings', payload);
+    const res = await api('PUT', '/settings', payload);
     msgEl.style.display = 'block';
     msgEl.style.background = '#f0fdf4';
     msgEl.style.border = '1px solid #bbf7d0';

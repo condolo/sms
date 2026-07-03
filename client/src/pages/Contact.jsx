@@ -11,7 +11,7 @@ import PublicNav    from '@/components/landing/PublicNav';
 import PublicFooter from '@/components/landing/PublicFooter';
 import BreadcrumbSchema from '@/components/landing/BreadcrumbSchema';
 import FloatingActions from '@/components/landing/FloatingActions';
-import { WA_URL } from '@/data/landingData';
+import { useWaUrl } from '@/hooks/useWaUrl';
 
 const WHO_WE_WORK_WITH = [
   { Icon: Building2,     label: 'School owners and directors'                          },
@@ -57,6 +57,7 @@ const PLAN_INQUIRY_MAP = {
 };
 
 export default function Contact() {
+  const waUrl          = useWaUrl();
   const [searchParams] = useSearchParams();
   const planParam      = searchParams.get('plan');
   const defaultInquiry = PLAN_INQUIRY_MAP[planParam] || '';
@@ -190,7 +191,7 @@ export default function Contact() {
                     <span className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-[11px] font-bold">@</span>
                     hello@msingi.io
                   </a>
-                  <a href={WA_URL} target="_blank" rel="noopener noreferrer"
+                  <a href={waUrl} target="_blank" rel="noopener noreferrer"
                     className="flex items-center gap-3 text-sm text-slate-600 hover:text-slate-900 transition-colors">
                     <span className="w-8 h-8 rounded-lg bg-[#25D366]/10 flex items-center justify-center">
                       <MessageCircle size={14} className="text-[#25D366]" />
@@ -220,7 +221,7 @@ export default function Contact() {
                       <p className="text-sm text-slate-500 max-w-sm mx-auto mb-6">
                         Your enquiry has been received. We typically respond within one business day. For faster response, reach us on WhatsApp.
                       </p>
-                      <a href={WA_URL} target="_blank" rel="noopener noreferrer"
+                      <a href={waUrl} target="_blank" rel="noopener noreferrer"
                         className="inline-flex items-center gap-2 rounded-xl bg-[#25D366] px-6 py-3 text-sm font-semibold text-white hover:opacity-90 transition-all shadow-sm">
                         <MessageCircle size={15} />
                         Chat on WhatsApp
