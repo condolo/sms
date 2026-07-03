@@ -53,6 +53,7 @@ router.get('/school-info', async (req, res) => {
       themePreset:  school.themePreset   || null,
       tagline:      school.tagline       || null,
       website:      school.website       || null,
+      loginBgUrl:   school.loginBgUrl    || null,
       isActive:     school.isActive !== false,
       status:       school.status        || 'active',
     });
@@ -108,8 +109,8 @@ router.get('/schools/search', async (req, res) => {
 router.get('/school-asset/:type', async (req, res) => {
   try {
     const { type } = req.params;
-    if (type !== 'logo' && type !== 'favicon') {
-      return res.status(400).json({ error: 'type must be logo or favicon' });
+    if (type !== 'logo' && type !== 'favicon' && type !== 'login-bg') {
+      return res.status(400).json({ error: 'type must be logo, favicon, or login-bg' });
     }
 
     const slug = (req.query.slug || '').toLowerCase().trim();
@@ -117,7 +118,7 @@ router.get('/school-asset/:type', async (req, res) => {
 
     const School = _model('schools');
     const school = await School.findOne({ id: slug }).lean();
-    const field  = type === 'logo' ? 'logoBase64' : 'faviconBase64';
+    const field  = type === 'logo' ? 'logoBase64' : type === 'favicon' ? 'faviconBase64' : 'loginBgBase64';
     const b64    = school?.[field];
 
     if (!b64) return res.status(404).json({ error: `No ${type} set` });

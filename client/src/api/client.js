@@ -409,8 +409,10 @@ export const settings = {
     },
     uploadLogo:   (b64)  => _put('/settings/school/logo',    { logoBase64: b64 }),
     deleteLogo:   ()     => _delete('/settings/school/logo'),
-    uploadFavicon:(b64)  => _put('/settings/school/favicon', { faviconBase64: b64 }),
-    deleteFavicon:()     => _delete('/settings/school/favicon'),
+    uploadFavicon:  (b64) => _put('/settings/school/favicon',  { faviconBase64: b64 }),
+    deleteFavicon:  ()    => _delete('/settings/school/favicon'),
+    uploadLoginBg:  (b64) => _put('/settings/school/login-bg', { loginBgBase64: b64 }),
+    deleteLoginBg:  ()    => _delete('/settings/school/login-bg'),
     smtp: {
       save:   (data) => _post('/settings/school/smtp', data),
       test:   (data) => _post('/settings/school/smtp/test', data),

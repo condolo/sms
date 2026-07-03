@@ -85,6 +85,7 @@ const SCHOOL_UPDATABLE = [
   'portalConfig',        // object — student/parent portal visibility toggles
   'admissionConfig',     // object — prefix, padding, yearInPrefix for admission numbers
   'staffResponsibilities', // [{value,label}] — configurable HR responsibility options per school
+  'loginBgUrl',           // login page background image URL
 ];
 
 /* ── GET /api/settings/modules — return the full module registry ─
@@ -377,6 +378,41 @@ router.delete('/school/favicon', authMiddleware, rbac('settings', 'update'), asy
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to remove favicon.' });
+  }
+});
+
+/* PUT /api/settings/school/login-bg — upload login page background image (admin only) */
+router.put('/school/login-bg', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+  try {
+    const { loginBgBase64 } = req.body;
+    if (!loginBgBase64) return res.status(400).json({ error: 'loginBgBase64 is required.' });
+    const err = _validateBase64Image(loginBgBase64, 2048);
+    if (err) return res.status(400).json({ error: err });
+
+    const Schools   = _model('schools');
+    const loginBgUrl = `/api/public/school-asset/login-bg?slug=${req.jwtUser.schoolId}`;
+    await Schools.updateOne(
+      { id: req.jwtUser.schoolId },
+      { $set: { loginBgBase64, loginBgUrl, updatedAt: new Date().toISOString() } }
+    );
+    res.json({ success: true, loginBgUrl });
+  } catch (err) {
+    console.error('[settings] PUT /school/login-bg:', err);
+    res.status(500).json({ error: 'Failed to upload login background.' });
+  }
+});
+
+/* DELETE /api/settings/school/login-bg — clear login background (admin only) */
+router.delete('/school/login-bg', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+  try {
+    const Schools = _model('schools');
+    await Schools.updateOne(
+      { id: req.jwtUser.schoolId },
+      { $unset: { loginBgBase64: '', loginBgUrl: '' }, $set: { updatedAt: new Date().toISOString() } }
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to remove login background.' });
   }
 });
 

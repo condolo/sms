@@ -488,10 +488,11 @@ function AssetUploader({ label, hint, currentUrl, maxKB, accept, onUpload, onDel
   );
 }
 
-/* ── Branding card — logo + favicon ─────────────────────────── */
-function BrandingCard({ schoolId, logoUrl, faviconUrl, onSaved }) {
+/* ── Branding card — logo + favicon + login background ──────── */
+function BrandingCard({ schoolId, logoUrl, faviconUrl, loginBgUrl, onSaved }) {
   const [logoUploading,    setLogoUploading]    = useState(false);
   const [faviconUploading, setFaviconUploading] = useState(false);
+  const [loginBgUploading, setLoginBgUploading] = useState(false);
   const [toast,            setToast]            = useState(null);
 
   async function handleLogoUpload(b64) {
@@ -542,6 +543,30 @@ function BrandingCard({ schoolId, logoUrl, faviconUrl, onSaved }) {
     }
   }
 
+  async function handleLoginBgUpload(b64) {
+    setLoginBgUploading(true);
+    try {
+      await settingsApi.school.uploadLoginBg(b64);
+      setToast({ msg: 'Login background saved.', type: 'success' });
+      onSaved?.();
+    } catch (err) {
+      setToast({ msg: err?.message || 'Failed to upload login background.', type: 'error' });
+    } finally {
+      setLoginBgUploading(false);
+    }
+  }
+
+  async function handleLoginBgDelete() {
+    setLoginBgUploading(true);
+    try {
+      await settingsApi.school.deleteLoginBg();
+      setToast({ msg: 'Login background removed.', type: 'success' });
+      onSaved?.();
+    } finally {
+      setLoginBgUploading(false);
+    }
+  }
+
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
       <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
@@ -557,7 +582,7 @@ function BrandingCard({ schoolId, logoUrl, faviconUrl, onSaved }) {
 
       <AssetUploader
         label="School Logo"
-        hint={`Displayed in the sidebar and login page. PNG, WebP or SVG recommended. Max 500 KB.`}
+        hint="Displayed in the sidebar and login page. PNG, WebP or SVG recommended. Max 500 KB."
         currentUrl={logoUrl}
         maxKB={500}
         accept="image/png,image/jpeg,image/webp,image/svg+xml"
@@ -578,6 +603,20 @@ function BrandingCard({ schoolId, logoUrl, faviconUrl, onSaved }) {
           onDelete={handleFaviconDelete}
           uploading={faviconUploading}
           square={true}
+        />
+      </div>
+
+      <div className="border-t border-slate-100 pt-4">
+        <AssetUploader
+          label="Login Page Background"
+          hint="Full-screen photo shown behind the login card. Landscape photo recommended (1920×1080+). JPEG or WebP. Max 2 MB."
+          currentUrl={loginBgUrl}
+          maxKB={2048}
+          accept="image/jpeg,image/webp,image/png"
+          onUpload={handleLoginBgUpload}
+          onDelete={handleLoginBgDelete}
+          uploading={loginBgUploading}
+          square={false}
         />
       </div>
     </div>
@@ -1007,7 +1046,7 @@ function SchoolTab() {
         </div>
 
         {/* Branding */}
-        <BrandingCard schoolId={school.id} logoUrl={school.logoUrl} faviconUrl={school.faviconUrl} onSaved={() => qc.invalidateQueries({ queryKey: ['settings', 'school'] })} />
+        <BrandingCard schoolId={school.id} logoUrl={school.logoUrl} faviconUrl={school.faviconUrl} loginBgUrl={school.loginBgUrl} onSaved={() => qc.invalidateQueries({ queryKey: ['settings', 'school'] })} />
       </div>
 
       {/* ── Row 2: Regional + House System ── */}

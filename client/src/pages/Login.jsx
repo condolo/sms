@@ -499,6 +499,7 @@ export default function Login() {
   const schoolName   = branding?.name     || (slug ? slug.toUpperCase() : 'Msingi');
   const shortName    = branding?.shortName || schoolName;
   const logoUrl      = branding?.logoUrl   || null;
+  const loginBgUrl   = branding?.loginBgUrl || null;
   const primary      = branding?.primaryColor || '#4f46e5';
   const accent       = branding?.accentColor  || '#7c3aed';
   const initials     = shortName.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
@@ -621,138 +622,6 @@ export default function Login() {
     );
   }
 
-  // ─── Left panel — animated gradient with floating shapes ───────────────────
-  function LeftPanel() {
-    // 4-stop gradient: primary → accent → primary (slightly transparent) → accent (slightly transparent)
-    // This gives the slow-shift illusion from the competitor screenshots
-    const g1 = primary;
-    const g2 = accent;
-    const g3 = primary + 'cc';   // ~80% opacity variant
-    const g4 = accent  + '99';   // ~60% opacity variant
-
-    return (
-      <div
-        className="hidden lg:flex lg:w-5/12 flex-col relative overflow-hidden"
-        style={{
-          background: `linear-gradient(-45deg, ${g1}, ${g2}, ${g3}, ${g4})`,
-          backgroundSize: '400% 400%',
-          animation: 'msingiGradientShift 12s ease infinite',
-        }}
-      >
-        {/* ── Floating decorative blobs ───────────────────────── */}
-        <div
-          className="absolute -top-24 -right-24 w-96 h-96 rounded-full bg-white/8 blur-sm pointer-events-none"
-          style={{ animation: 'msingiFloat1 9s ease-in-out infinite' }}
-        />
-        <div
-          className="absolute top-1/3 -left-20 w-64 h-64 rounded-full bg-white/6 pointer-events-none"
-          style={{ animation: 'msingiFloat2 11s ease-in-out infinite' }}
-        />
-        <div
-          className="absolute bottom-24 right-10 w-40 h-40 rounded-full bg-white/10 pointer-events-none"
-          style={{ animation: 'msingiFloat3 7s ease-in-out infinite' }}
-        />
-        <div
-          className="absolute bottom-0 left-1/2 -translate-x-1/2 w-72 h-72 rounded-full bg-white/5 blur-md pointer-events-none"
-          style={{ animation: 'msingiFloat1 14s ease-in-out infinite reverse' }}
-        />
-
-        {/* ── Content ─────────────────────────────────────────── */}
-        <div className="relative flex flex-col justify-between h-full p-10">
-
-          {/* Top — logo + school name */}
-          <div className="flex flex-col items-center text-center pt-4">
-            {/* Logo with soft glow ring */}
-            <div className="relative mb-5">
-              <div
-                className="absolute inset-0 rounded-3xl blur-2xl scale-125 opacity-40 bg-white"
-                aria-hidden="true"
-              />
-              {logoUrl ? (
-                <img
-                  src={logoUrl}
-                  alt={shortName}
-                  className="relative h-28 w-28 rounded-3xl object-contain bg-white/20 p-3 shadow-2xl"
-                />
-              ) : (
-                <div
-                  className="relative h-28 w-28 rounded-3xl bg-white/20 flex items-center justify-center text-white text-4xl font-black shadow-2xl select-none"
-                >
-                  {initials}
-                </div>
-              )}
-            </div>
-            <h1 className="text-2xl font-bold text-white tracking-tight leading-tight drop-shadow-sm">
-              {schoolName}
-            </h1>
-            {branding?.tagline && (
-              <p className="text-white/65 text-sm mt-2 italic font-light leading-relaxed max-w-xs">
-                {branding.tagline}
-              </p>
-            )}
-          </div>
-
-          {/* Middle — contextual content */}
-          <div>
-            {slug === 'demo' ? (
-              <>
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-white/45 mb-4 text-center">
-                  Interactive Demo
-                </p>
-                <blockquote className="text-xl font-light text-white/85 leading-relaxed mb-7 text-center">
-                  "Explore the full Msingi platform — sign in as any role to see the system in action."
-                </blockquote>
-                <div className="space-y-2.5 bg-white/10 rounded-2xl p-4 backdrop-blur-sm">
-                  {DEMO_ACCOUNTS.map(({ role, badge }) => (
-                    <div key={role} className="flex items-center gap-3">
-                      <div className="w-1.5 h-1.5 rounded-full bg-white/50 flex-shrink-0" />
-                      <span className="text-sm text-white/75">{role}</span>
-                      <span className="text-[10px] text-white/40 ml-auto">{badge}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : isSchool ? (
-              <>
-                <blockquote className="text-xl font-light text-white/85 leading-relaxed mb-7 text-center">
-                  "Your school management portal — students, staff, academics, and finance in one place."
-                </blockquote>
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { label: 'Student Records', symbol: 'S' },
-                    { label: 'Grades & Reports', symbol: 'G' },
-                    { label: 'Finance', symbol: 'F' },
-                  ].map(({ label, symbol }) => (
-                    <div
-                      key={label}
-                      className="flex flex-col items-center gap-1.5 bg-white/10 rounded-xl p-3 backdrop-blur-sm"
-                    >
-                      <div className="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center text-white text-xs font-bold">
-                        {symbol}
-                      </div>
-                      <span className="text-[10px] text-white/70 text-center leading-tight">{label}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <blockquote className="text-xl font-light text-white/85 leading-relaxed text-center">
-                "Empowering educators with the tools to inspire, track, and grow every learner."
-              </blockquote>
-            )}
-          </div>
-
-          {/* Bottom — powered by */}
-          <p className="text-xs text-white/35 text-center">
-            Powered by{' '}
-            <span className="font-semibold text-white/55">Msingi</span>
-            {' · '}© {new Date().getFullYear()} {isSchool ? schoolName : 'Msingi'}
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   // No school context — show the school finder instead of the login form
   if (!isSchool) {
     return <SchoolFinderPage />;
@@ -767,197 +636,256 @@ export default function Login() {
     );
   }
 
+  // Background: school photo if configured, else animated gradient using school colours
+  const g1 = primary;
+  const g2 = accent;
+  const g3 = primary + 'cc';
+  const g4 = accent  + '99';
+
   return (
-    <div className="min-h-full flex">
-      {/* Guarantee keyframes are always in the document when this component renders */}
+    <div id="login-root" className="min-h-full relative flex items-center justify-center overflow-hidden py-6 px-4">
       <style>{LOGIN_KEYFRAMES}</style>
-      <LeftPanel />
 
-      {/* Right panel — form */}
-      <div className="flex flex-1 flex-col items-center justify-center px-6 py-12 bg-slate-50">
-        <div className="w-full max-w-sm">
+      {/* ── Full-screen background ── */}
+      {loginBgUrl ? (
+        <div
+          id="login-bg"
+          className="absolute inset-0"
+          style={{
+            backgroundImage: `url(${loginBgUrl})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat',
+          }}
+        />
+      ) : (
+        <div
+          id="login-bg"
+          className="absolute inset-0"
+          style={{
+            background: `linear-gradient(-45deg, ${g1}, ${g2}, ${g3}, ${g4})`,
+            backgroundSize: '400% 400%',
+            animation: 'msingiGradientShift 12s ease infinite',
+          }}
+        />
+      )}
 
-          {/* Mobile logo */}
-          <div className="flex lg:hidden items-center gap-3 mb-8">
-            {logoUrl ? (
-              <img src={logoUrl} alt={shortName} className="h-9 w-9 rounded-xl object-contain" />
-            ) : (
-              <div
-                className="flex h-9 w-9 items-center justify-center rounded-xl text-white font-bold text-sm"
-                style={{ background: primary }}
-              >
-                {initials}
-              </div>
-            )}
-            <span className="font-semibold text-slate-800">{shortName}</span>
-          </div>
+      {/* Decorative floating blobs — only shown on gradient (not over photo) */}
+      {!loginBgUrl && (
+        <>
+          <div className="absolute -top-24 -right-24 w-96 h-96 rounded-full bg-white/8 blur-sm pointer-events-none" style={{ animation: 'msingiFloat1 9s ease-in-out infinite' }} />
+          <div className="absolute top-1/3 -left-20 w-64 h-64 rounded-full bg-white/6 pointer-events-none" style={{ animation: 'msingiFloat2 11s ease-in-out infinite' }} />
+          <div className="absolute bottom-24 right-10 w-40 h-40 rounded-full bg-white/10 pointer-events-none" style={{ animation: 'msingiFloat3 7s ease-in-out infinite' }} />
+        </>
+      )}
 
-          {/* ── LOGIN MODE ─────────────────────────────────────────── */}
-          {mode === MODES.LOGIN && (
-            <>
-              <h2 className="text-2xl font-bold text-slate-800">Welcome back 👋</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Sign in to <span className="font-medium text-slate-700">{schoolName}</span>
-              </p>
+      {/* Overlay — darker over photos for text contrast, subtle over gradients */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{ background: loginBgUrl ? 'rgba(0,0,0,0.52)' : 'rgba(0,0,0,0.18)' }}
+      />
 
-              <form onSubmit={handleLogin} className="mt-8 space-y-4">
-                <ErrorBanner />
-
-                <div>
-                  <label htmlFor="email" className="form-label">Email or admission number</label>
-                  <input
-                    id="email" type="text" autoComplete="username" required
-                    value={email}
-                    onChange={(e) => { setEmail(e.target.value); clearError(); }}
-                    className="form-input"
-                    placeholder="you@school.edu or admission number"
-                    disabled={loading || countdown > 0}
-                  />
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label htmlFor="password" className="form-label !mb-0">Password</label>
-                  </div>
-                  <div className="relative">
-                    <input
-                      id="password" type={showPassword ? 'text' : 'password'}
-                      autoComplete="current-password" required
-                      value={password}
-                      onChange={(e) => { setPassword(e.target.value); clearError(); }}
-                      className="form-input pr-10"
-                      placeholder="••••••••"
-                      disabled={loading || countdown > 0}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(v => !v)}
-                      className="absolute inset-y-0 right-3 flex items-center text-slate-400 hover:text-slate-600"
-                      tabIndex={-1}
-                    >
-                      {showPassword ? '🙈' : '👁'}
-                    </button>
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60"
-                  style={{ background: `linear-gradient(135deg, ${primary}, ${accent})` }}
-                  disabled={loading || countdown > 0}
-                >
-                  {loading ? <><Spinner size="sm" /> Signing in…</> : 'Sign in →'}
-                </button>
-              </form>
-
-              {/* ── Social login ── */}
-              <SocialLoginButtons slug={slug} primary={primary} />
-
-              <p className="mt-6 text-center text-xs text-slate-400">
-                Powered by{' '}
-                <a href="https://msingi.io" className="hover:underline" style={{ color: primary }}>
-                  Msingi
-                </a>
-              </p>
-
-              {/* Quick-login cards — only on the demo school */}
-              {slug === 'demo' && <DemoPanel onPick={handleQuickLogin} />}
-            </>
+      {/* ── Floating login card ── */}
+      <div
+        id="login-card"
+        className="relative z-10 w-full"
+        style={{
+          maxWidth: '420px',
+          background: 'rgba(255,255,255,0.97)',
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+          borderRadius: '20px',
+          boxShadow: '0 32px 80px rgba(0,0,0,0.35)',
+          maxHeight: 'calc(100vh - 48px)',
+          overflowY: 'auto',
+          padding: '36px 32px 28px',
+        }}
+      >
+        {/* ── School identity header ── */}
+        <div id="login-school-header" className="flex flex-col items-center text-center mb-7">
+          {logoUrl ? (
+            <img
+              src={logoUrl}
+              alt={shortName}
+              className="h-20 w-20 object-contain rounded-2xl mb-3 shadow-md"
+              style={{ background: '#f8fafc', padding: '6px' }}
+            />
+          ) : (
+            <div
+              className="h-20 w-20 rounded-2xl flex items-center justify-center text-white text-3xl font-black mb-3 shadow-md select-none"
+              style={{ background: `linear-gradient(135deg, ${primary}, ${accent})` }}
+            >
+              {initials}
+            </div>
           )}
-
-          {/* ── OTP MODE ───────────────────────────────────────────── */}
-          {mode === MODES.OTP && (
-            <>
-              <h2 className="text-2xl font-bold text-slate-800">Check your email 📬</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                A 6-digit code was sent to <strong>{email}</strong>. Enter it below.
-              </p>
-
-              <form onSubmit={handleOtp} className="mt-8 space-y-4">
-                <ErrorBanner />
-
-                <div>
-                  <label htmlFor="otp" className="form-label">Verification code</label>
-                  <input
-                    id="otp" type="text" inputMode="numeric" pattern="\d{6}"
-                    maxLength={6} required autoFocus
-                    value={otp}
-                    onChange={(e) => { setOtp(e.target.value.replace(/\D/g, '')); clearError(); }}
-                    className="form-input text-center text-2xl tracking-[0.5em] font-mono"
-                    placeholder="000000"
-                    disabled={loading}
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60"
-                  style={{ background: `linear-gradient(135deg, ${primary}, ${accent})` }}
-                  disabled={loading || otp.length !== 6}
-                >
-                  {loading ? <><Spinner size="sm" /> Verifying…</> : 'Verify code →'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => { setMode(MODES.LOGIN); setOtp(''); clearError(); }}
-                  className="w-full text-sm text-slate-500 hover:text-slate-700 py-1"
-                >
-                  ← Back to sign in
-                </button>
-              </form>
-            </>
-          )}
-
-          {/* ── CHANGE PASSWORD MODE ────────────────────────────────── */}
-          {mode === MODES.CHANGE_PASSWORD && (
-            <>
-              <h2 className="text-2xl font-bold text-slate-800">Password expired 🔑</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Your password is more than 90 days old. Please choose a new one to continue.
-              </p>
-
-              <form onSubmit={handleChangePassword} className="mt-8 space-y-4">
-                <ErrorBanner />
-
-                <div>
-                  <label htmlFor="new-password" className="form-label">New password</label>
-                  <input
-                    id="new-password" type="password" autoComplete="new-password"
-                    required minLength={8}
-                    value={newPassword}
-                    onChange={(e) => { setNewPassword(e.target.value); clearError(); }}
-                    className="form-input"
-                    placeholder="At least 8 characters"
-                    disabled={loading}
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="confirm-password" className="form-label">Confirm password</label>
-                  <input
-                    id="confirm-password" type="password" autoComplete="new-password"
-                    required
-                    value={confirmPassword}
-                    onChange={(e) => { setConfirmPassword(e.target.value); clearError(); }}
-                    className="form-input"
-                    placeholder="Repeat your new password"
-                    disabled={loading}
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60"
-                  style={{ background: `linear-gradient(135deg, ${primary}, ${accent})` }}
-                  disabled={loading}
-                >
-                  {loading ? <><Spinner size="sm" /> Saving…</> : 'Set password & sign in →'}
-                </button>
-              </form>
-            </>
+          <h1 className="text-lg font-bold text-slate-800 leading-snug">{schoolName}</h1>
+          {branding?.tagline && (
+            <p className="text-xs text-slate-500 mt-1 italic">{branding.tagline}</p>
           )}
         </div>
+
+        {/* ── LOGIN MODE ── */}
+        {mode === MODES.LOGIN && (
+          <>
+            <p className="text-sm font-medium text-slate-600 text-center mb-5">
+              Welcome back — sign in to continue
+            </p>
+
+            <form id="login-form" onSubmit={handleLogin} className="space-y-4">
+              <ErrorBanner />
+
+              <div>
+                <label htmlFor="email" className="form-label">Username / Email / Admission No.</label>
+                <input
+                  id="email" type="text" autoComplete="username" required
+                  value={email}
+                  onChange={(e) => { setEmail(e.target.value); clearError(); }}
+                  className="form-input"
+                  placeholder="you@school.edu or admission number"
+                  disabled={loading || countdown > 0}
+                />
+              </div>
+
+              <div>
+                <label htmlFor="password" className="form-label">Password</label>
+                <div className="relative">
+                  <input
+                    id="password" type={showPassword ? 'text' : 'password'}
+                    autoComplete="current-password" required
+                    value={password}
+                    onChange={(e) => { setPassword(e.target.value); clearError(); }}
+                    className="form-input pr-10"
+                    placeholder="••••••••"
+                    disabled={loading || countdown > 0}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(v => !v)}
+                    className="absolute inset-y-0 right-3 flex items-center text-slate-400 hover:text-slate-600"
+                    tabIndex={-1}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? '🙈' : '👁'}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                id="btn-login-submit"
+                type="submit"
+                className="w-full flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60 shadow-sm"
+                style={{ background: `linear-gradient(135deg, ${primary}, ${accent})` }}
+                disabled={loading || countdown > 0}
+              >
+                {loading ? <><Spinner size="sm" /> Signing in…</> : 'Sign in →'}
+              </button>
+            </form>
+
+            <SocialLoginButtons slug={slug} primary={primary} />
+
+            <p className="mt-5 text-center text-[11px] text-slate-400">
+              Powered by{' '}
+              <a href="https://msingi.io" className="hover:underline" style={{ color: primary }}>
+                Msingi
+              </a>
+            </p>
+
+            {slug === 'demo' && <DemoPanel onPick={handleQuickLogin} />}
+          </>
+        )}
+
+        {/* ── OTP MODE ── */}
+        {mode === MODES.OTP && (
+          <>
+            <h2 className="text-xl font-bold text-slate-800 text-center mb-1">Check your email 📬</h2>
+            <p className="text-sm text-slate-500 text-center mb-6">
+              A 6-digit code was sent to <strong>{email}</strong>.
+            </p>
+
+            <form onSubmit={handleOtp} className="space-y-4">
+              <ErrorBanner />
+
+              <div>
+                <label htmlFor="otp" className="form-label">Verification code</label>
+                <input
+                  id="otp" type="text" inputMode="numeric" pattern="\d{6}"
+                  maxLength={6} required autoFocus
+                  value={otp}
+                  onChange={(e) => { setOtp(e.target.value.replace(/\D/g, '')); clearError(); }}
+                  className="form-input text-center text-2xl tracking-[0.5em] font-mono"
+                  placeholder="000000"
+                  disabled={loading}
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                style={{ background: `linear-gradient(135deg, ${primary}, ${accent})` }}
+                disabled={loading || otp.length !== 6}
+              >
+                {loading ? <><Spinner size="sm" /> Verifying…</> : 'Verify code →'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setMode(MODES.LOGIN); setOtp(''); clearError(); }}
+                className="w-full text-sm text-slate-500 hover:text-slate-700 py-1"
+              >
+                ← Back to sign in
+              </button>
+            </form>
+          </>
+        )}
+
+        {/* ── CHANGE PASSWORD MODE ── */}
+        {mode === MODES.CHANGE_PASSWORD && (
+          <>
+            <h2 className="text-xl font-bold text-slate-800 text-center mb-1">Password expired 🔑</h2>
+            <p className="text-sm text-slate-500 text-center mb-6">
+              Your password is more than 90 days old. Please choose a new one to continue.
+            </p>
+
+            <form onSubmit={handleChangePassword} className="space-y-4">
+              <ErrorBanner />
+
+              <div>
+                <label htmlFor="new-password" className="form-label">New password</label>
+                <input
+                  id="new-password" type="password" autoComplete="new-password"
+                  required minLength={8}
+                  value={newPassword}
+                  onChange={(e) => { setNewPassword(e.target.value); clearError(); }}
+                  className="form-input"
+                  placeholder="At least 8 characters"
+                  disabled={loading}
+                />
+              </div>
+
+              <div>
+                <label htmlFor="confirm-password" className="form-label">Confirm password</label>
+                <input
+                  id="confirm-password" type="password" autoComplete="new-password"
+                  required
+                  value={confirmPassword}
+                  onChange={(e) => { setConfirmPassword(e.target.value); clearError(); }}
+                  className="form-input"
+                  placeholder="Repeat your new password"
+                  disabled={loading}
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                style={{ background: `linear-gradient(135deg, ${primary}, ${accent})` }}
+                disabled={loading}
+              >
+                {loading ? <><Spinner size="sm" /> Saving…</> : 'Set password & sign in →'}
+              </button>
+            </form>
+          </>
+        )}
       </div>
     </div>
   );
