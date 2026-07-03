@@ -31,11 +31,14 @@ const StudentCreateSchema = z.object({
   middleName:     z.string().max(100).trim().optional(),
   dateOfBirth:    z.string().optional(),
   gender:         z.enum(['male', 'female', 'other', 'prefer_not_to_say']).optional(),
-  classId:        z.string().optional(),
-  streamId:       z.string().optional(),
-  sectionId:      z.string().optional(),
-  houseId:        z.string().optional(),
-  keyStageId:     z.string().optional(),
+  // Association fields — nullable so they can be explicitly cleared (e.g. removing from a stream)
+  classId:        z.string().nullish(),
+  className:      z.string().nullish(),
+  streamId:       z.string().nullish(),
+  streamName:     z.string().nullish(),
+  sectionId:      z.string().nullish(),
+  houseId:        z.string().nullish(),
+  keyStageId:     z.string().nullish(),
   parentName:     z.string().max(200).trim().optional(),
   parentEmail:    z.string().email().optional().or(z.literal('')),
   parentPhone:    z.string().max(30).optional(),
@@ -283,9 +286,18 @@ router.put('/:id', authMiddleware, PLAN, rbac('students', 'update'), async (req,
     delete data.id;
     delete data._v;
 
+    // Resolve the student first so we can target by _id (always present),
+    // which handles pre-migration records that have no UUID `id` field.
+    const Students = _model('students');
+    let existing = await Students.findOne({ id: req.params.id, schoolId }).lean();
+    if (!existing) {
+      try { existing = await Students.findOne({ _id: req.params.id, schoolId }).lean(); } catch (_) {}
+    }
+    if (!existing) return E.notFound(res, 'Student not found');
+
     const { doc, conflict } = await applyOptimisticLock(
-      _model('students'),
-      { id: req.params.id, schoolId },
+      Students,
+      { _id: existing._id },
       { ...data, updatedBy: userId },
       clientVersion
     );
