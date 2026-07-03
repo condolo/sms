@@ -555,10 +555,10 @@ router.get('/billing/all', async (req, res) => {
       schoolSlug: schoolMap[s.schoolId]?.slug ?? '',
     }));
 
-    return ok(res, enriched);
+    return res.json({ success: true, data: enriched });
   } catch (err) {
     console.error('[platform GET /billing/all]', err);
-    return E.serverError(res);
+    return res.status(500).json({ success: false, error: { message: 'Failed to load billing data' } });
   }
 });
 
