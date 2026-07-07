@@ -227,8 +227,12 @@ export default function Landing() {
         </section>
 
         {/* ══ 2. MORNING NARRATIVE ════════════════════════════════════════════ */}
-        <section className="py-20 bg-white border-b border-slate-100">
-          <div className="max-w-5xl mx-auto px-6 lg:px-8">
+        <section className="relative py-20 bg-white border-b border-slate-100 overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-5xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">
                 A new term begins
@@ -368,8 +372,12 @@ export default function Landing() {
         </section>
 
         {/* ══ 5. SOLUTIONS ───────────────────────────────────────────────────── */}
-        <section id="solutions" className="py-24 sm:py-28 bg-slate-50 border-b border-slate-100">
-          <div className="max-w-5xl mx-auto px-6 lg:px-8">
+        <section id="solutions" className="relative py-24 sm:py-28 bg-slate-50 border-b border-slate-100 overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+            <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-5xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">
                 Solutions
@@ -411,8 +419,12 @@ export default function Landing() {
         </section>
 
         {/* ══ 6. PRICING TEASER ══════════════════════════════════════════════ */}
-        <section id="pricing" className="py-20 sm:py-24 bg-white border-b border-slate-100">
-          <div className="max-w-5xl mx-auto px-6 lg:px-8">
+        <section id="pricing" className="relative py-20 sm:py-24 bg-white border-b border-slate-100 overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute -top-24 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
+            <div className="absolute bottom-0 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-5xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Pricing</motion.p>
               <motion.h2 variants={fadeUp} className="text-3xl font-bold tracking-tight text-slate-900 mb-3">
@@ -501,8 +513,11 @@ export default function Landing() {
         </section>
 
         {/* ══ 9. HONEST SOCIAL PROOF ════════════════════════════════════════ */}
-        <section className="py-16 bg-white border-b border-slate-100">
-          <div className="max-w-4xl mx-auto px-6 lg:px-8">
+        <section className="relative py-16 bg-white border-b border-slate-100 overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute top-0 left-1/3 w-80 h-80 bg-indigo-100/50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-4xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}
               className="flex flex-col sm:flex-row gap-8 items-start sm:items-center">
               <motion.div variants={fadeUp} className="flex-1">
@@ -525,8 +540,12 @@ export default function Landing() {
         </section>
 
         {/* ══ 10. FINAL CTA ═════════════════════════════════════════════════ */}
-        <section className="py-24 sm:py-32 bg-slate-50">
-          <div className="max-w-3xl mx-auto px-6 lg:px-8 text-center">
+        <section className="relative py-24 sm:py-32 bg-slate-50 overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute top-0 left-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+            <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-3xl mx-auto px-6 lg:px-8 text-center">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-6">
                 The next step
