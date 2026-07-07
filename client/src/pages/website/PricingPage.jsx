@@ -98,8 +98,12 @@ export default function PricingPage() {
 
       <main>
         {/* Hero */}
-        <section className="pt-32 pb-16 bg-slate-50 border-b border-slate-100">
-          <div className="max-w-3xl mx-auto px-6 lg:px-8 text-center">
+        <section className="relative pt-32 pb-16 bg-slate-50 border-b border-slate-100 overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute top-0 left-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+            <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-3xl mx-auto px-6 lg:px-8 text-center">
             <motion.div initial="hidden" animate="visible" variants={stagger(0.08)}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-4">Pricing</motion.p>
               <motion.h1 variants={fadeUp} className="text-4xl sm:text-5xl font-bold tracking-tighter text-slate-900 mb-4">
@@ -157,8 +161,12 @@ export default function PricingPage() {
         </section>
 
         {/* Cost estimator */}
-        <section className="py-16 bg-slate-50 border-y border-slate-100">
-          <div className="max-w-2xl mx-auto px-6 lg:px-8">
+        <section className="relative py-16 bg-slate-50 border-y border-slate-100 overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+            <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-2xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-2">Estimate your cost</motion.h2>
               <motion.p variants={fadeUp} className="text-slate-500 mb-8 text-sm">Drag to set your student count. Multiply by your number of terms for annual cost.</motion.p>

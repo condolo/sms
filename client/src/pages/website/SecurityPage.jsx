@@ -73,8 +73,12 @@ export default function SecurityPage() {
         </section>
 
         {/* Pillars */}
-        <section className="py-20 bg-white border-b border-slate-100">
-          <div className="max-w-6xl mx-auto px-6 lg:px-8">
+        <section className="relative py-20 bg-white border-b border-slate-100 overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-6xl mx-auto px-6 lg:px-8">
             <div className="grid sm:grid-cols-2 gap-6">
               {PILLARS.map(({ Icon, title, points }) => (
                 <motion.div key={title}
@@ -102,8 +106,12 @@ export default function SecurityPage() {
         </section>
 
         {/* Responsible AI */}
-        <section className="py-20 bg-slate-50 border-b border-slate-100">
-          <div className="max-w-3xl mx-auto px-6 lg:px-8">
+        <section className="relative py-20 bg-slate-50 border-b border-slate-100 overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+            <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-3xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.div variants={fadeUp} className="flex items-center gap-3 mb-5">
                 <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center">
@@ -121,8 +129,12 @@ export default function SecurityPage() {
         </section>
 
         {/* Legal docs */}
-        <section className="py-20 bg-white">
-          <div className="max-w-3xl mx-auto px-6 lg:px-8">
+        <section className="relative py-20 bg-white overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-3xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.div variants={fadeUp} className="flex items-center gap-3 mb-6">
                 <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center">

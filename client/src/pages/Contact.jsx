@@ -117,8 +117,12 @@ export default function Contact() {
 
       <main>
         {/* Hero */}
-        <section className="pt-32 pb-16 bg-white border-b border-slate-100">
-          <div className="max-w-4xl mx-auto px-6 lg:px-8">
+        <section className="relative pt-32 pb-16 bg-white border-b border-slate-100 overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-4xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" animate="visible" variants={stagger(0.08)} className="max-w-3xl">
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-4">
                 Get in touch
@@ -135,8 +139,11 @@ export default function Contact() {
         </section>
 
         {/* Main content */}
-        <section className="py-16 bg-white">
-          <div className="max-w-7xl mx-auto px-6 lg:px-8">
+        <section className="relative py-16 bg-white overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-7xl mx-auto px-6 lg:px-8">
             <div className="grid lg:grid-cols-5 gap-12 xl:gap-20">
 
               {/* Left: Context */}

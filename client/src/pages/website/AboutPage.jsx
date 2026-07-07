@@ -57,8 +57,12 @@ export default function AboutPage() {
         </section>
 
         {/* The origin */}
-        <section className="py-20 bg-white border-b border-slate-100">
-          <div className="max-w-3xl mx-auto px-6 lg:px-8">
+        <section className="relative py-20 bg-white border-b border-slate-100 overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-3xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-6">The origin</motion.p>
               <motion.div variants={fadeUp} className="space-y-5 text-base text-slate-600 leading-relaxed">
@@ -80,8 +84,12 @@ export default function AboutPage() {
         </section>
 
         {/* Journey */}
-        <section className="py-20 bg-slate-50">
-          <div className="max-w-3xl mx-auto px-6 lg:px-8">
+        <section className="relative py-20 bg-slate-50 overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+            <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-3xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger(0.07)}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-4">The journey</motion.p>
               <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-10">Five roles. One direction.</motion.h2>

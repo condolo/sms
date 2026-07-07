@@ -66,8 +66,12 @@ export default function DifferencePage() {
         </section>
 
         {/* Comparison */}
-        <section className="py-20 bg-white border-b border-slate-100">
-          <div className="max-w-6xl mx-auto px-6 lg:px-8">
+        <section className="relative py-20 bg-white border-b border-slate-100 overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-6xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">How Msingi differs</motion.p>
               <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-10">Not a feature comparison. A category distinction.</motion.h2>
@@ -92,8 +96,12 @@ export default function DifferencePage() {
         </section>
 
         {/* Six pillars */}
-        <section className="py-20 bg-slate-50 border-b border-slate-100">
-          <div className="max-w-6xl mx-auto px-6 lg:px-8">
+        <section className="relative py-20 bg-slate-50 border-b border-slate-100 overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+            <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-6xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-10">Six things that set Msingi apart.</motion.h2>
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">

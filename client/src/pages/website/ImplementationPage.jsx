@@ -81,8 +81,12 @@ export default function ImplementationPage() {
         </section>
 
         {/* 4-phase timeline */}
-        <section className="py-20 bg-white border-b border-slate-100">
-          <div className="max-w-4xl mx-auto px-6 lg:px-8">
+        <section className="relative py-20 bg-white border-b border-slate-100 overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-4xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger(0.08)}>
               <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-12">Four phases. One implementation contact throughout.</motion.h2>
               <div className="space-y-4">
@@ -108,8 +112,12 @@ export default function ImplementationPage() {
         </section>
 
         {/* What we migrate */}
-        <section className="py-20 bg-slate-50 border-b border-slate-100">
-          <div className="max-w-4xl mx-auto px-6 lg:px-8">
+        <section className="relative py-20 bg-slate-50 border-b border-slate-100 overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+            <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-4xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-4">What we migrate.</motion.h2>
               <motion.p variants={fadeUp} className="text-slate-500 mb-8">Every record. Verified. No data left behind.</motion.p>
@@ -126,8 +134,12 @@ export default function ImplementationPage() {
         </section>
 
         {/* Common concerns */}
-        <section className="py-20 bg-white border-b border-slate-100">
-          <div className="max-w-3xl mx-auto px-6 lg:px-8">
+        <section className="relative py-20 bg-white border-b border-slate-100 overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-3xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-10">Things schools always ask before switching.</motion.h2>
               <div className="space-y-6">

@@ -101,8 +101,12 @@ export default function RoadmapPage() {
         </section>
 
         {/* Three horizons */}
-        <section className="py-20 bg-white border-b border-slate-100">
-          <div className="max-w-6xl mx-auto px-6 lg:px-8">
+        <section className="relative py-20 bg-white border-b border-slate-100 overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+            <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-6xl mx-auto px-6 lg:px-8">
             <div className="grid lg:grid-cols-3 gap-8">
               {HORIZONS.map(({ label, Icon, color, items }) => (
                 <motion.div key={label}
@@ -130,8 +134,12 @@ export default function RoadmapPage() {
         </section>
 
         {/* Guiding principles */}
-        <section className="py-20 bg-slate-50 border-b border-slate-100">
-          <div className="max-w-4xl mx-auto px-6 lg:px-8">
+        <section className="relative py-20 bg-slate-50 border-b border-slate-100 overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+            <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
+          </div>
+          <div className="relative max-w-4xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-10">What guides our decisions.</motion.h2>
               <div className="grid sm:grid-cols-3 gap-6">

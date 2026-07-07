@@ -386,8 +386,12 @@ export default function Plans() {
       </section>
 
       {/* ── ESTIMATOR + ALL MODULES ── */}
-      <section className="bg-zinc-50 border-y border-zinc-100 py-16">
-        <div className="max-w-7xl mx-auto px-6 lg:px-8">
+      <section className="relative bg-zinc-50 border-y border-zinc-100 py-16 overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+          <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
+        </div>
+        <div className="relative max-w-7xl mx-auto px-6 lg:px-8">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-start">
 
             {/* Estimator */}
@@ -458,8 +462,12 @@ export default function Plans() {
       </section>
 
       {/* ── FAQ ── */}
-      <section className="bg-zinc-50 border-t border-zinc-100 py-16">
-        <div className="max-w-3xl mx-auto px-6 lg:px-8">
+      <section className="relative bg-zinc-50 border-t border-zinc-100 py-16 overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+          <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
+        </div>
+        <div className="relative max-w-3xl mx-auto px-6 lg:px-8">
           <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger} className="text-center mb-10">
             <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-zinc-400 mb-3">FAQ</motion.p>
             <motion.h2 variants={fadeUp} className="text-2xl font-bold tracking-tight text-zinc-900">Common questions</motion.h2>
@@ -471,8 +479,11 @@ export default function Plans() {
       </section>
 
       {/* ── BOTTOM CTA ── */}
-      <section className="py-20 bg-white text-center">
-        <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger} className="max-w-2xl mx-auto px-6">
+      <section className="relative py-20 bg-white text-center overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute top-0 left-1/4 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
+        </div>
+        <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger} className="relative max-w-2xl mx-auto px-6">
           <motion.h2 variants={fadeUp} className="text-3xl font-bold tracking-tight text-zinc-900 mb-4">
             Ready to bring your school online?
           </motion.h2>
