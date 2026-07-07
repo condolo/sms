@@ -306,6 +306,14 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+/* ── TEMPORARY — Sentry pipeline verification route ─────────────
+   Added to confirm captureException() actually reaches Sentry after
+   activating SENTRY_DSN. Remove this route once confirmed working —
+   do not leave an intentional-error route in production long-term. */
+app.get('/api/_sentry-verify', (req, res, next) => {
+  next(new Error('Msingi Sentry verification — safe to ignore, temporary test route'));
+});
+
 /* ── Static frontend ────────────────────────────────────────── */
 const ROOT_DIR   = path.join(__dirname, '..');
 const REACT_DIST = path.join(__dirname, '..', 'client', 'dist');
