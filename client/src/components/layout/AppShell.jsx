@@ -63,9 +63,12 @@ export default function AppShell() {
   // Close mobile overlay on navigation
   useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
 
-  // Apply school favicon + page title dynamically
+  // Apply school favicon + page title dynamically.
+  // The <link rel="icon"> element is a single shared DOM node, and SPA route
+  // changes don't reload the page — so without a reset on unmount, a school's
+  // favicon stays stuck in the tab even after navigating back to the landing
+  // page or a different school (this is exactly what happened in production).
   useEffect(() => {
-    // Favicon
     let link = document.querySelector("link[rel~='icon']");
     if (!link) {
       link = document.createElement('link');
@@ -75,13 +78,18 @@ export default function AppShell() {
     if (faviconUrl) {
       link.href = faviconUrl;
     } else {
-      link.href = '/favicon.ico';
+      link.href = '/favicon.svg';
     }
 
-    // Page title
     if (schoolName) {
       document.title = schoolName;
     }
+
+    return () => {
+      const resetLink = document.querySelector("link[rel~='icon']");
+      if (resetLink) resetLink.href = '/favicon.svg';
+      document.title = 'Msingi';
+    };
   }, [faviconUrl, schoolName]);
 
   function toggleCollapse() {

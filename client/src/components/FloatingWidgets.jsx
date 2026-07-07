@@ -1,12 +1,18 @@
 import { useState, useEffect } from 'react';
 import { getPlatformSettings } from '@/utils/landingCMS';
 import useAuthStore from '@/store/auth';
+import { detectSchool } from '@/utils/schoolDetect';
 
 const WA_MESSAGE = encodeURIComponent('Hello Msingi, I would like to learn more about the platform.');
 const SCROLL_THRESHOLD = 300;
 
 export default function FloatingWidgets() {
-  // Hide on any authenticated school/portal dashboard — widget is for marketing only
+  // Widget is a marketing tool — it belongs on the main site and the demo
+  // school (used as a live sales demo), never on a real school's own pages.
+  // A real school's /login is pre-authentication, so gating on auth state
+  // alone (as before) let the widget leak onto every school's login page.
+  const { isSchool, slug } = detectSchool();
+  const isMarketingSurface = !isSchool || slug === 'demo';
   const isAuthenticated = useAuthStore(s => !!s.session?.user);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [waUrl, setWaUrl] = useState(null);
@@ -27,8 +33,9 @@ export default function FloatingWidgets() {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  // Early return after all hooks — authenticated users are in the school dashboard
-  if (isAuthenticated) return null;
+  // Early return after all hooks — never show on a real school's pages
+  // (login included), and never once a user is authenticated anywhere.
+  if (!isMarketingSurface || isAuthenticated) return null;
 
   function scrollToTop() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
