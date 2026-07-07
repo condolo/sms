@@ -3,7 +3,11 @@ services:
     name: msingi
     env: node
     plan: starter
-    buildCommand: npm install && cd client && npm install --legacy-peer-deps && npm run build
+    # build:ssg runs the normal Vite build, then a Puppeteer pass that
+    # renders every public marketing route to static HTML in dist/<route>/.
+    # Without this, AI/search crawlers that don't execute JS only ever see
+    # the empty SPA shell — see client/scripts/prerender.mjs for details.
+    buildCommand: npm install && cd client && npm install --legacy-peer-deps && npm run build:ssg
     startCommand: node server/index.js
     healthCheckPath: /api/health
     envVars:

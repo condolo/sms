@@ -376,6 +376,18 @@ app.get('*', (req, res) => {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
+
+    // Prerendered marketing pages (built by `npm run build:ssg`, see
+    // client/scripts/prerender.mjs) live at dist/<route>/index.html.
+    // Serve that fully-rendered HTML when it exists — crawlers that don't
+    // execute JS (and real users, for a faster first paint) get real
+    // content immediately; React hydrates over it normally afterwards.
+    // path.normalize + startsWith guards against path traversal via req.path.
+    const candidate = path.normalize(path.join(REACT_DIST, req.path, 'index.html'));
+    if (candidate.startsWith(REACT_DIST) && fs.existsSync(candidate)) {
+      return res.sendFile(candidate);
+    }
+
     return res.sendFile(path.join(REACT_DIST, 'index.html'));
   }
   // No build available (dev mode without running `npm run build`)
