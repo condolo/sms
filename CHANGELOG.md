@@ -6,6 +6,75 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.63.0] — 2026-07-07 — fix(seo,branding): activate prerender pipeline for crawlers; stop marketing-widget/favicon leaks onto real school pages
+
+### Fixed
+
+- **Public site was invisible to every non-JS crawler (Googlebot's sitemap fetcher, GPTBot, PerplexityBot, ClaudeBot, link-preview bots).** An SSG pre-render script (`client/scripts/prerender.mjs`, introduced v4.42.0) already rendered all public marketing routes to static HTML, but it was never actually wired into production:
+  - `render.yaml` `buildCommand` ran `npm run build` (plain Vite build). Changed to `npm run build:ssg` (build + Puppeteer pre-render pass).
+  - Even with pre-rendering run, `server/index.js`'s SPA wildcard route unconditionally served the root `dist/index.html` for every path — it never checked whether a pre-rendered `dist/<route>/index.html` existed on disk. Added a check: if a pre-rendered file exists for the request path (path-traversal guarded via `path.normalize` + `startsWith`), serve it; otherwise fall back to the SPA shell as before. Authenticated app routes (e.g. `/students`) have no pre-rendered file and are unaffected.
+  - Verified locally: `npm run build:ssg` renders all 25 routes with real text content (confirmed via direct file inspection), and the exact path-resolution logic used in the Express fix was verified against the actual `dist/` output before deploying.
+  - Note: the `<div id="pre-react-error" style="display:none;">` crash-fallback banner in `index.html` is invisible to real users and to any crawler that executes JS — it is not the cause of any "empty page" symptom; naive fetch-only tools that ignore CSS can misreport its text as visible page content.
+
+- **Sitemap route coverage was stale in docs, not in the app.** `client/public/sitemap.xml` and `client/scripts/prerender.mjs`'s `ROUTES` array already list all 24 public marketing routes (not the 6 documented back in v4.42.0) — `docs/DEVELOPER_GUIDE.md` §36 updated to match current reality.
+
+- **`FloatingWidgets.jsx` (global WhatsApp + scroll-to-top widget, mounted once in `main.jsx`) showed on every real school's `/login` page.** It only checked `isAuthenticated`, so a real school's login page — pre-authentication by definition — always showed the marketing widget. Now imports `detectSchool()` and hides whenever `isSchool` is true **unless** `slug === 'demo'` (demo is a live sales-demo surface, every other school is not), regardless of login state. This is a different component from the per-page `FloatingActions.jsx` used on Landing/FAQ/Contact/Plans/legal pages (v4.42.0/v4.9.6) — the two are not currently consolidated; see note in `docs/DEVELOPER_GUIDE.md` §36.
+
+- **Favicon leaked between schools/landing page in the same browser tab.** `AppShell.jsx` mutates the single shared `<link rel="icon">` DOM node to the active school's uploaded favicon on mount, but had no cleanup — since SPA route changes don't reload the page, once a school's dashboard set the tab's favicon it stayed there even after navigating back to the landing page or into a different school in the same tab (reproduced via `?school=demo`, the documented dev/testing path in `schoolDetect.js`). Added an unmount cleanup that restores the default favicon (`/favicon.svg`) and page title (`Msingi`).
+
+### Known issue (flagged, not fixed this release)
+
+- **`/favicon.svg` referenced in `client/index.html` does not exist anywhere in the repo** (never committed). The "default" tab icon has been 404ing since before this fix — the favicon-leak fix above restores the *path*, not a working icon. Needs an actual SVG file added at `client/public/favicon.svg`.
+
+---
+
+## [v4.62.0] — 2026-07-03 — fix(students): root-cause fix for dual-identifier bugs (deactivate/reactivate/portal-account 500s, empty filtered lists) + bulk credentials CSV
+
+### Fixed — the dual-identifier bug class
+
+Student, class, and stream documents reference each other by whichever identifier form was current when they were written: the custom UUID `id` field (routes generate this) or the MongoDB `_id` string (pre-migration and imported records — the UUID migration never back-filled `id` onto old docs or rewrote denormalised references). Exact-string lookups/filters on one form silently miss documents written under the other. This one root cause produced a chain of distinct-looking symptoms, all fixed this release:
+
+- **`PATCH /:id/deactivate` and `/:id/reactivate`** (`server/routes/students.js`) — added `_id` fallback lookup (matching the pattern already in `GET /:id`); `updateOne` now targets `{ _id: doc._id }` (always present) instead of `{ id: req.params.id }` (may be undefined on old records). Root-caused: "I only managed to activate one" / 500 on deactivate for imported students.
+- **`POST /:id/portal-account` and `/:id/parent-account`** — same `_id` fallback added to the student lookup.
+- **The actual 500 on portal-account creation** was a MongoDB index defect, not a lookup bug (see below) — the lookup fallback alone did not fix it; both were required.
+- **`GET /students` list filters (classId, streamId, section)** and **`GET /classes/:id/students`, `GET /streams/:id/students`** — filters compared the raw URL param against `classId`/`streamId` as an exact string, missing students whose class/stream reference was stored in the other identifier form. New `_entityIdForms(col, schoolId, value)` helper in `students.js` resolves every identifier form an entity is known by; filters now `$in`-match all of them. The section-filter branch also no longer drops classes lacking a UUID `id` (previous `.map(d => d.id).filter(Boolean)` silently excluded them from the section entirely). **This is why a filtered Students list (and filtered Export, which uses the same endpoint) could return "No students found" for a student who was visibly enrolled in that exact class/stream.**
+- **`PUT /:id` (student update)** — same `_id` fallback added before `applyOptimisticLock`, so pre-migration records can be edited (e.g. unassigning a stream) without a false "Student not found".
+- **`StudentUpdateSchema` (Zod) rejected `null` on `streamId`/`classId`/`sectionId`/`houseId`/`keyStageId`.** `z.string().optional()` accepts `string | undefined`, not `null` — the stream-unassign action sends `{ streamId: null, streamName: null }` to clear the field, which Zod rejected before the route even ran, surfacing as "Validation failed" in the UI. Changed all association fields to `.nullish()`. `streamName` was also missing from the schema entirely (silently stripped, leaving stale denormalised data after an unassign) — added.
+- **Client**: `StudentProfile.jsx` (`_call`, deactivate handler, reactivate button) and `StudentList.jsx`/`ClassDetail.jsx` (`unassign` mutation) now use `student.id ?? student._id` consistently. Reactivate button's empty `catch {}` replaced with real error surfacing via `setError()`.
+
+### Fixed — root cause of the portal-account 500 (database index defect)
+
+- **`users_school_email` and `users_school_username`** (`server/utils/indexes.js`) were **unique + sparse compound indexes** on `(schoolId, email)` / `(schoolId, username)`. Sparse compound indexes still index a document if it has *any* one of the keys — every user has `schoolId`, so every user (including email-less student accounts and username-less parent accounts) was indexed, as `(schoolId, null)`. The unique constraint then permitted only **one** email-less user per school — the first "Create Student Account" succeeded and took that slot; every subsequent one threw `E11000` → opaque 500. (`teachers_school_email` had the identical defect.) Replaced all three with **partial indexes** (`partialFilterExpression: { field: { $type: 'string' } }`) — uniqueness enforced only on real string values.
+- `ensureIndexes()` now drops the three superseded indexes at startup (`DROP_INDEXES` list) before recreating them — MongoDB rejects redefining an index under the same key pattern with different options (error 85), so this migration step is required, not optional. Safe to run repeatedly (`IndexNotFound` on later startups is ignored).
+- Account-creation routes (`portal-account`, `bulk-portal-accounts`) now **omit** the `email` field entirely when a student has no school email, instead of storing `email: null`.
+- `POST /:id/portal-account` catch block now returns a `409` naming the conflicting field on `E11000` instead of a blind `500`, and its E11000 handler gained a username-conflict branch (finds and resets the conflicting account instead of throwing) alongside the existing email-conflict branch.
+
+### Added
+
+- **Bulk portal account activation now returns one-time credentials, downloadable as CSV.** `POST /api/students/bulk-portal-accounts` previously generated and hashed a random password per student but never returned it — bulk-created accounts had no way to reach the student without a manual per-student reset. Now returns `credentials: [{ name, admissionNumber, username, tempPassword, action }]`. Client (`StudentList.jsx`) chunks any selection size into batches of 200 (the server's per-request cap) sent sequentially, so 500+ imported students activate in one click; credentials auto-download as a UTF-8 CSV (name, admission number, temp password) and remain re-downloadable from the result banner until dismissed — passwords are never stored in plaintext and are unrecoverable after that. All accounts still force a password change at first login. The route also gained the same `_id` fallback and existing-account-by-username matching as the single-student route, plus a clear per-student error when an admission number is missing (previously an unhandled `TypeError`).
+
+---
+
+## [v4.61.0] — 2026-07-02/03 — fix(platform): admin console hardening + feat(login): floating-card redesign with per-school background image
+
+### Fixed
+
+- **Platform admin billing overview threw `SyntaxError: Unexpected token '<'`.** `renderBillingOverview` in `platform.html` used a raw `fetch` + `res.json()` with no handling for non-JSON responses (401 redirects, error pages). Replaced with the shared `api()` helper, which already handles session expiry and surfaces the real HTTP status.
+- **`GET /api/platform/billing/all`** — fixed a route-level bug returning raw `res.json()` without the `ok`/`E` response envelope helpers, which were not imported in `platform.js`.
+- **Platform admin login page** — hardened error display; fixed empty catch blocks that silently swallowed login failures.
+- **`/platform` route CSP** — set a permissive, route-scoped Content-Security-Policy (`'unsafe-inline'` for script/style) to unblock the page's inline JS and Font Awesome CDN reliance; the React SPA keeps its strict global policy. Scoped to this one operator-only, cookie-session-gated route.
+- **`PLATFORM_ADMIN_KEY` missing env var** — was a fatal startup guard; changed to a warning-only check so the server still starts (platform admin login is simply unavailable until the key is set), rather than crashing the whole deployment.
+- **Analytics leadership dashboard (Attendance Risk, Behaviour Heatmap, Academic Health widgets)** showed raw MongoDB ObjectIds instead of class names. `classMap` was built only from classes' UUID `id` field, but older attendance/behaviour/grade records stored the MongoDB ObjectId as `classId`. Fixed by including both `c.id` and `String(c._id)` in the map.
+
+### Changed
+
+- **Login page redesign** — full-screen background image (per-school, configurable in Settings → Branding, falls back to an animated gradient) with a floating centered card, responsive across mobile/tablet/desktop. New `PUT`/`DELETE /api/settings/school/login-bg` endpoints; `loginBgUrl` added to `SCHOOL_UPDATABLE` and the public `school-info` response; `/api/public/school-asset/login-bg` endpoint added alongside the existing logo/favicon asset routes.
+- **Login page icons** — replaced emoji (📬 🔑 🙈 👁 ⚠) with `lucide-react` icons (`Mail`, `KeyRound`, `Eye`, `EyeOff`, `AlertTriangle`) throughout all login modes (password, OTP, force-change) and the demo panel.
+- **WhatsApp contact number and plan pricing** made dynamic — sourced from Platform Admin → Branding settings instead of being hardcoded, with corrected plan cache invalidation on change.
+- Student & parent portal UI and dashboard header rebuilt; platform billing/plan labels corrected to match actual plan names.
+
+---
+
 ## [v4.60.0] — 2026-07-02 — feat(rbac): Settings as control centre — MODULE_REGISTRY, principal role, per-user permission enforcement
 
 ### Added

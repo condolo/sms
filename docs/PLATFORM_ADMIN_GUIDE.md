@@ -370,6 +370,10 @@ Response:
 
 MRR is calculated as: `core × 15,000 + standard × 35,000 + premium × 65,000 + enterprise × 250,000` (KES).
 
+### Billing Overview tab (`/platform` dashboard)
+
+A separate, cookie-session-authenticated view from the API above — **Billing** tab in the Platform Console UI, backed by `GET /api/platform/billing/all` (uses the `platform_token` HttpOnly cookie via `platformSession` middleware, not the `X-Platform-Key` header). If this tab ever throws `SyntaxError: Unexpected token '<'` again, the cause is a raw `fetch()` + `res.json()` call somewhere that doesn't handle a non-JSON response (401 redirect, HTML error page) — use the shared `api()` helper in `platform.html`, which already handles session expiry and surfaces the real HTTP status instead of throwing a JSON parse error (fixed v4.61.0).
+
 ---
 
 ## 9. Impersonating a School Admin
@@ -558,6 +562,13 @@ GET  /api/platform/settings   — no auth — returns public platform config (so
 PATCH /api/platform/settings  — platform key required — update any settings fields
 ```
 
+### WhatsApp contact number & plan pricing (v4.61.0+)
+
+Also configured from `/platform` → **Settings**, and read the same way as social links:
+
+- **`contactPhone`** — the number the public site's WhatsApp widget (`client/src/components/FloatingWidgets.jsx`) links to. Previously hardcoded in the client; now sourced live from `getPlatformSettings()` so it can be changed without a deploy.
+- **Plan pricing** (core/standard/premium/enterprise) — editable here; changing it invalidates the plan cache so the Pricing page and in-app upgrade prompts reflect the new figures immediately rather than serving stale cached values.
+
 ---
 
-*Last updated: 2026-05-19 — Msingi v4.9.9*
+*Last updated: 2026-07-07 — Msingi v4.63.0*

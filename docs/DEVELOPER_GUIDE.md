@@ -1120,6 +1120,54 @@ function _tenantQuery(school) {
 
 Additionally, both delete routes always delete users by `school.adminEmail` regardless of `schoolId` matching — this is the guaranteed fallback.
 
+### Dual-Identifier Pattern — students/classes/streams/users (v4.62.0)
+
+The same root cause as the Mongoose `id` virtual conflict above shows up independently across student, class, stream, and user documents: each one references others by whichever identifier form was current when the reference was **written** — the custom UUID `id` field (what routes generate today) or the MongoDB `_id` string (pre-migration and imported records). The UUID migration never back-filled `id` onto old documents or rewrote denormalised references (e.g. a student's stored `classId`), so a collection can legitimately contain both forms side by side, referencing each other inconsistently.
+
+**Symptom pattern:** anything that does an exact-string lookup or filter against one identifier form silently misses documents written under the other. This produced several distinct-looking bugs before the actual cause was found (v4.62.0): 500s on student deactivate/reactivate/portal-account for imported students, "No students found" on a correctly-populated class/stream/section filter (and the Export feature, which shares the same endpoint), and MongoDB ObjectIds rendering in place of class names on the analytics dashboard (v4.61.0, same root cause, independently discovered first).
+
+**Rules for this codebase, going forward:**
+
+```js
+// Single-document lookup — try id, then _id, in that order:
+let doc = await Model.findOne({ id: req.params.id, schoolId }).lean();
+if (!doc) {
+  try { doc = await Model.findOne({ _id: req.params.id, schoolId }).lean(); } catch (_) {}
+}
+
+// Writes always target _id — it is always present, id may not be:
+await Model.updateOne({ _id: doc._id }, { $set: { ... } });
+
+// Canonical outbound id — prefer the UUID, fall back to the ObjectId string:
+const canonicalId = doc.id || String(doc._id);
+
+// List filters — resolve every form an entity is known by, then $in-match:
+// (server/routes/students.js — reusable across any collection)
+async function _entityIdForms(col, schoolId, value) {
+  const or = [{ id: value }];
+  if (mongoose.Types.ObjectId.isValid(value) && String(value).length === 24) or.push({ _id: value });
+  const doc = await _model(col).findOne({ schoolId, $or: or }).select('id').lean();
+  const forms = new Set([value]);
+  if (doc?.id)  forms.add(doc.id);
+  if (doc?._id) forms.add(String(doc._id));
+  return [...forms];
+}
+// filter.classId = { $in: await _entityIdForms('classes', schoolId, classId) };
+```
+
+```js
+// ❌ Never do this — misses every document written under the other identifier form:
+filter.classId = req.query.classId;
+await Model.updateOne({ id: req.params.id, schoolId }, { $set: data }); // fails silently for _id-only docs
+
+// ❌ Also wrong: excluding entities without a UUID instead of including both forms
+const ids = classes.map(c => c.id).filter(Boolean); // drops pre-migration classes from the result entirely
+```
+
+**Client-side mirror of the same rule:** always resolve an entity's id as `entity.id ?? entity._id` when building a URL or a list key — see `StudentList.jsx`, `ClassDetail.jsx`, `StudentProfile.jsx`.
+
+**A related, structurally different trap in the same area (v4.62.0):** `users_school_email` / `users_school_username` were **unique + sparse compound** indexes. Sparse compound indexes still index a document if it has *any one* of the compound keys — every user has `schoolId`, so every user (including students with no email, parents with no username) was indexed, permitting only one such document per school before `E11000` on the second. Fixed by converting to **partial indexes** (`partialFilterExpression: { field: { $type: 'string' } }`) in `server/utils/indexes.js` — uniqueness enforced only on real string values. Never write `email: null` / `username: null`; omit the field entirely when absent.
+
 ### Impersonate Flow (v4.5.5+)
 
 ```
@@ -2525,8 +2573,12 @@ Platform renamed from **InnoLearn** to **Msingi**, domain **msingi.io**.
 // Priority chain:
 detectSchool()
 // 1. Subdomain:  greenwood.msingi.io  → slug = "greenwood"
-// 2. ?school=X query param            → slug = X   (dev/localhost)
-// 3. localStorage il_school_slug      → slug = stored
+// 2. ?school=X query param            → slug = X   (dev/testing — also used to reproduce
+//                                        school-context bugs on the main domain, e.g. the
+//                                        favicon-leak repro in §36)
+// 3. localStorage ms_school_slug      → slug = stored (returning-user shortcut; skipped
+//                                        entirely on MAIN_HOSTS so it can never hijack
+//                                        the landing page)
 // 4. No match                         → { slug: null, isSchool: false }
 
 schoolPortalUrl('greenwood')
@@ -3192,22 +3244,19 @@ Stored on `schools.emergencyOnlineMode` (boolean). When `true`:
 
 ---
 
-## 36. Public Site SEO & SSG (v4.42.0+)
+## 36. Public Site SEO & SSG (v4.42.0+, activated in production v4.63.0)
 
 ### Overview
 
 The Msingi public site is a React SPA served by Vite. Because AI bots (GPTBot, PerplexityBot, ClaudeBot) and many SEO crawlers do not execute JavaScript, a static pre-render step is run after every production build.
 
+**Important history:** this pipeline was built in v4.42.0 but was never actually wired into the production deploy until v4.63.0 (2026-07-07). Until then, `render.yaml` ran the plain `npm run build` (no pre-render), and even when the pre-render script *was* run manually, `server/index.js`'s SPA wildcard route had no logic to serve the pre-rendered files it produced — it always served the root `dist/index.html` for every path. Both gaps are closed now; see §36 "Serving pre-rendered pages" below. If you are debugging "crawler sees nothing" again in the future, verify both halves — the file existing in `dist/` is necessary but not sufficient.
+
 ### Public routes
 
-| Path | Page | Priority |
-|---|---|---|
-| `/` | Landing | 1.0 |
-| `/plans` | Plans | 0.9 |
-| `/faq` | FAQ | 0.8 |
-| `/contact` | Contact | 0.7 |
-| `/privacy` | Privacy Policy | 0.3 |
-| `/terms` | Terms of Service | 0.3 |
+All 24 public marketing routes are pre-rendered (list lives in two places that must stay in sync: `client/scripts/prerender.mjs`'s `ROUTES` array, and `client/public/sitemap.xml`):
+
+`/`, `/why`, `/about`, `/platform`, `/pricing`, `/security`, `/difference`, `/why-choose`, `/roadmap`, `/implementation`, `/solutions/principal`, `/solutions/teacher`, `/solutions/finance`, `/solutions/parent`, `/solutions/admissions`, `/plans`, `/faq`, `/contact`, `/privacy`, `/terms`, `/legal/dpa`, `/legal/sla`, `/legal/accessibility`, `/legal/responsible-ai`, `/knowledge`.
 
 All other routes are authenticated app routes — blocked in `client/public/robots.txt`.
 
@@ -3235,23 +3284,49 @@ All other routes are authenticated app routes — blocked in `client/public/robo
 
 The script:
 1. Starts a local HTTP server on port 4174 serving `dist/` with SPA fallback.
-2. Launches headless Chromium via Puppeteer.
+2. Launches headless Chromium via Puppeteer (`--no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage --disable-gpu` — required to launch in a root/CI container like Render's build image).
 3. Intercepts all `/api/` requests and returns `{}` (app falls back to `CMS_DEFAULTS`).
 4. Waits 900 ms per route for Framer Motion animations to settle.
-5. Writes rendered HTML to `dist/index.html`, `dist/plans/index.html`, etc.
+5. Writes rendered HTML to `dist/index.html`, `dist/why/index.html`, `dist/solutions/principal/index.html`, etc. — nested routes get a nested directory with their own `index.html`.
 
-**Deploy requirement:** server/CDN must route `/plans` → `dist/plans/index.html` (not the SPA root). Render.com's static site rewrite rules handle this automatically if configured correctly.
+### Serving pre-rendered pages (v4.63.0)
 
-### FloatingActions component
+This app is **not** a static site — it's a Node/Express service (`render.yaml`: `env: node`, `startCommand: node server/index.js`). There is no CDN rewrite-rule layer. Two things must both be true for a route to actually serve pre-rendered HTML in production:
 
-`client/src/components/landing/FloatingActions.jsx` — renders on every public page:
-- WhatsApp FAB (always visible) linking to `WA_URL` from `landingData.js`
-- Scroll-to-top button (appears after 400 px scroll)
-- Fixed bottom-right, `z-50`
+1. **`render.yaml` `buildCommand`** must run `npm run build:ssg`, not plain `build` — otherwise `dist/<route>/index.html` never gets created at all.
+2. **`server/index.js`'s SPA wildcard route** (`app.get('*', ...)`) must check for a pre-rendered file before falling back to the shell:
+   ```js
+   const candidate = path.normalize(path.join(REACT_DIST, req.path, 'index.html'));
+   if (candidate.startsWith(REACT_DIST) && fs.existsSync(candidate)) {
+     return res.sendFile(candidate);
+   }
+   return res.sendFile(path.join(REACT_DIST, 'index.html')); // SPA shell fallback
+   ```
+   `express.static(REACT_DIST, { index: false })` does **not** auto-serve directory index files (that's what `index: false` disables), so without this explicit check the wildcard route always wins and always serves the root shell — this was the actual production bug even after the buildCommand fix, and both had to land together.
+   The `path.normalize` + `startsWith(REACT_DIST)` guard is required — `req.path` is attacker-controlled input, and without it a crafted path could attempt to escape `REACT_DIST` via `..` segments.
+
+Authenticated app routes (e.g. `/students`) have no pre-rendered file on disk, so `fs.existsSync` is `false` and they fall through to the normal SPA shell exactly as before — this change is additive, not a behavior change for the app itself.
+
+### Widget components — two, not one (do not conflate)
+
+There are **two** separate floating-widget components with overlapping purpose but different scope. This is a known duplication (a `check-docs`-flagged shadow-implementation smell), not yet consolidated:
+
+| Component | Mounted | Scope | Auth/school-aware? |
+|---|---|---|---|
+| `client/src/components/landing/FloatingActions.jsx` | Imported directly into Landing.jsx, FAQ.jsx, Contact.jsx, Plans.jsx, PrivacyPolicy.jsx, TermsOfService.jsx | Only renders on those specific public pages | No — always visible where imported |
+| `client/src/components/FloatingWidgets.jsx` | Once, globally, in `client/src/main.jsx` alongside `<RouterProvider>` | Renders on **every** route in the app, including school subdomains and dashboards, unless explicitly guarded | **Yes (v4.63.0)** — imports `detectSchool()`; hides when `isSchool` is true unless `slug === 'demo'`; also hides when `isAuthenticated` |
+
+`FloatingWidgets.jsx` is the one that leaked onto real schools' `/login` pages before v4.63.0 (a real school's login page is pre-authentication, so an auth-only check never caught it). If you add a third marketing surface in the future, gate it the same way `FloatingWidgets` does, not the way `FloatingActions` does.
+
+### Favicon reset (v4.63.0)
+
+`AppShell.jsx` mutates the single shared `<link rel="icon">` DOM node to the active school's `faviconUrl` on mount. Because this is a global singleton element and SPA route changes don't reload the page, the mutation now has an unmount cleanup that restores `/favicon.svg` and the default title `Msingi` — without it, a school's favicon persisted in the browser tab even after navigating back to the landing page or into a different school (reproducible via `?school=demo`, the dev/testing path documented in `schoolDetect.js` §28.2).
+
+**Known gap:** `/favicon.svg` is referenced in `client/index.html` and by this reset logic, but the file does not exist anywhere in the repo — it 404s. Not fixed as part of v4.63.0; needs an actual SVG added at `client/public/favicon.svg`.
 
 ### Crawler discovery
 
 - `client/public/robots.txt` — allow/disallow rules + sitemap pointer
-- `client/public/sitemap.xml` — 6 URLs, `lastmod` dates, `changefreq`, `priority`
+- `client/public/sitemap.xml` — 24 URLs (hand-maintained, no generation script), `lastmod` dates, `changefreq`, `priority`. Live at `https://msingi.io/sitemap.xml`. Updating a page's content should also bump its `<lastmod>` by hand — Google uses that date to prioritize re-crawling; resubmitting the same sitemap without changing `<lastmod>` does not force a faster re-crawl. For urgent single-page updates, use Search Console's "Request Indexing" instead of waiting on the sitemap cycle.
 
 Both files are copied to `dist/` by Vite's public directory handling and require no additional build step.

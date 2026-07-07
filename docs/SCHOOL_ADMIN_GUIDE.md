@@ -253,9 +253,23 @@ For a formal application workflow:
 
 ### Bulk import (CSV)
 
-*(Coming in v3.2 — Data Migration Tool)*
+Available from **Students → Import**. Upload a CSV of up to 500 students per batch — the system validates every row first and reports which rows succeeded and which were skipped (with a reason) before anything is saved. Rows that don't supply their own admission number are auto-assigned the next number in your school's sequence.
 
-For transitioning from another system, a CSV import tool is planned. In the meantime, use the Admissions module for batch processing or contact your Msingi administrator for a manual migration.
+### Student portal accounts
+
+Each student can have a **student login** (signs in with their admission number) and, if a parent email is on file, a **parent login** — created individually from that student's profile (**Students → [student] → Portal** tab) or in bulk:
+
+1. From the **Students** list, select the students who need portal access (checkbox column).
+2. Click **Grant Portal Access**. Any number of students works in one click — the system batches large selections automatically.
+3. A CSV of one-time login credentials (name, admission number, temporary password) downloads automatically. **Save this file before closing the result banner** — passwords are never stored in readable form and cannot be recovered afterward. Print it, or share each row individually with the relevant student/parent.
+4. Every account requires a password change on first login, so a slip changing hands after the student has already logged in poses no risk.
+5. If a student loses their credentials before ever logging in, reset just that one account from their Profile → Portal tab rather than re-running the bulk action.
+
+Siblings share one parent account automatically: put the same parent email on each sibling's profile, then create the parent account from each sibling's Portal tab in turn — the second and later clicks link that child to the existing account (and reset its password) instead of creating a duplicate. The parent must log out and back in to see a newly linked child.
+
+### Deactivating a student
+
+**Students → [student] → Portal → Deactivate Student.** Marks the student withdrawn/graduated/transferred; all academic records are preserved and the student is excluded from the next billing snapshot. A deactivated student can be restored at any time from the same tab (**Reactivate**), which restores active status and portal access.
 
 ---
 
