@@ -29,3 +29,7 @@ services:
         sync: false          # Set in Render dashboard: Gmail App Password (16 chars)
       - key: PLATFORM_EMAIL
         sync: false          # Set in Render dashboard: email address for admin alerts
+      - key: SENTRY_DSN
+        sync: false          # Optional — set in Render dashboard to activate Sentry error
+                              # tracking (server/utils/monitoring.js). Server behaves exactly
+                              # as before if left unset — this is purely additive.
