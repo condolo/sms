@@ -512,7 +512,7 @@ export default function Plans() {
           </Link>
           <p>© {new Date().getFullYear()} Msingi. All rights reserved.</p>
           <div className="flex gap-5">
-            <a href="mailto:hello@msingi.io" className="hover:text-zinc-700 transition-colors">hello@msingi.io</a>
+            <a href="mailto:support@msingi.io" className="hover:text-zinc-700 transition-colors">support@msingi.io</a>
             <Link to="/contact" className="hover:text-zinc-700 transition-colors">Contact</Link>
             <a href="/platform" className="opacity-40 hover:opacity-70 transition-opacity">⚙</a>
           </div>

@@ -67,10 +67,10 @@ export default function PublicFooter() {
             </p>
 
             <div className="space-y-3 mb-6">
-              <a href="mailto:hello@msingi.io"
+              <a href="mailto:support@msingi.io"
                 className="flex items-center gap-3 text-sm text-slate-500 hover:text-white transition-colors group">
                 <span className="w-8 h-8 rounded-lg bg-slate-800 group-hover:bg-slate-700 flex items-center justify-center text-[11px] font-bold transition-colors">@</span>
-                hello@msingi.io
+                support@msingi.io
               </a>
               <a href={waUrl} target="_blank" rel="noopener noreferrer"
                 className="flex items-center gap-3 text-sm text-slate-500 hover:text-white transition-colors group">

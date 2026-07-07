@@ -511,7 +511,7 @@ export default function PrivacyPolicy() {
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2 text-sm">
                   <p><strong>InnoLearn Limited</strong> (trading as Msingi)</p>
                   <p>Privacy enquiries: <a href="mailto:privacy@msingi.io" className="text-indigo-600 hover:underline">privacy@msingi.io</a></p>
-                  <p>General: <a href="mailto:hello@msingi.io" className="text-indigo-600 hover:underline">hello@msingi.io</a></p>
+                  <p>General: <a href="mailto:support@msingi.io" className="text-indigo-600 hover:underline">support@msingi.io</a></p>
                   <p>Website: <a href="https://msingi.io" className="text-indigo-600 hover:underline">msingi.io</a></p>
                 </div>
               </Sub>

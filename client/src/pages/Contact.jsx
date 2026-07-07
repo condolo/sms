@@ -92,7 +92,7 @@ export default function Contact() {
     await new Promise(r => setTimeout(r, 800));
     setSending(false);
     setSubmitted(true);
-    window.location.href = `mailto:hello@msingi.io?subject=${subject}&body=${body}`;
+    window.location.href = `mailto:support@msingi.io?subject=${subject}&body=${body}`;
   }
 
   return (
@@ -186,10 +186,10 @@ export default function Contact() {
                 {/* Direct contact */}
                 <motion.div variants={fadeUp} className="border-t border-slate-100 pt-8 space-y-3">
                   <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-4">Or reach us directly</p>
-                  <a href="mailto:hello@msingi.io"
+                  <a href="mailto:support@msingi.io"
                     className="flex items-center gap-3 text-sm text-slate-600 hover:text-slate-900 transition-colors">
                     <span className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-[11px] font-bold">@</span>
-                    hello@msingi.io
+                    support@msingi.io
                   </a>
                   <a href={waUrl} target="_blank" rel="noopener noreferrer"
                     className="flex items-center gap-3 text-sm text-slate-600 hover:text-slate-900 transition-colors">

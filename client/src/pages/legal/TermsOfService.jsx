@@ -200,9 +200,9 @@ export default function TermsOfService() {
                 </a>
               ))}
               <div className="pt-4 border-t border-slate-100 mt-4">
-                <a href="mailto:hello@msingi.io"
+                <a href="mailto:support@msingi.io"
                   className="block text-xs px-3 py-2 rounded-lg text-indigo-600 hover:bg-indigo-50 transition-colors font-medium">
-                  hello@msingi.io
+                  support@msingi.io
                 </a>
               </div>
             </nav>
@@ -512,7 +512,7 @@ export default function TermsOfService() {
               </Sub>
 
               <Sub title="13.2 Termination by the School">
-                <p>The School may terminate its subscription at any time by providing <strong>30 days' written notice</strong> to <a href="mailto:hello@msingi.io" className="text-indigo-600 hover:underline">hello@msingi.io</a>. Termination does not entitle the School to a refund of any fees already paid for the current term.</p>
+                <p>The School may terminate its subscription at any time by providing <strong>30 days' written notice</strong> to <a href="mailto:support@msingi.io" className="text-indigo-600 hover:underline">support@msingi.io</a>. Termination does not entitle the School to a refund of any fees already paid for the current term.</p>
               </Sub>
 
               <Sub title="13.3 Termination by Msingi for breach">
@@ -605,7 +605,7 @@ export default function TermsOfService() {
                 <Table
                   headers={['Party', 'Notice email']}
                   rows={[
-                    ['Msingi', 'hello@msingi.io (or legal@msingi.io for formal legal notices)'],
+                    ['Msingi', 'support@msingi.io (or legal@msingi.io for formal legal notices)'],
                     ['School', 'The primary administrator email address registered on the Platform during onboarding'],
                   ]}
                 />
@@ -633,7 +633,7 @@ export default function TermsOfService() {
                   <p className="text-slate-500 text-xs">Trading as Msingi</p>
                 </div>
                 <div className="space-y-1.5 text-slate-600">
-                  <p>General enquiries: <a href="mailto:hello@msingi.io" className="text-indigo-600 hover:underline">hello@msingi.io</a></p>
+                  <p>General enquiries: <a href="mailto:support@msingi.io" className="text-indigo-600 hover:underline">support@msingi.io</a></p>
                   <p>Legal notices: <a href="mailto:legal@msingi.io" className="text-indigo-600 hover:underline">legal@msingi.io</a></p>
                   <p>Privacy and data: <a href="mailto:privacy@msingi.io" className="text-indigo-600 hover:underline">privacy@msingi.io</a></p>
                   <p>Website: <a href="https://msingi.io" className="text-indigo-600 hover:underline">msingi.io</a></p>
@@ -641,7 +641,7 @@ export default function TermsOfService() {
               </div>
 
               <Callout color="indigo">
-                Schools are encouraged to contact <strong>hello@msingi.io</strong> with any questions before signing up. We are happy to answer compliance questions, provide the Data Processing Agreement in advance, or discuss customised arrangements for large institutions.
+                Schools are encouraged to contact <strong>support@msingi.io</strong> with any questions before signing up. We are happy to answer compliance questions, provide the Data Processing Agreement in advance, or discuss customised arrangements for large institutions.
               </Callout>
 
               <div className="mt-6 pt-6 border-t border-slate-100 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
@@ -669,7 +669,7 @@ export default function TermsOfService() {
           <p className="text-center">Last updated {LAST_UPDATED}. © {new Date().getFullYear()} InnoLearn Limited. All rights reserved.</p>
           <div className="flex gap-5">
             <Link to="/privacy" className="hover:text-slate-700 transition-colors">Privacy Policy</Link>
-            <a href="mailto:hello@msingi.io" className="hover:text-slate-700 transition-colors">hello@msingi.io</a>
+            <a href="mailto:support@msingi.io" className="hover:text-slate-700 transition-colors">support@msingi.io</a>
           </div>
         </div>
       </footer>

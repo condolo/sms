@@ -30,7 +30,7 @@ router.get('/settings', async (req, res) => {
       logoUrl:        settings.logoUrl        || null,
       faviconUrl:     settings.faviconUrl     || null,
       primaryColor:   settings.primaryColor   || '#4f46e5',
-      contactEmail:   settings.contactEmail   || 'hello@msingi.io',
+      contactEmail:   settings.contactEmail   || 'support@msingi.io',
       contactPhone:   settings.contactPhone   || '+254 769 024 153',
       socialLinks:    settings.socialLinks    || {},
       updatedAt:      settings.updatedAt      || null,

@@ -741,7 +741,7 @@ export const CMS_DEFAULTS = {
   },
   footer: {
     tagline: 'Decision Intelligence for Educational Leaders.',
-    email:   'hello@msingi.io',
+    email:   'support@msingi.io',
   },
   seo: {
     title:       'Msingi — Decision Intelligence for Educational Leaders',
