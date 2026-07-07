@@ -363,7 +363,7 @@ Toggle **Emergency Online Learning Mode** and click **Save Settings**. The chang
 
 ## 11. Custom Email Sending (SMTP) — Standard plan and above
 
-By default, all system emails from your school (welcome messages, password resets, attendance alerts, report card notifications, etc.) are sent from the Msingi platform address (`innolearnnetwork@gmail.com`) with your school's name as the display name.
+By default, all system emails from your school (welcome messages, password resets, attendance alerts, report card notifications, etc.) are sent from the Msingi platform address (`support@msingi.io`) with your school's name as the display name.
 
 If you want emails to come from your own domain — e.g. `noreply@greenwood.ke` or `info@mla.ac.ke` — you can configure your own SMTP server.
 
@@ -400,7 +400,7 @@ If your school email runs on Google Workspace (Gmail):
 
 ### Removing custom SMTP
 
-Click **Remove Custom SMTP** at the bottom of the SMTP section to revert to the platform sender. All future emails will go through `innolearnnetwork@gmail.com` again.
+Click **Remove Custom SMTP** at the bottom of the SMTP section to revert to the platform sender. All future emails will go through `support@msingi.io` again.
 
 ### Troubleshooting
 

@@ -49,7 +49,7 @@ If your school is not yet on Msingi, visit [msingi.io](https://msingi.io) and cl
 
 After submitting, your application enters a **pending review** state. You will receive a **confirmation email** at the address you provided, and hear back within **24 hours**.
 
-> **Note**: If you did not receive a confirmation email, check your spam folder. Ensure your school's email server is not blocking the sender `innolearnnetwork@gmail.com`.
+> **Note**: If you did not receive a confirmation email, check your spam folder. Ensure your school's email server is not blocking the sender `support@msingi.io`.
 
 ### Approval Process
 Once the Msingi team reviews and approves your school, you will receive a **welcome email** containing:

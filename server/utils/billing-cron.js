@@ -117,7 +117,7 @@ async function _sendInvoiceEmail(school, snapshot, Users) {
               </a>
             </div>
             <p style="font-size:11px;color:#94a3b8;text-align:center;margin-top:16px;">
-              Msingi · innolearnnetwork@gmail.com · msingi.io
+              Msingi · support@msingi.io · msingi.io
             </p>
           </div>
         `,

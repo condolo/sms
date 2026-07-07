@@ -319,7 +319,7 @@ Each module entry lists:
 **Blast radius if broken:** school profile updates fail; user management broken  
 **Integrity notes:**
 - School logo/banner stored as URL strings — no CDN cleanup on update
-- SMTP settings are hardcoded to `innolearnnetwork@gmail.com` — **MUST NOT be changed via settings UI**
+- Platform SMTP identity is `support@msingi.io` (Zoho, migrated from `innolearnnetwork@gmail.com` in 2026-07) — configured via `SMTP_HOST`/`SMTP_USER`/`SMTP_PASS` Render env vars. **MUST NOT be changed via settings UI** — this is the platform's own sending identity, not a per-school setting; only the platform operator changes it, and only via Render env vars
 
 ---
 
@@ -381,7 +381,7 @@ Each module entry lists:
 
 ### `utils/email.js`
 - **Imported by:** `auth.js`, potentially others
-- **SMTP sender is permanently `innolearnnetwork@gmail.com`** — must not be changed
+- **SMTP sender is `support@msingi.io`** (Zoho; migrated from `innolearnnetwork@gmail.com` 2026-07) — host/port/credentials are env-driven (`SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`), not hardcoded; changed only via Render env vars, never via application code or the Settings UI
 - If email fails, auth flows (password reset, invites) degrade silently
 
 ### `middleware/rbac.js`

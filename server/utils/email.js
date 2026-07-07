@@ -33,10 +33,15 @@ if (!SMTP_READY) {
   console.warn('[EMAIL] ⚠️  SMTP_USER / SMTP_PASS not set — platform emails will be skipped.');
 }
 
-/* Platform transporter — created once at module load */
+/* Platform transporter — created once at module load.
+   Host/port configurable via env so switching providers (e.g. Gmail → Zoho)
+   never requires a code change — only Render env vars. Defaults preserve
+   the historical Gmail behaviour for any deploy that hasn't set SMTP_HOST. */
+const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
+const SMTP_PORT = Number(process.env.SMTP_PORT) || 587;
 const _platformTransporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
+  host: SMTP_HOST,
+  port: SMTP_PORT,
   secure: false,
   auth: { user: SMTP_USER, pass: SMTP_PASS },
 });

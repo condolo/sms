@@ -82,9 +82,10 @@ InnoLearn.com / app.InnoLearn.com
 | `JWT_SECRET` | Secret for signing JWTs — **must be long and random** | `openssl rand -hex 64` |
 | `JWT_EXPIRES_IN` | Token lifetime | `7d` |
 | `PLATFORM_ADMIN_KEY` | Secret key for platform API — keep private | `openssl rand -hex 32` |
-| `SMTP_USER` | Gmail address for sending emails | `innolearnnetwork@gmail.com` |
-| `SMTP_PASS` | Gmail App Password (16 chars, spaces OK) | `xxxx xxxx xxxx xxxx` |
-| `PLATFORM_EMAIL` | Where to receive platform alerts (defaults to `SMTP_USER`) | `innolearnnetwork@gmail.com` |
+| `SMTP_HOST` | SMTP server hostname (defaults to `smtp.gmail.com` in code if unset — always set explicitly for non-Gmail providers) | `smtp.zoho.com` |
+| `SMTP_USER` | Platform sending address | `support@msingi.io` |
+| `SMTP_PASS` | App-specific password (Zoho: My Account → Security → App Passwords) | `xxxx xxxx xxxx xxxx` |
+| `PLATFORM_EMAIL` | Where to receive platform alerts (defaults to `SMTP_USER`) | `support@msingi.io` |
 | `PORT` | Server port (Render sets this automatically) | `3005` |
 | `NODE_ENV` | `production` on Render, `development` locally | `production` |
 | `APP_URL` | Base URL of the app | `https://innolearn-ecosystem.onrender.com` |

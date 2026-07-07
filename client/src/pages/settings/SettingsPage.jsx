@@ -1655,7 +1655,7 @@ function SmtpCard({ school = {}, onSaved }) {
 
       {/* Description */}
       <p className="text-xs text-slate-400 leading-relaxed">
-        By default, Msingi sends all school emails from <span className="font-medium text-slate-600">innolearnnetwork@gmail.com</span> with your school name as the display name.
+        By default, Msingi sends all school emails from <span className="font-medium text-slate-600">support@msingi.io</span> with your school name as the display name.
         Configure your own SMTP server to send from <span className="font-medium text-slate-600">noreply@yourschool.ke</span> or any address you control.
         Msingi always falls back to the platform sender if your SMTP is unreachable.
       </p>

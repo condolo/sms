@@ -6,6 +6,40 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.65.0] — 2026-07-07 — feat(email): migrate platform SMTP from Gmail to Zoho (`support@msingi.io`)
+
+### Changed
+
+- **Platform sending address changed from `innolearnnetwork@gmail.com` to `support@msingi.io`**, hosted on Zoho Mail. This is the address used for all platform-level emails (registration, approvals, OTP) and as the fallback sender for any school without its own custom SMTP configured.
+- **`server/utils/email.js`** — the platform transporter's `host` was hardcoded to `smtp.gmail.com`; made configurable via a new `SMTP_HOST` env var (default preserved as `smtp.gmail.com` so this code change alone, before Render env vars are updated, has zero behavior change). Added `SMTP_PORT` similarly (defaults to `587`, unchanged). This is the same host/port configurability pattern already used for per-school custom SMTP (`school.smtpHost`/`school.smtpPort`), now extended to the platform's own transporter.
+- **`server/utils/billing-cron.js`** — updated the hardcoded email footer text from the old Gmail address to `support@msingi.io`.
+- **`client/src/pages/settings/SettingsPage.jsx`** — updated the SMTP card copy shown to school admins describing the platform's default sending address.
+- Updated all references across `docs/DEVELOPER_GUIDE.md`, `docs/DEPENDENCY_MAP.md`, `docs/PLATFORM_ADMIN_GUIDE.md`, `docs/SCHOOL_ADMIN_GUIDE.md`, `docs/USER_GUIDE.md` — the "must not be changed via Settings UI" governance rule for the platform's SMTP identity (`docs/DEPENDENCY_MAP.md` §20) is preserved unchanged; only the address behind it changed.
+
+### Operational (Render dashboard, not code)
+
+Deploying this code change alone does **not** switch providers — `SMTP_HOST` defaults to Gmail's host until explicitly overridden. To complete the migration, these env vars must be set together in Render → Environment:
+- `SMTP_HOST=smtp.zoho.com`
+- `SMTP_USER=support@msingi.io`
+- `SMTP_PASS=<Zoho app-specific password>`
+- `PLATFORM_EMAIL=support@msingi.io`
+
+**Deliverability requirement:** SPF/DKIM/DMARC DNS records authorizing Zoho for `msingi.io` must be added in Cloudflare (Zoho's admin console provides the exact records) — without these, mail sent via the new SMTP host risks being flagged as spam or rejected by strict recipient servers, independent of whether the SMTP send itself succeeds.
+
+---
+
+## [v4.64.0] — 2026-07-07 — feat(monitoring): activate Sentry error tracking
+
+### Added
+
+- **`@sentry/node@^7`** installed as a production dependency, activating a Sentry integration that already existed in `server/utils/monitoring.js` but had never had the package installed — `_trySentry()` always hit its catch block and silently no-op'd. Pinned to v7 specifically (not latest) because `monitoring.js` calls the v7 `Sentry.Handlers.requestHandler()`/`Handlers.errorHandler()` API, which Sentry v8 removed.
+- **`render.yaml`** — added `SENTRY_DSN` as a documented, optional (`sync: false`) env var, same pattern as `SMTP_USER`/`PLATFORM_EMAIL`. Unset by default; the server behaves identically to before until a real DSN is configured.
+- Verified end-to-end in production: a temporary route intentionally throwing an error was added, triggered once, confirmed captured in the Sentry dashboard (tagged with route/method as designed via the existing `captureException()` context), then removed immediately — no permanent debug scaffolding left in the codebase.
+
+No source files required changes beyond the dependency addition — `monitoring.js`'s `init()`/`requestHandler()`/`errorHandler()`/`captureException()` call sites in `server/index.js` were already correctly placed per Sentry's documented middleware ordering requirements.
+
+---
+
 ## [v4.63.0] — 2026-07-07 — fix(seo,branding): activate prerender pipeline for crawlers; stop marketing-widget/favicon leaks onto real school pages
 
 ### Fixed
