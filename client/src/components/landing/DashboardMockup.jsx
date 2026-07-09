@@ -77,7 +77,7 @@ export default function DashboardMockup() {
           {/* Top bar */}
           <div className="bg-white border-b border-slate-100 px-5 py-2.5 flex items-center justify-between flex-shrink-0">
             <div>
-              <p className="text-[10px] text-slate-400 font-medium tracking-wide uppercase">Mascit Lab Academy</p>
+              <p className="text-[10px] text-slate-400 font-medium tracking-wide uppercase">Msingi International School</p>
               <p className="text-sm font-semibold text-slate-800">Dashboard</p>
             </div>
             <div className="flex items-center gap-2">

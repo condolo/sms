@@ -17,7 +17,7 @@ import { getLandingCMS, getPlatformSettings } from '@/utils/landingCMS';
 import { CMS_DEFAULTS } from '@/data/landingData';
 import PublicNav    from '@/components/landing/PublicNav';
 import PublicFooter from '@/components/landing/PublicFooter';
-import DashboardMockup from '@/components/landing/DashboardMockup';
+import DeviceMockup from '@/components/landing/DeviceMockup';
 import PlansSection    from '@/components/landing/PlansSection';
 import FloatingActions from '@/components/landing/FloatingActions';
 import ModulePreviewPanel from '@/components/landing/ModulePreviewPanel';
@@ -179,7 +179,7 @@ export default function Landing() {
 
               {/* Left: headline + copy + CTAs */}
               <motion.div initial="hidden" animate="visible" variants={stagger(0.07)}
-                className="text-center lg:text-left">
+                className="min-w-0 text-center lg:text-left">
 
                 {/* Purpose-first label */}
                 <motion.div variants={fadeUp} className="flex justify-center lg:justify-start mb-8">
@@ -219,13 +219,13 @@ export default function Landing() {
                 </motion.div>
               </motion.div>
 
-              {/* Right: dashboard mockup — a teacher/principal's live view of their school */}
+              {/* Right: angled laptop + tablet — a school's live view of Msingi */}
               <motion.div
                 initial={{ opacity: 0, y: 32, scale: 0.98 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 transition={{ duration: 0.9, delay: 0.3, ease: EASE }}
-                className="lg:scale-[1.08] lg:origin-left">
-                <DashboardMockup />
+                className="min-w-0 overflow-hidden pb-10 pl-6 sm:pl-10">
+                <DeviceMockup />
               </motion.div>
             </div>
           </div>
