@@ -63,15 +63,15 @@ export default function PublicNav() {
       transition={{ duration: 0.35, ease: EASE }}
       className={`fixed top-0 inset-x-0 z-50 transition-all duration-300 ${
         scrolled || mobileOpen
-          ? 'bg-white/96 backdrop-blur-md shadow-sm border-b border-slate-200/60'
-          : 'bg-white/80 backdrop-blur-sm'
+          ? 'bg-indigo-50/90 backdrop-blur-md shadow-sm border-b border-indigo-100'
+          : 'bg-indigo-50/70 backdrop-blur-sm'
       }`}
     >
       <div className="max-w-7xl mx-auto px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2.5 group flex-shrink-0">
           <div className="w-7 h-7 rounded-lg bg-slate-900 flex items-center justify-center text-white text-[10px] font-bold group-hover:bg-indigo-600 transition-colors">M</div>
-          <span className="text-sm font-bold text-slate-900 tracking-tight">Msingi</span>
+          <span className="text-base font-bold text-slate-900 tracking-tight">Msingi</span>
         </Link>
 
         {/* Desktop nav */}
@@ -83,7 +83,7 @@ export default function PublicNav() {
             >
               {item.children ? (
                 <>
-                  <button className="flex items-center gap-1 px-3.5 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-all">
+                  <button className="flex items-center gap-1 px-3.5 py-2 rounded-lg text-base font-medium text-slate-700 hover:text-slate-900 hover:bg-white/60 transition-all">
                     {item.label}
                     <ChevronDown size={13} className={`transition-transform ${openDropdown === item.label ? 'rotate-180' : ''}`} />
                   </button>
@@ -98,7 +98,7 @@ export default function PublicNav() {
                       >
                         {item.children.map(child => (
                           <Link key={child.href} to={child.href}
-                            className="block px-4 py-2.5 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors">
+                            className="block px-4 py-2.5 text-base text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors">
                             {child.label}
                           </Link>
                         ))}
@@ -108,10 +108,10 @@ export default function PublicNav() {
                 </>
               ) : (
                 <Link to={item.href}
-                  className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${
+                  className={`px-3.5 py-2 rounded-lg text-base font-medium transition-all ${
                     location.pathname === item.href
-                      ? 'text-slate-900 bg-slate-100'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                      ? 'text-slate-900 bg-white/70'
+                      : 'text-slate-700 hover:text-slate-900 hover:bg-white/60'
                   }`}>
                   {item.label}
                 </Link>
@@ -125,15 +125,15 @@ export default function PublicNav() {
           <button
             onClick={() => setMobileOpen(o => !o)}
             aria-label="Toggle menu"
-            className="lg:hidden w-9 h-9 rounded-lg flex items-center justify-center text-slate-600 hover:bg-slate-100 transition-colors">
+            className="lg:hidden w-9 h-9 rounded-lg flex items-center justify-center text-slate-600 hover:bg-white/60 transition-colors">
             {mobileOpen ? <X size={18} /> : <Menu size={18} />}
           </button>
           <Link to="/login"
-            className="hidden lg:block px-4 py-2 text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors">
+            className="hidden lg:block px-4 py-2 text-base font-medium text-slate-600 hover:text-slate-900 transition-colors">
             Login
           </Link>
           <Link to="/contact"
-            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-600 transition-all shadow-sm">
+            className="rounded-xl bg-slate-900 px-4 py-2 text-base font-semibold text-white hover:bg-indigo-600 transition-all shadow-sm">
             Book a Demo
           </Link>
         </div>
@@ -148,20 +148,20 @@ export default function PublicNav() {
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.2, ease: EASE }}
-            className="lg:hidden overflow-hidden border-t border-slate-100 bg-white"
+            className="lg:hidden overflow-hidden border-t border-indigo-100 bg-indigo-50/95 backdrop-blur-md"
           >
             <div className="px-5 py-4 flex flex-col gap-1">
               {NAV.map(item => (
                 <div key={item.label}>
                   <Link to={item.href}
-                    className="block px-3 py-2.5 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                    className="block px-3 py-2.5 rounded-xl text-base font-medium text-slate-700 hover:bg-white/60 transition-colors">
                     {item.label}
                   </Link>
                   {item.children && (
                     <div className="pl-4 mt-0.5 mb-1 space-y-0.5">
                       {item.children.slice(1).map(child => (
                         <Link key={child.href} to={child.href}
-                          className="block px-3 py-2 rounded-lg text-sm text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-colors">
+                          className="block px-3 py-2 rounded-lg text-base text-slate-500 hover:text-slate-800 hover:bg-white/60 transition-colors">
                           {child.label}
                         </Link>
                       ))}
@@ -169,9 +169,9 @@ export default function PublicNav() {
                   )}
                 </div>
               ))}
-              <div className="h-px bg-slate-100 my-2" />
-              <Link to="/login" className="block px-3 py-2.5 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50">Login</Link>
-              <Link to="/contact" className="block rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white text-center hover:bg-indigo-600 transition-all">
+              <div className="h-px bg-indigo-100 my-2" />
+              <Link to="/login" className="block px-3 py-2.5 rounded-xl text-base font-medium text-slate-600 hover:bg-white/60">Login</Link>
+              <Link to="/contact" className="block rounded-xl bg-slate-900 px-4 py-3 text-base font-semibold text-white text-center hover:bg-indigo-600 transition-all">
                 Book a Demo
               </Link>
             </div>
