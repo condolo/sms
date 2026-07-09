@@ -237,7 +237,7 @@ export default function Landing() {
             <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
             <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
           </div>
-          <div className="relative max-w-5xl mx-auto px-6 lg:px-8">
+          <div className="relative max-w-6xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">
                 A new term begins
@@ -248,7 +248,7 @@ export default function Landing() {
               </motion.h2>
             </motion.div>
 
-            <div className="grid lg:grid-cols-2 gap-12 items-start">
+            <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-start">
               {/* Animated timeline */}
               <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger(0.08)}
                 className="space-y-3">
@@ -265,7 +265,7 @@ export default function Landing() {
                     }`}>
                       {m.time}
                     </span>
-                    <p className={`text-sm leading-snug ${
+                    <p className={`text-base leading-snug ${
                       activeMoment === i ? 'text-white font-medium' : 'text-slate-600'
                     }`}>
                       {m.action}
@@ -276,7 +276,7 @@ export default function Landing() {
 
               {/* Narrative text */}
               <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}
-                className="space-y-5 text-base text-slate-600 leading-relaxed">
+                className="space-y-5 text-lg text-slate-600 leading-relaxed">
                 <motion.p variants={fadeUp}>
                   Every morning, before the first lesson begins, a school leader is already making dozens of decisions. Admissions. Attendance. Parent queries. Teacher coverage. Fee balances.
                 </motion.p>
@@ -307,7 +307,7 @@ export default function Landing() {
               <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-bold tracking-tight text-white mb-4 leading-tight">
                 22 modules. One record. No reconciliation.
               </motion.h2>
-              <motion.p variants={fadeUp} className="text-base text-slate-400 max-w-xl leading-relaxed">
+              <motion.p variants={fadeUp} className="text-lg text-slate-400 max-w-xl leading-relaxed">
                 Data entered once flows everywhere it needs to be — without re-entry, without a spreadsheet to bridge the gap.
               </motion.p>
               <motion.div variants={fadeUp} className="mt-5">
@@ -354,7 +354,7 @@ export default function Landing() {
 
         {/* ══ 4. CURRICULUM STRIP ════════════════════════════════════════════ */}
         <section className="py-12 bg-white border-b border-slate-100">
-          <div className="max-w-5xl mx-auto px-6 lg:px-8">
+          <div className="max-w-6xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}
               className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-8">
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 flex-shrink-0">
@@ -382,7 +382,7 @@ export default function Landing() {
             <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
             <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-blue-100/50 rounded-full blur-3xl" />
           </div>
-          <div className="relative max-w-5xl mx-auto px-6 lg:px-8">
+          <div className="relative max-w-6xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">
                 Solutions
@@ -423,53 +423,9 @@ export default function Landing() {
           </div>
         </section>
 
-        {/* ══ 6. PRICING TEASER ══════════════════════════════════════════════ */}
-        <section id="pricing" className="relative py-20 sm:py-24 bg-white border-b border-slate-100 overflow-hidden">
-          <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute -top-24 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl" />
-            <div className="absolute bottom-0 -left-24 w-96 h-96 bg-indigo-100/50 rounded-full blur-3xl" />
-          </div>
-          <div className="relative max-w-5xl mx-auto px-6 lg:px-8">
-            <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-              <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Pricing</motion.p>
-              <motion.h2 variants={fadeUp} className="text-3xl font-bold tracking-tight text-slate-900 mb-3">
-                Transparent pricing. No surprises.
-              </motion.h2>
-              <motion.p variants={fadeUp} className="text-slate-500 mb-10 max-w-lg">
-                Per student, per term. Published, not negotiated. No setup fee. No lock-in.
-              </motion.p>
-
-              <motion.div variants={fadeUp} className="grid sm:grid-cols-3 gap-4 mb-8">
-                {[
-                  { name: 'Base',           price: 'KES 150', note: 'Admin + teacher access' },
-                  { name: 'Student Portal', price: 'KES 200', note: 'Adds student portal', highlight: true },
-                  { name: 'Family Portal',  price: 'KES 250', note: 'Adds parent portal' },
-                ].map(tier => (
-                  <div key={tier.name}
-                    className={`rounded-2xl border p-6 ${
-                      tier.highlight
-                        ? 'border-indigo-200 bg-indigo-50'
-                        : 'border-slate-200 bg-slate-50'
-                    }`}>
-                    <p className="text-xs font-semibold text-slate-500 mb-2">{tier.name}</p>
-                    <p className="text-3xl font-bold text-slate-900 mb-1">{tier.price}</p>
-                    <p className="text-xs text-slate-400">per student · per term</p>
-                    <p className="text-xs text-slate-500 mt-3">{tier.note}</p>
-                  </div>
-                ))}
-              </motion.div>
-
-              <motion.div variants={fadeUp}>
-                <Link to="/pricing"
-                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-900 hover:text-indigo-600 transition-colors">
-                  See full pricing and estimate your cost <ArrowRight size={13} />
-                </Link>
-              </motion.div>
-            </motion.div>
-          </div>
-        </section>
-
-        {/* ══ 7. PLANS SECTION (existing component, keep for full plan detail) */}
+        {/* ══ 7. PLANS SECTION (existing component — full plan detail; the old
+               pricing-teaser section above this was removed as a straight
+               duplicate) ══════════════════════════════════════════════════ */}
         <PlansSection />
 
         {/* ══ 8. TRUST / INFRASTRUCTURE ══════════════════════════════════════ */}
@@ -481,7 +437,7 @@ export default function Landing() {
                 Built for institutional trust.<br />
                 <span className="text-slate-500">Not a startup experiment.</span>
               </motion.h2>
-              <motion.p variants={fadeUp} className="text-base text-slate-400 max-w-xl mb-6 leading-relaxed">
+              <motion.p variants={fadeUp} className="text-lg text-slate-400 max-w-xl mb-6 leading-relaxed">
                 Schools are asked to trust a platform with their most sensitive operational and academic data. Msingi is engineered for that responsibility.
               </motion.p>
 
@@ -530,7 +486,7 @@ export default function Landing() {
                 <p className="text-2xl font-bold text-slate-900 mb-2">
                   Live at Mascit Lab Academy.
                 </p>
-                <p className="text-slate-500 text-sm leading-relaxed">
+                <p className="text-slate-500 text-base leading-relaxed">
                   We are actively onboarding partner schools for the 2026 academic year. Early schools have direct input into the product roadmap.
                 </p>
               </motion.div>
@@ -559,7 +515,7 @@ export default function Landing() {
                 className="text-4xl sm:text-5xl font-bold tracking-tighter text-slate-900 leading-[1.05] mb-6">
                 A 30-minute session.<br />No commitment required.
               </motion.h2>
-              <motion.p variants={fadeUp} className="text-base text-slate-500 leading-relaxed mb-3 max-w-lg mx-auto">
+              <motion.p variants={fadeUp} className="text-lg text-slate-500 leading-relaxed mb-3 max-w-lg mx-auto">
                 Our discovery sessions are led by educators, not salespeople. We ask about your school. You ask about us. No demo pressure.
               </motion.p>
               <motion.p variants={fadeUp} className="text-sm text-slate-400 mb-10 max-w-sm mx-auto">
