@@ -174,55 +174,60 @@ export default function Landing() {
             <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-indigo-950/40 rounded-full blur-3xl" />
           </div>
 
-          <div className="relative max-w-5xl mx-auto px-6 lg:px-8 text-center">
-            <motion.div initial="hidden" animate="visible" variants={stagger(0.07)}>
+          <div className="relative max-w-7xl mx-auto px-6 lg:px-8">
+            <div className="grid lg:grid-cols-2 gap-14 lg:gap-10 items-start">
 
-              {/* Purpose-first label */}
-              <motion.div variants={fadeUp} className="flex justify-center mb-8">
-                <Link to="/why"
-                  className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 backdrop-blur-sm px-4 py-1.5 text-xs font-medium text-slate-400 hover:border-slate-500 hover:text-slate-200 transition-all">
-                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0" />
-                  Built by an educator who taught in these schools
-                  <ChevronRight size={12} className="text-slate-600" />
-                </Link>
+              {/* Left: headline + copy + CTAs */}
+              <motion.div initial="hidden" animate="visible" variants={stagger(0.07)}
+                className="text-center lg:text-left">
+
+                {/* Purpose-first label */}
+                <motion.div variants={fadeUp} className="flex justify-center lg:justify-start mb-8">
+                  <Link to="/why"
+                    className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 backdrop-blur-sm px-4 py-1.5 text-xs font-medium text-slate-400 hover:border-slate-500 hover:text-slate-200 transition-all">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0" />
+                    Built by an educator who taught in these schools
+                    <ChevronRight size={12} className="text-slate-600" />
+                  </Link>
+                </motion.div>
+
+                <motion.h1 variants={fadeUp}
+                  className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tighter text-white leading-[1.1] mb-7">
+                  The school management platform
+                  <br />
+                  <span className="text-slate-400">built for Africa.</span>
+                </motion.h1>
+
+                <motion.p variants={fadeUp} className="text-xl sm:text-2xl text-slate-400 max-w-xl mx-auto lg:mx-0 leading-relaxed mb-3">
+                  22 connected modules. One institutional record. CBC, CAIE, IB, M-Pesa — native.
+                </motion.p>
+                <motion.p variants={fadeUp} className="text-lg text-slate-500 italic mb-10">
+                  Not adapted for Africa. Built for it.
+                </motion.p>
+
+                <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-3">
+                  <Link to="/contact"
+                    className="group inline-flex items-center gap-2 rounded-xl bg-white px-7 py-3.5 text-sm font-semibold text-slate-900 hover:bg-slate-100 transition-all shadow-lg">
+                    Book a 30-min session
+                    <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" />
+                  </Link>
+                  <button onClick={() => goToSchool('demo')}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-700 px-7 py-3.5 text-sm font-semibold text-slate-300 hover:border-slate-500 hover:text-white transition-all">
+                    Explore the platform
+                    <ChevronRight size={15} className="text-slate-600" />
+                  </button>
+                </motion.div>
               </motion.div>
 
-              <motion.h1 variants={fadeUp}
-                className="text-5xl sm:text-6xl lg:text-[72px] font-bold tracking-tighter text-white leading-[1.03] mb-6">
-                The school management platform
-                <br />
-                <span className="text-slate-400">built for Africa.</span>
-              </motion.h1>
-
-              <motion.p variants={fadeUp} className="text-lg sm:text-xl text-slate-400 max-w-2xl mx-auto leading-relaxed mb-3">
-                22 connected modules. One institutional record. CBC, CAIE, IB, M-Pesa — native.
-              </motion.p>
-              <motion.p variants={fadeUp} className="text-base text-slate-500 italic mb-10">
-                Not adapted for Africa. Built for it.
-              </motion.p>
-
-              <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center gap-3">
-                <Link to="/contact"
-                  className="group inline-flex items-center gap-2 rounded-xl bg-white px-7 py-3.5 text-sm font-semibold text-slate-900 hover:bg-slate-100 transition-all shadow-lg">
-                  Book a 30-min session
-                  <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" />
-                </Link>
-                <button onClick={() => goToSchool('demo')}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-700 px-7 py-3.5 text-sm font-semibold text-slate-300 hover:border-slate-500 hover:text-white transition-all">
-                  Explore the platform
-                  <ChevronRight size={15} className="text-slate-600" />
-                </button>
+              {/* Right: dashboard mockup — a teacher/principal's live view of their school */}
+              <motion.div
+                initial={{ opacity: 0, y: 32, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ duration: 0.9, delay: 0.3, ease: EASE }}
+                className="lg:scale-[1.08] lg:origin-left">
+                <DashboardMockup />
               </motion.div>
-            </motion.div>
-
-            {/* Dashboard mockup */}
-            <motion.div
-              initial={{ opacity: 0, y: 48, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ duration: 0.9, delay: 0.3, ease: EASE }}
-              className="mt-16">
-              <DashboardMockup />
-            </motion.div>
+            </div>
           </div>
         </section>
 
