@@ -14,6 +14,7 @@ export const ECOSYSTEM_NODES = [
   // Core academic pipeline
   { label: 'Admissions',      Icon: ClipboardList, color: 'bg-pink-500',    desc: 'First enquiry in'   },
   { label: 'Student Records', Icon: Users,         color: 'bg-indigo-500',  desc: 'Profile created'    },
+  { label: 'Growth Profile',  Icon: Activity,      color: 'bg-green-600',  desc: 'Milestones tracked' },
   { label: 'Teachers',        Icon: UserCheck,     color: 'bg-blue-600',    desc: 'Staff managed'      },
   { label: 'Classes',         Icon: Layers,        color: 'bg-blue-500',    desc: 'Sections & streams' },
   { label: 'Subjects',        Icon: BookMarked,    color: 'bg-violet-400',  desc: 'Curriculum mapped'  },
@@ -31,7 +32,6 @@ export const ECOSYSTEM_NODES = [
   { label: 'HR & Payroll',    Icon: UserCog,       color: 'bg-slate-600',   desc: 'Staff & payroll'    },
   { label: 'Library',         Icon: BookOpen,      color: 'bg-lime-600',    desc: 'Resources managed'  },
   // Insights
-  { label: 'Growth Profile',  Icon: Activity,      color: 'bg-green-600',  desc: 'Milestones tracked' },
   { label: 'Reports',         Icon: FileText,      color: 'bg-purple-500',  desc: 'Governed publish'   },
   { label: 'Analytics',       Icon: TrendingUp,    color: 'bg-teal-500',    desc: 'Director insight'   },
   // Support services — last as requested
