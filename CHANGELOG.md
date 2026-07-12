@@ -6,6 +6,36 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.67.0] — 2026-07-12 — fix(seo): retire /faq into /knowledge; fix thin-content accordion bug on both
+
+### Fixed
+
+- **`/faq` and `/knowledge` were genuine duplicate content** — both rendered the same `FAQ_CATEGORIES` data through independently copy-pasted `FaqItem` components; `/knowledge` was the strict superset (guides + resources + the full FAQ), `/faq` was the FAQ alone with zero internal links pointing to it anywhere on the site. Retired `/faq`:
+  - **`server/index.js`** — added a real HTTP 301 (`/faq` → `/knowledge`), placed before the static/wildcard handlers so it fires for every client, crawlers included — a client-side-only redirect would be invisible to any non-JS crawler that had already indexed `/faq`, the exact class of bug this session spent considerable effort fixing elsewhere.
+  - **`client/src/App.jsx`** — matching `<Navigate to="/knowledge" replace />` route for in-app SPA navigation; removed the `FAQ` import.
+  - **`client/src/pages/FAQ.jsx`** deleted.
+  - Ported the `FAQPage` JSON-LD schema (Google's rich-snippet FAQ eligibility) from the deleted page into `KnowledgeCentre.jsx`'s `<Helmet>` — a naive delete-and-redirect would have silently lost this.
+  - Updated `sitemap.xml` and `robots.txt`: removed `/faq`, added `/knowledge` (which, independent of this bug, had never been listed in either file since it launched).
+  - Removed `/faq` from `client/scripts/prerender.mjs`'s `ROUTES` array (24 routes now, was 25).
+
+- **Thin-content bug, found via a Bing Webmaster Tools word-count flag, confirmed by measuring actual rendered word counts across every marketing page rather than reacting to the generic tip at face value.** `/knowledge`'s and the (now-deleted) `/faq`'s FAQ accordion used `<AnimatePresence>{open && <motion.div>...}</AnimatePresence>` — this fully unmounts the answer text from the DOM when collapsed, not just visually hides it. A prerender pass that never clicks anything (this one doesn't) therefore captured 12 question headlines and **zero** answer text — confirmed directly: `/faq` measured 255 words prerendered, with 0 of the 12 answer paragraphs present in the rendered HTML. Fixed in both `FAQ.jsx` (before deletion) and `KnowledgeCentre.jsx` by keeping the answer `<p>` permanently in the DOM and animating `height`/`opacity` directly instead of mount/unmount — same visual interaction, but the text is always crawlable. `/knowledge`'s prerendered word count went from 485 to 1,157 as a direct result — real content depth, not padding.
+
+Verified against real prerendered output, not assumption: ran `build:ssg` (24/24 routes succeeded), confirmed all 12 FAQ answers present in `dist/knowledge/index.html`, confirmed the `FAQPage` schema is intact, and verified the 301 via an isolated Express harness against the real `dist/` output (`/faq` → 301 → `Location: /knowledge` → 200 with the schema present).
+
+---
+
+## [v4.66.0] — 2026-07-09 — fix(seo): eliminate trailing-slash redirect on prerendered routes; harden prerender against partial failure
+
+### Fixed
+
+- **Root cause of a live outage traced this session**: Render's dashboard had its own Build Command setting (plain `npm run build`) silently overriding `render.yaml`'s `build:ssg` — a git push to `render.yaml` alone never took effect, since this service wasn't in Blueprint sync mode. Every marketing route except `/platform` (a stale leftover from an earlier successful deploy) was serving the raw unhydrated SPA shell to every crawler for an unknown period. Fixed on Render's dashboard directly (Build Command corrected); confirmed via build log showing the prerender script's own completion line.
+- **`server/index.js`** — `express.static(REACT_DIST, { index: false, ... })` was missing `redirect: false`. `serve-static`'s default `redirect: true` issued a 301 to the trailing-slash form on every directory-matching request (`/why` → 301 → `/why/`) before the wildcard route's prerendered-file lookup ever ran. Final content was correct, but the served URL disagreed with `sitemap.xml` and every page's canonical tag (neither uses a trailing slash) — real SEO hygiene issue. Added `redirect: false`; routes now serve their prerendered file directly as 200.
+- **`client/scripts/prerender.mjs`** — the per-route render loop had no error handling; one throwing/timing-out route could silently crash the whole script mid-build with no clear signal (Render's log just showed "Build successful" from the preceding plain `vite build`, no indication the prerender pass never ran or completed). Wrapped each route in try/catch so one failure can't take down the other 24; failures are logged loudly and summarized. Exit code is only set non-zero on **total** failure (0 routes) — a partial failure does not block deploying an otherwise-good build, since real users are unaffected regardless (the SPA shell fallback still serves those specific routes correctly).
+
+Verified against live production, not just local: full route sweep confirmed 200 direct responses (no redirects) with correct content sizes across every marketing page after the fix deployed.
+
+---
+
 ## [v4.65.0] — 2026-07-07 — feat(email): migrate platform SMTP from Gmail to Zoho (`support@msingi.io`)
 
 ### Changed

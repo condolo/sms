@@ -11,7 +11,6 @@ import Login   from '@/pages/Login.jsx';
 import Landing from '@/pages/Landing.jsx';
 import Contact       from '@/pages/Contact.jsx';
 import Plans         from '@/pages/Plans.jsx';
-import FAQ           from '@/pages/FAQ.jsx';
 import PrivacyPolicy from '@/pages/legal/PrivacyPolicy.jsx';
 import TermsOfService from '@/pages/legal/TermsOfService.jsx';
 import DataProcessingAgreement from '@/pages/legal/DataProcessingAgreement.jsx';
@@ -142,8 +141,10 @@ export const router = createBrowserRouter([
   // Plans — public pricing comparison (legacy route, keep for backlinks)
   { path: '/plans', element: <Plans /> },
 
-  // FAQ — public
-  { path: '/faq', element: <FAQ /> },
+  // FAQ — retired, merged into Knowledge Centre (was a strict subset of it,
+  // with zero internal links pointing to it). Server sends a real 301 for
+  // non-JS requests; this covers in-app client-side navigation to the URL.
+  { path: '/faq', element: <Navigate to="/knowledge" replace /> },
 
   // Legal — public, no auth required
   { path: '/privacy',               element: <PrivacyPolicy /> },

@@ -306,6 +306,17 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+/* ── Retired pages — permanent redirects ─────────────────────────
+   /faq was a strict subset of /knowledge (same FAQ_CATEGORIES data,
+   duplicated FaqItem component, zero internal links pointing to it).
+   A real 301 here — not a client-side React Router redirect — matters:
+   any crawler that already indexed /faq needs an HTTP-level signal to
+   transfer its link equity to /knowledge, and a JS-only redirect is
+   invisible to non-JS crawlers, the exact class of bug fixed elsewhere
+   in this file. Placed before static/wildcard handling so it always
+   wins. */
+app.get('/faq', (req, res) => res.redirect(301, '/knowledge'));
+
 /* ── Static frontend ────────────────────────────────────────── */
 const ROOT_DIR   = path.join(__dirname, '..');
 const REACT_DIST = path.join(__dirname, '..', 'client', 'dist');

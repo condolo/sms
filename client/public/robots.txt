@@ -11,7 +11,7 @@ Allow: /roadmap
 Allow: /implementation
 Allow: /solutions/
 Allow: /plans
-Allow: /faq
+Allow: /knowledge
 Allow: /contact
 Allow: /privacy
 Allow: /terms

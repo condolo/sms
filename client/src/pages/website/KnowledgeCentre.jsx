@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, ArrowRight, BookOpen, Shield, GraduationCap, Users, Zap, DollarSign } from 'lucide-react';
 import { fadeUp, stagger, VP, EASE } from '@/utils/animations';
-import { FAQ_CATEGORIES } from '@/data/faqData';
+import { FAQ_CATEGORIES, ALL_FAQS_FLAT } from '@/data/faqData';
 import PublicNav from '@/components/landing/PublicNav';
 import PublicFooter from '@/components/landing/PublicFooter';
 import BreadcrumbSchema from '@/components/landing/BreadcrumbSchema';
@@ -62,6 +62,9 @@ const RESOURCES = [
   },
 ];
 
+/* Answer text stays permanently in the DOM (just visually collapsed via
+   height/opacity) instead of being conditionally mounted — see FAQ.jsx
+   for the full rationale. Same bug, same fix, duplicated component. */
 function FaqItem({ q, a }) {
   const [open, setOpen] = useState(false);
   return (
@@ -77,23 +80,28 @@ function FaqItem({ q, a }) {
           className={`text-slate-400 shrink-0 mt-0.5 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
         />
       </button>
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            key="body"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.25, ease: EASE }}
-            className="overflow-hidden"
-          >
-            <p className="text-sm text-slate-500 leading-relaxed pb-5">{a}</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <motion.div
+        initial={false}
+        animate={{ height: open ? 'auto' : 0, opacity: open ? 1 : 0 }}
+        transition={{ duration: 0.25, ease: EASE }}
+        className="overflow-hidden"
+        aria-hidden={!open}
+      >
+        <p className="text-sm text-slate-500 leading-relaxed pb-5">{a}</p>
+      </motion.div>
     </div>
   );
 }
+
+const FAQ_SCHEMA = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: ALL_FAQS_FLAT.map(({ q, a }) => ({
+    '@type': 'Question',
+    name: q,
+    acceptedAnswer: { '@type': 'Answer', text: a },
+  })),
+};
 
 export default function KnowledgeCentre() {
   const [activeCategory, setActiveCategory] = useState(null);
@@ -110,6 +118,7 @@ export default function KnowledgeCentre() {
         <link rel="canonical" href="https://msingi.io/knowledge" />
         <meta property="og:title" content="Msingi Knowledge Centre" />
         <meta property="og:url" content="https://msingi.io/knowledge" />
+        <script type="application/ld+json">{JSON.stringify(FAQ_SCHEMA)}</script>
       </Helmet>
 
       <BreadcrumbSchema items={[{ name: 'Knowledge Centre', href: '/knowledge' }]} />

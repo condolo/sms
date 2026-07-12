@@ -3260,7 +3260,9 @@ The Msingi public site is a React SPA served by Vite. Because AI bots (GPTBot, P
 
 All 24 public marketing routes are pre-rendered (list lives in two places that must stay in sync: `client/scripts/prerender.mjs`'s `ROUTES` array, and `client/public/sitemap.xml`):
 
-`/`, `/why`, `/about`, `/platform`, `/pricing`, `/security`, `/difference`, `/why-choose`, `/roadmap`, `/implementation`, `/solutions/principal`, `/solutions/teacher`, `/solutions/finance`, `/solutions/parent`, `/solutions/admissions`, `/plans`, `/faq`, `/contact`, `/privacy`, `/terms`, `/legal/dpa`, `/legal/sla`, `/legal/accessibility`, `/legal/responsible-ai`, `/knowledge`.
+`/`, `/why`, `/about`, `/platform`, `/pricing`, `/security`, `/difference`, `/why-choose`, `/roadmap`, `/implementation`, `/solutions/principal`, `/solutions/teacher`, `/solutions/finance`, `/solutions/parent`, `/solutions/admissions`, `/plans`, `/contact`, `/privacy`, `/terms`, `/legal/dpa`, `/legal/sla`, `/legal/accessibility`, `/legal/responsible-ai`, `/knowledge`.
+
+`/faq` is not in this list — it was a strict content subset of `/knowledge` (same `FAQ_CATEGORIES` data source, a duplicated `FaqItem` component, and zero internal links pointing to it) and was retired. `server/index.js` sends a real HTTP 301 for `/faq` → `/knowledge` (placed before the static/wildcard handlers, so it fires for every client — crawlers included, not just JS-executing browsers), and `App.jsx` has a matching client-side `<Navigate>` for in-app SPA navigation. If you're tempted to re-add a standalone FAQ page, don't — extend `/knowledge`'s FAQ section instead, which already renders the full `FAQ_CATEGORIES` list with category filtering and carries the `FAQPage` JSON-LD schema (ported over from the old `/faq` page when it was retired, so Google's rich-snippet FAQ eligibility wasn't lost in the merge).
 
 All other routes are authenticated app routes — blocked in `client/public/robots.txt`.
 
