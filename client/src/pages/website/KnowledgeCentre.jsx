@@ -42,7 +42,7 @@ const RESOURCES = [
   {
     Icon: DollarSign,
     title: 'Pricing explained',
-    desc: 'KES 150 per student per term. No hidden modules. No negotiation required to find out the number.',
+    desc: 'KES 250 per student per term. No hidden modules. No negotiation required to find out the number.',
     href: '/pricing',
     cta: 'See pricing',
   },

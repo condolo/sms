@@ -31,7 +31,7 @@ const TIERS = [
     key:     'base',
     name:    'Base',
     tagline: 'Full ERP for school staff',
-    rate:    150,
+    rate:    250,
     color:   'text-slate-700',
     ring:    'ring-slate-200',
     btn:     'bg-slate-900 text-white hover:bg-slate-700',
@@ -58,7 +58,7 @@ const TIERS = [
     key:     'student',
     name:    'Student',
     tagline: 'Base + dedicated student portal',
-    rate:    200,
+    rate:    300,
     color:   'text-indigo-700',
     ring:    'ring-indigo-300',
     btn:     'bg-indigo-600 text-white hover:bg-indigo-700',
@@ -76,7 +76,7 @@ const TIERS = [
     key:     'family',
     name:    'Family',
     tagline: 'Student + parent portal included',
-    rate:    250,
+    rate:    350,
     color:   'text-violet-700',
     ring:    'ring-violet-300',
     btn:     'bg-violet-600 text-white hover:bg-violet-700',
@@ -110,7 +110,7 @@ const ALL_MODULES = [
 const FAQS = [
   {
     q: 'How does the per-student pricing work?',
-    a: 'You pay per enrolled student at the start of each term. For example, a school with 300 students on the Family tier pays KSh 250 × 300 = KSh 75,000 per term.',
+    a: 'You pay per enrolled student at the start of each term. For example, a school with 300 students on the Family tier pays KSh 350 × 300 = KSh 105,000 per term.',
   },
   {
     q: 'What is the setup fee for?',
@@ -167,7 +167,9 @@ function FaqItem({ q, a }) {
 function PriceEstimator() {
   const [count,    setCount]    = useState(200);
   const [tier,     setTier]     = useState('family');
-  const rates = { base: 150, student: 200, family: 250 };
+  // Derived from TIERS, not a second hardcoded copy — a duplicate rates
+  // object here previously matched TIERS by coincidence, not by construction.
+  const rates = Object.fromEntries(TIERS.map(t => [t.key, t.rate]));
   const termTotal   = count * rates[tier];
   const annualTotal = termTotal * 3;
 
@@ -245,9 +247,9 @@ export default function Plans() {
     name: 'Msingi',
     applicationCategory: 'EducationalApplication',
     offers: [
-      { '@type': 'Offer', name: 'Base', price: '150.00', priceCurrency: 'KES', description: 'KES 150 per student per term — admin & teacher portals, full ERP' },
-      { '@type': 'Offer', name: 'Student', price: '200.00', priceCurrency: 'KES', description: 'KES 200 per student per term — adds dedicated student portal' },
-      { '@type': 'Offer', name: 'Family', price: '250.00', priceCurrency: 'KES', description: 'KES 250 per student per term — adds parent portal with M-Pesa payments' },
+      { '@type': 'Offer', name: 'Base', price: '250.00', priceCurrency: 'KES', description: 'KES 250 per student per term — admin & teacher portals, full ERP' },
+      { '@type': 'Offer', name: 'Student', price: '300.00', priceCurrency: 'KES', description: 'KES 300 per student per term — adds dedicated student portal' },
+      { '@type': 'Offer', name: 'Family', price: '350.00', priceCurrency: 'KES', description: 'KES 350 per student per term — adds parent portal with M-Pesa payments' },
     ],
   };
 
@@ -256,16 +258,16 @@ export default function Plans() {
 
       <Helmet>
         <title>Pricing — Msingi School Management Platform</title>
-        <meta name="description" content="Simple per-student, per-term pricing for Msingi. Base at KES 150, Student portal at KES 200, Family portal at KES 250. One-time setup fee of KES 30,000–50,000. No hidden costs." />
+        <meta name="description" content="Simple per-student, per-term pricing for Msingi. Base at KES 250, Student portal at KES 300, Family portal at KES 350. One-time setup fee of KES 30,000–50,000. No hidden costs." />
         <link rel="canonical" href="https://msingi.io/plans" />
         <meta property="og:type" content="website" />
         <meta property="og:url" content="https://msingi.io/plans" />
         <meta property="og:title" content="Pricing — Msingi School Management Platform" />
-        <meta property="og:description" content="Simple per-student, per-term pricing starting at KES 150. Base, Student, and Family portal tiers. No hidden costs." />
+        <meta property="og:description" content="Simple per-student, per-term pricing starting at KES 250. Base, Student, and Family portal tiers. No hidden costs." />
         <meta property="og:image" content="https://msingi.io/images/og-plans.png" />
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content="Pricing — Msingi School Management Platform" />
-        <meta name="twitter:description" content="Simple per-student, per-term pricing starting at KES 150. Base, Student, and Family portal tiers." />
+        <meta name="twitter:description" content="Simple per-student, per-term pricing starting at KES 250. Base, Student, and Family portal tiers." />
         <meta name="twitter:image" content="https://msingi.io/images/og-plans.png" />
         <script type="application/ld+json">{JSON.stringify(PRICING_SCHEMA)}</script>
       </Helmet>
@@ -300,7 +302,7 @@ export default function Plans() {
             <span className="text-indigo-600">your school actually uses.</span>
           </motion.h1>
           <motion.p variants={fadeUp} className="text-lg text-zinc-500 max-w-2xl mx-auto leading-relaxed">
-            One-time setup fee from KSh 45,000. Then KSh 150–250 per student per term — choose whether
+            One-time setup fee from KSh 45,000. Then KSh 250–350 per student per term — choose whether
             you need student and parent portals or just the staff dashboard.
           </motion.p>
         </motion.div>

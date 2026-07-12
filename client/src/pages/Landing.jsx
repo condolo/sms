@@ -81,9 +81,9 @@ const SOFTWARE_SCHEMA = {
   url: 'https://msingi.io',
   description: 'School management platform for African schools — attendance, grades, M-Pesa fees, admissions, report cards, and parent portals in one connected system.',
   offers: [
-    { '@type': 'Offer', name: 'Base',           price: '150.00', priceCurrency: 'KES', description: 'KES 150 per student per term — full admin & teacher access' },
-    { '@type': 'Offer', name: 'Student Portal', price: '200.00', priceCurrency: 'KES', description: 'KES 200 per student per term — adds student portal' },
-    { '@type': 'Offer', name: 'Family Portal',  price: '250.00', priceCurrency: 'KES', description: 'KES 250 per student per term — adds parent portal' },
+    { '@type': 'Offer', name: 'Base',           price: '250.00', priceCurrency: 'KES', description: 'KES 250 per student per term — full admin & teacher access' },
+    { '@type': 'Offer', name: 'Student Portal', price: '300.00', priceCurrency: 'KES', description: 'KES 300 per student per term — adds student portal' },
+    { '@type': 'Offer', name: 'Family Portal',  price: '350.00', priceCurrency: 'KES', description: 'KES 350 per student per term — adds parent portal' },
   ],
   audience: { '@type': 'EducationalAudience', educationalRole: 'administrator' },
   provider: {

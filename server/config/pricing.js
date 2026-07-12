@@ -13,16 +13,16 @@
 
    ── Portal tiers ─────────────────────────────────────────────
    TIER 1 — BASE (staff portal only)
-     KSh 150 / student / term
+     KSh 250 / student / term
      Includes: admin + teacher dashboards, all ERP modules
 
    TIER 2 — STUDENT (+ student portal)
-     KSh 200 / student / term
+     KSh 300 / student / term
      Includes: Tier 1 + student login account + student dashboard
      (lessons progress, timetable, report cards, attendance)
 
    TIER 3 — FAMILY (+ student AND parent portal)
-     KSh 250 / student / term
+     KSh 350 / student / term
      Includes: Tier 2 + parent login accounts + parent dashboard
      (child progress, fees, attendance, curriculum coverage)
 
@@ -42,9 +42,9 @@
 
 /* ── Per-student per-term rates (KES) ───────────────────────── */
 const STUDENT_RATE = {
-  base:    150,   // staff dashboard only
-  student: 200,   // + student login & dashboard
-  family:  250,   // + student & parent login & dashboards
+  base:    250,   // staff dashboard only
+  student: 300,   // + student login & dashboard
+  family:  350,   // + student & parent login & dashboards
 };
 
 /* ── Setup fee range (KES) ──────────────────────────────────── */

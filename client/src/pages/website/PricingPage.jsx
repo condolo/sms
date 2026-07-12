@@ -11,7 +11,7 @@ import BreadcrumbSchema from '@/components/landing/BreadcrumbSchema';
 const TIERS = [
   {
     name: 'Base',
-    price: 150,
+    price: 250,
     desc: 'Full platform for administration and teaching staff.',
     features: [
       'All 22 modules (admin + teacher access)',
@@ -30,7 +30,7 @@ const TIERS = [
   },
   {
     name: 'Student Portal',
-    price: 200,
+    price: 300,
     desc: 'Adds a branded student portal to the Base plan.',
     features: [
       'Everything in Base',
@@ -45,7 +45,7 @@ const TIERS = [
   },
   {
     name: 'Family Portal',
-    price: 250,
+    price: 350,
     desc: 'Adds a parent-facing portal for full family visibility.',
     features: [
       'Everything in Student Portal',
@@ -61,7 +61,7 @@ const TIERS = [
 ];
 
 const FAQS = [
-  { q: 'Is pricing per student or per school?', a: 'Per student, per term. A school with 400 students on the Base plan pays KES 60,000 per term.' },
+  { q: 'Is pricing per student or per school?', a: 'Per student, per term. A school with 400 students on the Base plan pays KES 100,000 per term.' },
   { q: 'What does "per term" mean if our school runs four terms?', a: 'You are billed at the start of each active term. If your school runs four terms, you pay four times per year.' },
   { q: 'Are there setup or onboarding fees?', a: 'No setup fee. Implementation and data migration are included for all new schools.' },
   { q: 'Can we start on Base and upgrade later?', a: 'Yes. You can upgrade at the start of any term. Your data carries forward — nothing is lost.' },
@@ -85,8 +85,8 @@ export default function PricingPage() {
   return (
     <div className="min-h-screen bg-white text-slate-900 antialiased">
       <Helmet>
-        <title>Pricing | Msingi — KES 150 per student per term</title>
-        <meta name="description" content="Transparent, per-student pricing. KES 150 (Base) / KES 200 (Student Portal) / KES 250 (Family Portal) per student per term. No setup fee. No lock-in." />
+        <title>Pricing | Msingi — KES 250 per student per term</title>
+        <meta name="description" content="Transparent, per-student pricing. KES 250 (Base) / KES 300 (Student Portal) / KES 350 (Family Portal) per student per term. No setup fee. No lock-in." />
         <link rel="canonical" href="https://msingi.io/pricing" />
         <meta property="og:title" content="Msingi Pricing — Transparent, No Surprises" />
         <meta property="og:url" content="https://msingi.io/pricing" />
@@ -110,7 +110,7 @@ export default function PricingPage() {
                 Transparent pricing. No surprises. No lock-in.
               </motion.h1>
               <motion.p variants={fadeUp} className="text-lg text-slate-500 leading-relaxed">
-                KES 150 per student per term. That is the base price. Everything included in it is listed below.
+                KES 250 per student per term. That is the base price. Everything included in it is listed below.
               </motion.p>
             </motion.div>
           </div>

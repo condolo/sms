@@ -3897,9 +3897,9 @@ function RolesTab() {
    ══════════════════════════════════════════════════════════════ */
 /* Portal tiers — mirrors server/config/pricing.js */
 const PORTAL_TIERS_SETTINGS = {
-  base:       { label: 'Base',       rate: 150, tagline: 'Admin & teacher portals',   color: 'text-slate-700',  bg: 'bg-slate-50',   border: 'border-slate-300' },
-  student:    { label: 'Student',    rate: 200, tagline: 'Base + student portal',      color: 'text-indigo-700', bg: 'bg-indigo-50',  border: 'border-indigo-300', popular: true },
-  family:     { label: 'Family',     rate: 250, tagline: 'Student + parent portal',    color: 'text-violet-700', bg: 'bg-violet-50',  border: 'border-violet-300' },
+  base:       { label: 'Base',       rate: 250, tagline: 'Admin & teacher portals',   color: 'text-slate-700',  bg: 'bg-slate-50',   border: 'border-slate-300' },
+  student:    { label: 'Student',    rate: 300, tagline: 'Base + student portal',      color: 'text-indigo-700', bg: 'bg-indigo-50',  border: 'border-indigo-300', popular: true },
+  family:     { label: 'Family',     rate: 350, tagline: 'Student + parent portal',    color: 'text-violet-700', bg: 'bg-violet-50',  border: 'border-violet-300' },
   enterprise: { label: 'Enterprise', rate: null, tagline: 'Full access · custom SLAs', color: 'text-amber-700',  bg: 'bg-amber-50',   border: 'border-amber-200'  },
 };
 /* Map legacy plan keys → portal tier keys */

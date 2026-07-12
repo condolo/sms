@@ -7,7 +7,7 @@
    GET  /api/billing/all               — all schools' snapshots (superadmin)
 
    Billing model:
-     • Amount = activeStudentCount × tier rate (KSh 150/200/250)
+     • Amount = activeStudentCount × tier rate (KSh 250/300/350)
      • Snapshot taken at term start date (auto via cron, or manual trigger here)
      • One snapshot per school per academicYear+term (idempotent)
    ============================================================ */

@@ -89,7 +89,7 @@ export const SHOWCASE_TAB_DATA = [
 export const PORTAL_TIERS_LANDING = [
   {
     name:     'Base',
-    rate:     150,
+    rate:     250,
     tagline:  'Full school ERP for admin and teaching staff',
     badge:    null,
     dark:     false,
@@ -105,7 +105,7 @@ export const PORTAL_TIERS_LANDING = [
   },
   {
     name:     'Student',
-    rate:     200,
+    rate:     300,
     tagline:  'Base + dedicated student login and dashboard',
     badge:    'Popular',
     dark:     true,
@@ -120,7 +120,7 @@ export const PORTAL_TIERS_LANDING = [
   },
   {
     name:     'Family',
-    rate:     250,
+    rate:     350,
     tagline:  'Student + parent portal with full family visibility',
     badge:    'Recommended',
     dark:     false,

@@ -25,7 +25,7 @@ const SECTIONS = [
   {
     title: 'Transparent pricing.',
     body: [
-      'KES 150 per student per term. That is the base price. It does not require a sales call to find out. It does not change at renewal. There is no module-by-module pricing that makes the total number impossible to predict.',
+      'KES 250 per student per term. That is the base price. It does not require a sales call to find out. It does not change at renewal. There is no module-by-module pricing that makes the total number impossible to predict.',
       'We publish it because we believe schools should be able to make informed decisions without negotiating. If you know your student count, you know what Msingi costs.',
     ],
   },
