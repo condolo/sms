@@ -63,7 +63,7 @@ const TIERS = [
 const FAQS = [
   { q: 'Is pricing per student or per school?', a: 'Per student, per term. A school with 400 students on the Base plan pays KES 100,000 per term.' },
   { q: 'What does "per term" mean if our school runs four terms?', a: 'You are billed at the start of each active term. If your school runs four terms, you pay four times per year.' },
-  { q: 'Are there setup or onboarding fees?', a: 'No setup fee. Implementation and data migration are included for all new schools.' },
+  { q: 'Are there setup or onboarding fees?', a: 'Yes. A one-time setup fee applies, starting from KSh 45,000 and scaling with student count. It covers account configuration, data migration, and staff training.' },
   { q: 'Can we start on Base and upgrade later?', a: 'Yes. You can upgrade at the start of any term. Your data carries forward — nothing is lost.' },
   { q: 'What happens to our data if we leave?', a: 'Your data belongs to your school. You can export everything at any time in standard formats. We do not hold data hostage.' },
   { q: 'Is there a contract lock-in?', a: 'No long-term contract is required. Schools commit term by term. Most stay because the platform works, not because they have to.' },
@@ -86,7 +86,7 @@ export default function PricingPage() {
     <div className="min-h-screen bg-white text-slate-900 antialiased">
       <Helmet>
         <title>Pricing | Msingi — KES 250 per student per term</title>
-        <meta name="description" content="Transparent, per-student pricing. KES 250 (Base) / KES 300 (Student Portal) / KES 350 (Family Portal) per student per term. No setup fee. No lock-in." />
+        <meta name="description" content="Transparent, per-student pricing. KES 250 (Base) / KES 300 (Student Portal) / KES 350 (Family Portal) per student per term. One-time setup fee from KSh 45,000. No lock-in." />
         <link rel="canonical" href="https://msingi.io/pricing" />
         <meta property="og:title" content="Msingi Pricing — Transparent, No Surprises" />
         <meta property="og:url" content="https://msingi.io/pricing" />

@@ -1,7 +1,7 @@
 /**
  * Msingi — Plans & Pricing Page
  * Per-student / per-term pricing model with three portal tiers.
- * Setup fee: KSh 30,000 – 50,000 (one-time, depends on size & modules).
+ * Setup fee: KSh 45,000 – 75,000 (one-time, banded by student count).
  */
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -258,7 +258,7 @@ export default function Plans() {
 
       <Helmet>
         <title>Pricing — Msingi School Management Platform</title>
-        <meta name="description" content="Simple per-student, per-term pricing for Msingi. Base at KES 250, Student portal at KES 300, Family portal at KES 350. One-time setup fee of KES 30,000–50,000. No hidden costs." />
+        <meta name="description" content="Simple per-student, per-term pricing for Msingi. Base at KES 250, Student portal at KES 300, Family portal at KES 350. One-time setup fee from KES 45,000. No hidden costs." />
         <link rel="canonical" href="https://msingi.io/plans" />
         <meta property="og:type" content="website" />
         <meta property="og:url" content="https://msingi.io/plans" />
