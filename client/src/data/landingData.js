@@ -28,9 +28,10 @@ export const ECOSYSTEM_NODES = [
   { label: 'Finance',         Icon: DollarSign,    color: 'bg-amber-500',   desc: 'Fees collected'     },
   { label: 'Messages',        Icon: MessageSquare, color: 'bg-sky-600',     desc: 'Staff connected'    },
   { label: 'Events',          Icon: CalendarDays,  color: 'bg-yellow-500',  desc: 'School calendar'    },
-  { label: 'HR & Staff',      Icon: UserCog,       color: 'bg-slate-600',   desc: 'Staff & payroll'    },
+  { label: 'HR & Payroll',    Icon: UserCog,       color: 'bg-slate-600',   desc: 'Staff & payroll'    },
   { label: 'Library',         Icon: BookOpen,      color: 'bg-lime-600',    desc: 'Resources managed'  },
   // Insights
+  { label: 'Growth Profile',  Icon: Activity,      color: 'bg-green-600',  desc: 'Milestones tracked' },
   { label: 'Reports',         Icon: FileText,      color: 'bg-purple-500',  desc: 'Governed publish'   },
   { label: 'Analytics',       Icon: TrendingUp,    color: 'bg-teal-500',    desc: 'Director insight'   },
   // Support services — last as requested
@@ -350,6 +351,32 @@ export const MODULE_PREVIEWS = {
       ],
     },
   },
+  'Growth Profile': {
+    tagline: 'The record of a student that grades alone never capture.',
+    outcomes: [
+      'Leadership roles, activities, service, projects and awards logged against each student over time',
+      'Teachers write recommendations directly into the record — no separate letter drafted from memory at application time',
+      'Students record their own aspirations; staff verify and approve entries before they count toward the profile',
+      'One holistic view alongside academic history — for references, scholarship applications, and parent conversations',
+    ],
+    results: [
+      'A complete co-curricular record exists the day a reference letter is needed — nothing reconstructed from memory',
+      'Recognition is documented as it happens, not lost between the person who gave it and the person who needs it',
+      'Every entry verified and attributed — a credible record, not a self-reported list',
+    ],
+    badge: 'Verified Record',
+    connectedModules: ['Student Records', 'Behaviour', 'Reports'],
+    demoPath: '/students',
+    mockup: {
+      type: 'stats',
+      items: [
+        { label: 'Leadership',  value: '3',  trend: '+1 this term', up: true },
+        { label: 'Activities',  value: '12', trend: '+4 this term', up: true },
+        { label: 'Awards',      value: '5',  trend: '+2 this term', up: true },
+        { label: 'Recommendations', value: '2', trend: 'Pending review', up: false },
+      ],
+    },
+  },
   'Reports': {
     tagline: 'Five-stage approval pipeline — no report card leaves without every gate cleared.',
     outcomes: [
@@ -639,7 +666,7 @@ export const MODULE_PREVIEWS = {
       ],
     },
   },
-  'HR & Staff': {
+  'HR & Payroll': {
     tagline: 'Staff employment, payroll, and leave — managed in one place, not a spreadsheet.',
     outcomes: [
       'Employee records created with contract type, start date, department, and salary grade',
