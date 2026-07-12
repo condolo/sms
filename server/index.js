@@ -318,7 +318,14 @@ const STATIC_DIR = (process.env.NODE_ENV === 'production' && reactBuilt) ? REACT
 // Serve React build assets (hashed filenames → long cache)
 if (reactBuilt) {
   app.use(express.static(REACT_DIST, {
-    index: false,   // SPA fallback handled below
+    index: false,     // SPA fallback handled below
+    redirect: false,  // serve-static's default 301-to-trailing-slash on directory
+                       // matches (e.g. /why -> /why/) would otherwise fire before
+                       // the wildcard route's explicit prerendered-file lookup runs
+                       // — that extra hop makes the served URL (/why/) disagree
+                       // with sitemap.xml and every page's canonical tag (/why,
+                       // no trailing slash), which is bad for SEO even though the
+                       // final content is correct.
     setHeaders: (res, filePath) => {
       if (/\.[0-9a-f]{8}\.(js|css)$/.test(filePath)) {
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
