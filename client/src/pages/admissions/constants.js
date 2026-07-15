@@ -28,10 +28,21 @@ export const PRIORITY_CONFIG = {
 
 export const EMPTY_FORM = {
   firstName: '', lastName: '', middleName: '', dateOfBirth: '',
-  gender: '', applyingForClass: '', applyingForYear: '',
+  gender: '',
+  applyingForClass: '', applyingForClassName: '',
+  applyingForStream: '', applyingForStreamName: '',
+  applyingForYear: '',
   parentName: '', parentEmail: '', parentPhone: '',
   priority: 'normal', notes: '', stage: 'enquiry',
 };
+
+/** Display label for an applicant's class — prefers the denormalized name
+ *  (set when picked from the real Classes list), falls back to the raw
+ *  applyingForClass value for records saved before class became a real
+ *  reference (previously free text). */
+export function applicantClassLabel(a) {
+  return a.applyingForClassName || a.applyingForClass || null;
+}
 
 /* ── Pure helpers ─────────────────────────────────────────── */
 export function stageMeta(id) {
@@ -66,7 +77,7 @@ export function avatarColor(name = '') {
 export function exportAdmissionsCSV(cols) {
   const header = [
     'First Name','Last Name','Stage','Priority',
-    'Applying For','Academic Year','Date of Birth','Gender',
+    'Applying For Class','Applying For Stream','Academic Year','Date of Birth','Gender',
     'Parent Name','Parent Phone','Parent Email','Applied Date',
   ];
   const rows = cols.flatMap(col =>
@@ -74,7 +85,7 @@ export function exportAdmissionsCSV(cols) {
       a.firstName ?? '', a.lastName ?? '',
       stageMeta(a.stage).label,
       a.priority ?? 'normal',
-      a.applyingForClass ?? '', a.applyingForYear ?? '',
+      applicantClassLabel(a) ?? '', a.applyingForStreamName ?? '', a.applyingForYear ?? '',
       a.dateOfBirth ? new Date(a.dateOfBirth).toLocaleDateString('en-GB') : '',
       a.gender ?? '',
       a.parentName ?? '', a.parentPhone ?? '', a.parentEmail ?? '',

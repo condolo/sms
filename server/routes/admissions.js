@@ -30,8 +30,11 @@ const ApplicationSchema = z.object({
   gender:         z.enum(['male', 'female', 'other', 'prefer_not_to_say']).optional(),
 
   // Admission details
-  applyingForYear:   z.string().optional(),     // "Year 7", "Grade 3"
-  applyingForClass:  z.string().optional(),     // classId
+  applyingForYear:       z.string().optional(),          // academic year name, e.g. "2026-2027"
+  applyingForClass:      z.string().nullish(),            // classId
+  applyingForClassName:  z.string().nullish(),            // denormalized class name, for display without a lookup
+  applyingForStream:     z.string().nullish(),            // streamId
+  applyingForStreamName: z.string().nullish(),            // denormalized stream name, for display without a lookup
   keyStageId:        z.string().optional(),
   academicYearId:    z.string().optional(),
   intakeTerm:        z.string().optional(),

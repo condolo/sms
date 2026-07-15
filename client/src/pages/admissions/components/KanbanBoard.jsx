@@ -3,7 +3,7 @@
    ============================================================ */
 import { motion } from 'framer-motion';
 import { Calendar, ArrowRight } from 'lucide-react';
-import { avatarColor, initials, formatDate, PRIORITY_CONFIG } from '../constants.js';
+import { avatarColor, initials, formatDate, PRIORITY_CONFIG, applicantClassLabel } from '../constants.js';
 import { CardSkeleton, EmptyCol } from './AdmissionsPrimitives.jsx';
 
 /* ── Applicant card ───────────────────────────────────────── */
@@ -33,7 +33,8 @@ function ApplicantCard({ applicant, col, onClick, onStageClick }) {
               {a.firstName} {a.lastName}
             </p>
             <p className="text-xs text-slate-400 truncate mt-0.5">
-              {a.applyingForClass || a.applyingForYear || 'No class specified'}
+              {applicantClassLabel(a) || 'No class specified'}
+              {a.applyingForStreamName && ` · ${a.applyingForStreamName}`}
             </p>
           </div>
           {a.priority === 'high' && (

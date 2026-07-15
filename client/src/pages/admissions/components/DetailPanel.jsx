@@ -3,15 +3,18 @@
    PrintLetterModal is kept here (only called from this panel)
    ============================================================ */
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
   X, Loader2, AlertCircle, Edit2, Save, ArrowRight, ChevronRight,
   GraduationCap, Users, Calendar, Flag, Phone, Mail, Printer,
 } from 'lucide-react';
-import { admissions as admissionsApi } from '@/api/client.js';
+import {
+  admissions as admissionsApi, academicConfig as academicConfigApi,
+  classes as classesApi, streams as streamsApi,
+} from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
-import { stageMeta, avatarColor, initials, formatDate, PRIORITY_CONFIG } from '../constants.js';
+import { stageMeta, avatarColor, initials, formatDate, PRIORITY_CONFIG, applicantClassLabel } from '../constants.js';
 import { Section, Field, inputCls, DetailSection, DetailRow } from './AdmissionsPrimitives.jsx';
 
 /* ── Print letter modal ───────────────────────────────────── */
@@ -55,7 +58,7 @@ function PrintLetterModal({ applicant, school, onClose }) {
       <div class="detail-box">
         <div class="detail-row"><span class="detail-label">Applicant Name</span><span class="detail-value">${a.firstName} ${a.middleName ? a.middleName + ' ' : ''}${a.lastName}</span></div>
         <div class="detail-row"><span class="detail-label">Date of Birth</span><span class="detail-value">${a.dateOfBirth ? new Date(a.dateOfBirth).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : '—'}</span></div>
-        <div class="detail-row"><span class="detail-label">Applying For</span><span class="detail-value">${a.applyingForClass || '—'} — ${a.applyingForYear || 'Current Year'}</span></div>
+        <div class="detail-row"><span class="detail-label">Applying For</span><span class="detail-value">${applicantClassLabel(a) || '—'}${a.applyingForStreamName ? ` (Stream ${a.applyingForStreamName})` : ''} — ${a.applyingForYear || 'Current Year'}</span></div>
         <div class="detail-row"><span class="detail-label">Stage</span><span class="detail-value">${stageMeta(a.stage).label}</span></div>
         <div class="detail-row"><span class="detail-label">Reference No.</span><span class="detail-value">${refNo}</span></div>
         <div class="detail-row"><span class="detail-label">Application Date</span><span class="detail-value">${a.createdAt ? new Date(a.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : today}</span></div>
@@ -97,7 +100,7 @@ function PrintLetterModal({ applicant, school, onClose }) {
               We are pleased to confirm the application for <strong>{a.firstName} {a.lastName}</strong>{' '}
               is at the <strong>{stageMeta(a.stage).label}</strong> stage.
             </p>
-            <p className="text-slate-500 mt-2 text-xs">Class: {a.applyingForClass || '—'} · Year: {a.applyingForYear || '—'}</p>
+            <p className="text-slate-500 mt-2 text-xs">Class: {applicantClassLabel(a) || '—'} · Year: {a.applyingForYear || '—'}</p>
           </div>
           <div className="flex gap-3 justify-end">
             <button onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
@@ -128,10 +131,13 @@ export default function DetailPanel({ applicant, onClose, onStageChange }) {
   const [showLetter, setShowLetter] = useState(false);
   const [editing, setEditing]       = useState(false);
   const [editForm, setEditForm]     = useState({
-    firstName:        a.firstName        ?? '',
-    lastName:         a.lastName         ?? '',
-    applyingForClass: a.applyingForClass ?? '',
-    applyingForYear:  a.applyingForYear  ?? '',
+    firstName:             a.firstName             ?? '',
+    lastName:              a.lastName              ?? '',
+    applyingForClass:      a.applyingForClass       ?? '',
+    applyingForClassName:  a.applyingForClassName   ?? '',
+    applyingForStream:     a.applyingForStream      ?? '',
+    applyingForStreamName: a.applyingForStreamName  ?? '',
+    applyingForYear:       a.applyingForYear        ?? '',
     parentName:       a.parentName       ?? '',
     parentPhone:      a.parentPhone      ?? '',
     parentEmail:      a.parentEmail      ?? '',
@@ -148,6 +154,49 @@ export default function DetailPanel({ applicant, onClose, onStageChange }) {
   });
 
   function setF(field, val) { setEditForm(f => ({ ...f, [field]: val })); }
+
+  /* Classes/streams/years — same real-reference selects as the New
+     Application form, so editing an application can't reintroduce free
+     text in place of a class/stream/year reference. */
+  const { data: classesData } = useQuery({
+    queryKey: ['classes', 'all'],
+    queryFn:  () => classesApi.list({ limit: 200 }),
+    staleTime: 5 * 60_000,
+    enabled:  editing,
+  });
+  const classList = classesData?.data ?? [];
+
+  const { data: streamData } = useQuery({
+    queryKey: ['streams', { classId: editForm.applyingForClass }],
+    queryFn:  () => streamsApi.list({ classId: editForm.applyingForClass, status: 'active', limit: 200 }),
+    enabled:  editing && !!editForm.applyingForClass,
+    staleTime: 60_000,
+  });
+  const streamList = streamData?.data ?? [];
+
+  const { data: yearsData } = useQuery({
+    queryKey: ['academic-config', 'years'],
+    queryFn:  academicConfigApi.years.list,
+    staleTime: 10 * 60_000,
+    enabled:  editing,
+  });
+  const years = yearsData?.data ?? yearsData ?? [];
+
+  function onEditClassChange(classId) {
+    const c = classList.find(c => (c.id ?? c._id) === classId);
+    setEditForm(f => ({
+      ...f,
+      applyingForClass:      classId,
+      applyingForClassName:  c?.name ?? '',
+      applyingForStream:     '',
+      applyingForStreamName: '',
+    }));
+  }
+
+  function onEditStreamChange(streamId) {
+    const s = streamList.find(s => (s.id ?? s._id) === streamId);
+    setEditForm(f => ({ ...f, applyingForStream: streamId, applyingForStreamName: s?.name ?? '' }));
+  }
 
   return (
     <>
@@ -240,12 +289,33 @@ export default function DetailPanel({ applicant, onClose, onStageChange }) {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Applying for Class">
-                    <input value={editForm.applyingForClass} onChange={e => setF('applyingForClass', e.target.value)} className={inputCls()} />
+                    <select value={editForm.applyingForClass} onChange={e => onEditClassChange(e.target.value)} className={inputCls()}>
+                      <option value="">Select class…</option>
+                      {classList.map(c => <option key={c.id ?? c._id} value={c.id ?? c._id}>{c.name}</option>)}
+                    </select>
                   </Field>
-                  <Field label="Academic Year">
-                    <input value={editForm.applyingForYear} onChange={e => setF('applyingForYear', e.target.value)} className={inputCls()} />
+                  <Field label="Stream">
+                    <select
+                      value={editForm.applyingForStream}
+                      onChange={e => onEditStreamChange(e.target.value)}
+                      disabled={!editForm.applyingForClass}
+                      className={inputCls()}
+                    >
+                      <option value="">{editForm.applyingForClass ? 'No stream' : 'Select class first'}</option>
+                      {streamList.map(s => <option key={s.id ?? s._id} value={s.id ?? s._id}>Stream {s.name}</option>)}
+                    </select>
                   </Field>
                 </div>
+                <Field label="Academic Year">
+                  <select value={editForm.applyingForYear} onChange={e => setF('applyingForYear', e.target.value)} className={inputCls()}>
+                    <option value="">Select year…</option>
+                    {years.map(y => (
+                      <option key={y.id ?? y._id} value={y.name}>
+                        {y.name}{y.isCurrent ? ' (current)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
                 <Field label="Priority">
                   <select value={editForm.priority} onChange={e => setF('priority', e.target.value)} className={inputCls()}>
                     <option value="low">Low</option>
@@ -304,7 +374,8 @@ export default function DetailPanel({ applicant, onClose, onStageChange }) {
               <div className="px-6 py-5 space-y-6">
                 {/* Academic */}
                 <DetailSection icon={<GraduationCap size={14} />} label="Academic">
-                  <DetailRow label="Applying for"  value={a.applyingForClass || '—'} />
+                  <DetailRow label="Applying for"  value={applicantClassLabel(a) || '—'} />
+                  {a.applyingForStreamName && <DetailRow label="Stream" value={a.applyingForStreamName} />}
                   <DetailRow label="Academic year" value={a.applyingForYear  || '—'} />
                   <DetailRow label="Date of birth" value={formatDate(a.dateOfBirth)} />
                   <DetailRow label="Gender"        value={a.gender           || '—'} />

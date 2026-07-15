@@ -5,7 +5,10 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { X, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { admissions as admissionsApi, academicConfig as academicConfigApi } from '@/api/client.js';
+import {
+  admissions as admissionsApi, academicConfig as academicConfigApi,
+  classes as classesApi, streams as streamsApi,
+} from '@/api/client.js';
 import { EMPTY_FORM, PIPELINE } from '../constants.js';
 import { Section, Field, inputCls } from './AdmissionsPrimitives.jsx';
 import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
@@ -28,6 +31,41 @@ export default function AddSlideOver({ onClose, onCreated }) {
     if (!currentPeriod.academicYear || form.applyingForYear) return;
     set('applyingForYear', currentPeriod.academicYear);
   }, [currentPeriod.academicYear]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* Classes/streams — same source as everywhere else a class is picked
+     (Students, Timetable, ...), so a stream added under Classes shows up
+     here immediately instead of "Applying for Class" being free text
+     disconnected from real class/stream records. */
+  const { data: classesData } = useQuery({
+    queryKey: ['classes', 'all'],
+    queryFn:  () => classesApi.list({ limit: 200 }),
+    staleTime: 5 * 60_000,
+  });
+  const classList = classesData?.data ?? [];
+
+  const { data: streamData } = useQuery({
+    queryKey: ['streams', { classId: form.applyingForClass }],
+    queryFn:  () => streamsApi.list({ classId: form.applyingForClass, status: 'active', limit: 200 }),
+    enabled:  !!form.applyingForClass,
+    staleTime: 60_000,
+  });
+  const streamList = streamData?.data ?? [];
+
+  function onClassChange(classId) {
+    const c = classList.find(c => (c.id ?? c._id) === classId);
+    setForm(f => ({
+      ...f,
+      applyingForClass:      classId,
+      applyingForClassName:  c?.name ?? '',
+      applyingForStream:     '',
+      applyingForStreamName: '',
+    }));
+  }
+
+  function onStreamChange(streamId) {
+    const s = streamList.find(s => (s.id ?? s._id) === streamId);
+    setForm(f => ({ ...f, applyingForStream: streamId, applyingForStreamName: s?.name ?? '' }));
+  }
 
   const mutation = useMutation({
     mutationFn: data => admissionsApi.create(data),
@@ -115,19 +153,33 @@ export default function AddSlideOver({ onClose, onCreated }) {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <Field label="Applying for Class">
-                <input value={form.applyingForClass} onChange={e => set('applyingForClass', e.target.value)} placeholder="e.g. Year 7" className={inputCls()} />
+                <select value={form.applyingForClass} onChange={e => onClassChange(e.target.value)} className={inputCls()}>
+                  <option value="">Select class…</option>
+                  {classList.map(c => <option key={c.id ?? c._id} value={c.id ?? c._id}>{c.name}</option>)}
+                </select>
               </Field>
-              <Field label="Academic Year">
-                <select value={form.applyingForYear} onChange={e => set('applyingForYear', e.target.value)} className={inputCls()}>
-                  <option value="">Select year…</option>
-                  {years.map(y => (
-                    <option key={y.id ?? y._id} value={y.name}>
-                      {y.name}{y.isCurrent ? ' (current)' : ''}
-                    </option>
-                  ))}
+              <Field label="Stream">
+                <select
+                  value={form.applyingForStream}
+                  onChange={e => onStreamChange(e.target.value)}
+                  disabled={!form.applyingForClass}
+                  className={inputCls()}
+                >
+                  <option value="">{form.applyingForClass ? 'No stream' : 'Select class first'}</option>
+                  {streamList.map(s => <option key={s.id ?? s._id} value={s.id ?? s._id}>Stream {s.name}</option>)}
                 </select>
               </Field>
             </div>
+            <Field label="Academic Year">
+              <select value={form.applyingForYear} onChange={e => set('applyingForYear', e.target.value)} className={inputCls()}>
+                <option value="">Select year…</option>
+                {years.map(y => (
+                  <option key={y.id ?? y._id} value={y.name}>
+                    {y.name}{y.isCurrent ? ' (current)' : ''}
+                  </option>
+                ))}
+              </select>
+            </Field>
           </Section>
 
           {/* Parent/Guardian */}

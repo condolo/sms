@@ -2,7 +2,7 @@
    ListView — flat table fallback for the admissions pipeline
    ============================================================ */
 import { ChevronRight } from 'lucide-react';
-import { avatarColor, initials, formatDate, PRIORITY_CONFIG } from '../constants.js';
+import { avatarColor, initials, formatDate, PRIORITY_CONFIG, applicantClassLabel } from '../constants.js';
 
 export default function ListView({ cols, onCardClick, onStageClick }) {
   const allItems = cols.flatMap(col => col.items.map(i => ({ ...i, _stageMeta: col })));
@@ -50,7 +50,9 @@ export default function ListView({ cols, onCardClick, onStageClick }) {
                     </div>
                   </td>
                   <td className="py-3.5 px-4 hidden sm:table-cell">
-                    <span className="text-slate-600 text-sm">{a.applyingForClass || a.applyingForYear || '—'}</span>
+                    <span className="text-slate-600 text-sm">
+                      {applicantClassLabel(a) || '—'}{a.applyingForStreamName && ` · ${a.applyingForStreamName}`}
+                    </span>
                   </td>
                   <td className="py-3.5 px-4">
                     <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ring-1 ${sm.light}`}>
