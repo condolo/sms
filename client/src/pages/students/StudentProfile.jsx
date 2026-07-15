@@ -104,6 +104,16 @@ export default function StudentProfile() {
   });
   const student = studentRes?.data ?? null;
 
+  /* Houses — for resolving/editing a student's house (id) to a display name.
+     Always fetched (not tab/edit-gated) since the header and print view need
+     the resolved name too, not just the edit-mode dropdown. */
+  const { data: settingsData } = useQuery({
+    queryKey: ['settings', 'school'],
+    queryFn:  () => settingsApi.school.get(),
+    staleTime: 5 * 60_000,
+  });
+  const houses = Array.isArray(settingsData?.data?.houses) ? settingsData.data.houses : [];
+
   /* ── Cross-module queries (lazy by tab) ── */
   const { data: attData, isLoading: attLoading } = useQuery({
     queryKey: ['attendance', 'summary', studentId],
@@ -232,6 +242,10 @@ export default function StudentProfile() {
 
   const grad = avatarGradient(student.firstName ?? '');
   const initials = `${student.firstName?.charAt(0) ?? ''}${student.lastName?.charAt(0) ?? ''}`.toUpperCase();
+  // houseId is canonical; house (legacy field name, pre-cleanup) is read as a fallback
+  // for records saved before this fix — never written to going forward.
+  const studentHouseRef = student.houseId ?? student.house ?? null;
+  const houseName = houses.find(h => (h.id ?? h.name) === studentHouseRef)?.name ?? null;
 
   function printProfile() {
     const fmtDate = d => d ? new Date(d).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' }) : '—';
@@ -240,7 +254,7 @@ export default function StudentProfile() {
       ['Date of Birth',   fmtDate(student.dateOfBirth)],
       ['Gender',          student.gender ?? '—'],
       ['Class',           student.className ?? '—'],
-      ['House',           student.house ?? '—'],
+      ['House',           houseName ?? '—'],
       ['Status',          student.status ?? '—'],
       ['School Email',    student.schoolEmail ?? '—'],
       ['Personal Email',  student.email ?? '—'],
@@ -263,7 +277,7 @@ td:last-child{font-weight:500}
 @media print{body{padding:20px}}</style></head><body>
 <div class="hdr">${student.photo ? `<img src="${student.photo}" style="width:60px;height:60px;border-radius:14px;object-fit:cover;flex-shrink:0" alt="Photo" />` : `<div class="avatar">${initials}</div>`}
 <div><p class="name">${student.firstName} ${student.lastName}<span class="status">${student.status ?? 'active'}</span></p>
-<p class="sub">${student.className ? `${student.className} · ` : ''}${student.house ? `${student.house} · ` : ''}ID: ${student.admissionNumber ?? '—'}</p></div></div>
+<p class="sub">${student.className ? `${student.className} · ` : ''}${houseName ? `${houseName} · ` : ''}ID: ${student.admissionNumber ?? '—'}</p></div></div>
 <table>${rows.map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>
 <div class="footer">Printed ${new Date().toLocaleString('en-GB')}</div>
 </body></html>`;
@@ -336,8 +350,8 @@ td:last-child{font-weight:500}
                 {student.className && (
                   <span className="flex items-center gap-1"><BookOpen size={11} />{student.className}</span>
                 )}
-                {student.house && (
-                  <span className="flex items-center gap-1"><Home size={11} />{student.house}</span>
+                {houseName && (
+                  <span className="flex items-center gap-1"><Home size={11} />{houseName}</span>
                 )}
                 {student.schoolEmail && (
                   <span className="flex items-center gap-1"><Mail size={11} />{student.schoolEmail}</span>
@@ -415,6 +429,8 @@ td:last-child{font-weight:500}
             {tab === 'overview' && (
               <OverviewTab
                 student={student}
+                houses={houses}
+                houseName={houseName}
                 editing={editing}
                 saving={saving}
                 onSave={updateStudent}
@@ -449,18 +465,9 @@ td:last-child{font-weight:500}
 /* ══════════════════════════════════════════════════════════════
    OVERVIEW TAB
    ══════════════════════════════════════════════════════════════ */
-function OverviewTab({ student, editing, saving, onSave, onCancel }) {
+function OverviewTab({ student, houses, houseName, editing, saving, onSave, onCancel }) {
   const [form, setForm] = useState({ ...student });
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
-
-  /* Houses from school settings (for dropdown in edit mode) */
-  const { data: settingsData } = useQuery({
-    queryKey: ['settings', 'school'],
-    queryFn:  () => settingsApi.school.get(),
-    enabled:  editing,
-    staleTime: 5 * 60_000,
-  });
-  const houses = Array.isArray(settingsData?.data?.houses) ? settingsData.data.houses : [];
 
   /* ── View mode ── */
   if (!editing) {
@@ -485,7 +492,7 @@ function OverviewTab({ student, editing, saving, onSave, onCancel }) {
         <InfoCard title="Academic" icon={<BookOpen size={14} />}>
           <InfoRow label="Admission No." value={student.admissionNumber} />
           <InfoRow label="Class"         value={student.className} />
-          <InfoRow label="House"         value={student.house} />
+          <InfoRow label="House"         value={houseName} />
           <InfoRow label="Status"        value={student.status} />
           <InfoRow label="Enrolled"      value={student.enrollmentDate ? new Date(student.enrollmentDate).toLocaleDateString('en-GB') : null} />
         </InfoCard>
@@ -559,7 +566,7 @@ function OverviewTab({ student, editing, saving, onSave, onCancel }) {
           </FField>
           <FField label="House">
             {houses.length > 0 ? (
-              <select className={iCls()} value={form.house ?? ''} onChange={e => set('house', e.target.value)}>
+              <select className={iCls()} value={form.houseId ?? form.house ?? ''} onChange={e => set('houseId', e.target.value)}>
                 <option value="">No house assigned</option>
                 {houses.map(h => (
                   <option key={h.id ?? h.name} value={h.id ?? h.name}>
@@ -568,7 +575,7 @@ function OverviewTab({ student, editing, saving, onSave, onCancel }) {
                 ))}
               </select>
             ) : (
-              <input className={iCls()} value={form.house ?? ''} onChange={e => set('house', e.target.value)} placeholder="House name" />
+              <input className={iCls()} value={form.houseId ?? form.house ?? ''} onChange={e => set('houseId', e.target.value)} placeholder="House name" />
             )}
           </FField>
           <FField label="Status">

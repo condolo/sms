@@ -13,11 +13,15 @@ import {
   Loader2, CheckCircle2, Phone, Mail, Download,
   ShieldAlert, UserMinus, KeyRound, ArrowUpCircle, ChevronsRight,
 } from 'lucide-react';
-import { students as studentsApi, classes as classesApi, streams as streamsApi, importExport } from '@/api/client.js';
+import {
+  students as studentsApi, classes as classesApi, streams as streamsApi, importExport,
+  academicConfig as academicConfigApi, settings as settingsApi,
+} from '@/api/client.js';
 import { useSections } from '@/hooks/useSections.js';
 import { Pagination } from '@/components/ui/Pagination.jsx';
 import useAuthStore from '@/store/auth.js';
 import { useToast } from '@/hooks/useToast.jsx';
+import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
 
 const LIMIT = 25;
 
@@ -78,6 +82,15 @@ export default function StudentList() {
 
   const canDelete     = role === 'admin' || role === 'superadmin';
   const canHardDelete = role === 'admin' || role === 'superadmin';
+
+  /* Houses — for resolving a student's houseId to a display name in the table */
+  const { data: settingsData } = useQuery({
+    queryKey: ['settings', 'school'],
+    queryFn:  () => settingsApi.school.get(),
+    staleTime: 5 * 60_000,
+  });
+  const houses = Array.isArray(settingsData?.data?.houses) ? settingsData.data.houses : [];
+  const houseName = id => houses.find(h => (h.id ?? h.name) === id)?.name ?? null;
 
   /* Read ?classId= from URL so "View students" on class cards pre-filters the list */
   const [searchParams] = useSearchParams();
@@ -770,7 +783,7 @@ export default function StudentList() {
                       <td className="py-3.5 px-4 hidden lg:table-cell text-sm text-slate-600 capitalize">
                         {s.gender === 'prefer_not_to_say' ? 'Not stated' : s.gender ?? '—'}
                       </td>
-                      <td className="py-3.5 px-4 hidden xl:table-cell text-sm text-slate-600">{s.house ?? '—'}</td>
+                      <td className="py-3.5 px-4 hidden xl:table-cell text-sm text-slate-600">{houseName(s.houseId ?? s.house) ?? '—'}</td>
                       <td className="py-3.5 px-4">
                         <span className={`inline-flex items-center text-xs font-medium px-2.5 py-1 rounded-full capitalize ${sts}`}>
                           {s.status}
@@ -844,11 +857,13 @@ const EMPTY = {
   gender: '', classId: '', streamId: '', parentName: '', parentEmail: '',
   parentPhone: '', address: '', medicalNotes: '', status: 'active',
   enrollmentDate: new Date().toISOString().slice(0, 10),
+  enrollmentAcademicYearId: '', enrollmentTermId: '',
 };
 
 export function AddStudentSlideOver({ classList, onClose, onCreated }) {
   const [form, setForm] = useState(EMPTY);
   const [errors, setErrors] = useState({});
+  const currentPeriod = useCurrentAcademicPeriod();
 
   // Load streams for the selected class
   const { data: streamData } = useQuery({
@@ -858,6 +873,27 @@ export function AddStudentSlideOver({ classList, onClose, onCreated }) {
     staleTime: 60_000,
   });
   const streamList = streamData?.data ?? [];
+
+  // Academic years — for the intake year/term pickers
+  const { data: yearsData } = useQuery({
+    queryKey: ['academic-config', 'years'],
+    queryFn:  academicConfigApi.years.list,
+    staleTime: 10 * 60_000,
+  });
+  const years = yearsData?.data ?? yearsData ?? [];
+  const selectedYear = years.find(y => (y.id ?? y._id?.toString()) === form.enrollmentAcademicYearId);
+  const yearTerms     = selectedYear?.terms ?? [];
+
+  /* Default intake year/term to the live-resolved current period —
+     still fully overridable (e.g. backdating an enrolment). */
+  useEffect(() => {
+    if (!currentPeriod.academicYearId || form.enrollmentAcademicYearId) return;
+    setForm(f => ({
+      ...f,
+      enrollmentAcademicYearId: currentPeriod.academicYearId,
+      enrollmentTermId:         currentPeriod.termId ?? '',
+    }));
+  }, [currentPeriod.academicYearId, currentPeriod.termId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const mutation = useMutation({
     mutationFn: data => studentsApi.create(data),
@@ -870,6 +906,8 @@ export function AddStudentSlideOver({ classList, onClose, onCreated }) {
       const next = { ...f, [field]: val };
       // Clear streamId when class changes
       if (field === 'classId') next.streamId = '';
+      // Clear term when year changes
+      if (field === 'enrollmentAcademicYearId') next.enrollmentTermId = '';
       return next;
     });
     setErrors(e => { const n = { ...e }; delete n[field]; return n; });
@@ -964,6 +1002,29 @@ export function AddStudentSlideOver({ classList, onClose, onCreated }) {
             <FormField label="Enrolment Date">
               <input type="date" value={form.enrollmentDate} onChange={e => set('enrollmentDate', e.target.value)} className={inputCls()} />
             </FormField>
+            <div className="grid grid-cols-2 gap-4">
+              <FormField label="Academic Year">
+                <select value={form.enrollmentAcademicYearId} onChange={e => set('enrollmentAcademicYearId', e.target.value)} className={inputCls()}>
+                  <option value="">Select year…</option>
+                  {years.map(y => (
+                    <option key={y.id ?? y._id} value={y.id ?? y._id}>
+                      {y.name}{y.isCurrent ? ' (current)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </FormField>
+              <FormField label="Term">
+                <select
+                  value={form.enrollmentTermId}
+                  onChange={e => set('enrollmentTermId', e.target.value)}
+                  disabled={!form.enrollmentAcademicYearId}
+                  className={inputCls()}
+                >
+                  <option value="">{form.enrollmentAcademicYearId ? 'Select term…' : 'Select year first'}</option>
+                  {yearTerms.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </FormField>
+            </div>
           </FormSection>
 
           <FormSection label="Parent / Guardian">

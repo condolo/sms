@@ -39,6 +39,11 @@ const StudentCreateSchema = z.object({
   sectionId:      z.string().nullish(),
   houseId:        z.string().nullish(),
   keyStageId:     z.string().nullish(),
+  // Intake year/term — which academic year/term this student was enrolled in.
+  // Defaulted client-side from the live-resolved current period (see
+  // client/src/hooks/useCurrentAcademicPeriod.js) but always overridable.
+  enrollmentAcademicYearId: z.string().nullish(),
+  enrollmentTermId:         z.string().nullish(),
   parentName:     z.string().max(200).trim().optional(),
   parentEmail:    z.string().email().optional().or(z.literal('')),
   parentPhone:    z.string().max(30).optional(),

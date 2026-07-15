@@ -44,7 +44,9 @@ export default function HousesTab() {
   /* House standings */
   const standings = useMemo(() => (
     houses.map(h => {
-      const members   = allStudents.filter(s => (s.house ?? s.houseId) === (h.id ?? h.name));
+      // houseId is canonical; house (legacy field name) is a fallback for
+      // records saved before the house field-name cleanup.
+      const members   = allStudents.filter(s => (s.houseId ?? s.house) === (h.id ?? h.name));
       const memberIds = new Set(members.map(s => s.id ?? s._id));
       const hLogs     = allLogs.filter(l => memberIds.has(l.studentId));
       const merits    = hLogs.filter(l => l.type === 'merit').reduce((sum, l) => sum + (l.points ?? 0), 0);
