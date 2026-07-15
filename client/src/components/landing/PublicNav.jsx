@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useLayoutEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Menu, X, ChevronDown } from 'lucide-react';
 import { EASE } from '@/utils/animations';
+import { setFavicon, DEFAULT_FAVICON } from '@/utils/favicon.js';
 
 const NAV = [
   {
@@ -41,6 +42,15 @@ export default function PublicNav() {
   const location = useLocation();
 
   useEffect(() => { window.scrollTo({ top: 0, behavior: 'instant' }); }, [location.pathname]);
+
+  // Defensive favicon reset — every public/marketing page renders this nav,
+  // so this is the one place that guarantees a stray school favicon (left
+  // behind by AppShell/Login, which can only clean up via React unmount —
+  // a no-op on a hard navigation/reload, since the browser tears down that
+  // JS context before any cleanup runs) never lingers on the public site.
+  // Title is intentionally untouched here — each page sets its own via
+  // react-helmet-async.
+  useLayoutEffect(() => { setFavicon(DEFAULT_FAVICON); }, []);
 
   useEffect(() => {
     function onScroll() {

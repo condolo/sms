@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { Spinner } from '@/components/ui/Spinner.jsx';
 import useAuthStore from '@/store/auth.js';
 import { auth as authApi, publicApi, APIError } from '@/api/client.js';
 import { detectSchool, storeSchoolSlug } from '@/utils/schoolDetect.js';
+import { setFavicon, DEFAULT_FAVICON, DEFAULT_TITLE } from '@/utils/favicon.js';
 import { Loader2 as Loader2Icon, Search, Mail, KeyRound, Eye, EyeOff, AlertTriangle } from 'lucide-react';
 
 /* ── School branding hook ──────────────────────────────────────
@@ -394,6 +395,20 @@ export default function Login() {
   // Detect school from subdomain / query param
   const { slug, isSchool } = detectSchool();
   const { branding, loadingBranding } = useSchoolBranding(slug);
+
+  // Brand the tab favicon/title as soon as the school is known — otherwise
+  // they stay on the generic Msingi default for the whole time the user is
+  // on this school's login page, only switching once AppShell mounts after
+  // authentication (visible as a flash on reload/first load).
+  useLayoutEffect(() => {
+    if (!branding) return;
+    setFavicon(branding.faviconUrl || DEFAULT_FAVICON);
+    document.title = branding.name || DEFAULT_TITLE;
+    return () => {
+      setFavicon(DEFAULT_FAVICON);
+      document.title = DEFAULT_TITLE;
+    };
+  }, [branding]);
 
   // Redirect if already logged in
   useEffect(() => {

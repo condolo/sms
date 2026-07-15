@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import Sidebar from './Sidebar.jsx';
@@ -9,6 +9,7 @@ import useIdleTimer from '@/hooks/useIdleTimer.js';
 import IdleWarningModal from '@/components/session/IdleWarningModal.jsx';
 import { ToastProvider } from '@/hooks/useToast.jsx';
 import Toaster from '@/components/ui/Toaster.jsx';
+import { setFavicon, DEFAULT_FAVICON, DEFAULT_TITLE } from '@/utils/favicon.js';
 
 const W_EXPANDED  = 256;  // 16rem
 const W_COLLAPSED = 64;   // 4rem
@@ -68,27 +69,18 @@ export default function AppShell() {
   // changes don't reload the page — so without a reset on unmount, a school's
   // favicon stays stuck in the tab even after navigating back to the landing
   // page or a different school (this is exactly what happened in production).
-  useEffect(() => {
-    let link = document.querySelector("link[rel~='icon']");
-    if (!link) {
-      link = document.createElement('link');
-      link.rel = 'icon';
-      document.head.appendChild(link);
-    }
-    if (faviconUrl) {
-      link.href = faviconUrl;
-    } else {
-      link.href = '/favicon.svg';
-    }
-
-    if (schoolName) {
-      document.title = schoolName;
-    }
+  // useLayoutEffect (not useEffect) so this runs before the browser paints —
+  // on a hard reload straight into an authenticated page, this is still after
+  // the static index.html default has already painted once (unavoidable
+  // without SSR), but it closes the *additional* one-frame gap a deferred
+  // useEffect would otherwise add on top of that.
+  useLayoutEffect(() => {
+    setFavicon(faviconUrl || DEFAULT_FAVICON);
+    document.title = schoolName || DEFAULT_TITLE;
 
     return () => {
-      const resetLink = document.querySelector("link[rel~='icon']");
-      if (resetLink) resetLink.href = '/favicon.svg';
-      document.title = 'Msingi';
+      setFavicon(DEFAULT_FAVICON);
+      document.title = DEFAULT_TITLE;
     };
   }, [faviconUrl, schoolName]);
 
