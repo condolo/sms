@@ -1,7 +1,7 @@
 /* ============================================================
    ReportCardsTab — class/term selector + report card view
    ============================================================ */
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ClipboardList, FileText, Send, CheckCircle, Loader2 } from 'lucide-react';
 import {
@@ -15,11 +15,20 @@ import useAuthStore from '@/store/auth.js';
 import { TERM_NUMBERS, DEFAULT_CUSTOM_TYPES } from '../constants.js';
 import { Skeleton, SelField } from './GradesPrimitives.jsx';
 import StudentReportCard from './StudentReportCard.jsx';
+import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
 
 export default function ReportCardsTab() {
   const [classId, setClassId] = useState('');
   const [termNum, setTermNum] = useState('');
   const qc = useQueryClient();
+  const currentPeriod = useCurrentAcademicPeriod();
+
+  /* Default the term picker to the live-resolved current term the moment
+     it loads — still fully overridable (e.g. to publish a past term). */
+  useEffect(() => {
+    if (!currentPeriod.termNumber || termNum) return;
+    setTermNum(String(currentPeriod.termNumber));
+  }, [currentPeriod.termNumber]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [publishError, setPublishError] = useState('');
 

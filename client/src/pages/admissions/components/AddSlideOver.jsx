@@ -1,17 +1,33 @@
 /* ============================================================
    AddSlideOver — new application slide-over form
    ============================================================ */
-import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { X, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { admissions as admissionsApi } from '@/api/client.js';
+import { admissions as admissionsApi, academicConfig as academicConfigApi } from '@/api/client.js';
 import { EMPTY_FORM, PIPELINE } from '../constants.js';
 import { Section, Field, inputCls } from './AdmissionsPrimitives.jsx';
+import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
 
 export default function AddSlideOver({ onClose, onCreated }) {
   const [form, setForm]     = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
+  const currentPeriod = useCurrentAcademicPeriod();
+
+  const { data: yearsData } = useQuery({
+    queryKey: ['academic-config', 'years'],
+    queryFn:  academicConfigApi.years.list,
+    staleTime: 10 * 60_000,
+  });
+  const years = yearsData?.data ?? yearsData ?? [];
+
+  /* Default "applying for" year to the live-resolved current academic
+     year — still overridable (e.g. applying ahead for next year's intake). */
+  useEffect(() => {
+    if (!currentPeriod.academicYear || form.applyingForYear) return;
+    set('applyingForYear', currentPeriod.academicYear);
+  }, [currentPeriod.academicYear]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const mutation = useMutation({
     mutationFn: data => admissionsApi.create(data),
@@ -102,7 +118,14 @@ export default function AddSlideOver({ onClose, onCreated }) {
                 <input value={form.applyingForClass} onChange={e => set('applyingForClass', e.target.value)} placeholder="e.g. Year 7" className={inputCls()} />
               </Field>
               <Field label="Academic Year">
-                <input value={form.applyingForYear} onChange={e => set('applyingForYear', e.target.value)} placeholder="e.g. 2025/26" className={inputCls()} />
+                <select value={form.applyingForYear} onChange={e => set('applyingForYear', e.target.value)} className={inputCls()}>
+                  <option value="">Select year…</option>
+                  {years.map(y => (
+                    <option key={y.id ?? y._id} value={y.name}>
+                      {y.name}{y.isCurrent ? ' (current)' : ''}
+                    </option>
+                  ))}
+                </select>
               </Field>
             </div>
           </Section>

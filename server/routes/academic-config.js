@@ -352,6 +352,74 @@ function _yearStatus(year, archivedIds = []) {
 }
 
 /**
+ * _resolveCurrentPeriod — live-resolve "now" against a school's configured
+ * academic years/terms. This is the single algorithm for "what year/term
+ * is it right now" — every screen that needs a default must call
+ * GET /current below rather than reimplementing years.find(y => y.isCurrent).
+ *
+ * Year:  the isCurrent-flagged year (set by POST /transition-year — a
+ *        deliberate admin action, not a date guess, since a year can
+ *        legitimately stay "active" across a between-terms gap).
+ *        Falls back to a date-range match, then the most recently
+ *        started year, if no year is flagged (e.g. never transitioned).
+ * Term:  always resolved live from term.startDate/endDate against today —
+ *        never a stored flag — so it self-corrects the moment a term
+ *        boundary passes, with no admin action required.
+ *        If today falls in a gap (holiday) or past the last term,
+ *        falls back to the nearest upcoming term, then the last term.
+ */
+function _resolveCurrentPeriod(years, todayStr) {
+  todayStr = todayStr || new Date().toISOString().slice(0, 10);
+
+  let year = years.find(y => y.isCurrent);
+  if (!year) {
+    year = years.find(y => y.startDate <= todayStr && y.endDate >= todayStr)
+        ?? [...years].sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''))[0]
+        ?? null;
+  }
+  if (!year) return { year: null, term: null, termNumber: null };
+
+  const terms = Array.isArray(year.terms) ? year.terms : [];
+  let termIdx = terms.findIndex(t => t.startDate <= todayStr && t.endDate >= todayStr);
+  if (termIdx === -1) {
+    const upcoming = terms
+      .map((t, i) => ({ t, i }))
+      .filter(({ t }) => t.startDate > todayStr)
+      .sort((a, b) => a.t.startDate.localeCompare(b.t.startDate))[0];
+    termIdx = upcoming ? upcoming.i : (terms.length ? terms.length - 1 : -1);
+  }
+
+  return {
+    year,
+    term:       termIdx >= 0 ? terms[termIdx] : null,
+    termNumber: termIdx >= 0 ? termIdx + 1 : null,
+  };
+}
+
+/**
+ * GET /api/academic-config/current
+ * Live-resolves the current academic year + term. Single source of truth
+ * for defaulting year/term pickers anywhere in the app (admissions, exam
+ * creation, report cards, mark entry, ...).
+ */
+router.get('/current', authMiddleware, async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const years = await _model('academic_years').find({ schoolId }).lean();
+    const { year, term, termNumber } = _resolveCurrentPeriod(years);
+    return ok(res, {
+      academicYearId: year?.id ?? null,
+      academicYear:   year?.name ?? null,
+      termId:         term?.id ?? null,
+      termName:       term?.name ?? null,
+      termNumber,
+      year: year ?? null,
+      term: term ?? null,
+    });
+  } catch (err) { console.error('[academic-config/current GET]', err); return E.serverError(res); }
+});
+
+/**
  * GET /api/academic-config/years
  * Returns all academic years for this school, enriched with status.
  */
@@ -775,3 +843,4 @@ module.exports = router;
 module.exports.resolveGrade          = resolveGrade;
 module.exports.DEFAULT_GRADING_SCHEMA = DEFAULT_GRADING_SCHEMA;
 module.exports.mergeConfig           = _mergeConfig;
+module.exports.resolveCurrentPeriod  = _resolveCurrentPeriod;

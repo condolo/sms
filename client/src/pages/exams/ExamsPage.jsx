@@ -30,6 +30,7 @@ import CAConfigTab    from '../grades/components/ConfigTab.jsx';
 import { TypePill, Toast } from '../grades/components/GradesPrimitives.jsx';
 import { DEFAULT_CUSTOM_TYPES, _pct, _scoreColor } from '../grades/constants.js';
 import useAuthStore from '@/store/auth.js';
+import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
 
 const LIMIT = 20;
 
@@ -1240,6 +1241,7 @@ function CreateExamSlideOver({ years, assessmentWeights, subjectsList, onClose, 
   const [form, setForm]     = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
   const [subjectSearch, setSubjectSearch] = useState('');
+  const currentPeriod = useCurrentAcademicPeriod();
 
   const { data: classesData } = useQuery({
     queryKey: ['classes', 'all'],
@@ -1247,6 +1249,19 @@ function CreateExamSlideOver({ years, assessmentWeights, subjectsList, onClose, 
     staleTime: 5 * 60_000,
   });
   const classList = classesData?.data ?? [];
+
+  /* Default to the live-resolved current year/term the moment it loads —
+     still fully overridable via the pickers below (e.g. to create a
+     retroactive or future exam). */
+  useEffect(() => {
+    if (!currentPeriod.academicYearId || form.academicYearId) return;
+    setForm(f => ({
+      ...f,
+      academicYearId: currentPeriod.academicYearId,
+      termId:         currentPeriod.termId ?? '',
+      termLabel:      currentPeriod.termName ?? '',
+    }));
+  }, [currentPeriod.academicYearId, currentPeriod.termId, currentPeriod.termName]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* Derived: terms from selected year */
   const selectedYear = years.find(y => (y.id ?? y._id?.toString()) === form.academicYearId);
@@ -1277,14 +1292,12 @@ function CreateExamSlideOver({ years, assessmentWeights, subjectsList, onClose, 
   }
 
   function onYearChange(yearId) {
-    const yr = years.find(y => (y.id ?? y._id?.toString()) === yearId);
     setForm(f => {
       const next = { ...f, academicYearId: yearId, termId: '', termLabel: '' };
-      // Auto-select current term if year is active
-      if (yr?.isCurrent && yr.terms?.length > 0) {
-        const today   = new Date().toISOString().slice(0, 10);
-        const current = yr.terms.find(t => t.startDate <= today && t.endDate >= today);
-        if (current) { next.termId = current.id ?? ''; next.termLabel = current.name ?? ''; }
+      // If the picked year is the live-resolved current one, prefill its current term too
+      if (yearId === currentPeriod.academicYearId && currentPeriod.termId) {
+        next.termId    = currentPeriod.termId;
+        next.termLabel = currentPeriod.termName ?? '';
       }
       return next;
     });

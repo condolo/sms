@@ -444,6 +444,9 @@ export const academicConfig = {
   get:          ()           => _get('/academic-config'),
   update:       (data)       => _put('/academic-config', data),
   resetDefaults:()           => _post('/academic-config/reset'),
+  // Live-resolved current academic year + term — single source of truth
+  // for defaulting year/term pickers anywhere in the app.
+  current:      ()           => _get('/academic-config/current'),
   // Academic years (terms embedded in each year)
   years: {
     list:       ()           => _get('/academic-config/years'),
