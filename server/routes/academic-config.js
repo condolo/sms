@@ -31,13 +31,6 @@ const DEFAULT_GRADING_SCHEMA = [
   { grade: 'E',  minScore: 0,  maxScore: 39,  points: 0.0, descriptor: 'Fail',            remarks: 'Did not meet the minimum standard' },
 ];
 
-// Default assessment weights — sum must equal 100
-const DEFAULT_ASSESSMENT_WEIGHTS = [
-  { assessmentType: 'classwork',  label: 'Classwork / CAT',     weight: 20 },
-  { assessmentType: 'midterm',    label: 'Mid-Term Exam',       weight: 30 },
-  { assessmentType: 'final',      label: 'End-Term Exam',       weight: 50 },
-];
-
 const DEFAULT_RANKING_CONFIG = {
   enabled:           true,
   scope:             ['class', 'stream', 'overall'],  // which ranking levels to show
@@ -69,12 +62,6 @@ const GradeBandSchema = z.object({
   remarks:    z.string().max(200).optional(),
 });
 
-const AssessmentWeightSchema = z.object({
-  assessmentType: z.enum(['classwork', 'homework', 'project', 'test', 'midterm', 'final', 'coursework', 'oral', 'practical', 'other']),
-  label:          z.string().min(1).max(100),
-  weight:         z.number().min(0).max(100),
-});
-
 const ConfigSchema = z.object({
   // Grading
   gradingSchema:       z.array(GradeBandSchema).min(1).max(20).optional(),
@@ -82,7 +69,6 @@ const ConfigSchema = z.object({
   passMark:            z.number().min(0).max(100).optional(),
 
   // Assessment weighting
-  assessmentWeights:   z.array(AssessmentWeightSchema).optional(),
   weightingEnabled:    z.boolean().optional(),
 
   // Ranking
@@ -133,7 +119,6 @@ function _mergeConfig(saved) {
     gradingSchema:         saved?.gradingSchema         ?? DEFAULT_GRADING_SCHEMA,
     gradingType:           saved?.gradingType           ?? 'percentage',
     passMark:              saved?.passMark              ?? 40,
-    assessmentWeights:     saved?.assessmentWeights     ?? DEFAULT_ASSESSMENT_WEIGHTS,
     weightingEnabled:      saved?.weightingEnabled      ?? true,
     rankingEnabled:        saved?.rankingEnabled        ?? DEFAULT_RANKING_CONFIG.enabled,
     rankingScope:          saved?.rankingScope          ?? DEFAULT_RANKING_CONFIG.scope,
@@ -192,14 +177,6 @@ router.put('/', authMiddleware, PLAN, rbac('settings', 'update'), async (req, re
         if (i > 0 && sorted[i].minScore <= sorted[i - 1].maxScore) {
           return E.badRequest(res, `Grade bands "${sorted[i - 1].grade}" and "${sorted[i].grade}" overlap — check your score ranges`);
         }
-      }
-    }
-
-    // Validate assessment weights sum to 100 (within tolerance)
-    if (data.assessmentWeights) {
-      const total = data.assessmentWeights.reduce((s, w) => s + w.weight, 0);
-      if (Math.abs(total - 100) > 0.01) {
-        return E.badRequest(res, `Assessment weights must sum to 100 — current total: ${total}`);
       }
     }
 

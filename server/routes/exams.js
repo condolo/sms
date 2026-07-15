@@ -16,6 +16,7 @@ const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { isYearArchived } = require('../utils/archival');
+const { getConfig: _getAssessmentConfig } = require('./assessment');
 
 const router = express.Router();
 const PLAN   = planGate('exams');
@@ -98,9 +99,12 @@ const ExamSchema = z.object({
   ]).default('scheduled'),
   // Teacher-subject ownership (set when creating — used for validation)
   ownerId:       z.string().optional(),   // userId of subject teacher who owns this exam
+  // weightPercent/assessmentLabel are client-supplied hints only — _resolveAssessmentType()
+  // overwrites both from the school's canonical assessment_config.customTypes before saving,
+  // so they can never drift from what Configuration shows.
   weightPercent: z.number().min(0).max(100).optional(),  // how much this exam contributes to term grade
-  // Assessment type linkage (v4.33.0) — connected to academic-config assessmentWeights
-  assessmentType:  z.string().max(50).optional(),   // key from assessmentWeights, e.g. 'midterm', 'classwork'
+  // Assessment type linkage — key into assessment_config.customTypes (server/routes/assessment.js)
+  assessmentType:  z.string().max(50).optional(),   // customTypes[].key, e.g. 'MT', 'ET', 'CA'
   assessmentLabel: z.string().max(100).optional(),  // display label, e.g. 'Mid-Term Exam', 'CA 1'
   termLabel:       z.string().max(100).optional(),  // denormalized term name, e.g. 'Term 1'
   subjectName:     z.string().max(100).optional(),  // denormalized subject name for quick display
@@ -131,6 +135,26 @@ function _validate(schema, data) {
   const r = schema.safeParse(data);
   if (!r.success) return { error: r.error.issues.map(i => ({ field: i.path.join('.'), message: i.message })) };
   return { data: r.data };
+}
+
+/**
+ * Resolve assessmentType against the school's canonical assessment_config.customTypes
+ * and overwrite weightPercent/assessmentLabel with the configured values — so an exam's
+ * stored weight can never diverge from what Configuration shows, regardless of what a
+ * (possibly stale) client sends. Returns an error string if assessmentType is set but
+ * doesn't match any configured type; returns null (no-op) if assessmentType is absent.
+ */
+async function _resolveAssessmentType(schoolId, data) {
+  if (!data.assessmentType) return null;
+  const cfg   = await _getAssessmentConfig(schoolId, null);
+  const match = (cfg.customTypes || []).find(t => t.key === data.assessmentType);
+  if (!match) {
+    const valid = (cfg.customTypes || []).map(t => t.key).join(', ');
+    return `Unknown assessment type "${data.assessmentType}" — must be one of: ${valid}`;
+  }
+  data.assessmentLabel = match.label || match.key;
+  data.weightPercent   = match.weight ?? 0;
+  return null;
 }
 
 /** Validate exam status transition — returns error string or null */
@@ -338,6 +362,9 @@ router.post('/', authMiddleware, PLAN, rbac('exams', 'create'), async (req, res)
     const { data, error } = _validate(ExamSchema, req.body);
     if (error) return E.validation(res, error);
 
+    const typeError = await _resolveAssessmentType(schoolId, data);
+    if (typeError) return E.badRequest(res, typeError);
+
     const doc = await _model('exams').create({ ...data, id: uuidv4(), schoolId, createdBy: userId, updatedBy: userId });
     return created(res, doc.toObject ? doc.toObject() : doc);
   } catch (err) { console.error('[exams POST]', err); return E.serverError(res); }
@@ -349,6 +376,9 @@ router.put('/:id', authMiddleware, PLAN, rbac('exams', 'update'), async (req, re
     const { data, error } = _validate(ExamSchema.partial(), req.body);
     if (error) return E.validation(res, error);
     delete data.schoolId; delete data.id;
+
+    const typeError = await _resolveAssessmentType(schoolId, data);
+    if (typeError) return E.badRequest(res, typeError);
 
     const existing = await _model('exams').findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Exam not found');

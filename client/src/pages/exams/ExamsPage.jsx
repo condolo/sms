@@ -55,19 +55,20 @@ export default function ExamsPage() {
   });
   const years = yearsRaw?.data ?? yearsRaw ?? [];
 
-  const { data: acfgRaw } = useQuery({
-    queryKey: ['academic-config', 'main'],
-    queryFn:  academicConfigApi.get,
+  /* Assessment types/weights — single source of truth is assessment_config.customTypes,
+     the same config edited on the Configuration tab (ConfigTab.jsx). Falls back to
+     DEFAULT_CUSTOM_TYPES only while the query is still loading. */
+  const { data: assessmentCfgRaw } = useQuery({
+    queryKey: ['assessment', 'config'],
+    queryFn:  () => assessmentApi.getConfig(),
     staleTime: 10 * 60_000,
   });
-  /* Fallback defaults if not yet configured */
-  const assessmentWeights = acfgRaw?.data?.assessmentWeights
-    ?? acfgRaw?.assessmentWeights
-    ?? [
-      { assessmentType: 'classwork', label: 'Classwork / CAT', weight: 20 },
-      { assessmentType: 'midterm',   label: 'Mid-Term Exam',   weight: 30 },
-      { assessmentType: 'final',     label: 'End-Term Exam',   weight: 50 },
-    ];
+  const customTypesForExams = assessmentCfgRaw?.data?.customTypes ?? DEFAULT_CUSTOM_TYPES;
+  const assessmentWeights = customTypesForExams.map(t => ({
+    assessmentType: t.key,
+    label:          t.label || t.key,
+    weight:         t.weight ?? 0,
+  }));
 
   const { data: subjectsRaw } = useQuery({
     queryKey: ['subjects', 'all'],

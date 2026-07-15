@@ -1384,3 +1384,5 @@ router.get('/marks/summary', authMiddleware, PLAN, rbac('grades', 'read'), async
 });
 
 module.exports = router;
+module.exports.getConfig          = _getConfig;
+module.exports.DEFAULT_CUSTOM_TYPES = DEFAULT_CUSTOM_TYPES;

@@ -198,8 +198,9 @@ async function aggregateAssessmentMarks(schoolId, classId, termNumber = null, ac
  *
  * @param {Object} gradesData      — from aggregateGrades()
  * @param {Object} examData        — from aggregateExamResults().data
- * @param {Array}  assessmentWeights — from academic-config
- * @param {Array}  gradingSchema     — from academic-config
+ * @param {Array}  assessmentWeights — [{assessmentType, label, weight}], derived from
+ *                                     assessment_config.customTypes (server/routes/assessment.js)
+ * @param {Array}  gradingSchema     — from grade_boundaries, falls back to academic-config
  */
 function computeFinalScores(gradesData, examData, assessmentWeights, gradingSchema) {
   // ── Runtime input validation ─────────────────────────────────

@@ -34,6 +34,7 @@ const { _model }         = require('../utils/model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { rankStudents, mergeRankings, bestPerSubject, computeRankingScore } = require('../utils/ranking');
 const { mergeConfig }    = require('./academic-config');
+const { getConfig: _getAssessmentConfig } = require('./assessment');
 const { isYearArchived } = require('../utils/archival');
 const AuditService       = require('../services/audit');
 const { sanitisePdfStr } = require('../utils/sanitisePdf');
@@ -90,31 +91,27 @@ function _hashSnapshot(snap) {
 
 /* ── CA config loader (assessment_config + grade_boundaries) ── */
 /**
- * Load the school's CA-system configuration:
- *   - customTypes  from assessment_config   (the school's CA type definitions + weights)
- *   - gradeScale   from grade_boundaries    (the school's default grading scale)
- *
- * Both can be null if the school hasn't configured them yet.
+ * Load the school's assessment-type configuration and grading scale.
+ * customTypes is the school's single source of truth for assessment
+ * types/weights (server/routes/assessment.js) — getConfig() auto-seeds
+ * and persists DEFAULT_CUSTOM_TYPES on first call, so this always
+ * returns a populated, weight-complete array (never empty/null).
  */
 async function _loadCaConfig(schoolId) {
   const [assessmentCfg, defaultScale] = await Promise.all([
-    _model('assessment_config').findOne({ schoolId, academicYearId: null }).lean(),
+    _getAssessmentConfig(schoolId, null),
     _model('grade_boundaries').findOne({ schoolId, isDefault: true }).lean(),
   ]);
   return {
-    customTypes: assessmentCfg?.customTypes ?? [],
+    customTypes: assessmentCfg.customTypes,
     gradeScale:  defaultScale ?? null,
   };
 }
 
 /**
  * Convert assessment_config.customTypes → assessmentWeights format expected by computeFinalScores.
- * Returns null when customTypes is empty (caller should fall back to academic_config.assessmentWeights).
  */
 function _convertCustomTypesToWeights(customTypes) {
-  if (!Array.isArray(customTypes) || !customTypes.length) return null;
-  const total = customTypes.reduce((s, t) => s + (t.weight ?? 0), 0);
-  if (total <= 0) return null;
   return customTypes.map(t => ({
     assessmentType: t.key,
     label:          t.label || t.key,
@@ -202,8 +199,7 @@ router.post('/generate', authMiddleware, PLAN, rbac('grades', 'read'), async (re
       aggregateAssessmentMarks(schoolId, classId, termNum ?? null, academicYearId, studentId),
     ]);
 
-    // Prefer assessment_config.customTypes (CA system) over legacy academic_config.assessmentWeights
-    const activeWeights = _convertCustomTypesToWeights(caConfig.customTypes) ?? config.assessmentWeights;
+    const activeWeights = _convertCustomTypesToWeights(caConfig.customTypes);
     // Prefer grade_boundaries default scale over legacy academic_config.gradingSchema
     const activeSchema  = caConfig.gradeScale?.bands ?? config.gradingSchema;
 
@@ -271,7 +267,7 @@ router.post('/generate', authMiddleware, PLAN, rbac('grades', 'read'), async (re
       config: {
         gradingType: config.gradingType, passMark: config.passMark,
         rankingEnabled: config.rankingEnabled, rankingSubjectStrategy: config.rankingSubjectStrategy,
-        assessmentWeights: config.assessmentWeights,
+        assessmentWeights: _convertCustomTypesToWeights(caConfig.customTypes),
         customTypes: caConfig.customTypes ?? null,
         gradeScale:  caConfig.gradeScale  ?? null,
       },
@@ -326,8 +322,7 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
       _loadCaConfig(schoolId),
     ]);
 
-    // Prefer assessment_config.customTypes (CA system) over legacy academic_config.assessmentWeights
-    const activeWeights = _convertCustomTypesToWeights(caConfig.customTypes) ?? config.assessmentWeights;
+    const activeWeights = _convertCustomTypesToWeights(caConfig.customTypes);
     // Prefer grade_boundaries default scale over legacy academic_config.gradingSchema
     const activeSchema  = caConfig.gradeScale?.bands ?? config.gradingSchema;
 
@@ -870,7 +865,7 @@ function _buildPDFPage(doc, snap, config, attendance, isFirstPage, images = {}) 
   /* RESULTS TABLE — dynamic columns from snapshot's assessmentWeights */
   const tableTop = infoTop + infoHeight + (snap.moderationBypassed ? 20 : 6);
 
-  const weights     = snap.assessmentWeights || config.assessmentWeights;
+  const weights     = snap.assessmentWeights || [];
   // One column per assessment type, using the type's label (first word only to save space)
   const typeEntries = weights.map(w => ({
     key:   w.assessmentType,
