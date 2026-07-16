@@ -12,7 +12,7 @@
 | Owner | Chief Architect |
 | Review Frequency | Before every major architectural initiative |
 | Next Review | After D-001 is ratified |
-| Related Documents | `ARCHITECTURE_CONSTITUTION.md`, `PLATFORM_OPERATING_MODEL.md`, `PLATFORM_ENGINEERING_STANDARDS.md` |
+| Related Documents | `ARCHITECTURE_CONSTITUTION.md`, `PLATFORM_OPERATING_MODEL.md`, `PLATFORM_ENGINEERING_STANDARDS.md`, `IDENTITY_DOMAIN_MODEL_v1.md`, `PLATFORM_CONCURRENCY_MODEL.md` |
 | Supersedes | None |
 
 ---
@@ -72,7 +72,18 @@
 
 ---
 
-## 4. Assumption Register
+## 4. Production Defects
+
+Unlike Security Policy Conflicts (§3), these have no legitimate trade-off or policy question behind them — they are straightforward correctness gaps with an unambiguous fix. They do not depend on D-001–D-004 and should not wait on the ADR sequence. Full evidence and context in `PLATFORM_CONCURRENCY_MODEL.md`.
+
+| ID | Defect | Severity | Status |
+|---|---|---|---|
+| BUG-002 | `POST /api/mpesa/callback` creates a Payment record unconditionally on every successful callback delivery, with no check that the transaction wasn't already marked completed. A retried callback (a documented Safaricom behavior, not a hypothetical) creates a duplicate Payment record for the same money. The parallel `subscription/callback` path has the same missing guard, lower severity since it only performs idempotent `$set` updates. | **Critical** | Not fixed |
+| BUG-003 | Exam mark-entry (`POST /api/exams/:id/results`) bulk-upserts with no version check. Two teachers saving marks for the same student within the same window silently last-write-wins — no conflict surfaced to either party, no audit trail of the overwritten value. | High | Not fixed |
+
+---
+
+## 5. Assumption Register
 
 **Technical:**
 - `users` carries a DB-level unique index on `{schoolId: 1, email: 1}` (`server/utils/indexes.js:155`) — a hard constraint, not a soft convention.
@@ -98,7 +109,7 @@
 
 ---
 
-## 5. Architecture Traceability Matrix
+## 6. Architecture Traceability Matrix
 
 | Principle | ADR | Implementation | Tests |
 |---|---|---|---|
@@ -111,7 +122,7 @@
 
 ---
 
-## 6. Migration Risk Register
+## 7. Migration Risk Register
 
 | ID | Risk | Likelihood | Impact | Mitigation | Rollback | Exit Criteria |
 |---|---|---|---|---|---|---|
@@ -122,7 +133,7 @@
 
 ---
 
-## 7. Constitution Amendments Needed
+## 8. Constitution Amendments Needed
 
 | Section | Affected By | Status |
 |---|---|---|
@@ -131,14 +142,14 @@
 
 ---
 
-## 8. Open Product Decisions
+## 9. Open Product Decisions
 
 - D-002's role-sensitivity question (should admin/finance sessions be treated differently from teacher sessions) — resolved inside the eventual ADR.
 - D-003 — identity ownership. Proposed (the user owns identity, schools own memberships), **not ratified**.
 
 ---
 
-## 9. Non-Decisions
+## 10. Non-Decisions
 
 Items intentionally postponed, recorded so they are not mistaken for open gaps or reopened without cause:
 
@@ -151,7 +162,9 @@ Items intentionally postponed, recorded so they are not mistaken for open gaps o
 
 ---
 
-## 10. Recommended Sequence
+## 11. Recommended Sequence
+
+**In parallel, starting immediately, gated by nothing above:** fix BUG-002 and BUG-003. Neither depends on D-001–D-004; both are live correctness gaps independent of the identity/organization work.
 
 1. Resolve D-001 (resolves D-004 simultaneously — same underlying fork).
 2. Write the ADR — Organizations/Memberships, with MR-001 (Identity Migration) as its own linked-but-separate ADR given its distinct risk profile.
@@ -168,6 +181,7 @@ Phase 0 is complete only when:
 - All contradictions have owners.
 - All pending decisions have corresponding ADRs scheduled.
 - Security policy conflicts have assigned reviewers.
+- Production defects have a tracked fix status (independent of ADR sequencing).
 - Migration risks have mitigation plans.
 - Traceability has been established.
 - No implementation has begun.
