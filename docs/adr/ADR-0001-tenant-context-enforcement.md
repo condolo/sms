@@ -1,7 +1,7 @@
 # ADR-0001: Tenant Context & Structural Tenant Enforcement
 
-**Status:** Proposed
-**Date:** 2026-07-16
+**Status:** Accepted
+**Date:** 2026-07-16 (proposed) · 2026-07-16 (accepted)
 **Change class:** Kernel (per `PLATFORM_OPERATING_MODEL.md §10`) — changes how every tenant-scoped query is written. Requires Architecture Review sign-off before implementation.
 **Unblocks:** C4 in `IMPLEMENTATION_DEPENDENCY_GRAPH_v1.md` (the highest-fan-out root).
 **Related:** Governance Review D1 (P2 not reflected in code), SPC-001, MR-001; `PLATFORM_ARCHITECTURE_EVOLUTION_v1.md` §11/§17.1/Principle 4.
