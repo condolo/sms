@@ -32,6 +32,7 @@ const mockModel = {
   findOneAndUpdate: recorder('findOneAndUpdate'),
   findOneAndDelete: recorder('findOneAndDelete'),
   create:           recorder('create'),
+  insertMany:       recorder('insertMany'),
   aggregate:        recorder('aggregate'),
   bulkWrite:        recorder('bulkWrite'),
 };
@@ -87,6 +88,19 @@ describe('tenantModel — writes', () => {
   test('scopes each doc when creating an array', () => {
     tenantModel('students', CTX).create([{ a: 1 }, { b: 2 }]);
     expect(calls.create[0]).toEqual([{ a: 1, schoolId: 'school_A' }, { b: 2, schoolId: 'school_A' }]);
+  });
+
+  test('scopes every doc in insertMany', () => {
+    tenantModel('mark_audit_log', CTX).insertMany([{ action: 'X' }, { action: 'Y' }]);
+    expect(calls.insertMany[0]).toEqual([
+      { action: 'X', schoolId: 'school_A' },
+      { action: 'Y', schoolId: 'school_A' },
+    ]);
+  });
+
+  test('rejects an insertMany doc carrying a different schoolId', () => {
+    expect(() => tenantModel('mark_audit_log', CTX).insertMany([{ schoolId: 'school_B' }]))
+      .toThrow(/conflicts with tenant context/);
   });
 
   test('blocks a tenant-hop via update $set schoolId', () => {

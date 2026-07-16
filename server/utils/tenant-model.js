@@ -126,6 +126,7 @@ function _wrap(model, schoolId, collection) {
     findOneAndUpdate: (filter, update, ...rest) => model.findOneAndUpdate(_scopedFilter(filter, schoolId, collection), _guardUpdate(update, schoolId, collection), ...rest),
     findOneAndDelete: (filter, ...rest) => model.findOneAndDelete(_scopedFilter(filter, schoolId, collection), ...rest),
     create:           (doc, ...rest) => model.create(_scopedDoc(doc, schoolId, collection), ...rest),
+    insertMany:       (docs, ...rest) => model.insertMany(_scopedDoc(docs, schoolId, collection), ...rest),
     aggregate:        (pipeline, ...rest) => model.aggregate(_scopedPipeline(pipeline, schoolId, collection), ...rest),
     bulkWrite:        (ops, ...rest) => model.bulkWrite(_scopedBulk(ops, schoolId, collection), ...rest),
 

@@ -13,7 +13,7 @@ const { v4: uuidv4 } = require('uuid');
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { isYearArchived } = require('../utils/archival');
 const { getConfig: _getAssessmentConfig } = require('./assessment');
@@ -225,7 +225,7 @@ router.post('/announce', authMiddleware, PLAN, async (req, res) => { // rbac: te
     const d = parsed.data;
 
     // Validate teacher owns this class + subject
-    const assignment = await _model('teaching_assignments').findOne({
+    const assignment = await tenantModel('teaching_assignments', tenantContext(req)).findOne({
       schoolId, teacherId: userId, classId: d.classId, subjectId: d.subjectId,
     }).lean();
     if (!assignment) {
@@ -233,7 +233,7 @@ router.post('/announce', authMiddleware, PLAN, async (req, res) => { // rbac: te
     }
 
     // Validate schedule entry exists and is not locked
-    const schedEntry = await _model('assessment_schedule').findOne({
+    const schedEntry = await tenantModel('assessment_schedule', tenantContext(req)).findOne({
       id: d.scheduleEntryId, schoolId,
     }).lean();
     if (!schedEntry) return E.notFound(res, 'Schedule entry not found');
@@ -248,13 +248,13 @@ router.post('/announce', authMiddleware, PLAN, async (req, res) => { // rbac: te
 
     // Enrich with denormalized names for quick display
     const [subject, cls] = await Promise.all([
-      _model('subjects').findOne({ id: d.subjectId, schoolId }).select('name').lean(),
-      _model('classes').findOne({ id: d.classId, schoolId }).select('name').lean(),
+      tenantModel('subjects', tenantContext(req)).findOne({ id: d.subjectId, schoolId }).select('name').lean(),
+      tenantModel('classes', tenantContext(req)).findOne({ id: d.classId, schoolId }).select('name').lean(),
     ]);
 
     const title = `${subject?.name ?? d.subjectId} — ${schedEntry.label || schedEntry.assessmentType}`;
 
-    const doc = await _model('exams').create({
+    const doc = await tenantModel('exams', tenantContext(req)).create({
       id:                      uuidv4(),
       schoolId,
       classId:                 d.classId,
@@ -325,7 +325,7 @@ router.get('/', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) =>
       filter.title = rx;
     }
 
-    const Exams = _model('exams');
+    const Exams = tenantModel('exams', tenantContext(req));
     const [docs, total] = await Promise.all([
       Exams.find(filter).sort({ date: -1 }).skip(skip).limit(limit).select('-__v').lean(),
       Exams.countDocuments(filter)
@@ -335,8 +335,8 @@ router.get('/', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) =>
     const subjectIds = [...new Set(docs.map(d => d.subjectId).filter(Boolean))];
     const classIds   = [...new Set(docs.map(d => d.classId).filter(Boolean))];
     const [subjectDocs, classDocs] = await Promise.all([
-      subjectIds.length ? _model('subjects').find({ id: { $in: subjectIds }, schoolId }).select('id name').lean() : Promise.resolve([]),
-      classIds.length   ? _model('classes').find({ id: { $in: classIds }, schoolId }).select('id name').lean()   : Promise.resolve([]),
+      subjectIds.length ? tenantModel('subjects', tenantContext(req)).find({ id: { $in: subjectIds }, schoolId }).select('id name').lean() : Promise.resolve([]),
+      classIds.length   ? tenantModel('classes', tenantContext(req)).find({ id: { $in: classIds }, schoolId }).select('id name').lean()   : Promise.resolve([]),
     ]);
     const subjectMap = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
     const classMap   = Object.fromEntries(classDocs.map(c => [c.id, c.name]));
@@ -353,7 +353,7 @@ router.get('/', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) =>
 router.get('/:id', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('exams').findOne({ id: req.params.id, schoolId }).select('-__v').lean();
+    const doc = await tenantModel('exams', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Exam not found');
     return ok(res, doc);
   } catch (err) { console.error('[exams GET/:id]', err); return E.serverError(res); }
@@ -368,7 +368,7 @@ router.post('/', authMiddleware, PLAN, rbac('exams', 'create'), async (req, res)
     const typeError = await _resolveAssessmentType(schoolId, data);
     if (typeError) return E.badRequest(res, typeError);
 
-    const doc = await _model('exams').create({ ...data, id: uuidv4(), schoolId, createdBy: userId, updatedBy: userId });
+    const doc = await tenantModel('exams', tenantContext(req)).create({ ...data, id: uuidv4(), schoolId, createdBy: userId, updatedBy: userId });
     return created(res, doc.toObject ? doc.toObject() : doc);
   } catch (err) { console.error('[exams POST]', err); return E.serverError(res); }
 });
@@ -383,7 +383,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('exams', 'update'), async (req, re
     const typeError = await _resolveAssessmentType(schoolId, data);
     if (typeError) return E.badRequest(res, typeError);
 
-    const existing = await _model('exams').findOne({ id: req.params.id, schoolId }).lean();
+    const existing = await tenantModel('exams', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Exam not found');
 
     // Block edits to locked/published/archived exams (except by admin via unlock flow)
@@ -405,7 +405,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('exams', 'update'), async (req, re
       ];
     }
 
-    const doc = await _model('exams').findOneAndUpdate(
+    const doc = await tenantModel('exams', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { ...data, updatedBy: userId },
       { new: true, runValidators: false }
@@ -417,7 +417,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('exams', 'update'), async (req, re
 router.delete('/:id', authMiddleware, PLAN, rbac('exams', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const doc = await _model('exams').findOneAndUpdate(
+    const doc = await tenantModel('exams', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { status: 'cancelled', deletedAt: new Date().toISOString(), deletedBy: userId },
       { new: true }
@@ -437,14 +437,14 @@ router.post('/:id/lock', authMiddleware, PLAN, rbac('exams', 'update'), async (r
     const { schoolId, userId, role } = req.jwtUser;
     if (!['admin', 'superadmin'].includes(role)) return E.forbidden(res, 'Only admins can lock exams');
 
-    const exam = await _model('exams').findOne({ id: req.params.id, schoolId }).lean();
+    const exam = await tenantModel('exams', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!exam) return E.notFound(res, 'Exam not found');
 
     const transitionError = _checkTransition(exam.status, 'locked', role);
     if (transitionError) return E.badRequest(res, transitionError);
 
     const now = new Date().toISOString();
-    const doc = await _model('exams').findOneAndUpdate(
+    const doc = await tenantModel('exams', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       {
         status: 'locked', lockedBy: userId, lockedAt: now, updatedBy: userId,
@@ -467,12 +467,12 @@ router.post('/:id/unlock', authMiddleware, PLAN, rbac('exams', 'update'), async 
     const reason = (req.body.reason || '').trim();
     if (!reason) return E.badRequest(res, 'A reason is required when unlocking an exam');
 
-    const exam = await _model('exams').findOne({ id: req.params.id, schoolId }).lean();
+    const exam = await tenantModel('exams', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!exam) return E.notFound(res, 'Exam not found');
     if (exam.status !== 'locked') return E.badRequest(res, `Exam is "${exam.status}" — only locked exams can be unlocked`);
 
     const now = new Date().toISOString();
-    const doc = await _model('exams').findOneAndUpdate(
+    const doc = await tenantModel('exams', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       {
         status: 'approved', unlockedBy: userId, unlockedAt: now, unlockReason: reason, updatedBy: userId,
@@ -482,7 +482,7 @@ router.post('/:id/unlock', authMiddleware, PLAN, rbac('exams', 'update'), async 
     ).lean();
 
     // Write to audit log
-    await _model('mark_audit_log').create({
+    await tenantModel('mark_audit_log', tenantContext(req)).create({
       action: 'EXAM_UNLOCKED', examId: req.params.id, schoolId,
       editedBy: userId, reason, timestamp: now
     });
@@ -496,7 +496,7 @@ router.post('/:id/unlock', authMiddleware, PLAN, rbac('exams', 'update'), async 
 router.get('/:id/status-history', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const exam = await _model('exams').findOne({ id: req.params.id, schoolId }).lean();
+    const exam = await tenantModel('exams', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!exam) return E.notFound(res, 'Exam not found');
     return ok(res, { examId: req.params.id, title: exam.title, currentStatus: exam.status, history: exam.statusHistory || [] });
   } catch (err) { console.error('[exams/:id/status-history]', err); return E.serverError(res); }
@@ -512,14 +512,14 @@ router.get('/:id/results', authMiddleware, PLAN, rbac('exams', 'read'), async (r
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
 
-    const exam = await _model('exams').findOne({ id: req.params.id, schoolId }).lean();
+    const exam = await tenantModel('exams', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!exam) return E.notFound(res, 'Exam not found');
 
     const filter = { schoolId, examId: req.params.id };
     if (req.query.studentId) filter.studentId = req.query.studentId;
     if (req.query.absent === 'true') filter.absent = true;
 
-    const Results = _model('exam_results');
+    const Results = tenantModel('exam_results', tenantContext(req));
     const [docs, total] = await Promise.all([
       Results.find(filter).sort({ score: -1 }).skip(skip).limit(limit).select('-__v').lean(),
       Results.countDocuments(filter)
@@ -546,7 +546,7 @@ router.post('/:id/results', authMiddleware, PLAN, rbac('exams', 'create'), async
     const { data, error } = _validate(BulkResultSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const exam = await _model('exams').findOne({ id: req.params.id, schoolId }).lean();
+    const exam = await tenantModel('exams', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!exam) return E.notFound(res, 'Exam not found');
 
     // Block writes to locked/published/archived exams
@@ -556,7 +556,7 @@ router.post('/:id/results', authMiddleware, PLAN, rbac('exams', 'create'), async
 
     // Block writes to archived academic years — log the attempt for auditability
     if (await isYearArchived(schoolId, exam.academicYearId)) {
-      _model('mark_audit_log').create({
+      tenantModel('mark_audit_log', tenantContext(req)).create({
         action:        'WRITE_BLOCKED_ARCHIVED_YEAR',
         schoolId,
         academicYearId: exam.academicYearId,
@@ -588,7 +588,7 @@ router.post('/:id/results', authMiddleware, PLAN, rbac('exams', 'create'), async
     }
 
     // Fetch existing results for audit trail
-    const existingResults = await _model('exam_results').find({
+    const existingResults = await tenantModel('exam_results', tenantContext(req)).find({
       schoolId, examId: req.params.id,
       studentId: { $in: data.results.map(r => r.studentId) }
     }).lean();
@@ -621,7 +621,7 @@ router.post('/:id/results', authMiddleware, PLAN, rbac('exams', 'create'), async
 
     const now    = new Date().toISOString();
     const auditEntries = [];
-    const Results = _model('exam_results');
+    const Results = tenantModel('exam_results', tenantContext(req));
 
     const ops = writableResults.map(r => {
       const resolved  = _resolveMarkState(r);
@@ -678,12 +678,12 @@ router.post('/:id/results', authMiddleware, PLAN, rbac('exams', 'create'), async
 
     const [result] = await Promise.all([
       ops.length ? Results.bulkWrite(ops, { ordered: false }) : Promise.resolve({ upsertedCount: 0, modifiedCount: 0 }),
-      auditEntries.length ? _model('mark_audit_log').insertMany(auditEntries) : Promise.resolve()
+      auditEntries.length ? tenantModel('mark_audit_log', tenantContext(req)).insertMany(auditEntries) : Promise.resolve()
     ]);
 
     // Auto-advance exam to 'completed' when marks are first entered
     if (['scheduled', 'in_progress'].includes(exam.status)) {
-      await _model('exams').updateOne({ id: req.params.id }, { status: 'completed', updatedBy: userId });
+      await tenantModel('exams', tenantContext(req)).updateOne({ id: req.params.id }, { status: 'completed', updatedBy: userId });
     }
 
     // Check for any INC/MIS marks remaining — surface as warning, not error
@@ -712,7 +712,7 @@ router.get('/results/all', authMiddleware, PLAN, rbac('exams', 'read'), async (r
     if (req.query.subjectId)    filter.subjectId    = req.query.subjectId;
     if (req.query.examId)       filter.examId       = req.query.examId;
 
-    const Results = _model('exam_results');
+    const Results = tenantModel('exam_results', tenantContext(req));
     const [docs, total] = await Promise.all([
       Results.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
       Results.countDocuments(filter)
