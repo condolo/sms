@@ -64,7 +64,17 @@ Gated by decision D-001 and by all of Phase A/B existing beneath it.
 
 ---
 
-## 5. Freeze rule
+## 5. Build status (live)
+
+| Component | Status |
+|---|---|
+| C1 Organization collection | ✅ Done — `31a3f1b` |
+| C2 Organization provisioning | ✅ Done — `31a3f1b` (not yet run against a live DB) |
+| C4 Tenant enforcement | 🟡 In progress — mechanism `tenantModel()` (`4b20f08`), ADR-0001 Accepted, first route (attendance) migrated + isolation test (`4b2b482`), CI ratchet live (baseline 822 direct `_model()` sites, monotonically decreasing). Remaining: migrate the other 52 route files behind the ratchet, each with an isolation test. |
+| C3 / C5 (rest of Phase A) | ⬜ Not started |
+| Phase B onward | ⬜ Gated |
+
+## 6. Freeze rule
 
 No component may begin before every prerequisite in its "Depends on" column exists and is verified. C8 additionally may not begin before decision D-001 is ratified. This graph is the engineering roadmap; changing it requires the same review as any governance change.
 

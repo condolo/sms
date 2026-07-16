@@ -37,3 +37,21 @@ jobs:
         run: node scripts/verify-rbac-coverage.js
         env:
           CI: 'true'
+
+  tenant-enforcement:
+    name: Tenant Enforcement Ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install server dependencies
+        run: npm install --omit=dev
+
+      - name: Check tenant enforcement (ADR-0001 — direct _model() ratchet)
+        run: node scripts/verify-tenant-coverage.js
+        env:
+          CI: 'true'

@@ -16,6 +16,7 @@
     "platform:health": "node scripts/platform-health.js",
     "platform:manifest": "node scripts/generate-endpoint-inventory.js",
     "platform:coverage": "node scripts/verify-rbac-coverage.js",
+    "platform:tenant": "node scripts/verify-tenant-coverage.js",
     "platform:release-gate": "node scripts/release-gate.js",
     "platform:release-cert": "node scripts/release-cert.js"
   },
