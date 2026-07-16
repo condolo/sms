@@ -12,6 +12,7 @@ const { authMiddleware }               = require('../middleware/auth');
 const { rbac }                         = require('../middleware/rbac');
 const { planGate }                     = require('../middleware/plan');
 const { _model }                       = require('../utils/model');
+const { tenantModel, tenantContext }   = require('../utils/tenant-model');
 const { nextInvoiceNumber, nextReceiptNumber } = require('../utils/counters');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
@@ -108,7 +109,7 @@ router.get('/invoices', authMiddleware, PLAN, rbac('finance', 'read'), async (re
       filter.$or = [{ invoiceNumber: rx }, { title: rx }];
     }
 
-    const Invoices = _model('invoices');
+    const Invoices = tenantModel('invoices', tenantContext(req));
     const [docs, total] = await Promise.all([
       Invoices.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
       Invoices.countDocuments(filter)
@@ -125,7 +126,7 @@ router.get('/invoices', authMiddleware, PLAN, rbac('finance', 'read'), async (re
 router.get('/invoices/:id', authMiddleware, PLAN, rbac('finance', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const Invoices = _model('invoices');
+    const Invoices = tenantModel('invoices', tenantContext(req));
     const doc = await Invoices.findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Invoice not found');
     return ok(res, doc);
@@ -152,7 +153,7 @@ router.post('/invoices', authMiddleware, PLAN, rbac('finance', 'create'), async 
       data.currency = school?.currency || 'KES';
     }
 
-    const Invoices = _model('invoices');
+    const Invoices = tenantModel('invoices', tenantContext(req));
     const doc = await Invoices.create({
       ...data,
       id:            uuidv4(),
@@ -182,7 +183,7 @@ router.put('/invoices/:id', authMiddleware, PLAN, rbac('finance', 'update'), asy
     if (error) return E.validation(res, error);
 
     // Re-calculate totals if line items / discounts changed
-    const Invoices  = _model('invoices');
+    const Invoices  = tenantModel('invoices', tenantContext(req));
     const existing  = await Invoices.findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Invoice not found');
 
@@ -196,7 +197,7 @@ router.put('/invoices/:id', authMiddleware, PLAN, rbac('finance', 'update'), asy
     const totals      = _calcInvoiceTotals(lineItems, discountPct, taxPct);
 
     // Recalculate balance from stored payments
-    const Payments  = _model('payments');
+    const Payments  = tenantModel('payments', tenantContext(req));
     const payments  = await Payments.find({ invoiceId: req.params.id, schoolId }).lean();
     const bal       = _calcBalance(totals.total, payments);
 
@@ -224,7 +225,7 @@ router.put('/invoices/:id', authMiddleware, PLAN, rbac('finance', 'update'), asy
 router.delete('/invoices/:id', authMiddleware, PLAN, rbac('finance', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const Invoices = _model('invoices');
+    const Invoices = tenantModel('invoices', tenantContext(req));
     const doc      = await Invoices.findOne({ id: req.params.id, schoolId }).lean();
     if (!doc) return E.notFound(res, 'Invoice not found');
 
@@ -271,7 +272,7 @@ router.get('/payments', authMiddleware, PLAN, rbac('finance', 'read'), async (re
       filter.$or = [{ receiptNumber: rx }, { reference: rx }];
     }
 
-    const Payments = _model('payments');
+    const Payments = tenantModel('payments', tenantContext(req));
     const [docs, total] = await Promise.all([
       Payments.find(filter).sort({ paidAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
       Payments.countDocuments(filter)
@@ -292,7 +293,7 @@ router.post('/payments', authMiddleware, PLAN, rbac('finance', 'create'), async 
     if (error) return E.validation(res, error);
 
     // Load the invoice and verify it belongs to this school
-    const Invoices = _model('invoices');
+    const Invoices = tenantModel('invoices', tenantContext(req));
     const invoice  = await Invoices.findOne({ id: data.invoiceId, schoolId }).lean();
     if (!invoice) return E.notFound(res, 'Invoice not found');
     if (invoice.status === 'voided') return E.badRequest(res, 'Cannot record payment on a voided invoice');
@@ -305,7 +306,7 @@ router.post('/payments', authMiddleware, PLAN, rbac('finance', 'create'), async 
 
     const receiptNumber = await nextReceiptNumber(schoolId);
 
-    const Payments = _model('payments');
+    const Payments = tenantModel('payments', tenantContext(req));
     const payment  = await Payments.create({
       ...data,
       id:            uuidv4(),
@@ -368,7 +369,7 @@ const FeeStructureSchema = z.object({
 router.get('/fee-structures', authMiddleware, PLAN, rbac('finance', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const FeeStructures = _model('fee_structures');
+    const FeeStructures = tenantModel('fee_structures', tenantContext(req));
     const docs = await FeeStructures.find({ schoolId }).sort({ createdAt: -1 }).lean();
     return ok(res, docs);
   } catch (err) {
@@ -385,7 +386,7 @@ router.post('/fee-structures', authMiddleware, PLAN, rbac('finance', 'create'), 
     if (error) return E.validation(res, error);
 
     const totals = _calcInvoiceTotals(data.lineItems);
-    const FeeStructures = _model('fee_structures');
+    const FeeStructures = tenantModel('fee_structures', tenantContext(req));
     const doc = await FeeStructures.create({
       id:        uuidv4(),
       schoolId,
@@ -409,7 +410,7 @@ router.put('/fee-structures/:id', authMiddleware, PLAN, rbac('finance', 'update'
     if (error) return E.validation(res, error);
 
     const totals = data.lineItems ? _calcInvoiceTotals(data.lineItems) : {};
-    const FeeStructures = _model('fee_structures');
+    const FeeStructures = tenantModel('fee_structures', tenantContext(req));
     const doc = await FeeStructures.findOneAndUpdate(
       { id: req.params.id, schoolId },
       { ...data, ...(totals.total != null ? { total: totals.total } : {}), updatedBy: userId },
@@ -428,7 +429,7 @@ router.put('/fee-structures/:id', authMiddleware, PLAN, rbac('finance', 'update'
 router.delete('/fee-structures/:id', authMiddleware, PLAN, rbac('finance', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const FeeStructures = _model('fee_structures');
+    const FeeStructures = tenantModel('fee_structures', tenantContext(req));
     const doc = await FeeStructures.findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Fee structure not found');
     AuditService.log({ action: 'finance.fee_structure_deleted', actor: req.jwtUser, schoolId, target: { type: 'fee_structure', id: req.params.id, label: doc.name }, req });
@@ -443,9 +444,9 @@ router.delete('/fee-structures/:id', authMiddleware, PLAN, rbac('finance', 'dele
 router.post('/fee-structures/:id/generate', authMiddleware, PLAN, rbac('finance', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const FeeStructures = _model('fee_structures');
-    const Students      = _model('students');
-    const Invoices      = _model('invoices');
+    const FeeStructures = tenantModel('fee_structures', tenantContext(req));
+    const Students      = tenantModel('students', tenantContext(req));
+    const Invoices      = tenantModel('invoices', tenantContext(req));
 
     const fs = await FeeStructures.findOne({ id: req.params.id, schoolId }).lean();
     if (!fs) return E.notFound(res, 'Fee structure not found');
@@ -507,8 +508,8 @@ router.get('/summary', authMiddleware, PLAN, rbac('finance', 'read'), async (req
     const _ay2 = strParam(req.query.academicYearId);
     if (_ay2) filter.academicYearId = _ay2;
 
-    const Invoices = _model('invoices');
-    const Payments = _model('payments');
+    const Invoices = tenantModel('invoices', tenantContext(req));
+    const Payments = tenantModel('payments', tenantContext(req));
 
     const [invoiceSummary, paymentSummary] = await Promise.all([
       Invoices.aggregate([
