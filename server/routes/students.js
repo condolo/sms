@@ -15,6 +15,7 @@ const { planGate }              = require('../middleware/plan');
 const { scopeMiddleware }       = require('../middleware/scopeMiddleware');
 const ScopeEngine               = require('../utils/scopeEngine');
 const { _model }                = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { nextAdmissionNumber, reserveAdmissionNumbers } = require('../utils/counters');
 const { ok, created, fail, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
@@ -86,7 +87,8 @@ async function _entityIdForms(col, schoolId, value) {
     or.push({ _id: value });
   }
   let doc = null;
-  try { doc = await _model(col).findOne({ schoolId, $or: or }).select('id').lean(); } catch (_) {}
+  // Helper has schoolId (not req), so build the tenant context inline.
+  try { doc = await tenantModel(col, { schoolId }).findOne({ schoolId, $or: or }).select('id').lean(); } catch (_) {}
   const forms = new Set([value]);
   if (doc?.id)  forms.add(doc.id);
   if (doc?._id) forms.add(String(doc._id));
@@ -97,7 +99,7 @@ async function _entityIdForms(col, schoolId, value) {
 router.get('/stats', authMiddleware, PLAN, rbac('students', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const Students = _model('students');
+    const Students = tenantModel('students', tenantContext(req));
 
     const [byStatus, byGender, byClass] = await Promise.all([
       Students.aggregate([
@@ -123,7 +125,7 @@ router.get('/stats', authMiddleware, PLAN, rbac('students', 'read'), async (req,
     if (unresolved.length) {
       const mongoose = require('mongoose');
       const ids      = unresolved.map(c => c._id);
-      const Classes  = _model('classes');
+      const Classes  = tenantModel('classes', tenantContext(req));
       const classDocs = await Classes.find({
         schoolId,
         $or: [
@@ -186,7 +188,7 @@ router.get('/', authMiddleware, PLAN, rbac('students', 'read'), scopeMiddleware,
     if (sectionKey) {
       // Include BOTH identifier forms of every class in the section — and note
       // `_id` is always present, so classes without a UUID are not dropped.
-      const sectionClassIds = await _model('classes')
+      const sectionClassIds = await tenantModel('classes', tenantContext(req))
         .find({ schoolId, sectionKey })
         .select('id').lean()
         .then(docs => docs.flatMap(d => [d.id, String(d._id)].filter(Boolean)));
@@ -230,7 +232,7 @@ router.get('/', authMiddleware, PLAN, rbac('students', 'read'), scopeMiddleware,
       return ok(res, [], { ...paginate(page, limit, 0), noAssignments: true });
     }
 
-    const Students = _model('students');
+    const Students = tenantModel('students', tenantContext(req));
     const [docs, total] = await Promise.all([
       Students.find(filter)
         .sort({ lastName: 1, firstName: 1 })
@@ -251,7 +253,7 @@ router.get('/', authMiddleware, PLAN, rbac('students', 'read'), scopeMiddleware,
 router.get('/:id', authMiddleware, PLAN, rbac('students', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const Students = _model('students');
+    const Students = tenantModel('students', tenantContext(req));
 
     // Primary lookup by custom uuid `id` field
     let doc = await Students.findOne({ id: req.params.id, schoolId }).select('-__v').lean();
@@ -285,7 +287,7 @@ router.post('/', authMiddleware, PLAN, rbac('students', 'create'), async (req, r
     const admissionNumber = manualAdmNo || await nextAdmissionNumber(schoolId, admCfg);
     delete data.admissionNumber;
 
-    const Students = _model('students');
+    const Students = tenantModel('students', tenantContext(req));
     const doc = await Students.create({
       ...data,
       id:              uuidv4(),
@@ -320,7 +322,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('students', 'update'), async (req,
 
     // Resolve the student first so we can target by _id (always present),
     // which handles pre-migration records that have no UUID `id` field.
-    const Students = _model('students');
+    const Students = tenantModel('students', tenantContext(req));
     let existing = await Students.findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) {
       try { existing = await Students.findOne({ _id: req.params.id, schoolId }).lean(); } catch (_) {}
@@ -359,9 +361,9 @@ router.delete('/purge', authMiddleware, PLAN, rbac('students', 'delete'), async 
       return E.badRequest(res, 'Maximum 200 records per purge. Split into smaller batches.');
     }
 
-    const Students = _model('students');
-    const Invoices = _model('invoices');
-    const Payments = _model('payments');
+    const Students = tenantModel('students', tenantContext(req));
+    const Invoices = tenantModel('invoices', tenantContext(req));
+    const Payments = tenantModel('payments', tenantContext(req));
 
     // Separate valid ObjectIds from UUID strings so we can do a dual lookup.
     // This handles both records created via the API (custom uuid `id` field) and
@@ -407,7 +409,7 @@ router.delete('/:id', authMiddleware, PLAN, rbac('students', 'delete'), async (r
   try {
     const { schoolId, userId } = req.jwtUser;
 
-    const Students = _model('students');
+    const Students = tenantModel('students', tenantContext(req));
     const patch = { status: 'inactive', deletedAt: new Date().toISOString(), deletedBy: userId };
 
     // Primary lookup by custom uuid `id` field
@@ -447,7 +449,7 @@ router.post('/bulk', authMiddleware, PLAN, rbac('students', 'create'), async (re
     }
 
     const results  = { created: 0, skipped: 0, errors: [] };
-    const Students = _model('students');
+    const Students = tenantModel('students', tenantContext(req));
     const toInsert = [];
     const admCfg   = await _getAdmConfig(schoolId);
 
@@ -504,8 +506,8 @@ router.post('/bulk-portal-accounts', authMiddleware, PLAN, rbac('students', 'upd
     }
     if (studentIds.length > 200) return E.badRequest(res, 'Maximum 200 students per batch.');
 
-    const Students = _model('students');
-    const Users    = _model('users');
+    const Students = tenantModel('students', tenantContext(req));
+    const Users    = tenantModel('users', tenantContext(req));
     const Schools  = _model('schools');
 
     const school = await Schools.findOne({ id: schoolId }).lean();
@@ -627,8 +629,8 @@ router.post('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'updat
     const allowed = ['superadmin', 'admin', 'principal', 'deputy_principal'];
     if (!allowed.includes(role)) return E.forbidden(res, 'Only admin or principal can create student portal accounts.');
 
-    const Students = _model('students');
-    const Users    = _model('users');
+    const Students = tenantModel('students', tenantContext(req));
+    const Users    = tenantModel('users', tenantContext(req));
     const Schools  = _model('schools');
 
     let student = await Students.findOne({ id: req.params.id, schoolId }).lean();
@@ -752,7 +754,7 @@ router.delete('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'upd
     const allowed = ['superadmin', 'admin', 'principal', 'deputy_principal'];
     if (!allowed.includes(role)) return E.forbidden(res, 'Only admin or principal can manage student portal accounts.');
 
-    const Users = _model('users');
+    const Users = tenantModel('users', tenantContext(req));
     const result = await Users.updateOne(
       { studentId: req.params.id, schoolId, role: 'student' },
       { $set: { isActive: false, updatedAt: new Date().toISOString() } }
@@ -777,8 +779,8 @@ router.post('/:id/parent-account', authMiddleware, PLAN, rbac('students', 'updat
     const allowed = ['superadmin', 'admin', 'principal', 'deputy_principal'];
     if (!allowed.includes(role)) return E.forbidden(res, 'Only admin or principal can create parent portal accounts.');
 
-    const Students = _model('students');
-    const Users    = _model('users');
+    const Students = tenantModel('students', tenantContext(req));
+    const Users    = tenantModel('users', tenantContext(req));
     const Schools  = _model('schools');
 
     let student = await Students.findOne({ id: req.params.id, schoolId }).lean();
@@ -885,7 +887,7 @@ router.patch('/:id/deactivate', authMiddleware, PLAN, rbac('students', 'update')
         ? 'transferred'
         : 'withdrawn';
 
-    const Students = _model('students');
+    const Students = tenantModel('students', tenantContext(req));
     let doc = await Students.findOne({ id: req.params.id, schoolId }).lean();
     if (!doc) {
       try { doc = await Students.findOne({ _id: req.params.id, schoolId }).lean(); } catch (_) {}
@@ -931,7 +933,7 @@ router.patch('/:id/reactivate', authMiddleware, PLAN, rbac('students', 'update')
     const allowed = ['superadmin', 'admin', 'principal', 'deputy_principal'];
     if (!allowed.includes(role)) return E.forbidden(res, 'Only admin or principal can reactivate students.');
 
-    const Students = _model('students');
+    const Students = tenantModel('students', tenantContext(req));
     let doc = await Students.findOne({ id: req.params.id, schoolId }).lean();
     if (!doc) {
       try { doc = await Students.findOne({ _id: req.params.id, schoolId }).lean(); } catch (_) {}
@@ -983,8 +985,8 @@ router.post('/promote', authMiddleware, PLAN, rbac('students', 'update'), async 
 
     const SKIP_STATUSES = new Set(['withdrawn', 'graduated', 'transferred', 'suspended']);
 
-    const Students = _model('students');
-    const Classes  = _model('classes');
+    const Students = tenantModel('students', tenantContext(req));
+    const Classes  = tenantModel('classes', tenantContext(req));
 
     // Load all target classes up-front to validate toClassIds and get names
     const toClassIds = promotions.map(p => p.toClassId).filter(Boolean);
@@ -1050,7 +1052,7 @@ router.post('/promote', authMiddleware, PLAN, rbac('students', 'update'), async 
             }
           );
           // Deactivate portal accounts for graduated students
-          await _model('users').updateMany(
+          await tenantModel('users', tenantContext(req)).updateMany(
             { schoolId, studentId: { $in: eligibleIds }, role: 'student' },
             { $set: { isActive: false, updatedAt: now } }
           );
