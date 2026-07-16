@@ -125,6 +125,9 @@ const ResultSchema = z.object({
   gradedBy:   z.string().optional(),         // overridden by JWT
   // Audit: who entered/changed this result
   actingAs:   z.string().optional(),         // if admin acting as teacher: teacherId
+  // Optimistic concurrency — the _v the client last read for this result.
+  // Omit to skip the check (backward compatible with clients that don't send it).
+  _v:         z.number().int().min(0).optional(),
 });
 
 const BulkResultSchema = z.object({
@@ -591,11 +594,36 @@ router.post('/:id/results', authMiddleware, PLAN, rbac('exams', 'create'), async
     }).lean();
     const existingMap = Object.fromEntries(existingResults.map(r => [r.studentId, r]));
 
+    // Optimistic concurrency — split off any result whose client-supplied _v
+    // doesn't match the current DB value (two teachers editing the same
+    // student's marks at the same time). These are never sent to bulkWrite:
+    // encoding _v into an upsert filter would make a stale version silently
+    // create a duplicate document instead of correctly failing to match.
+    // Conflicting entries are reported back, not written. Omitting _v (as
+    // every client does today) skips this check entirely — no behavior
+    // change until a client actually starts sending it.
+    const conflicts = [];
+    const writableResults = [];
+    for (const r of data.results) {
+      const existing = existingMap[r.studentId];
+      if (existing && r._v != null && Number(r._v) !== (existing._v ?? 0)) {
+        conflicts.push({
+          studentId:        r.studentId,
+          yourVersion:      Number(r._v),
+          currentVersion:   existing._v ?? 0,
+          currentScore:     existing.score,
+          currentMarkState: existing.markState,
+        });
+        continue;
+      }
+      writableResults.push(r);
+    }
+
     const now    = new Date().toISOString();
     const auditEntries = [];
     const Results = _model('exam_results');
 
-    const ops = data.results.map(r => {
+    const ops = writableResults.map(r => {
       const resolved  = _resolveMarkState(r);
       const gradeInfo = resolved.markState === 'present' && resolved.score != null
         ? _calcGrade(resolved.score, exam.maxScore, exam.gradeScale || [])
@@ -640,7 +668,8 @@ router.post('/:id/results', authMiddleware, PLAN, rbac('exams', 'create'), async
               updatedAt:  now,
               ...(gradeInfo || {}),
             },
-            $setOnInsert: { id: uuidv4(), createdBy: userId, createdAt: now }
+            $setOnInsert: { id: uuidv4(), createdBy: userId, createdAt: now },
+            $inc: { _v: 1 },
           },
           upsert: true
         }
@@ -648,7 +677,7 @@ router.post('/:id/results', authMiddleware, PLAN, rbac('exams', 'create'), async
     });
 
     const [result] = await Promise.all([
-      Results.bulkWrite(ops, { ordered: false }),
+      ops.length ? Results.bulkWrite(ops, { ordered: false }) : Promise.resolve({ upsertedCount: 0, modifiedCount: 0 }),
       auditEntries.length ? _model('mark_audit_log').insertMany(auditEntries) : Promise.resolve()
     ]);
 
@@ -665,6 +694,7 @@ router.post('/:id/results', authMiddleware, PLAN, rbac('exams', 'create'), async
       modified:  result.modifiedCount,
       total:     data.results.length,
       audited:   auditEntries.length,
+      conflicts,
       warnings:  incCount ? [`${incCount} result(s) marked as INC/MIS — resolve before approving`] : [],
     }, null, 201);
   } catch (err) { console.error('[exams/:id/results POST]', err); return E.serverError(res); }

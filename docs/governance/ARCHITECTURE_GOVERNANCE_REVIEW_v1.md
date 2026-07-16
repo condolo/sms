@@ -78,8 +78,8 @@ Unlike Security Policy Conflicts (§3), these have no legitimate trade-off or po
 
 | ID | Defect | Severity | Status |
 |---|---|---|---|
-| BUG-002 | `POST /api/mpesa/callback` creates a Payment record unconditionally on every successful callback delivery, with no check that the transaction wasn't already marked completed. A retried callback (a documented Safaricom behavior, not a hypothetical) creates a duplicate Payment record for the same money. The parallel `subscription/callback` path has the same missing guard, lower severity since it only performs idempotent `$set` updates. | **Critical** | Not fixed |
-| BUG-003 | Exam mark-entry (`POST /api/exams/:id/results`) bulk-upserts with no version check. Two teachers saving marks for the same student within the same window silently last-write-wins — no conflict surfaced to either party, no audit trail of the overwritten value. | High | Not fixed |
+| BUG-002 | `POST /api/mpesa/callback` creates a Payment record unconditionally on every successful callback delivery, with no check that the transaction wasn't already marked completed. A retried callback (a documented Safaricom behavior, not a hypothetical) creates a duplicate Payment record for the same money. The parallel `subscription/callback` path had the same missing guard. | **Critical** | **Fixed** — both callbacks now atomically claim the transaction via `findOneAndUpdate({status: {$ne: 'completed'}})` before proceeding; a second delivery matches nothing and is skipped. Regression test: `server/__tests__/routes/mpesa-idempotency.test.js` |
+| BUG-003 | Exam mark-entry (`POST /api/exams/:id/results`) bulk-upserts with no version check. Two teachers saving marks for the same student within the same window silently last-write-wins — no conflict surfaced to either party, no audit trail of the overwritten value. | High | **Fixed (server-side half)** — `ResultSchema` gained an optional `_v`; a stale version is excluded from the write and reported in a new `conflicts` field instead of silently overwriting. Omitting `_v` (every client today) is unchanged behavior. **Follow-up still needed:** the Markbook UI must read and send `_v` per cell, and surface `conflicts` to the teacher, for this to be a complete fix end to end — not done in this pass. Regression test: `server/__tests__/routes/exams-mark-conflict.test.js` |
 
 ---
 
@@ -164,7 +164,7 @@ Items intentionally postponed, recorded so they are not mistaken for open gaps o
 
 ## 11. Recommended Sequence
 
-**In parallel, starting immediately, gated by nothing above:** fix BUG-002 and BUG-003. Neither depends on D-001–D-004; both are live correctness gaps independent of the identity/organization work.
+**In parallel, gated by nothing above:** BUG-002 and BUG-003 — server-side fixes shipped, both with regression tests. BUG-003's Markbook UI follow-up (send/surface `_v` and `conflicts`) remains open and should be scheduled independently of D-001–D-004.
 
 1. Resolve D-001 (resolves D-004 simultaneously — same underlying fork).
 2. Write the ADR — Organizations/Memberships, with MR-001 (Identity Migration) as its own linked-but-separate ADR given its distinct risk profile.

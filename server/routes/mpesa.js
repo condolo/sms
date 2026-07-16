@@ -255,10 +255,21 @@ router.post('/callback', async (req, res) => {
     const amount    = Number(meta.Amount);
     const mpesaCode = String(meta.MpesaReceiptNumber || '');
 
-    // Mark transaction complete
-    await Transactions.updateOne({ checkoutRequestId, schoolId: txn.schoolId }, {
-      $set: { status: 'completed', mpesaReceiptNumber: mpesaCode, amount, paidAt: now, updatedAt: now },
-    });
+    // Atomically claim this transaction for completion — only the FIRST
+    // callback delivery to reach this line matches (status starts as
+    // anything other than 'completed') and proceeds to create a Payment.
+    // A retried/duplicate callback — a documented Safaricom behavior, not
+    // an edge case — finds status already 'completed', matches nothing,
+    // and is skipped before it can create a second Payment record.
+    const claimed = await Transactions.findOneAndUpdate(
+      { checkoutRequestId, schoolId: txn.schoolId, status: { $ne: 'completed' } },
+      { $set: { status: 'completed', mpesaReceiptNumber: mpesaCode, amount, paidAt: now, updatedAt: now } },
+    ).lean();
+
+    if (!claimed) {
+      console.log(`[mpesa] callback for ${checkoutRequestId} already processed — skipping duplicate payment`);
+      return;
+    }
 
     // Record payment on the invoice
     const Invoices = _model('invoices');
@@ -575,9 +586,17 @@ router.post('/subscription/callback', async (req, res) => {
     const paidAmount = Number(meta.Amount);
     const mpesaCode  = String(meta.MpesaReceiptNumber || '');
 
-    await Transactions.updateOne({ checkoutRequestId }, {
-      $set: { status: 'completed', mpesaReceiptNumber: mpesaCode, amount: paidAmount, paidAt: now, updatedAt: now },
-    });
+    // Same atomic claim as the invoice-payment callback above — prevents a
+    // retried callback from re-running plan activation a second time.
+    const claimed = await Transactions.findOneAndUpdate(
+      { checkoutRequestId, type: 'subscription', status: { $ne: 'completed' } },
+      { $set: { status: 'completed', mpesaReceiptNumber: mpesaCode, amount: paidAmount, paidAt: now, updatedAt: now } },
+    ).lean();
+
+    if (!claimed) {
+      console.log(`[mpesa/subscription] callback for ${checkoutRequestId} already processed — skipping`);
+      return;
+    }
 
     // Activate the school's plan until end of current term (90 days fallback)
     const Schools = _model('schools');
