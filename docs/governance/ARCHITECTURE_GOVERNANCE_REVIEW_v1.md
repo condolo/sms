@@ -114,11 +114,11 @@ Unlike Security Policy Conflicts (§3), these have no legitimate trade-off or po
 | Principle | ADR | Implementation | Tests |
 |---|---|---|---|
 | Constitution Inv 1 — Single active school context | N/A — established, pre-dates ADR process | `server/middleware/auth.js:54` | None dedicated; implicitly exercised by every route test |
-| Constitution Inv 2 — Cross-school isolation | Pending (D-001 scope) | Convention only, no structural layer | `report-cards.test.js:315`, `routes/students.test.js:147` — per-module spot checks, not a centralized suite |
+| Constitution Inv 2 — Cross-school isolation | **ADR-0001** (Proposed) — tenant context + `tenantModel()` | Convention only today, no structural layer; ADR-0001 specifies the fix (C4) | `report-cards.test.js:315`, `routes/students.test.js:147` — per-module spot checks; ADR-0001 mandates a centralized cross-tenant suite as a C4 deliverable |
 | Constitution Inv 3 — RBAC/DataScope separation | N/A — established | `rbac.js`, `scopeMiddleware.js` | Not verified this review |
 | Constitution Inv 4 — Identity/Employment/Academic independence | Pending (D-001) | Not yet built | N/A — not yet built |
 | Constitution Inv 7 — Auth fails open | Pending (D-002) | `authMiddleware` — currently does not | None found |
-| Operating Model P2 — Tenant isolation at data layer | Pending (D1 resolution) | Claimed; `model.js` has none | Same as Inv 2, above |
+| Operating Model P2 — Tenant isolation at data layer | **ADR-0001** (Proposed) | Claimed; `model.js` has none — ADR-0001 makes P2 true | Same as Inv 2, above |
 
 ---
 
