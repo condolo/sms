@@ -12,7 +12,7 @@
 | Owner | Chief Architect |
 | Review Frequency | Before every major architectural initiative |
 | Next Review | After D-001 is ratified |
-| Related Documents | `ARCHITECTURE_CONSTITUTION.md`, `PLATFORM_OPERATING_MODEL.md`, `PLATFORM_ENGINEERING_STANDARDS.md`, `IDENTITY_DOMAIN_MODEL_v1.md`, `PLATFORM_CONCURRENCY_MODEL.md` |
+| Related Documents | `ARCHITECTURE_CONSTITUTION.md`, `PLATFORM_OPERATING_MODEL.md`, `PLATFORM_ENGINEERING_STANDARDS.md`, `IDENTITY_DOMAIN_MODEL_v1.md`, `PLATFORM_CONCURRENCY_MODEL.md`, `PLATFORM_ARCHITECTURE_EVOLUTION_v1.md` (target-state authority) |
 | Supersedes | None |
 
 ---
@@ -139,6 +139,7 @@ Unlike Security Policy Conflicts (§3), these have no legitimate trade-off or po
 |---|---|---|
 | §7 — Session Architecture | Pending ADR (D-004) | Pending |
 | §9 — Identity guarantees | Pending ADR (D-001) | Pending |
+| §12 — Billing and Licensing Model | Architecture Evolution Plan §7/§16 (subscription belongs to School, not Organization) — matches current code (`plan.js:106`, `mpesa.js:598`); Constitution currently vests subscription in the Organization | Pending Billing ADR — Constitution §12 annotated as superseded pending that ADR |
 
 ---
 
@@ -187,6 +188,26 @@ Phase 0 is complete only when:
 - No implementation has begun.
 
 Only then may Phase 1 (ADR drafting) commence.
+
+---
+
+## 12. Reconciliation with the Architecture Evolution Plan
+
+`PLATFORM_ARCHITECTURE_EVOLUTION_v1.md` is adopted as the **target-state authority** — the direction the ADR sequence serves. It agrees with roughly 80% of the committed corpus; the deltas below are what "aligning the governance docs to the plan" concretely requires. Each is classified the same way as everything else in this review.
+
+| # | Plan element | Relationship to committed docs | Action |
+|---|---|---|---|
+| R1 | Identity / Membership / Authorization split (§9–11), security invariants 1/9/10 (§17) | **Already aligned** with `IDENTITY_DOMAIN_MODEL_v1.md` and `PLATFORM_CONCURRENCY_MODEL.md` | None — confirm and proceed |
+| R2 | Subscription belongs to School (§7, §16) | **Contradicts** Constitution §12 (subscription vests in Organization). **Matches current code** (`plan.js:106`, `mpesa.js:598`) | Amend Constitution §12 via Billing ADR (registered in §8 above); §12 annotated as superseded-pending |
+| R3 | Plans vs Entitlements decoupling (§8) | **Net-new** — today `plan.js:33-80` hard-couples plan→feature in one static map | Own ADR (Kernel-tier); not "foundation," sequence deliberately |
+| R4 | Integration as a foundation domain (§13) | **Sequencing conflict** with this review's Non-Decisions register (Integration Marketplace / Public API deferred) and `PLATFORM_CONCURRENCY_MODEL.md` (no queue infra exists) | Keep deferred; own ADR off the identity critical path |
+| R5 | Nine-domain taxonomy (§3–4) | **Overlaps/collides** with `PLATFORM_OPERATING_MODEL.md §2`'s seven Platform Kernel subsystems | Reconcile taxonomies explicitly — one must absorb or supersede the other |
+| R6 | "No migration, no duplicate accounts" (§14) | **Over-claim** — the identity/index split IS `MR-001` (Critical) | Correct the plan's framing; MR-001 stays gated by shadow-migration + rollback |
+| R7 | "Context switch, not new login" (§15) | **Unresolved** — this is D-004, dependent on D-001; the plan is silent on the identity-scope fork | Still requires D-001 ratification; the plan does not settle it |
+
+**Important:** adopting the plan as the direction does **not** resolve D-001 (platform-global vs organization-scoped identity). The plan is silent on that fork — §19's "cross-organization identities" non-goal is compatible with either model. D-001 remains Pending and remains the gate for the whole sequence.
+
+**New finding surfaced while reconciling** (add to `PLATFORM_CONCURRENCY_MODEL.md §5`): `plan.js:83` `_planCache` is a **fourth** in-memory per-process cache alongside RBAC / scope / token-version — same single-instance assumption, same multi-instance staleness risk.
 
 ---
 

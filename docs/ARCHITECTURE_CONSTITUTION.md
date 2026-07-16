@@ -390,6 +390,15 @@ Build Organization-level analytics and executive dashboards using dedicated `/ap
 
 ## 12. Billing and Licensing Model
 
+> **⚠ SUPERSEDED PENDING BILLING ADR (2026-07-16).** The model below vests the subscription
+> in the Organization. The adopted target-state direction (`docs/governance/PLATFORM_ARCHITECTURE_EVOLUTION_v1.md`
+> §7 & §16) instead vests the **subscription in the School** — the Platform invoices the
+> Organization, but each School is licensed independently. That direction matches the current
+> implementation (`server/middleware/plan.js:106`, `server/routes/mpesa.js:598` both store the
+> plan per-School). The text below is retained for audit trail until the Billing ADR formally
+> amends it. See `docs/governance/ARCHITECTURE_GOVERNANCE_REVIEW_v1.md §12 (R2)`. Do not build
+> against the model below without checking the ADR outcome first.
+
 ### Ownership
 
 ```
