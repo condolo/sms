@@ -606,6 +606,31 @@ const INDEXES = [
       { key: { id: 1 },                        name: 'els_id', unique: true, sparse: true },
     ],
   },
+
+  /* ── organizations (Phase A · C1) ───────────────────────────
+     Platform/org-level (no schoolId). One org per customer; 1:1 with a
+     school today, one-to-many once multi-school activates.
+     provisionedFromSchoolId is the 1:1 provenance key used by the
+     provisioning migration for interruption-safe upserts. */
+  {
+    col: 'organizations',
+    indexes: [
+      { key: { id: 1 },                      name: 'org_id',               unique: true, sparse: true },
+      { key: { slug: 1 },                    name: 'org_slug',             unique: true, sparse: true },
+      { key: { provisionedFromSchoolId: 1 }, name: 'org_provisioned_from', unique: true, sparse: true },
+    ],
+  },
+
+  /* ── schools (Phase A · C2) ─────────────────────────────────
+     schools was previously unindexed here (relied on _id). Only the new
+     organizationId FK is added — sparse, since it is null until a school
+     is provisioned. Non-unique: one org may own many schools. */
+  {
+    col: 'schools',
+    indexes: [
+      { key: { organizationId: 1 }, name: 'schools_org', sparse: true },
+    ],
+  },
 ];
 
 /* ── One-time index migrations ──────────────────────────────────

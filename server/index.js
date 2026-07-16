@@ -12,6 +12,7 @@ const monitoring = require('./utils/monitoring');
 const { connect }             = require('./config/db');
 const { ensureIndexes }       = require('./utils/indexes');
 const { repairPermissions }   = require('./utils/repairPermissions');
+const { provisionOrganizations } = require('./utils/provision-organizations');
 const { seedDemo }            = require('./scripts/seed-demo');
 
 /* ── Monitoring: initialise BEFORE anything else ──────────────
@@ -604,6 +605,12 @@ async function start() {
     // Backfill reportId + sha256Hash on existing published snapshots that pre-date RC-3
     _migrateReportIds()
       .catch(err => console.error('[_migrateReportIds] Unhandled error:', err));
+
+    // Phase A (C1/C2): provision a 1:1 Organization for every existing school.
+    // Purely additive — nothing reads organizationId yet. Self-heals a freshly
+    // seeded demo school on the next boot if it races this run.
+    provisionOrganizations()
+      .catch(err => console.error('[provisionOrganizations] Unhandled error:', err));
 
     // Lesson coverage reminder cron jobs (Friday + Saturday)
     try {
