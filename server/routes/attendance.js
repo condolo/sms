@@ -12,8 +12,16 @@ const { rbac }            = require('../middleware/rbac');
 const { planGate }        = require('../middleware/plan');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 const ScopeEngine         = require('../utils/scopeEngine');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
+
+/* First route migrated to tenantModel() (C4 · ADR-0001). attendance is
+   entirely self-contained (one tenant-owned collection; every filter
+   already carried schoolId), so this is behavior-identical — but the
+   scoping is now structural: a future edit that forgets schoolId can no
+   longer leak across schools, because tenantModel injects it and rejects
+   any conflicting one. Tenant isolation here is enforced at the data
+   accessor, not assumed in the handler. */
 
 const router = express.Router();
 const PLAN   = planGate('attendance');
@@ -68,7 +76,7 @@ router.get('/', authMiddleware, PLAN, rbac('attendance', 'read'), scopeMiddlewar
 
     ScopeEngine.applyToFilter(req, 'attendance', filter);
 
-    const Attendance = _model('attendance');
+    const Attendance = tenantModel('attendance', tenantContext(req));
     const [docs, total] = await Promise.all([
       Attendance.find(filter)
         .sort({ date: -1, classId: 1 })
@@ -105,7 +113,7 @@ router.get('/summary', authMiddleware, PLAN, rbac('attendance', 'read'), scopeMi
 
     ScopeEngine.applyToFilter(req, 'attendance', filter);
 
-    const Attendance = _model('attendance');
+    const Attendance = tenantModel('attendance', tenantContext(req));
     const summary = await Attendance.aggregate([
       { $match: filter },
       {
@@ -139,7 +147,7 @@ router.get('/summary', authMiddleware, PLAN, rbac('attendance', 'read'), scopeMi
 router.get('/:id', authMiddleware, PLAN, rbac('attendance', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const Attendance = _model('attendance');
+    const Attendance = tenantModel('attendance', tenantContext(req));
     const doc = await Attendance.findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Attendance record not found');
     return ok(res, doc);
@@ -156,7 +164,7 @@ router.post('/', authMiddleware, PLAN, rbac('attendance', 'create'), async (req,
     const { data, error } = _validate(AttendanceRecordSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const Attendance = _model('attendance');
+    const Attendance = tenantModel('attendance', tenantContext(req));
 
     // Upsert: replace if same student/date/period already exists
     const filter = {
@@ -187,7 +195,7 @@ router.post('/bulk', authMiddleware, PLAN, rbac('attendance', 'create'), async (
     if (error) return E.validation(res, error);
 
     const { classId, date, period, records } = data;
-    const Attendance = _model('attendance');
+    const Attendance = tenantModel('attendance', tenantContext(req));
 
     // Build bulk upsert operations
     const ops = records.map(r => ({
@@ -223,7 +231,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('attendance', 'update'), async (re
 
     delete data.schoolId; delete data.id;
 
-    const Attendance = _model('attendance');
+    const Attendance = tenantModel('attendance', tenantContext(req));
     const doc = await Attendance.findOneAndUpdate(
       { id: req.params.id, schoolId },
       { ...data, updatedBy: userId },
@@ -242,7 +250,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('attendance', 'update'), async (re
 router.delete('/:id', authMiddleware, PLAN, rbac('attendance', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const Attendance = _model('attendance');
+    const Attendance = tenantModel('attendance', tenantContext(req));
     const doc = await Attendance.findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Attendance record not found');
     return ok(res, { id: req.params.id, deleted: true });
