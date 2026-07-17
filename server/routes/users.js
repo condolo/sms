@@ -13,6 +13,7 @@ const rateLimit = require('express-rate-limit');
 const { authMiddleware }   = require('../middleware/auth');
 const { rbac }             = require('../middleware/rbac');
 const { _model }           = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { revokeUserTokens } = require('../utils/token-version');
 const email                = require('../utils/email');
 const AuditService         = require('../services/audit');
@@ -84,7 +85,7 @@ router.post('/invite', authMiddleware, inviteLimiter, rbac('settings', 'users'),
   }
 
   try {
-    const User   = _model('users');
+    const User   = tenantModel('users', tenantContext(req));
     const School = _model('schools');
 
     const schoolId = req.jwtUser.schoolId;
@@ -156,7 +157,7 @@ router.post('/bulk-invite', authMiddleware, inviteLimiter, rbac('settings', 'use
     return res.status(400).json({ error: 'Maximum 200 users per bulk invite' });
   }
 
-  const User   = _model('users');
+  const User   = tenantModel('users', tenantContext(req));
   const School = _model('schools');
   const schoolId = req.jwtUser.schoolId;
   const school   = await School.findOne({ id: schoolId }).lean();
@@ -224,7 +225,7 @@ router.post('/:id/role-change', authMiddleware, rbac('settings', 'users'), async
   if (!newRole) return res.status(400).json({ error: 'newRole is required' });
 
   try {
-    const User   = _model('users');
+    const User   = tenantModel('users', tenantContext(req));
     const School = _model('schools');
     const user   = await User.findOne({ id: req.params.id, schoolId: req.jwtUser.schoolId }).lean();
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -267,8 +268,8 @@ router.post('/:id/role-change', authMiddleware, rbac('settings', 'users'), async
 router.get('/me', authMiddleware, async (req, res) => {
   try {
     const { userId, schoolId } = req.jwtUser;
-    const User   = _model('users');
-    const Photos = _model('user_photos');
+    const User   = tenantModel('users', tenantContext(req));
+    const Photos = tenantModel('user_photos', tenantContext(req));
     const user   = await User.findOne(_meFilter(userId, schoolId)).lean();
     if (!user) return res.status(404).json({ error: 'User not found' });
 
@@ -298,7 +299,7 @@ router.put('/me', authMiddleware, async (req, res) => {
 
     updates.updatedAt = new Date().toISOString();
     const { userId, schoolId } = req.jwtUser;
-    const User = _model('users');
+    const User = tenantModel('users', tenantContext(req));
     await User.updateOne(_meFilter(userId, schoolId), { $set: updates });
 
     // Cascade name change to the teachers record and all denormalized teacherName fields.
@@ -310,7 +311,7 @@ router.put('/me', authMiddleware, async (req, res) => {
       const newFullName = updates.name;
       const now         = updates.updatedAt;
 
-      const Teachers = _model('teachers');
+      const Teachers = tenantModel('teachers', tenantContext(req));
       const teacherExists = await Teachers.findOne({ schoolId, userId }).lean();
       if (teacherExists) {
         await Teachers.updateOne({ schoolId, userId }, { $set: { firstName: newFirst, lastName: newLast, updatedAt: now } });
@@ -318,30 +319,30 @@ router.put('/me', authMiddleware, async (req, res) => {
 
       // Cascade to every collection that denormalises teacherName
       await Promise.all([
-        _model('timetable').updateMany(
+        tenantModel('timetable', tenantContext(req)).updateMany(
           { schoolId, teacherId: userId },
           { $set: { teacherName: newFullName } }
         ),
-        _model('lesson_plans').updateMany(
+        tenantModel('lesson_plans', tenantContext(req)).updateMany(
           { schoolId, teacherId: userId },
           { $set: { teacherName: newFullName } }
         ),
-        _model('substitutions').updateMany(
+        tenantModel('substitutions', tenantContext(req)).updateMany(
           { schoolId, originalTeacherId: userId },
           { $set: { originalTeacherName: newFullName } }
         ),
-        _model('substitutions').updateMany(
+        tenantModel('substitutions', tenantContext(req)).updateMany(
           { schoolId, substituteTeacherId: userId },
           { $set: { substituteTeacherName: newFullName } }
         ),
-        _model('lesson_coverage').updateMany(
+        tenantModel('lesson_coverage', tenantContext(req)).updateMany(
           { schoolId, teacherId: userId },
           { $set: { teacherName: newFullName } }
         ),
       ]);
     }
 
-    const Photos  = _model('user_photos');
+    const Photos  = tenantModel('user_photos', tenantContext(req));
     const user    = await User.findOne(_meFilter(userId, schoolId)).lean();
     const uid     = user?.id || user?._id?.toString() || userId;
     const photo   = await Photos.findOne({ userId: uid, schoolId }).lean();
@@ -376,11 +377,11 @@ router.put('/me/meeting-links', authMiddleware, async (req, res) => {
       updatedAt:    new Date().toISOString(),
     };
 
-    const User = _model('users');
+    const User = tenantModel('users', tenantContext(req));
     await User.updateOne(_meFilter(userId, schoolId), { $set: updates });
 
     // Mirror onto teacher record if one exists (keeps emergency timetable logic working)
-    const Teachers = _model('teachers');
+    const Teachers = tenantModel('teachers', tenantContext(req));
     const user = await User.findOne(_meFilter(userId, schoolId)).lean();
     if (user) {
       await Teachers.updateOne(
@@ -419,11 +420,11 @@ router.put('/me/photo', authMiddleware, async (req, res) => {
 
     // Resolve the same canonical uid used everywhere else (user.id preferred over _id)
     const { userId, schoolId } = req.jwtUser;
-    const User = _model('users');
+    const User = tenantModel('users', tenantContext(req));
     const user = await User.findOne(_meFilter(userId, schoolId)).lean();
     const uid  = user?.id || user?._id?.toString() || userId;
 
-    const Photos = _model('user_photos');
+    const Photos = tenantModel('user_photos', tenantContext(req));
     await Photos.updateOne(
       { userId: uid, schoolId },
       { $set: { userId: uid, schoolId, photoBase64, updatedAt: new Date().toISOString() } },
@@ -441,11 +442,11 @@ router.put('/me/photo', authMiddleware, async (req, res) => {
 router.delete('/me/photo', authMiddleware, async (req, res) => {
   try {
     const { userId, schoolId } = req.jwtUser;
-    const User = _model('users');
+    const User = tenantModel('users', tenantContext(req));
     const user = await User.findOne(_meFilter(userId, schoolId)).lean();
     const uid  = user?.id || user?._id?.toString() || userId;
 
-    const Photos = _model('user_photos');
+    const Photos = tenantModel('user_photos', tenantContext(req));
     await Photos.deleteOne({ userId: uid, schoolId });
     res.json({ success: true });
   } catch (err) {
@@ -463,7 +464,7 @@ router.get('/:id/photo', async (req, res) => {
     const { schoolId } = req.query;
     if (!schoolId) return res.status(400).end();
 
-    const Photos = _model('user_photos');
+    const Photos = tenantModel('user_photos', tenantContext(req));
     const photo  = await Photos.findOne({ userId: req.params.id, schoolId }).lean();
 
     if (!photo?.photoBase64) return res.status(404).end();

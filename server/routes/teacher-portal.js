@@ -9,6 +9,7 @@
 const express            = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, E }          = require('../utils/response');
 const { resolveTeacher } = require('../utils/resolveTeacher');
 
@@ -36,22 +37,22 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
 
-    const Teachers           = _model('teachers');
-    const TeachingAssignments = _model('teaching_assignments');
-    const Classes            = _model('classes');
-    const Students           = _model('students');
-    const Attendance         = _model('attendance');
-    const Timetable          = _model('timetable_slots');
-    const Subjects           = _model('subjects');
+    const Teachers           = tenantModel('teachers', tenantContext(req));
+    const TeachingAssignments = tenantModel('teaching_assignments', tenantContext(req));
+    const Classes            = tenantModel('classes', tenantContext(req));
+    const Students           = tenantModel('students', tenantContext(req));
+    const Attendance         = tenantModel('attendance', tenantContext(req));
+    const Timetable          = tenantModel('timetable_slots', tenantContext(req));
+    const Subjects           = tenantModel('subjects', tenantContext(req));
     const Schools            = _model('schools');
-    const Behaviour          = _model('behaviour');
-    const Exams              = _model('exams');
-    const Announcements      = _model('announcements');
-    const Events             = _model('events');
-    const Messages           = _model('messages');
-    const Coverage           = _model('lesson_coverage');
-    const Topics             = _model('syllabus_topics');
-    const FeeInvoices        = _model('invoices');
+    const Behaviour          = tenantModel('behaviour', tenantContext(req));
+    const Exams              = tenantModel('exams', tenantContext(req));
+    const Announcements      = tenantModel('announcements', tenantContext(req));
+    const Events             = tenantModel('events', tenantContext(req));
+    const Messages           = tenantModel('messages', tenantContext(req));
+    const Coverage           = tenantModel('lesson_coverage', tenantContext(req));
+    const Topics             = tenantModel('syllabus_topics', tenantContext(req));
+    const FeeInvoices        = tenantModel('invoices', tenantContext(req));
 
     const todayISO  = new Date().toISOString().slice(0, 10);
     const todayDay  = DAY_NAMES[new Date().getDay()];
@@ -301,7 +302,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     // ── Departments for this teacher ─────────────────────────
     let departments = [];
     if (subjectIds.length) {
-      const Departments = _model('departments');
+      const Departments = tenantModel('departments', tenantContext(req));
       const subDepts = await Subjects.find({ id: { $in: subjectIds }, schoolId })
         .select('id departmentId').lean().catch(() => []);
       const deptIds = [...new Set(subDepts.map(s => s.departmentId).filter(Boolean))];
@@ -321,7 +322,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
 
     // ── Lesson plans (today + next 7 days) ───────────────────
     const weekAheadISO = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
-    const LessonPlans  = _model('lesson_plans');
+    const LessonPlans  = tenantModel('lesson_plans', tenantContext(req));
     const lessonPlans  = await LessonPlans.find({
       schoolId,
       teacherId,
@@ -332,8 +333,8 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       .lean().catch(() => []);
 
     // ── HR: leave + payroll ───────────────────────────────────
-    const LeaveRequests = _model('leave_requests');
-    const Payroll       = _model('payroll');
+    const LeaveRequests = tenantModel('leave_requests', tenantContext(req));
+    const Payroll       = tenantModel('payroll', tenantContext(req));
 
     const [recentLeave, latestPayroll] = await Promise.all([
       LeaveRequests.find({ schoolId, staffId: teacherId })

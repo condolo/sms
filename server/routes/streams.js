@@ -12,7 +12,7 @@ const { v4: uuidv4 } = require('uuid');
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
 
@@ -45,7 +45,7 @@ router.get('/', authMiddleware, PLAN, rbac('classes', 'read'), async (req, res) 
     if (req.query.classId) filter.classId = req.query.classId;
     if (req.query.status)  filter.status  = req.query.status;
 
-    const Streams = _model('streams');
+    const Streams = tenantModel('streams', tenantContext(req));
     const [docs, total] = await Promise.all([
       Streams.find(filter).sort({ name: 1 }).skip(skip).limit(limit).select('-__v').lean(),
       Streams.countDocuments(filter),
@@ -55,7 +55,7 @@ router.get('/', authMiddleware, PLAN, rbac('classes', 'read'), async (req, res) 
     const teacherIds = [...new Set(docs.map(d => d.formTeacherId).filter(Boolean))];
     let teacherMap = {};
     if (teacherIds.length) {
-      const Teachers = _model('teachers');
+      const Teachers = tenantModel('teachers', tenantContext(req));
       const ts = await Teachers.find({ id: { $in: teacherIds }, schoolId })
         .select('id firstName lastName title').lean();
       for (const t of ts) {
@@ -65,7 +65,7 @@ router.get('/', authMiddleware, PLAN, rbac('classes', 'read'), async (req, res) 
 
     // Student counts per stream (active only)
     const streamIds = docs.map(d => d.id || d._id?.toString()).filter(Boolean);
-    const Students  = _model('students');
+    const Students  = tenantModel('students', tenantContext(req));
     const counts = await Students.aggregate([
       { $match: { schoolId, streamId: { $in: streamIds }, status: { $nin: ['withdrawn', 'graduated'] } } },
       { $group: { _id: '$streamId', count: { $sum: 1 } } },
@@ -94,7 +94,7 @@ router.get('/', authMiddleware, PLAN, rbac('classes', 'read'), async (req, res) 
 router.get('/:id', authMiddleware, PLAN, rbac('classes', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const Streams  = _model('streams');
+    const Streams  = tenantModel('streams', tenantContext(req));
     const paramId  = req.params.id;
     let doc = await Streams.findOne({ id: paramId, schoolId }).select('-__v').lean();
     if (!doc && /^[a-f\d]{24}$/i.test(paramId)) {
@@ -115,7 +115,7 @@ router.get('/:id/students', authMiddleware, PLAN, rbac('students', 'read'), asyn
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
 
-    const Streams  = _model('streams');
+    const Streams  = tenantModel('streams', tenantContext(req));
     const paramId  = req.params.id;
     let stream = await Streams.findOne({ id: paramId, schoolId }).lean();
     if (!stream && /^[a-f\d]{24}$/i.test(paramId)) {
@@ -123,7 +123,7 @@ router.get('/:id/students', authMiddleware, PLAN, rbac('students', 'read'), asyn
     }
     if (!stream) return E.notFound(res, 'Stream not found');
 
-    const Students = _model('students');
+    const Students = tenantModel('students', tenantContext(req));
     // Match students stored under ANY identifier form of this stream —
     // UUID `id` or Mongo `_id` string (pre-migration / imported records)
     const streamIdForms = [...new Set([stream.id, String(stream._id), req.params.id].filter(Boolean))];
@@ -150,7 +150,7 @@ router.post('/', authMiddleware, PLAN, rbac('classes', 'create'), async (req, re
     if (error) return E.validation(res, error);
 
     // Verify parent class belongs to this school (UUID id field, then _id fallback)
-    const Classes = _model('classes');
+    const Classes = tenantModel('classes', tenantContext(req));
     let cls = await Classes.findOne({ id: data.classId, schoolId }).lean();
     if (!cls && /^[a-f\d]{24}$/i.test(data.classId)) {
       try { cls = await Classes.findOne({ _id: new mongoose.Types.ObjectId(data.classId), schoolId }).lean(); } catch { /* ignore */ }
@@ -161,7 +161,7 @@ router.post('/', authMiddleware, PLAN, rbac('classes', 'create'), async (req, re
     const resolvedClassId = cls.id || cls._id?.toString();
 
     // Prevent duplicate stream name within the same class
-    const Streams = _model('streams');
+    const Streams = tenantModel('streams', tenantContext(req));
     const dup = await Streams.findOne({ classId: resolvedClassId, schoolId, name: data.name }).lean();
     if (dup) return E.conflict(res, `Stream '${data.name}' already exists in this class`);
 
@@ -201,7 +201,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('classes', 'update'), async (req, 
       : { id: paramId, schoolId };
 
     const { doc, conflict } = await applyOptimisticLock(
-      _model('streams'),
+      tenantModel('streams', tenantContext(req)),
       putFilter,
       { ...data, updatedBy: userId },
       clientVersion
@@ -222,13 +222,13 @@ router.delete('/:id', authMiddleware, PLAN, rbac('classes', 'delete'), async (re
     const { schoolId, userId } = req.jwtUser;
 
     // Block if stream has active students
-    const Students    = _model('students');
+    const Students    = tenantModel('students', tenantContext(req));
     const activeCount = await Students.countDocuments({ streamId: req.params.id, schoolId, status: 'active' });
     if (activeCount > 0) {
       return E.conflict(res, `Cannot delete stream with ${activeCount} active student${activeCount !== 1 ? 's' : ''}. Reassign students first.`);
     }
 
-    const Streams  = _model('streams');
+    const Streams  = tenantModel('streams', tenantContext(req));
     const paramId  = req.params.id;
     const isOid    = /^[a-f\d]{24}$/i.test(paramId);
     const delFilter = isOid

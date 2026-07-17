@@ -10,7 +10,7 @@ const { v4: uuidv4 } = require('uuid');
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
 
@@ -47,7 +47,7 @@ router.get('/', authMiddleware, PLAN, rbac('classes', 'read'), async (req, res) 
       filter.$or = [{ name: rx }, { description: rx }];
     }
 
-    const Classes = _model('classes');
+    const Classes = tenantModel('classes', tenantContext(req));
     const [docs, total] = await Promise.all([
       Classes.find(filter).sort({ name: 1 }).skip(skip).limit(limit).select('-__v').lean(),
       Classes.countDocuments(filter),
@@ -59,8 +59,8 @@ router.get('/', authMiddleware, PLAN, rbac('classes', 'read'), async (req, res) 
 
     // Enrich with stream count + total student count per class
     const classIds = normalised.map(d => d.id).filter(Boolean);
-    const Streams  = _model('streams');
-    const Students = _model('students');
+    const Streams  = tenantModel('streams', tenantContext(req));
+    const Students = tenantModel('students', tenantContext(req));
 
     const [streamCounts, studentCounts] = await Promise.all([
       Streams.aggregate([
@@ -95,7 +95,7 @@ router.get('/', authMiddleware, PLAN, rbac('classes', 'read'), async (req, res) 
 router.get('/:id', authMiddleware, PLAN, rbac('classes', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const Classes = _model('classes');
+    const Classes = tenantModel('classes', tenantContext(req));
     const paramId = req.params.id;
 
     // Primary lookup by custom UUID id field
@@ -125,7 +125,7 @@ router.get('/:id/students', authMiddleware, PLAN, rbac('students', 'read'), asyn
     const { page, limit, skip } = parsePagination(req.query);
 
     // Verify the class belongs to this school (try custom id, then _id fallback)
-    const Classes = _model('classes');
+    const Classes = tenantModel('classes', tenantContext(req));
     const pId     = req.params.id;
     let cls       = await Classes.findOne({ id: pId, schoolId }).lean();
     if (!cls && /^[a-f\d]{24}$/i.test(pId)) {
@@ -133,7 +133,7 @@ router.get('/:id/students', authMiddleware, PLAN, rbac('students', 'read'), asyn
     }
     if (!cls) return E.notFound(res, 'Class not found');
 
-    const Students = _model('students');
+    const Students = tenantModel('students', tenantContext(req));
     // Match students stored under ANY identifier form of this class —
     // UUID `id` or Mongo `_id` string (pre-migration / imported records)
     const classIdForms = [...new Set([cls.id, String(cls._id), req.params.id].filter(Boolean))];
@@ -159,7 +159,7 @@ router.post('/', authMiddleware, PLAN, rbac('classes', 'create'), async (req, re
     const { data, error } = _validate(ClassSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const Classes = _model('classes');
+    const Classes = tenantModel('classes', tenantContext(req));
     const dup = await Classes.findOne({ schoolId, name: data.name }).lean();
     if (dup) return E.conflict(res, `A class named '${data.name}' already exists`);
 
@@ -188,7 +188,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('classes', 'update'), async (req, 
       : { id: paramId, schoolId };
 
     const { doc, conflict } = await applyOptimisticLock(
-      _model('classes'),
+      tenantModel('classes', tenantContext(req)),
       putFilter,
       { ...data, updatedBy: userId },
       clientVersion
@@ -215,13 +215,13 @@ router.delete('/:id', authMiddleware, PLAN, rbac('classes', 'delete'), async (re
       : { id: paramId, schoolId };
 
     // Block if class still has active streams
-    const Streams     = _model('streams');
+    const Streams     = tenantModel('streams', tenantContext(req));
     const streamCount = await Streams.countDocuments({ classId: paramId, schoolId, status: 'active' });
     if (streamCount > 0) {
       return E.conflict(res, `Cannot delete class with ${streamCount} active stream${streamCount !== 1 ? 's' : ''}. Remove all streams first.`);
     }
 
-    const Classes = _model('classes');
+    const Classes = tenantModel('classes', tenantContext(req));
     const doc = await Classes.findOneAndUpdate(
       delFilter,
       { status: 'inactive', deletedAt: new Date().toISOString(), deletedBy: userId },

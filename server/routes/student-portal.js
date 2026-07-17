@@ -11,6 +11,7 @@
 const express            = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, E }          = require('../utils/response');
 
 const router = express.Router();
@@ -37,21 +38,21 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
   try {
     const { schoolId, studentId } = req.jwtUser;
 
-    const Students      = _model('students');
-    const Attendance    = _model('attendance');
-    const FeeInvoices   = _model('invoices');
-    const Reports       = _model('report_card_snapshots');
-    const Coverage      = _model('lesson_coverage');
-    const Topics        = _model('syllabus_topics');
-    const Timetable     = _model('timetable_slots');
-    const Subjects      = _model('subjects');
+    const Students      = tenantModel('students', tenantContext(req));
+    const Attendance    = tenantModel('attendance', tenantContext(req));
+    const FeeInvoices   = tenantModel('invoices', tenantContext(req));
+    const Reports       = tenantModel('report_card_snapshots', tenantContext(req));
+    const Coverage      = tenantModel('lesson_coverage', tenantContext(req));
+    const Topics        = tenantModel('syllabus_topics', tenantContext(req));
+    const Timetable     = tenantModel('timetable_slots', tenantContext(req));
+    const Subjects      = tenantModel('subjects', tenantContext(req));
     const Schools       = _model('schools');
-    const Behaviour     = _model('behaviour');
-    const Exams         = _model('exams');
-    const Announcements = _model('announcements');
-    const Events        = _model('events');
-    const Classes       = _model('classes');
-    const Teachers      = _model('teachers');
+    const Behaviour     = tenantModel('behaviour', tenantContext(req));
+    const Exams         = tenantModel('exams', tenantContext(req));
+    const Announcements = tenantModel('announcements', tenantContext(req));
+    const Events        = tenantModel('events', tenantContext(req));
+    const Classes       = tenantModel('classes', tenantContext(req));
+    const Teachers      = tenantModel('teachers', tenantContext(req));
 
     const todayISO = new Date().toISOString().slice(0, 10);
 
@@ -132,7 +133,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       // Collect unique teacherIds present in today's slots
       const teacherIds = [...new Set(rawSlots.map(s => s.teacherId).filter(Boolean))];
       if (teacherIds.length > 0) {
-        const Teachers = _model('teachers');
+        const Teachers = tenantModel('teachers', tenantContext(req));
         const teacherDocs = await Teachers.find({
           schoolId,
           $or: [{ id: { $in: teacherIds } }, { userId: { $in: teacherIds } }],
@@ -260,7 +261,7 @@ router.get('/me', authMiddleware, async (req, res) => {
   if (!_requireStudent(req, res)) return;
   try {
     const { schoolId, studentId } = req.jwtUser;
-    const Students = _model('students');
+    const Students = tenantModel('students', tenantContext(req));
     const student  = await Students.findOne({ id: studentId, schoolId }).lean();
     if (!student) return E.notFound(res, 'Student record not found.');
     const { __v, _id, ...safe } = student;

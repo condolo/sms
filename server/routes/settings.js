@@ -17,6 +17,7 @@ const crypto   = require('crypto');
 const nodemailer = require('nodemailer');
 const { authMiddleware }    = require('../middleware/auth');
 const { _model }            = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { revokeUserTokens }  = require('../utils/token-version');
 const emailUtil             = require('../utils/email');
 const { encrypt, smtpEncryptReady } = require('../utils/smtpEncrypt');
@@ -103,7 +104,7 @@ router.get('/modules', authMiddleware, (req, res) => {
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const { userId, schoolId } = req.jwtUser;
-    const Users = _model('users');
+    const Users = tenantModel('users', tenantContext(req));
     const isOid = /^[a-f\d]{24}$/i.test(userId);
     const filter = isOid
       ? { $or: [{ id: userId }, { _id: new mongoose.Types.ObjectId(userId) }], schoolId }
@@ -122,7 +123,7 @@ router.get('/', authMiddleware, async (req, res) => {
 /* PUT /api/settings — update display name or change password */
 router.put('/', authMiddleware, async (req, res) => {
   try {
-    const Users = _model('users');
+    const Users = tenantModel('users', tenantContext(req));
     const { name, currentPassword, newPassword } = req.body;
 
     /* ── Password change ── */
@@ -248,7 +249,7 @@ router.put('/school', authMiddleware, rbac('settings', 'update'), async (req, re
           const permFields = Object.fromEntries(
             Object.entries(derived).map(([mod, actions]) => [`permissions.${mod}`, actions])
           );
-          syncOps.push(_model('role_permissions').updateOne(
+          syncOps.push(tenantModel('role_permissions', tenantContext(req)).updateOne(
             { schoolId: req.jwtUser.schoolId, roleKey },
             { $set: { ...permFields, updatedAt: new Date().toISOString() } },
             { upsert: true }
@@ -274,7 +275,7 @@ router.put('/school', authMiddleware, rbac('settings', 'update'), async (req, re
           const permFields = Object.fromEntries(
             Object.entries(derived).map(([mod, actions]) => [`permissions.${mod}`, actions])
           );
-          userOps.push(_model('role_permissions').updateOne(
+          userOps.push(tenantModel('role_permissions', tenantContext(req)).updateOne(
             { schoolId: req.jwtUser.schoolId, userId },
             { $set: { ...permFields, updatedAt: new Date().toISOString() } },
             { upsert: true }
@@ -423,7 +424,7 @@ router.delete('/school/login-bg', authMiddleware, rbac('settings', 'update'), as
 /* GET /api/settings/users — list users in this school (admin only) */
 router.get('/users', authMiddleware, rbac('settings', 'read'), async (req, res) => {
   try {
-    const Users = _model('users');
+    const Users = tenantModel('users', tenantContext(req));
     const users = await Users.find(
       { schoolId: req.jwtUser.schoolId, isActive: { $ne: false } },
       { password: 0, passwordHash: 0 }   // exclude both field names
@@ -453,7 +454,7 @@ router.post('/users/invite', authMiddleware, rbac('settings', 'create'), async (
     ]);
     if (!BUILTIN_INVITE_ROLES.has(role)) {
       // Allow any custom role belonging to this school
-      const customRole = await _model('custom_roles').findOne({ schoolId: req.jwtUser.schoolId, key: role }).lean();
+      const customRole = await tenantModel('custom_roles', tenantContext(req)).findOne({ schoolId: req.jwtUser.schoolId, key: role }).lean();
       if (!customRole) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Invalid role '${role}'.` } });
       }
@@ -463,7 +464,7 @@ router.post('/users/invite', authMiddleware, rbac('settings', 'create'), async (
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Only superadmin can invite admin users.' } });
     }
 
-    const Users = _model('users');
+    const Users = tenantModel('users', tenantContext(req));
     const existing = await Users.findOne({ schoolId: req.jwtUser.schoolId, email: userEmail.toLowerCase().trim() }).lean();
     if (existing) {
       return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: 'A user with this email already exists in this school.' } });
@@ -473,7 +474,7 @@ router.post('/users/invite', authMiddleware, rbac('settings', 'create'), async (
     // from the HR "Create Login Account" flow (which passes staffId to signal it's
     // an intentional account creation for a known staff member).
     if (!staffId) {
-      const existingTeacher = await _model('teachers').findOne({ schoolId: req.jwtUser.schoolId, email: userEmail.toLowerCase().trim() }).lean();
+      const existingTeacher = await tenantModel('teachers', tenantContext(req)).findOne({ schoolId: req.jwtUser.schoolId, email: userEmail.toLowerCase().trim() }).lean();
       if (existingTeacher) {
         const tName = [existingTeacher.firstName, existingTeacher.lastName].filter(Boolean).join(' ');
         return res.status(409).json({
@@ -543,7 +544,7 @@ router.post('/users/bulk-invite', authMiddleware, rbac('settings', 'create'), as
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Maximum 100 staff per batch.' } });
     }
 
-    const Users   = _model('users');
+    const Users   = tenantModel('users', tenantContext(req));
     const Schools = _model('schools');
     const school  = await Schools.findOne({ id: schoolId }).lean();
     const now     = new Date().toISOString();
@@ -610,7 +611,7 @@ router.put('/users/:id', authMiddleware, rbac('settings', 'update'), async (req,
         'discipline_committee', 'parent', 'guardian', 'student',
       ];
       if (!BUILTIN_UPDATE_ROLES.includes(role)) {
-        const customRole = await _model('custom_roles').findOne({ schoolId: req.jwtUser.schoolId, key: role }).lean();
+        const customRole = await tenantModel('custom_roles', tenantContext(req)).findOne({ schoolId: req.jwtUser.schoolId, key: role }).lean();
         if (!customRole) {
           return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Invalid role.` } });
         }
@@ -626,7 +627,7 @@ router.put('/users/:id', authMiddleware, rbac('settings', 'update'), async (req,
       if (sectionAssigned === null || sectionAssigned === '') {
         update.sectionAssigned = null;
       } else if (typeof sectionAssigned === 'string' && sectionAssigned.length <= 50) {
-        const Sections = _model('sections');
+        const Sections = tenantModel('sections', tenantContext(req));
         const exists = await Sections.findOne(
           { schoolId: req.jwtUser.schoolId, key: sectionAssigned },
           { _id: 1 }
@@ -641,7 +642,7 @@ router.put('/users/:id', authMiddleware, rbac('settings', 'update'), async (req,
       update.guardianOf = guardianOf.filter(id => typeof id === 'string');
     }
 
-    const Users  = _model('users');
+    const Users  = tenantModel('users', tenantContext(req));
     const isOidPut = /^[0-9a-f]{24}$/i.test(req.params.id);
     const putFilter = isOidPut
       ? { schoolId: req.jwtUser.schoolId, $or: [{ id: req.params.id }, { _id: req.params.id }] }
@@ -657,7 +658,7 @@ router.put('/users/:id', authMiddleware, rbac('settings', 'update'), async (req,
       try {
         const changedUser = await Users.findOne(putFilter, { id: 1, email: 1 }).lean();
         if (changedUser) {
-          await _model('teachers').updateOne(
+          await tenantModel('teachers', tenantContext(req)).updateOne(
             { schoolId: req.jwtUser.schoolId, $or: [{ userId: changedUser.id }, { email: changedUser.email }] },
             { $set: { staffType: role, updatedAt: new Date().toISOString() } }
           );
@@ -685,7 +686,7 @@ router.delete('/users/:id', authMiddleware, rbac('settings', 'delete'), async (r
     if (req.params.id === req.jwtUser.userId) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'You cannot remove your own account.' } });
     }
-    const Users  = _model('users');
+    const Users  = tenantModel('users', tenantContext(req));
     // Support both custom id field and MongoDB _id so accounts created
     // outside the normal invite flow (seed scripts, direct DB writes) can
     // still be removed through the UI.
@@ -708,7 +709,7 @@ router.delete('/users/:id', authMiddleware, rbac('settings', 'delete'), async (r
 
     // Cascade: deactivate linked teacher record so they stop appearing in timetable/assignments
     try {
-      await _model('teachers').updateOne(
+      await tenantModel('teachers', tenantContext(req)).updateOne(
         { schoolId: req.jwtUser.schoolId, $or: [{ userId: targetUser.id }, { email: targetUser.email }] },
         { $set: { status: 'inactive', updatedAt: new Date().toISOString() } }
       );
@@ -748,7 +749,7 @@ router.post('/users/:id/reset-password', authMiddleware, rbac('settings', 'updat
   }
 
   try {
-    const User   = _model('users');
+    const User   = tenantModel('users', tenantContext(req));
     const School = _model('schools');
 
     /* Support both custom `id` field and MongoDB `_id` (for users created
@@ -1036,7 +1037,7 @@ const BUILT_IN_ROLE_KEYS = new Set([
 
 router.get('/custom-roles', authMiddleware, rbac('settings', 'read'), async (req, res) => {
   try {
-    const roles = await _model('custom_roles').find({ schoolId: req.jwtUser.schoolId }).sort({ createdAt: 1 }).lean();
+    const roles = await tenantModel('custom_roles', tenantContext(req)).find({ schoolId: req.jwtUser.schoolId }).sort({ createdAt: 1 }).lean();
     res.json({ success: true, data: roles });
   } catch (err) {
     console.error('[settings] GET /custom-roles:', err);
@@ -1058,12 +1059,12 @@ router.post('/custom-roles', authMiddleware, rbac('settings', 'create'), async (
     }
 
     const { schoolId, userId } = req.jwtUser;
-    const CustomRoles = _model('custom_roles');
+    const CustomRoles = tenantModel('custom_roles', tenantContext(req));
     const existing = await CustomRoles.findOne({ schoolId, key }).lean();
     if (existing) return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: `A role with key '${key}' already exists.` } });
 
     // Copy API-level permissions from baseRole's role_permissions doc
-    const RolePerms = _model('role_permissions');
+    const RolePerms = tenantModel('role_permissions', tenantContext(req));
     const baseDoc   = await RolePerms.findOne({ schoolId, roleKey: baseRole }).lean();
     const basePerms = baseDoc?.permissions ?? {};
 
@@ -1100,7 +1101,7 @@ router.put('/custom-roles/:key', authMiddleware, rbac('settings', 'update'), asy
     if (label?.trim()) patch.label = label.trim();
     if (color)         patch.color = color;
 
-    const doc = await _model('custom_roles').findOneAndUpdate(
+    const doc = await tenantModel('custom_roles', tenantContext(req)).findOneAndUpdate(
       { schoolId, key },
       { $set: patch },
       { new: true }
@@ -1119,12 +1120,12 @@ router.delete('/custom-roles/:key', authMiddleware, rbac('settings', 'delete'), 
     const { key } = req.params;
     const { schoolId } = req.jwtUser;
 
-    const CustomRoles = _model('custom_roles');
+    const CustomRoles = tenantModel('custom_roles', tenantContext(req));
     const deleted = await CustomRoles.findOneAndDelete({ schoolId, key });
     if (!deleted) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Custom role not found.' } });
 
     // Remove role_permissions doc
-    await _model('role_permissions').deleteOne({ schoolId, roleKey: key });
+    await tenantModel('role_permissions', tenantContext(req)).deleteOne({ schoolId, roleKey: key });
 
     // Strip the role's column from school.modulePermissions.byRole
     await _model('schools').updateOne(

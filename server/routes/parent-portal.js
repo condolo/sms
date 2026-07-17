@@ -11,6 +11,7 @@
 const express            = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, E }          = require('../utils/response');
 
 const router = express.Router();
@@ -40,10 +41,10 @@ router.get('/family-summary', authMiddleware, async (req, res) => {
       return ok(res, { childrenCount: 0, totalBalance: 0, presentToday: 0, upcomingEvents: 0, unreadMessages: 0 });
     }
 
-    const FeeInvoices = _model('invoices');
-    const Attendance  = _model('attendance');
-    const Messages    = _model('messages');
-    const Events      = _model('events');
+    const FeeInvoices = tenantModel('invoices', tenantContext(req));
+    const Attendance  = tenantModel('attendance', tenantContext(req));
+    const Messages    = tenantModel('messages', tenantContext(req));
+    const Events      = tenantModel('events', tenantContext(req));
 
     const [invoices, todayAtt, unreadMsgs, eventCount] = await Promise.all([
       FeeInvoices.find({ schoolId, studentId: { $in: ids }, balance: { $gt: 0 } })
@@ -82,7 +83,7 @@ router.get('/children', authMiddleware, async (req, res) => {
     const { schoolId, studentIds = [], guardianOf = [] } = req.jwtUser;
     const ids = [...new Set([...studentIds, ...guardianOf])];
 
-    const Students = _model('students');
+    const Students = tenantModel('students', tenantContext(req));
     const children = await Students.find({ id: { $in: ids }, schoolId })
       .select('id firstName lastName admissionNumber classId className photo status')
       .lean();
@@ -118,22 +119,22 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
       return E.forbidden(res, 'You do not have access to this student\'s records.');
     }
 
-    const Students      = _model('students');
-    const Attendance    = _model('attendance');
-    const FeeInvoices   = _model('invoices');
-    const FeePayments   = _model('payments');
-    const Reports       = _model('report_card_snapshots');
-    const Coverage      = _model('lesson_coverage');
-    const Topics        = _model('syllabus_topics');
-    const Subjects      = _model('subjects');
+    const Students      = tenantModel('students', tenantContext(req));
+    const Attendance    = tenantModel('attendance', tenantContext(req));
+    const FeeInvoices   = tenantModel('invoices', tenantContext(req));
+    const FeePayments   = tenantModel('payments', tenantContext(req));
+    const Reports       = tenantModel('report_card_snapshots', tenantContext(req));
+    const Coverage      = tenantModel('lesson_coverage', tenantContext(req));
+    const Topics        = tenantModel('syllabus_topics', tenantContext(req));
+    const Subjects      = tenantModel('subjects', tenantContext(req));
     const Schools       = _model('schools');
-    const Behaviour     = _model('behaviour');
-    const Exams         = _model('exams');
-    const Announcements = _model('announcements');
-    const Events        = _model('events');
-    const Classes       = _model('classes');
-    const Teachers      = _model('teachers');
-    const Timetable     = _model('timetable_slots');
+    const Behaviour     = tenantModel('behaviour', tenantContext(req));
+    const Exams         = tenantModel('exams', tenantContext(req));
+    const Announcements = tenantModel('announcements', tenantContext(req));
+    const Events        = tenantModel('events', tenantContext(req));
+    const Classes       = tenantModel('classes', tenantContext(req));
+    const Teachers      = tenantModel('teachers', tenantContext(req));
+    const Timetable     = tenantModel('timetable_slots', tenantContext(req));
 
     const todayISO = new Date().toISOString().slice(0, 10);
     const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
