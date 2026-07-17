@@ -5,7 +5,6 @@
    Notification emails sent to recipients on every new message.
    ============================================================ */
 const express        = require('express');
-const mongoose       = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
 const { authMiddleware }   = require('../middleware/auth');
 const { tenantMiddleware } = require('../middleware/tenant');
@@ -13,19 +12,12 @@ const { rbac }             = require('../middleware/rbac');
 const email = require('../utils/email');
 const notif = require('../utils/notif-settings');
 const { enqueueBatch } = require('../utils/email-queue');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 
 const router = express.Router();
 router.use(authMiddleware, tenantMiddleware);
 
 const APP_URL = process.env.APP_URL || 'https://msingi.io';
-
-function _model(col) {
-  const name = col.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
-                  .replace(/^./, c => c.toUpperCase()) + 'Doc';
-  if (mongoose.models[name]) return mongoose.models[name];
-  const schema = new mongoose.Schema({}, { strict: false, timestamps: true });
-  return mongoose.model(name, schema, col);
-}
 
 /* ── Role → recipient group mapping ─────────────────────── */
 const ROLE_GROUPS = {
@@ -42,7 +34,7 @@ router.get('/', rbac('messages', 'read'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const { tab = 'inbox', page = 1, limit = 50 } = req.query;
-    const Msg = _model('messages');
+    const Msg = tenantModel('messages', tenantContext(req));
 
     let query;
     if (tab === 'sent') {
@@ -74,7 +66,7 @@ router.get('/', rbac('messages', 'read'), async (req, res) => {
     // Enrich senderName for legacy messages that were stored without it
     const missingNameIds = [...new Set(msgs.filter(m => !m.senderName && m.senderId).map(m => m.senderId))];
     if (missingNameIds.length) {
-      const User = _model('users');
+      const User = tenantModel('users', tenantContext(req));
       const users = await User.find({ id: { $in: missingNameIds }, schoolId }).select('id name').lean();
       const nameMap = Object.fromEntries(users.map(u => [u.id, u.name]));
       msgs.forEach(m => { if (!m.senderName && m.senderId) m.senderName = nameMap[m.senderId] ?? null; });
@@ -108,8 +100,8 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
       return res.status(403).json({ error: 'Only staff members may send school-wide announcements.' });
     }
 
-    const Msg  = _model('messages');
-    const User = _model('users');
+    const Msg  = tenantModel('messages', tenantContext(req));
+    const User = tenantModel('users', tenantContext(req));
 
     const msg = await Msg.create({
       id:         uuidv4(),
@@ -218,7 +210,7 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
 router.patch('/:id/read', rbac('messages', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const Msg = _model('messages');
+    const Msg = tenantModel('messages', tenantContext(req));
     const msg = await Msg.findOneAndUpdate(
       { id: req.params.id, schoolId },
       { $set: { [`isRead.${userId}`]: true } },
@@ -233,7 +225,7 @@ router.patch('/:id/read', rbac('messages', 'update'), async (req, res) => {
 router.delete('/:id', rbac('messages', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
-    const Msg = _model('messages');
+    const Msg = tenantModel('messages', tenantContext(req));
     const msg = await Msg.findOne({ id: req.params.id, schoolId }).lean();
     if (!msg) return res.status(404).json({ error: 'Message not found' });
 

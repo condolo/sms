@@ -11,6 +11,7 @@ const rateLimit  = require('express-rate-limit');
 const { MODULE_KEYS } = require('../config/moduleRegistry');
 const { sign }   = require('../utils/jwt');
 const email      = require('../utils/email');
+const { tenantModel } = require('../utils/tenant-model');
 
 const router = express.Router();
 
@@ -190,6 +191,10 @@ async function _provisionInDB(data, res) {
           curriculum, sections } = data;
 
   const School = _model('schools');
+  // Bootstrap-only handle: this lookup checks email uniqueness ACROSS ALL
+  // schools, before a schoolId exists for this registration — it cannot
+  // itself be tenant-scoped. tenantModel() is used below once schoolId is
+  // generated.
   const User   = _model('users');
 
   /* Check slug uniqueness */
@@ -247,7 +252,7 @@ async function _provisionInDB(data, res) {
      tempPassword stored in plaintext so approval email can include it,
      then cleared after approval is sent. mustChangePassword forces reset on first login. */
   const hashed = await bcrypt.hash(tempPassword, 12);
-  const user   = await User.create({
+  const user   = await tenantModel('users', { schoolId }).create({
     id: userId, schoolId, name: adminName || adminEmail.split('@')[0],
     email: adminEmail.toLowerCase(), password: hashed,
     role: 'superadmin', primaryRole: 'superadmin', roles: ['superadmin'],
@@ -415,9 +420,9 @@ function _buildAcademicYear(schoolId, country) {
 
 /* ── Seed base data — only the sections the school selected ─ */
 async function _seedBaseData(schoolId, selectedSections = ['primary','secondary'], country = '') {
-  const AY   = _model('academic_years');
-  const Perm = _model('role_permissions');
-  const Sec  = _model('sections');
+  const AY   = tenantModel('academic_years', { schoolId });
+  const Perm = tenantModel('role_permissions', { schoolId });
+  const Sec  = tenantModel('sections', { schoolId });
 
   const { ayId, name, startDate, endDate, terms } = _buildAcademicYear(schoolId, country);
 

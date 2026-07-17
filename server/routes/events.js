@@ -3,29 +3,21 @@
    /api/events — School events, calendar entries
    ============================================================ */
 const express        = require('express');
-const mongoose       = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
 const { authMiddleware }   = require('../middleware/auth');
 const { tenantMiddleware } = require('../middleware/tenant');
 const { rbac }             = require('../middleware/rbac');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 
 const router = express.Router();
 router.use(authMiddleware, tenantMiddleware);
-
-function _model(col) {
-  const name = col.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
-                  .replace(/^./, c => c.toUpperCase()) + 'Doc';
-  if (mongoose.models[name]) return mongoose.models[name];
-  const schema = new mongoose.Schema({}, { strict: false, timestamps: true });
-  return mongoose.model(name, schema, col);
-}
 
 /* GET /api/events — list events for this school */
 router.get('/', rbac('events', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { from, to, type, category } = req.query;
-    const Event = _model('events');
+    const Event = tenantModel('events', tenantContext(req));
 
     const filter = { schoolId };
     if (type)     filter.type = type;
@@ -51,8 +43,8 @@ router.get('/birthdays', rbac('events', 'read'), async (req, res) => {
     const monthStr = String(month).padStart(2, '0');
     const pattern  = new RegExp(`^\\d{4}-${monthStr}-`);
 
-    const Student = _model('students');
-    const Teacher = _model('teachers');
+    const Student = tenantModel('students', tenantContext(req));
+    const Teacher = tenantModel('teachers', tenantContext(req));
 
     const [students, teachers] = await Promise.all([
       Student.find({ schoolId, dateOfBirth: { $regex: pattern } }).lean(),
@@ -90,7 +82,7 @@ router.get('/birthdays', rbac('events', 'read'), async (req, res) => {
 router.get('/:id', rbac('events', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const event = await _model('events').findOne({ id: req.params.id, schoolId }).lean();
+    const event = await tenantModel('events', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!event) return res.status(404).json({ error: 'Event not found' });
     res.json({ event });
   } catch (err) {
@@ -106,7 +98,7 @@ router.post('/', rbac('events', 'create'), async (req, res) => {
             meetingLink, meetingPasscode, platform } = req.body;
     if (!title || !startDate) return res.status(400).json({ error: 'title and startDate are required' });
 
-    const event = await _model('events').create({
+    const event = await tenantModel('events', tenantContext(req)).create({
       id: `evt_${uuidv4().slice(0, 8)}`,
       schoolId, title, description, location,
       startDate, endDate: endDate || startDate,
@@ -131,7 +123,7 @@ router.post('/', rbac('events', 'create'), async (req, res) => {
 router.put('/:id', rbac('events', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const event = await _model('events').findOneAndUpdate(
+    const event = await tenantModel('events', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { $set: { ...req.body, updatedAt: new Date().toISOString() } },
       { new: true }
@@ -147,7 +139,7 @@ router.put('/:id', rbac('events', 'update'), async (req, res) => {
 router.delete('/:id', rbac('events', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const result = await _model('events').deleteOne({ id: req.params.id, schoolId });
+    const result = await tenantModel('events', tenantContext(req)).deleteOne({ id: req.params.id, schoolId });
     if (!result.deletedCount) return res.status(404).json({ error: 'Event not found' });
     res.json({ success: true });
   } catch (err) {
