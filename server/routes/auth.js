@@ -4,6 +4,7 @@ const crypto     = require('crypto');
 const mongoose   = require('mongoose');
 const { sign, verify } = require('../utils/jwt');
 const { _model } = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { tenantMiddleware } = require('../middleware/tenant');
 const { authMiddleware }   = require('../middleware/auth');
 const rateLimit  = require('express-rate-limit');
@@ -181,7 +182,7 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
       });
     }
 
-    const User   = _model('users');
+    const User   = tenantModel('users', { schoolId: req.school.id });
     const School = _model('schools');
 
     // Find user regardless of isActive so we can give a clear pending message
@@ -273,7 +274,7 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
       const otp      = _genOTP();
       const otpHash  = _hashOTP(otp);          // store hash, not plaintext
       const expiry   = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 min
-      await _model('users').updateOne({ _id: user._id }, { mfaOtp: otpHash, mfaExpiry: expiry });
+      await tenantModel('users', { schoolId: req.school.id }).updateOne({ _id: user._id }, { mfaOtp: otpHash, mfaExpiry: expiry });
 
       // Send OTP email with plaintext code (non-blocking — log if it fails)
       email.sendLoginOTP({
@@ -295,7 +296,7 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
     }
 
     // Update last login
-    await _model('users').updateOne({ _id: user._id }, { lastLogin: new Date().toISOString() });
+    await tenantModel('users', { schoolId: req.school.id }).updateOne({ _id: user._id }, { lastLogin: new Date().toISOString() });
 
     AuditService.log({ action: 'auth.login', actor: { userId: user.id, role: userRole, email: user.email }, schoolId: req.school.id, req });
 
@@ -343,7 +344,7 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
     const { userId, otp } = req.body;
     if (!userId || !otp) return res.status(400).json({ error: 'userId and otp required' });
 
-    const User  = _model('users');
+    const User  = tenantModel('users', { schoolId: req.school.id });
     const isOid = /^[0-9a-f]{24}$/i.test(userId);
     const userQ  = isOid
       ? { $or: [{ id: userId }, { _id: new mongoose.Types.ObjectId(userId) }], schoolId: req.school.id }
@@ -405,7 +406,7 @@ async function _loadMergedPermissions(schoolId, roles, userId = null) {
   // Normalise aliases
   const keys = [...new Set(roles.map(r => r === 'deputy' ? 'deputy_principal' : r))];
 
-  const RolePerms = _model('role_permissions');
+  const RolePerms = tenantModel('role_permissions', { schoolId });
   const docs = await RolePerms.find({ schoolId, roleKey: { $in: keys } }).lean();
 
   // Union of actions per module across all roles — most permissive wins
@@ -493,8 +494,8 @@ router.post('/force-change', forceChangeLimiter, tenantMiddleware, async (req, r
     if (!userId || !newPassword) return res.status(400).json({ error: 'userId and newPassword required' });
     if (newPassword.length < 8)  return res.status(400).json({ error: 'Password must be at least 8 characters' });
 
-    const User = _model('users');
     const sid  = schoolId || req.school?.id;
+    const User = tenantModel('users', { schoolId: sid });
 
     /* Support users with custom `id` field AND users that only have MongoDB _id */
     const isOid     = /^[0-9a-f]{24}$/i.test(userId);
@@ -759,7 +760,7 @@ router.get('/google/callback', async (req, res) => {
     }
 
     // Find or create user
-    const User = _model('users');
+    const User = tenantModel('users', { schoolId: school.id });
     let user = await User.findOne({ email: email.toLowerCase(), schoolId: school.id }).lean();
 
     if (!user) {
@@ -875,7 +876,7 @@ router.get('/microsoft/callback', async (req, res) => {
       : null;
     if (!school) return res.redirect(`${publicUrl}/login?error=school_not_found`);
 
-    const User = _model('users');
+    const User = tenantModel('users', { schoolId: school.id });
     let user = await User.findOne({ email, schoolId: school.id }).lean();
 
     if (!user) {
@@ -914,7 +915,7 @@ router.get('/microsoft/callback', async (req, res) => {
 /* GET /api/auth/me — verify token + return current user */
 router.get('/me', authMiddleware, async (req, res) => {
   try {
-    const User = _model('users');
+    const User = tenantModel('users', tenantContext(req));
     const user = await User.findOne({ id: req.jwtUser.userId, schoolId: req.jwtUser.schoolId }).lean();
     if (!user) return res.status(404).json({ error: 'User not found' });
 
@@ -934,7 +935,7 @@ router.post('/change-password', authMiddleware, async (req, res) => {
     if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Both passwords required' });
     if (newPassword.length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters' });
 
-    const User = _model('users');
+    const User = tenantModel('users', tenantContext(req));
     const user = await User.findOne({ id: req.jwtUser.userId, schoolId: req.jwtUser.schoolId }).lean();
     if (!user) return res.status(404).json({ error: 'User not found' });
 
@@ -1007,8 +1008,10 @@ router.post('/exchange', exchangeLimiter, async (req, res) => {
     }
 
     // Build the full session response — mirrors GET /api/auth/me
-    const User    = _model('users');
-    const Photos  = _model('user_photos');
+    // payload.schoolId comes from a cryptographically verified JWT (verify()
+    // above), so it's an equally valid tenant context even without req.jwtUser.
+    const User    = tenantModel('users', { schoolId: payload.schoolId });
+    const Photos  = tenantModel('user_photos', { schoolId: payload.schoolId });
     const Schools = _model('schools');
 
     const [user, photo, school] = await Promise.all([
