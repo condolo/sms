@@ -31,6 +31,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { rankStudents, mergeRankings, bestPerSubject, computeRankingScore } = require('../utils/ranking');
 const { mergeConfig }    = require('./academic-config');
@@ -52,7 +53,7 @@ const PLAN   = planGate('grades');
 
 /* ── Config loader (legacy academic_config) ─────────────────── */
 async function _loadConfig(schoolId) {
-  const saved = await _model('academic_config').findOne({ schoolId }).lean();
+  const saved = await tenantModel('academic_config', { schoolId }).findOne({ schoolId }).lean();
   return mergeConfig(saved);
 }
 
@@ -61,7 +62,7 @@ async function _nextReportId(schoolId, termNumber, academicYear) {
   const year = academicYear ? String(academicYear).slice(0, 4) : String(new Date().getFullYear());
   const tn   = String(termNumber || 1).padStart(1, '0');
   const key  = `rc_${schoolId}_${year}_${tn}`;
-  const ctr  = await _model('report_card_counters').findOneAndUpdate(
+  const ctr  = await tenantModel('report_card_counters', { schoolId }).findOneAndUpdate(
     { key },
     { $inc: { seq: 1 }, $setOnInsert: { schoolId, year, termNumber: tn } },
     { upsert: true, new: true }
@@ -100,7 +101,7 @@ function _hashSnapshot(snap) {
 async function _loadCaConfig(schoolId) {
   const [assessmentCfg, defaultScale] = await Promise.all([
     _getAssessmentConfig(schoolId, null),
-    _model('grade_boundaries').findOne({ schoolId, isDefault: true }).lean(),
+    tenantModel('grade_boundaries', { schoolId }).findOne({ schoolId, isDefault: true }).lean(),
   ]);
   return {
     customTypes: assessmentCfg.customTypes,
@@ -230,9 +231,9 @@ router.post('/generate', authMiddleware, PLAN, rbac('grades', 'read'), async (re
 
     // Resolve class teacher name: student → stream (formTeacherId) → teacher name
     const studentIds  = studentsWithRanks.map(s => s.studentId);
-    const Students    = _model('students');
-    const Streams     = _model('streams');
-    const Teachers    = _model('teachers');
+    const Students    = tenantModel('students', tenantContext(req));
+    const Streams     = tenantModel('streams', tenantContext(req));
+    const Teachers    = tenantModel('teachers', tenantContext(req));
 
     const studentDocs = await Students
       .find({ schoolId, id: { $in: studentIds } })
@@ -296,7 +297,7 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
   const batchId = uuidv4();
 
   // ── Step 1: Create batch record (interrupt-safe anchor) ──────
-  const Batches = _model('publish_batches');
+  const Batches = tenantModel('publish_batches', tenantContext(req));
   await Batches.create({
     id: batchId, schoolId, classId,
     termId: termId || null, academicYearId: academicYearId || null,
@@ -331,7 +332,7 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
 
     if (skipModerationCheck) {
       // Write audit entry for the bypass — this is mandatory, non-negotiable
-      await _model('mark_audit_log').create({
+      await tenantModel('mark_audit_log', tenantContext(req)).create({
         action:    'MODERATION_BYPASS',
         batchId,
         schoolId,  classId,
@@ -386,7 +387,7 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
       : {};
 
     // ── Step 5: Load existing live snapshots (for versioning) ─
-    const existingSnaps = await _model('report_card_snapshots').find({
+    const existingSnaps = await tenantModel('report_card_snapshots', tenantContext(req)).find({
       schoolId, classId,
       termId: termId || null, academicYearId: academicYearId || null,
       superseded: { $ne: true },
@@ -395,7 +396,7 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
 
     // ── Step 6: Denormalise student info ─────────────────────
     const studentIds = Object.keys(allReports);
-    const students   = await _model('students').find({ schoolId,
+    const students   = await tenantModel('students', tenantContext(req)).find({ schoolId,
       $or: [
         { id: { $in: studentIds } },
         { _id: { $in: studentIds.filter(s => /^[0-9a-f]{24}$/i.test(s)) } }
@@ -407,7 +408,7 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
     // Best-effort: finance may not be used by this school. Any DB error leaves all flags false.
     const blockedStudentIds = new Set();
     try {
-      const unpaidIds = await _model('invoices').distinct('studentId', {
+      const unpaidIds = await tenantModel('invoices', tenantContext(req)).distinct('studentId', {
         schoolId,
         studentId: { $in: studentIds },
         balance:   { $gt: 0 },
@@ -518,7 +519,7 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
     }
 
     // ── Step 8: Persist (transaction-wrapped when replica set available) ──
-    const Snaps = _model('report_card_snapshots');
+    const Snaps = tenantModel('report_card_snapshots', tenantContext(req));
     const insertOps = newSnaps.map(s => ({ insertOne: { document: s } }));
 
     let session = null;
@@ -581,7 +582,7 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
     return ok(res, response, null, 201);
 
   } catch (err) {
-    await _model('publish_batches').updateOne({ id: batchId }, {
+    await tenantModel('publish_batches', tenantContext(req)).updateOne({ id: batchId }, {
       status: 'failed', failureReason: err.message, completedAt: new Date().toISOString()
     }).catch(() => {});
     console.error('[report-cards/publish]', err);
@@ -602,9 +603,9 @@ router.get('/publish-batches', authMiddleware, PLAN, rbac('grades', 'read'), asy
     if (req.query.status)  filter.status  = req.query.status;
 
     const [docs, total] = await Promise.all([
-      _model('publish_batches').find(filter).sort({ startedAt: -1 }).skip(skip).limit(limit)
+      tenantModel('publish_batches', tenantContext(req)).find(filter).sort({ startedAt: -1 }).skip(skip).limit(limit)
         .select('-newVersions -__v').lean(),
-      _model('publish_batches').countDocuments(filter),
+      tenantModel('publish_batches', tenantContext(req)).countDocuments(filter),
     ]);
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) { console.error('[publish-batches GET]', err); return E.serverError(res); }
@@ -631,9 +632,9 @@ router.get('/', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) =
     if (req.query.status)         filter.status         = req.query.status;
 
     const [docs, total] = await Promise.all([
-      _model('report_card_snapshots').find(filter).sort({ publishedAt: -1 }).skip(skip).limit(limit)
+      tenantModel('report_card_snapshots', tenantContext(req)).find(filter).sort({ publishedAt: -1 }).skip(skip).limit(limit)
         .select('-gradingSchema -assessmentWeights -subjects -__v').lean(),
-      _model('report_card_snapshots').countDocuments(filter),
+      tenantModel('report_card_snapshots', tenantContext(req)).countDocuments(filter),
     ]);
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) { console.error('[report-cards GET]', err); return E.serverError(res); }
@@ -645,6 +646,11 @@ router.get('/', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) =
    ══════════════════════════════════════════════════════════════ */
 router.get('/verify/:reportId', async (req, res) => {
   try {
+    // ADR-0001 §4 exception: PUBLIC endpoint (no auth, no tenant context).
+    // Verifies a report card by its globally-unique reportId without knowing
+    // the school — an intentional cross-tenant lookup. Stays on _model();
+    // tenantModel() would (correctly) fail closed here. reportId is globally
+    // unique, so this reveals only a single, already-public report card.
     const snap = await _model('report_card_snapshots')
       .findOne({ reportId: req.params.reportId })
       .lean();
@@ -682,7 +688,7 @@ router.get('/verify/:reportId', async (req, res) => {
 router.get('/:id', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
   try {
     const { schoolId, role, userId, guardianOf } = req.jwtUser;
-    const doc = await _model('report_card_snapshots')
+    const doc = await tenantModel('report_card_snapshots', tenantContext(req))
       .findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Report card snapshot not found');
 
@@ -696,7 +702,7 @@ router.get('/:id', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res
       const linkedStudents = Array.isArray(guardianOf) ? guardianOf : [];
       if (!linkedStudents.includes(doc.studentId)) {
         // Log the access attempt for compliance (GDPR/POPIA: failed access to student records)
-        _model('mark_audit_log').create({
+        tenantModel('mark_audit_log', tenantContext(req)).create({
           action:       'GUARDIAN_ACCESS_DENIED',
           schoolId,
           requestedBy:  userId,
@@ -723,7 +729,7 @@ router.put('/:id/comments', authMiddleware, PLAN, rbac('grades', 'update'), asyn
     const { data, error } = _validate(CommentSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const snap = await _model('report_card_snapshots').findOne({ id: req.params.id, schoolId }).lean();
+    const snap = await tenantModel('report_card_snapshots', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!snap) return E.notFound(res, 'Report card snapshot not found');
     if (snap.superseded) return E.badRequest(res, 'Cannot edit a superseded report card. Use the current version.');
 
@@ -745,7 +751,7 @@ router.put('/:id/comments', authMiddleware, PLAN, rbac('grades', 'update'), asyn
       merged.principalRemarkAt = now;
     }
 
-    const doc = await _model('report_card_snapshots').findOneAndUpdate(
+    const doc = await tenantModel('report_card_snapshots', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { $set: { comments: merged, updatedBy: userId, updatedAt: now } },
       { new: true, runValidators: false }
@@ -1049,7 +1055,7 @@ router.get('/:id/pdf', authMiddleware, PLAN, _pdfAccess, async (req, res) => {
   try {
     const { schoolId, role, guardianOf, studentId: jwtStudentId, userId } = req.jwtUser;
 
-    const snap = await _model('report_card_snapshots').findOne({ id: req.params.id, schoolId }).lean();
+    const snap = await tenantModel('report_card_snapshots', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!snap) return E.notFound(res, 'Report card snapshot not found');
 
     if (snap.superseded && RESTRICTED_ROLES.includes(role)) {
@@ -1067,7 +1073,7 @@ router.get('/:id/pdf', authMiddleware, PLAN, _pdfAccess, async (req, res) => {
     if (['parent', 'guardian'].includes(role)) {
       const linkedStudents = Array.isArray(guardianOf) ? guardianOf : [];
       if (!linkedStudents.includes(snap.studentId)) {
-        _model('mark_audit_log').create({
+        tenantModel('mark_audit_log', tenantContext(req)).create({
           action:       'GUARDIAN_ACCESS_DENIED',
           schoolId,
           requestedBy:  userId,
@@ -1088,7 +1094,7 @@ router.get('/:id/pdf', authMiddleware, PLAN, _pdfAccess, async (req, res) => {
         const school    = await _model('schools').findOne({ id: schoolId }, { 'portalConfig.reportCardFeeThreshold': 1 }).lean();
         const threshold = school?.portalConfig?.reportCardFeeThreshold ?? 100;
         if (threshold > 0) {
-          const invoices    = await _model('invoices').find({ schoolId, studentId: snap.studentId }, { total: 1, balance: 1 }).lean();
+          const invoices    = await tenantModel('invoices', tenantContext(req)).find({ schoolId, studentId: snap.studentId }, { total: 1, balance: 1 }).lean();
           const totalBilled = invoices.reduce((s, i) => s + (i.total || 0), 0);
           const totalOwed   = invoices.reduce((s, i) => s + (i.balance || 0), 0);
           const clearancePct = totalBilled > 0
@@ -1157,7 +1163,7 @@ router.get('/bulk-pdf', authMiddleware, PLAN, rbac('grades', 'read'), async (req
     const config = await _loadConfig(schoolId);
 
     // Pre-fetch signature images once for the whole batch (same school for all snaps)
-    const firstSnap    = await _model('report_card_snapshots').findOne(filter).lean();
+    const firstSnap    = await tenantModel('report_card_snapshots', tenantContext(req)).findOne(filter).lean();
     const bulkImages   = firstSnap ? await _fetchSignatureImages(firstSnap) : {};
 
     let PDFDocument;
@@ -1165,7 +1171,7 @@ router.get('/bulk-pdf', authMiddleware, PLAN, rbac('grades', 'read'), async (req
     catch { return res.status(501).json({ error: 'pdfkit not installed. Run: npm install pdfkit' }); }
 
     // Count first so we can return 404 before sending any headers
-    const total = await _model('report_card_snapshots').countDocuments(filter);
+    const total = await tenantModel('report_card_snapshots', tenantContext(req)).countDocuments(filter);
     if (total === 0) return E.notFound(res, 'No published report cards found for this class/term');
 
     // Start streaming response now — headers sent before cursor begins
@@ -1178,7 +1184,7 @@ router.get('/bulk-pdf', authMiddleware, PLAN, rbac('grades', 'read'), async (req
 
     // Use Mongoose cursor — loads CHUNK_SIZE documents at a time, not all at once
     const CHUNK_SIZE = 10;
-    const cursor = _model('report_card_snapshots')
+    const cursor = tenantModel('report_card_snapshots', tenantContext(req))
       .find(filter)
       .sort({ studentName: 1 })
       .batchSize(CHUNK_SIZE)
@@ -1234,7 +1240,7 @@ router.get('/draft-comments', authMiddleware, PLAN, rbac('report_cards', 'read')
     const filter = { schoolId };
     if (req.query.classId)    filter.classId    = req.query.classId;
     if (req.query.termNumber) filter.termNumber = Number(req.query.termNumber);
-    const docs = await _model('report_card_draft_comments').find(filter).lean();
+    const docs = await tenantModel('report_card_draft_comments', tenantContext(req)).find(filter).lean();
     return ok(res, docs);
   } catch (err) {
     console.error('[report-cards/draft-comments GET]', err);
@@ -1278,7 +1284,7 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, rbac('report_card
       }
     }
 
-    const doc = await _model('report_card_draft_comments').findOneAndUpdate(
+    const doc = await tenantModel('report_card_draft_comments', tenantContext(req)).findOneAndUpdate(
       { schoolId, studentId, termNumber: Number(termNumber) },
       { $set: setFields },
       { upsert: true, new: true }
@@ -1299,7 +1305,7 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
     if (!termNumber) return E.badRequest(res, 'termNumber is required');
     if (typeof comment !== 'string') return E.badRequest(res, 'comment must be a string');
 
-    const doc = await _model('report_card_draft_comments').findOneAndUpdate(
+    const doc = await tenantModel('report_card_draft_comments', tenantContext(req)).findOneAndUpdate(
       { schoolId, studentId, termNumber: Number(termNumber) },
       { $set: {
           schoolId, studentId, classId,
