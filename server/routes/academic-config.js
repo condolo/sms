@@ -14,6 +14,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, E }          = require('../utils/response');
 
 const router = express.Router();
@@ -153,7 +154,7 @@ function _mergeConfig(saved) {
 router.get('/', authMiddleware, PLAN, rbac('settings', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const saved = await _model('academic_config').findOne({ schoolId }).lean();
+    const saved = await tenantModel('academic_config', tenantContext(req)).findOne({ schoolId }).lean();
     return ok(res, _mergeConfig(saved));
   } catch (err) { console.error('[academic-config GET]', err); return E.serverError(res); }
 });
@@ -180,7 +181,7 @@ router.put('/', authMiddleware, PLAN, rbac('settings', 'update'), async (req, re
       }
     }
 
-    const doc = await _model('academic_config').findOneAndUpdate(
+    const doc = await tenantModel('academic_config', tenantContext(req)).findOneAndUpdate(
       { schoolId },
       { $set: { ...data, schoolId, updatedBy: userId, updatedAt: new Date().toISOString() } },
       { new: true, upsert: true, runValidators: false }
@@ -196,7 +197,7 @@ router.put('/', authMiddleware, PLAN, rbac('settings', 'update'), async (req, re
 router.post('/reset', authMiddleware, PLAN, rbac('settings', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    await _model('academic_config').deleteOne({ schoolId });
+    await tenantModel('academic_config', tenantContext(req)).deleteOne({ schoolId });
     console.log(`[ACADEMIC-CONFIG] Reset to defaults by ${userId} for school ${schoolId}`);
     return ok(res, _mergeConfig(null));
   } catch (err) { console.error('[academic-config RESET]', err); return E.serverError(res); }
@@ -213,7 +214,7 @@ router.get('/grade', authMiddleware, PLAN, rbac('grades', 'read'), async (req, r
     const score = parseFloat(req.query.score);
     if (isNaN(score)) return E.badRequest(res, 'score query param is required and must be a number');
 
-    const saved = await _model('academic_config').findOne({ schoolId }).lean();
+    const saved = await tenantModel('academic_config', tenantContext(req)).findOne({ schoolId }).lean();
     const config = _mergeConfig(saved);
     const band = resolveGrade(score, config.gradingSchema);
     return ok(res, { score, ...band });
@@ -246,7 +247,7 @@ router.post('/archive-year', authMiddleware, PLAN, rbac('settings', 'update'), a
     // Best-effort — does not block archival if the year document is missing.
     let academicYearLabel = academicYearId;
     try {
-      const yearDoc = await _model('academic_years').findOne({ schoolId, id: academicYearId }, { name: 1, year: 1 }).lean();
+      const yearDoc = await tenantModel('academic_years', tenantContext(req)).findOne({ schoolId, id: academicYearId }, { name: 1, year: 1 }).lean();
       if (yearDoc) academicYearLabel = yearDoc.name || yearDoc.year || academicYearId;
     } catch { /* non-fatal */ }
 
@@ -255,17 +256,17 @@ router.post('/archive-year', authMiddleware, PLAN, rbac('settings', 'update'), a
     // succeed so that the gate is never active without the cascade completing.
     const [examsResult, snapshotsResult, gradesResult] = await Promise.all([
       // Freeze all exams not already archived/cancelled
-      _model('exams').updateMany(
+      tenantModel('exams', tenantContext(req)).updateMany(
         { ...filter, status: { $nin: ['archived', 'cancelled'] } },
         { $set: { status: 'archived', archivedAt: now, archivedBy: userId, archiveReason: reason } }
       ),
       // Lock all published report card snapshots for this year
-      _model('report_card_snapshots').updateMany(
+      tenantModel('report_card_snapshots', tenantContext(req)).updateMany(
         { ...filter, status: 'published', superseded: { $ne: true } },
         { $set: { yearArchived: true, yearArchivedAt: now, yearArchivedBy: userId } }
       ),
       // Prevent new grade entries by marking grades as year-archived
-      _model('grades').updateMany(
+      tenantModel('grades', tenantContext(req)).updateMany(
         { ...filter },
         { $set: { yearArchived: true, yearArchivedAt: now } }
       ),
@@ -279,7 +280,7 @@ router.post('/archive-year', authMiddleware, PLAN, rbac('settings', 'update'), a
     let writeBlockActive = false;
     let writeBlockError  = null;
     try {
-      await _model('academic_config').findOneAndUpdate(
+      await tenantModel('academic_config', tenantContext(req)).findOneAndUpdate(
         { schoolId },
         {
           $addToSet: { archivedAcademicYears: academicYearId },
@@ -294,7 +295,7 @@ router.post('/archive-year', authMiddleware, PLAN, rbac('settings', 'update'), a
     }
 
     // ── Step D: Audit log (includes cascade counts + label + gate status) ──
-    await _model('mark_audit_log').create({
+    await tenantModel('mark_audit_log', tenantContext(req)).create({
       action:             'ACADEMIC_YEAR_ARCHIVED',
       schoolId,
       academicYearId,
@@ -405,7 +406,7 @@ function _resolveCurrentPeriod(years, todayStr) {
 router.get('/current', authMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const years = await _model('academic_years').find({ schoolId }).lean();
+    const years = await tenantModel('academic_years', tenantContext(req)).find({ schoolId }).lean();
     const { year, term, termNumber } = _resolveCurrentPeriod(years);
     return ok(res, {
       academicYearId: year?.id ?? null,
@@ -431,8 +432,8 @@ router.get('/years', authMiddleware, async (req, res) => { // rbac: all-authenti
     // Write operations (POST/PUT/DELETE) remain admin-only.
 
     const [years, cfg] = await Promise.all([
-      _model('academic_years').find({ schoolId }).sort({ startDate: 1 }).lean(),
-      _model('academic_config').findOne({ schoolId }, { archivedAcademicYears: 1 }).lean(),
+      tenantModel('academic_years', tenantContext(req)).find({ schoolId }).sort({ startDate: 1 }).lean(),
+      tenantModel('academic_config', tenantContext(req)).findOne({ schoolId }, { archivedAcademicYears: 1 }).lean(),
     ]);
 
     const archivedIds = cfg?.archivedAcademicYears ?? [];
@@ -469,11 +470,11 @@ router.post('/years', authMiddleware, async (req, res) => { // rbac: admin-only 
     }
 
     // Prevent duplicate name for same school
-    const existing = await _model('academic_years').findOne({ schoolId, name: name.trim() }).lean();
+    const existing = await tenantModel('academic_years', tenantContext(req)).findOne({ schoolId, name: name.trim() }).lean();
     if (existing) return E.badRequest(res, `An academic year named "${name.trim()}" already exists`);
 
     const now = new Date().toISOString();
-    const doc = await _model('academic_years').create({
+    const doc = await tenantModel('academic_years', tenantContext(req)).create({
       id:         uuidv4(),
       schoolId,
       name:       name.trim(),
@@ -504,10 +505,10 @@ router.put('/years/:id', authMiddleware, async (req, res) => { // rbac: admin-on
     }
 
     const yearId = req.params.id;
-    const year   = await _model('academic_years').findOne({ schoolId, $or: [{ id: yearId }, { _id: yearId }] }).lean();
+    const year   = await tenantModel('academic_years', tenantContext(req)).findOne({ schoolId, $or: [{ id: yearId }, { _id: yearId }] }).lean();
     if (!year) return E.notFound(res, 'Academic year not found');
 
-    const cfg        = await _model('academic_config').findOne({ schoolId }, { archivedAcademicYears: 1 }).lean();
+    const cfg        = await tenantModel('academic_config', tenantContext(req)).findOne({ schoolId }, { archivedAcademicYears: 1 }).lean();
     const archivedIds = cfg?.archivedAcademicYears ?? [];
     const yid        = year.id || year._id.toString();
 
@@ -521,7 +522,7 @@ router.put('/years/:id', authMiddleware, async (req, res) => { // rbac: admin-on
     if (name !== undefined) {
       if (!name.trim()) return E.badRequest(res, 'name cannot be empty');
       // check for duplicate name (exclude self)
-      const dup = await _model('academic_years').findOne({ schoolId, name: name.trim(), id: { $ne: yid } }).lean();
+      const dup = await tenantModel('academic_years', tenantContext(req)).findOne({ schoolId, name: name.trim(), id: { $ne: yid } }).lean();
       if (dup) return E.badRequest(res, `An academic year named "${name.trim()}" already exists`);
       update.name = name.trim();
     }
@@ -534,7 +535,7 @@ router.put('/years/:id', authMiddleware, async (req, res) => { // rbac: admin-on
     }
 
     const updateFilter = year.id ? { id: year.id } : { _id: year._id };
-    const updated = await _model('academic_years').findOneAndUpdate(
+    const updated = await tenantModel('academic_years', tenantContext(req)).findOneAndUpdate(
       updateFilter,
       { $set: update },
       { new: true }
@@ -558,10 +559,10 @@ router.delete('/years/:id', authMiddleware, async (req, res) => { // rbac: admin
     }
 
     const yearId = req.params.id;
-    const year   = await _model('academic_years').findOne({ schoolId, $or: [{ id: yearId }, { _id: yearId }] }).lean();
+    const year   = await tenantModel('academic_years', tenantContext(req)).findOne({ schoolId, $or: [{ id: yearId }, { _id: yearId }] }).lean();
     if (!year) return E.notFound(res, 'Academic year not found');
 
-    const cfg        = await _model('academic_config').findOne({ schoolId }, { archivedAcademicYears: 1 }).lean();
+    const cfg        = await tenantModel('academic_config', tenantContext(req)).findOne({ schoolId }, { archivedAcademicYears: 1 }).lean();
     const archivedIds = cfg?.archivedAcademicYears ?? [];
     const yid        = year.id || year._id.toString();
 
@@ -573,7 +574,7 @@ router.delete('/years/:id', authMiddleware, async (req, res) => { // rbac: admin
     }
 
     const deleteFilter = year.id ? { id: year.id } : { _id: year._id };
-    await _model('academic_years').deleteOne(deleteFilter);
+    await tenantModel('academic_years', tenantContext(req)).deleteOne(deleteFilter);
 
     console.log(`[ACADEMIC-CONFIG] Year deleted: "${year.name}" by ${userId}`);
     return ok(res, { deleted: true, id: yid });
@@ -602,9 +603,9 @@ router.post('/transition-year', authMiddleware, async (req, res) => { // rbac: s
 
     // ── Locate the active and target years ────────────────────
     const [activeYear, targetYear, cfg] = await Promise.all([
-      _model('academic_years').findOne({ schoolId, isCurrent: true }).lean(),
-      _model('academic_years').findOne({ schoolId, $or: [{ id: targetYearId }, { _id: targetYearId }] }).lean(),
-      _model('academic_config').findOne({ schoolId }, { archivedAcademicYears: 1 }).lean(),
+      tenantModel('academic_years', tenantContext(req)).findOne({ schoolId, isCurrent: true }).lean(),
+      tenantModel('academic_years', tenantContext(req)).findOne({ schoolId, $or: [{ id: targetYearId }, { _id: targetYearId }] }).lean(),
+      tenantModel('academic_config', tenantContext(req)).findOne({ schoolId }, { archivedAcademicYears: 1 }).lean(),
     ]);
 
     if (!targetYear) return E.notFound(res, 'Target academic year not found');
@@ -629,21 +630,21 @@ router.post('/transition-year', authMiddleware, async (req, res) => { // rbac: s
       const archiveFilter        = { schoolId, academicYearId: activeYid };
 
       const [examsResult, snapshotsResult, gradesResult] = await Promise.all([
-        _model('exams').updateMany(
+        tenantModel('exams', tenantContext(req)).updateMany(
           { ...archiveFilter, status: { $nin: ['archived', 'cancelled'] } },
           { $set: { status: 'archived', archivedAt: now, archivedBy: userId, archiveReason: reason } }
         ),
-        _model('report_card_snapshots').updateMany(
+        tenantModel('report_card_snapshots', tenantContext(req)).updateMany(
           { ...archiveFilter, status: 'published', superseded: { $ne: true } },
           { $set: { yearArchived: true, yearArchivedAt: now, yearArchivedBy: userId } }
         ),
-        _model('grades').updateMany(
+        tenantModel('grades', tenantContext(req)).updateMany(
           { ...archiveFilter },
           { $set: { yearArchived: true, yearArchivedAt: now } }
         ),
       ]);
 
-      await _model('academic_config').findOneAndUpdate(
+      await tenantModel('academic_config', tenantContext(req)).findOneAndUpdate(
         { schoolId },
         {
           $addToSet: { archivedAcademicYears: activeYid },
@@ -654,7 +655,7 @@ router.post('/transition-year', authMiddleware, async (req, res) => { // rbac: s
 
       // Mark active year as no longer current
       const activeFilter = activeYear.id ? { id: activeYear.id } : { _id: activeYear._id };
-      await _model('academic_years').updateOne(activeFilter, { $set: { isCurrent: false, updatedAt: now } });
+      await tenantModel('academic_years', tenantContext(req)).updateOne(activeFilter, { $set: { isCurrent: false, updatedAt: now } });
 
       archiveResult = {
         archivedYearId:    activeYid,
@@ -664,7 +665,7 @@ router.post('/transition-year', authMiddleware, async (req, res) => { // rbac: s
         gradesLocked:      gradesResult.modifiedCount,
       };
 
-      await _model('mark_audit_log').create({
+      await tenantModel('mark_audit_log', tenantContext(req)).create({
         action:            'ACADEMIC_YEAR_ARCHIVED',
         schoolId,
         academicYearId:    activeYid,
@@ -683,7 +684,7 @@ router.post('/transition-year', authMiddleware, async (req, res) => { // rbac: s
 
     // ── Step B: Activate the target year ──────────────────────
     const targetFilter = targetYear.id ? { id: targetYear.id } : { _id: targetYear._id };
-    const activatedYear = await _model('academic_years').findOneAndUpdate(
+    const activatedYear = await tenantModel('academic_years', tenantContext(req)).findOneAndUpdate(
       targetFilter,
       { $set: { isCurrent: true, updatedAt: now } },
       { new: true }
@@ -698,7 +699,7 @@ router.post('/transition-year', authMiddleware, async (req, res) => { // rbac: s
     }
     await _model('schools').updateOne({ id: schoolId }, { $set: syncPayload });
 
-    await _model('mark_audit_log').create({
+    await tenantModel('mark_audit_log', tenantContext(req)).create({
       action:            'ACADEMIC_YEAR_ACTIVATED',
       schoolId,
       academicYearId:    targetYid,

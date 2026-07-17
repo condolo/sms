@@ -14,7 +14,7 @@
 
 const express            = require('express');
 const { authMiddleware } = require('../middleware/auth');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, E }          = require('../utils/response');
 const { v4: uuidv4 }     = require('uuid');
 const { resolveTeacher } = require('../utils/resolveTeacher');
@@ -50,7 +50,7 @@ router.get('/', authMiddleware, async (req, res) => {
     const { schoolId, userId } = req.jwtUser;
     const { classId, subjectId, from, to, status } = req.query;
 
-    const LessonPlans = _model('lesson_plans');
+    const LessonPlans = tenantModel('lesson_plans', tenantContext(req));
 
     const filter = { schoolId };
 
@@ -107,21 +107,21 @@ router.post('/', authMiddleware, async (req, res) => {
 
     // Verify teacher is assigned to this class+subject (skip for admins)
     if (!_isAdmin(req)) {
-      const Assignments = _model('teaching_assignments');
+      const Assignments = tenantModel('teaching_assignments', tenantContext(req));
       const assigned = await Assignments.findOne({ schoolId, teacherId: teacher.id, classId, subjectId }).lean();
       if (!assigned) {
         return E.forbidden(res, 'You are not assigned to teach this subject in this class.');
       }
     }
 
-    const Classes  = _model('classes');
-    const Subjects = _model('subjects');
+    const Classes  = tenantModel('classes', tenantContext(req));
+    const Subjects = tenantModel('subjects', tenantContext(req));
     const [cls, sub] = await Promise.all([
       Classes.findOne({ id: classId, schoolId }).select('name').lean().catch(() => null),
       Subjects.findOne({ id: subjectId, schoolId }).select('name').lean().catch(() => null),
     ]);
 
-    const LessonPlans = _model('lesson_plans');
+    const LessonPlans = tenantModel('lesson_plans', tenantContext(req));
     const plan = {
       id:          `lp_${uuidv4().replace(/-/g, '').slice(0, 16)}`,
       schoolId,
@@ -158,7 +158,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
   if (!_can(req, res)) return;
   try {
     const { schoolId, userId } = req.jwtUser;
-    const LessonPlans = _model('lesson_plans');
+    const LessonPlans = tenantModel('lesson_plans', tenantContext(req));
     const plan = await LessonPlans.findOne({ id: req.params.id, schoolId }).lean();
     if (!plan) return E.notFound(res, 'Lesson plan not found.');
 
@@ -197,7 +197,7 @@ router.patch('/:id/deliver', authMiddleware, async (req, res) => {
   if (!_can(req, res)) return;
   try {
     const { schoolId, userId } = req.jwtUser;
-    const LessonPlans = _model('lesson_plans');
+    const LessonPlans = tenantModel('lesson_plans', tenantContext(req));
     const plan = await LessonPlans.findOne({ id: req.params.id, schoolId }).lean();
     if (!plan) return E.notFound(res, 'Lesson plan not found.');
 
@@ -217,7 +217,7 @@ router.patch('/:id/deliver', authMiddleware, async (req, res) => {
 
     // Create coverage record if linked to a topic
     if (plan.topicId) {
-      const Coverage = _model('lesson_coverage');
+      const Coverage = tenantModel('lesson_coverage', tenantContext(req));
       const existing = await Coverage.findOne({ schoolId, teacherId: plan.teacherId, classId: plan.classId, subjectId: plan.subjectId, topicId: plan.topicId }).lean();
       if (!existing) {
         await Coverage.create({
@@ -249,7 +249,7 @@ router.delete('/:id', authMiddleware, async (req, res) => {
   if (!_can(req, res)) return;
   try {
     const { schoolId, userId } = req.jwtUser;
-    const LessonPlans = _model('lesson_plans');
+    const LessonPlans = tenantModel('lesson_plans', tenantContext(req));
     const plan = await LessonPlans.findOne({ id: req.params.id, schoolId }).lean();
     if (!plan) return E.notFound(res, 'Lesson plan not found.');
 

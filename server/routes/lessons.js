@@ -32,6 +32,7 @@ const ScopeEngine         = require('../utils/scopeEngine');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 
 const router = express.Router();
@@ -97,7 +98,7 @@ function _validate(schema, data) {
 
 /* ── Helper: get teacher's assignments ─────────────────────── */
 async function _teacherAssignments(schoolId, teacherId) {
-  return _model('teaching_assignments')
+  return tenantModel('teaching_assignments', { schoolId })
     .find({ schoolId, teacherId })
     .select('classId className subjectId subjectName')
     .lean();
@@ -107,7 +108,7 @@ async function _teacherAssignments(schoolId, teacherId) {
 async function _coverageMap(schoolId, classId, subjectId, academicYear) {
   const filter = { schoolId, classId, subjectId };
   if (academicYear) filter.academicYear = academicYear;
-  const records = await _model('lesson_coverage').find(filter).lean();
+  const records = await tenantModel('lesson_coverage', { schoolId }).find(filter).lean();
   // Map: topicId_subtopicId → record (or topicId → record for full topic)
   const map = {};
   records.forEach(r => {
@@ -131,7 +132,7 @@ router.get('/topics', authMiddleware, PLAN, async (req, res) => {
     const filter = { schoolId, subjectId };
     if (academicYear) filter.academicYear = academicYear;
 
-    const topics = await _model('syllabus_topics')
+    const topics = await tenantModel('syllabus_topics', tenantContext(req))
       .find(filter)
       .sort({ order: 1, createdAt: 1 })
       .lean();
@@ -150,7 +151,7 @@ router.post('/topics', authMiddleware, PLAN, rbac('lessons', 'create'), async (r
     // Resolve subject name if not provided
     let subjectName = data.subjectName;
     if (!subjectName) {
-      const sub = await _model('subjects').findOne({ id: data.subjectId, schoolId }).select('name').lean();
+      const sub = await tenantModel('subjects', tenantContext(req)).findOne({ id: data.subjectId, schoolId }).select('name').lean();
       subjectName = sub?.name ?? '';
     }
 
@@ -168,7 +169,7 @@ router.post('/topics', authMiddleware, PLAN, rbac('lessons', 'create'), async (r
       order: st.order ?? i,
     }));
 
-    const doc = await _model('syllabus_topics').create({
+    const doc = await tenantModel('syllabus_topics', tenantContext(req)).create({
       id: uuidv4(),
       schoolId,
       subjectId:    data.subjectId,
@@ -203,7 +204,7 @@ router.put('/topics/:id', authMiddleware, PLAN, rbac('lessons', 'update'), async
       }));
     }
 
-    const doc = await _model('syllabus_topics').findOneAndUpdate(
+    const doc = await tenantModel('syllabus_topics', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       update,
       { new: true, runValidators: false }
@@ -217,10 +218,10 @@ router.put('/topics/:id', authMiddleware, PLAN, rbac('lessons', 'update'), async
 router.delete('/topics/:id', authMiddleware, PLAN, rbac('lessons', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('syllabus_topics').findOneAndDelete({ id: req.params.id, schoolId });
+    const doc = await tenantModel('syllabus_topics', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Topic not found');
     // Also remove coverage records for this topic
-    await _model('lesson_coverage').deleteMany({ schoolId, topicId: req.params.id });
+    await tenantModel('lesson_coverage', tenantContext(req)).deleteMany({ schoolId, topicId: req.params.id });
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) { console.error('[lessons/topics DELETE/:id]', err); return E.serverError(res); }
 });
@@ -234,7 +235,7 @@ router.post('/topics/reorder', authMiddleware, PLAN, rbac('lessons', 'update'), 
     if (!subjectId || !Array.isArray(order)) return E.validation(res, [{ field: 'order', message: 'order array is required' }]);
 
     await Promise.all(order.map(({ id, order: o }) =>
-      _model('syllabus_topics').updateOne({ id, schoolId, subjectId }, { order: o, updatedBy: userId })
+      tenantModel('syllabus_topics', tenantContext(req)).updateOne({ id, schoolId, subjectId }, { order: o, updatedBy: userId })
     ));
     return ok(res, { reordered: order.length });
   } catch (err) { console.error('[lessons/topics/reorder POST]', err); return E.serverError(res); }
@@ -260,14 +261,14 @@ router.post('/topics/copy-from', authMiddleware, PLAN, rbac('lessons', 'create')
       return E.validation(res, [{ field: 'fromAcademicYear', message: 'Cannot copy from same academic year' }]);
     }
 
-    const sourceDocs = await _model('syllabus_topics')
+    const sourceDocs = await tenantModel('syllabus_topics', tenantContext(req))
       .find({ schoolId, subjectId, academicYear: fromAcademicYear })
       .lean();
 
     if (!sourceDocs.length) return ok(res, { copied: 0, message: 'No topics found in source year' });
 
     // Check if target already has topics
-    const existing = await _model('syllabus_topics').countDocuments({ schoolId, subjectId, academicYear: toAcademicYear });
+    const existing = await tenantModel('syllabus_topics', tenantContext(req)).countDocuments({ schoolId, subjectId, academicYear: toAcademicYear });
     if (existing > 0) return E.conflict(res, `Target year already has ${existing} topic(s). Delete them first or choose a different year.`);
 
     const newDocs = sourceDocs.map(src => ({
@@ -282,7 +283,7 @@ router.post('/topics/copy-from', authMiddleware, PLAN, rbac('lessons', 'create')
       updatedAt:    new Date(),
     }));
 
-    await _model('syllabus_topics').insertMany(newDocs);
+    await tenantModel('syllabus_topics', tenantContext(req)).insertMany(newDocs);
     return ok(res, { copied: newDocs.length });
   } catch (err) { console.error('[lessons/topics/copy-from POST]', err); return E.serverError(res); }
 });
@@ -311,7 +312,7 @@ router.get('/my-classes', authMiddleware, PLAN, async (req, res) => {
     // For each assignment, calculate coverage
     const results = await Promise.all(assignments.map(async (a) => {
       // Total subtopic items for this subject/year
-      const topics = await _model('syllabus_topics')
+      const topics = await tenantModel('syllabus_topics', tenantContext(req))
         .find({ schoolId, subjectId: a.subjectId, academicYear })
         .select('id subtopics')
         .lean();
@@ -323,7 +324,7 @@ router.get('/my-classes', authMiddleware, PLAN, async (req, res) => {
       });
 
       // Count covered items for this class-subject
-      const coveredCount = await _model('lesson_coverage').countDocuments({
+      const coveredCount = await tenantModel('lesson_coverage', tenantContext(req)).countDocuments({
         schoolId, classId: a.classId, subjectId: a.subjectId, academicYear,
       });
 
@@ -371,11 +372,11 @@ router.get('/coverage', authMiddleware, PLAN, scopeMiddleware, async (req, res) 
     const year = academicYear || school?.academicYear || String(new Date().getFullYear());
 
     const [topics, coverageRecords] = await Promise.all([
-      _model('syllabus_topics')
+      tenantModel('syllabus_topics', tenantContext(req))
         .find({ schoolId, subjectId, academicYear: year })
         .sort({ order: 1, createdAt: 1 })
         .lean(),
-      _model('lesson_coverage')
+      tenantModel('lesson_coverage', tenantContext(req))
         .find({ schoolId, classId, subjectId, academicYear: year })
         .lean(),
     ]);
@@ -428,7 +429,7 @@ router.post('/coverage', authMiddleware, PLAN, rbac('lessons', 'create'), async 
     const academicYear = school?.academicYear ?? String(new Date().getFullYear());
 
     // Validate topic exists
-    const topic = await _model('syllabus_topics').findOne({ id: data.topicId, schoolId }).lean();
+    const topic = await tenantModel('syllabus_topics', tenantContext(req)).findOne({ id: data.topicId, schoolId }).lean();
     if (!topic) return E.notFound(res, 'Topic not found');
 
     // If subtopicId provided, validate it belongs to the topic
@@ -440,7 +441,7 @@ router.post('/coverage', authMiddleware, PLAN, rbac('lessons', 'create'), async 
     // Get teacher name
     let teacherName = req.jwtUser.name ?? '';
     if (effectiveTeacherId !== userId) {
-      const t = await _model('users').findOne({ id: effectiveTeacherId, schoolId }).select('name').lean();
+      const t = await tenantModel('users', tenantContext(req)).findOne({ id: effectiveTeacherId, schoolId }).select('name').lean();
       teacherName = t?.name ?? teacherName;
     }
 
@@ -469,10 +470,10 @@ router.post('/coverage', authMiddleware, PLAN, rbac('lessons', 'create'), async 
     };
 
     // Enrich with className
-    const cls = await _model('classes').findOne({ id: data.classId, schoolId }).select('name').lean();
+    const cls = await tenantModel('classes', tenantContext(req)).findOne({ id: data.classId, schoolId }).select('name').lean();
     if (cls) update.$set.className = cls.name;
 
-    const doc = await _model('lesson_coverage').findOneAndUpdate(filter, update, { new: true, upsert: true, runValidators: false }).lean();
+    const doc = await tenantModel('lesson_coverage', tenantContext(req)).findOneAndUpdate(filter, update, { new: true, upsert: true, runValidators: false }).lean();
     return ok(res, doc);
   } catch (err) { console.error('[lessons/coverage POST]', err); return E.serverError(res); }
 });
@@ -485,7 +486,7 @@ router.delete('/coverage/:id', authMiddleware, PLAN, rbac('lessons', 'delete'), 
     // Teachers can only delete their own records
     if (!isAdmin(req)) filter.teacherId = userId;
 
-    const doc = await _model('lesson_coverage').findOneAndDelete(filter);
+    const doc = await tenantModel('lesson_coverage', tenantContext(req)).findOneAndDelete(filter);
     if (!doc) return E.notFound(res, 'Coverage record not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) { console.error('[lessons/coverage DELETE/:id]', err); return E.serverError(res); }
@@ -504,7 +505,7 @@ router.delete('/coverage', authMiddleware, PLAN, rbac('lessons', 'delete'), asyn
     if (subtopicId) filter.subtopicId = subtopicId;
     if (!isAdmin(req)) filter.teacherId = userId;
 
-    const result = await _model('lesson_coverage').deleteMany(filter);
+    const result = await tenantModel('lesson_coverage', tenantContext(req)).deleteMany(filter);
     return ok(res, { deleted: result.deletedCount });
   } catch (err) { console.error('[lessons/coverage DELETE bulk]', err); return E.serverError(res); }
 });
@@ -531,13 +532,13 @@ router.get('/summary', authMiddleware, PLAN, async (req, res) => {
     if (classId)      assignFilter.classId      = classId;
     if (departmentId) assignFilter.departmentId = departmentId;
 
-    const assignments = await _model('teaching_assignments').find(assignFilter).lean();
+    const assignments = await tenantModel('teaching_assignments', tenantContext(req)).find(assignFilter).lean();
 
     // Aggregate topics count per subject
     const topicCounts = {};
     const uniqueSubjects = [...new Set(assignments.map(a => a.subjectId))];
     await Promise.all(uniqueSubjects.map(async sid => {
-      const topics = await _model('syllabus_topics').find({ schoolId, subjectId: sid, academicYear }).select('id subtopics').lean();
+      const topics = await tenantModel('syllabus_topics', tenantContext(req)).find({ schoolId, subjectId: sid, academicYear }).select('id subtopics').lean();
       let total = 0;
       topics.forEach(t => { total += t.subtopics?.length ? t.subtopics.length : 1; });
       topicCounts[sid] = total;
@@ -547,7 +548,7 @@ router.get('/summary', authMiddleware, PLAN, async (req, res) => {
     const coverageCounts = {};
     await Promise.all(assignments.map(async a => {
       const key = `${a.classId}__${a.subjectId}`;
-      const count = await _model('lesson_coverage').countDocuments({
+      const count = await tenantModel('lesson_coverage', tenantContext(req)).countDocuments({
         schoolId, classId: a.classId, subjectId: a.subjectId, academicYear,
       });
       coverageCounts[key] = count;
@@ -590,7 +591,7 @@ router.get('/class-summary/:classId', authMiddleware, PLAN, async (req, res) => 
     const academicYear = yearQ || school?.academicYear || String(new Date().getFullYear());
 
     // Get subjects taught in this class via teaching assignments
-    const assignments = await _model('teaching_assignments')
+    const assignments = await tenantModel('teaching_assignments', tenantContext(req))
       .find({ schoolId, classId })
       .select('subjectId subjectName teacherName')
       .lean();
@@ -600,7 +601,7 @@ router.get('/class-summary/:classId', authMiddleware, PLAN, async (req, res) => 
     );
 
     const rows = await Promise.all(uniqueBySubject.map(async (a) => {
-      const topics = await _model('syllabus_topics')
+      const topics = await tenantModel('syllabus_topics', tenantContext(req))
         .find({ schoolId, subjectId: a.subjectId, academicYear })
         .select('id title subtopics order')
         .sort({ order: 1 })
@@ -609,7 +610,7 @@ router.get('/class-summary/:classId', authMiddleware, PLAN, async (req, res) => 
       let totalItems = 0;
       topics.forEach(t => { totalItems += t.subtopics?.length ? t.subtopics.length : 1; });
 
-      const coverageRecords = await _model('lesson_coverage')
+      const coverageRecords = await tenantModel('lesson_coverage', tenantContext(req))
         .find({ schoolId, classId, subjectId: a.subjectId, academicYear })
         .lean();
 
@@ -674,7 +675,7 @@ router.get('/pending-teachers', authMiddleware, PLAN, async (req, res) => {
     if (subjectId)    assignFilter.subjectId    = subjectId;
     if (departmentId) assignFilter.departmentId = departmentId;
 
-    const assignments = await _model('teaching_assignments').find(assignFilter).lean();
+    const assignments = await tenantModel('teaching_assignments', tenantContext(req)).find(assignFilter).lean();
 
     // Group by teacher
     const byTeacher = {};
@@ -689,12 +690,12 @@ router.get('/pending-teachers', authMiddleware, PLAN, async (req, res) => {
     const results = await Promise.all(Object.values(byTeacher).map(async (t) => {
       let totalItems = 0, coveredItems = 0;
       await Promise.all(t.classes.map(async (c) => {
-        const topics = await _model('syllabus_topics')
+        const topics = await tenantModel('syllabus_topics', tenantContext(req))
           .find({ schoolId, subjectId: c.subjectId, academicYear })
           .select('id subtopics').lean();
         topics.forEach(tp => { totalItems += tp.subtopics?.length ? tp.subtopics.length : 1; });
 
-        const cov = await _model('lesson_coverage').countDocuments({
+        const cov = await tenantModel('lesson_coverage', tenantContext(req)).countDocuments({
           schoolId, classId: c.classId, subjectId: c.subjectId, academicYear,
         });
         coveredItems += cov;

@@ -22,6 +22,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 const email              = require('../utils/email');
 const {
@@ -60,7 +61,7 @@ function _err(res, msg, code=400){ return res.status(code).json({ error: msg });
 
 /** Fetch or create the assessment config doc for a school/year */
 async function _getConfig(schoolId, academicYearId) {
-  const Config = _model('assessment_config');
+  const Config = tenantModel('assessment_config', { schoolId });
   let doc = await Config.findOne({ schoolId, academicYearId }).lean();
   if (!doc) {
     doc = {
@@ -118,7 +119,7 @@ router.get('/config', authMiddleware, PLAN, rbac('settings', 'read'), async (req
     const { academicYearId } = req.query;
     const [doc, defaultScale] = await Promise.all([
       _getConfig(schoolId, academicYearId || null),
-      _model('grade_boundaries').findOne({ schoolId, isDefault: true }).lean(),
+      tenantModel('grade_boundaries', tenantContext(req)).findOne({ schoolId, isDefault: true }).lean(),
     ]);
     return _ok(res, {
       ...doc,
@@ -193,7 +194,7 @@ router.patch('/config', authMiddleware, PLAN, rbac('settings', 'update'), async 
       return _err(res, 'No valid fields to update');
     }
 
-    const Config = _model('assessment_config');
+    const Config = tenantModel('assessment_config', tenantContext(req));
     const doc = await Config.findOneAndUpdate(
       { schoolId, academicYearId: academicYearId || null },
       { $set: update },
@@ -232,7 +233,7 @@ router.get('/schedule', authMiddleware, PLAN, rbac('settings', 'read'), async (r
     if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
     if (req.query.termNumber)     filter.termNumber     = Number(req.query.termNumber);
 
-    const docs = await _model('assessment_schedule').find(filter)
+    const docs = await tenantModel('assessment_schedule', tenantContext(req)).find(filter)
       .sort({ termNumber: 1, assessmentType: 1, instance: 1 }).limit(200).lean();
     return _ok(res, docs);
   } catch (err) {
@@ -268,7 +269,7 @@ router.put('/schedule', authMiddleware, PLAN, rbac('settings', 'update'), async 
 
     const label = d.label || _label(d.assessmentType, d.instance);
 
-    const doc = await _model('assessment_schedule').findOneAndUpdate(
+    const doc = await tenantModel('assessment_schedule', tenantContext(req)).findOneAndUpdate(
       {
         schoolId,
         academicYearId: d.academicYearId || null,
@@ -296,7 +297,7 @@ router.put('/schedule', authMiddleware, PLAN, rbac('settings', 'update'), async 
 router.delete('/schedule/:id', authMiddleware, PLAN, rbac('settings', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('assessment_schedule').findOneAndDelete({ id: req.params.id, schoolId });
+    const doc = await tenantModel('assessment_schedule', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Schedule entry not found');
     return _ok(res, { id: req.params.id, deleted: true });
   } catch (err) {
@@ -317,12 +318,12 @@ router.post('/schedule/:id/lock', authMiddleware, PLAN, rbac('assessment', 'upda
   try {
     const { schoolId, userId } = req.jwtUser;
 
-    const Sched = _model('assessment_schedule');
+    const Sched = tenantModel('assessment_schedule', tenantContext(req));
     const entry = await Sched.findOne({ id: req.params.id, schoolId }).lean();
     if (!entry) return E.notFound(res, 'Schedule entry not found');
     if (entry.isLocked) return _err(res, 'This schedule entry is already locked.');
 
-    const user = await _model('users').findOne({ id: userId, schoolId }).select('name').lean();
+    const user = await tenantModel('users', tenantContext(req)).findOne({ id: userId, schoolId }).select('name').lean();
     const now  = new Date().toISOString();
     const note = (req.body.note || '').trim();
 
@@ -340,7 +341,7 @@ router.post('/schedule/:id/lock', authMiddleware, PLAN, rbac('assessment', 'upda
       { new: true }
     ).lean();
 
-    await _model('assessment_audit_log').create({
+    await tenantModel('assessment_audit_log', tenantContext(req)).create({
       id:              uuidv4(),
       schoolId,
       scheduleId:      req.params.id,
@@ -371,12 +372,12 @@ router.post('/schedule/:id/unlock', authMiddleware, PLAN, rbac('assessment', 'up
     const reason = (req.body.reason || '').trim();
     if (!reason) return _err(res, 'A reason is required when unlocking a schedule entry.');
 
-    const Sched = _model('assessment_schedule');
+    const Sched = tenantModel('assessment_schedule', tenantContext(req));
     const entry = await Sched.findOne({ id: req.params.id, schoolId }).lean();
     if (!entry) return E.notFound(res, 'Schedule entry not found');
     if (!entry.isLocked) return _err(res, 'This schedule entry is not locked.');
 
-    const user = await _model('users').findOne({ id: userId, schoolId }).select('name').lean();
+    const user = await tenantModel('users', tenantContext(req)).findOne({ id: userId, schoolId }).select('name').lean();
     const now  = new Date().toISOString();
 
     const doc = await Sched.findOneAndUpdate(
@@ -394,7 +395,7 @@ router.post('/schedule/:id/unlock', authMiddleware, PLAN, rbac('assessment', 'up
       { new: true }
     ).lean();
 
-    await _model('assessment_audit_log').create({
+    await tenantModel('assessment_audit_log', tenantContext(req)).create({
       id:              uuidv4(),
       schoolId,
       scheduleId:      req.params.id,
@@ -458,7 +459,7 @@ router.post('/types', authMiddleware, PLAN, rbac('settings', 'update'), async (r
     }
     const newType = parsed.data;
 
-    const Config = _model('assessment_config');
+    const Config = tenantModel('assessment_config', tenantContext(req));
     const cfg    = await _getConfig(schoolId, null);
 
     if (cfg.customTypes.some(t => t.key === newType.key)) {
@@ -522,7 +523,7 @@ router.put('/types', authMiddleware, PLAN, rbac('settings', 'update'), async (re
     }
 
     const { weights, instances } = _syncLegacyFields(validated);
-    const Config = _model('assessment_config');
+    const Config = tenantModel('assessment_config', tenantContext(req));
     const doc = await Config.findOneAndUpdate(
       { schoolId, academicYearId: null },
       { $set: { customTypes: validated, weights, instances } },
@@ -555,7 +556,7 @@ router.delete('/types/:key', authMiddleware, PLAN, rbac('settings', 'update'), a
     }
 
     // Guard: check for existing marks using this type
-    const markCount = await _model('assessment_marks').countDocuments({ schoolId, assessmentType: key });
+    const markCount = await tenantModel('assessment_marks', tenantContext(req)).countDocuments({ schoolId, assessmentType: key });
     if (markCount > 0) {
       return _err(
         res,
@@ -566,7 +567,7 @@ router.delete('/types/:key', authMiddleware, PLAN, rbac('settings', 'update'), a
 
     const updated              = cfg.customTypes.filter(t => t.key !== key);
     const { weights, instances } = _syncLegacyFields(updated);
-    const Config = _model('assessment_config');
+    const Config = tenantModel('assessment_config', tenantContext(req));
     const doc = await Config.findOneAndUpdate(
       { schoolId, academicYearId: null },
       { $set: { customTypes: updated, weights, instances } },
@@ -624,7 +625,7 @@ router.get('/grade-scales', authMiddleware, PLAN, rbac('settings', 'read'), asyn
     const filter = { schoolId };
     if (req.query.sectionId) filter.sectionId = req.query.sectionId;
 
-    const docs = await _model('grade_boundaries')
+    const docs = await tenantModel('grade_boundaries', tenantContext(req))
       .find(filter)
       .sort({ isDefault: -1, name: 1 })
       .limit(50)
@@ -664,7 +665,7 @@ router.post('/grade-scales', authMiddleware, PLAN, rbac('settings', 'update'), a
       return _err(res, 'At least one band must start at 0 (to cover the lowest possible score)');
     }
 
-    const Scales = _model('grade_boundaries');
+    const Scales = tenantModel('grade_boundaries', tenantContext(req));
 
     // If this scale is being set as default, clear previous default for the same scope
     if (d.isDefault) {
@@ -707,7 +708,7 @@ router.post('/grade-scales', authMiddleware, PLAN, rbac('settings', 'update'), a
 router.put('/grade-scales/:id', authMiddleware, PLAN, rbac('settings', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const Scales = _model('grade_boundaries');
+    const Scales = tenantModel('grade_boundaries', tenantContext(req));
     const existing = await Scales.findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Grade scale not found');
 
@@ -770,7 +771,7 @@ router.put('/grade-scales/:id', authMiddleware, PLAN, rbac('settings', 'update')
 router.delete('/grade-scales/:id', authMiddleware, PLAN, rbac('settings', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const Scales = _model('grade_boundaries');
+    const Scales = tenantModel('grade_boundaries', tenantContext(req));
     const doc = await Scales.findOne({ id: req.params.id, schoolId }).lean();
     if (!doc) return E.notFound(res, 'Grade scale not found');
 
@@ -837,7 +838,7 @@ router.get('/marks', authMiddleware, PLAN, rbac('grades', 'read'), async (req, r
       filter.isPublished = req.query.isPublished === 'true';
     }
 
-    const docs = await _model('assessment_marks').find(filter)
+    const docs = await tenantModel('assessment_marks', tenantContext(req)).find(filter)
       .sort({ termNumber: 1, assessmentType: 1, instance: 1 }).limit(5000).lean();
     return _ok(res, docs);
   } catch (err) {
@@ -886,7 +887,7 @@ router.post('/marks', authMiddleware, PLAN, rbac('grades', 'create'), async (req
 
     const label = d.label || _label(d.assessmentType, d.instance);
 
-    const doc = await _model('assessment_marks').findOneAndUpdate(
+    const doc = await tenantModel('assessment_marks', tenantContext(req)).findOneAndUpdate(
       {
         schoolId,
         studentId:      d.studentId,
@@ -968,7 +969,7 @@ router.post('/marks/bulk', authMiddleware, PLAN, rbac('grades', 'create'), async
       const [assessmentType, termNumber] = k.split('__');
       return { assessmentType, termNumber: Number(termNumber) };
     });
-    const lockedScheduleEntry = await _model('assessment_schedule').findOne({
+    const lockedScheduleEntry = await tenantModel('assessment_schedule', tenantContext(req)).findOne({
       schoolId,
       isLocked: true,
       $or: schedOr,
@@ -982,7 +983,7 @@ router.post('/marks/bulk', authMiddleware, PLAN, rbac('grades', 'create'), async
     }
 
     // Guard: reject if any target marks are locked (post-approval lock)
-    const Marks = _model('assessment_marks');
+    const Marks = tenantModel('assessment_marks', tenantContext(req));
     const lockedSample = await Marks.findOne({
       schoolId,
       isLocked: true,
@@ -1044,7 +1045,7 @@ router.post('/marks/bulk', authMiddleware, PLAN, rbac('grades', 'create'), async
 router.delete('/marks/:id', authMiddleware, PLAN, rbac('grades', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('assessment_marks').findOneAndDelete({ id: req.params.id, schoolId });
+    const doc = await tenantModel('assessment_marks', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Mark not found');
     return _ok(res, { id: req.params.id, deleted: true });
   } catch (err) {
@@ -1089,7 +1090,7 @@ router.get('/report', authMiddleware, PLAN, rbac('grades', 'read'), async (req, 
     // Load config (weights, template) + default grade scale in parallel
     const [config, defaultScale] = await Promise.all([
       _getConfig(schoolId, academicYearId || null),
-      _model('grade_boundaries').findOne({ schoolId, isDefault: true }).lean(),
+      tenantModel('grade_boundaries', tenantContext(req)).findOne({ schoolId, isDefault: true }).lean(),
     ]);
     // Derive weights from customTypes (new) or fall back to legacy weights map
     const weights = config.customTypes && config.customTypes.length > 0
@@ -1105,7 +1106,7 @@ router.get('/report', authMiddleware, PLAN, rbac('grades', 'read'), async (req, 
 
     // Safety ceiling: 10,000 marks = ~50 students × 14 subjects × 4 types × 3-4 instances
     // Bounded further by the classId/termNumber filters applied above
-    const allMarks = await _model('assessment_marks').find(marksFilter).limit(10000).lean();
+    const allMarks = await tenantModel('assessment_marks', tenantContext(req)).find(marksFilter).limit(10000).lean();
 
     // Group marks by studentId → subjectId
     const byStudentSubject = {};
@@ -1206,7 +1207,7 @@ router.get('/reminders', authMiddleware, PLAN, rbac('grades', 'read'), async (re
     const schedFilter = { schoolId };
     if (academicYearId) schedFilter.academicYearId = academicYearId;
 
-    const schedules = await _model('assessment_schedule').find(schedFilter).lean();
+    const schedules = await tenantModel('assessment_schedule', tenantContext(req)).find(schedFilter).lean();
 
     // For each schedule entry, check if marks have been entered
     const reminders = [];
@@ -1230,7 +1231,7 @@ router.get('/reminders', authMiddleware, PLAN, rbac('grades', 'read'), async (re
       if (classId)   marksFilter.classId   = classId;
       if (subjectId) marksFilter.subjectId = subjectId;
 
-      const marksCount = await _model('assessment_marks').countDocuments(marksFilter);
+      const marksCount = await tenantModel('assessment_marks', tenantContext(req)).countDocuments(marksFilter);
 
       reminders.push({
         scheduleId:     sched.id,
@@ -1277,7 +1278,7 @@ router.post('/reminders/notify', authMiddleware, PLAN, rbac('settings', 'update'
     const upcomingStr = upcoming.toISOString().slice(0, 10);
 
     // Schedules that are open, overdue, or opening within 3 days
-    const schedules = await _model('assessment_schedule').find({
+    const schedules = await tenantModel('assessment_schedule', tenantContext(req)).find({
       schoolId,
       ...(academicYearId ? { academicYearId } : {}),
       dateFrom: { $lte: upcomingStr },
@@ -1289,7 +1290,7 @@ router.post('/reminders/notify', authMiddleware, PLAN, rbac('settings', 'update'
     const school = await _model('schools').findOne({ id: schoolId }).lean();
 
     // Load all teachers for this school
-    const teachers = await _model('users').find({ schoolId, role: 'teacher' }).limit(200).lean();
+    const teachers = await tenantModel('users', tenantContext(req)).find({ schoolId, role: 'teacher' }).limit(200).lean();
 
     let notified = 0;
     for (const sched of schedules) {
@@ -1305,7 +1306,7 @@ router.post('/reminders/notify', authMiddleware, PLAN, rbac('settings', 'update'
 
       // Create in-app notifications
       for (const teacher of teachers) {
-        await _model('notifications').create({
+        await tenantModel('notifications', tenantContext(req)).create({
           id:        uuidv4(),
           schoolId,
           userId:    teacher.id,
@@ -1366,7 +1367,7 @@ router.get('/marks/summary', authMiddleware, PLAN, rbac('grades', 'read'), async
     if (academicYearId) filter.academicYearId = academicYearId;
 
     // classId is required (enforced above) — bounded to one class, safe ceiling
-    const marks = await _model('assessment_marks').find(filter).limit(5000).lean();
+    const marks = await tenantModel('assessment_marks', tenantContext(req)).find(filter).limit(5000).lean();
 
     // Group by studentId → assessmentType+instance → rawScore
     const grid = {};

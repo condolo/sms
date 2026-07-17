@@ -33,6 +33,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { resolveBellSchedule } = require('./bell-schedule');
 const { sanitisePdfStr }      = require('../utils/sanitisePdf');
@@ -116,7 +117,7 @@ async function _resolveSlotTimes(schoolId, section, periodKey) {
  */
 async function _sectionForClass(schoolId, classId) {
   try {
-    const Classes = _model('classes');
+    const Classes = tenantModel('classes', { schoolId });
     const cls = await Classes.findOne({
       schoolId,
       $or: [{ id: classId }, { _id: classId }],
@@ -138,7 +139,7 @@ async function _sectionForClass(schoolId, classId) {
  * Falls back to exact period-key match for old slots without stored times.
  */
 async function _checkConflicts(schoolId, data, excludeId = null) {
-  const Timetable = _model('timetable');
+  const Timetable = tenantModel('timetable', { schoolId });
   const base = { schoolId, day: data.day, isActive: true };
   if (excludeId) base.id = { $ne: excludeId };
 
@@ -210,7 +211,7 @@ router.get('/', authMiddleware, PLAN, rbac('timetable', 'read'), async (req, res
     if (req.query.isActive)       filter.isActive       = req.query.isActive === 'true';
     if (req.query.type)           filter.type           = req.query.type;
 
-    const Timetable = _model('timetable');
+    const Timetable = tenantModel('timetable', tenantContext(req));
     const [docs, total] = await Promise.all([
       Timetable.find(filter)
         .sort({ day: 1, periodNumber: 1, period: 1 })
@@ -231,7 +232,7 @@ router.get('/workload', authMiddleware, PLAN, rbac('timetable', 'read'), async (
     if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
     if (req.query.termId)         filter.termId         = req.query.termId;
 
-    const slots = await _model('timetable')
+    const slots = await tenantModel('timetable', tenantContext(req))
       .find(filter)
       .select('teacherId teacherName day classId section')
       .limit(10000)
@@ -279,7 +280,7 @@ router.get('/conflicts', authMiddleware, PLAN, rbac('timetable', 'read'), async 
     if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
     if (req.query.termId)         filter.termId         = req.query.termId;
 
-    const slots = await _model('timetable')
+    const slots = await tenantModel('timetable', tenantContext(req))
       .find(filter)
       .select('id classId teacherId teacherName room day period subject startTime endTime section')
       .limit(10000)
@@ -371,7 +372,7 @@ router.get('/conflicts', authMiddleware, PLAN, rbac('timetable', 'read'), async 
     )];
     const teacherNameMap = {};
     if (unresolvedTeacherIds.length) {
-      const teachers = await _model('teachers').find({
+      const teachers = await tenantModel('teachers', tenantContext(req)).find({
         schoolId,
         $or: [{ userId: { $in: unresolvedTeacherIds } }, { id: { $in: unresolvedTeacherIds } }],
       }).select('userId id firstName lastName title').lean();
@@ -386,7 +387,7 @@ router.get('/conflicts', authMiddleware, PLAN, rbac('timetable', 'read'), async 
     const allClassIds = [...new Set(conflicts.flatMap(c => c.classIds ?? []))];
     const classNameMap = {};
     if (allClassIds.length) {
-      const classes = await _model('classes').find({
+      const classes = await tenantModel('classes', tenantContext(req)).find({
         schoolId,
         $or: [{ id: { $in: allClassIds } }, { _id: { $in: allClassIds } }],
       }).select('id name').lean();
@@ -419,7 +420,7 @@ router.get('/overview', authMiddleware, PLAN, rbac('timetable', 'read'), async (
     if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
     if (req.query.termId)         filter.termId         = req.query.termId;
 
-    const slots = await _model('timetable')
+    const slots = await tenantModel('timetable', tenantContext(req))
       .find(filter)
       .select('classId day period subject teacherName teacherId room type section')
       .limit(5000)
@@ -455,7 +456,7 @@ router.get('/class/:classId', authMiddleware, PLAN, rbac('timetable', 'read'), a
     if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
     if (req.query.termId)         filter.termId         = req.query.termId;
 
-    const docs = await _model('timetable')
+    const docs = await tenantModel('timetable', tenantContext(req))
       .find(filter)
       .sort({ day: 1, periodNumber: 1, period: 1 })
       .limit(200)
@@ -474,7 +475,7 @@ router.get('/teacher/:teacherId', authMiddleware, PLAN, rbac('timetable', 'read'
     if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
     if (req.query.termId)         filter.termId         = req.query.termId;
 
-    const docs = await _model('timetable')
+    const docs = await tenantModel('timetable', tenantContext(req))
       .find(filter)
       .sort({ day: 1, startTime: 1, periodNumber: 1, period: 1 })
       .limit(200)
@@ -518,8 +519,8 @@ router.post('/publish', authMiddleware, PLAN, rbac('timetable', 'update'), async
     });
 
     // Snapshot version metadata on every publish
-    const slotCount = await _model('timetable').countDocuments({ schoolId, isActive: true });
-    await _model('timetable_versions').create({
+    const slotCount = await tenantModel('timetable', tenantContext(req)).countDocuments({ schoolId, isActive: true });
+    await tenantModel('timetable_versions', tenantContext(req)).create({
       id:          uuidv4(),
       schoolId,
       termLabel:   termLabel.trim(),
@@ -563,22 +564,22 @@ router.get('/my', authMiddleware, async (req, res) => {
     }
 
     if (isSectionHead) {
-      const user    = await _model('users').findOne({ id: userId, schoolId }).lean();
+      const user    = await tenantModel('users', tenantContext(req)).findOne({ id: userId, schoolId }).lean();
       const section = user?.sectionAssigned ?? null;
       const filter  = { schoolId, isActive: true };
       if (section) filter.section = section;
-      const slots = await _model('timetable').find(filter)
+      const slots = await tenantModel('timetable', tenantContext(req)).find(filter)
         .sort({ day: 1, startTime: 1, period: 1 }).limit(5000).lean();
       return ok(res, { slots, section: section ?? 'all', role: 'section_head' });
     }
 
     // Teacher — resolve teacher record by email
-    const teacher = await _model('teachers')
+    const teacher = await tenantModel('teachers', tenantContext(req))
       .findOne({ schoolId, email: (email || '').toLowerCase() }).lean();
     if (!teacher) {
       return ok(res, { slots: [], teacher: null, message: 'No teacher record is linked to this account.' });
     }
-    const slots = await _model('timetable')
+    const slots = await tenantModel('timetable', tenantContext(req))
       .find({ schoolId, teacherId: teacher.id, isActive: true })
       .sort({ day: 1, startTime: 1, periodNumber: 1, period: 1 })
       .limit(500).lean();
@@ -604,12 +605,12 @@ router.get('/my-children', authMiddleware, async (req, res) => {
       return ok(res, { children: [], notPublished: true, message: 'Timetable has not been published yet.' });
     }
 
-    const students = await _model('students')
+    const students = await tenantModel('students', tenantContext(req))
       .find({ id: { $in: guardianOf }, schoolId }).lean();
 
     const children = await Promise.all(students.map(async student => {
       const slots = student.classId
-        ? await _model('timetable')
+        ? await tenantModel('timetable', tenantContext(req))
           .find({ schoolId, classId: student.classId, isActive: true })
           .sort({ day: 1, startTime: 1, period: 1 }).limit(300).lean()
         : [];
@@ -649,7 +650,7 @@ router.get('/substitutions', authMiddleware, PLAN, rbac('timetable', 'read'), as
       if (from) filter.date.$gte = from;
       if (to)   filter.date.$lte = to;
     }
-    const substitutions = await _model('substitutions')
+    const substitutions = await tenantModel('substitutions', tenantContext(req))
       .find(filter).sort({ date: 1, period: 1 }).limit(500).lean();
     return ok(res, { substitutions });
   } catch (err) { console.error('[substitutions GET]', err); return E.serverError(res); }
@@ -665,7 +666,7 @@ router.get('/substitutions/cover-pdf', authMiddleware, PLAN, rbac('timetable', '
     if (!date) return res.status(400).json({ error: { code: 'MISSING_PARAMS', message: 'date is required' } });
 
     const [subs, school] = await Promise.all([
-      _model('substitutions').find({ schoolId, date }).sort({ originalTeacherId: 1, period: 1 }).lean(),
+      tenantModel('substitutions', tenantContext(req)).find({ schoolId, date }).sort({ originalTeacherId: 1, period: 1 }).lean(),
       _model('schools').findOne({ id: schoolId }).lean(),
     ]);
 
@@ -885,7 +886,7 @@ router.post('/substitutions/absent', authMiddleware, PLAN, rbac('timetable', 'up
     }
 
     // Resolve teacher profile — accept either teacher profile id (tch_demo_2) OR user id (u_demo_t2)
-    const teacher = await _model('teachers').findOne({
+    const teacher = await tenantModel('teachers', tenantContext(req)).findOne({
       schoolId,
       $or: [{ id: teacherId }, { userId: teacherId }],
     }).lean();
@@ -894,7 +895,7 @@ router.post('/substitutions/absent', authMiddleware, PLAN, rbac('timetable', 'up
     const slotIds = [...new Set([teacherId, teacher?.userId, teacher?.id].filter(Boolean))];
 
     // All slots for this teacher on that weekday
-    const slots = await _model('timetable').find({
+    const slots = await tenantModel('timetable', tenantContext(req)).find({
       schoolId, teacherId: { $in: slotIds }, day: dayOfWeek, isActive: true,
       type: { $in: ['lesson', 'assembly', 'registration'] },
     }).lean();
@@ -910,7 +911,7 @@ router.post('/substitutions/absent', authMiddleware, PLAN, rbac('timetable', 'up
       : teacherId;
 
     // Skip periods already recorded for this teacher + date (check all possible ID formats)
-    const existing = await _model('substitutions')
+    const existing = await tenantModel('substitutions', tenantContext(req))
       .find({ schoolId, originalTeacherId: { $in: slotIds }, date }).lean();
     const existingPeriods = new Set(existing.map(s => s.period));
 
@@ -940,7 +941,7 @@ router.post('/substitutions/absent', authMiddleware, PLAN, rbac('timetable', 'up
       }));
 
     const created = toCreate.length
-      ? await _model('substitutions').insertMany(toCreate)
+      ? await tenantModel('substitutions', tenantContext(req)).insertMany(toCreate)
       : [];
 
     const all = [
@@ -965,12 +966,12 @@ router.post('/substitutions/auto-assign', authMiddleware, PLAN, rbac('timetable'
     const DOW = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
     const day = DOW[new Date(date + 'T12:00:00').getDay()];
 
-    const Sub = _model('substitutions');
+    const Sub = tenantModel('substitutions', tenantContext(req));
 
     const [uncovered, allTeachers, weeklySlots] = await Promise.all([
       Sub.find({ schoolId, date, status: 'uncovered' }).lean(),
-      _model('teachers').find({ schoolId, status: 'active' }).lean(),
-      _model('timetable').find({ schoolId, isActive: true }).select('teacherId').lean(),
+      tenantModel('teachers', tenantContext(req)).find({ schoolId, status: 'active' }).lean(),
+      tenantModel('timetable', tenantContext(req)).find({ schoolId, isActive: true }).select('teacherId').lean(),
     ]);
 
     if (!uncovered.length) return ok(res, { assigned: 0, message: 'No uncovered lessons to assign.' });
@@ -998,7 +999,7 @@ router.post('/substitutions/auto-assign', authMiddleware, PLAN, rbac('timetable'
       if (!thisRunByPeriod[p]) thisRunByPeriod[p] = new Set();
 
       // Teachers already teaching at this period on this weekday
-      const busySlots = await _model('timetable')
+      const busySlots = await tenantModel('timetable', tenantContext(req))
         .find({ schoolId, day, period: p, isActive: true })
         .select('teacherId').lean();
       const busyIds = new Set(busySlots.map(s => String(s.teacherId)).filter(Boolean));
@@ -1075,7 +1076,7 @@ router.put('/substitutions/:id', authMiddleware, PLAN, rbac('timetable', 'update
 
     if (substituteTeacherId !== undefined) {
       if (substituteTeacherId) {
-        const sub = await _model('teachers').findOne({ id: substituteTeacherId, schoolId }).lean();
+        const sub = await tenantModel('teachers', tenantContext(req)).findOne({ id: substituteTeacherId, schoolId }).lean();
         update.substituteTeacherId   = substituteTeacherId;
         update.substituteTeacherName = sub
           ? `${sub.title ?? ''} ${sub.firstName} ${sub.lastName}`.trim()
@@ -1091,7 +1092,7 @@ router.put('/substitutions/:id', authMiddleware, PLAN, rbac('timetable', 'update
     if (type   !== undefined) update.type   = type;
     if (status !== undefined && substituteTeacherId === undefined) update.status = status;
 
-    const doc = await _model('substitutions').findOneAndUpdate(
+    const doc = await tenantModel('substitutions', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { $set: update },
       { new: true }
@@ -1106,7 +1107,7 @@ router.put('/substitutions/:id', authMiddleware, PLAN, rbac('timetable', 'update
 router.delete('/substitutions/:id', authMiddleware, PLAN, rbac('timetable', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('substitutions').findOneAndDelete({ id: req.params.id, schoolId });
+    const doc = await tenantModel('substitutions', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Substitution record not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) { console.error('[substitutions DELETE /:id]', err); return E.serverError(res); }
@@ -1116,7 +1117,7 @@ router.delete('/substitutions/:id', authMiddleware, PLAN, rbac('timetable', 'del
 router.get('/versions', authMiddleware, PLAN, rbac('timetable', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const versions = await _model('timetable_versions')
+    const versions = await tenantModel('timetable_versions', tenantContext(req))
       .find({ schoolId }).sort({ publishedAt: -1 }).limit(20).lean();
     return ok(res, { versions });
   } catch (err) { console.error('[timetable GET /versions]', err); return E.serverError(res); }
@@ -1141,20 +1142,20 @@ router.get('/available-teachers', authMiddleware, PLAN, rbac('timetable', 'read'
     // Run all lookups in parallel
     const [busySlots, absentSubs, coveredSubs, allTeachers, weeklySlots] = await Promise.all([
       // Teachers scheduled at this period on this weekday (master timetable)
-      _model('timetable').find({ schoolId, day, period: String(period), isActive: true })
+      tenantModel('timetable', tenantContext(req)).find({ schoolId, day, period: String(period), isActive: true })
         .select('teacherId').lean(),
       // Teachers already marked absent today
-      _model('substitutions').find({ schoolId, date })
+      tenantModel('substitutions', tenantContext(req)).find({ schoolId, date })
         .select('originalTeacherId').lean(),
       // Substitutes already covering another slot at this exact period today
-      _model('substitutions').find({
+      tenantModel('substitutions', tenantContext(req)).find({
         schoolId, date, period: String(period),
         substituteTeacherId: { $exists: true, $ne: null },
       }).select('substituteTeacherId').lean(),
       // All active teachers for this school
-      _model('teachers').find({ schoolId, status: 'active' }).lean(),
+      tenantModel('teachers', tenantContext(req)).find({ schoolId, status: 'active' }).lean(),
       // All slots (for weekly load count)
-      _model('timetable').find({ schoolId, isActive: true }).select('teacherId').lean(),
+      tenantModel('timetable', tenantContext(req)).find({ schoolId, isActive: true }).select('teacherId').lean(),
     ]);
 
     const busyIds    = new Set(busySlots.map(s => String(s.teacherId)).filter(Boolean));
@@ -1226,7 +1227,7 @@ router.get('/available-teachers', authMiddleware, PLAN, rbac('timetable', 'read'
 router.get('/:id', authMiddleware, PLAN, rbac('timetable', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('timetable').findOne({ id: req.params.id, schoolId }).select('-__v').lean();
+    const doc = await tenantModel('timetable', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Timetable slot not found');
     return ok(res, doc);
   } catch (err) { console.error('[timetable GET /:id]', err); return E.serverError(res); }
@@ -1255,7 +1256,7 @@ router.post('/', authMiddleware, PLAN, rbac('timetable', 'create'), async (req, 
     const conflictMsg = await _checkConflicts(schoolId, data);
     if (conflictMsg) return E.conflict(res, conflictMsg);
 
-    const doc = await _model('timetable').create({
+    const doc = await tenantModel('timetable', tenantContext(req)).create({
       ...data,
       id:        uuidv4(),
       schoolId,
@@ -1273,7 +1274,7 @@ router.post('/bulk', authMiddleware, PLAN, rbac('timetable', 'create'), async (r
     const { data, error } = _validate(BulkSlotSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const Timetable = _model('timetable');
+    const Timetable = tenantModel('timetable', tenantContext(req));
 
     if (data.replaceClass) {
       const delFilter = { schoolId, classId: data.replaceClass };
@@ -1316,7 +1317,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('timetable', 'update'), async (req
     if (error) return E.validation(res, error);
     delete data.schoolId; delete data.id;
 
-    const current = await _model('timetable').findOne({ id: req.params.id, schoolId }).lean();
+    const current = await tenantModel('timetable', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!current) return E.notFound(res, 'Timetable slot not found');
 
     const merged = { ...current, ...data };
@@ -1341,7 +1342,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('timetable', 'update'), async (req
       if (conflictMsg) return E.conflict(res, conflictMsg);
     }
 
-    const doc = await _model('timetable').findOneAndUpdate(
+    const doc = await tenantModel('timetable', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { ...data, updatedBy: userId },
       { new: true, runValidators: false },
@@ -1355,7 +1356,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('timetable', 'update'), async (req
 router.delete('/:id', authMiddleware, PLAN, rbac('timetable', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('timetable').findOneAndDelete({ id: req.params.id, schoolId });
+    const doc = await tenantModel('timetable', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Timetable slot not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) { console.error('[timetable DELETE /:id]', err); return E.serverError(res); }
