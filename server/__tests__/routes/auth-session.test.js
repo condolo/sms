@@ -230,16 +230,26 @@ describe('POST /api/auth/login — school shape', () => {
     }
   });
 
-  test('response includes token and user', async () => {
+  test('issues the session token as an HttpOnly cookie (not in the JSON body) and includes user', async () => {
+    // The JWT is deliberately never returned in the response body — only as
+    // an HttpOnly, SameSite=Strict cookie (_setAuthCookie in auth.js), so
+    // client-side JS (and therefore XSS) can never read it. The frontend
+    // (client/src/pages/Login.jsx) already only reads res.user/res.school —
+    // it never reads res.token.
     const app = buildApp();
     const res = await supertest(app)
       .post('/api/auth/login')
       .set('X-School-Slug', 'demo')
       .send({ email: 'admin@demo.school', password: 'Password123!' });
 
-    expect(res.body).toHaveProperty('token');
-    expect(typeof res.body.token).toBe('string');
-    expect(res.body.token.length).toBeGreaterThan(0);
+    expect(res.body).not.toHaveProperty('token');
+
+    const cookies = [].concat(res.headers['set-cookie'] || []);
+    const tokenCookie = cookies.find(c => c.startsWith('token='));
+    expect(tokenCookie).toBeDefined();
+    expect(tokenCookie).toMatch(/HttpOnly/i);
+    expect(tokenCookie).toMatch(/^token=[^;]+/); // non-empty value
+
     expect(res.body).toHaveProperty('user');
   });
 

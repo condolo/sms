@@ -51,6 +51,10 @@
     "testMatch": [
       "**/server/__tests__/**/*.test.js"
     ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "<rootDir>/.claude/worktrees/"
+    ],
     "collectCoverageFrom": [
       "server/utils/academic-calc.js",
       "server/utils/ranking.js",
