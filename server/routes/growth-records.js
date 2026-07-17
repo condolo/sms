@@ -14,7 +14,7 @@ const { v4: uuidv4 } = require('uuid');
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 
 const router = express.Router();
@@ -78,8 +78,8 @@ router.get('/:type', authMiddleware, PLAN, rbac('growth_profile', 'read'), _type
     if (req.query.verificationStatus) filter.verificationStatus = req.query.verificationStatus;
 
     const [docs, total] = await Promise.all([
-      _model(col).find(filter).sort({ startDate: -1, createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
-      _model(col).countDocuments(filter),
+      tenantModel(col, tenantContext(req)).find(filter).sort({ startDate: -1, createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
+      tenantModel(col, tenantContext(req)).countDocuments(filter),
     ]);
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) { console.error(`[growth-records GET /${req.params.type}]`, err); return E.serverError(res); }
@@ -90,7 +90,7 @@ router.get('/:type/:id', authMiddleware, PLAN, rbac('growth_profile', 'read'), _
   try {
     const { schoolId } = req.jwtUser;
     const col = TYPE_COLLECTIONS[req.params.type];
-    const doc = await _model(col).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
+    const doc = await tenantModel(col, tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Record not found');
     return ok(res, doc);
   } catch (err) { console.error(`[growth-records GET /${req.params.type}/:id]`, err); return E.serverError(res); }
@@ -104,7 +104,7 @@ router.post('/:type', authMiddleware, PLAN, rbac('growth_profile', 'create'), _t
     const { data, error } = _validate(RecordSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const doc = await _model(col).create({
+    const doc = await tenantModel(col, tenantContext(req)).create({
       ...data,
       id:                 uuidv4(),
       schoolId,
@@ -129,7 +129,7 @@ router.put('/:type/:id', authMiddleware, PLAN, rbac('growth_profile', 'update'),
     delete data.verificationStatus; delete data.verifiedBy; delete data.verifiedAt;
     delete data.schoolId; delete data.id;
 
-    const doc = await _model(col).findOneAndUpdate(
+    const doc = await tenantModel(col, tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { ...data, updatedBy: userId, updatedAt: new Date().toISOString() },
       { new: true, runValidators: false }
@@ -144,7 +144,7 @@ router.delete('/:type/:id', authMiddleware, PLAN, rbac('growth_profile', 'delete
   try {
     const { schoolId } = req.jwtUser;
     const col = TYPE_COLLECTIONS[req.params.type];
-    const doc = await _model(col).findOneAndDelete({ id: req.params.id, schoolId });
+    const doc = await tenantModel(col, tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Record not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) { console.error(`[growth-records DELETE /${req.params.type}/:id]`, err); return E.serverError(res); }
@@ -172,7 +172,7 @@ router.patch('/:type/:id/verify', authMiddleware, PLAN, _typeGuard, async (req, 
 
     const col = TYPE_COLLECTIONS[req.params.type];
     const now = new Date().toISOString();
-    const doc = await _model(col).findOneAndUpdate(
+    const doc = await tenantModel(col, tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       {
         verificationStatus: data.status,

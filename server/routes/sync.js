@@ -15,6 +15,7 @@ const express  = require('express');
 const mongoose = require('mongoose');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext, PLATFORM_COLLECTIONS } = require('../utils/tenant-model');
 
 const router = express.Router();
 
@@ -61,7 +62,9 @@ router.get('/', authMiddleware, _requireAdmin, async (req, res) => {
     const result = {};
 
     await Promise.all(SYNC_COLLECTIONS.map(async col => {
-      const Model = _model(col);
+      // SYNC_COLLECTIONS mixes platform-exempt ('schools') with tenant-owned
+      // collections — tenantModel() throws for the former.
+      const Model = PLATFORM_COLLECTIONS.has(col) ? _model(col) : tenantModel(col, tenantContext(req));
       const docs  = await Model.find({ schoolId }).lean();
       result[col] = docs.map(_stripSensitive);
     }));

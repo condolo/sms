@@ -63,6 +63,22 @@ const CASES = [
   ['mark-submissions',     '/api/mark-submissions',     '/', 'mark_submissions'],
 ];
 
+describe('collections.js — generic CRUD router, tenant isolation (authenticated as School A)', () => {
+  test('GET /api/collections/subjects (tenant-owned col) scopes the query to School A', async () => {
+    const router = require('../../routes/collections');
+    const res = await supertest(app('/api/collections', router)).get('/api/collections/subjects');
+    expect(res.status).toBeLessThan(500);
+    expect(mockSeen['subjects']).toBeDefined();
+    expect(mockSeen['subjects'][0].schoolId).toBe(SCHOOL_A);
+  });
+  // 'schools' (platform-exempt) and 'behaviour_matrix' (GLOBAL) both route
+  // through collections.js's own local _model(), which uses real Mongoose —
+  // not the mocked utils/model — so they can't be exercised here without a
+  // live DB. Covered instead by code review: _accessor()'s
+  // GLOBAL.has(col) || PLATFORM_COLLECTIONS.has(col) check is a plain
+  // synchronous branch, and a module-load check confirms no ReferenceError.
+});
+
 describe('mechanical routes — tenant isolation (authenticated as School A)', () => {
   for (const [file, mount, listPath, coll] of CASES) {
     test(`${file}: GET ${listPath} scopes the ${coll} query to School A (and imports resolve at runtime)`, async () => {

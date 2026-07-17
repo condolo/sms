@@ -8,7 +8,7 @@ const crypto   = require('crypto');
 const rateLimit = require('express-rate-limit');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
-const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { tenantModel, tenantContext, PLATFORM_COLLECTIONS } = require('../utils/tenant-model');
 
 const router = express.Router();
 
@@ -82,6 +82,13 @@ function _uid() {
   return Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
 }
 
+/* BACKUP_COLLECTIONS mixes platform-exempt ('schools') with tenant-owned
+   collections — route each through the right accessor rather than a
+   blanket tenantModel(), which throws for platform-exempt names. */
+function _backupAccessor(col, schoolId) {
+  return PLATFORM_COLLECTIONS.has(col) ? _model(col) : tenantModel(col, { schoolId });
+}
+
 /* ── GET /api/backup/history — list this school's backup logs ── */
 router.get('/history', _requireSuperAdmin, async (req, res) => {
   try {
@@ -105,7 +112,7 @@ router.get('/preview', _requireSuperAdmin, async (req, res) => {
     let   total    = 0;
 
     await Promise.all(BACKUP_COLLECTIONS.map(async col => {
-      const Model = _model(col);
+      const Model = _backupAccessor(col, schoolId);
       const count = await Model.countDocuments({ schoolId });
       stats[col]  = count;
       total      += count;
@@ -133,7 +140,7 @@ router.post('/export', _requireSuperAdmin, backupLimiter, async (req, res) => {
     let   total  = 0;
 
     await Promise.all(BACKUP_COLLECTIONS.map(async col => {
-      const Model  = _model(col);
+      const Model  = _backupAccessor(col, schoolId);
       const filter = col === 'schools' ? { id: schoolId } : { schoolId };
       let   docs   = await Model.find(filter).lean();
 

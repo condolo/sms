@@ -7,6 +7,7 @@ const crypto   = require('crypto');
 const mongoose = require('mongoose');
 const { authMiddleware }   = require('../middleware/auth');
 const { tenantMiddleware } = require('../middleware/tenant');
+const { tenantModel, tenantContext, PLATFORM_COLLECTIONS } = require('../utils/tenant-model');
 const email    = require('../utils/email');
 
 const router = express.Router();
@@ -114,12 +115,21 @@ function _modelName(col) {
             .replace(/^./, c => c.toUpperCase()) + 'Doc';
 }
 
+/* col is caller-controlled (URL param, gated by ALLOWED). GLOBAL collections
+   are deliberately unscoped by this router's own design (unrelated to
+   ADR-0001); PLATFORM_COLLECTIONS ('schools' here) can't go through
+   tenantModel() at all. Everything else gets tenant-scoped. */
+function _accessor(col, req) {
+  if (GLOBAL.has(col) || PLATFORM_COLLECTIONS.has(col)) return _model(col);
+  return tenantModel(col, tenantContext(req));
+}
+
 /* ── GET /api/collections/:col  — list all docs for this school ── */
 router.get('/:col', authMiddleware, async (req, res) => {
   const { col } = req.params;
   if (!ALLOWED.has(col)) return res.status(400).json({ error: `Unknown collection: ${col}` });
   try {
-    const Model  = _model(col);
+    const Model  = _accessor(col, req);
     const filter = GLOBAL.has(col) ? {} : { schoolId: req.jwtUser.schoolId };
     let docs     = await Model.find(filter).lean();
     // ⚠️ Security: strip password hashes and OTP fields from user records
@@ -139,7 +149,7 @@ router.post('/:col', authMiddleware, async (req, res) => {
   if (SUPERADMIN_WRITE.has(col) && !_isSuperAdmin(req)) return res.status(403).json({ error: 'Super admin access required' });
   if (ADMIN_WRITE.has(col) && !_isAdmin(req)) return res.status(403).json({ error: 'Admin access required' });
   try {
-    const Model = _model(col);
+    const Model  = _accessor(col, req);
     const data  = { ...req.body };
     if (!GLOBAL.has(col)) data.schoolId = req.jwtUser.schoolId;
     if (!data.id) data.id = _uid();
@@ -160,7 +170,7 @@ router.put('/:col/:id', authMiddleware, async (req, res) => {
   if (SUPERADMIN_WRITE.has(col) && !_isSuperAdmin(req)) return res.status(403).json({ error: 'Super admin access required' });
   if (ADMIN_WRITE.has(col) && !_isAdmin(req)) return res.status(403).json({ error: 'Admin access required' });
   try {
-    const Model  = _model(col);
+    const Model  = _accessor(col, req);
     const filter = GLOBAL.has(col) ? { id } : { id, schoolId: req.jwtUser.schoolId };
 
     // ── Role change detection (users collection) ──────────
@@ -215,7 +225,7 @@ router.delete('/:col/:id', authMiddleware, async (req, res) => {
   if (SUPERADMIN_WRITE.has(col) && !_isSuperAdmin(req)) return res.status(403).json({ error: 'Super admin access required' });
   if (ADMIN_WRITE.has(col) && !_isAdmin(req)) return res.status(403).json({ error: 'Admin access required' });
   try {
-    const Model  = _model(col);
+    const Model  = _accessor(col, req);
     const filter = GLOBAL.has(col) ? { id } : { id, schoolId: req.jwtUser.schoolId };
     const result = await Model.deleteOne(filter);
     if (!result.deletedCount) return res.status(404).json({ error: 'Document not found' });
@@ -235,7 +245,7 @@ router.post('/:col/bulk', authMiddleware, async (req, res) => {
   const rows = req.body;
   if (!Array.isArray(rows)) return res.status(400).json({ error: 'Body must be an array' });
   try {
-    const Model  = _model(col);
+    const Model  = _accessor(col, req);
     const ops    = rows.map(r => ({
       updateOne: {
         filter: { id: r.id, ...(GLOBAL.has(col) ? {} : { schoolId: req.jwtUser.schoolId }) },
