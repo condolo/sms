@@ -9,7 +9,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 
 const router = express.Router();
@@ -41,7 +41,7 @@ router.get('/', authMiddleware, async (req, res) => {
     if (req.query.section)      filter.sections     = req.query.section;
     if (req.query.isCompulsory) filter.isCompulsory = req.query.isCompulsory === 'true';
 
-    const docs = await _model('subjects')
+    const docs = await tenantModel('subjects', tenantContext(req))
       .find(filter)
       .sort({ order: 1, name: 1 })
       .limit(500)
@@ -55,7 +55,7 @@ router.get('/', authMiddleware, async (req, res) => {
       // Fetch without .select() so the stored `id` UUID field is not filtered out.
       // (The schema uses id:false which makes Mongoose treat .select('id') as the
       //  disabled virtual, silently dropping the real stored id field from lean results.)
-      const links = await _model('class_subjects')
+      const links = await tenantModel('class_subjects', tenantContext(req))
         .find({ schoolId, classId, isActive: { $ne: false } })
         .lean();
       const linkMap = Object.fromEntries(links.map(l => [l.subjectId, l]));
@@ -78,7 +78,7 @@ router.get('/', authMiddleware, async (req, res) => {
 router.get('/:id', authMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('subjects').findOne({ id: req.params.id, schoolId }).select('-__v').lean();
+    const doc = await tenantModel('subjects', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Subject not found');
     return ok(res, doc);
   } catch (err) { console.error('[subjects GET /:id]', err); return E.serverError(res); }
@@ -92,14 +92,14 @@ router.post('/', authMiddleware, rbac('subjects', 'create'), async (req, res) =>
     if (error) return E.badRequest(res, error);
 
     // Verify department belongs to this school
-    const dept = await _model('departments').findOne({ id: data.departmentId, schoolId }).lean();
+    const dept = await tenantModel('departments', tenantContext(req)).findOne({ id: data.departmentId, schoolId }).lean();
     if (!dept) return E.badRequest(res, 'Department not found in this school');
 
     // Code uniqueness within school
-    const dup = await _model('subjects').findOne({ schoolId, code: data.code }).lean();
+    const dup = await tenantModel('subjects', tenantContext(req)).findOne({ schoolId, code: data.code }).lean();
     if (dup) return E.conflict(res, `Subject code '${data.code}' already exists`);
 
-    const doc = await _model('subjects').create({
+    const doc = await tenantModel('subjects', tenantContext(req)).create({
       ...data,
       id:           uuidv4(),
       schoolId,
@@ -120,18 +120,18 @@ router.put('/:id', authMiddleware, rbac('subjects', 'update'), async (req, res) 
     if (error) return E.badRequest(res, error);
 
     if (data.departmentId) {
-      const dept = await _model('departments').findOne({ id: data.departmentId, schoolId }).lean();
+      const dept = await tenantModel('departments', tenantContext(req)).findOne({ id: data.departmentId, schoolId }).lean();
       if (!dept) return E.badRequest(res, 'Department not found in this school');
     }
 
     if (data.code) {
-      const conflict = await _model('subjects').findOne({
+      const conflict = await tenantModel('subjects', tenantContext(req)).findOne({
         schoolId, code: data.code, id: { $ne: req.params.id },
       }).lean();
       if (conflict) return E.conflict(res, `Subject code '${data.code}' already used`);
     }
 
-    const doc = await _model('subjects').findOneAndUpdate(
+    const doc = await tenantModel('subjects', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { ...data, updatedBy: userId },
       { new: true },
@@ -145,7 +145,7 @@ router.put('/:id', authMiddleware, rbac('subjects', 'update'), async (req, res) 
 router.delete('/:id', authMiddleware, rbac('subjects', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const doc = await _model('subjects').findOneAndUpdate(
+    const doc = await tenantModel('subjects', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { isActive: false, updatedBy: userId },
       { new: true },

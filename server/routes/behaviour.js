@@ -13,7 +13,7 @@ const { v4: uuidv4 } = require('uuid');
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 
 const router = express.Router();
@@ -104,7 +104,7 @@ router.get('/incidents', authMiddleware, PLAN, rbac('behaviour', 'read'), async 
       filter.$or = [{ title: rx }, { description: rx }];
     }
 
-    const Incidents = _model('behaviour_incidents');
+    const Incidents = tenantModel('behaviour_incidents', tenantContext(req));
     const [docs, total] = await Promise.all([
       Incidents.find(filter).sort({ date: -1, createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
       Incidents.countDocuments(filter)
@@ -126,7 +126,7 @@ router.get('/incidents/summary', authMiddleware, PLAN, rbac('behaviour', 'read')
       if (req.query.dateTo)   filter.date.$lte = req.query.dateTo;
     }
 
-    const Incidents = _model('behaviour_incidents');
+    const Incidents = tenantModel('behaviour_incidents', tenantContext(req));
     const summary = await Incidents.aggregate([
       { $match: filter },
       { $group: {
@@ -145,7 +145,7 @@ router.get('/incidents/summary', authMiddleware, PLAN, rbac('behaviour', 'read')
 router.get('/incidents/:id', authMiddleware, PLAN, rbac('behaviour', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('behaviour_incidents').findOne({ id: req.params.id, schoolId }).select('-__v').lean();
+    const doc = await tenantModel('behaviour_incidents', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Incident not found');
     return ok(res, doc);
   } catch (err) { console.error('[behaviour/incidents GET/:id]', err); return E.serverError(res); }
@@ -157,7 +157,7 @@ router.post('/incidents', authMiddleware, PLAN, rbac('behaviour', 'create'), asy
     const { data, error } = _validate(IncidentSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const doc = await _model('behaviour_incidents').create({
+    const doc = await tenantModel('behaviour_incidents', tenantContext(req)).create({
       ...data,
       id:          uuidv4(),
       schoolId,
@@ -177,7 +177,7 @@ router.put('/incidents/:id', authMiddleware, PLAN, rbac('behaviour', 'update'), 
     if (error) return E.validation(res, error);
     delete data.schoolId; delete data.id;
 
-    const doc = await _model('behaviour_incidents').findOneAndUpdate(
+    const doc = await tenantModel('behaviour_incidents', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { ...data, updatedBy: userId },
       { new: true, runValidators: false }
@@ -190,7 +190,7 @@ router.put('/incidents/:id', authMiddleware, PLAN, rbac('behaviour', 'update'), 
 router.delete('/incidents/:id', authMiddleware, PLAN, rbac('behaviour', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const doc = await _model('behaviour_incidents').findOneAndUpdate(
+    const doc = await tenantModel('behaviour_incidents', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { status: 'resolved', deletedAt: new Date().toISOString(), deletedBy: userId },
       { new: true }
@@ -213,7 +213,7 @@ router.get('/appeals', authMiddleware, PLAN, rbac('behaviour', 'read'), async (r
     if (req.query.incidentId) filter.incidentId = req.query.incidentId;
     if (req.query.outcome)    filter.outcome    = req.query.outcome;
 
-    const Appeals = _model('behaviour_appeals');
+    const Appeals = tenantModel('behaviour_appeals', tenantContext(req));
     const [docs, total] = await Promise.all([
       Appeals.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
       Appeals.countDocuments(filter)
@@ -229,10 +229,10 @@ router.post('/appeals', authMiddleware, PLAN, rbac('behaviour', 'create'), async
     if (error) return E.validation(res, error);
 
     // Verify incident exists and belongs to this school
-    const incident = await _model('behaviour_incidents').findOne({ id: data.incidentId, schoolId }).lean();
+    const incident = await tenantModel('behaviour_incidents', tenantContext(req)).findOne({ id: data.incidentId, schoolId }).lean();
     if (!incident) return E.notFound(res, 'Incident not found');
 
-    const doc = await _model('behaviour_appeals').create({
+    const doc = await tenantModel('behaviour_appeals', tenantContext(req)).create({
       ...data,
       id:          uuidv4(),
       schoolId,
@@ -242,7 +242,7 @@ router.post('/appeals', authMiddleware, PLAN, rbac('behaviour', 'create'), async
     });
 
     // Mark incident as appealed
-    await _model('behaviour_incidents').updateOne({ id: data.incidentId }, { status: 'appealed' });
+    await tenantModel('behaviour_incidents', tenantContext(req)).updateOne({ id: data.incidentId }, { status: 'appealed' });
 
     return created(res, doc.toObject ? doc.toObject() : doc);
   } catch (err) { console.error('[behaviour/appeals POST]', err); return E.serverError(res); }
@@ -255,7 +255,7 @@ router.put('/appeals/:id', authMiddleware, PLAN, rbac('behaviour', 'update'), as
     if (error) return E.validation(res, error);
     delete data.schoolId; delete data.id;
 
-    const doc = await _model('behaviour_appeals').findOneAndUpdate(
+    const doc = await tenantModel('behaviour_appeals', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { ...data, reviewedBy: userId, reviewedAt: new Date().toISOString(), updatedBy: userId },
       { new: true, runValidators: false }
@@ -266,7 +266,7 @@ router.put('/appeals/:id', authMiddleware, PLAN, rbac('behaviour', 'update'), as
     if (data.outcome && data.outcome !== 'pending') {
       // 'overturned' → incident cleared/dismissed; 'upheld' → incident remains closed
       const newStatus = data.outcome === 'overturned' ? 'overturned' : 'closed';
-      await _model('behaviour_incidents').updateOne(
+      await tenantModel('behaviour_incidents', tenantContext(req)).updateOne(
         { id: doc.incidentId },
         { status: newStatus, appealOutcome: data.outcome }
       );
@@ -287,7 +287,7 @@ router.get('/categories', authMiddleware, PLAN, rbac('behaviour', 'read'), async
     if (req.query.type)     filter.type     = req.query.type;
     if (req.query.isActive) filter.isActive = req.query.isActive === 'true';
 
-    const docs = await _model('behaviour_categories').find(filter).sort({ type: 1, name: 1 }).limit(200).select('-__v').lean();
+    const docs = await tenantModel('behaviour_categories', tenantContext(req)).find(filter).sort({ type: 1, name: 1 }).limit(200).select('-__v').lean();
     return ok(res, docs);
   } catch (err) { console.error('[behaviour/categories GET]', err); return E.serverError(res); }
 });
@@ -298,10 +298,10 @@ router.post('/categories', authMiddleware, PLAN, rbac('behaviour', 'create'), as
     const { data, error } = _validate(CategorySchema, req.body);
     if (error) return E.validation(res, error);
 
-    const dup = await _model('behaviour_categories').findOne({ schoolId, name: data.name }).lean();
+    const dup = await tenantModel('behaviour_categories', tenantContext(req)).findOne({ schoolId, name: data.name }).lean();
     if (dup) return E.conflict(res, `Category '${data.name}' already exists`);
 
-    const doc = await _model('behaviour_categories').create({ ...data, id: uuidv4(), schoolId, createdBy: userId, updatedBy: userId });
+    const doc = await tenantModel('behaviour_categories', tenantContext(req)).create({ ...data, id: uuidv4(), schoolId, createdBy: userId, updatedBy: userId });
     return created(res, doc.toObject ? doc.toObject() : doc);
   } catch (err) { console.error('[behaviour/categories POST]', err); return E.serverError(res); }
 });
@@ -313,7 +313,7 @@ router.put('/categories/:id', authMiddleware, PLAN, rbac('behaviour', 'update'),
     if (error) return E.validation(res, error);
     delete data.schoolId; delete data.id;
 
-    const doc = await _model('behaviour_categories').findOneAndUpdate(
+    const doc = await tenantModel('behaviour_categories', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { ...data, updatedBy: userId },
       { new: true, runValidators: false }
@@ -326,7 +326,7 @@ router.put('/categories/:id', authMiddleware, PLAN, rbac('behaviour', 'update'),
 router.delete('/categories/:id', authMiddleware, PLAN, rbac('behaviour', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('behaviour_categories').findOneAndDelete({ id: req.params.id, schoolId });
+    const doc = await tenantModel('behaviour_categories', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Category not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) { console.error('[behaviour/categories DELETE/:id]', err); return E.serverError(res); }

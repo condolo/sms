@@ -15,7 +15,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
 const { planGate }       = require('../middleware/plan');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 
 const router = express.Router();
@@ -79,8 +79,8 @@ router.get('/routes', async (req, res) => {
     }
 
     const [docs, total] = await Promise.all([
-      _model('transport_routes').find(filter).sort({ name: 1 }).skip(skip).limit(limit).select('-__v').lean(),
-      _model('transport_routes').countDocuments(filter),
+      tenantModel('transport_routes', tenantContext(req)).find(filter).sort({ name: 1 }).skip(skip).limit(limit).select('-__v').lean(),
+      tenantModel('transport_routes', tenantContext(req)).countDocuments(filter),
     ]);
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) {
@@ -93,7 +93,7 @@ router.get('/routes', async (req, res) => {
 router.get('/routes/:id', async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('transport_routes').findOne({ id: req.params.id, schoolId }).select('-__v').lean();
+    const doc = await tenantModel('transport_routes', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Route not found');
     return ok(res, doc);
   } catch (err) {
@@ -111,7 +111,7 @@ router.post('/routes', async (req, res) => {
     const { data, error } = _validate(RouteSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const doc = await _model('transport_routes').create({
+    const doc = await tenantModel('transport_routes', tenantContext(req)).create({
       id:        uuidv4(),
       schoolId,
       ...data,
@@ -132,13 +132,13 @@ router.put('/routes/:id', async (req, res) => {
     const { schoolId, userId, role } = req.jwtUser;
     if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Transport staff or Admin access required');
 
-    const existing = await _model('transport_routes').findOne({ id: req.params.id, schoolId }).lean();
+    const existing = await tenantModel('transport_routes', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Route not found');
 
     const { data, error } = _validate(RouteSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const doc = await _model('transport_routes').findOneAndUpdate(
+    const doc = await tenantModel('transport_routes', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { $set: { ...data, updatedBy: userId, updatedAt: new Date().toISOString() } },
       { new: true }
@@ -157,14 +157,14 @@ router.delete('/routes/:id', async (req, res) => {
     if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Transport staff or Admin access required');
 
     /* Block deletion if active assignments reference this route */
-    const activeAssignments = await _model('transport_assignments').countDocuments({
+    const activeAssignments = await tenantModel('transport_assignments', tenantContext(req)).countDocuments({
       schoolId, routeId: req.params.id, status: 'active',
     });
     if (activeAssignments > 0) {
       return E.badRequest(res, `Cannot delete — ${activeAssignments} student(s) are assigned to this route`);
     }
 
-    const doc = await _model('transport_routes').findOneAndDelete({ id: req.params.id, schoolId }).lean();
+    const doc = await tenantModel('transport_routes', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId }).lean();
     if (!doc) return E.notFound(res, 'Route not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) {
@@ -195,8 +195,8 @@ router.get('/assignments', async (req, res) => {
     if (status)  filter.status  = status;
 
     const [docs, total] = await Promise.all([
-      _model('transport_assignments').find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
-      _model('transport_assignments').countDocuments(filter),
+      tenantModel('transport_assignments', tenantContext(req)).find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
+      tenantModel('transport_assignments', tenantContext(req)).countDocuments(filter),
     ]);
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) {
@@ -215,18 +215,18 @@ router.post('/assignments', async (req, res) => {
     if (error) return E.validation(res, error);
 
     /* Validate route exists */
-    const route = await _model('transport_routes').findOne({ id: data.routeId, schoolId }).lean();
+    const route = await tenantModel('transport_routes', tenantContext(req)).findOne({ id: data.routeId, schoolId }).lean();
     if (!route) return E.notFound(res, 'Route not found');
 
     /* Check student not already actively assigned to same route */
-    const existing = await _model('transport_assignments').findOne({
+    const existing = await tenantModel('transport_assignments', tenantContext(req)).findOne({
       schoolId, routeId: data.routeId, studentId: data.studentId, status: 'active',
     }).lean();
     if (existing) return E.conflict(res, 'Student is already assigned to this route');
 
     /* Capacity check — soft warning; still allow if capacity not set */
     if (route.capacity) {
-      const currentCount = await _model('transport_assignments').countDocuments({
+      const currentCount = await tenantModel('transport_assignments', tenantContext(req)).countDocuments({
         schoolId, routeId: data.routeId, status: 'active',
       });
       if (currentCount >= route.capacity) {
@@ -235,7 +235,7 @@ router.post('/assignments', async (req, res) => {
     }
 
     const now = new Date().toISOString();
-    const doc = await _model('transport_assignments').create({
+    const doc = await tenantModel('transport_assignments', tenantContext(req)).create({
       id:           uuidv4(),
       schoolId,
       routeId:      data.routeId,
@@ -266,7 +266,7 @@ router.patch('/assignments/:id', async (req, res) => {
     const { schoolId, userId, role } = req.jwtUser;
     if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Transport staff or Admin access required');
 
-    const existing = await _model('transport_assignments').findOne({ id: req.params.id, schoolId }).lean();
+    const existing = await tenantModel('transport_assignments', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Assignment not found');
 
     const allowed = ['pickupStop', 'direction', 'endDate', 'notes', 'status', 'studentName', 'studentClass'];
@@ -277,7 +277,7 @@ router.patch('/assignments/:id', async (req, res) => {
     update.updatedBy = userId;
     update.updatedAt = new Date().toISOString();
 
-    const doc = await _model('transport_assignments').findOneAndUpdate(
+    const doc = await tenantModel('transport_assignments', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { $set: update },
       { new: true }
@@ -295,7 +295,7 @@ router.delete('/assignments/:id', async (req, res) => {
     const { schoolId, role } = req.jwtUser;
     if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Transport staff or Admin access required');
 
-    const doc = await _model('transport_assignments').findOneAndDelete({ id: req.params.id, schoolId }).lean();
+    const doc = await tenantModel('transport_assignments', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId }).lean();
     if (!doc) return E.notFound(res, 'Assignment not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) {
@@ -311,8 +311,8 @@ router.get('/summary', async (req, res) => {
     if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Transport staff or Admin access required');
 
     const [routeCount, assignmentAgg] = await Promise.all([
-      _model('transport_routes').countDocuments({ schoolId }),
-      _model('transport_assignments').aggregate([
+      tenantModel('transport_routes', tenantContext(req)).countDocuments({ schoolId }),
+      tenantModel('transport_assignments', tenantContext(req)).aggregate([
         { $match: { schoolId } },
         { $group: {
             _id:      null,

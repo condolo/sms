@@ -18,7 +18,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
 const { planGate }       = require('../middleware/plan');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 
 const router = express.Router();
@@ -77,8 +77,8 @@ router.get('/books', async (req, res) => {
     }
 
     const [docs, total] = await Promise.all([
-      _model('library_books').find(filter).sort({ title: 1 }).skip(skip).limit(limit).select('-__v').lean(),
-      _model('library_books').countDocuments(filter),
+      tenantModel('library_books', tenantContext(req)).find(filter).sort({ title: 1 }).skip(skip).limit(limit).select('-__v').lean(),
+      tenantModel('library_books', tenantContext(req)).countDocuments(filter),
     ]);
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) {
@@ -91,7 +91,7 @@ router.get('/books', async (req, res) => {
 router.get('/books/:id', async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('library_books').findOne({ id: req.params.id, schoolId }).select('-__v').lean();
+    const doc = await tenantModel('library_books', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Book not found');
     return ok(res, doc);
   } catch (err) {
@@ -109,7 +109,7 @@ router.post('/books', async (req, res) => {
     const { data, error } = _validate(BookSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const doc = await _model('library_books').create({
+    const doc = await tenantModel('library_books', tenantContext(req)).create({
       id:          uuidv4(),
       schoolId,
       ...data,
@@ -131,7 +131,7 @@ router.put('/books/:id', async (req, res) => {
     const { schoolId, userId, role } = req.jwtUser;
     if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Library staff or Admin access required');
 
-    const existing = await _model('library_books').findOne({ id: req.params.id, schoolId }).lean();
+    const existing = await tenantModel('library_books', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Book not found');
 
     const { data, error } = _validate(BookSchema, req.body);
@@ -141,7 +141,7 @@ router.put('/books/:id', async (req, res) => {
     const onLoan = (existing.copies || 0) - (existing.available || 0);
     const newAvailable = Math.max(0, data.copies - onLoan);
 
-    const doc = await _model('library_books').findOneAndUpdate(
+    const doc = await tenantModel('library_books', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { $set: { ...data, available: newAvailable, updatedBy: userId, updatedAt: new Date().toISOString() } },
       { new: true }
@@ -160,14 +160,14 @@ router.delete('/books/:id', async (req, res) => {
     if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Library staff or Admin access required');
 
     /* Block deletion if any copies are on loan */
-    const activeLoans = await _model('library_loans').countDocuments({
+    const activeLoans = await tenantModel('library_loans', tenantContext(req)).countDocuments({
       schoolId, bookId: req.params.id, status: 'active',
     });
     if (activeLoans > 0) {
       return E.badRequest(res, `Cannot delete — ${activeLoans} copy/copies are currently on loan`);
     }
 
-    const doc = await _model('library_books').findOneAndDelete({ id: req.params.id, schoolId }).lean();
+    const doc = await tenantModel('library_books', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId }).lean();
     if (!doc) return E.notFound(res, 'Book not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) {
@@ -198,8 +198,8 @@ router.get('/loans', async (req, res) => {
     if (bookId)   filter.bookId = bookId;
 
     const [docs, total] = await Promise.all([
-      _model('library_loans').find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
-      _model('library_loans').countDocuments(filter),
+      tenantModel('library_loans', tenantContext(req)).find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
+      tenantModel('library_loans', tenantContext(req)).countDocuments(filter),
     ]);
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) {
@@ -217,12 +217,12 @@ router.post('/loans', async (req, res) => {
     const { data, error } = _validate(LoanSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const book = await _model('library_books').findOne({ id: data.bookId, schoolId }).lean();
+    const book = await tenantModel('library_books', tenantContext(req)).findOne({ id: data.bookId, schoolId }).lean();
     if (!book) return E.notFound(res, 'Book not found in catalogue');
     if ((book.available ?? 0) < 1) return E.badRequest(res, 'No copies available for this book');
 
     /* Check borrower does not already have this book on loan */
-    const existing = await _model('library_loans').findOne({
+    const existing = await tenantModel('library_loans', tenantContext(req)).findOne({
       schoolId, bookId: data.bookId, borrowerId: data.borrowerId, status: 'active',
     }).lean();
     if (existing) return E.conflict(res, 'This borrower already has a copy of this book');
@@ -231,7 +231,7 @@ router.post('/loans', async (req, res) => {
 
     /* Create loan + decrement available atomically (best-effort in MongoDB without transactions) */
     const [loan] = await Promise.all([
-      _model('library_loans').create({
+      tenantModel('library_loans', tenantContext(req)).create({
         id:            uuidv4(),
         schoolId,
         bookId:        data.bookId,
@@ -248,7 +248,7 @@ router.post('/loans', async (req, res) => {
         createdBy:     userId,
         createdAt:     now,
       }),
-      _model('library_books').updateOne(
+      tenantModel('library_books', tenantContext(req)).updateOne(
         { id: data.bookId, schoolId, available: { $gt: 0 } },
         { $inc: { available: -1 } }
       ),
@@ -266,7 +266,7 @@ router.patch('/loans/:id/return', async (req, res) => {
     const { schoolId, userId, role } = req.jwtUser;
     if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Library staff or Admin access required');
 
-    const loan = await _model('library_loans').findOne({ id: req.params.id, schoolId }).lean();
+    const loan = await tenantModel('library_loans', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!loan) return E.notFound(res, 'Loan record not found');
     if (loan.status !== 'active') return E.badRequest(res, 'This book has already been returned');
 
@@ -278,7 +278,7 @@ router.patch('/loans/:id/return', async (req, res) => {
     const fineAmount  = daysOverdue * finePerDay;
 
     const [updated] = await Promise.all([
-      _model('library_loans').findOneAndUpdate(
+      tenantModel('library_loans', tenantContext(req)).findOneAndUpdate(
         { id: req.params.id, schoolId },
         { $set: {
             status:     'returned',
@@ -291,7 +291,7 @@ router.patch('/loans/:id/return', async (req, res) => {
         },
         { new: true }
       ).lean(),
-      _model('library_books').updateOne(
+      tenantModel('library_books', tenantContext(req)).updateOne(
         { id: loan.bookId, schoolId },
         { $inc: { available: 1 } }
       ),
@@ -310,7 +310,7 @@ router.post('/loans/sync-overdue', async (req, res) => {
     if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Library staff or Admin access required');
 
     const today = new Date().toISOString().slice(0, 10);
-    const result = await _model('library_loans').updateMany(
+    const result = await tenantModel('library_loans', tenantContext(req)).updateMany(
       { schoolId, status: 'active', dueDate: { $lt: today } },
       { $set: { status: 'overdue' } }
     );
@@ -330,7 +330,7 @@ router.get('/summary', async (req, res) => {
     const today = new Date().toISOString().slice(0, 10);
 
     const [bookStats, loanStats] = await Promise.all([
-      _model('library_books').aggregate([
+      tenantModel('library_books', tenantContext(req)).aggregate([
         { $match: { schoolId } },
         { $group: {
             _id:       null,
@@ -339,7 +339,7 @@ router.get('/summary', async (req, res) => {
             available:   { $sum: '$available' },
         }},
       ]),
-      _model('library_loans').aggregate([
+      tenantModel('library_loans', tenantContext(req)).aggregate([
         { $match: { schoolId } },
         { $group: {
             _id:      null,
@@ -351,7 +351,7 @@ router.get('/summary', async (req, res) => {
     ]);
 
     /* Also count active loans past due date (not yet marked overdue via sync) */
-    const overdueCount = await _model('library_loans').countDocuments({
+    const overdueCount = await tenantModel('library_loans', tenantContext(req)).countDocuments({
       schoolId, status: { $in: ['active', 'overdue'] }, dueDate: { $lt: today },
     });
 

@@ -17,7 +17,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
 const { planGate }       = require('../middleware/plan');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 
 const router = express.Router();
@@ -84,8 +84,8 @@ router.get('/hostels', async (req, res) => {
     if (gender) filter.gender = gender;
 
     const [docs, total] = await Promise.all([
-      _model('hostels').find(filter).sort({ name: 1 }).skip(skip).limit(limit).select('-__v').lean(),
-      _model('hostels').countDocuments(filter),
+      tenantModel('hostels', tenantContext(req)).find(filter).sort({ name: 1 }).skip(skip).limit(limit).select('-__v').lean(),
+      tenantModel('hostels', tenantContext(req)).countDocuments(filter),
     ]);
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) {
@@ -98,7 +98,7 @@ router.get('/hostels', async (req, res) => {
 router.get('/hostels/:id', async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('hostels').findOne({ id: req.params.id, schoolId }).select('-__v').lean();
+    const doc = await tenantModel('hostels', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Hostel not found');
     return ok(res, doc);
   } catch (err) {
@@ -116,7 +116,7 @@ router.post('/hostels', async (req, res) => {
     const { data, error } = _validate(HostelSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const doc = await _model('hostels').create({
+    const doc = await tenantModel('hostels', tenantContext(req)).create({
       id:        uuidv4(),
       schoolId,
       ...data,
@@ -137,13 +137,13 @@ router.put('/hostels/:id', async (req, res) => {
     const { schoolId, userId, role } = req.jwtUser;
     if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Hostel staff or Admin access required');
 
-    const existing = await _model('hostels').findOne({ id: req.params.id, schoolId }).lean();
+    const existing = await tenantModel('hostels', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Hostel not found');
 
     const { data, error } = _validate(HostelSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const doc = await _model('hostels').findOneAndUpdate(
+    const doc = await tenantModel('hostels', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { $set: { ...data, updatedBy: userId, updatedAt: new Date().toISOString() } },
       { new: true }
@@ -163,13 +163,13 @@ router.delete('/hostels/:id', async (req, res) => {
 
     /* Block if rooms or active assignments exist */
     const [roomCount, assignCount] = await Promise.all([
-      _model('hostel_rooms').countDocuments({ schoolId, hostelId: req.params.id }),
-      _model('hostel_assignments').countDocuments({ schoolId, hostelId: req.params.id, status: 'active' }),
+      tenantModel('hostel_rooms', tenantContext(req)).countDocuments({ schoolId, hostelId: req.params.id }),
+      tenantModel('hostel_assignments', tenantContext(req)).countDocuments({ schoolId, hostelId: req.params.id, status: 'active' }),
     ]);
     if (roomCount > 0)   return E.badRequest(res, `Cannot delete — hostel still has ${roomCount} room(s). Remove rooms first.`);
     if (assignCount > 0) return E.badRequest(res, `Cannot delete — ${assignCount} student(s) are currently assigned`);
 
-    const doc = await _model('hostels').findOneAndDelete({ id: req.params.id, schoolId }).lean();
+    const doc = await tenantModel('hostels', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId }).lean();
     if (!doc) return E.notFound(res, 'Hostel not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) {
@@ -195,8 +195,8 @@ router.get('/rooms', async (req, res) => {
     if (type)     filter.type     = type;
 
     const [docs, total] = await Promise.all([
-      _model('hostel_rooms').find(filter).sort({ hostelId: 1, roomNumber: 1 }).skip(skip).limit(limit).select('-__v').lean(),
-      _model('hostel_rooms').countDocuments(filter),
+      tenantModel('hostel_rooms', tenantContext(req)).find(filter).sort({ hostelId: 1, roomNumber: 1 }).skip(skip).limit(limit).select('-__v').lean(),
+      tenantModel('hostel_rooms', tenantContext(req)).countDocuments(filter),
     ]);
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) {
@@ -209,7 +209,7 @@ router.get('/rooms', async (req, res) => {
 router.get('/rooms/:id', async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('hostel_rooms').findOne({ id: req.params.id, schoolId }).select('-__v').lean();
+    const doc = await tenantModel('hostel_rooms', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Room not found');
     return ok(res, doc);
   } catch (err) {
@@ -228,15 +228,15 @@ router.post('/rooms', async (req, res) => {
     if (error) return E.validation(res, error);
 
     /* Validate hostel exists */
-    const hostel = await _model('hostels').findOne({ id: data.hostelId, schoolId }).lean();
+    const hostel = await tenantModel('hostels', tenantContext(req)).findOne({ id: data.hostelId, schoolId }).lean();
     if (!hostel) return E.notFound(res, 'Hostel not found');
 
     /* Check room number unique within hostel */
-    const dup = await _model('hostel_rooms').findOne({ schoolId, hostelId: data.hostelId, roomNumber: data.roomNumber }).lean();
+    const dup = await tenantModel('hostel_rooms', tenantContext(req)).findOne({ schoolId, hostelId: data.hostelId, roomNumber: data.roomNumber }).lean();
     if (dup) return E.conflict(res, `Room "${data.roomNumber}" already exists in this hostel`);
 
     const now = new Date().toISOString();
-    const doc = await _model('hostel_rooms').create({
+    const doc = await tenantModel('hostel_rooms', tenantContext(req)).create({
       id:          uuidv4(),
       schoolId,
       hostelName:  hostel.name,
@@ -259,7 +259,7 @@ router.put('/rooms/:id', async (req, res) => {
     const { schoolId, userId, role } = req.jwtUser;
     if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Hostel staff or Admin access required');
 
-    const existing = await _model('hostel_rooms').findOne({ id: req.params.id, schoolId }).lean();
+    const existing = await tenantModel('hostel_rooms', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Room not found');
 
     const { data, error } = _validate(RoomSchema, req.body);
@@ -267,14 +267,14 @@ router.put('/rooms/:id', async (req, res) => {
 
     /* Block if room number changed and conflicts */
     if (data.roomNumber !== existing.roomNumber) {
-      const dup = await _model('hostel_rooms').findOne({
+      const dup = await tenantModel('hostel_rooms', tenantContext(req)).findOne({
         schoolId, hostelId: existing.hostelId, roomNumber: data.roomNumber,
       }).lean();
       if (dup) return E.conflict(res, `Room "${data.roomNumber}" already exists in this hostel`);
     }
 
     /* Recalculate occupied count stays as-is (managed by assignment endpoints) */
-    const doc = await _model('hostel_rooms').findOneAndUpdate(
+    const doc = await tenantModel('hostel_rooms', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { $set: { ...data, updatedBy: userId, updatedAt: new Date().toISOString() } },
       { new: true }
@@ -292,14 +292,14 @@ router.delete('/rooms/:id', async (req, res) => {
     const { schoolId, role } = req.jwtUser;
     if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Hostel staff or Admin access required');
 
-    const activeOccupants = await _model('hostel_assignments').countDocuments({
+    const activeOccupants = await tenantModel('hostel_assignments', tenantContext(req)).countDocuments({
       schoolId, roomId: req.params.id, status: 'active',
     });
     if (activeOccupants > 0) {
       return E.badRequest(res, `Cannot delete — ${activeOccupants} student(s) are currently in this room`);
     }
 
-    const doc = await _model('hostel_rooms').findOneAndDelete({ id: req.params.id, schoolId }).lean();
+    const doc = await tenantModel('hostel_rooms', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId }).lean();
     if (!doc) return E.notFound(res, 'Room not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) {
@@ -330,8 +330,8 @@ router.get('/assignments', async (req, res) => {
     if (status)   filter.status   = status;
 
     const [docs, total] = await Promise.all([
-      _model('hostel_assignments').find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
-      _model('hostel_assignments').countDocuments(filter),
+      tenantModel('hostel_assignments', tenantContext(req)).find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
+      tenantModel('hostel_assignments', tenantContext(req)).countDocuments(filter),
     ]);
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) {
@@ -350,11 +350,11 @@ router.post('/assignments', async (req, res) => {
     if (error) return E.validation(res, error);
 
     /* Validate room exists */
-    const room = await _model('hostel_rooms').findOne({ id: data.roomId, schoolId }).lean();
+    const room = await tenantModel('hostel_rooms', tenantContext(req)).findOne({ id: data.roomId, schoolId }).lean();
     if (!room) return E.notFound(res, 'Room not found');
 
     /* Check student not already actively assigned in this school */
-    const existingAssignment = await _model('hostel_assignments').findOne({
+    const existingAssignment = await tenantModel('hostel_assignments', tenantContext(req)).findOne({
       schoolId, studentId: data.studentId, status: 'active',
     }).lean();
     if (existingAssignment) {
@@ -362,7 +362,7 @@ router.post('/assignments', async (req, res) => {
     }
 
     /* Capacity check */
-    const currentOccupied = await _model('hostel_assignments').countDocuments({
+    const currentOccupied = await tenantModel('hostel_assignments', tenantContext(req)).countDocuments({
       schoolId, roomId: data.roomId, status: 'active',
     });
     if (currentOccupied >= (room.capacity ?? 1)) {
@@ -371,7 +371,7 @@ router.post('/assignments', async (req, res) => {
 
     const now = new Date().toISOString();
     const [assignment] = await Promise.all([
-      _model('hostel_assignments').create({
+      tenantModel('hostel_assignments', tenantContext(req)).create({
         id:           uuidv4(),
         schoolId,
         hostelId:     data.hostelId,
@@ -391,7 +391,7 @@ router.post('/assignments', async (req, res) => {
         updatedAt:    now,
       }),
       /* Increment occupied count */
-      _model('hostel_rooms').updateOne(
+      tenantModel('hostel_rooms', tenantContext(req)).updateOne(
         { id: data.roomId, schoolId },
         { $inc: { occupied: 1 } }
       ),
@@ -409,13 +409,13 @@ router.patch('/assignments/:id/discharge', async (req, res) => {
     const { schoolId, userId, role } = req.jwtUser;
     if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Hostel staff or Admin access required');
 
-    const assignment = await _model('hostel_assignments').findOne({ id: req.params.id, schoolId }).lean();
+    const assignment = await tenantModel('hostel_assignments', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!assignment) return E.notFound(res, 'Assignment not found');
     if (assignment.status !== 'active') return E.badRequest(res, 'Assignment is not currently active');
 
     const now = new Date().toISOString();
     const [updated] = await Promise.all([
-      _model('hostel_assignments').findOneAndUpdate(
+      tenantModel('hostel_assignments', tenantContext(req)).findOneAndUpdate(
         { id: req.params.id, schoolId },
         { $set: {
             status:       'discharged',
@@ -429,7 +429,7 @@ router.patch('/assignments/:id/discharge', async (req, res) => {
         { new: true }
       ).lean(),
       /* Decrement occupied count, floor at 0 */
-      _model('hostel_rooms').updateOne(
+      tenantModel('hostel_rooms', tenantContext(req)).updateOne(
         { id: assignment.roomId, schoolId, occupied: { $gt: 0 } },
         { $inc: { occupied: -1 } }
       ),
@@ -448,8 +448,8 @@ router.get('/summary', async (req, res) => {
     if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Hostel staff or Admin access required');
 
     const [hostelCount, roomAgg, assignAgg] = await Promise.all([
-      _model('hostels').countDocuments({ schoolId }),
-      _model('hostel_rooms').aggregate([
+      tenantModel('hostels', tenantContext(req)).countDocuments({ schoolId }),
+      tenantModel('hostel_rooms', tenantContext(req)).aggregate([
         { $match: { schoolId } },
         { $group: {
             _id:      null,
@@ -458,7 +458,7 @@ router.get('/summary', async (req, res) => {
             totalOccupied: { $sum: '$occupied' },
         }},
       ]),
-      _model('hostel_assignments').aggregate([
+      tenantModel('hostel_assignments', tenantContext(req)).aggregate([
         { $match: { schoolId } },
         { $group: {
             _id:         null,
