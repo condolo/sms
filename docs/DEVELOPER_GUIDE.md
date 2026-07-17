@@ -1503,6 +1503,29 @@ function _model(col) {
 
 **Usage**: `const User = _model('users')` — returns a Mongoose model that maps to the `users` collection with `strict: false` (accepts any fields without a predefined schema).
 
+**`_model()` is bare — it runs any filter handed to it, with no tenant scoping.** As of ADR-0001/C4 (2026-07-18), calling `_model()` directly on a **tenant-owned** collection from a route is no longer the norm and is CI-blocked from increasing (`scripts/verify-tenant-coverage.js`). Use `tenantModel()` instead — see below. `_model()` remains correct and required for **platform-level** collections (`schools`, `organizations`, `release_certificates`, `audit_logs`, `platform_settings`, `landing_content`, `system_announcements` — the full list is `PLATFORM_COLLECTIONS` in `server/utils/tenant-model.js`), which have no `schoolId` and would make `tenantModel()` throw.
+
+### 20a. Tenant-Scoped Model Accessor (`server/utils/tenant-model.js`)
+
+The preferred way to access any tenant-owned collection from a route:
+
+```js
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
+
+router.get('/', authMiddleware, async (req, res) => {
+  const Students = tenantModel('students', tenantContext(req));
+  const docs = await Students.find({ status: 'active' }).lean();
+  // schoolId is injected automatically — the caller never supplies it,
+  // and cannot get it wrong or forget it.
+});
+```
+
+`tenantModel(collection, ctx)` wraps `_model(collection)` and force-scopes every query to `ctx.schoolId` — injected into filters, update payloads, aggregation `$match` stages, and bulk-write ops. It **throws** if `ctx.schoolId` is missing (fail-closed) or if the caller's own filter/update tries to set a conflicting `schoolId` (tenant-hop blocked). `tenantContext(req)` reads `req.jwtUser.schoolId`; when a helper function doesn't have `req` in scope but does have a validated `schoolId` (e.g. `async function seedDefaults(schoolId) {...}`), pass `{ schoolId }` directly — that's an equally valid context, no `req` required.
+
+**What it does not cover** (named exceptions, not silent gaps — full list with examples in `docs/adr/ADR-0001-tenant-context-enforcement.md` §4): `.populate()`, raw driver access (`mongoose.connection.db.collection(...)`), transactions, and filters using `$or` where the tenant-matching condition isn't identical on every branch (dual-ID-forms lookups, admin-recovery-by-email). These stay on `_model()`, documented inline at each site. Platform-admin routes (`platformSession`-protected, not school-JWT — `platform.js`, `qa-health.js`) are out of scope for `tenantModel()` entirely, not merely unmigrated — see `docs/governance/IDENTITY_DOMAIN_MODEL_v1.md`'s cross-boundary rule table.
+
+**Enforcement**: `node scripts/verify-tenant-coverage.js --list` shows the current count of direct `_model()` sites on tenant collections and where they are; it fails CI if the count rises above `scripts/.tenant-baseline`. Run `--update-baseline` after migrating a route to lock in the drop.
+
 ---
 
 ## 21. Setup Wizard (`js/modules/dashboard.js`)

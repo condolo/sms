@@ -298,6 +298,19 @@ curl -X PATCH .../api/platform/schools/SCH_ID \
   -d '{ "planExpiry": "2026-06-30T00:00:00.000Z" }'
 ```
 
+### View organizations
+
+**Platform dashboard → Organizations** lists every organization with its member schools and rolled-up plan/status stats. Click **View Schools** on any row to see that organization's schools with plan and active status in a modal.
+
+```bash
+curl https://innolearn-ecosystem.onrender.com/api/platform/organizations \
+  -H "X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY"
+```
+
+Returns `{ organizations: [...], unlinkedSchools: N }` — each organization includes its `schools` array and `_stats` (`schoolCount`, `activeCount`, `byPlan`). `unlinkedSchools` counts any school missing its `organizationId` link, which shouldn't happen in normal operation (every school gets a 1:1 organization automatically) but is worth investigating if it's ever non-zero.
+
+Every organization is currently 1:1 with exactly one school — there is no way yet, via this dashboard or the API, to add a second school to an existing organization. This view is groundwork for that capability, not a sign it exists today.
+
 ---
 
 ## 7. Platform Admin API Reference
@@ -319,6 +332,7 @@ X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY
 | `PATCH` | `/api/platform/schools/:id` | Update plan, addOns, isActive, planExpiry |
 | `POST` | `/api/platform/schools/:id/impersonate` | Get a JWT for any school's superadmin |
 | `GET` | `/api/platform/stats` | MRR, school counts, plan breakdown |
+| `GET` | `/api/platform/organizations` | List organizations with member schools + rolled-up plan/status stats |
 
 **System announcements**
 

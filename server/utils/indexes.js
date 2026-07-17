@@ -11,6 +11,7 @@
    createIndex for existing indexes.
    ============================================================ */
 const { _model } = require('./model');
+const { isConnected } = require('../config/db');
 
 const INDEXES = [
   /* ── report_card_snapshots ──────────────────────────────────
@@ -659,6 +660,11 @@ const DROP_INDEXES = [
  */
 async function ensureIndexes() {
   const results = { created: 0, skipped: 0, errors: [] };
+
+  if (!isConnected()) {
+    console.warn('[DB] Skipping index creation — no MongoDB connection (MONGODB_URI not set).');
+    return results;
+  }
 
   // Drop superseded indexes first — ignore "index not found" (already migrated)
   for (const { col, name } of DROP_INDEXES) {

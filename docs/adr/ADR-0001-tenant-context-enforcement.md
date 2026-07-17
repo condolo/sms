@@ -2,9 +2,10 @@
 
 **Status:** Accepted
 **Date:** 2026-07-16 (proposed) · 2026-07-16 (accepted)
+**Implementation:** Complete as of 2026-07-18 — ratchet at 24 direct-usage sites (from a baseline of 722), all reviewed exceptions (§4) or platform-admin routes out of scope by design. See `CHANGELOG.md` v4.68.0. This closes Governance Review D1.
 **Change class:** Kernel (per `PLATFORM_OPERATING_MODEL.md §10`) — changes how every tenant-scoped query is written. Requires Architecture Review sign-off before implementation.
 **Unblocks:** C4 in `IMPLEMENTATION_DEPENDENCY_GRAPH_v1.md` (the highest-fan-out root).
-**Related:** Governance Review D1 (P2 not reflected in code), SPC-001, MR-001; `PLATFORM_ARCHITECTURE_EVOLUTION_v1.md` §11/§17.1/Principle 4.
+**Related:** Governance Review D1 (P2 not reflected in code — now closed, see Implementation above), SPC-001, MR-001; `PLATFORM_ARCHITECTURE_EVOLUTION_v1.md` §11/§17.1/Principle 4.
 
 ---
 
@@ -47,6 +48,8 @@ Named, not hidden — each becomes a reviewed exception, not a silent gap:
 - **`.populate()`** — a populated reference pulls from another collection without the wrapper's scoping. Cross-collection populates on tenant data must be scoped manually and are flagged in review.
 - **Raw driver access** — `mongoose.connection.db.collection(...)` bypasses the wrapper entirely. Permitted only in audited platform/migration code, never in tenant request paths.
 - **Transactions** dropping to the raw session API — same rule.
+- **Filters using `$or` where the tenant-matching condition isn't the same on every branch** — found during the C4 migration (`platform.js`'s `/schools/:id/approve`, `/impersonate`, and both `DELETE /schools` routes). `_scopedFilter()` only recognizes a *top-level* `schoolId` key; it doesn't inspect `$or`. A filter like `{ $or: [{schoolId: X}, {email: Y}] }` (admin-recovery-by-email for accounts with a missing/mismatched `schoolId`) or `{ $or: [{schoolId: X}, {schoolId: legacyObjectIdStr}] }` (dual-ID-forms) relies on a branch that does *not* require `schoolId === X`. Wrapping it in `tenantModel(coll, {schoolId: X})` AND-injects `schoolId: X` at the top level, silently making that branch unreachable — the exact records these queries exist to recover become invisible. Left on `_model()`, each site documented inline with why. Before wrapping any filter containing `$or`, check whether every branch already implies the same `schoolId`; if not, don't wrap it.
+- **Platform-admin routes** (`platformSession`-protected — `server/routes/platform.js`, `server/routes/qa-health.js` — not school-JWT) are out of scope for `tenantModel()` entirely, not merely unmigrated. `IDENTITY_DOMAIN_MODEL_v1.md`'s cross-boundary rule table places Platform Admin outside this model: it's a different actor with a legitimate need to see across schools (provisioning, billing rollups, health/integrity scanning, orphan detection). Only the sites within `platform.js` where a *specific* school's data is being read (a per-school loop, a `_seedBaseData(schoolId)` helper) were migrated; the genuinely cross-school views were not, and should not be.
 
 ### 5. The backstop — a cross-tenant regression suite
 

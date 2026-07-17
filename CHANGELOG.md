@@ -6,6 +6,62 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.69.0] — 2026-07-18 — feat(platform): Organizations dashboard panel; fix(boot): dev server no longer hangs without MongoDB
+
+### Added
+
+- **`GET /api/platform/organizations`** (`server/routes/platform.js`) — lists every organization with its member schools (grouped by `school.organizationId`, the FK `provision-organizations.js` backfills) and rolled-up plan/status stats (`schoolCount`, `activeCount`, `byPlan`). Surfaces `unlinkedSchools` — any school missing its `organizationId` FK, which shouldn't happen post-backfill but is worth knowing about if it does.
+- **"Organizations" nav panel in `platform.html`** — new stat cards (total orgs, multi-school orgs, unlinked schools) and a table of organizations; a "View Schools" action opens a modal (via the dashboard's existing `showModal()` helper) listing each member school's plan and active status. Follows the file's established `render<Section>()` + `_<x>Row()` + `api()` pattern exactly — `platform.html` is a standalone static page (not part of `client/src`, not React), served by a special-cased Express route with a relaxed CSP.
+- **`server/__tests__/routes/platform-organizations.test.js`** — 4 tests covering grouping, plan/status rollup, unlinked-school counting, and empty states. Had to mock `mongoose.model()` directly rather than `utils/model`, since `platform.js`'s routes call their own local `_model(col)` shadow (a lazy schema-less Mongoose factory), not the shared one — same pattern already used throughout that file for `schools`/`users`.
+- **`.claude/launch.json`** — added a `server` launch config (`node server/index.js`, port 3005) alongside the existing `client` (Vite, port 5173) one.
+
+### Fixed
+
+- **`server/utils/indexes.js`'s `ensureIndexes()` had no guard for a missing MongoDB connection**, unlike `server/config/db.js`'s `connect()` (which already no-ops cleanly when `MONGODB_URI` is unset). Without a DB, every one of the ~150 `createIndex()` calls across every collection buffered against a connection that was never established and only gave up after Mongoose's default 10-second buffering timeout — sequentially, since they're not run in parallel. In practice this meant the server did eventually reach `app.listen()` in a no-DB dev environment, just after roughly 20 minutes of nothing but timeout logs, which made local verification of any change effectively impractical. Added the same `MONGODB_URI` guard `connect()` already uses (via a new `isConnected()` export from `server/config/db.js`) — `ensureIndexes()` now returns immediately, logging that it skipped, when there's no DB connection. No change to production behavior (a real `MONGODB_URI` still runs indexing exactly as before).
+
+### Product context
+
+Built in place of continuing the D-001 multi-school identity-scope decision (see `docs/governance/ARCHITECTURE_GOVERNANCE_REVIEW_v1.md`'s Decision Register) — this is deliberately read-mostly visibility on data that already existed (the `organizations` collection, 1:1-backfilled per school since the Phase A/C1-C2 work), with no identity or login implications, so it didn't need D-001 resolved first. D-001 remains unratified. Every organization is currently 1:1 with exactly one school; this panel is the visibility layer built ahead of the capability to add a second school to an existing org, not a sign that capability exists yet.
+
+Verification: 4 new jest tests passing; full suite at 381 passed, same 7 pre-existing unrelated `auth-session.test.js` failures. Live browser verification was not possible for most of this work — this sandbox has no MongoDB, and the `ensureIndexes()` hang above (found *while* trying to verify) blocked it entirely until fixed. After the fix, verified live: server boots in seconds instead of ~20 minutes without a DB.
+
+---
+
+## [v4.68.0] — 2026-07-16 → 2026-07-18 — feat(security): structural tenant isolation complete (ADR-0001 / C4)
+
+### Added
+
+- **`tenantModel(collection, ctx)`** (`server/utils/tenant-model.js`) — a wrapper around the bare `_model(collection)` accessor that force-scopes every query to `ctx.schoolId`, injecting it into filters, update payloads, aggregation `$match` stages, and bulk-write ops, and **throwing** if the caller supplies a conflicting `schoolId` or no tenant context at all. Where `_model()` would run any filter handed to it, `tenantModel()` structurally cannot return another school's data through its normal query surface. Full design and honest scope (what it does *not* cover — `.populate()`, raw driver access, transactions) in `docs/adr/ADR-0001-tenant-context-enforcement.md`.
+- **`scripts/verify-tenant-coverage.js`** + **`scripts/_tenant-scan.js`** — a CI ratchet enforcing ADR-0001 §6: the count of direct `_model()` call sites on tenant-owned collections in `server/routes/` may only ever *decrease*. `scripts/.tenant-baseline` holds the ceiling; `--update-baseline` locks in a drop after a migration. Blocks any PR that adds new unprotected tenant access.
+- **Cross-tenant regression suite** (`server/__tests__/routes/*-tenant-isolation.test.js`, plus `mechanical-routes-tenant-isolation.test.js` for the lower-risk routes) — seeds two schools' data and asserts School B's data never appears in a response authenticated as School A, for every migrated route. The required backstop per ADR-0001 §5 for the parts of the query surface the wrapper structurally can't reach.
+
+### Changed — every route in `server/routes/` migrated (except two, see below)
+
+Migrated incrementally, highest-risk first, exactly as ADR-0001 §6 prescribes — each route independently tested and revertible, no big-bang rewrite, no route's external behavior changed. In order: `attendance` → `finance` → `exams` → `students` → `report-cards` (the top-tier, highest-risk routes) → four batches of mechanical CRUD routes (~50 files) → the individually-careful ones with non-`req` helper functions or pre-auth flows (`timetable`, `lessons`, `academic-config`, `assessment`, `mpesa`, `import-export`, `auth`, `billing`, `bell-schedule`, `birthdays`) → three files with local `_model()` shadows (`events`, `messages`, `onboard`) → the 21 sites the ratchet scanner couldn't classify statically (`growth-records`, `backup`, `sync`, `collections`) → `platform.js`.
+
+**Patterns established along the way** (see `docs/adr/ADR-0001-tenant-context-enforcement.md` §4 for the full, updated list):
+- Helper functions that take `schoolId` as a parameter rather than `req` use `tenantModel(coll, { schoolId })` — `tenantContext(req)` isn't required, `{schoolId}` alone satisfies the contract.
+- Unauthenticated bootstrap flows (Safaricom M-Pesa webhooks, `auth.js` login/OTP/OAuth before `req.jwtUser` exists) leave the query that *discovers* the tenant on raw `_model()`, documented inline as a reviewed exception — every query after the tenant is resolved uses `tenantModel()`.
+- Fixed collection lists that mix platform-exempt names (`schools`) with tenant-owned ones (`backup.js`, `sync.js`) route through a small per-collection accessor checking `PLATFORM_COLLECTIONS.has(col)` first.
+- **New structural gap found and documented**: filters using `$or` for dual-ID-forms (`{$or:[{schoolId:X},{schoolId:legacyObjectIdStr}]}`) or admin-recovery-by-email (`{$or:[{schoolId:X},{email:Y}]}`) — `tenantModel()`'s scoped-filter only recognizes a *top-level* `schoolId` key; wrapping these silently AND-injects one and makes the non-matching `$or` branch unreachable. Left on `_model()` in `platform.js`'s `/approve`, `/impersonate`, and both `DELETE /schools` routes, each with an inline comment.
+- This migration repeatedly **closed latent gaps for free** — filters that previously had no `schoolId` at all (relying on `_id`/`id` uniqueness alone) now get it injected automatically by the wrapper. Called out per-commit rather than fixed silently elsewhere.
+
+**`PLATFORM_COLLECTIONS`** (the exempt set) grew from 4 to 7: `platform_settings` and `landing_content` (singleton `id:'global'` config/CMS docs) and `system_announcements` (platform-wide, shown on every school's dashboard) were mis-classified as tenant data before — none carry a `schoolId` at all.
+
+### Deliberately not migrated
+
+- **`qa-health.js`** (11 sites) — every query (global collection counts, orphan/duplicate detection scanning all schools, migration-backfill tracking) is structurally required to be cross-school; the feature cannot work any other way. Confirmed by full read, not deferred.
+- **`platform.js`** (8 sites) — genuinely platform-wide superadmin views (`/stats`, `/billing/all`, `/orphans`) plus the `$or`-fallback routes above. Not a gap — `IDENTITY_DOMAIN_MODEL_v1.md` explicitly places platform-admin (`platformSession`-protected, not school-JWT) outside this model entirely.
+- **`mpesa.js`** (2 sites), **`billing.js`** (1), **`onboard.js`** (1), **`report-cards.js`** (1) — single documented bootstrap or platform-wide exceptions within otherwise fully-migrated files.
+
+### Verification
+
+Every migrated file: module-load check (no `ReferenceError`), then full jest suite. Held at **376–381 passed, 7 pre-existing unrelated `auth-session.test.js` failures** (confirmed pre-existing before this work started, identical error signatures throughout — not a regression) across every commit in the sequence. Ratchet: **722 → 24** direct-usage sites (101 platform-exempt, 9 dynamic sites remaining for manual review, both fully accounted for as reviewed exceptions).
+
+This closes Governance Review finding **D1** (`PLATFORM_OPERATING_MODEL.md` P2 — "`schoolId` scoping is enforced at the data layer, not assumed at the route layer" — previously aspirational, now substantially true) and unblocks C4 in `IMPLEMENTATION_DEPENDENCY_GRAPH_v1.md`, the highest-fan-out root the multi-school evolution depends on. D-001 (identity scope) remains a separate, unratified decision — this work is explicitly decision-independent of it per ADR-0001's adoption gate.
+
+---
+
 ## [v4.67.0] — 2026-07-12 — fix(seo): retire /faq into /knowledge; fix thin-content accordion bug on both
 
 ### Fixed

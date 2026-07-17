@@ -52,8 +52,9 @@
 
 | ID | Statement | Severity | Resolution |
 |---|---|---|---|
-| D1 | P2 claims tenant isolation is enforced at the data layer. Implementation currently differs from the approved invariant — `server/utils/model.js` has no data-layer enforcement; scoping is route-layer convention. | High | Correct wording or relabel as target-state, pending clarification of original intent |
+| D1 | P2 claims tenant isolation is enforced at the data layer. Implementation currently differs from the approved invariant — `server/utils/model.js` has no data-layer enforcement; scoping is route-layer convention. | High | **Resolved 2026-07-18** — ADR-0001/C4 (`tenantModel()`) implemented and adopted platform-wide; ratchet at 24 direct-usage sites (from 722), all reviewed exceptions or platform-admin routes explicitly out of scope. P2's wording now matches the implementation. See `docs/adr/ADR-0001-tenant-context-enforcement.md` and `CHANGELOG.md` v4.68.0. |
 | D2 | Operating Model's AuditService list names 6 actions, calls two "next"; code already implements ~20, including both. | Low | One-line refresh |
+| D3 | Constitution §9's Organization schema documents a `schools: [String]` array on Organization. The actual implementation (`server/utils/provision-organizations.js`, Phase A/C1-C2) deliberately does not do this — a single authoritative FK on the School (`school.organizationId`) only, with an explicit in-code design note citing Operating Model Principle 6 ("one authoritative source per datum") as the reason for the deviation. Found 2026-07-18 while building the platform-admin Organizations dashboard panel, which queries by the FK (the actual schema), not the array (the documented one). | Medium | Constitution §9 needs correcting to match the implemented (and arguably better-reasoned) schema — requires an ADR per the Constitution's own amendment rule ("changes require an ADR"), not a silent edit. Not yet drafted. |
 
 ---
 
