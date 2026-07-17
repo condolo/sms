@@ -14,6 +14,7 @@ const express = require('express');
 const crypto  = require('crypto');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { nextReceiptNumber } = require('../utils/counters');
 const mpesa              = require('../utils/mpesa');
 
@@ -71,8 +72,8 @@ function _assertSafaricomIP(req, res) {
 
 /** Recalculate invoice paid/balance/status and persist */
 async function _reconcileInvoice(invoiceId, schoolId) {
-  const Invoices = _model('invoices');
-  const Payments = _model('payments');
+  const Invoices = tenantModel('invoices', { schoolId });
+  const Payments = tenantModel('payments', { schoolId });
   const invoice  = await Invoices.findOne({ id: invoiceId, schoolId }).lean();
   if (!invoice) return;
   const all     = await Payments.find({ invoiceId }).lean();
@@ -104,7 +105,7 @@ router.post('/stk-push', authMiddleware, async (req, res) => {
       return res.status(422).json({ success: false, error: { code: 'MPESA_NOT_CONFIGURED', message: 'M-Pesa is not configured for this school. Add credentials in Settings → School → M-Pesa.' } });
     }
 
-    const Invoices = _model('invoices');
+    const Invoices = tenantModel('invoices', tenantContext(req));
     const invoice  = await Invoices.findOne({ id: invoiceId, schoolId }).lean();
     if (!invoice) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Invoice not found.' } });
 
@@ -141,7 +142,7 @@ router.post('/stk-push', authMiddleware, async (req, res) => {
     }
 
     // Record pending transaction
-    const Transactions = _model('mpesa_transactions');
+    const Transactions = tenantModel('mpesa_transactions', tenantContext(req));
     const txnId = _uid();
     await Transactions.create({
       id:                txnId,
@@ -177,7 +178,7 @@ router.post('/stk-push', authMiddleware, async (req, res) => {
 router.get('/status/:checkoutRequestId', authMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const Transactions = _model('mpesa_transactions');
+    const Transactions = tenantModel('mpesa_transactions', tenantContext(req));
     const txn = await Transactions.findOne({
       checkoutRequestId: req.params.checkoutRequestId,
       schoolId,
@@ -232,15 +233,21 @@ router.post('/callback', async (req, res) => {
     const resultCode        = Number(body.ResultCode);
     const now               = new Date().toISOString();
 
+    // Bootstrap lookup — this callback carries no auth/JWT, so the tenant
+    // isn't known yet. checkoutRequestId is Safaricom's own unique ID, and
+    // this is the query that DISCOVERS the tenant; it cannot itself be
+    // tenant-scoped. Every subsequent query in this handler uses the
+    // resolved txn.schoolId via tenantModel().
     const Transactions = _model('mpesa_transactions');
     const txn = await Transactions.findOne({ checkoutRequestId }).lean();
     if (!txn) {
       console.warn('[mpesa] callback: unknown checkoutRequestId', checkoutRequestId);
       return;
     }
+    const ScopedTransactions = tenantModel('mpesa_transactions', { schoolId: txn.schoolId });
 
     if (resultCode !== 0) {
-      await Transactions.updateOne({ checkoutRequestId, schoolId: txn.schoolId }, {
+      await ScopedTransactions.updateOne({ checkoutRequestId, schoolId: txn.schoolId }, {
         $set: { status: 'failed', resultCode, resultDesc: body.ResultDesc, updatedAt: now },
       });
       console.log(`[mpesa] STK failed — ${checkoutRequestId} — ${body.ResultDesc}`);
@@ -261,7 +268,7 @@ router.post('/callback', async (req, res) => {
     // A retried/duplicate callback — a documented Safaricom behavior, not
     // an edge case — finds status already 'completed', matches nothing,
     // and is skipped before it can create a second Payment record.
-    const claimed = await Transactions.findOneAndUpdate(
+    const claimed = await ScopedTransactions.findOneAndUpdate(
       { checkoutRequestId, schoolId: txn.schoolId, status: { $ne: 'completed' } },
       { $set: { status: 'completed', mpesaReceiptNumber: mpesaCode, amount, paidAt: now, updatedAt: now } },
     ).lean();
@@ -272,14 +279,14 @@ router.post('/callback', async (req, res) => {
     }
 
     // Record payment on the invoice
-    const Invoices = _model('invoices');
+    const Invoices = tenantModel('invoices', { schoolId: txn.schoolId });
     const invoice  = await Invoices.findOne({ id: txn.invoiceId, schoolId: txn.schoolId }).lean();
     if (!invoice) return;
 
     let receiptNum = mpesaCode;
     try { receiptNum = await nextReceiptNumber(txn.schoolId); } catch {}
 
-    const Payments = _model('payments');
+    const Payments = tenantModel('payments', { schoolId: txn.schoolId });
     await Payments.create({
       id:            _uid(),
       schoolId:      txn.schoolId,
@@ -367,7 +374,7 @@ router.post('/c2b/confirmation', async (req, res) => {
     const amount = Number(TransAmount);
 
     // Record raw transaction
-    const Transactions = _model('mpesa_transactions');
+    const Transactions = tenantModel('mpesa_transactions', { schoolId: school.id });
     await Transactions.create({
       id:                _uid(),
       schoolId:          school.id,
@@ -382,7 +389,7 @@ router.post('/c2b/confirmation', async (req, res) => {
     });
 
     // Match BillRefNumber to invoice number for auto-reconciliation
-    const Invoices = _model('invoices');
+    const Invoices = tenantModel('invoices', { schoolId: school.id });
     const invoice  = await Invoices.findOne({ schoolId: school.id, invoiceNumber: BillRefNumber }).lean();
     if (!invoice) {
       console.log(`[mpesa] C2B ${TransID} received — no matching invoice for ref "${BillRefNumber}"`);
@@ -392,7 +399,7 @@ router.post('/c2b/confirmation', async (req, res) => {
     let receiptNum = TransID;
     try { receiptNum = await nextReceiptNumber(school.id); } catch {}
 
-    const Payments = _model('payments');
+    const Payments = tenantModel('payments', { schoolId: school.id });
     await Payments.create({
       id:            _uid(),
       schoolId:      school.id,
@@ -422,7 +429,7 @@ router.post('/c2b/confirmation', async (req, res) => {
 router.get('/transactions', authMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const Transactions = _model('mpesa_transactions');
+    const Transactions = tenantModel('mpesa_transactions', tenantContext(req));
     const filter = { schoolId };
     if (req.query.invoiceId) filter.invoiceId = req.query.invoiceId;
     if (req.query.status)    filter.status    = req.query.status;
@@ -516,11 +523,11 @@ router.post('/subscription', authMiddleware, async (req, res) => {
     }
 
     // Record pending subscription transaction
-    const Transactions = _model('mpesa_transactions');
+    const Transactions = tenantModel('mpesa_transactions', tenantContext(req));
     const txnId = _uid();
     // Fetch current academic year + pending invoice term for callback reconciliation
     const schoolDoc    = await _model('schools').findOne({ id: schoolId }).select('academicYear').lean();
-    const pendingSnap  = await _model('billing_snapshots').findOne({ schoolId, status: 'pending' }).sort({ generatedAt: -1 }).lean();
+    const pendingSnap  = await tenantModel('billing_snapshots', tenantContext(req)).findOne({ schoolId, status: 'pending' }).sort({ generatedAt: -1 }).lean();
     await Transactions.create({
       id:                txnId,
       schoolId,
@@ -564,15 +571,19 @@ router.post('/subscription/callback', async (req, res) => {
     const resultCode        = Number(body.ResultCode);
     const now               = new Date().toISOString();
 
+    // Bootstrap lookup — same reasoning as the invoice-payment callback
+    // above: no auth/JWT on this route, so the tenant isn't known until
+    // this query resolves it via Safaricom's checkoutRequestId.
     const Transactions = _model('mpesa_transactions');
     const txn = await Transactions.findOne({ checkoutRequestId, type: 'subscription' }).lean();
     if (!txn) {
       console.warn('[mpesa/subscription] callback: unknown checkoutRequestId', checkoutRequestId);
       return;
     }
+    const ScopedTransactions = tenantModel('mpesa_transactions', { schoolId: txn.schoolId });
 
     if (resultCode !== 0) {
-      await Transactions.updateOne({ checkoutRequestId }, {
+      await ScopedTransactions.updateOne({ checkoutRequestId }, {
         $set: { status: 'failed', resultCode, resultDesc: body.ResultDesc, updatedAt: now },
       });
       console.log(`[mpesa/subscription] STK failed — ${checkoutRequestId} — ${body.ResultDesc}`);
@@ -588,7 +599,7 @@ router.post('/subscription/callback', async (req, res) => {
 
     // Same atomic claim as the invoice-payment callback above — prevents a
     // retried callback from re-running plan activation a second time.
-    const claimed = await Transactions.findOneAndUpdate(
+    const claimed = await ScopedTransactions.findOneAndUpdate(
       { checkoutRequestId, type: 'subscription', status: { $ne: 'completed' } },
       { $set: { status: 'completed', mpesaReceiptNumber: mpesaCode, amount: paidAmount, paidAt: now, updatedAt: now } },
     ).lean();
@@ -625,7 +636,7 @@ router.post('/subscription/callback', async (req, res) => {
     });
 
     // Mark the billing snapshot as paid (if one exists for this term)
-    const Snapshots = _model('billing_snapshots');
+    const Snapshots = tenantModel('billing_snapshots', { schoolId: txn.schoolId });
     await Snapshots.updateOne(
       { schoolId: txn.schoolId, status: 'pending', academicYear: txn.academicYear },
       { $set: { status: 'paid', paidAt: now, mpesaCode, paidAmount, updatedAt: now } }
