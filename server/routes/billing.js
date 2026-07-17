@@ -17,6 +17,7 @@ const express        = require('express');
 const crypto         = require('crypto');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }     = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 const { STUDENT_RATE } = require('../config/pricing');
 
@@ -40,8 +41,8 @@ function _invoiceRef(academicYear, term) {
 
 /* ── Core snapshot creation (shared by cron + manual route) ── */
 async function createBillingSnapshot(schoolId, { academicYear, term, tier, triggerType = 'manual' }) {
-  const Students = _model('students');
-  const Snapshots = _model('billing_snapshots');
+  const Students = tenantModel('students', { schoolId });
+  const Snapshots = tenantModel('billing_snapshots', { schoolId });
 
   // Guard: don't duplicate for same year+term
   const existing = await Snapshots.findOne({ schoolId, academicYear, term }).lean();
@@ -85,7 +86,7 @@ router.get('/current', authMiddleware, async (req, res) => {
   try {
     if (!_isAdmin(req)) return E.forbidden(res, 'Admin access required.');
     const { schoolId } = req.jwtUser;
-    const Snapshots = _model('billing_snapshots');
+    const Snapshots = tenantModel('billing_snapshots', tenantContext(req));
 
     const pending = await Snapshots.findOne({ schoolId, status: 'pending' })
       .sort({ generatedAt: -1 })
@@ -105,7 +106,7 @@ router.get('/history', authMiddleware, async (req, res) => {
   try {
     if (!_isAdmin(req)) return E.forbidden(res, 'Admin access required.');
     const { schoolId } = req.jwtUser;
-    const Snapshots = _model('billing_snapshots');
+    const Snapshots = tenantModel('billing_snapshots', tenantContext(req));
 
     const history = await Snapshots.find({ schoolId })
       .sort({ generatedAt: -1 })
@@ -165,6 +166,9 @@ router.post('/generate', authMiddleware, async (req, res) => {
 router.get('/all', authMiddleware, async (req, res) => {
   try {
     if (!_isSuperAdmin(req)) return E.forbidden(res, 'Superadmin access required.');
+    // Deliberately cross-tenant — this is the platform-wide billing view for
+    // superadmins, not a school-scoped endpoint. Not a candidate for
+    // tenantModel(), same reasoning as platform.js / qa-health.js.
     const Snapshots = _model('billing_snapshots');
     const Schools   = _model('schools');
 

@@ -17,6 +17,7 @@ const { v4: uuidv4 } = require('uuid');
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, E }          = require('../utils/response');
 const email              = require('../utils/email');
 const { resolveTeacher } = require('../utils/resolveTeacher');
@@ -65,8 +66,8 @@ router.get('/today', rbac('students', 'read'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const todayMD  = _todayStr().slice(5); // 'MM-DD'
-    const Students = _model('students');
-    const Teachers = _model('teachers');
+    const Students = tenantModel('students', tenantContext(req));
+    const Teachers = tenantModel('teachers', tenantContext(req));
 
     let studentFilter = { schoolId, status: 'active' };
 
@@ -161,7 +162,7 @@ router.post('/notify', rbac('students', 'read'), async (req, res) => {
     }
 
     const todayMD  = _todayStr().slice(5);
-    const Students = _model('students');
+    const Students = tenantModel('students', tenantContext(req));
     const allStudents = await Students.find({ schoolId, status: 'active' })
       .select('id firstName lastName dateOfBirth gender className schoolEmail parentEmail parentName')
       .lean();
@@ -182,7 +183,7 @@ router.post('/notify', rbac('students', 'read'), async (req, res) => {
 async function _sendDailyBirthdays(schoolId, birthdayStudents, force = false) {
   if (!birthdayStudents.length) return { notified: 0, skipped: 0 };
 
-  const Log    = _model('birthday_sent');
+  const Log    = tenantModel('birthday_sent', { schoolId });
   const School = _model('schools');
   const today  = _todayStr();
 

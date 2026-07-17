@@ -24,7 +24,7 @@ const { z }   = require('zod');
 const { authMiddleware } = require('../middleware/auth');
 const { planGate }       = require('../middleware/plan');
 const { rbac }           = require('../middleware/rbac');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 
 const router = express.Router();
 
@@ -71,7 +71,7 @@ function _uid() {
  * Returns { periods, section } — the section that was actually used.
  */
 async function resolveBellSchedule(schoolId, section = 'all') {
-  const Bs = _model('bell_schedules');
+  const Bs = tenantModel('bell_schedules', { schoolId });
   let doc = null;
 
   // 1. Try requested section (if not already 'all')
@@ -96,7 +96,7 @@ async function resolveBellSchedule(schoolId, section = 'all') {
 /* GET /api/bell-schedule/sections — list all configured sections ─ */
 router.get('/sections', authMiddleware, planGate('bell_schedule'), async (req, res) => {
   try {
-    const Bs   = _model('bell_schedules');
+    const Bs   = tenantModel('bell_schedules', tenantContext(req));
     const docs = await Bs.find({ schoolId: req.jwtUser.schoolId }).lean();
 
     // Return one entry per VALID_SECTION indicating configured/default
@@ -143,7 +143,7 @@ router.put('/', authMiddleware, planGate('bell_schedule'), rbac('timetable', 'be
 
     const { section, periods } = parsed.data;
     const now  = new Date().toISOString();
-    const Bs   = _model('bell_schedules');
+    const Bs   = tenantModel('bell_schedules', tenantContext(req));
 
     const existing = await Bs.findOne({ schoolId: req.jwtUser.schoolId, section }).lean();
     if (existing) {
@@ -176,7 +176,7 @@ router.delete('/', authMiddleware, planGate('bell_schedule'), rbac('timetable', 
     if (!VALID_SECTIONS.includes(section)) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Unknown section '${section}'.` } });
     }
-    await _model('bell_schedules').deleteOne({ schoolId: req.jwtUser.schoolId, section });
+    await tenantModel('bell_schedules', tenantContext(req)).deleteOne({ schoolId: req.jwtUser.schoolId, section });
     res.json({ success: true, message: `Bell schedule for '${section}' removed. Will now use school default.` });
   } catch (err) {
     console.error('[bell-schedule] DELETE error:', err);
