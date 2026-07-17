@@ -17,7 +17,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 
 const router = express.Router();
@@ -26,7 +26,7 @@ const router = express.Router();
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const rules = await _model('subject_rules')
+    const rules = await tenantModel('subject_rules', tenantContext(req))
       .find({ schoolId })
       .sort({ section: 1, classPattern: 1 })
       .lean();
@@ -41,7 +41,7 @@ router.get('/', authMiddleware, async (req, res) => {
 router.get('/:id', authMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const rule = await _model('subject_rules')
+    const rule = await tenantModel('subject_rules', tenantContext(req))
       .findOne({ id: req.params.id, schoolId })
       .lean();
     if (!rule) return E.notFound(res, 'Subject rule not found');
@@ -72,15 +72,15 @@ router.post('/', authMiddleware, rbac('timetable', 'update'), async (req, res) =
 
     /* Uniqueness: one rule per section, one per classPattern */
     if (section) {
-      const dup = await _model('subject_rules').findOne({ schoolId, section }).lean();
+      const dup = await tenantModel('subject_rules', tenantContext(req)).findOne({ schoolId, section }).lean();
       if (dup) return E.conflict(res, `A rule for section '${section}' already exists`);
     }
     if (classPattern) {
-      const dup = await _model('subject_rules').findOne({ schoolId, classPattern }).lean();
+      const dup = await tenantModel('subject_rules', tenantContext(req)).findOne({ schoolId, classPattern }).lean();
       if (dup) return E.conflict(res, `A rule for classPattern '${classPattern}' already exists`);
     }
 
-    const doc = await _model('subject_rules').create({
+    const doc = await tenantModel('subject_rules', tenantContext(req)).create({
       id: uuidv4(),
       schoolId,
       section:      section      ?? null,
@@ -117,7 +117,7 @@ router.put('/:id', authMiddleware, rbac('timetable', 'update'), async (req, res)
     if (typeof maxSubjects   !== 'undefined') update.maxSubjects   = maxSubjects;
     if (typeof notes         !== 'undefined') update.notes         = notes;
 
-    const doc = await _model('subject_rules').findOneAndUpdate(
+    const doc = await tenantModel('subject_rules', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       update,
       { new: true },
@@ -134,7 +134,7 @@ router.put('/:id', authMiddleware, rbac('timetable', 'update'), async (req, res)
 router.delete('/:id', authMiddleware, rbac('timetable', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('subject_rules').findOneAndDelete({
+    const doc = await tenantModel('subject_rules', tenantContext(req)).findOneAndDelete({
       id: req.params.id,
       schoolId,
     });

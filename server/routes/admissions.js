@@ -12,6 +12,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 
 const router = express.Router();
@@ -108,7 +109,7 @@ router.get('/', authMiddleware, PLAN, rbac('admissions', 'read'), async (req, re
       ];
     }
 
-    const Apps = _model('admissions');
+    const Apps = tenantModel('admissions', tenantContext(req));
     const [docs, total] = await Promise.all([
       Apps.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
       Apps.countDocuments(filter)
@@ -125,7 +126,7 @@ router.get('/stats', authMiddleware, PLAN, rbac('admissions', 'read'), async (re
     const _ay2 = strParam(req.query.academicYearId);
     if (_ay2) filter.academicYearId = _ay2;
 
-    const Apps = _model('admissions');
+    const Apps = tenantModel('admissions', tenantContext(req));
     const pipeline = await Apps.aggregate([
       { $match: filter },
       { $group: {
@@ -150,7 +151,7 @@ router.get('/stats', authMiddleware, PLAN, rbac('admissions', 'read'), async (re
 router.get('/:id', authMiddleware, PLAN, rbac('admissions', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('admissions').findOne({ id: req.params.id, schoolId }).select('-__v').lean();
+    const doc = await tenantModel('admissions', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Application not found');
     return ok(res, doc);
   } catch (err) { console.error('[admissions GET/:id]', err); return E.serverError(res); }
@@ -170,7 +171,7 @@ router.post('/', authMiddleware, PLAN, rbac('admissions', 'create'), async (req,
     const yearCode   = yearLabel.match(/\d{4}/)?.[0] ?? String(new Date().getFullYear());
     const ref        = `APP-${yearCode}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
 
-    const doc = await _model('admissions').create({
+    const doc = await tenantModel('admissions', tenantContext(req)).create({
       ...data,
       id:              uuidv4(),
       schoolId,
@@ -192,7 +193,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('admissions', 'update'), async (re
     if (error) return E.validation(res, error);
     delete data.schoolId; delete data.id; delete data.applicationRef;
 
-    const Apps    = _model('admissions');
+    const Apps    = tenantModel('admissions', tenantContext(req));
     const existing = await Apps.findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Application not found');
 
@@ -221,7 +222,7 @@ router.patch('/:id/stage', authMiddleware, PLAN, rbac('admissions', 'update'), a
     const { data, error } = _validate(StageChangeSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const Apps = _model('admissions');
+    const Apps = tenantModel('admissions', tenantContext(req));
     const doc  = await Apps.findOneAndUpdate(
       { id: req.params.id, schoolId },
       {
@@ -240,7 +241,7 @@ router.patch('/:id/stage', authMiddleware, PLAN, rbac('admissions', 'update'), a
 router.delete('/:id', authMiddleware, PLAN, rbac('admissions', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const doc = await _model('admissions').findOneAndUpdate(
+    const doc = await tenantModel('admissions', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { stage: 'withdrawn', deletedAt: new Date().toISOString(), deletedBy: userId },
       { new: true }

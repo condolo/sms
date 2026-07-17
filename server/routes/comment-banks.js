@@ -12,7 +12,7 @@ const { z }              = require('zod');
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 
 const router = express.Router();
@@ -44,7 +44,7 @@ router.get('/', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) =
       const escaped = req.query.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       filter.text   = new RegExp(escaped, 'i');
     }
-    const docs = await _model('comment_banks')
+    const docs = await tenantModel('comment_banks', tenantContext(req))
       .find(filter)
       .sort({ category: 1, createdAt: -1 })
       .limit(500)
@@ -63,7 +63,7 @@ router.post('/', authMiddleware, PLAN, rbac('grades', 'create'), async (req, res
     const { data, error } = _validate(CommentBankSchema, req.body);
     if (error) return E.validation(res, error);
     const now = new Date().toISOString();
-    const doc = await _model('comment_banks').create({
+    const doc = await tenantModel('comment_banks', tenantContext(req)).create({
       ...data,
       id:        uuidv4(),
       schoolId,
@@ -84,7 +84,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('grades', 'update'), async (req, r
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(CommentBankSchema.partial(), req.body);
     if (error) return E.validation(res, error);
-    const doc = await _model('comment_banks').findOneAndUpdate(
+    const doc = await tenantModel('comment_banks', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { $set: { ...data, updatedBy: userId, updatedAt: new Date().toISOString() } },
       { new: true }
@@ -101,7 +101,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('grades', 'update'), async (req, r
 router.delete('/:id', authMiddleware, PLAN, rbac('grades', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('comment_banks').findOneAndDelete({ id: req.params.id, schoolId });
+    const doc = await tenantModel('comment_banks', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Comment not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) {

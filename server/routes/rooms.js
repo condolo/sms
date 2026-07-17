@@ -19,7 +19,7 @@ const { z }         = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 
 const router = express.Router();
@@ -49,7 +49,7 @@ router.get('/', authMiddleware, async (req, res) => {
     const filter = { schoolId, isActive: { $ne: false } };
     if (req.query.type) filter.type = req.query.type;
 
-    const docs = await _model('rooms')
+    const docs = await tenantModel('rooms', tenantContext(req))
       .find(filter)
       .sort({ name: 1 })
       .lean();
@@ -65,7 +65,7 @@ router.get('/', authMiddleware, async (req, res) => {
 router.get('/:id', authMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('rooms').findOne({ id: req.params.id, schoolId }).lean();
+    const doc = await tenantModel('rooms', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!doc) return E.notFound(res, 'Room not found');
     return ok(res, doc);
   } catch (err) {
@@ -86,12 +86,12 @@ router.post('/', authMiddleware, async (req, res) => {
     const { data } = result;
 
     // Duplicate name guard within school
-    const existing = await _model('rooms').findOne({
+    const existing = await tenantModel('rooms', tenantContext(req)).findOne({
       schoolId, name: data.name, isActive: { $ne: false },
     }).lean();
     if (existing) return E.conflict(res, `Room "${data.name}" already exists in this school`);
 
-    const doc = await _model('rooms').create({
+    const doc = await tenantModel('rooms', tenantContext(req)).create({
       ...data,
       id:        uuidv4(),
       schoolId,
@@ -118,13 +118,13 @@ router.put('/:id', authMiddleware, async (req, res) => {
 
     // Name uniqueness check on rename
     if (result.data.name) {
-      const conflict = await _model('rooms').findOne({
+      const conflict = await tenantModel('rooms', tenantContext(req)).findOne({
         schoolId, name: result.data.name, id: { $ne: req.params.id }, isActive: { $ne: false },
       }).lean();
       if (conflict) return E.conflict(res, `Room "${result.data.name}" already exists in this school`);
     }
 
-    const doc = await _model('rooms').findOneAndUpdate(
+    const doc = await tenantModel('rooms', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { ...result.data, updatedBy: userId },
       { new: true, runValidators: false },
@@ -144,7 +144,7 @@ router.delete('/:id', authMiddleware, async (req, res) => {
     if (!canManage(req)) return E.forbidden(res);
 
     const { schoolId, userId } = req.jwtUser;
-    const doc = await _model('rooms').findOneAndUpdate(
+    const doc = await tenantModel('rooms', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { isActive: false, deletedAt: new Date().toISOString(), deletedBy: userId },
       { new: true },

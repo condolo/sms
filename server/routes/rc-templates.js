@@ -13,7 +13,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 
 const router = express.Router();
@@ -81,7 +81,7 @@ function _stampSubjects(subjects) {
 router.get('/', authMiddleware, rbac('settings', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const docs = await _model('rc_templates')
+    const docs = await tenantModel('rc_templates', tenantContext(req))
       .find({ schoolId })
       .sort({ createdAt: -1 })
       .select('-__v')
@@ -99,7 +99,7 @@ router.get('/', authMiddleware, rbac('settings', 'read'), async (req, res) => {
 router.get('/:id', authMiddleware, rbac('settings', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('rc_templates')
+    const doc = await tenantModel('rc_templates', tenantContext(req))
       .findOne({ id: req.params.id, schoolId })
       .select('-__v')
       .lean();
@@ -126,7 +126,7 @@ router.post('/', authMiddleware, rbac('settings', 'update'), async (req, res) =>
     }
     const data = parsed.data;
 
-    const doc = await _model('rc_templates').create({
+    const doc = await tenantModel('rc_templates', tenantContext(req)).create({
       ...data,
       performanceBands: _stampBands(data.performanceBands),
       subjects:         _stampSubjects(data.subjects),
@@ -150,7 +150,7 @@ router.put('/:id', authMiddleware, rbac('settings', 'update'), async (req, res) 
   try {
     const { schoolId, userId } = req.jwtUser;
 
-    const existing = await _model('rc_templates').findOne({ id: req.params.id, schoolId }).lean();
+    const existing = await tenantModel('rc_templates', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Template not found');
 
     const parsed = TemplateSchema.partial().safeParse(req.body);
@@ -164,7 +164,7 @@ router.put('/:id', authMiddleware, rbac('settings', 'update'), async (req, res) 
     if (data.performanceBands) data.performanceBands = _stampBands(data.performanceBands);
     if (data.subjects)         data.subjects         = _stampSubjects(data.subjects);
 
-    const doc = await _model('rc_templates').findOneAndUpdate(
+    const doc = await tenantModel('rc_templates', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { ...data, updatedBy: userId, updatedAt: new Date() },
       { new: true, runValidators: false },
@@ -183,7 +183,7 @@ router.put('/:id', authMiddleware, rbac('settings', 'update'), async (req, res) 
 router.delete('/:id', authMiddleware, rbac('settings', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('rc_templates').findOneAndDelete({ id: req.params.id, schoolId });
+    const doc = await tenantModel('rc_templates', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Template not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) {

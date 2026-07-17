@@ -9,7 +9,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E, parsePagination } = require('../utils/response');
 
 const router = express.Router();
@@ -34,8 +34,8 @@ function _v(data) {
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const Dept    = _model('departments');
-    const Subject = _model('subjects');
+    const Dept    = tenantModel('departments', tenantContext(req));
+    const Subject = tenantModel('subjects', tenantContext(req));
 
     const [depts, subjects] = await Promise.all([
       Dept.find({ schoolId, isActive: { $ne: false } })
@@ -57,7 +57,7 @@ router.get('/', authMiddleware, async (req, res) => {
 router.get('/:id', authMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('departments').findOne({ id: req.params.id, schoolId }).select('-__v').lean();
+    const doc = await tenantModel('departments', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Department not found');
     return ok(res, doc);
   } catch (err) { console.error('[departments GET /:id]', err); return E.serverError(res); }
@@ -70,7 +70,7 @@ router.post('/', authMiddleware, rbac('departments', 'create'), async (req, res)
     const { data, error } = _v(req.body);
     if (error) return E.badRequest(res, error);
 
-    const Dept = _model('departments');
+    const Dept = tenantModel('departments', tenantContext(req));
     const dup  = await Dept.findOne({ schoolId, code: data.code }).lean();
     if (dup) return E.conflict(res, `Department code '${data.code}' already exists`);
 
@@ -91,13 +91,13 @@ router.put('/:id', authMiddleware, rbac('departments', 'update'), async (req, re
 
     // Code uniqueness (exclude self)
     if (data.code) {
-      const conflict = await _model('departments').findOne({
+      const conflict = await tenantModel('departments', tenantContext(req)).findOne({
         schoolId, code: data.code, id: { $ne: req.params.id },
       }).lean();
       if (conflict) return E.conflict(res, `Department code '${data.code}' already used`);
     }
 
-    const doc = await _model('departments').findOneAndUpdate(
+    const doc = await tenantModel('departments', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { ...data, updatedBy: userId },
       { new: true },
@@ -113,14 +113,14 @@ router.delete('/:id', authMiddleware, rbac('departments', 'delete'), async (req,
     const { schoolId, userId } = req.jwtUser;
 
     // Block if subjects still active in this department
-    const subjectCount = await _model('subjects').countDocuments({
+    const subjectCount = await tenantModel('subjects', tenantContext(req)).countDocuments({
       schoolId, departmentId: req.params.id, isActive: { $ne: false },
     });
     if (subjectCount > 0) {
       return E.badRequest(res, `Cannot delete — ${subjectCount} active subject(s) still in this department. Move or deactivate them first.`);
     }
 
-    const doc = await _model('departments').findOneAndUpdate(
+    const doc = await tenantModel('departments', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { isActive: false, updatedBy: userId },
       { new: true },

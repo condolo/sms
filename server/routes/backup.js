@@ -8,6 +8,7 @@ const crypto   = require('crypto');
 const rateLimit = require('express-rate-limit');
 const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 
 const router = express.Router();
 
@@ -84,7 +85,7 @@ function _uid() {
 /* ── GET /api/backup/history — list this school's backup logs ── */
 router.get('/history', _requireSuperAdmin, async (req, res) => {
   try {
-    const Logs = _model('backup_logs');
+    const Logs = tenantModel('backup_logs', tenantContext(req));
     const logs = await Logs.find({ schoolId: req.jwtUser.schoolId })
       .sort({ createdAt: -1 })
       .limit(20)
@@ -174,7 +175,7 @@ router.post('/export', _requireSuperAdmin, backupLimiter, async (req, res) => {
     };
 
     /* Log metadata (without the data blob) */
-    const Logs = _model('backup_logs');
+    const Logs = tenantModel('backup_logs', tenantContext(req));
     await Logs.create({
       id:          backup._meta.id,
       schoolId,
@@ -204,7 +205,7 @@ router.post('/export', _requireSuperAdmin, backupLimiter, async (req, res) => {
 /* ── DELETE /api/backup/logs/:id — delete a backup log entry ── */
 router.delete('/logs/:id', _requireSuperAdmin, async (req, res) => {
   try {
-    const Logs = _model('backup_logs');
+    const Logs = tenantModel('backup_logs', tenantContext(req));
     await Logs.deleteOne({ id: req.params.id, schoolId: req.jwtUser.schoolId });
     res.json({ success: true });
   } catch (err) {

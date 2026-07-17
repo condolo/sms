@@ -18,7 +18,7 @@ const { z }   = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 
 const router = express.Router();
@@ -72,7 +72,7 @@ function _inferKey(name) {
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const Sections = _model('sections');
+    const Sections = tenantModel('sections', tenantContext(req));
     let docs = await Sections.find({ schoolId }).sort({ order: 1, name: 1 }).select('-__v').lean();
 
     // Auto-seed the 4 standard sections on first access per school
@@ -105,7 +105,7 @@ router.get('/', authMiddleware, async (req, res) => {
     // Enrich with section head teacher name where sectionHeadId is set
     const headIds = docs.map(d => d.sectionHeadId).filter(Boolean);
     if (headIds.length) {
-      const Teachers = _model('teachers');
+      const Teachers = tenantModel('teachers', tenantContext(req));
       const teachers = await Teachers.find({ schoolId, id: { $in: headIds } })
         .select('id title firstName lastName').lean();
       const tMap = {};
@@ -136,7 +136,7 @@ router.post('/', authMiddleware, async (req, res) => {
     const { data, error } = _validate(SectionSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const Sections = _model('sections');
+    const Sections = tenantModel('sections', tenantContext(req));
     const dup = await Sections.findOne({ schoolId, key: data.key }).lean();
     if (dup) return E.conflict(res, `A section with key '${data.key}' already exists`);
 
@@ -163,7 +163,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
     );
     if (error) return E.validation(res, error);
 
-    const Sections = _model('sections');
+    const Sections = tenantModel('sections', tenantContext(req));
     const doc = await Sections.findOneAndUpdate(
       { id: req.params.id, schoolId },
       { ...data, updatedBy: userId },
@@ -184,12 +184,12 @@ router.delete('/:id', authMiddleware, async (req, res) => {
     if (!_isAdmin(req)) return E.forbidden(res, 'Admin access required to manage sections');
 
     const { schoolId } = req.jwtUser;
-    const Sections = _model('sections');
+    const Sections = tenantModel('sections', tenantContext(req));
     const section = await Sections.findOne({ id: req.params.id, schoolId }).lean();
     if (!section) return E.notFound(res, 'Section not found');
 
     // Referential integrity: block deletion if classes use this section
-    const Classes = _model('classes');
+    const Classes = tenantModel('classes', tenantContext(req));
     const inUse = await Classes.countDocuments({ schoolId, sectionKey: section.key, status: 'active' });
     if (inUse > 0) {
       return E.conflict(res,

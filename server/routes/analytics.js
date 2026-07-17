@@ -13,7 +13,7 @@ const express = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, E }          = require('../utils/response');
 
 const router = express.Router();
@@ -48,7 +48,7 @@ router.get('/leadership', authMiddleware, PLAN, rbac('analytics', 'read'), async
       /* 1. ATTENDANCE RISK ─────────────────────────────────
          Per-student attendance in the window → flag at-risk (<80%)
          Then group by classId to get class-level risk summary.         */
-      _model('attendance').aggregate([
+      tenantModel('attendance', tenantContext(req)).aggregate([
         { $match: { schoolId, date: { $gte: sinceStr } } },
         {
           $group: {
@@ -85,7 +85,7 @@ router.get('/leadership', authMiddleware, PLAN, rbac('analytics', 'read'), async
       /* 2. FEE EXPOSURE ────────────────────────────────────
          Invoices with an outstanding balance.
          Totals + overdue count (dueDate before today).              */
-      _model('invoices').aggregate([
+      tenantModel('invoices', tenantContext(req)).aggregate([
         { $match: { schoolId, balance: { $gt: 0 } } },
         {
           $group: {
@@ -115,7 +115,7 @@ router.get('/leadership', authMiddleware, PLAN, rbac('analytics', 'read'), async
       /* 3. BEHAVIOUR HEATMAP ──────────────────────────────
          Incidents in the window grouped by classId.
          Merits vs demerits + severity breakdown.                    */
-      _model('behaviour_incidents').aggregate([
+      tenantModel('behaviour_incidents', tenantContext(req)).aggregate([
         { $match: { schoolId, date: { $gte: sinceStr } } },
         {
           $group: {
@@ -135,7 +135,7 @@ router.get('/leadership', authMiddleware, PLAN, rbac('analytics', 'read'), async
       /* 4. ACADEMIC HEALTH ────────────────────────────────
          Published grades → weighted avg per student → class avg.
          Shows how each class is performing academically.           */
-      _model('grades').aggregate([
+      tenantModel('grades', tenantContext(req)).aggregate([
         { $match: { schoolId, isPublished: true } },
         {
           $group: {
@@ -176,7 +176,7 @@ router.get('/leadership', authMiddleware, PLAN, rbac('analytics', 'read'), async
          Batch-fetch all class names to enrich the results.
          Include _id so we can map both UUID 'id' and ObjectId strings
          — older attendance records may have been saved with either.  */
-      _model('classes').find({ schoolId }, { id: 1, name: 1 }).lean(),
+      tenantModel('classes', tenantContext(req)).find({ schoolId }, { id: 1, name: 1 }).lean(),
     ]);
 
     /* ── Build classId → name map ─────────────────────── */

@@ -17,7 +17,7 @@ const { v4: uuidv4 } = require('uuid');
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 
 const router = express.Router();
@@ -71,8 +71,8 @@ router.get('/', authMiddleware, PLAN, rbac('growth_profile', 'read'), async (req
     }
 
     const [docs, total] = await Promise.all([
-      _model('growth_recommendations').find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
-      _model('growth_recommendations').countDocuments(filter),
+      tenantModel('growth_recommendations', tenantContext(req)).find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
+      tenantModel('growth_recommendations', tenantContext(req)).countDocuments(filter),
     ]);
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) { console.error('[growth-recommendations GET]', err); return E.serverError(res); }
@@ -82,7 +82,7 @@ router.get('/', authMiddleware, PLAN, rbac('growth_profile', 'read'), async (req
 router.get('/:id', authMiddleware, PLAN, rbac('growth_profile', 'read'), async (req, res) => {
   try {
     const { schoolId, role } = req.jwtUser;
-    const doc = await _model('growth_recommendations').findOne({ id: req.params.id, schoolId }).select('-__v').lean();
+    const doc = await tenantModel('growth_recommendations', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Recommendation not found');
 
     // Hide confidential recommendations from restricted roles
@@ -108,7 +108,7 @@ router.post('/', authMiddleware, PLAN, rbac('growth_profile', 'create'), async (
     const { data, error } = _validate(RecommendationSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const doc = await _model('growth_recommendations').create({
+    const doc = await tenantModel('growth_recommendations', tenantContext(req)).create({
       ...data,
       id:        uuidv4(),
       schoolId,
@@ -126,7 +126,7 @@ router.delete('/:id', authMiddleware, PLAN, rbac('growth_profile', 'delete'), as
     const { schoolId, userId, role } = req.jwtUser;
 
     // Only admin/superadmin or the original author can delete a recommendation
-    const doc = await _model('growth_recommendations').findOne({ id: req.params.id, schoolId }).lean();
+    const doc = await tenantModel('growth_recommendations', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!doc) return E.notFound(res, 'Recommendation not found');
 
     const isAdmin  = ['admin', 'superadmin'].includes(role);
@@ -135,7 +135,7 @@ router.delete('/:id', authMiddleware, PLAN, rbac('growth_profile', 'delete'), as
       return E.forbidden(res, 'You can only delete recommendations you wrote');
     }
 
-    await _model('growth_recommendations').findOneAndDelete({ id: req.params.id, schoolId });
+    await tenantModel('growth_recommendations', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) { console.error('[growth-recommendations DELETE/:id]', err); return E.serverError(res); }
 });
@@ -150,7 +150,7 @@ router.delete('/:id', authMiddleware, PLAN, rbac('growth_profile', 'delete'), as
 router.get('/aspirations/:studentId', authMiddleware, PLAN, rbac('growth_profile', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('growth_aspirations').findOne({ schoolId, studentId: req.params.studentId }).select('-__v').lean();
+    const doc = await tenantModel('growth_aspirations', tenantContext(req)).findOne({ schoolId, studentId: req.params.studentId }).select('-__v').lean();
     // Return empty object if not yet set — not a 404
     return ok(res, doc ?? { studentId: req.params.studentId, careerInterests: [], universityAspirations: [], intendedCourses: [], targetCountries: [] });
   } catch (err) { console.error('[growth-aspirations GET]', err); return E.serverError(res); }
@@ -171,7 +171,7 @@ router.put('/aspirations/:studentId', authMiddleware, PLAN, rbac('growth_profile
     if (error) return E.validation(res, error);
 
     const now = new Date().toISOString();
-    const doc = await _model('growth_aspirations').findOneAndUpdate(
+    const doc = await tenantModel('growth_aspirations', tenantContext(req)).findOneAndUpdate(
       { schoolId, studentId: req.params.studentId },
       {
         ...data,
