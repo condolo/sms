@@ -632,7 +632,12 @@ async function renderOrganizations() {
       </div>
 
       <div class="pa-card">
-        <div class="pa-card-header"><h3>Organizations (${orgs.length})</h3></div>
+        <div class="pa-card-header">
+          <h3>Organizations (${orgs.length})</h3>
+          <button class="pa-btn primary" onclick="showCreateOrganization()">
+            <i class="fas fa-plus"></i> Create Organization
+          </button>
+        </div>
         <div class="pa-table-wrap">
           <table class="pa-table">
             <thead>
@@ -700,6 +705,50 @@ function viewOrgSchools(orgId) {
     </table>`,
     [{ label: 'Close', cls: 'pa-btn', action: 'closeModal()' }]
   );
+}
+
+function showCreateOrganization() {
+  showModal(
+    'Create Organization',
+    `<div style="display:flex;flex-direction:column;gap:12px;text-align:left">
+      <div>
+        <label class="pa-label">Organization Name *</label>
+        <input id="org-name" class="pa-input" placeholder="e.g. Green Valley Schools" style="width:100%">
+      </div>
+      <div>
+        <label class="pa-label">URL Slug</label>
+        <input id="org-slug" class="pa-input" placeholder="e.g. green-valley (auto-derived from name if left blank)" style="width:100%">
+        <span style="font-size:11px;color:var(--gray-400)">Schools added to this organization will get slugs prefixed with it, e.g. <code>green-valley-eldoret</code>.</span>
+      </div>
+      <div id="org-create-error" style="display:none;padding:8px 12px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:12px;color:#b91c1c"></div>
+    </div>`,
+    [
+      { label: 'Cancel', cls: 'pa-btn', action: 'closeModal()' },
+      { label: '+ Create', cls: 'pa-btn primary', action: 'doCreateOrganization()' }
+    ]
+  );
+}
+
+async function doCreateOrganization() {
+  const name = document.getElementById('org-name')?.value.trim();
+  const slug = document.getElementById('org-slug')?.value.trim();
+  const errEl = document.getElementById('org-create-error');
+
+  if (!name) {
+    errEl.textContent = 'Organization name is required.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  try {
+    await api('POST', '/organizations', { name, slug: slug || undefined });
+    closeModal();
+    toast(`Organization "${name}" created.`, 'success');
+    renderOrganizations();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  }
 }
 
 /* ── Diagnostics ─────────────────────────────────────────── */
@@ -1010,8 +1059,18 @@ async function _doWipeAll() {
 }
 
 /* ── PROVISION ──────────────────────────────────────────── */
-function renderProvision() {
-  document.getElementById('pa-content').innerHTML = `
+async function renderProvision() {
+  const el = document.getElementById('pa-content');
+  el.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading…</div>';
+
+  let orgs = [];
+  try {
+    const json = await api('GET', '/organizations');
+    orgs = json.organizations || [];
+  } catch { /* org list is a nice-to-have here — provisioning still works without it */ }
+  _orgsCache = orgs.length ? orgs : _orgsCache;
+
+  el.innerHTML = `
     <div class="pa-card" style="max-width:640px">
       <div class="pa-card-header"><h3>Provision a New School</h3></div>
       <div class="pa-form">
@@ -1027,9 +1086,19 @@ function renderProvision() {
         </div>
         <div class="pa-form-row">
           <div class="pa-field">
-            <label>URL Slug *</label>
-            <input type="text" id="p-slug" placeholder="e.g. sunrise-academy">
+            <label>Organization</label>
+            <select id="p-org" onchange="_updateSlugHint()">
+              <option value="">— Create new organization for this school —</option>
+              ${orgs.map(o => `<option value="${o.id}" data-slug="${o.slug || ''}">${o.name}${o.slug ? ` (${o.slug})` : ''}</option>`).join('')}
+            </select>
           </div>
+          <div class="pa-field">
+            <label>URL Slug *</label>
+            <input type="text" id="p-slug" placeholder="e.g. sunrise-academy" oninput="_updateSlugHint()">
+            <span id="p-slug-hint" style="font-size:11px;color:var(--gray-400);display:none"></span>
+          </div>
+        </div>
+        <div class="pa-form-row">
           <div class="pa-field">
             <label>Plan</label>
             <select id="p-plan">
@@ -1039,22 +1108,22 @@ function renderProvision() {
               <option value="enterprise">Enterprise — KSh 250/student/term (all portals)</option>
             </select>
           </div>
-        </div>
-        <div class="pa-form-row">
           <div class="pa-field">
             <label>Admin Full Name *</label>
             <input type="text" id="p-admin-name" placeholder="School administrator">
           </div>
+        </div>
+        <div class="pa-form-row">
           <div class="pa-field">
             <label>Admin Email *</label>
             <input type="email" id="p-admin-email" placeholder="admin@school.edu">
           </div>
-        </div>
-        <div class="pa-form-row">
           <div class="pa-field">
             <label>Admin Password *</label>
             <input type="password" id="p-admin-pw" placeholder="Min. 8 characters">
           </div>
+        </div>
+        <div class="pa-form-row">
           <div class="pa-field">
             <label>Currency</label>
             <select id="p-currency">
@@ -1068,6 +1137,7 @@ function renderProvision() {
               <option value="USD">USD — US Dollar</option>
             </select>
           </div>
+          <div class="pa-field"></div>
         </div>
 
         <div id="provision-error" style="display:none;padding:10px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:13px;color:#b91c1c"></div>
@@ -1082,9 +1152,29 @@ function renderProvision() {
     </div>`;
 }
 
+/* Shows "will become: {orgSlug}-{typed}" under the slug field when an
+   existing organization is selected — the server derives the same value,
+   this is just so the admin isn't surprised by the final slug. */
+function _updateSlugHint() {
+  const orgSel = document.getElementById('p-org');
+  const hint   = document.getElementById('p-slug-hint');
+  const slugEl = document.getElementById('p-slug');
+  const opt    = orgSel?.selectedOptions?.[0];
+  const orgSlug = opt?.value ? (opt.dataset.slug || '') : '';
+
+  if (!orgSlug) { hint.style.display = 'none'; return; }
+
+  const typed = (slugEl.value || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+  const prefix = orgSlug + '-';
+  const finalSlug = typed.startsWith(prefix) ? typed : prefix + typed;
+  hint.textContent = `Will be created as: ${finalSlug || prefix + '…'}`;
+  hint.style.display = 'block';
+}
+
 async function doProvision() {
   const g = id => document.getElementById(id)?.value.trim();
   const name = g('p-name'), slug = g('p-slug'), email = g('p-admin-email'), pw = g('p-admin-pw');
+  const organizationId = g('p-org') || undefined;
   const errEl = document.getElementById('provision-error');
   errEl.style.display = 'none';
 
@@ -1100,7 +1190,8 @@ async function doProvision() {
     await api('POST', '/schools', {
       name, shortName: g('p-short'), slug,
       plan: g('p-plan'), currency: g('p-currency'), timezone: 'Africa/Nairobi',
-      adminName: g('p-admin-name'), adminEmail: email, adminPassword: pw
+      adminName: g('p-admin-name'), adminEmail: email, adminPassword: pw,
+      organizationId
     });
     toast(`${name} provisioned successfully!`, 'success');
     showView('schools');

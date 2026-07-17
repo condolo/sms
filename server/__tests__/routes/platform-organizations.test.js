@@ -19,6 +19,7 @@ jest.mock('../../utils/email', () => ({}));
 
 let mockOrgDocs = [];
 let mockSchoolDocs = [];
+let mockOrgCreateCalls = [];
 
 // platform.js defines its OWN local _model(col) — a lazy schema-less
 // mongoose.model() factory, not the shared utils/model._model — so the
@@ -31,7 +32,11 @@ jest.mock('mongoose', () => {
     models: {},
     model: jest.fn((_name, _schema, col) => {
       if (col === 'organizations') {
-        return { find: () => ({ sort: () => ({ lean: () => Promise.resolve(mockOrgDocs) }) }) };
+        return {
+          find:    () => ({ sort: () => ({ lean: () => Promise.resolve(mockOrgDocs) }) }),
+          findOne: (filter) => ({ lean: () => Promise.resolve(mockOrgDocs.find(o => o.slug === filter.slug || o.id === filter.id) || null) }),
+          create:  jest.fn((doc) => { mockOrgCreateCalls.push(doc); mockOrgDocs.push(doc); return Promise.resolve(doc); }),
+        };
       }
       if (col === 'schools') {
         return { find: () => ({ select: () => ({ lean: () => Promise.resolve(mockSchoolDocs) }) }) };
@@ -55,6 +60,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockOrgDocs = [];
   mockSchoolDocs = [];
+  mockOrgCreateCalls = [];
 });
 
 describe('GET /api/platform/organizations', () => {
@@ -122,5 +128,89 @@ describe('GET /api/platform/organizations', () => {
     expect(res.status).toBe(200);
     expect(res.body.organizations).toEqual([]);
     expect(res.body.unlinkedSchools).toBe(0);
+  });
+});
+
+describe('POST /api/platform/organizations', () => {
+  test('creates an organization with a sanitised slug and multiSchoolEnabled always false', async () => {
+    const res = await supertest(app())
+      .post('/api/platform/organizations')
+      .send({ name: 'Green Valley Schools', slug: 'Green Valley!!' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.organization).toMatchObject({
+      name: 'Green Valley Schools',
+      slug: 'green-valley',
+      status: 'active',
+      multiSchoolEnabled: false,
+    });
+    expect(mockOrgCreateCalls).toHaveLength(1);
+  });
+
+  test('auto-derives the slug from the name when no slug is given', async () => {
+    const res = await supertest(app())
+      .post('/api/platform/organizations')
+      .send({ name: 'St Mary\'s Academy' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.organization.slug).toBe('st-marys-academy');
+  });
+
+  test('rejects a missing name', async () => {
+    const res = await supertest(app()).post('/api/platform/organizations').send({ slug: 'no-name' });
+    expect(res.status).toBe(400);
+    expect(mockOrgCreateCalls).toHaveLength(0);
+  });
+
+  test('rejects a slug already taken by another organization', async () => {
+    mockOrgDocs = [{ id: 'org_existing', name: 'Existing', slug: 'green-valley', status: 'active' }];
+
+    const res = await supertest(app())
+      .post('/api/platform/organizations')
+      .send({ name: 'Green Valley Again', slug: 'green-valley' });
+
+    expect(res.status).toBe(409);
+    expect(mockOrgCreateCalls).toHaveLength(0);
+  });
+
+  // multiSchoolEnabled is deliberately not accepted from the request body —
+  // per Constitution §10 Stage 3 it specifically means "auth begins reading
+  // Memberships", which isn't built yet (gated behind D-001). This route
+  // must never let a caller set it true.
+  test('ignores an attempt to set multiSchoolEnabled via the request body', async () => {
+    const res = await supertest(app())
+      .post('/api/platform/organizations')
+      .send({ name: 'Sneaky Org', multiSchoolEnabled: true });
+
+    expect(res.status).toBe(201);
+    expect(res.body.organization.multiSchoolEnabled).toBe(false);
+  });
+});
+
+describe('_deriveSlugForOrg (school slug namespacing under an organization)', () => {
+  const { _deriveSlugForOrg } = require('../../routes/platform');
+
+  test('prefixes a plain campus slug with the organization slug', () => {
+    expect(_deriveSlugForOrg('green-valley', 'eldoret')).toBe('green-valley-eldoret');
+  });
+
+  test('does not double-prefix a slug the admin already typed with the org prefix', () => {
+    expect(_deriveSlugForOrg('green-valley', 'green-valley-eldoret')).toBe('green-valley-eldoret');
+  });
+
+  test('sanitises the raw slug before prefixing (spaces, punctuation, case)', () => {
+    expect(_deriveSlugForOrg('green-valley', 'Eldoret Campus!!')).toBe('green-valley-eldoret-campus');
+  });
+
+  test('returns just the sanitised slug when the organization has no slug', () => {
+    expect(_deriveSlugForOrg(null, 'Eldoret')).toBe('eldoret');
+    expect(_deriveSlugForOrg('', 'Eldoret')).toBe('eldoret');
+  });
+
+  test('caps the result at 60 characters', () => {
+    const long = 'a'.repeat(80);
+    const result = _deriveSlugForOrg('org', long);
+    expect(result.length).toBeLessThanOrEqual(60);
+    expect(result.startsWith('org-')).toBe(true);
   });
 });

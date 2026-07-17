@@ -32,6 +32,54 @@
 const { v4: uuidv4 } = require('uuid');
 const { _model } = require('./model');
 
+/**
+ * Get-or-create the 1:1 Organization for one School and write the FK back.
+ * Shared by the batch backfill below and by immediate, synchronous calls at
+ * provisioning time (platform.js, onboard.js) — same idempotent, crash-safe
+ * upsert either way, keyed on provenance so it can never duplicate an org
+ * for the same school.
+ *
+ * `school` must have `_id` (a real Mongo ObjectId) and, ideally, `id`,
+ * `name`/`shortName`, `slug`. Returns the org doc, or null if the school
+ * has no usable identifier.
+ */
+async function provisionOrganizationForSchool(school, { Schools, Orgs } = {}) {
+  Schools = Schools || _model('schools');
+  Orgs    = Orgs    || _model('organizations');
+
+  const schoolId = school.id || (school._id && school._id.toString());
+  if (!schoolId) return null;   // malformed doc — never crash the caller
+
+  const now = new Date().toISOString();
+
+  const org = await Orgs.findOneAndUpdate(
+    { provisionedFromSchoolId: schoolId },
+    {
+      $setOnInsert: {
+        id:                      `org_${uuidv4()}`,
+        name:                    school.name || school.shortName || 'Organization',
+        slug:                    school.slug || null,
+        status:                  'active',
+        multiSchoolEnabled:      false,   // opt-in later (Constitution §10 Stage 3)
+        provisionedFromSchoolId: schoolId,
+        createdBy:               'system:provision',
+        createdAt:               now,
+      },
+      $set: { updatedAt: now },
+    },
+    { upsert: true, new: true }
+  ).lean();
+
+  // Set the authoritative FK on the school. Filter by _id (always present)
+  // to sidestep the custom-id vs _id ambiguity entirely.
+  await Schools.updateOne(
+    { _id: school._id },
+    { $set: { organizationId: org.id } }
+  );
+
+  return org;
+}
+
 async function provisionOrganizations() {
   try {
     const Schools = _model('schools');
@@ -43,40 +91,8 @@ async function provisionOrganizations() {
 
     let count = 0;
     for await (const school of cursor) {
-      // Stable external id when present; fall back to the Mongo _id string.
-      const schoolId = school.id || (school._id && school._id.toString());
-      if (!schoolId) continue;   // malformed doc — skip, never crash the run
-
-      const now = new Date().toISOString();
-
-      // Get-or-create the 1:1 Organization for this School, deterministically
-      // keyed on provenance so re-runs (or crash recovery) never duplicate it.
-      const org = await Orgs.findOneAndUpdate(
-        { provisionedFromSchoolId: schoolId },
-        {
-          $setOnInsert: {
-            id:                      `org_${uuidv4()}`,
-            name:                    school.name || school.shortName || 'Organization',
-            slug:                    school.slug || null,
-            status:                  'active',
-            multiSchoolEnabled:      false,   // opt-in later (Constitution §10 Stage 3)
-            provisionedFromSchoolId: schoolId,
-            createdBy:               'system:provision',
-            createdAt:               now,
-          },
-          $set: { updatedAt: now },
-        },
-        { upsert: true, new: true }
-      ).lean();
-
-      // Set the authoritative FK on the school. Filter by _id (always
-      // present on the cursor doc) to sidestep the custom-id vs _id
-      // ambiguity entirely.
-      await Schools.updateOne(
-        { _id: school._id },
-        { $set: { organizationId: org.id } }
-      );
-      count++;
+      const org = await provisionOrganizationForSchool(school, { Schools, Orgs });
+      if (org) count++;
     }
 
     if (count > 0) {
@@ -90,4 +106,4 @@ async function provisionOrganizations() {
   }
 }
 
-module.exports = { provisionOrganizations };
+module.exports = { provisionOrganizations, provisionOrganizationForSchool };

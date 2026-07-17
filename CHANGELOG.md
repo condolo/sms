@@ -6,6 +6,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.70.0] — 2026-07-18 — feat(platform): create organizations and add multiple schools to one
+
+### Added
+
+- **`POST /api/platform/organizations`** — create an organization explicitly (`{ name, slug? }`, slug auto-derived from name if omitted). `multiSchoolEnabled` is hardcoded `false` and never accepted from the request body — see Governance note below.
+- **`POST /api/platform/schools` accepts an optional `organizationId`** — adds the new school to that existing organization instead of the default (a brand-new 1:1 organization for it). When targeting an existing org, the school's slug is auto-namespaced under the organization's slug (`_deriveSlugForOrg` in `server/routes/platform.js`) — e.g. organization `green-valley` + campus slug `eldoret` → school slug `green-valley-eldoret` — so schools sharing an org are recognizable by URL, and idempotent (won't double-prefix a slug the admin already typed correctly).
+- **`provisionOrganizationForSchool(school)`** (`server/utils/provision-organizations.js`) — the get-or-create-org-and-link logic extracted out of the batch backfill loop into a standalone, directly-callable function (dependency-injectable `{Schools, Orgs}` for testing). Both `platform.js`'s `POST /schools` and `onboard.js`'s public self-registration now call it **synchronously, immediately at provisioning time** — a school's organization no longer waits for the next server restart's backfill job to exist. The batch job (`provisionOrganizations()`) is unchanged in behavior and stays as the self-healing safety net for anything that predates this fix.
+- **Platform dashboard**: "Create Organization" button on the Organizations panel (name + slug form in a modal). Provision School form gained an "Organization" dropdown (default: create a new one; or pick an existing organization), with a live hint showing the final namespaced slug as you type.
+- 12 new jest tests: `_deriveSlugForOrg` (prefixing, idempotency, sanitization, length cap), `provisionOrganizationForSchool` (dependency-injected, same call shapes as the already-tested batch path), and `POST /api/platform/organizations` (creation, slug derivation, uniqueness, and — explicitly — that `multiSchoolEnabled: true` cannot be set via the request body).
+
+### Fixed
+
+- **`_sanitiseSlug` (in `platform.js`) stripped spaces instead of converting them to hyphens** — `"St Mary's Academy"` sanitised to `"stmarysacademy"` (one unreadable blob) instead of `"st-marys-academy"`. Found by a test written for the new slug-derivation logic, not observed in production. `onboard.js`'s equivalent (`slugFromName` calling `sanitiseSlug`) already handled this correctly via a separate whitespace-to-hyphen pass; fixed by folding that same step into `_sanitiseSlug` itself so every call site benefits, not just the ones that remember to pre-process.
+
+### Governance
+
+Checked against `docs/ARCHITECTURE_CONSTITUTION.md` and the governance corpus before writing any code, per direct request. The finding that shaped the design: `multiSchoolEnabled` is not a free-standing "does this org have >1 school" flag — Constitution §10 Stage 3 defines it as meaning specifically *"auth begins reading Memberships"*, a capability that doesn't exist yet (Memberships aren't authoritative, gated behind the still-unratified D-001). Grouping schools under one organization is safe and already schema-legal today (`schools.organizationId` → `organizations` is a plain, non-unique FK, "one org may own many schools" per its own index comment) — but flipping `multiSchoolEnabled` true before Stages 2–4 are built would claim a capability the code doesn't have. This feature therefore never sets that flag, touches no identity/session/JWT/login code, and only groups schools for admin visibility and reporting. Multi-school **login** (a school switcher, one admin account managing several campuses) remains a separate, larger, unbuilt capability gated behind D-001 — unaffected by this work. Public self-service registration (`onboard.js`) got the same immediate-provisioning fix but deliberately **not** an existing-organization picker: Constitution §6 requires an ADR and consent from both organization admins before any cross-org linking, and there's no sensible way for an anonymous registrant to be shown a list of organizations to join.
+
+Verification: full jest suite, 393 passed (+12 from this round), same 7 pre-existing unrelated `auth-session.test.js` failures.
+
+---
+
 ## [v4.69.0] — 2026-07-18 — feat(platform): Organizations dashboard panel; fix(boot): dev server no longer hangs without MongoDB
 
 ### Added

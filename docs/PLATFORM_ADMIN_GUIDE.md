@@ -298,18 +298,25 @@ curl -X PATCH .../api/platform/schools/SCH_ID \
   -d '{ "planExpiry": "2026-06-30T00:00:00.000Z" }'
 ```
 
-### View organizations
+### Organizations — create, and add multiple schools to one
 
-**Platform dashboard → Organizations** lists every organization with its member schools and rolled-up plan/status stats. Click **View Schools** on any row to see that organization's schools with plan and active status in a modal.
+**Platform dashboard → Organizations** lists every organization with its member schools and rolled-up plan/status stats. Click **View Schools** on any row to see that organization's schools with plan and active status in a modal. Click **Create Organization** to create one explicitly (name required, slug optional — auto-derived from the name if left blank).
 
 ```bash
 curl https://innolearn-ecosystem.onrender.com/api/platform/organizations \
   -H "X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY"
+
+curl -X POST https://innolearn-ecosystem.onrender.com/api/platform/organizations \
+  -H "Content-Type: application/json" \
+  -H "X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY" \
+  -d '{ "name": "Green Valley Schools", "slug": "green-valley" }'
 ```
 
-Returns `{ organizations: [...], unlinkedSchools: N }` — each organization includes its `schools` array and `_stats` (`schoolCount`, `activeCount`, `byPlan`). `unlinkedSchools` counts any school missing its `organizationId` link, which shouldn't happen in normal operation (every school gets a 1:1 organization automatically) but is worth investigating if it's ever non-zero.
+`GET` returns `{ organizations: [...], unlinkedSchools: N }` — each organization includes its `schools` array and `_stats` (`schoolCount`, `activeCount`, `byPlan`). `unlinkedSchools` counts any school missing its `organizationId` link, which shouldn't happen in normal operation but is worth investigating if it's ever non-zero.
 
-Every organization is currently 1:1 with exactly one school — there is no way yet, via this dashboard or the API, to add a second school to an existing organization. This view is groundwork for that capability, not a sign it exists today.
+**Adding a school to an existing organization**: in **Provision School**, pick the organization from the new **Organization** dropdown instead of leaving it on "Create new organization for this school." The school's slug is automatically namespaced under the organization's slug — e.g. organization `green-valley` + a school slug of `eldoret` becomes `green-valley-eldoret` — so schools sharing an organization are recognizable by URL. Via the API, pass `organizationId` in the `POST /schools` body (see §7 below); leave it out to get the default behavior (a new, separate 1:1 organization, created immediately, not on the next server restart).
+
+**What this does and does not enable**: this groups schools under one organization for admin visibility and reporting — nothing more. It does **not** let one login/admin account manage multiple schools, does **not** enable a school switcher, and does **not** activate Membership-based auth. Per `docs/ARCHITECTURE_CONSTITUTION.md` §10 Stage 3, that's what the `multiSchoolEnabled` flag on an Organization means — and this dashboard never sets it to `true`. Each school under a shared organization still has its own completely independent admin login, exactly as before. Multi-school login is a separate, larger decision (D-001) that remains unratified — see `docs/governance/ARCHITECTURE_GOVERNANCE_REVIEW_v1.md`.
 
 ---
 
@@ -326,13 +333,14 @@ X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY
 |---|---|---|
 | `GET` | `/api/platform/schools` | List all schools with student/staff stats |
 | `GET` | `/api/platform/schools/pending` | List schools awaiting approval |
-| `POST` | `/api/platform/schools` | Provision a new school manually (immediately active) |
+| `POST` | `/api/platform/schools` | Provision a new school manually (immediately active). Optional body field `organizationId` adds it to an existing organization (slug auto-namespaced under the org's slug); omitted, a new 1:1 organization is created immediately. |
 | `POST` | `/api/platform/schools/:id/approve` | Approve a pending school — activates account + sends emails |
 | `POST` | `/api/platform/schools/:id/reject` | Reject a pending school — sends rejection email (body: `{ reason }`) |
 | `PATCH` | `/api/platform/schools/:id` | Update plan, addOns, isActive, planExpiry |
 | `POST` | `/api/platform/schools/:id/impersonate` | Get a JWT for any school's superadmin |
 | `GET` | `/api/platform/stats` | MRR, school counts, plan breakdown |
 | `GET` | `/api/platform/organizations` | List organizations with member schools + rolled-up plan/status stats |
+| `POST` | `/api/platform/organizations` | Create an organization (body: `{ name, slug? }`) — `multiSchoolEnabled` always `false` |
 
 **System announcements**
 

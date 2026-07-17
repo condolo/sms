@@ -14,6 +14,7 @@ const AuditService      = require('../services/audit');
 const { sign } = require('../utils/jwt');
 const email    = require('../utils/email');
 const { tenantModel } = require('../utils/tenant-model');
+const { provisionOrganizationForSchool } = require('../utils/provision-organizations');
 
 const router = express.Router();
 
@@ -158,22 +159,39 @@ router.get('/schools', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-/* POST /api/platform/schools — provision a new school */
+/* POST /api/platform/schools — provision a new school.
+   Optional `organizationId`: adds the school to an EXISTING organization
+   instead of the default (a brand-new 1:1 organization, created
+   immediately in this same request — no longer deferred to the next
+   server restart's backfill job). When targeting an existing org, the
+   school's slug is namespaced under the org's slug (e.g. org `green-
+   valley` + campus slug `eldoret` → school slug `green-valley-eldoret`)
+   so schools sharing an organization are recognizable by URL. */
 router.post('/schools', async (req, res) => {
   try {
-    const { name, shortName, slug, plan, adminName, adminEmail, adminPassword, currency, timezone } = req.body;
+    const { name, shortName, slug, plan, adminName, adminEmail, adminPassword, currency, timezone, organizationId } = req.body;
     if (!name || !slug || !adminEmail || !adminPassword) {
       return res.status(400).json({ error: 'name, slug, adminEmail, adminPassword required' });
     }
 
     const School = _model('schools');
+    const Org    = _model('organizations');
 
-    // Check slug uniqueness
-    const exists = await School.findOne({ slug }).lean();
-    if (exists) return res.status(409).json({ error: `Slug '${slug}' is already taken` });
+    let org = null;
+    let finalSlug = _sanitiseSlug(slug);
+    if (organizationId) {
+      org = await Org.findOne({ id: organizationId }).lean();
+      if (!org) return res.status(404).json({ error: 'Organization not found' });
+      finalSlug = _deriveSlugForOrg(org.slug, finalSlug);
+    }
+    if (!finalSlug) return res.status(400).json({ error: 'Could not derive a valid slug' });
 
-    const schoolId = `sch_${slug}_${Date.now().toString(36)}`;
-    const userId   = `u_${slug}_admin`;
+    // Check slug uniqueness (on the final, possibly org-prefixed slug)
+    const exists = await School.findOne({ slug: finalSlug }).lean();
+    if (exists) return res.status(409).json({ error: `Slug '${finalSlug}' is already taken` });
+
+    const schoolId = `sch_${finalSlug}_${Date.now().toString(36)}`;
+    const userId   = `u_${finalSlug}_admin`;
 
     // Use raw collection API to bypass Mongoose's `id` virtual, which would
     // silently strip any field named "id" passed to Model.create().
@@ -181,12 +199,14 @@ router.post('/schools', async (req, res) => {
 
     // Create school record
     const schoolDoc = {
-      id: schoolId, slug, name, shortName: shortName || name,
+      id: schoolId, slug: finalSlug, name, shortName: shortName || name,
       plan: plan || process.env.BOOTSTRAP_PLAN || 'base', addOns: [], isActive: true,
       currency: currency || 'KES', timezone: timezone || 'Africa/Nairobi',
+      organizationId: org ? org.id : null,
       createdAt: new Date().toISOString()
     };
-    await db.collection('schools').insertOne(schoolDoc);
+    const insertResult = await db.collection('schools').insertOne(schoolDoc);
+    schoolDoc._id = insertResult.insertedId;
 
     // Create superadmin user
     const hashed = await bcrypt.hash(adminPassword, 12);
@@ -199,6 +219,18 @@ router.post('/schools', async (req, res) => {
 
     // Seed essential base records (academic year, role_permissions, etc.)
     await _seedBaseData(schoolId);
+
+    // No existing org targeted — create this school's own 1:1 organization
+    // now, synchronously, instead of waiting for the next server restart's
+    // backfill job (provisionOrganizations()) to pick it up.
+    if (!org) {
+      try {
+        const newOrg = await provisionOrganizationForSchool(schoolDoc, { Schools: School, Orgs: Org });
+        if (newOrg) schoolDoc.organizationId = newOrg.id;
+      } catch (err) {
+        console.error('[platform/schools POST] immediate org provisioning failed (will self-heal at next restart):', err.message);
+      }
+    }
 
     res.status(201).json({ school: schoolDoc, adminUserId: userId });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -214,9 +246,7 @@ router.get('/schools/pending', async (req, res) => {
 });
 
 /* GET /api/platform/organizations — list organizations with their member
-   schools and rolled-up plan/status stats. Organizations are currently 1:1
-   with schools (backfilled by provision-organizations.js); this becomes
-   more useful once a school can be added to an existing organization. */
+   schools and rolled-up plan/status stats. */
 router.get('/organizations', async (req, res) => {
   try {
     const Org    = _model('organizations');
@@ -273,6 +303,71 @@ router.get('/organizations', async (req, res) => {
     res.json({ organizations, unlinkedSchools });
   } catch (err) {
     console.error('[platform/organizations GET]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function _sanitiseSlug(raw) {
+  return (raw || '')
+    .toLowerCase()
+    .replace(/\s+/g, '-')       // spaces become hyphens, not dropped
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .substring(0, 40);
+}
+
+/* Namespaces a school's slug under its organization's slug, e.g.
+   orgSlug 'green-valley' + rawSlug 'eldoret' -> 'green-valley-eldoret'.
+   Idempotent — a slug already carrying the prefix isn't double-prefixed. */
+function _deriveSlugForOrg(orgSlug, rawSlug) {
+  const clean = _sanitiseSlug(rawSlug);
+  if (!orgSlug) return clean;
+  const prefix = `${orgSlug}-`;
+  return (clean.startsWith(prefix) ? clean : `${prefix}${clean}`).substring(0, 60);
+}
+
+/* POST /api/platform/organizations — create an organization explicitly.
+   multiSchoolEnabled is deliberately never settable here — per
+   Constitution §10 Stage 3, that flag means "auth begins reading
+   Memberships", a capability that doesn't exist yet (gated behind D-001).
+   This route only creates the Organization entity itself — grouping
+   schools for admin/reporting visibility, not enabling multi-school
+   login or switching. */
+router.post('/organizations', async (req, res) => {
+  try {
+    const { name, slug } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+
+    const finalSlug = _sanitiseSlug(slug || name);
+    if (!finalSlug) {
+      return res.status(400).json({ error: 'Could not derive a valid slug from the name/slug provided' });
+    }
+
+    const Org = _model('organizations');
+    const exists = await Org.findOne({ slug: finalSlug }).lean();
+    if (exists) {
+      return res.status(409).json({ error: `Slug '${finalSlug}' is already taken by another organization` });
+    }
+
+    const now = new Date().toISOString();
+    const org = {
+      id:                 `org_${crypto.randomUUID()}`,
+      name:               name.trim(),
+      slug:               finalSlug,
+      status:             'active',
+      multiSchoolEnabled: false,
+      createdBy:          'platform-admin',
+      createdAt:          now,
+      updatedAt:          now,
+    };
+    await Org.create(org);
+
+    res.status(201).json({ organization: org });
+  } catch (err) {
+    console.error('[platform/organizations POST]', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1151,3 +1246,6 @@ router.put('/landing-content', async (req, res) => {
 });
 
 module.exports = router;
+// Exposed for direct unit testing — router is a function, so attaching a
+// property doesn't affect `app.use('/api/platform', require(...))` usage.
+module.exports._deriveSlugForOrg = _deriveSlugForOrg;

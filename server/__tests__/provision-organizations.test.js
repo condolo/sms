@@ -38,7 +38,7 @@ jest.mock('../utils/model', () => ({
   }),
 }));
 
-const { provisionOrganizations } = require('../utils/provision-organizations');
+const { provisionOrganizations, provisionOrganizationForSchool } = require('../utils/provision-organizations');
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -138,5 +138,41 @@ describe('provisionOrganizations', () => {
     const result = await provisionOrganizations();
 
     expect(result).toMatchObject({ provisioned: 0, error: 'mongo down' });
+  });
+});
+
+/* ── provisionOrganizationForSchool — the extracted single-school path,
+   called immediately at provisioning time (platform.js, onboard.js), not
+   just at the next server restart. Uses dependency injection ({Schools,
+   Orgs}) so these tests don't need the module-level _model mock above. */
+describe('provisionOrganizationForSchool (immediate, single-school path)', () => {
+  test('creates the org and writes the FK back, same shape as the batch path', async () => {
+    const mockOrgFindOneAndUpdate = jest.fn(() => ({
+      lean: () => Promise.resolve({ id: 'org_new', provisionedFromSchoolId: 'sch_x' }),
+    }));
+    const mockSchoolUpdateOne = jest.fn().mockResolvedValue({ modifiedCount: 1 });
+    const Orgs    = { findOneAndUpdate: mockOrgFindOneAndUpdate };
+    const Schools = { updateOne: mockSchoolUpdateOne };
+
+    const school = { _id: 'oid_x', id: 'sch_x', name: 'New School', slug: 'new-school' };
+    const org = await provisionOrganizationForSchool(school, { Schools, Orgs });
+
+    expect(org).toEqual({ id: 'org_new', provisionedFromSchoolId: 'sch_x' });
+    const [filter, update, opts] = mockOrgFindOneAndUpdate.mock.calls[0];
+    expect(filter).toEqual({ provisionedFromSchoolId: 'sch_x' });
+    expect(opts).toMatchObject({ upsert: true });
+    expect(update.$setOnInsert).toMatchObject({ name: 'New School', slug: 'new-school', multiSchoolEnabled: false });
+
+    expect(mockSchoolUpdateOne).toHaveBeenCalledWith({ _id: 'oid_x' }, { $set: { organizationId: 'org_new' } });
+  });
+
+  test('returns null for a malformed school with no id and no _id-derivable schoolId', async () => {
+    const Orgs    = { findOneAndUpdate: jest.fn() };
+    const Schools = { updateOne: jest.fn() };
+
+    const org = await provisionOrganizationForSchool({ name: 'No IDs' }, { Schools, Orgs });
+
+    expect(org).toBeNull();
+    expect(Orgs.findOneAndUpdate).not.toHaveBeenCalled();
   });
 });

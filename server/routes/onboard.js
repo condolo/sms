@@ -12,6 +12,7 @@ const { MODULE_KEYS } = require('../config/moduleRegistry');
 const { sign }   = require('../utils/jwt');
 const email      = require('../utils/email');
 const { tenantModel } = require('../utils/tenant-model');
+const { provisionOrganizationForSchool } = require('../utils/provision-organizations');
 
 const router = express.Router();
 
@@ -263,6 +264,17 @@ async function _provisionInDB(data, res) {
 
   /* Seed base data — sections, academic year, permissions */
   await _seedBaseData(schoolId, sections || ['primary'], country || '');
+
+  // Create this school's own 1:1 organization now, synchronously — public
+  // self-service registration has no concept of an existing target
+  // organization to join (that requires consent + an ADR per Constitution
+  // §6), so every self-registered school always gets its own new one.
+  // Immediate, not deferred to the next server restart's backfill job.
+  try {
+    await provisionOrganizationForSchool(school);
+  } catch (err) {
+    console.error('[ONBOARD] immediate org provisioning failed (will self-heal at next restart):', err.message);
+  }
 
   const schoolObj = school.toObject();
   const userObj   = { ...user.toObject(), password: undefined };
