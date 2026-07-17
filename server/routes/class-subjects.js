@@ -17,7 +17,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 
 const router = express.Router();
@@ -47,7 +47,7 @@ function _linkQuery(schoolId, linkId) {
 router.get('/counts', authMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const agg = await _model('class_subjects').aggregate([
+    const agg = await tenantModel('class_subjects', tenantContext(req)).aggregate([
       { $match: { schoolId, isActive: { $ne: false } } },
       { $group: { _id: '$classId', count: { $sum: 1 } } },
     ]);
@@ -89,7 +89,7 @@ router.get('/enrollment-warnings', authMiddleware, async (req, res) => {
     const { classId: qClassId } = req.query;
 
     /* 1. Load all subject rules for this school */
-    const allRules = await _model('subject_rules')
+    const allRules = await tenantModel('subject_rules', tenantContext(req))
       .find({ schoolId })
       .lean();
 
@@ -114,7 +114,7 @@ router.get('/enrollment-warnings', authMiddleware, async (req, res) => {
     const classFilter = { schoolId, status: { $ne: 'inactive' } };
     if (qClassId) classFilter.id = qClassId;
 
-    const classes = await _model('classes')
+    const classes = await tenantModel('classes', tenantContext(req))
       .find(classFilter)
       .sort({ order: 1 })
       .select('id name sectionKey order')
@@ -127,13 +127,13 @@ router.get('/enrollment-warnings', authMiddleware, async (req, res) => {
     const classIds = classes.map(c => c.id);
 
     /* 3. Load all active students in the relevant classes */
-    const students = await _model('students')
+    const students = await tenantModel('students', tenantContext(req))
       .find({ schoolId, classId: { $in: classIds }, status: { $ne: 'inactive' } })
       .select('id firstName lastName admissionNumber classId')
       .lean();
 
     /* 4. Count enrollments per student via aggregation */
-    const enrollAgg = await _model('student_subjects').aggregate([
+    const enrollAgg = await tenantModel('student_subjects', tenantContext(req)).aggregate([
       { $match: { schoolId, classId: { $in: classIds } } },
       { $group: { _id: '$studentId', count: { $sum: 1 } } },
     ]);
@@ -217,7 +217,7 @@ router.get('/', authMiddleware, async (req, res) => {
     if (classId)   filter.classId   = classId;
     if (subjectId) filter.subjectId = subjectId;
 
-    const docs = await _model('class_subjects')
+    const docs = await tenantModel('class_subjects', tenantContext(req))
       .find(filter)
       .sort({ createdAt: 1 })
       .lean();
@@ -225,14 +225,14 @@ router.get('/', authMiddleware, async (req, res) => {
     /* ── Populate subject + department when listing by class ── */
     if (classId && docs.length > 0) {
       const subjectIds = [...new Set(docs.map(d => d.subjectId))];
-      const subjects   = await _model('subjects')
+      const subjects   = await tenantModel('subjects', tenantContext(req))
         .find({ schoolId, id: { $in: subjectIds } })
         .select('id name code shortName departmentId sections isCompulsory color order')
         .lean();
 
       const deptIds = [...new Set(subjects.map(s => s.departmentId).filter(Boolean))];
       const depts   = deptIds.length
-        ? await _model('departments')
+        ? await tenantModel('departments', tenantContext(req))
             .find({ schoolId, id: { $in: deptIds } })
             .select('id name code color')
             .lean()
@@ -255,7 +255,7 @@ router.get('/', authMiddleware, async (req, res) => {
     if (subjectId && docs.length > 0) {
       const classIds = [...new Set(docs.map(d => d.classId))];
       const classes  = classIds.length
-        ? await _model('classes')
+        ? await tenantModel('classes', tenantContext(req))
             .find({ schoolId, id: { $in: classIds } })
             .select('id name sectionKey order')
             .lean()
@@ -284,19 +284,19 @@ router.post('/', authMiddleware, rbac('subjects', 'update'), async (req, res) =>
 
     /* Validate both entities exist in this school */
     const [cls, subject] = await Promise.all([
-      _model('classes').findOne(_classQuery(schoolId, classId)).lean(),
-      _model('subjects').findOne({ schoolId, id: subjectId, isActive: { $ne: false } }).lean(),
+      tenantModel('classes', tenantContext(req)).findOne(_classQuery(schoolId, classId)).lean(),
+      tenantModel('subjects', tenantContext(req)).findOne({ schoolId, id: subjectId, isActive: { $ne: false } }).lean(),
     ]);
     if (!cls)     return E.notFound(res, 'Class not found');
     if (!subject) return E.notFound(res, 'Subject not found or deactivated');
 
     /* Duplicate guard */
-    const existing = await _model('class_subjects')
+    const existing = await tenantModel('class_subjects', tenantContext(req))
       .findOne({ schoolId, classId, subjectId })
       .lean();
     if (existing) return E.conflict(res, 'Subject is already in this class curriculum');
 
-    const doc = await _model('class_subjects').create({
+    const doc = await tenantModel('class_subjects', tenantContext(req)).create({
       id:                   uuidv4(),
       schoolId,
       classId,
@@ -325,21 +325,21 @@ router.post('/bulk', authMiddleware, rbac('subjects', 'update'), async (req, res
       return E.badRequest(res, 'classId and subjects[] required');
     }
 
-    const cls = await _model('classes').findOne(_classQuery(schoolId, classId)).lean();
+    const cls = await tenantModel('classes', tenantContext(req)).findOne(_classQuery(schoolId, classId)).lean();
     if (!cls) return E.notFound(res, 'Class not found');
 
     const subjectIds = [...new Set(subjects.map(s => s.subjectId).filter(Boolean))];
     if (subjectIds.length === 0) return E.badRequest(res, 'No valid subjectIds provided');
 
     /* Validate all subject IDs exist and are active */
-    const validSubjects = await _model('subjects')
+    const validSubjects = await tenantModel('subjects', tenantContext(req))
       .find({ schoolId, id: { $in: subjectIds }, isActive: { $ne: false } })
       .select('id')
       .lean();
     const validIds = new Set(validSubjects.map(s => s.id));
 
     /* Already in curriculum — skip silently */
-    const alreadyAssigned = await _model('class_subjects')
+    const alreadyAssigned = await tenantModel('class_subjects', tenantContext(req))
       .find({ schoolId, classId, subjectId: { $in: subjectIds } })
       .select('subjectId')
       .lean();
@@ -358,7 +358,7 @@ router.post('/bulk', authMiddleware, rbac('subjects', 'update'), async (req, res
         updatedBy:            userId,
       }));
 
-    if (toInsert.length > 0) await _model('class_subjects').insertMany(toInsert);
+    if (toInsert.length > 0) await tenantModel('class_subjects', tenantContext(req)).insertMany(toInsert);
 
     return ok(res, {
       assigned: toInsert.length,
@@ -384,7 +384,7 @@ router.put('/:id', authMiddleware, rbac('subjects', 'update'), async (req, res) 
       return E.badRequest(res, 'isCompulsoryForClass required');
     }
 
-    const doc = await _model('class_subjects').findOneAndUpdate(
+    const doc = await tenantModel('class_subjects', tenantContext(req)).findOneAndUpdate(
       _linkQuery(schoolId, req.params.id),
       { isCompulsoryForClass: Boolean(isCompulsoryForClass), updatedBy: userId },
       { new: true },
@@ -403,13 +403,13 @@ router.delete('/:id', authMiddleware, rbac('subjects', 'update'), async (req, re
   try {
     const { schoolId } = req.jwtUser;
 
-    const link = await _model('class_subjects')
+    const link = await tenantModel('class_subjects', tenantContext(req))
       .findOne(_linkQuery(schoolId, req.params.id))
       .lean();
     if (!link) return E.notFound(res, 'Class-subject link not found');
 
     /* Guard: refuse if students are still enrolled */
-    const enrolledCount = await _model('student_subjects').countDocuments({
+    const enrolledCount = await tenantModel('student_subjects', tenantContext(req)).countDocuments({
       schoolId,
       classId:   link.classId,
       subjectId: link.subjectId,
@@ -421,7 +421,7 @@ router.delete('/:id', authMiddleware, rbac('subjects', 'update'), async (req, re
       );
     }
 
-    await _model('class_subjects').deleteOne(_linkQuery(schoolId, req.params.id));
+    await tenantModel('class_subjects', tenantContext(req)).deleteOne(_linkQuery(schoolId, req.params.id));
     return ok(res, { message: 'Subject removed from class curriculum' });
   } catch (err) {
     console.error('[class-subjects DELETE /:id]', err);

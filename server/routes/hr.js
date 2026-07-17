@@ -15,7 +15,7 @@ const { v4: uuidv4 } = require('uuid');
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 
 const router = express.Router();
@@ -86,8 +86,8 @@ router.get('/leave', async (req, res) => {
     if (status) filter.status = status;
 
     const [docs, total] = await Promise.all([
-      _model('leave_requests').find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
-      _model('leave_requests').countDocuments(filter),
+      tenantModel('leave_requests', tenantContext(req)).find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
+      tenantModel('leave_requests', tenantContext(req)).countDocuments(filter),
     ]);
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) {
@@ -111,7 +111,7 @@ router.post('/leave', async (req, res) => {
       (new Date(data.endDate) - new Date(data.startDate)) / 86400000
     ) + 1);
 
-    const doc = await _model('leave_requests').create({
+    const doc = await tenantModel('leave_requests', tenantContext(req)).create({
       id:            `lr_${uuidv4().slice(0, 8)}`,
       schoolId,
       staffId:       userId,
@@ -143,7 +143,7 @@ router.patch('/leave/:id/resolve', rbac('hr', 'update'), async (req, res) => {
       return E.badRequest(res, 'status must be "approved" or "rejected"');
     }
 
-    const doc = await _model('leave_requests').findOneAndUpdate(
+    const doc = await tenantModel('leave_requests', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { $set: {
           status,
@@ -180,8 +180,8 @@ router.get('/payroll/mine', async (req, res) => {
     if (period) filter.payPeriod = period;
 
     const [docs, total] = await Promise.all([
-      _model('payroll').find(filter).sort({ payPeriod: -1 }).skip(skip).limit(limit).select('-__v').lean(),
-      _model('payroll').countDocuments(filter),
+      tenantModel('payroll', tenantContext(req)).find(filter).sort({ payPeriod: -1 }).skip(skip).limit(limit).select('-__v').lean(),
+      tenantModel('payroll', tenantContext(req)).countDocuments(filter),
     ]);
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) {
@@ -203,8 +203,8 @@ router.get('/payroll', rbac('hr', 'read'), async (req, res) => {
     if (staffId) filter.staffId   = staffId;
 
     const [docs, total] = await Promise.all([
-      _model('payroll').find(filter).sort({ payPeriod: -1, staffName: 1 }).skip(skip).limit(limit).select('-__v').lean(),
-      _model('payroll').countDocuments(filter),
+      tenantModel('payroll', tenantContext(req)).find(filter).sort({ payPeriod: -1, staffName: 1 }).skip(skip).limit(limit).select('-__v').lean(),
+      tenantModel('payroll', tenantContext(req)).countDocuments(filter),
     ]);
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) {
@@ -225,7 +225,7 @@ router.post('/payroll', rbac('hr', 'create'), async (req, res) => {
     const netSalary   = grossSalary - data.deductions;
     const now         = new Date().toISOString();
 
-    const doc = await _model('payroll').findOneAndUpdate(
+    const doc = await tenantModel('payroll', tenantContext(req)).findOneAndUpdate(
       { schoolId, staffId: data.staffId, payPeriod: data.payPeriod },
       {
         $set: {
@@ -275,7 +275,7 @@ router.patch('/payroll/:id/status', rbac('hr', 'update'), async (req, res) => {
       return E.forbidden(res, 'Only Admin can mark payroll as paid');
     }
 
-    const doc = await _model('payroll').findOneAndUpdate(
+    const doc = await tenantModel('payroll', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { $set: { status, updatedBy: userId, updatedAt: new Date().toISOString() } },
       { new: true }
@@ -300,7 +300,7 @@ router.post('/payroll/copy', rbac('hr', 'create'), async (req, res) => {
       return E.badRequest(res, 'Periods must be in YYYY-MM format');
     }
 
-    const Payroll = _model('payroll');
+    const Payroll = tenantModel('payroll', tenantContext(req));
     const source  = await Payroll.find({ schoolId, payPeriod: sourcePeriod }).lean();
     if (!source.length) {
       return ok(res, { copied: 0, message: `No payroll records found for ${sourcePeriod}` });
@@ -346,7 +346,7 @@ router.delete('/payroll/:id', rbac('hr', 'delete'), async (req, res) => {
   try {
     const { schoolId, role } = req.jwtUser;
 
-    const doc = await _model('payroll').findOne({ id: req.params.id, schoolId }).lean();
+    const doc = await tenantModel('payroll', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!doc) return E.notFound(res, 'Payroll record not found');
 
     /* Only admins can delete confirmed/paid records */
@@ -354,7 +354,7 @@ router.delete('/payroll/:id', rbac('hr', 'delete'), async (req, res) => {
       return E.forbidden(res, 'Only Admin can delete confirmed or paid payroll records');
     }
 
-    await _model('payroll').findOneAndDelete({ id: req.params.id, schoolId });
+    await tenantModel('payroll', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) {
     console.error('[hr/payroll DELETE]', err);
@@ -382,8 +382,8 @@ router.get('/documents', async (req, res) => {
     }
 
     const [docs, total] = await Promise.all([
-      _model('staff_documents').find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
-      _model('staff_documents').countDocuments(filter),
+      tenantModel('staff_documents', tenantContext(req)).find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
+      tenantModel('staff_documents', tenantContext(req)).countDocuments(filter),
     ]);
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) {
@@ -400,7 +400,7 @@ router.post('/documents', rbac('hr', 'create'), async (req, res) => {
     const { data, error } = _validate(DocSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const doc = await _model('staff_documents').create({
+    const doc = await tenantModel('staff_documents', tenantContext(req)).create({
       id:         `doc_${uuidv4().slice(0, 8)}`,
       schoolId,
       staffId:    data.staffId,
@@ -427,7 +427,7 @@ router.put('/documents/:id', rbac('hr', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
 
-    const doc = await _model('staff_documents').findOneAndUpdate(
+    const doc = await tenantModel('staff_documents', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { $set: { ...req.body, updatedBy: userId, updatedAt: new Date().toISOString() } },
       { new: true }
@@ -445,7 +445,7 @@ router.delete('/documents/:id', rbac('hr', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
 
-    const doc = await _model('staff_documents').findOneAndDelete({ id: req.params.id, schoolId }).lean();
+    const doc = await tenantModel('staff_documents', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId }).lean();
     if (!doc) return E.notFound(res, 'Document not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) {
@@ -465,7 +465,7 @@ router.get('/summary', rbac('hr', 'read'), async (req, res) => {
     const now = new Date().toISOString().slice(0, 7); // YYYY-MM
 
     const [teacherStats, pendingLeaves, payrollAgg] = await Promise.all([
-      _model('teachers').aggregate([
+      tenantModel('teachers', tenantContext(req)).aggregate([
         { $match: { schoolId } },
         { $group: {
             _id:      null,
@@ -474,8 +474,8 @@ router.get('/summary', rbac('hr', 'read'), async (req, res) => {
             onLeave:  { $sum: { $cond: [{ $eq: ['$status', 'on_leave'] }, 1, 0] } },
         }},
       ]),
-      _model('leave_requests').countDocuments({ schoolId, status: 'pending' }),
-      _model('payroll').aggregate([
+      tenantModel('leave_requests', tenantContext(req)).countDocuments({ schoolId, status: 'pending' }),
+      tenantModel('payroll', tenantContext(req)).aggregate([
         { $match: { schoolId, payPeriod: now } },
         { $group: {
             _id:            null,

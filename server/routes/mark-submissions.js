@@ -19,7 +19,7 @@ const { z }              = require('zod');
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 
 const router = express.Router();
@@ -62,7 +62,7 @@ router.get('/', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) =
     if (req.query.status)         filter.status         = req.query.status;
     if (req.query.examSeriesId)   filter.examSeriesId   = req.query.examSeriesId;
 
-    const docs = await _model('mark_submissions')
+    const docs = await tenantModel('mark_submissions', tenantContext(req))
       .find(filter)
       .sort({ createdAt: -1 })
       .limit(500)
@@ -78,7 +78,7 @@ router.get('/', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) =
 router.get('/:id', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('mark_submissions').findOne({ id: req.params.id, schoolId }).lean();
+    const doc = await tenantModel('mark_submissions', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!doc) return E.notFound(res, 'Submission not found');
     return ok(res, doc);
   } catch (err) {
@@ -104,11 +104,11 @@ router.post('/', authMiddleware, PLAN, rbac('grades', 'create'), async (req, res
       instance:       data.instance,
     };
     if (data.academicYearId) markFilter.academicYearId = data.academicYearId;
-    const marks = await _model('assessment_marks').find(markFilter).select('studentId rawScore').lean();
+    const marks = await tenantModel('assessment_marks', tenantContext(req)).find(markFilter).select('studentId rawScore').lean();
 
     // Upsert: one submission per class/subject/term/type/instance combination
     const now = new Date().toISOString();
-    const existing = await _model('mark_submissions').findOne({ schoolId, ...markFilter }).lean();
+    const existing = await tenantModel('mark_submissions', tenantContext(req)).findOne({ schoolId, ...markFilter }).lean();
 
     if (existing) {
       if (existing.status === 'locked') {
@@ -118,7 +118,7 @@ router.post('/', authMiddleware, PLAN, rbac('grades', 'create'), async (req, res
         return res.status(400).json({ error: `Marks are already ${existing.status}. Recall first to re-submit.` });
       }
       // Re-submit (from draft or rejected)
-      const doc = await _model('mark_submissions').findOneAndUpdate(
+      const doc = await tenantModel('mark_submissions', tenantContext(req)).findOneAndUpdate(
         { id: existing.id },
         {
           $set: {
@@ -139,7 +139,7 @@ router.post('/', authMiddleware, PLAN, rbac('grades', 'create'), async (req, res
       return ok(res, doc);
     }
 
-    const doc = await _model('mark_submissions').create({
+    const doc = await tenantModel('mark_submissions', tenantContext(req)).create({
       ...markFilter,
       id:              uuidv4(),
       schoolId,
@@ -166,13 +166,13 @@ router.post('/', authMiddleware, PLAN, rbac('grades', 'create'), async (req, res
 router.post('/:id/recall', authMiddleware, PLAN, rbac('grades', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const sub = await _model('mark_submissions').findOne({ id: req.params.id, schoolId }).lean();
+    const sub = await tenantModel('mark_submissions', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!sub) return E.notFound(res, 'Submission not found');
     if (sub.status === 'locked') return res.status(400).json({ error: 'Cannot recall locked marks.' });
     if (sub.status === 'approved') return res.status(400).json({ error: 'Cannot recall an approved submission without admin override.' });
     if (sub.status !== 'submitted') return res.status(400).json({ error: `Cannot recall a ${sub.status} submission.` });
 
-    const doc = await _model('mark_submissions').findOneAndUpdate(
+    const doc = await tenantModel('mark_submissions', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id },
       { $set: { status: 'draft', updatedBy: userId, updatedAt: new Date().toISOString() } },
       { new: true }
@@ -194,7 +194,7 @@ router.post('/:id/review', authMiddleware, PLAN, rbac('grades', 'update'), async
     const { data, error } = _validate(ReviewSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const sub = await _model('mark_submissions').findOne({ id: req.params.id, schoolId }).lean();
+    const sub = await tenantModel('mark_submissions', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!sub) return E.notFound(res, 'Submission not found');
     if (sub.status !== 'submitted') {
       return res.status(400).json({ error: `Cannot review a ${sub.status} submission.` });
@@ -211,7 +211,7 @@ router.post('/:id/review', authMiddleware, PLAN, rbac('grades', 'update'), async
       update.rejectionReason = data.rejectionReason ?? 'No reason given';
     }
 
-    const doc = await _model('mark_submissions').findOneAndUpdate(
+    const doc = await tenantModel('mark_submissions', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id },
       { $set: update },
       { new: true }
@@ -230,11 +230,11 @@ router.post('/:id/lock', authMiddleware, PLAN, rbac('grades', 'update'), async (
     if (!['admin', 'principal'].includes(role)) {
       return E.forbidden(res, 'Only admins and principals can lock submissions.');
     }
-    const sub = await _model('mark_submissions').findOne({ id: req.params.id, schoolId }).lean();
+    const sub = await tenantModel('mark_submissions', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!sub) return E.notFound(res, 'Submission not found');
     if (sub.status === 'locked') return ok(res, sub);  // idempotent
 
-    const doc = await _model('mark_submissions').findOneAndUpdate(
+    const doc = await tenantModel('mark_submissions', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id },
       { $set: { status: 'locked', lockedBy: userId, lockedAt: new Date().toISOString(), updatedAt: new Date().toISOString() } },
       { new: true }
@@ -249,7 +249,7 @@ router.post('/:id/lock', authMiddleware, PLAN, rbac('grades', 'update'), async (
       assessmentType: sub.assessmentType,
       instance:       sub.instance,
     };
-    await _model('assessment_marks').updateMany(markFilter, {
+    await tenantModel('assessment_marks', tenantContext(req)).updateMany(markFilter, {
       $set: { isLocked: true, lockedAt: new Date().toISOString(), lockedBySubmissionId: sub.id },
     });
 
@@ -272,12 +272,12 @@ router.post('/:id/unlock', authMiddleware, PLAN, rbac('grades', 'update'), async
       return res.status(400).json({ error: 'An unlock reason is required.' });
     }
 
-    const sub = await _model('mark_submissions').findOne({ id: req.params.id, schoolId }).lean();
+    const sub = await tenantModel('mark_submissions', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!sub) return E.notFound(res, 'Submission not found');
     if (sub.status !== 'locked') return res.status(400).json({ error: 'Submission is not locked.' });
 
     const now = new Date().toISOString();
-    const doc = await _model('mark_submissions').findOneAndUpdate(
+    const doc = await tenantModel('mark_submissions', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id },
       {
         $set:  { status: 'approved', unlockedBy: userId, unlockedAt: now, unlockReason: reason.trim(), updatedAt: now },
@@ -295,7 +295,7 @@ router.post('/:id/unlock', authMiddleware, PLAN, rbac('grades', 'update'), async
       assessmentType: sub.assessmentType,
       instance:       sub.instance,
     };
-    await _model('assessment_marks').updateMany(markFilter, {
+    await tenantModel('assessment_marks', tenantContext(req)).updateMany(markFilter, {
       $set: { isLocked: false, unlockedAt: now },
     });
 

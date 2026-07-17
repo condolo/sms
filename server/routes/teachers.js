@@ -11,7 +11,7 @@ const { v4: uuidv4 } = require('uuid');
 const { authMiddleware }  = require('../middleware/auth');
 const { rbac }            = require('../middleware/rbac');
 const { planGate }        = require('../middleware/plan');
-const { _model }          = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { nextStaffId }     = require('../utils/counters');
 const { ok, created, fail, paginate, parsePagination, E } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
@@ -113,9 +113,9 @@ function _userFilter(userId, schoolId) {
 router.get('/me', authMiddleware, async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const user = await _model('users').findOne(_userFilter(userId, schoolId)).lean();
+    const user = await tenantModel('users', tenantContext(req)).findOne(_userFilter(userId, schoolId)).lean();
     if (!user) return E.notFound(res, 'User not found');
-    const doc = await _model('teachers').findOne({ schoolId, email: user.email }).lean();
+    const doc = await tenantModel('teachers', tenantContext(req)).findOne({ schoolId, email: user.email }).lean();
     if (!doc) return res.json({ success: true, data: null }); // no staff record — that's OK
     return ok(res, _stripSensitive(doc));
   } catch (err) {
@@ -128,7 +128,7 @@ router.get('/me', authMiddleware, async (req, res) => {
 router.put('/me', authMiddleware, async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const user = await _model('users').findOne(_userFilter(userId, schoolId)).lean();
+    const user = await tenantModel('users', tenantContext(req)).findOne(_userFilter(userId, schoolId)).lean();
     if (!user) return E.notFound(res, 'User not found');
 
     // Only allow the approved self-editable subset
@@ -142,7 +142,7 @@ router.put('/me', authMiddleware, async (req, res) => {
     update.updatedAt = new Date().toISOString();
     update.updatedBy = userId;
 
-    const doc = await _model('teachers').findOneAndUpdate(
+    const doc = await tenantModel('teachers', tenantContext(req)).findOneAndUpdate(
       { schoolId, email: user.email },
       { $set: update },
       { new: true }
@@ -180,10 +180,10 @@ router.get('/', authMiddleware, PLAN, rbac('teachers', 'read'), async (req, res)
 
     // classId filter: resolve via teaching_assignments (teachers.classes[] is not reliably populated)
     if (req.query.classId) {
-      const Assignments = _model('teaching_assignments');
+      const Assignments = tenantModel('teaching_assignments', tenantContext(req));
       const teacherIds  = await Assignments.distinct('teacherId', { classId: req.query.classId, schoolId });
       // teacherId may be stored as teacher.id or teacher.userId — match both
-      const Teachers2   = _model('teachers');
+      const Teachers2   = tenantModel('teachers', tenantContext(req));
       const matched     = await Teachers2.find({ schoolId, $or: [{ id: { $in: teacherIds } }, { userId: { $in: teacherIds } }] }).select('id').lean();
       filter.id = { $in: matched.map(t => t.id) };
     }
@@ -199,7 +199,7 @@ router.get('/', authMiddleware, PLAN, rbac('teachers', 'read'), async (req, res)
     const viewFull   = _canViewFullData(req.jwtUser.role);
     const projection = viewFull ? FULL_PROJECTION : LIMITED_PROJECTION;
 
-    const Teachers = _model('teachers');
+    const Teachers = tenantModel('teachers', tenantContext(req));
     const [docs, total] = await Promise.all([
       Teachers.find(filter)
         .sort({ lastName: 1, firstName: 1 })
@@ -214,7 +214,7 @@ router.get('/', authMiddleware, PLAN, rbac('teachers', 'read'), async (req, res)
     const allSubjectIds = [...new Set(docs.flatMap(d => d.subjects ?? []).filter(Boolean))];
     let subjectNameMap = {};
     if (allSubjectIds.length) {
-      const subs = await _model('subjects').find({ id: { $in: allSubjectIds }, schoolId }).select('id name').lean();
+      const subs = await tenantModel('subjects', tenantContext(req)).find({ id: { $in: allSubjectIds }, schoolId }).select('id name').lean();
       for (const s of subs) subjectNameMap[s.id] = s.name;
     }
 
@@ -237,7 +237,7 @@ router.get('/:id', authMiddleware, PLAN, rbac('teachers', 'read'), async (req, r
   try {
     const { schoolId } = req.jwtUser;
     const projection = _canViewFullData(req.jwtUser.role) ? FULL_PROJECTION : LIMITED_PROJECTION;
-    const Teachers = _model('teachers');
+    const Teachers = tenantModel('teachers', tenantContext(req));
     const paramId  = req.params.id;
     let doc = await Teachers.findOne({ id: paramId, schoolId }).select(projection).lean();
     if (!doc && /^[a-f\d]{24}$/i.test(paramId)) {
@@ -261,7 +261,7 @@ router.post('/', authMiddleware, PLAN, rbac('teachers', 'create'), async (req, r
     if (error) return E.validation(res, error);
 
     // Check for duplicate email within the school
-    const Teachers = _model('teachers');
+    const Teachers = tenantModel('teachers', tenantContext(req));
     const existing = await Teachers.findOne({ schoolId, email: data.email }).lean();
     if (existing) return E.conflict(res, `A teacher with email '${data.email}' already exists`);
 
@@ -271,7 +271,7 @@ router.post('/', authMiddleware, PLAN, rbac('teachers', 'create'), async (req, r
     // This is required for timetable slot resolution and meeting-link lookups.
     let linkedUserId = null;
     if (data.email) {
-      const userDoc = await _model('users').findOne({ schoolId, email: data.email }).select('id').lean();
+      const userDoc = await tenantModel('users', tenantContext(req)).findOne({ schoolId, email: data.email }).select('id').lean();
       if (userDoc) linkedUserId = userDoc.id;
     }
 
@@ -289,7 +289,7 @@ router.post('/', authMiddleware, PLAN, rbac('teachers', 'create'), async (req, r
 
     // Sync staffType → user role so permissions apply immediately
     if (data.staffType && docObj.userId) {
-      await _model('users').updateOne(
+      await tenantModel('users', tenantContext(req)).updateOne(
         { id: docObj.userId, schoolId },
         { $set: { role: data.staffType, primaryRole: data.staffType, roles: [data.staffType], updatedAt: new Date().toISOString() } }
       );
@@ -320,13 +320,13 @@ router.put('/:id', authMiddleware, PLAN, rbac('teachers', 'update'), async (req,
 
     // If email is being changed, check for duplicates
     if (data.email) {
-      const Teachers = _model('teachers');
+      const Teachers = tenantModel('teachers', tenantContext(req));
       const existing = await Teachers.findOne({ schoolId, email: data.email, id: { $ne: req.params.id } }).lean();
       if (existing) return E.conflict(res, `Email '${data.email}' is already used by another teacher`);
     }
 
     const { doc, conflict } = await applyOptimisticLock(
-      _model('teachers'),
+      tenantModel('teachers', tenantContext(req)),
       { id: req.params.id, schoolId },
       { ...data, updatedBy: userId },
       clientVersion
@@ -337,7 +337,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('teachers', 'update'), async (req,
 
     // Sync staffType → user role when staffType was explicitly updated
     if (data.staffType && doc.userId) {
-      await _model('users').updateOne(
+      await tenantModel('users', tenantContext(req)).updateOne(
         { id: doc.userId, schoolId },
         { $set: { role: data.staffType, primaryRole: data.staffType, roles: [data.staffType], updatedAt: new Date().toISOString() } }
       );
@@ -360,8 +360,8 @@ router.delete('/bulk', authMiddleware, PLAN, rbac('teachers', 'delete'), async (
     if (ids.length > 200)
       return E.badRequest(res, 'Maximum 200 teachers per batch');
 
-    const Teachers = _model('teachers');
-    const Users    = _model('users');
+    const Teachers = tenantModel('teachers', tenantContext(req));
+    const Users    = tenantModel('users', tenantContext(req));
 
     // Build a filter that handles both UUID id and legacy ObjectId-only records
     const isOid = id => /^[a-f\d]{24}$/i.test(id);
@@ -407,7 +407,7 @@ router.delete('/:id', authMiddleware, PLAN, rbac('teachers', 'delete'), async (r
       ? { $or: [{ id: paramId }, { _id: new mongoose.Types.ObjectId(paramId) }], schoolId }
       : { id: paramId, schoolId };
 
-    const Teachers = _model('teachers');
+    const Teachers = tenantModel('teachers', tenantContext(req));
     const doc = await Teachers.findOneAndUpdate(
       delFilter,
       { status: 'inactive', deletedAt: new Date().toISOString(), deletedBy: userId },

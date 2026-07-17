@@ -51,11 +51,16 @@ beforeEach(() => { jest.clearAllMocks(); for (const k of Object.keys(mockSeen)) 
 
 /* [file, mount, listPath, collection queried] */
 const CASES = [
+  // batch 1
   ['subjects',  '/api/subjects',  '/',          'subjects'],
   ['behaviour', '/api/behaviour', '/incidents', 'behaviour_incidents'],
   ['library',   '/api/library',   '/books',     'library_books'],
   ['transport', '/api/transport', '/routes',    'transport_routes'],
   ['hostel',    '/api/hostel',    '/hostels',   'hostels'],
+  // batch 2 (representative — full batch is capture-sed + import-verified + load-checked)
+  ['exam-series',          '/api/exam-series',          '/', 'exam_series'],
+  ['teaching-assignments', '/api/teaching-assignments', '/', 'teaching_assignments'],
+  ['mark-submissions',     '/api/mark-submissions',     '/', 'mark_submissions'],
 ];
 
 describe('mechanical routes — tenant isolation (authenticated as School A)', () => {

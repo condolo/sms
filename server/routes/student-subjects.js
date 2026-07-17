@@ -9,7 +9,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 
 const router = express.Router();
@@ -20,7 +20,7 @@ const router = express.Router();
 router.get('/counts', authMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const agg = await _model('student_subjects').aggregate([
+    const agg = await tenantModel('student_subjects', tenantContext(req)).aggregate([
       { $match: { schoolId } },
       { $group: { _id: '$subjectId', count: { $sum: 1 } } },
     ]);
@@ -44,7 +44,7 @@ router.get('/', authMiddleware, async (req, res) => {
     if (subjectId) filter.subjectId = subjectId;
     if (studentId) filter.studentId = studentId;
 
-    const enrollments = await _model('student_subjects')
+    const enrollments = await tenantModel('student_subjects', tenantContext(req))
       .find(filter)
       .sort({ enrolledAt: -1 })
       .lean();
@@ -53,17 +53,17 @@ router.get('/', authMiddleware, async (req, res) => {
     if (subjectId && enrollments.length > 0) {
       const studentIds = enrollments.map(e => e.studentId);
       const [students, classes] = await Promise.all([
-        _model('students')
+        tenantModel('students', tenantContext(req))
           .find({ schoolId, id: { $in: studentIds } })
           .select('id firstName lastName admissionNumber classId status')
           .lean(),
         (async () => {
           const classIds = [...new Set(
-            (await _model('students').find({ schoolId, id: { $in: studentIds } }).select('classId').lean())
+            (await tenantModel('students', tenantContext(req)).find({ schoolId, id: { $in: studentIds } }).select('classId').lean())
               .map(s => s.classId).filter(Boolean)
           )];
           return classIds.length
-            ? _model('classes').find({ schoolId, id: { $in: classIds } }).select('id name').lean()
+            ? tenantModel('classes', tenantContext(req)).find({ schoolId, id: { $in: classIds } }).select('id name').lean()
             : [];
         })(),
       ]);
@@ -92,16 +92,16 @@ router.post('/', authMiddleware, rbac('subjects', 'update'), async (req, res) =>
     if (!studentId || !subjectId) return E.badRequest(res, 'studentId and subjectId required');
 
     const [student, subject] = await Promise.all([
-      _model('students').findOne({ schoolId, id: studentId }).lean(),
-      _model('subjects').findOne({ schoolId, id: subjectId, isActive: { $ne: false } }).lean(),
+      tenantModel('students', tenantContext(req)).findOne({ schoolId, id: studentId }).lean(),
+      tenantModel('subjects', tenantContext(req)).findOne({ schoolId, id: subjectId, isActive: { $ne: false } }).lean(),
     ]);
     if (!student) return E.notFound(res, 'Student not found');
     if (!subject) return E.notFound(res, 'Subject not found');
 
-    const existing = await _model('student_subjects').findOne({ schoolId, studentId, subjectId }).lean();
+    const existing = await tenantModel('student_subjects', tenantContext(req)).findOne({ schoolId, studentId, subjectId }).lean();
     if (existing) return E.conflict(res, 'Student is already enrolled in this subject');
 
-    const doc = await _model('student_subjects').create({
+    const doc = await tenantModel('student_subjects', tenantContext(req)).create({
       id:         uuidv4(),
       schoolId,
       studentId,
@@ -123,10 +123,10 @@ router.post('/bulk', authMiddleware, rbac('subjects', 'update'), async (req, res
 
     if (!subjectId || !classId) return E.badRequest(res, 'subjectId and classId required');
 
-    const subject = await _model('subjects').findOne({ schoolId, id: subjectId, isActive: { $ne: false } }).lean();
+    const subject = await tenantModel('subjects', tenantContext(req)).findOne({ schoolId, id: subjectId, isActive: { $ne: false } }).lean();
     if (!subject) return E.notFound(res, 'Subject not found');
 
-    const students = await _model('students')
+    const students = await tenantModel('students', tenantContext(req))
       .find({ schoolId, classId, status: 'active' })
       .select('id classId')
       .lean();
@@ -135,7 +135,7 @@ router.post('/bulk', authMiddleware, rbac('subjects', 'update'), async (req, res
       return ok(res, { enrolled: 0, skipped: 0, message: 'No active students found in this class' });
     }
 
-    const alreadyEnrolled = await _model('student_subjects')
+    const alreadyEnrolled = await tenantModel('student_subjects', tenantContext(req))
       .find({ schoolId, subjectId, studentId: { $in: students.map(s => s.id) } })
       .select('studentId')
       .lean();
@@ -154,7 +154,7 @@ router.post('/bulk', authMiddleware, rbac('subjects', 'update'), async (req, res
         enrolledBy: userId,
       }));
 
-    if (toInsert.length > 0) await _model('student_subjects').insertMany(toInsert);
+    if (toInsert.length > 0) await tenantModel('student_subjects', tenantContext(req)).insertMany(toInsert);
 
     return ok(res, {
       enrolled: toInsert.length,
@@ -168,7 +168,7 @@ router.post('/bulk', authMiddleware, rbac('subjects', 'update'), async (req, res
 router.delete('/:id', authMiddleware, rbac('subjects', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('student_subjects').findOneAndDelete({ id: req.params.id, schoolId });
+    const doc = await tenantModel('student_subjects', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Enrollment not found');
     return ok(res, { message: 'Student unenrolled successfully' });
   } catch (err) { console.error('[student-subjects DELETE /:id]', err); return E.serverError(res); }

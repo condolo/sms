@@ -12,7 +12,7 @@ const { rbac }            = require('../middleware/rbac');
 const { planGate }        = require('../middleware/plan');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 const ScopeEngine         = require('../utils/scopeEngine');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { isYearArchived, firstArchivedYear } = require('../utils/archival');
 
@@ -67,7 +67,7 @@ router.get('/', authMiddleware, PLAN, rbac('grades', 'read'), scopeMiddleware, a
 
     ScopeEngine.applyToFilter(req, 'grades', filter);
 
-    const Grades = _model('grades');
+    const Grades = tenantModel('grades', tenantContext(req));
     const [docs, total] = await Promise.all([
       Grades.find(filter).sort({ date: -1, createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
       Grades.countDocuments(filter)
@@ -91,7 +91,7 @@ router.get('/report', authMiddleware, PLAN, rbac('grades', 'read'), async (req, 
     if (req.query.termId)         filter.termId         = req.query.termId;
     if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
 
-    const Grades = _model('grades');
+    const Grades = tenantModel('grades', tenantContext(req));
 
     // Aggregate: weighted average per student per subject
     const report = await Grades.aggregate([
@@ -131,7 +131,7 @@ router.get('/report', authMiddleware, PLAN, rbac('grades', 'read'), async (req, 
 router.get('/:id', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('grades').findOne({ id: req.params.id, schoolId }).select('-__v').lean();
+    const doc = await tenantModel('grades', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Grade not found');
     return ok(res, doc);
   } catch (err) { console.error('[grades GET/:id]', err); return E.serverError(res); }
@@ -146,7 +146,7 @@ router.post('/', authMiddleware, PLAN, rbac('grades', 'create'), async (req, res
 
     // Block writes to archived academic years — log the attempt for auditability
     if (await isYearArchived(schoolId, data.academicYearId)) {
-      _model('mark_audit_log').create({
+      tenantModel('mark_audit_log', tenantContext(req)).create({
         action:        'WRITE_BLOCKED_ARCHIVED_YEAR',
         schoolId,
         academicYearId: data.academicYearId,
@@ -160,7 +160,7 @@ router.post('/', authMiddleware, PLAN, rbac('grades', 'create'), async (req, res
 
     if (data.score > data.maxScore) return E.badRequest(res, `Score (${data.score}) cannot exceed maxScore (${data.maxScore})`);
 
-    const doc = await _model('grades').create({
+    const doc = await tenantModel('grades', tenantContext(req)).create({
       ...data,
       id:          uuidv4(),
       schoolId,
@@ -184,7 +184,7 @@ router.post('/bulk', authMiddleware, PLAN, rbac('grades', 'create'), async (req,
     // Block bulk writes to archived academic years — check all distinct yearIds in the payload
     const blockedYear = await firstArchivedYear(schoolId, data.grades.map(g => g.academicYearId));
     if (blockedYear) {
-      _model('mark_audit_log').create({
+      tenantModel('mark_audit_log', tenantContext(req)).create({
         action:        'WRITE_BLOCKED_ARCHIVED_YEAR',
         schoolId,
         academicYearId: blockedYear,
@@ -199,7 +199,7 @@ router.post('/bulk', authMiddleware, PLAN, rbac('grades', 'create'), async (req,
     const invalid = data.grades.filter(g => g.score > g.maxScore);
     if (invalid.length) return E.badRequest(res, `${invalid.length} grade(s) have score exceeding maxScore`);
 
-    const Grades = _model('grades');
+    const Grades = tenantModel('grades', tenantContext(req));
     const ops = data.grades.map(g => ({
       updateOne: {
         filter: {
@@ -239,7 +239,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('grades', 'update'), async (req, r
     delete data.schoolId; delete data.id;
 
     // Always fetch existing record — needed for audit trail and percentage recalc
-    const existing = await _model('grades').findOne({ id: req.params.id, schoolId }).lean();
+    const existing = await tenantModel('grades', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Grade not found');
 
     // Recalculate percentage if score or maxScore changes
@@ -251,7 +251,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('grades', 'update'), async (req, r
     }
 
     const now = new Date().toISOString();
-    const doc = await _model('grades').findOneAndUpdate(
+    const doc = await tenantModel('grades', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { ...data, updatedBy: userId, updatedAt: now },
       { new: true, runValidators: false }
@@ -260,7 +260,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('grades', 'update'), async (req, r
     // Write audit entry if score changed
     const newScore = data.score ?? existing.score;
     if (data.score != null && data.score !== existing.score) {
-      await _model('mark_audit_log').create({
+      await tenantModel('mark_audit_log', tenantContext(req)).create({
         action:        'GRADE_UPDATED',
         gradeId:       req.params.id,
         studentId:     existing.studentId,
@@ -285,7 +285,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('grades', 'update'), async (req, r
 router.delete('/:id', authMiddleware, PLAN, rbac('grades', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('grades').findOneAndDelete({ id: req.params.id, schoolId });
+    const doc = await tenantModel('grades', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Grade not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) { console.error('[grades DELETE/:id]', err); return E.serverError(res); }

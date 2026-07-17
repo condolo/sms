@@ -34,7 +34,7 @@ const express        = require('express');
 const crypto         = require('crypto');
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 
 const router = express.Router();
 
@@ -55,7 +55,7 @@ function _gcRedirectUri() {
 
 /* ── Token helpers ──────────────────────────────────────────── */
 async function _getToken(userId) {
-  const Tokens = _model('elearning_tokens');
+  const Tokens = tenantModel('elearning_tokens', tenantContext(req));
   return Tokens.findOne({ userId }).lean();
 }
 
@@ -82,7 +82,7 @@ async function _refreshIfNeeded(tokenDoc) {
     googleAccessToken: json.access_token,
     expiresAt: new Date(Date.now() + (json.expires_in ?? 3600) * 1000).toISOString(),
   };
-  const Tokens = _model('elearning_tokens');
+  const Tokens = tenantModel('elearning_tokens', tenantContext(req));
   await Tokens.updateOne({ userId: tokenDoc.userId }, { $set: updated });
   return { ...tokenDoc, ...updated };
 }
@@ -183,7 +183,7 @@ router.get('/auth/callback', async (req, res) => {
     });
     const profile = await profileRes.json();
 
-    const Tokens = _model('elearning_tokens');
+    const Tokens = tenantModel('elearning_tokens', tenantContext(req));
     await Tokens.updateOne(
       { userId: stateData.userId },
       {
@@ -227,7 +227,7 @@ router.get('/auth/status', authMiddleware, async (req, res) => {
 /* DELETE /api/elearning/auth/disconnect */
 router.delete('/auth/disconnect', authMiddleware, async (req, res) => {
   try {
-    const Tokens = _model('elearning_tokens');
+    const Tokens = tenantModel('elearning_tokens', tenantContext(req));
     await Tokens.deleteOne({ userId: req.jwtUser.userId });
     res.json({ success: true });
   } catch (err) {
@@ -255,7 +255,7 @@ router.get('/gc/courses', authMiddleware, async (req, res) => {
 /* GET /api/elearning/courses — list courses linked in Msingi */
 router.get('/courses', authMiddleware, rbac('elearning', 'view'), async (req, res) => {
   try {
-    const Links = _model('elearning_course_links');
+    const Links = tenantModel('elearning_course_links', tenantContext(req));
     const links = await Links.find({
       schoolId: req.jwtUser.schoolId,
       teacherId: req.jwtUser.userId,
@@ -274,7 +274,7 @@ router.post('/courses/link', authMiddleware, rbac('elearning', 'create'), async 
       return res.status(400).json({ error: 'gcCourseId, subjectId, classId required.' });
     }
 
-    const Links = _model('elearning_course_links');
+    const Links = tenantModel('elearning_course_links', tenantContext(req));
     await Links.updateOne(
       { schoolId: req.jwtUser.schoolId, gcCourseId },
       {
@@ -303,7 +303,7 @@ router.post('/courses/link', authMiddleware, rbac('elearning', 'create'), async 
 /* DELETE /api/elearning/courses/:id — unlink a course */
 router.delete('/courses/:id', authMiddleware, rbac('elearning', 'delete'), async (req, res) => {
   try {
-    const Links = _model('elearning_course_links');
+    const Links = tenantModel('elearning_course_links', tenantContext(req));
     await Links.deleteOne({ _id: req.params.id, schoolId: req.jwtUser.schoolId });
     res.json({ success: true });
   } catch (err) {
@@ -404,7 +404,7 @@ router.post('/courses/:id/coursework', authMiddleware, rbac('elearning', 'create
     });
 
     // Store link in Msingi so grade webhook can resolve it
-    const CwLinks = _model('elearning_coursework_links');
+    const CwLinks = tenantModel('elearning_coursework_links', tenantContext(req));
     await CwLinks.insertOne({
       schoolId:        req.jwtUser.schoolId,
       gcCourseId:      req.params.id,
@@ -434,7 +434,7 @@ router.delete('/courses/:id/coursework/:cwId', authMiddleware, rbac('elearning',
       method: 'DELETE',
     });
 
-    const CwLinks = _model('elearning_coursework_links');
+    const CwLinks = tenantModel('elearning_coursework_links', tenantContext(req));
     await CwLinks.deleteOne({ gcCourseId: req.params.id, gcCourseWorkId: req.params.cwId });
 
     res.json({ success: true });
@@ -549,12 +549,12 @@ router.post('/gc-webhook', async (req, res) => {
     if (!courseId || !courseWorkId || !gcStudentId) return res.sendStatus(204);
 
     // Find the coursework link to get schoolId + maxScore
-    const CwLinks = _model('elearning_coursework_links');
+    const CwLinks = tenantModel('elearning_coursework_links', tenantContext(req));
     const cwLink  = await CwLinks.findOne({ gcCourseId: courseId, gcCourseWorkId: courseWorkId }).lean();
     if (!cwLink) return res.sendStatus(204);
 
     // Find the school's token to query submission details
-    const Tokens  = _model('elearning_tokens');
+    const Tokens  = tenantModel('elearning_tokens', tenantContext(req));
     const tok     = await Tokens.findOne({ schoolId: cwLink.schoolId }).lean();
     if (!tok) return res.sendStatus(204);
 
@@ -571,16 +571,16 @@ router.post('/gc-webhook', async (req, res) => {
     if (!sub?.assignedGrade && sub?.assignedGrade !== 0) return res.sendStatus(204);
 
     // Resolve Msingi student by Google email
-    const Users   = _model('users');
+    const Users   = tenantModel('users', tenantContext(req));
     const student = await Users.findOne({ schoolId: cwLink.schoolId, googleId: gcStudentId }).lean();
     if (!student) return res.sendStatus(204);
 
     // Find course link to get subjectId + classId
-    const CourseLinks = _model('elearning_course_links');
+    const CourseLinks = tenantModel('elearning_course_links', tenantContext(req));
     const courseLink  = await CourseLinks.findOne({ gcCourseId: courseId, schoolId: cwLink.schoolId }).lean();
 
     // Write / update grade in Msingi Grades module
-    const Grades = _model('grades');
+    const Grades = tenantModel('grades', tenantContext(req));
     await Grades.updateOne(
       {
         schoolId:       cwLink.schoolId,
@@ -783,7 +783,7 @@ router.get('/zoom/status', authMiddleware, (req, res) => {
 */
 router.get('/sessions', authMiddleware, rbac('elearning', 'view'), async (req, res) => {
   try {
-    const Sessions = _model('elearning_sessions');
+    const Sessions = tenantModel('elearning_sessions', tenantContext(req));
     const query    = { schoolId: req.jwtUser.schoolId, teacherId: req.jwtUser.userId };
     if (req.query.platform) query.platform = req.query.platform;
     const sessions = await Sessions.find(query).sort({ scheduledAt: -1 }).lean();
@@ -832,11 +832,11 @@ router.post('/sessions', authMiddleware, planGate('elearning'), rbac('elearning'
     }
 
     // Resolve the teacher's stored meeting link
-    const Users   = _model('users');
+    const Users   = tenantModel('users', tenantContext(req));
     const user    = await Users.findOne({ id: userId, schoolId }).lean();
     if (!user) return res.status(404).json({ error: 'User not found.' });
 
-    const Teachers = _model('teachers');
+    const Teachers = tenantModel('teachers', tenantContext(req));
     const teacher  = await Teachers.findOne({ schoolId, email: user.email }).lean();
 
     // Resolve meeting link — teacher record first, then user document (for admin/superadmin roles
@@ -878,13 +878,13 @@ router.post('/sessions', authMiddleware, planGate('elearning'), rbac('elearning'
       recordingUrl: null,
       createdAt:   new Date().toISOString(),
     };
-    await _model('elearning_sessions').create(sessionDoc);
+    await tenantModel('elearning_sessions', tenantContext(req)).create(sessionDoc);
 
     // Create matching calendar event so the session appears on the school calendar
     const { v4: uuidv4 } = require('uuid');
     const audienceLabel  = audience.label || audience.type;
     const eventDate      = new Date(scheduledAt).toISOString().slice(0, 10);
-    const calendarEvent  = await _model('events').create({
+    const calendarEvent  = await tenantModel('events', tenantContext(req)).create({
       id:              `evt_${uuidv4().slice(0, 8)}`,
       schoolId,
       title,
@@ -913,7 +913,7 @@ router.post('/sessions', authMiddleware, planGate('elearning'), rbac('elearning'
 /* ── List sessions for a course ──────────────────────────────── */
 router.get('/courses/:id/sessions', authMiddleware, rbac('elearning', 'view'), async (req, res) => {
   try {
-    const Sessions = _model('elearning_sessions');
+    const Sessions = tenantModel('elearning_sessions', tenantContext(req));
     const sessions = await Sessions.find({
       schoolId:  req.jwtUser.schoolId,
       gcCourseId: req.params.id,
@@ -935,10 +935,10 @@ router.post('/courses/:id/sessions', authMiddleware, rbac('elearning', 'create')
       return res.status(400).json({ error: 'title and scheduledAt are required.' });
     }
 
-    const Users   = _model('users');
+    const Users   = tenantModel('users', tenantContext(req));
     const teacher = await Users.findOne({ id: req.jwtUser.userId }).lean();
 
-    const CourseLinks = _model('elearning_course_links');
+    const CourseLinks = tenantModel('elearning_course_links', tenantContext(req));
     const courseLink  = await CourseLinks.findOne({
       gcCourseId: req.params.id, schoolId: req.jwtUser.schoolId,
     }).lean();
@@ -1008,7 +1008,7 @@ router.post('/courses/:id/sessions', authMiddleware, rbac('elearning', 'create')
       doc.zoomPassword  = meeting.password;
     }
 
-    const Sessions = _model('elearning_sessions');
+    const Sessions = tenantModel('elearning_sessions', tenantContext(req));
     await Sessions.insertOne(doc);
 
     res.json({ success: true, session: doc });
@@ -1021,7 +1021,7 @@ router.post('/courses/:id/sessions', authMiddleware, rbac('elearning', 'create')
 /* ── Get single session ──────────────────────────────────────── */
 router.get('/sessions/:sessionId', authMiddleware, rbac('elearning', 'view'), async (req, res) => {
   try {
-    const Sessions = _model('elearning_sessions');
+    const Sessions = tenantModel('elearning_sessions', tenantContext(req));
     const session  = await Sessions.findOne({
       id:       req.params.sessionId,
       schoolId: req.jwtUser.schoolId,
@@ -1036,7 +1036,7 @@ router.get('/sessions/:sessionId', authMiddleware, rbac('elearning', 'view'), as
 /* ── Update session (reschedule) ─────────────────────────────── */
 router.patch('/sessions/:sessionId', authMiddleware, rbac('elearning', 'edit'), async (req, res) => {
   try {
-    const Sessions = _model('elearning_sessions');
+    const Sessions = tenantModel('elearning_sessions', tenantContext(req));
     const session  = await Sessions.findOne({
       id: req.params.sessionId, schoolId: req.jwtUser.schoolId,
     }).lean();
@@ -1074,7 +1074,7 @@ router.patch('/sessions/:sessionId', authMiddleware, rbac('elearning', 'edit'), 
 /* ── Cancel / delete session ─────────────────────────────────── */
 router.delete('/sessions/:sessionId', authMiddleware, rbac('elearning', 'delete'), async (req, res) => {
   try {
-    const Sessions = _model('elearning_sessions');
+    const Sessions = tenantModel('elearning_sessions', tenantContext(req));
     const session  = await Sessions.findOne({
       id: req.params.sessionId, schoolId: req.jwtUser.schoolId,
     }).lean();
@@ -1104,13 +1104,13 @@ router.delete('/sessions/:sessionId', authMiddleware, rbac('elearning', 'delete'
 */
 router.post('/sessions/:sessionId/attend', authMiddleware, async (req, res) => {
   try {
-    const Sessions = _model('elearning_sessions');
+    const Sessions = tenantModel('elearning_sessions', tenantContext(req));
     const session  = await Sessions.findOne({
       id: req.params.sessionId, schoolId: req.jwtUser.schoolId,
     }).lean();
     if (!session) return res.status(404).json({ error: 'Session not found.' });
 
-    const Users   = _model('users');
+    const Users   = tenantModel('users', tenantContext(req));
     const student = await Users.findOne({ id: req.jwtUser.userId }).lean();
     if (!student) return res.status(404).json({ error: 'User not found.' });
 
@@ -1135,7 +1135,7 @@ router.post('/sessions/:sessionId/attend', authMiddleware, async (req, res) => {
 
       // Write to Attendance module immediately (present — they clicked Join)
       if (session.classId) {
-        const Attendance = _model('attendance');
+        const Attendance = tenantModel('attendance', tenantContext(req));
         const date       = new Date(session.scheduledAt).toISOString().split('T')[0];
         await Attendance.updateOne(
           { schoolId: session.schoolId, studentId: student.id, date, type: 'virtual_class', sessionId: session.id },
@@ -1195,11 +1195,11 @@ router.post('/zoom-webhook', async (req, res) => {
     const zoomMeetingId = String(payload?.object?.id || '');
     if (!zoomMeetingId) return;
 
-    const Sessions = _model('elearning_sessions');
+    const Sessions = tenantModel('elearning_sessions', tenantContext(req));
     const session  = await Sessions.findOne({ zoomMeetingId }).lean();
     if (!session) return;
 
-    const Users = _model('users');
+    const Users = tenantModel('users', tenantContext(req));
 
     if (event === 'meeting.started') {
       await Sessions.updateOne({ zoomMeetingId }, { $set: { status: 'live', startedAt: new Date().toISOString() } });
@@ -1266,7 +1266,7 @@ router.post('/zoom-webhook', async (req, res) => {
 
       // Write attendance to the Attendance module for each attendee
       if (sess?.attendees?.length && sess.classId) {
-        const Attendance = _model('attendance');
+        const Attendance = tenantModel('attendance', tenantContext(req));
         const date       = new Date(sess.scheduledAt).toISOString().split('T')[0];
         for (const att of sess.attendees) {
           if (!att.studentId) continue;

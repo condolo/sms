@@ -17,7 +17,7 @@ const express = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, E }          = require('../utils/response');
 
 const router = express.Router();
@@ -30,7 +30,7 @@ router.get('/:studentId', authMiddleware, PLAN, rbac('growth_profile', 'read'), 
     const { studentId } = req.params;
 
     // Verify student exists and belongs to this school
-    const student = await _model('students').findOne({ id: studentId, schoolId })
+    const student = await tenantModel('students', tenantContext(req)).findOne({ id: studentId, schoolId })
       .select('id firstName lastName admissionNumber classId className sectionKey photo status')
       .lean();
     if (!student) return E.notFound(res, 'Student not found');
@@ -45,13 +45,13 @@ router.get('/:studentId', authMiddleware, PLAN, rbac('growth_profile', 'read'), 
       recsCount,
       aspirations,
     ] = await Promise.all([
-      _model('growth_leadership').countDocuments({ schoolId, studentId }),
-      _model('growth_activities').countDocuments({ schoolId, studentId }),
-      _model('growth_projects').countDocuments({ schoolId, studentId }),
-      _model('growth_service').countDocuments({ schoolId, studentId }),
-      _model('growth_awards').countDocuments({ schoolId, studentId }),
-      _model('growth_recommendations').countDocuments({ schoolId, studentId }),
-      _model('growth_aspirations').findOne({ schoolId, studentId }).select('careerInterests universityAspirations').lean(),
+      tenantModel('growth_leadership', tenantContext(req)).countDocuments({ schoolId, studentId }),
+      tenantModel('growth_activities', tenantContext(req)).countDocuments({ schoolId, studentId }),
+      tenantModel('growth_projects', tenantContext(req)).countDocuments({ schoolId, studentId }),
+      tenantModel('growth_service', tenantContext(req)).countDocuments({ schoolId, studentId }),
+      tenantModel('growth_awards', tenantContext(req)).countDocuments({ schoolId, studentId }),
+      tenantModel('growth_recommendations', tenantContext(req)).countDocuments({ schoolId, studentId }),
+      tenantModel('growth_aspirations', tenantContext(req)).findOne({ schoolId, studentId }).select('careerInterests universityAspirations').lean(),
     ]);
 
     // Verified counts
@@ -62,11 +62,11 @@ router.get('/:studentId', authMiddleware, PLAN, rbac('growth_profile', 'read'), 
       serviceVerified,
       awardsVerified,
     ] = await Promise.all([
-      _model('growth_leadership').countDocuments({ schoolId, studentId, verificationStatus: { $in: ['institution_verified','staff_verified'] } }),
-      _model('growth_activities').countDocuments({ schoolId, studentId, verificationStatus: { $in: ['institution_verified','staff_verified'] } }),
-      _model('growth_projects').countDocuments({ schoolId, studentId, verificationStatus: { $in: ['institution_verified','staff_verified'] } }),
-      _model('growth_service').countDocuments({ schoolId, studentId, verificationStatus: { $in: ['institution_verified','staff_verified'] } }),
-      _model('growth_awards').countDocuments({ schoolId, studentId, verificationStatus: { $in: ['institution_verified','staff_verified'] } }),
+      tenantModel('growth_leadership', tenantContext(req)).countDocuments({ schoolId, studentId, verificationStatus: { $in: ['institution_verified','staff_verified'] } }),
+      tenantModel('growth_activities', tenantContext(req)).countDocuments({ schoolId, studentId, verificationStatus: { $in: ['institution_verified','staff_verified'] } }),
+      tenantModel('growth_projects', tenantContext(req)).countDocuments({ schoolId, studentId, verificationStatus: { $in: ['institution_verified','staff_verified'] } }),
+      tenantModel('growth_service', tenantContext(req)).countDocuments({ schoolId, studentId, verificationStatus: { $in: ['institution_verified','staff_verified'] } }),
+      tenantModel('growth_awards', tenantContext(req)).countDocuments({ schoolId, studentId, verificationStatus: { $in: ['institution_verified','staff_verified'] } }),
     ]);
 
     const totalEntries  = leadershipCount + activitiesCount + projectsCount + serviceCount + awardsCount;
@@ -103,13 +103,13 @@ router.get('/:studentId/academic', authMiddleware, PLAN, rbac('growth_profile', 
     const { studentId } = req.params;
 
     // Verify student
-    const student = await _model('students').findOne({ id: studentId, schoolId }).select('id firstName lastName classId className').lean();
+    const student = await tenantModel('students', tenantContext(req)).findOne({ id: studentId, schoolId }).select('id firstName lastName classId className').lean();
     if (!student) return E.notFound(res, 'Student not found');
 
     // Parallel fetch from existing collections — read-only aggregation
     const [gradesAgg, attendanceAgg, recentReports] = await Promise.all([
       // Grades: weighted average per subject (mirrors /api/grades/report logic)
-      _model('grades').aggregate([
+      tenantModel('grades', tenantContext(req)).aggregate([
         { $match: { schoolId, studentId, isPublished: true } },
         {
           $group: {
@@ -138,7 +138,7 @@ router.get('/:studentId/academic', authMiddleware, PLAN, rbac('growth_profile', 
       ]),
 
       // Attendance summary
-      _model('attendance').aggregate([
+      tenantModel('attendance', tenantContext(req)).aggregate([
         { $match: { schoolId, studentId } },
         {
           $group: {
@@ -160,7 +160,7 @@ router.get('/:studentId/academic', authMiddleware, PLAN, rbac('growth_profile', 
       ]),
 
       // Recent published report cards (latest 3, non-superseded)
-      _model('report_card_snapshots').find({
+      tenantModel('report_card_snapshots', tenantContext(req)).find({
         schoolId,
         studentId,
         superseded: { $ne: true },
@@ -177,7 +177,7 @@ router.get('/:studentId/academic', authMiddleware, PLAN, rbac('growth_profile', 
     // Batch-resolve subject names so the client never shows raw UUIDs
     const subjectIds  = gradesAgg.map(r => r._id).filter(Boolean);
     const subjectDocs = subjectIds.length
-      ? await _model('subjects').find({ schoolId, id: { $in: subjectIds } }, { id: 1, name: 1, code: 1, _id: 0 }).lean()
+      ? await tenantModel('subjects', tenantContext(req)).find({ schoolId, id: { $in: subjectIds } }, { id: 1, name: 1, code: 1, _id: 0 }).lean()
       : [];
     const subjectMap = Object.fromEntries(subjectDocs.map(s => [s.id, s]));
 

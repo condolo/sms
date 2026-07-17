@@ -14,7 +14,7 @@ const { z }              = require('zod');
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
-const { _model }         = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 
 const router = express.Router();
@@ -49,7 +49,7 @@ router.get('/', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) =>
     if (req.query.status)         filter.status         = req.query.status;
     if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
     if (req.query.termNumber)     filter.termNumber     = Number(req.query.termNumber);
-    const docs = await _model('exam_series')
+    const docs = await tenantModel('exam_series', tenantContext(req))
       .find(filter)
       .sort({ createdAt: -1 })
       .limit(200)
@@ -65,7 +65,7 @@ router.get('/', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) =>
 router.get('/:id', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await _model('exam_series').findOne({ id: req.params.id, schoolId }).lean();
+    const doc = await tenantModel('exam_series', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!doc) return E.notFound(res, 'Exam series not found');
     return ok(res, doc);
   } catch (err) {
@@ -81,7 +81,7 @@ router.post('/', authMiddleware, PLAN, rbac('exams', 'create'), async (req, res)
     const { data, error } = _validate(SeriesSchema, req.body);
     if (error) return E.validation(res, error);
     const now = new Date().toISOString();
-    const doc = await _model('exam_series').create({
+    const doc = await tenantModel('exam_series', tenantContext(req)).create({
       ...data,
       id:        uuidv4(),
       schoolId,
@@ -103,13 +103,13 @@ router.put('/:id', authMiddleware, PLAN, rbac('exams', 'update'), async (req, re
     const { data, error } = _validate(SeriesSchema.partial(), req.body);
     if (error) return E.validation(res, error);
 
-    const existing = await _model('exam_series').findOne({ id: req.params.id, schoolId }).lean();
+    const existing = await tenantModel('exam_series', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Exam series not found');
     if (existing.status === 'closed') {
       return res.status(400).json({ error: 'A closed series cannot be edited.' });
     }
 
-    const doc = await _model('exam_series').findOneAndUpdate(
+    const doc = await tenantModel('exam_series', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { $set: { ...data, updatedBy: userId, updatedAt: new Date().toISOString() } },
       { new: true }
@@ -125,12 +125,12 @@ router.put('/:id', authMiddleware, PLAN, rbac('exams', 'update'), async (req, re
 router.delete('/:id', authMiddleware, PLAN, rbac('exams', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const existing = await _model('exam_series').findOne({ id: req.params.id, schoolId }).lean();
+    const existing = await tenantModel('exam_series', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Exam series not found');
     if (existing.status !== 'draft') {
       return res.status(400).json({ error: 'Only draft series can be deleted.' });
     }
-    await _model('exam_series').deleteOne({ id: req.params.id, schoolId });
+    await tenantModel('exam_series', tenantContext(req)).deleteOne({ id: req.params.id, schoolId });
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) {
     console.error('[exam-series DELETE /:id]', err);
@@ -145,7 +145,7 @@ router.post('/:id/exams', authMiddleware, PLAN, rbac('exams', 'update'), async (
     const { examId } = req.body;
     if (!examId) return res.status(400).json({ error: 'examId is required' });
 
-    const existing = await _model('exam_series').findOne({ id: req.params.id, schoolId }).lean();
+    const existing = await tenantModel('exam_series', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Exam series not found');
     if (existing.status === 'closed') {
       return res.status(400).json({ error: 'Cannot add exams to a closed series.' });
@@ -154,7 +154,7 @@ router.post('/:id/exams', authMiddleware, PLAN, rbac('exams', 'update'), async (
       return res.status(400).json({ error: 'Exam already in this series.' });
     }
 
-    const doc = await _model('exam_series').findOneAndUpdate(
+    const doc = await tenantModel('exam_series', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { $push: { examIds: examId }, $set: { updatedAt: new Date().toISOString() } },
       { new: true }
@@ -170,12 +170,12 @@ router.post('/:id/exams', authMiddleware, PLAN, rbac('exams', 'update'), async (
 router.delete('/:id/exams/:examId', authMiddleware, PLAN, rbac('exams', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const existing = await _model('exam_series').findOne({ id: req.params.id, schoolId }).lean();
+    const existing = await tenantModel('exam_series', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Exam series not found');
     if (existing.status === 'closed') {
       return res.status(400).json({ error: 'Cannot modify a closed series.' });
     }
-    const doc = await _model('exam_series').findOneAndUpdate(
+    const doc = await tenantModel('exam_series', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       { $pull: { examIds: req.params.examId }, $set: { updatedAt: new Date().toISOString() } },
       { new: true }

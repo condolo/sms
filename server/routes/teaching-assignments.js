@@ -23,7 +23,7 @@ const { z }         = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware }      = require('../middleware/auth');
-const { _model }              = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E }      = require('../utils/response');
 const { invalidateScopeCache } = require('../middleware/scopeMiddleware');
 
@@ -86,7 +86,7 @@ router.get('/', authMiddleware, async (req, res) => {
     if (req.query.roomId)     filter.preferredRoomId = req.query.roomId;
     if (req.query.departmentId) filter.departmentId  = req.query.departmentId;
 
-    const docs = await _model('teaching_assignments')
+    const docs = await tenantModel('teaching_assignments', tenantContext(req))
       .find(filter)
       .sort({ subjectName: 1, className: 1 })
       .lean();
@@ -110,14 +110,14 @@ router.post('/', authMiddleware, async (req, res) => {
 
     // Resolve entities — denormalise names at write time
     const [teacher, subject, cls, room] = await Promise.all([
-      _model('teachers').findOne({
+      tenantModel('teachers', tenantContext(req)).findOne({
         schoolId,
         $or: [{ userId: data.teacherId }, { id: data.teacherId }],
       }).lean(),
-      _model('subjects').findOne({ schoolId, id: data.subjectId, isActive: { $ne: false } }).lean(),
-      _model('classes').findOne({ schoolId, id: data.classId }).lean(),
+      tenantModel('subjects', tenantContext(req)).findOne({ schoolId, id: data.subjectId, isActive: { $ne: false } }).lean(),
+      tenantModel('classes', tenantContext(req)).findOne({ schoolId, id: data.classId }).lean(),
       data.preferredRoomId
-        ? _model('rooms').findOne({ schoolId, id: data.preferredRoomId, isActive: { $ne: false } }).lean()
+        ? tenantModel('rooms', tenantContext(req)).findOne({ schoolId, id: data.preferredRoomId, isActive: { $ne: false } }).lean()
         : Promise.resolve(null),
     ]);
 
@@ -139,7 +139,7 @@ router.post('/', authMiddleware, async (req, res) => {
     }
 
     // Duplicate guard — same teacher+subject+class is idempotent (conflict)
-    const existing = await _model('teaching_assignments').findOne({
+    const existing = await tenantModel('teaching_assignments', tenantContext(req)).findOne({
       schoolId,
       teacherId: data.teacherId,
       subjectId: data.subjectId,
@@ -152,7 +152,7 @@ router.post('/', authMiddleware, async (req, res) => {
     const teacherName = [teacher.title, teacher.firstName, teacher.lastName]
       .filter(Boolean).join(' ');
 
-    const doc = await _model('teaching_assignments').create({
+    const doc = await tenantModel('teaching_assignments', tenantContext(req)).create({
       id:                uuidv4(),
       schoolId,
       teacherId:         data.teacherId,
@@ -183,7 +183,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
 
-    const existing = await _model('teaching_assignments')
+    const existing = await tenantModel('teaching_assignments', tenantContext(req))
       .findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Assignment not found');
 
@@ -201,7 +201,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
     if ('preferredRoomId' in result.data) {
       const rId = result.data.preferredRoomId;
       if (rId) {
-        const room = await _model('rooms').findOne({ schoolId, id: rId, isActive: { $ne: false } }).lean();
+        const room = await tenantModel('rooms', tenantContext(req)).findOne({ schoolId, id: rId, isActive: { $ne: false } }).lean();
         if (!room) return E.notFound(res, 'Room not found');
         patch.preferredRoomId   = room.id;
         patch.preferredRoomName = room.name;
@@ -212,7 +212,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
     }
     if ('periodsPerWeek' in result.data) patch.periodsPerWeek = result.data.periodsPerWeek;
 
-    const doc = await _model('teaching_assignments').findOneAndUpdate(
+    const doc = await tenantModel('teaching_assignments', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },
       patch,
       { new: true, runValidators: false },
@@ -231,13 +231,13 @@ router.delete('/:id', authMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
 
-    const existing = await _model('teaching_assignments')
+    const existing = await tenantModel('teaching_assignments', tenantContext(req))
       .findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Assignment not found');
 
     if (!canManage(req, existing.departmentId)) return E.forbidden(res);
 
-    await _model('teaching_assignments').deleteOne({ id: req.params.id, schoolId });
+    await tenantModel('teaching_assignments', tenantContext(req)).deleteOne({ id: req.params.id, schoolId });
     invalidateScopeCache(existing.teacherId, schoolId);
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) {
