@@ -6,6 +6,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.71.0] — 2026-07-18 — test: fix jest running a stale worktree's tests; fix stale login-response assertion
+
+### Fixed
+
+- **`package.json`'s jest `testMatch` had no exclusion for `.claude/worktrees/`** — a leftover git worktree checked out on a completely different branch (a report-cards feature, different commit) has its own copy of `server/__tests__/**/*.test.js`. Every `npm test` silently ran that stale codebase's tests too, alongside the real ones, and identical-looking failures from the two unrelated checkouts read as one duplicated fact rather than two separate ones — several commits this session carried a "same 7 pre-existing failures" caveat that was actually conflating a real, single failing test on `main` with six failures from the unrelated worktree. Added `testPathIgnorePatterns` for `.claude/worktrees/`. The worktree itself is untouched.
+- **The one real failure, root-caused**: `server/__tests__/routes/auth-session.test.js`'s `'response includes token and user'` asserted `res.body.token`, but `auth.js`'s `/login` deliberately puts the JWT in an HttpOnly, `SameSite=Strict` cookie only (`_setAuthCookie`) and never returns it in the JSON body — intentional XSS hardening. Confirmed the frontend (`client/src/pages/Login.jsx`) already only reads `res.user`/`res.school`, never `res.token` — the app was correct, the test was stale (written for an older API contract). Rewrote the assertion to check for the HttpOnly cookie instead of a body field that was deliberately removed by design.
+
+Verification: full jest suite, 20 test suites, 245/245 passed, zero failures — the first fully clean run this session.
+
+---
+
 ## [v4.70.0] — 2026-07-18 — feat(platform): create organizations and add multiple schools to one
 
 ### Added
