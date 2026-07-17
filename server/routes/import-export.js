@@ -25,6 +25,7 @@ const { authMiddleware }      = require('../middleware/auth');
 const { rbac }                = require('../middleware/rbac');
 const { planGate }            = require('../middleware/plan');
 const { _model }              = require('../utils/model');
+const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const {
   reserveAdmissionNumbers,
   reserveStaffIds,
@@ -326,7 +327,7 @@ const rawText = express.text({ type: 'text/csv', limit: '5mb' });
 
 /* ── Helper: resolve class name → classId ────────────────────── */
 async function _buildClassMap(schoolId) {
-  const Classes = _model('classes');
+  const Classes = tenantModel('classes', { schoolId });
   const docs    = await Classes.find({ schoolId }).select('id _id name').lean();
   const map     = {};
   for (const c of docs) {
@@ -337,7 +338,7 @@ async function _buildClassMap(schoolId) {
 
 /* ── Helper: resolve (classId + streamName) → streamId ─────── */
 async function _buildStreamMap(schoolId) {
-  const Streams = _model('streams');
+  const Streams = tenantModel('streams', { schoolId });
   const docs    = await Streams.find({ schoolId }).select('id _id classId name').lean();
   const map     = {};
   for (const s of docs) {
@@ -349,7 +350,7 @@ async function _buildStreamMap(schoolId) {
 
 /* ── Helper: resolve teacher name → { teacherId, teacherName } ── */
 async function _buildTeacherMap(schoolId) {
-  const docs = await _model('teachers')
+  const docs = await tenantModel('teachers', { schoolId })
     .find({ schoolId, status: 'active' })
     .select('userId id firstName lastName')
     .lean();
@@ -400,7 +401,7 @@ async function _importStudents(rows, schoolId, userId) {
     _buildClassMap(schoolId),
     _buildStreamMap(schoolId),
   ]);
-  const Students = _model('students');
+  const Students = tenantModel('students', { schoolId });
 
   // Load school's admission number config once for the whole batch
   const schoolDoc = await _model('schools').findOne({ id: schoolId }, { admissionConfig: 1 }).lean();
@@ -558,8 +559,8 @@ async function _importStudents(rows, schoolId, userId) {
 
   if (feeRows.length > 0) {
     const invoiceNums = await reserveInvoiceNumbers(schoolId, feeRows.length);
-    const Invoices    = _model('invoices');
-    const Payments    = _model('payments');
+    const Invoices    = tenantModel('invoices', { schoolId });
+    const Payments    = tenantModel('payments', { schoolId });
     const now         = new Date().toISOString();
 
     const invoiceDocs = [];
@@ -638,7 +639,7 @@ async function _importStudents(rows, schoolId, userId) {
 
 /* ── Teacher import handler ────────────────────────── */
 async function _importTeachers(rows, schoolId, userId) {
-  const Teachers = _model('teachers');
+  const Teachers = tenantModel('teachers', { schoolId });
 
   const VALID_GENDER   = new Set(['male', 'female', 'other', 'prefer_not_to_say']);
   const VALID_STATUS   = new Set(['active', 'inactive', 'on_leave', 'terminated']);
@@ -736,7 +737,7 @@ async function _importTeachers(rows, schoolId, userId) {
 
   if (successfulTeachers.length > 0) {
     try {
-      const Users   = _model('users');
+      const Users   = tenantModel('users', { schoolId });
       const Schools = _model('schools');
 
       // Skip emails that already have login accounts
@@ -840,7 +841,7 @@ async function _importTeachers(rows, schoolId, userId) {
 
 /* ── Classes import handler ────────────────────────────────── */
 async function _importClasses(rows, schoolId, userId) {
-  const Classes  = _model('classes');
+  const Classes  = tenantModel('classes', { schoolId });
   const existing = await Classes.find({ schoolId }).select('name').lean();
   const knownNames = new Set(existing.map(c => c.name.toLowerCase().trim()));
 
@@ -918,7 +919,7 @@ async function _importTimetable(rows, schoolId, userId) {
     _buildTeacherMap(schoolId),
   ]);
 
-  const Timetable  = _model('timetable');
+  const Timetable  = tenantModel('timetable', { schoolId });
   const VALID_DAYS = new Set(['monday', 'tuesday', 'wednesday', 'thursday', 'friday']);
   const VALID_TYPE = new Set(['lesson', 'assembly', 'registration', 'free']);
 
@@ -1013,9 +1014,9 @@ async function _importTimetable(rows, schoolId, userId) {
 
 /* ── Finance import handler ────────────────────────────────── */
 async function _importFinance(rows, schoolId, userId) {
-  const Students = _model('students');
-  const Invoices = _model('invoices');
-  const Payments = _model('payments');
+  const Students = tenantModel('students', { schoolId });
+  const Invoices = tenantModel('invoices', { schoolId });
+  const Payments = tenantModel('payments', { schoolId });
 
   // Build admission number → studentId map
   const studentDocs = await Students.find({ schoolId }).select('id admissionNumber firstName lastName').lean();
@@ -1263,9 +1264,9 @@ router.get('/export/:type', authMiddleware, /* rbac: dynamic — checked via EXP
 
     if (type === 'students') {
       const { strParam } = require('../utils/response');
-      const Students = _model('students');
-      const Classes  = _model('classes');
-      const Streams  = _model('streams');
+      const Students = tenantModel('students', tenantContext(req));
+      const Classes  = tenantModel('classes', tenantContext(req));
+      const Streams  = tenantModel('streams', tenantContext(req));
 
       // Build student filter from query params (mirrors students list route)
       const filter = { schoolId };
@@ -1367,7 +1368,7 @@ router.get('/export/:type', authMiddleware, /* rbac: dynamic — checked via EXP
       res.setHeader('Content-Disposition', `attachment; filename="${parts.join('_')}.csv"`);
 
     } else if (type === 'teachers') {
-      const Teachers = _model('teachers');
+      const Teachers = tenantModel('teachers', tenantContext(req));
       const docs     = await Teachers.find({ schoolId }).sort({ lastName: 1, firstName: 1 }).lean();
 
       const headers = [
@@ -1397,7 +1398,7 @@ router.get('/export/:type', authMiddleware, /* rbac: dynamic — checked via EXP
       res.setHeader('Content-Disposition', `attachment; filename="msingi_teachers_${_dateStamp()}.csv"`);
 
     } else if (type === 'classes') {
-      const Classes = _model('classes');
+      const Classes = tenantModel('classes', tenantContext(req));
       const docs    = await Classes.find({ schoolId }).sort({ name: 1 }).lean();
 
       const headers = ['name', 'section', 'keyStage', 'capacity', 'status', 'createdAt'];
@@ -1415,8 +1416,8 @@ router.get('/export/:type', authMiddleware, /* rbac: dynamic — checked via EXP
 
     } else if (type === 'timetable') {
       const [slots, classes] = await Promise.all([
-        _model('timetable').find({ schoolId, isActive: true }).sort({ classId: 1, day: 1, period: 1 }).lean(),
-        _model('classes').find({ schoolId }).select('id name').lean()
+        tenantModel('timetable', tenantContext(req)).find({ schoolId, isActive: true }).sort({ classId: 1, day: 1, period: 1 }).lean(),
+        tenantModel('classes', tenantContext(req)).find({ schoolId }).select('id name').lean()
       ]);
 
       const classById = {};
@@ -1437,7 +1438,7 @@ router.get('/export/:type', authMiddleware, /* rbac: dynamic — checked via EXP
       res.setHeader('Content-Disposition', `attachment; filename="msingi_timetable_${_dateStamp()}.csv"`);
 
     } else if (type === 'finance') {
-      const Invoices = _model('invoices');
+      const Invoices = tenantModel('invoices', tenantContext(req));
       const docs     = await Invoices.find({ schoolId }).sort({ createdAt: -1 }).lean();
 
       const headers = ['invoiceNumber', 'studentName', 'title', 'description', 'amount', 'total', 'amountPaid', 'balance', 'status', 'dueDate', 'createdAt'];
