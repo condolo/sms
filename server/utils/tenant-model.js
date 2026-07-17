@@ -33,6 +33,9 @@ const PLATFORM_COLLECTIONS = new Set([
   'organizations',
   'release_certificates',
   'audit_logs',
+  'platform_settings',    // singleton config doc (id:'global'), no schoolId concept
+  'landing_content',      // singleton CMS doc (id:'global'), no schoolId concept
+  'system_announcements', // platform-wide notices shown on every school's dashboard
 ]);
 
 /* ── Tenant context ─────────────────────────────────────────────

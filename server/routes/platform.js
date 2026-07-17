@@ -13,6 +13,7 @@ const { invalidatePlanCache } = require('../middleware/plan');
 const AuditService      = require('../services/audit');
 const { sign } = require('../utils/jwt');
 const email    = require('../utils/email');
+const { tenantModel } = require('../utils/tenant-model');
 
 const router = express.Router();
 
@@ -135,8 +136,6 @@ function _model(col) {
 router.get('/schools', async (req, res) => {
   try {
     const School  = _model('schools');
-    const User    = _model('users');
-    const Student = _model('students');
     // Projection: only load fields needed for the dashboard list + stats
     // Avoids pulling large fields (logoUrl, branding, email templates) into RAM for every school
     const schools = await School.find({})
@@ -149,8 +148,8 @@ router.get('/schools', async (req, res) => {
       // Fall back to _id.toString() so stats still work for legacy docs.
       const sid = s.id || s._id?.toString();
       const [students, staff] = await Promise.all([
-        Student.countDocuments({ schoolId: sid, status: 'active' }),
-        User.countDocuments({ schoolId: sid, isActive: true })
+        tenantModel('students', { schoolId: sid }).countDocuments({ schoolId: sid, status: 'active' }),
+        tenantModel('users', { schoolId: sid }).countDocuments({ schoolId: sid, isActive: true })
       ]);
       return { ...s, _stats: { students, staff } };
     }));
@@ -168,7 +167,6 @@ router.post('/schools', async (req, res) => {
     }
 
     const School = _model('schools');
-    const User   = _model('users');
 
     // Check slug uniqueness
     const exists = await School.findOne({ slug }).lean();
@@ -219,6 +217,11 @@ router.get('/schools/pending', async (req, res) => {
 router.post('/schools/:id/approve', async (req, res) => {
   try {
     const School = _model('schools');
+    // Not tenantModel(): userQuery below OR-s schoolId with an email fallback
+    // for accounts whose schoolId is missing/mismatched — the exact case
+    // /orphans exists to clean up. Forcing tenantModel()'s injected
+    // schoolId as a top-level AND condition would defeat that fallback for
+    // precisely the broken records this route needs to still recover.
     const User   = _model('users');
 
     /* Find by MongoDB _id — always reliable regardless of custom id field */
@@ -329,6 +332,9 @@ router.post('/schools/:id/impersonate', async (req, res) => {
 
   try {
     const School   = _model('schools');
+    // Not tenantModel(): same email-fallback reasoning as /approve above —
+    // this route exists partly to recover superadmin access for schools
+    // whose admin user has a missing/mismatched schoolId.
     const User     = _model('users');
 
     /* Support both MongoDB _id and custom id string */
@@ -477,6 +483,12 @@ router.delete('/schools/all', async (req, res) => {
 
     const ops = [School.deleteMany({ _id: { $in: schoolMonIds } })];
 
+    // Not tenantModel(): tenantFilter is a combined $or across MULTIPLE
+    // schools' tenant IDs at once (a bulk multi-tenant wipe) — tenantModel()
+    // is single-schoolId-per-call by design and would have to run once per
+    // school per collection, changing this from one deleteMany to N; left
+    // as a reviewed direct-access exception for this destructive,
+    // superadmin-only reset operation.
     if (tenantFilter) {
       TENANT_COLS.forEach(col => ops.push(_model(col).deleteMany(tenantFilter)));
     }
@@ -514,12 +526,21 @@ router.delete('/schools/:id', async (req, res) => {
 
     const ops = [School.findByIdAndDelete(req.params.id)];
 
+    // Not tenantModel(): tenantFilter is a $or across this school's TWO id
+    // forms (custom sch_ id and raw ObjectId string — see the dual-ID-forms
+    // pattern used throughout this codebase). tenantModel()'s scoped-filter
+    // only recognizes a top-level schoolId key; it would AND-inject
+    // {schoolId: school.id} onto this filter and silently make the
+    // _id.toString() branch of the $or unreachable, leaving legacy-form
+    // tenant docs behind on delete.
     if (tenantFilter) {
       TENANT_COLS.forEach(col => ops.push(_model(col).deleteMany(tenantFilter)));
     }
 
     /* Always delete the user by email — catches orphaned accounts even if
-       schoolId matching fails due to Mongoose virtual id conflict */
+       schoolId matching fails due to Mongoose virtual id conflict.
+       Not tenantModel(): deliberately NOT schoolId-scoped, same orphan-
+       catching reasoning as /approve and /impersonate above. */
     if (adminEmail) {
       ops.push(_model('users').deleteMany({ email: adminEmail }));
     }
@@ -537,6 +558,8 @@ router.delete('/schools/:id', async (req, res) => {
 /* GET /api/platform/billing/all — all billing snapshots (platform admin) */
 router.get('/billing/all', async (req, res) => {
   try {
+    // Not tenantModel() — deliberately platform-wide, same as billing.js's
+    // own GET /all superadmin view.
     const Snapshot = _model('billing_snapshots');
     const School   = _model('schools');
 
@@ -565,6 +588,8 @@ router.get('/billing/all', async (req, res) => {
 /* GET /api/platform/stats — MRR, school counts, plan breakdown */
 router.get('/stats', async (req, res) => {
   try {
+    // Not tenantModel() — deliberately platform-wide aggregate stats
+    // (total students, MRR) across every school.
     const School   = _model('schools');
     const Student  = _model('students');
     const Snapshot = _model('billing_snapshots');
@@ -607,9 +632,9 @@ router.get('/stats', async (req, res) => {
 
 /* ── Base data seed for new schools ─── */
 async function _seedBaseData(schoolId) {
-  const AY    = _model('academic_years');
-  const Perm  = _model('role_permissions');
-  const Sec   = _model('sections');
+  const AY    = tenantModel('academic_years', { schoolId });
+  const Perm  = tenantModel('role_permissions', { schoolId });
+  const Sec   = tenantModel('sections', { schoolId });
 
   const ayId  = `ay_${schoolId}_2025`;
   await AY.updateOne({ id: ayId }, { $set: {
@@ -899,6 +924,9 @@ router.delete('/announcements/:id', async (req, res) => {
 router.delete('/orphans', async (req, res) => {
   try {
     const School = _model('schools');
+    // Not tenantModel() — this route's entire purpose is finding superadmin
+    // accounts across ALL schools whose email/schoolId no longer matches
+    // any existing school. Tenant-scoping it would defeat the search.
     const User   = _model('users');
 
     /* Get all active school adminEmails and custom schoolIds */
