@@ -13,6 +13,17 @@
       "env": {
         "PATH": "C:\\Program Files\\nodejs;C:\\Windows\\system32;C:\\Windows"
       }
+    },
+    {
+      "name": "server",
+      "runtimeExecutable": "C:\\Program Files\\nodejs\\node.exe",
+      "runtimeArgs": [
+        "server/index.js"
+      ],
+      "port": 3005,
+      "env": {
+        "PATH": "C:\\Program Files\\nodejs;C:\\Windows\\system32;C:\\Windows"
+      }
     }
   ]
 }

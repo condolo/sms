@@ -69,6 +69,9 @@
       <button class="pa-nav-item" onclick="showView('schools')" id="nav-schools">
         <i class="fas fa-school"></i> All Schools
       </button>
+      <button class="pa-nav-item" onclick="showView('organizations')" id="nav-organizations">
+        <i class="fas fa-sitemap"></i> Organizations
+      </button>
       <button class="pa-nav-item" onclick="showView('provision')" id="nav-provision">
         <i class="fas fa-plus-circle"></i> Provision School
       </button>
@@ -243,10 +246,10 @@ function showView(view) {
   document.querySelectorAll('.pa-nav-item').forEach(el => el.classList.remove('active'));
   document.getElementById('nav-' + view)?.classList.add('active');
 
-  const titles = { overview:'Overview', pending:'Pending Approvals', schools:'Registered Schools', provision:'Provision New School', announcements:'System Announcements', diagnostics:'System Diagnostics', branding:'Branding & Platform Settings', landing:'Landing Page CMS', billing:'Billing Overview' };
+  const titles = { overview:'Overview', pending:'Pending Approvals', schools:'Registered Schools', organizations:'Organizations', provision:'Provision New School', announcements:'System Announcements', diagnostics:'System Diagnostics', branding:'Branding & Platform Settings', landing:'Landing Page CMS', billing:'Billing Overview' };
   document.getElementById('view-title').textContent = titles[view] || view;
 
-  const views = { overview: renderOverview, pending: renderPending, schools: renderSchools, provision: renderProvision, announcements: renderAnnouncements, diagnostics: renderDiagnostics, branding: renderBranding, landing: renderLandingCMS, billing: renderBillingOverview };
+  const views = { overview: renderOverview, pending: renderPending, schools: renderSchools, organizations: renderOrganizations, provision: renderProvision, announcements: renderAnnouncements, diagnostics: renderDiagnostics, branding: renderBranding, landing: renderLandingCMS, billing: renderBillingOverview };
   (views[view] || (() => {}))();
 }
 
@@ -587,6 +590,116 @@ function _schoolRow(s) {
         </div>
       </td>
     </tr>`;
+}
+
+/* ── ORGANIZATIONS ──────────────────────────────────────── */
+let _orgsCache = [];
+
+async function renderOrganizations() {
+  const el = document.getElementById('pa-content');
+  el.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading organizations…</div>';
+
+  try {
+    const json = await api('GET', '/organizations');
+    const orgs = json.organizations || [];
+    _orgsCache = orgs;
+
+    if (!orgs.length) {
+      el.innerHTML = `<div class="pa-card"><div class="pa-empty"><i class="fas fa-sitemap"></i><p>No organizations yet.</p></div></div>`;
+      return;
+    }
+
+    const totalSchools    = orgs.reduce((sum, o) => sum + o._stats.schoolCount, 0);
+    const multiSchoolOrgs = orgs.filter(o => o._stats.schoolCount > 1).length;
+
+    el.innerHTML = `
+      <div class="pa-stats" style="margin-bottom:20px">
+        <div class="pa-stat-card">
+          <div class="pa-stat-label">Total Organizations</div>
+          <div class="pa-stat-value">${orgs.length}</div>
+          <div class="pa-stat-sub">${totalSchools} school(s) total</div>
+        </div>
+        <div class="pa-stat-card">
+          <div class="pa-stat-label">Multi-School Orgs</div>
+          <div class="pa-stat-value">${multiSchoolOrgs}</div>
+          <div class="pa-stat-sub">with 2+ schools</div>
+        </div>
+        <div class="pa-stat-card">
+          <div class="pa-stat-label">Unlinked Schools</div>
+          <div class="pa-stat-value" style="${json.unlinkedSchools ? 'color:#f59e0b' : ''}">${json.unlinkedSchools || 0}</div>
+          <div class="pa-stat-sub">missing an organization</div>
+        </div>
+      </div>
+
+      <div class="pa-card">
+        <div class="pa-card-header"><h3>Organizations (${orgs.length})</h3></div>
+        <div class="pa-table-wrap">
+          <table class="pa-table">
+            <thead>
+              <tr>
+                <th>Organization</th>
+                <th>Slug</th>
+                <th>Schools</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${orgs.map(o => _orgRow(o)).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+  } catch (err) {
+    el.innerHTML = `<div class="pa-error">Failed to load organizations: ${err.message}</div>`;
+  }
+}
+
+function _orgRow(o) {
+  const created = o.createdAt ? new Date(o.createdAt).toLocaleDateString('en-GB') : '—';
+  const names   = o.schools.map(s => s.name).join(', ') || '—';
+  const namesShort = names.length > 40 ? names.slice(0, 40) + '…' : names;
+  return `
+    <tr>
+      <td><strong style="font-size:13px;color:var(--gray-900)">${o.name}</strong></td>
+      <td><code style="font-size:12px;background:var(--gray-100);padding:2px 6px;border-radius:4px">${o.slug||'—'}</code></td>
+      <td>${o._stats.schoolCount} <span style="color:var(--gray-400);font-size:12px">(${namesShort})</span></td>
+      <td><span class="status-dot ${o.status === 'active' ? 'active' : ''}">${o.status || '—'}</span></td>
+      <td style="color:var(--gray-400);font-size:12px">${created}</td>
+      <td>
+        <button class="pa-btn" title="View member schools" onclick="viewOrgSchools('${o.id}')">
+          <i class="fas fa-eye"></i> View Schools
+        </button>
+      </td>
+    </tr>`;
+}
+
+function viewOrgSchools(orgId) {
+  const org = _orgsCache.find(o => o.id === orgId);
+  if (!org) return;
+
+  const rows = (org.schools || []).map(s => `
+    <tr>
+      <td style="padding:8px 10px;font-weight:600">${s.name}</td>
+      <td style="padding:8px 10px"><span class="plan-pill ${s.plan||'core'}">${s.plan||'core'}</span></td>
+      <td style="padding:8px 10px">${s.isActive ? '<span style="color:#22c55e">Active</span>' : '<span style="color:#ef4444">Inactive</span>'}</td>
+    </tr>`).join('');
+
+  showModal(
+    `${org.name} — ${org._stats.schoolCount} school(s)`,
+    `<table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead>
+        <tr style="border-bottom:2px solid #e2e8f0">
+          <th style="text-align:left;padding:8px 10px;color:#64748b;font-size:11px;text-transform:uppercase">School</th>
+          <th style="text-align:left;padding:8px 10px;color:#64748b;font-size:11px;text-transform:uppercase">Plan</th>
+          <th style="text-align:left;padding:8px 10px;color:#64748b;font-size:11px;text-transform:uppercase">Status</th>
+        </tr>
+      </thead>
+      <tbody>${rows || '<tr><td colspan="3" style="padding:12px;color:#94a3b8">No schools linked.</td></tr>'}</tbody>
+    </table>`,
+    [{ label: 'Close', cls: 'pa-btn', action: 'closeModal()' }]
+  );
 }
 
 /* ── Diagnostics ─────────────────────────────────────────── */

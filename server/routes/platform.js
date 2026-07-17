@@ -213,6 +213,70 @@ router.get('/schools/pending', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+/* GET /api/platform/organizations — list organizations with their member
+   schools and rolled-up plan/status stats. Organizations are currently 1:1
+   with schools (backfilled by provision-organizations.js); this becomes
+   more useful once a school can be added to an existing organization. */
+router.get('/organizations', async (req, res) => {
+  try {
+    const Org    = _model('organizations');
+    const School = _model('schools');
+
+    const [orgs, schools] = await Promise.all([
+      Org.find({}).sort({ createdAt: -1 }).lean(),
+      School.find({})
+        .select('id _id organizationId name shortName slug plan isActive status trialEnds')
+        .lean(),
+    ]);
+
+    const schoolsByOrg = {};
+    for (const s of schools) {
+      const oid = s.organizationId;
+      if (!oid) continue;
+      (schoolsByOrg[oid] = schoolsByOrg[oid] || []).push({
+        id:        s.id || s._id?.toString(),
+        name:      s.name,
+        shortName: s.shortName,
+        slug:      s.slug,
+        plan:      s.plan,
+        isActive:  s.isActive,
+        status:    s.status,
+        trialEnds: s.trialEnds,
+      });
+    }
+
+    const organizations = orgs.map(o => {
+      const memberSchools = schoolsByOrg[o.id] || [];
+      const byPlan = {};
+      memberSchools.forEach(s => {
+        const p = s.plan || 'base';
+        byPlan[p] = (byPlan[p] || 0) + 1;
+      });
+      return {
+        id:                 o.id,
+        name:               o.name,
+        slug:               o.slug,
+        status:             o.status,
+        multiSchoolEnabled: !!o.multiSchoolEnabled,
+        createdAt:          o.createdAt,
+        schools:            memberSchools,
+        _stats: {
+          schoolCount: memberSchools.length,
+          activeCount: memberSchools.filter(s => s.isActive).length,
+          byPlan,
+        },
+      };
+    });
+
+    const unlinkedSchools = schools.filter(s => !s.organizationId).length;
+
+    res.json({ organizations, unlinkedSchools });
+  } catch (err) {
+    console.error('[platform/organizations GET]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* POST /api/platform/schools/:id/approve — approve a pending school */
 router.post('/schools/:id/approve', async (req, res) => {
   try {
