@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.78.0] — 2026-07-18 — feat(auth): School switching (C9/D-004)
+
+### Added
+
+- **`POST /api/auth/switch-school`** (`server/routes/auth.js`) — `authMiddleware`-protected; body `{schoolId}`. Validates the caller has an active `memberships` doc for the target school, that it's within the same organization as their current context (409 on cross-org, mirroring `POST /memberships`'s existing convention), and that a per-school `users` doc actually exists there (404 otherwise — a Membership grant does not by itself guarantee login capability, since ADR-0002's Link Identity flow can create the former without the latter). Mints a fresh, correctly-scoped token and hands back an opaque exchange code via the **existing, unmodified** `_issueExchangeCode`/`POST /exchange` mechanism — no new token-consumption endpoint, no client-side token handling.
+- **`_buildTokenPayload` gains `orgId`/`membershipId`** — added only when the target school's organization has `multiSchoolEnabled: true`. Every organization has this hardcoded `false` today (Stage 3 activation is a separate, later, per-organization operator decision — no code path flips it), so this is a no-op in every current deployment; that's the specific regression this release's own tests pin.
+- **`availableSchools` (optional array)** added to the JSON body of `/login`, `/verify-otp`, `/force-change`, and `/exchange` — the other schools a user can switch to without re-authenticating. Absent unless `orgId` is present on the token (i.e. never, today).
+- **Minimal "Switch School" menu** in `TopBar.jsx` — renders only when `availableSchools` is non-empty; calls `switch-school` then the existing `exchange`, then hard-reloads so every school-scoped cache/component state resets cleanly rather than requiring an audit of every query's cache key.
+- 13 new tests (9 route-level in `auth-switch-school.test.js`, 4 JWT-field in `auth-session.test.js`'s existing C9 describe block) plus 4 new `availableSchools`-specific tests.
+
+### Governance — shipped ahead of its stated dependency, deliberately
+
+Per the dependency graph, C9 depends on "C8 authoritative" (`IDENTITY_CUTOVER_ENABLED=true` in a real deployment with the `identity` gate green) — not satisfied here, and cannot be in this sandbox (no live MongoDB to safely flip that switch against). Built anyway, at explicit operator instruction, **self-gated on `organizations.multiSchoolEnabled`** instead of on C8's own activation flag — a genuinely unreachable condition today, verified by search to be hardcoded `false` at every provisioning site. This mirrors every prior phase's disabled-by-default posture; the dependency-graph deviation itself is recorded inline in `IMPLEMENTATION_DEPENDENCY_GRAPH_v1.md` §1, not silently worked around.
+
+Also corrected alongside the code: `docs/ARCHITECTURE_CONSTITUTION.md` §7/§8/§10 Stage 4 described a "sessionStorage holds the JWT per tab" session model that is architecturally impossible against this codebase's actual security design — the JWT is delivered exclusively via an HttpOnly cookie (`_setAuthCookie`), and the client's own `store/auth.js` explicitly hardcodes `get token() { return null; }` because JS was deliberately never meant to read it. Cookies also aren't tab-scoped, so "one JWT per tab" isn't representable via cookie auth regardless. Replaced with the actual, already-existing exchange-code mechanism this release reuses.
+
+Verification: full jest suite, 33/33 suites, 383/383 tests. Client build (`vite build`) verified clean; UI verified in-browser via injected mock session data (no live MongoDB in this sandbox to exercise a real `multiSchoolEnabled` organization) — dropdown renders correctly, lists the mocked schools, and fails gracefully (toast, no crash, buttons re-enable) when the switch call 500s against the unconfigured backend.
+
+---
+
 ## [v4.77.0] — 2026-07-18 — feat(auth): Identity separation Phase 3 — Cutover (C8/MR-001)
 
 ### Added

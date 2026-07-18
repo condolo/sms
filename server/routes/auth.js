@@ -119,7 +119,65 @@ async function _buildTokenPayload(user, schoolId) {
     payload.itv = await getIdentityTokenVersion(user.identityId);
   }
 
+  // C9 (D-004, Constitution §10 Stage 4) — orgId/membershipId only when
+  // this school's organization has explicitly opted into multi-school
+  // (multiSchoolEnabled: true). Every organization is multiSchoolEnabled:
+  // false today (Stage 3 activation is a separate, later operator
+  // decision — see docs/adr/ for C8's identical disabled-by-default
+  // posture), so this block never executes in any current deployment;
+  // that's the specific regression this addition's own tests pin. Never
+  // fatal — a lookup failure here must not block token issuance.
+  try {
+    const school = await _model('schools').findOne({ id: schoolId }).select('organizationId').lean();
+    if (school?.organizationId) {
+      const org = await _model('organizations').findOne({ id: school.organizationId }).select('multiSchoolEnabled').lean();
+      if (org?.multiSchoolEnabled) {
+        const membership = await _model('memberships').findOne({ userId: payload.userId, schoolId }).select('id orgId').lean();
+        if (membership) {
+          payload.orgId = membership.orgId;
+          payload.membershipId = membership.id;
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[auth] _buildTokenPayload multi-school lookup failed (non-fatal):', err.message);
+  }
+
   return payload;
+}
+
+/**
+ * C9 (D-004) — other schools this user can switch to without
+ * re-authenticating, for the client to render a School Switcher.
+ * Only non-empty when the token payload carries orgId (i.e. this
+ * user's current school's organization has multiSchoolEnabled: true —
+ * false for every organization today, so this returns [] in every
+ * current deployment) and at least one other active Membership exists
+ * in that same organization.
+ *
+ * @param {Object} payload — a built token payload (from _buildTokenPayload,
+ *   or a verified JWT payload — same shape)
+ * @returns {Promise<Array<{id: string, name: string}>>}
+ */
+async function _availableSchools(payload) {
+  if (!payload.orgId) return [];
+  try {
+    const memberships = await _model('memberships')
+      .find({ userId: payload.userId, orgId: payload.orgId, isActive: { $ne: false } })
+      .lean();
+    const otherSchoolIds = [...new Set(
+      memberships.map(m => m.schoolId).filter(id => id && id !== payload.schoolId)
+    )];
+    if (otherSchoolIds.length === 0) return [];
+    const schools = await _model('schools')
+      .find({ id: { $in: otherSchoolIds } })
+      .select('id name')
+      .lean();
+    return schools.map(s => ({ id: s.id, name: s.name }));
+  } catch (err) {
+    console.error('[auth] _availableSchools lookup failed (non-fatal):', err.message);
+    return [];
+  }
 }
 
 /* ── Temp password generator (for new user invites) ────── */
@@ -340,7 +398,8 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
       req.headers['user-agent'] || '',
     );
 
-    const token = sign({ ...(await _buildTokenPayload(user, req.school.id)), sessionId, absoluteExpiry });
+    const tokenPayload = await _buildTokenPayload(user, req.school.id);
+    const token = sign({ ...tokenPayload, sessionId, absoluteExpiry });
 
     // Check trial expiry and send reminder if needed
     _checkTrialAndNotify(req.school).catch(() => {});
@@ -355,9 +414,14 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
       safeUser.permissions = mergedPerms;
     }
 
+    const availableSchools = await _availableSchools(tokenPayload);
+
     SecurityService.clearFail(req.school.id, loginId).catch(() => {});
     _setAuthCookie(res, token, absoluteExpiry);
-    res.json({ user: safeUser, school: req.school, absoluteExpiry });
+    res.json({
+      user: safeUser, school: req.school, absoluteExpiry,
+      ...(availableSchools.length ? { availableSchools } : {}),
+    });
   } catch (err) {
     console.error('[auth/login]', err);
     res.status(500).json({ error: 'Login failed' });
@@ -413,7 +477,8 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
       req.headers['user-agent'] || '',
     );
 
-    const token = sign({ ...(await _buildTokenPayload(user, user.schoolId)), sessionId: otpSessionId, absoluteExpiry: otpAbsExpiry });
+    const otpTokenPayload = await _buildTokenPayload(user, user.schoolId);
+    const token = sign({ ...otpTokenPayload, sessionId: otpSessionId, absoluteExpiry: otpAbsExpiry });
 
     // Attach merged role permissions so sidebar filters correctly (same as regular login)
     const safeUser = { ...user, password: undefined, mfaOtp: undefined, mfaExpiry: undefined };
@@ -421,9 +486,14 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
     const otpMergedPerms = await _loadMergedPermissions(user.schoolId, otpAllRoles, user.id);
     if (otpMergedPerms !== null) safeUser.permissions = otpMergedPerms;
 
+    const otpAvailableSchools = await _availableSchools(otpTokenPayload);
+
     _checkTrialAndNotify(school).catch(() => {});
     _setAuthCookie(res, token, otpAbsExpiry);
-    res.json({ user: safeUser, school, absoluteExpiry: otpAbsExpiry });
+    res.json({
+      user: safeUser, school, absoluteExpiry: otpAbsExpiry,
+      ...(otpAvailableSchools.length ? { availableSchools: otpAvailableSchools } : {}),
+    });
   } catch (err) {
     console.error('[auth/verify-otp]', err);
     res.status(500).json({ error: 'Verification failed' });
@@ -592,7 +662,8 @@ router.post('/force-change', forceChangeLimiter, tenantMiddleware, async (req, r
     );
 
     // Issue JWT
-    const token = sign({ ...(await _buildTokenPayload(user, user.schoolId)), sessionId: fcSessionId, absoluteExpiry: fcAbsExpiry });
+    const fcTokenPayload = await _buildTokenPayload(user, user.schoolId);
+    const token = sign({ ...fcTokenPayload, sessionId: fcSessionId, absoluteExpiry: fcAbsExpiry });
 
     // Send security confirmation email (non-blocking)
     email.sendPasswordChanged({
@@ -605,8 +676,12 @@ router.post('/force-change', forceChangeLimiter, tenantMiddleware, async (req, r
 
     const safeUser = { ...user, password: undefined, mfaOtp: undefined, mfaExpiry: undefined,
                        passwordChangedAt: now, mustChangePassword: false };
+    const fcAvailableSchools = await _availableSchools(fcTokenPayload);
     _setAuthCookie(res, token, fcAbsExpiry);
-    res.json({ user: safeUser, school, absoluteExpiry: fcAbsExpiry });
+    res.json({
+      user: safeUser, school, absoluteExpiry: fcAbsExpiry,
+      ...(fcAvailableSchools.length ? { availableSchools: fcAvailableSchools } : {}),
+    });
   } catch (err) {
     console.error('[auth/force-change]', err);
     res.status(500).json({ error: 'Password change failed' });
@@ -1129,11 +1204,119 @@ router.post('/exchange', exchangeLimiter, async (req, res) => {
       ? `/api/users/${user.id}/photo?schoolId=${encodeURIComponent(payload.schoolId)}`
       : null;
 
+    const exchangeAvailableSchools = await _availableSchools(payload);
+
     _setAuthCookie(res, entry.token);
-    return res.json({ user: safeUser, school });
+    return res.json({
+      user: safeUser, school,
+      ...(exchangeAvailableSchools.length ? { availableSchools: exchangeAvailableSchools } : {}),
+    });
   } catch (err) {
     console.error('[auth/exchange]', err);
     res.status(500).json({ error: 'Exchange failed' });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   POST /api/auth/switch-school — C9 (D-004, Constitution §10 Stage 4)
+
+   Switches the caller's active school context without a full
+   re-login. Mints a fresh token server-side and hands back only a
+   short-lived exchange code — reuses the existing OAuth exchange
+   machinery (_issueExchangeCode / POST /exchange) rather than a new
+   token-delivery mechanism, since the browser has one HttpOnly cookie
+   per origin (not per tab — see Constitution §7's corrected text).
+
+   Provably inert today: fails closed at the multiSchoolEnabled check
+   below for every organization that hasn't explicitly opted in
+   (currently all of them — see _buildTokenPayload).
+   ══════════════════════════════════════════════════════════════ */
+const switchSchoolLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 20,
+  message: { error: 'Too many school-switch attempts. Please try again in a few minutes.' },
+  skip: () => process.env.NODE_ENV === 'test',
+});
+
+router.post('/switch-school', authMiddleware, switchSchoolLimiter, async (req, res) => {
+  try {
+    const { schoolId: targetSchoolId } = req.body;
+    if (!targetSchoolId || typeof targetSchoolId !== 'string') {
+      return res.status(400).json({ error: 'schoolId is required' });
+    }
+    if (targetSchoolId === req.jwtUser.schoolId) {
+      return res.status(400).json({ error: 'Already in that school context' });
+    }
+
+    const userId = req.jwtUser.userId;
+
+    // Membership required for the target school (ADR-0002, C7) — this
+    // records access authorization, not credentials (see below).
+    const Memberships = _model('memberships');
+    const membership  = await Memberships.findOne({ userId, schoolId: targetSchoolId }).lean();
+    if (!membership || membership.isActive === false) {
+      return res.status(404).json({ error: 'You do not have access to that school.' });
+    }
+
+    // The target school's organization must have explicitly opted into
+    // multi-school (Constitution §10 Stage 3) — the sole activation
+    // lever for this entire endpoint.
+    const Schools = _model('schools');
+    const Orgs    = _model('organizations');
+    const targetSchool = await Schools.findOne({ id: targetSchoolId }).lean();
+    if (!targetSchool) return res.status(404).json({ error: 'School not found.' });
+
+    const targetOrg = targetSchool.organizationId
+      ? await Orgs.findOne({ id: targetSchool.organizationId }).lean()
+      : null;
+    if (!targetOrg?.multiSchoolEnabled) {
+      return res.status(403).json({ error: 'School switching is not enabled for this organization.' });
+    }
+
+    // Same-organization boundary (Constitution §6) — never allow
+    // switching across organizations, mirroring POST /memberships'
+    // existing cross-org 409. Checked fresh against the DB rather than
+    // trusting the caller's current token, since an older still-valid
+    // token may predate this org's multiSchoolEnabled activation and
+    // therefore may not carry orgId at all.
+    const currentSchool = await Schools.findOne({ id: req.jwtUser.schoolId }).lean();
+    if (!currentSchool || currentSchool.organizationId !== targetSchool.organizationId) {
+      return res.status(409).json({ error: 'Cross-organization switching is not supported.' });
+    }
+
+    // A Membership grant (Link Identity, ADR-0002) records authorization
+    // but deliberately does NOT create a per-school users doc — so a
+    // valid Membership does not guarantee login credentials exist at
+    // the target school yet. Failing closed here, not silently
+    // provisioning one, is the correct behavior for that boundary.
+    const TargetUsers = tenantModel('users', { schoolId: targetSchoolId });
+    const targetUser  = await TargetUsers.findOne({ id: userId, schoolId: targetSchoolId }).lean();
+    if (!targetUser) {
+      return res.status(404).json({ error: 'No account exists for you at that school yet.' });
+    }
+
+    const { sessionId, absoluteExpiry } = await SessionService.createSession(
+      userId, targetSchoolId, targetUser.primaryRole || targetUser.role,
+      req.headers['cf-connecting-ip'] || req.ip,
+      req.headers['user-agent'] || '',
+    );
+
+    const token = sign({ ...(await _buildTokenPayload(targetUser, targetSchoolId)), sessionId, absoluteExpiry });
+    const code  = _issueExchangeCode(token);
+
+    AuditService.log({
+      action: 'auth.school_switch',
+      actor:  { userId, role: req.jwtUser.role, email: req.jwtUser.email },
+      schoolId: targetSchoolId,
+      target: { type: 'school', id: targetSchoolId, label: targetSchool.name },
+      details: { fromSchoolId: req.jwtUser.schoolId },
+      req,
+    });
+
+    res.json({ code });
+  } catch (err) {
+    console.error('[auth/switch-school]', err);
+    res.status(500).json({ error: 'School switch failed' });
   }
 });
 

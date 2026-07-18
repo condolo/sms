@@ -125,6 +125,8 @@ export const auth = {
   sessions:        ()             => _get('/auth/sessions'),
   terminateSession:(id)           => _delete(`/auth/sessions/${id}`),
   revokeAllSessions:(userId)      => _post('/auth/sessions/revoke-all', { userId }),
+  switchSchool:    (schoolId)     => _post('/auth/switch-school', { schoolId }),
+  exchange:        (code)         => _post('/auth/exchange', { code }),
 };
 
 export const profile = {

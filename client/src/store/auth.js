@@ -4,7 +4,7 @@ const SESSION_KEY = 'msingi_session';
 
 /**
  * What we persist to localStorage:
- *   token        — JWT (needed to re-authenticate on refresh)
+ *   (token is NEVER persisted — it lives in an HttpOnly cookie, inaccessible to JS)
  *   user (slim)  — id, name, role, schoolId, studentId, guardianOf, permissions
  *                  NO email (PII) — stays in memory only
  *   school (slim)— id, name, slug, plan, logoUrl, faviconUrl, moduleConfig, primaryColor
@@ -90,6 +90,11 @@ const useAuthStore = create((set, get) => ({
   get schoolId()        { return get().session?.user?.schoolId ?? null; },
   get role()            { return get().session?.user?.role ?? null; },
   get plan()            { return get().session?.school?.plan ?? get().session?.user?.plan ?? 'core'; },
+  // C9 (D-004) — other schools this user can switch to. Set only by a
+  // login/exchange response that included it (never persisted, so it's
+  // absent again until the next such response — acceptable since a page
+  // refresh doesn't call login again either).
+  get availableSchools(){ return get().session?.availableSchools ?? []; },
 
   // ─── Actions ────────────────────────────────────────────────────────────────
 

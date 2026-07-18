@@ -86,8 +86,21 @@ jest.mock('../../services/audit', () => ({
 }));
 
 /* ── Mock _model — returns test doubles for users + schools ─── */
-let mockUserDoc = null;      // set per test
-let mockIdentityDoc = null;  // C8/MR-001 Phase 3 — set per cutover test, null otherwise
+let mockUserDoc = null;         // set per test
+let mockIdentityDoc = null;     // C8/MR-001 Phase 3 — set per cutover test, null otherwise
+let mockSchoolDoc = { isActive: true }; // C9 — override organizationId per test, null otherwise
+let mockOrgDoc = null;          // C9 — set per multi-school test, null otherwise
+let mockMembershipDoc = null;   // C9 — set per multi-school test, null otherwise
+let mockMembershipDocs = [];    // C9 — .find() results for _availableSchools, [] otherwise
+let mockOtherSchoolDocs = [];   // C9 — .find() results for _availableSchools' school lookup, [] otherwise
+
+// Supports both .lean() directly and .select(...).lean() — the two chain
+// shapes real Mongoose query builders (and this codebase's call sites)
+// actually use.
+function mockChain(resolveFn) {
+  const lean = jest.fn().mockImplementation(() => Promise.resolve(resolveFn()));
+  return { lean, select: jest.fn().mockReturnValue({ lean }) };
+}
 
 jest.mock('../../utils/model', () => {
   const mockUpdateOne = jest.fn().mockResolvedValue({});
@@ -103,7 +116,8 @@ jest.mock('../../utils/model', () => {
       }
       if (collection === 'schools') {
         return {
-          findOne:  jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ isActive: true }) }),
+          findOne:  jest.fn(() => mockChain(() => mockSchoolDoc)),
+          find:     jest.fn(() => mockChain(() => mockOtherSchoolDocs)),
           updateOne: mockUpdateOne,
         };
       }
@@ -113,6 +127,15 @@ jest.mock('../../utils/model', () => {
             lean: jest.fn().mockImplementation(() => Promise.resolve(mockIdentityDoc)),
           }),
           updateOne: mockUpdateOne,
+        };
+      }
+      if (collection === 'organizations') {
+        return { findOne: jest.fn(() => mockChain(() => mockOrgDoc)) };
+      }
+      if (collection === 'memberships') {
+        return {
+          findOne: jest.fn(() => mockChain(() => mockMembershipDoc)),
+          find:    jest.fn(() => mockChain(() => mockMembershipDocs)),
         };
       }
       return {
@@ -167,6 +190,11 @@ function makeUser(overrides = {}) {
 beforeEach(() => {
   mockUserDoc = makeUser();
   mockIdentityDoc = null;
+  mockSchoolDoc = { isActive: true }; // C9 — no organizationId by default
+  mockOrgDoc = null;
+  mockMembershipDoc = null;
+  mockMembershipDocs = [];
+  mockOtherSchoolDocs = [];
   jest.clearAllMocks();
   // C8/MR-001 Phase 3 — guarantee a deterministic "cutover disabled"
   // baseline regardless of any other test file's env state (defense
@@ -479,5 +507,183 @@ describe('POST /api/auth/login — C8/MR-001 Phase 3 cutover', () => {
     } finally {
       delete module.exports.__MOCK_SCHOOL__;
     }
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════
+   POST /api/auth/login — C9 (D-004, Constitution §10 Stage 4)
+   _buildTokenPayload gains orgId/membershipId, but ONLY when the
+   school's organization has multiSchoolEnabled: true. Every
+   organization is multiSchoolEnabled:false today (confirmed —
+   provision-organizations.js always sets it false; no admin route
+   accepts it as input), so the FIRST test below is the specific
+   regression this addition must never break: with no organizationId
+   on the school (the common case) or multiSchoolEnabled false (every
+   real org today), the JWT must be byte-for-byte unaffected — decoded
+   here via the real verify(), not inferred from a 200 status alone.
+══════════════════════════════════════════════════════════════ */
+describe('POST /api/auth/login — C9 multi-school JWT fields', () => {
+  const { verify } = require('../../utils/jwt');
+
+  function tokenFromResponse(res) {
+    const cookies = [].concat(res.headers['set-cookie'] || []);
+    const tokenCookie = cookies.find(c => c.startsWith('token='));
+    return verify(tokenCookie.split(';')[0].split('=')[1]);
+  }
+
+  test('no organizationId on the school: orgId/membershipId absent, rest of payload unaffected', async () => {
+    mockSchoolDoc = { isActive: true }; // no organizationId — the common case today
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ email: 'admin@demo.school', password: 'Password123!' });
+
+    expect(res.status).toBe(200);
+    const payload = tokenFromResponse(res);
+    expect(payload.orgId).toBeUndefined();
+    expect(payload.membershipId).toBeUndefined();
+    expect(payload.schoolId).toBe('sch_demo_001');
+    expect(payload.userId).toBe('usr_demo_001');
+  });
+
+  test('organization exists but multiSchoolEnabled is false (every real org today): orgId/membershipId still absent', async () => {
+    mockSchoolDoc = { isActive: true, organizationId: 'org_demo' };
+    mockOrgDoc = { multiSchoolEnabled: false };
+    mockMembershipDoc = { id: 'mem_demo_001', orgId: 'org_demo' }; // exists, but must not be consulted
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ email: 'admin@demo.school', password: 'Password123!' });
+
+    expect(res.status).toBe(200);
+    const payload = tokenFromResponse(res);
+    expect(payload.orgId).toBeUndefined();
+    expect(payload.membershipId).toBeUndefined();
+  });
+
+  test('multiSchoolEnabled true AND an active membership exists: orgId/membershipId are added', async () => {
+    mockSchoolDoc = { isActive: true, organizationId: 'org_demo' };
+    mockOrgDoc = { multiSchoolEnabled: true };
+    mockMembershipDoc = { id: 'mem_demo_001', orgId: 'org_demo' };
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ email: 'admin@demo.school', password: 'Password123!' });
+
+    expect(res.status).toBe(200);
+    const payload = tokenFromResponse(res);
+    expect(payload.orgId).toBe('org_demo');
+    expect(payload.membershipId).toBe('mem_demo_001');
+    // Untouched fields stay exactly as before.
+    expect(payload.schoolId).toBe('sch_demo_001');
+    expect(payload.role).toBe('admin');
+  });
+
+  test('multiSchoolEnabled true but NO membership doc for this user/school: orgId/membershipId stay absent, login still succeeds', async () => {
+    mockSchoolDoc = { isActive: true, organizationId: 'org_demo' };
+    mockOrgDoc = { multiSchoolEnabled: true };
+    mockMembershipDoc = null; // no membership record
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ email: 'admin@demo.school', password: 'Password123!' });
+
+    expect(res.status).toBe(200); // never blocks login — additive only
+    const payload = tokenFromResponse(res);
+    expect(payload.orgId).toBeUndefined();
+    expect(payload.membershipId).toBeUndefined();
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════
+   POST /api/auth/login — C9 availableSchools (School Switcher UI)
+══════════════════════════════════════════════════════════════ */
+describe('POST /api/auth/login — C9 availableSchools', () => {
+  test('multiSchoolEnabled false (every real org today): availableSchools absent from the response', async () => {
+    mockSchoolDoc = { isActive: true, organizationId: 'org_demo' };
+    mockOrgDoc = { multiSchoolEnabled: false };
+    mockMembershipDoc = { id: 'mem_demo_001', orgId: 'org_demo' };
+    mockMembershipDocs = [
+      { id: 'mem_demo_001', schoolId: 'sch_demo_001', orgId: 'org_demo', isActive: true },
+      { id: 'mem_other_001', schoolId: 'sch_other_001', orgId: 'org_demo', isActive: true },
+    ];
+    mockOtherSchoolDocs = [{ id: 'sch_other_001', name: 'Other Campus' }];
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ email: 'admin@demo.school', password: 'Password123!' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.availableSchools).toBeUndefined();
+  });
+
+  test('multiSchoolEnabled true but only one active membership (this school): availableSchools absent', async () => {
+    mockSchoolDoc = { isActive: true, organizationId: 'org_demo' };
+    mockOrgDoc = { multiSchoolEnabled: true };
+    mockMembershipDoc = { id: 'mem_demo_001', orgId: 'org_demo' };
+    mockMembershipDocs = [
+      { id: 'mem_demo_001', schoolId: 'sch_demo_001', orgId: 'org_demo', isActive: true },
+    ];
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ email: 'admin@demo.school', password: 'Password123!' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.availableSchools).toBeUndefined();
+  });
+
+  test('multiSchoolEnabled true AND a second active membership exists: availableSchools lists the other school, excluding the current one', async () => {
+    mockSchoolDoc = { isActive: true, organizationId: 'org_demo' };
+    mockOrgDoc = { multiSchoolEnabled: true };
+    mockMembershipDoc = { id: 'mem_demo_001', orgId: 'org_demo' };
+    mockMembershipDocs = [
+      { id: 'mem_demo_001', schoolId: 'sch_demo_001', orgId: 'org_demo', isActive: true },
+      { id: 'mem_other_001', schoolId: 'sch_other_001', orgId: 'org_demo', isActive: true },
+    ];
+    mockOtherSchoolDocs = [{ id: 'sch_other_001', name: 'Other Campus' }];
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ email: 'admin@demo.school', password: 'Password123!' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.availableSchools).toEqual([{ id: 'sch_other_001', name: 'Other Campus' }]);
+  });
+
+  test('a membership doc for the current school only (as an active-filtered query would return) yields no switcher entries', async () => {
+    mockSchoolDoc = { isActive: true, organizationId: 'org_demo' };
+    mockOrgDoc = { multiSchoolEnabled: true };
+    mockMembershipDoc = { id: 'mem_demo_001', orgId: 'org_demo' };
+    // Simulates the result of the real query's isActive:{$ne:false} filter
+    // already having excluded a revoked membership at the DB layer —
+    // _availableSchools then has nothing but the current school to work
+    // with, so it must still resolve to no switcher entries.
+    mockMembershipDocs = [
+      { id: 'mem_demo_001', schoolId: 'sch_demo_001', orgId: 'org_demo', isActive: true },
+    ];
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ email: 'admin@demo.school', password: 'Password123!' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.availableSchools).toBeUndefined();
   });
 });

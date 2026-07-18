@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { User, LogOut, ChevronDown, Menu } from 'lucide-react';
+import { User, LogOut, ChevronDown, Menu, Building2 } from 'lucide-react';
 import clsx from 'clsx';
 import useAuthStore from '@/store/auth.js';
+import { auth as authApi, APIError } from '@/api/client.js';
+import { useToast } from '@/hooks/useToast.jsx';
 
 const BREADCRUMB_MAP = {
   '/dashboard':     'Dashboard',
@@ -59,11 +61,18 @@ function Avatar({ user, size = 8 }) {
 export default function TopBar({ onMenuClick, collapsed = false, onExpand }) {
   const title      = useBreadcrumb();
   const navigate   = useNavigate();
+  const { toast }  = useToast();
   const user       = useAuthStore((s) => s.session?.user);
   const logout     = useAuthStore((s) => s.logout);
+  const setSession = useAuthStore((s) => s.setSession);
   const plan       = useAuthStore((s) => s.session?.school?.plan ?? s.session?.user?.plan ?? 'core');
+  // C9 (D-004) — only ever non-empty when this org has multiSchoolEnabled
+  // and the user holds 2+ active Memberships in it (never true today).
+  const availableSchools = useAuthStore((s) => s.session?.availableSchools ?? []);
 
   const [open, setOpen] = useState(false);
+  const [showSchools, setShowSchools] = useState(false);
+  const [switchingTo, setSwitchingTo] = useState(null);
   const dropRef = useRef(null);
 
   // Close dropdown on outside click
@@ -78,6 +87,25 @@ export default function TopBar({ onMenuClick, collapsed = false, onExpand }) {
   function handleLogout() {
     logout();
     navigate('/login', { replace: true });
+  }
+
+  // C9 (D-004) — mints a fresh cookie scoped to the target school via the
+  // existing exchange-code mechanism, then hard-reloads so every cached
+  // query/component state tied to the previous school is discarded rather
+  // than needing to audit each one for a schoolId-aware cache key.
+  async function handleSwitchSchool(schoolId) {
+    if (switchingTo) return;
+    setSwitchingTo(schoolId);
+    try {
+      const { code } = await authApi.switchSchool(schoolId);
+      const res = await authApi.exchange(code);
+      if (!res.user) throw new Error('Invalid exchange response');
+      setSession({ user: res.user, school: res.school, availableSchools: res.availableSchools });
+      window.location.assign('/dashboard');
+    } catch (err) {
+      toast.error(err instanceof APIError ? err.message : 'Could not switch schools. Please try again.');
+      setSwitchingTo(null);
+    }
   }
 
   const PLAN_COLORS = {
@@ -156,6 +184,34 @@ export default function TopBar({ onMenuClick, collapsed = false, onExpand }) {
                   <User className="h-4 w-4 text-slate-400" />
                   My Profile
                 </button>
+
+                {availableSchools.length > 0 && (
+                  <>
+                    <button
+                      onClick={() => setShowSchools(v => !v)}
+                      className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+                      aria-expanded={showSchools}
+                    >
+                      <Building2 className="h-4 w-4 text-slate-400" />
+                      Switch School
+                      <ChevronDown className={clsx('ml-auto h-3 w-3 text-slate-400 transition-transform', showSchools && 'rotate-180')} />
+                    </button>
+                    {showSchools && (
+                      <div className="bg-slate-50">
+                        {availableSchools.map((s) => (
+                          <button
+                            key={s.id}
+                            disabled={!!switchingTo}
+                            onClick={() => handleSwitchSchool(s.id)}
+                            className="flex w-full items-center gap-2.5 pl-9 pr-4 py-2 text-sm text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed truncate"
+                          >
+                            {switchingTo === s.id ? 'Switching…' : s.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
 
                 <div className="border-t border-slate-100 my-1" />
 

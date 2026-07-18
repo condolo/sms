@@ -203,34 +203,37 @@ The same Identity can hold different Roles at different Schools within the same 
 
 ## 7. Session Architecture
 
-### Many Context Sessions (Approved Model)
+**Corrected 2026-07-18 (C9 implementation).** The section below previously described a per-tab `sessionStorage` JWT model. That model is architecturally impossible against this codebase's actual security design and was never buildable as written — recorded here rather than silently rewritten, so the correction itself is legible to future readers.
 
-One login produces one Identity verification. Each browser tab that establishes a school context gets its own Session with its own JWT.
+### Why the original model doesn't work
+
+The JWT is delivered exclusively as an **HttpOnly** cookie (`auth.js`'s `_setAuthCookie`) — a deliberate XSS hardening decision that predates this correction. JavaScript cannot read an HttpOnly cookie's value, and therefore cannot copy it into `sessionStorage`; a storage mechanism that requires JS to read a value it is structurally forbidden from reading cannot be implemented, no matter how the client code is written. Separately, cookies are not tab-scoped: a browser has one cookie jar per origin, shared by every tab, so "Tab 1 → JWT A, Tab 2 → JWT B" was never representable via cookie-based auth even in principle — only one cookie value can be attached to the origin at a time.
+
+### Actual model (Many Context Sessions, via server-side re-issuance)
+
+One login produces one Identity verification and one HttpOnly cookie for the browser (not per tab). Switching the active school context re-issues that same cookie, server-side, via a short-lived exchange code — the same mechanism already used for OAuth callbacks (`_issueExchangeCode` / `POST /api/auth/exchange`):
 
 ```
-Login
-  └── Identity verified
-        ├── Tab 1 → Session A → JWT (schoolId: nairobi) → Active context: Nairobi Campus
-        └── Tab 2 → Session B → JWT (schoolId: eldoret) → Active context: Eldoret Campus
+Login → HttpOnly cookie (schoolId: nairobi) → Active context: Nairobi Campus
+  └── User switches to Eldoret Campus
+        → POST /api/auth/switch-school {schoolId: eldoret}   (validates Membership + org match)
+        → server mints a new JWT, returns a one-time exchange code (never the token itself)
+        → client calls the existing POST /api/auth/exchange with that code
+        → server sets a fresh HttpOnly cookie (schoolId: eldoret) → Active context: Eldoret Campus
 ```
-
-### Implementation: sessionStorage for Active Context
-
-- **localStorage** — stores identity-level data: who you are, your Organization, your available Memberships. Persists across tabs and page refresh.
-- **sessionStorage** — stores the active school context JWT for this tab. Isolated per tab. Does not survive tab close.
 
 This means:
-- Opening a new tab: you appear logged in (identity from localStorage) but must select a school context
-- Closing and reopening a tab: identity is preserved; school context must be re-selected
-- An existing single-school user: localStorage holds their JWT as today — no change to current behavior
+- Switching schools changes the browser's *one* active context — it is not simultaneous multi-tab access to two schools. A second tab reflects whichever school the shared cookie currently points to, not an independent context.
+- The client never reads, stores, or decodes the JWT itself at any point — `client/src/store/auth.js`'s `token` getter returns `null` by design; session state (`user`, `school`) comes entirely from response bodies, not from the cookie's contents.
+- An existing single-Membership user sees no change: the switch endpoint and its UI entry point are inert unless the user's organization has `multiSchoolEnabled: true` (§10 Stage 3) and they hold 2+ active Memberships.
 
 ### Revocation
 
-Revoking all sessions via `revokeAllUserSessions()` + tokenVersion bump invalidates all tab JWTs simultaneously. The revocation mechanism works identically for single-school and multi-campus users.
+Revoking all sessions via `revokeAllUserSessions()` + tokenVersion bump invalidates the JWT immediately on its next validated request, regardless of which school context it was scoped to. Unchanged by this correction.
 
 ### Single-School Users (Existing Behavior)
 
-Users with exactly one Membership see no change. Their JWT is stored in localStorage exactly as today. The sessionStorage mechanism is only activated when a user has more than one active Membership.
+Users with exactly one Membership, or whose organization doesn't have `multiSchoolEnabled: true`, see no change whatsoever — same login, same single HttpOnly cookie, same behavior as before C9 existed.
 
 ---
 
@@ -250,7 +253,7 @@ Users with exactly one Membership see no change. Their JWT is stored in localSto
 }
 ```
 
-### Future JWT Payload (multi-campus users only, Phase 4+)
+### Multi-campus JWT Payload (C9, implemented — `orgId`/`membershipId` present only when `organizations.multiSchoolEnabled: true`)
 
 ```json
 {
@@ -266,7 +269,7 @@ Users with exactly one Membership see no change. Their JWT is stored in localSto
 }
 ```
 
-`schoolId` remains present and unchanged. All existing middleware and queries continue to work without modification.
+`schoolId` remains present and unchanged. All existing middleware and queries continue to work without modification. `multiSchoolEnabled` is `false` on every Organization as of this writing — no deployment's tokens carry `orgId`/`membershipId` yet; the code path exists and is tested, but is only reachable once an operator deliberately flips that flag for a specific Organization (§10 Stage 3).
 
 ---
 
@@ -346,11 +349,11 @@ The feature flag is a field on the Organization document — not a separate feat
 
 ---
 
-### Stage 4 — School Switcher (Phase 4)
+### Stage 4 — School Switcher (Implemented, C9)
 
-Add a school/campus switcher visible only to users with more than one active Membership. Single-Membership users see no new UI. Switching school context issues a new JWT for that tab scoped to the selected School.
+Add a school/campus switcher visible only to users with more than one active Membership **in an Organization with `multiSchoolEnabled: true`**. Single-Membership and non-multi-school users see no new UI. Switching school context calls `POST /api/auth/switch-school`, which mints a new JWT server-side and re-issues the browser's one HttpOnly cookie via the existing OAuth exchange-code mechanism (§7) — not a new JWT "for that tab," since tabs share one cookie (§7's correction explains why).
 
-**Rollback:** Disable the switcher behind a flag. Multi-Membership users revert to their primary Membership.
+**Rollback:** Set the Organization's `multiSchoolEnabled: false`. Multi-Membership users revert to their primary Membership, same as before Stage 3.
 
 ---
 
