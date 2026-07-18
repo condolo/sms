@@ -261,12 +261,12 @@ async function renderOverview() {
   try {
     const stats = await api('GET', '/stats');
     // Per-student per-term rates (source of truth: server/config/pricing.js)
-    const STUDENT_RATE = { base: 150, student: 200, family: 250 };
+    const STUDENT_RATE = { base: 250, student: 300, family: 350 };
     // Canonical plan labels — Base (staff only), Student (+student portal), Family (+parent portal)
     const PLAN_META = {
-      base:       { label: 'Base',       desc: 'KSh 150 / student / term', sub: 'Staff portals only' },
-      student:    { label: 'Student',    desc: 'KSh 200 / student / term', sub: '+ Student portal' },
-      family:     { label: 'Family',     desc: 'KSh 250 / student / term', sub: '+ Parent portal' },
+      base:       { label: 'Base',       desc: 'KSh 250 / student / term', sub: 'Staff portals only' },
+      student:    { label: 'Student',    desc: 'KSh 300 / student / term', sub: '+ Student portal' },
+      family:     { label: 'Family',     desc: 'KSh 350 / student / term', sub: '+ Parent portal' },
       enterprise: { label: 'Enterprise', desc: 'Custom rate',              sub: 'API / SSO / white-label' },
     };
 
@@ -938,10 +938,10 @@ async function doImpersonate(schoolId) {
 /* ── Change Plan ────────────────────────────────────────── */
 function changePlan(schoolId, currentPlan, schoolName) {
   const PLAN_LABELS = {
-    base:       'Base — KSh 150/student/term',
-    student:    'Student Portal — KSh 200/student/term',
-    family:     'Family Portal — KSh 250/student/term',
-    enterprise: 'Enterprise — KSh 250/student/term (all portals)',
+    base:       'Base — KSh 250/student/term',
+    student:    'Student Portal — KSh 300/student/term',
+    family:     'Family Portal — KSh 350/student/term',
+    enterprise: 'Enterprise — Custom pricing (contact sales)',
   };
   const opts = ['base','student','family','enterprise']
     .map(p => `<option value="${p}" ${p===currentPlan?'selected':''}>${PLAN_LABELS[p]||p}</option>`)
@@ -1102,10 +1102,10 @@ async function renderProvision() {
           <div class="pa-field">
             <label>Plan</label>
             <select id="p-plan">
-              <option value="base">Base — KSh 150/student/term</option>
-              <option value="student" selected>Student Portal — KSh 200/student/term</option>
-              <option value="family">Family Portal — KSh 250/student/term</option>
-              <option value="enterprise">Enterprise — KSh 250/student/term (all portals)</option>
+              <option value="base">Base — KSh 250/student/term</option>
+              <option value="student" selected>Student Portal — KSh 300/student/term</option>
+              <option value="family">Family Portal — KSh 350/student/term</option>
+              <option value="enterprise">Enterprise — Custom pricing (contact sales)</option>
             </select>
           </div>
           <div class="pa-field">
@@ -1165,9 +1165,9 @@ function _updateSlugHint() {
   if (!orgSlug) { hint.style.display = 'none'; return; }
 
   const typed = (slugEl.value || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
-  const prefix = orgSlug + '-';
-  const finalSlug = typed.startsWith(prefix) ? typed : prefix + typed;
-  hint.textContent = `Will be created as: ${finalSlug || prefix + '…'}`;
+  const suffix = '-' + orgSlug;
+  const finalSlug = typed.endsWith(suffix) ? typed : typed + suffix;
+  hint.textContent = `Will be created as: ${typed ? finalSlug : '…' + suffix}`;
   hint.style.display = 'block';
 }
 

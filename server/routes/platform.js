@@ -317,14 +317,18 @@ function _sanitiseSlug(raw) {
     .substring(0, 40);
 }
 
-/* Namespaces a school's slug under its organization's slug, e.g.
-   orgSlug 'green-valley' + rawSlug 'eldoret' -> 'green-valley-eldoret'.
-   Idempotent — a slug already carrying the prefix isn't double-prefixed. */
+/* Namespaces a school's slug under its organization's slug, school first:
+   rawSlug 'eldoret' + orgSlug 'green-valley' -> 'eldoret-green-valley'.
+   Idempotent — a slug already carrying the suffix isn't double-suffixed. */
 function _deriveSlugForOrg(orgSlug, rawSlug) {
   const clean = _sanitiseSlug(rawSlug);
   if (!orgSlug) return clean;
-  const prefix = `${orgSlug}-`;
-  return (clean.startsWith(prefix) ? clean : `${prefix}${clean}`).substring(0, 60);
+  const suffix = `-${orgSlug}`;
+  if (clean.endsWith(suffix)) return clean.substring(0, 60);
+  // Truncate the school-specific part, not the org suffix — the suffix
+  // must always survive intact so the slug reliably ends with -orgSlug.
+  const maxCleanLen = Math.max(1, 60 - suffix.length);
+  return `${clean.substring(0, maxCleanLen)}${suffix}`;
 }
 
 /* POST /api/platform/organizations — create an organization explicitly.

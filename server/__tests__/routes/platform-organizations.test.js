@@ -187,19 +187,19 @@ describe('POST /api/platform/organizations', () => {
   });
 });
 
-describe('_deriveSlugForOrg (school slug namespacing under an organization)', () => {
+describe('_deriveSlugForOrg (school slug namespacing under an organization, school first)', () => {
   const { _deriveSlugForOrg } = require('../../routes/platform');
 
-  test('prefixes a plain campus slug with the organization slug', () => {
-    expect(_deriveSlugForOrg('green-valley', 'eldoret')).toBe('green-valley-eldoret');
+  test('suffixes a plain campus slug with the organization slug', () => {
+    expect(_deriveSlugForOrg('green-valley', 'eldoret')).toBe('eldoret-green-valley');
   });
 
-  test('does not double-prefix a slug the admin already typed with the org prefix', () => {
-    expect(_deriveSlugForOrg('green-valley', 'green-valley-eldoret')).toBe('green-valley-eldoret');
+  test('does not double-suffix a slug the admin already typed with the org suffix', () => {
+    expect(_deriveSlugForOrg('green-valley', 'eldoret-green-valley')).toBe('eldoret-green-valley');
   });
 
-  test('sanitises the raw slug before prefixing (spaces, punctuation, case)', () => {
-    expect(_deriveSlugForOrg('green-valley', 'Eldoret Campus!!')).toBe('green-valley-eldoret-campus');
+  test('sanitises the raw slug before suffixing (spaces, punctuation, case)', () => {
+    expect(_deriveSlugForOrg('green-valley', 'Eldoret Campus!!')).toBe('eldoret-campus-green-valley');
   });
 
   test('returns just the sanitised slug when the organization has no slug', () => {
@@ -207,10 +207,10 @@ describe('_deriveSlugForOrg (school slug namespacing under an organization)', ()
     expect(_deriveSlugForOrg('', 'Eldoret')).toBe('eldoret');
   });
 
-  test('caps the result at 60 characters', () => {
+  test('caps the result at 60 characters, truncating the school part and preserving the org suffix intact', () => {
     const long = 'a'.repeat(80);
     const result = _deriveSlugForOrg('org', long);
     expect(result.length).toBeLessThanOrEqual(60);
-    expect(result.startsWith('org-')).toBe(true);
+    expect(result.endsWith('-org')).toBe(true);
   });
 });
