@@ -6,6 +6,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.75.0] — 2026-07-18 — feat(auth): Identity separation Phase 1 — Dual-write (C8/MR-001)
+
+### Added
+
+- **Two-tier token revocation** (`server/utils/token-version.js`): new `getIdentityTokenVersion(identityId)`/`revokeIdentityTokens(identityId)`, an exact mirror of the existing `users.tokenVersion` pair but scoped to the shared `identities` credential — revoking it invalidates every token across every school sharing that credential. The existing `users.tokenVersion` pair is untouched (still correctly school-scoped for role-change/deactivation).
+- **`authMiddleware` gained an additive `itv` check** (`server/middleware/auth.js`) — same "missing claim passes through" convention as the existing `tv` check, so every pre-migration token keeps working unmodified.
+- **`_buildTokenPayload` gains `identityId`/`itv`** (`server/routes/auth.js`) — became `async` (one cached DB read), all 5 call sites (login, verify-otp, force-change, Google/Microsoft OAuth) updated to `await` it. Additive only — tokens for users without an `identityId` are unaffected.
+- **All 4 password-write paths now dual-write and revoke**, closing a real pre-existing gap where **none of them ever revoked a session**, not even at the same school:
+  - `POST /api/auth/change-password`, `POST /api/auth/force-change`, `PUT /api/settings` (self-service), `POST /api/settings/users/:id/reset-password` (admin reset) — each now writes the identical bcrypt hash (hashed once, never re-hashed — bcrypt is salted per call) to `identities.passwordHash` when the user has one, then calls `revokeUserTokens` (always) and `revokeIdentityTokens` (when `identityId` is set). Admin reset correctly revokes the **target**, not the admin performing the reset.
+  - `/force-change` issues a fresh session token in the same request as the revocation — a staleness bug had to be designed around explicitly: the newly-issued token's `tv` is patched to the post-revocation value locally (since the `user` object was fetched before revocation), while `itv` needs no such patch (it's resolved via a fresh, cache-invalidated DB read inside `_buildTokenPayload`).
+- 34 new jest tests across 4 files — the first coverage any of these 4 routes, `authMiddleware`'s `tv` check, or `token-version.js` itself has ever had: `token-version.test.js` (11), `middleware/auth-token-version.test.js` (10), `routes/auth-password-paths.test.js` (5), `routes/settings-password-paths.test.js` (5), plus 3 more folded into existing suites.
+
+### Not done (deliberately — this is Phase 1 of 4)
+
+`auth.js`'s credential **check** at login is unchanged — it still reads `users.password` exclusively. Only the **write** path dual-writes now. `rbac.js`/`scopeMiddleware.js` remain untouched. Phase 2 (Verify — extending `qa-health.js`'s gate pattern) and Phase 3 (Cutover) have not started.
+
+### Governance
+
+Two real bugs were caught and fixed by the new tests during development, not found by manual review: (1) a mock-fidelity issue where `.lean()` returned a live mutable reference instead of a snapshot, which was masking the intended `/force-change` `tv`-staleness fix — fixing the mock to snapshot-copy, as real Mongoose does, proved the actual fix works correctly; (2) an identity-cache test that mutated mock data directly instead of going through `revokeIdentityTokens()`, which bypassed the real cache-invalidation path and would have given a false pass. ADR-0003's Status/Implementation lines and the dependency graph's C8 row updated to reflect Phases 0-1 shipped.
+
+Verification: full jest suite, 30 test suites, 337/337 passed.
+
+---
+
 ## [v4.74.0] — 2026-07-18 — feat(auth): Identity separation Phase 0 — Shadow (C8/MR-001)
 
 ### Added

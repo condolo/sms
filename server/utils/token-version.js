@@ -1,11 +1,21 @@
 /* ============================================================
    Token Version Cache — lightweight JWT revocation via
-   per-user version counter.
+   per-user AND per-identity version counters.
 
-   Every issued JWT carries a `tv` (token version) integer.
-   Calling revokeUserTokens(userId) increments the user's stored
-   version in the DB, making all previously issued tokens for that
-   user return 401 on their next request.
+   Every issued JWT carries a `tv` (token version) integer, scoped to
+   one school's `users` doc. Calling revokeUserTokens(userId) increments
+   that user's stored version in the DB, making all previously issued
+   tokens for that (school-scoped) account return 401 on their next
+   request.
+
+   Tokens for a user with a shared credential (ADR-0003, C8/MR-001
+   Phase 1) additionally carry `itv` (identity token version), scoped
+   to their `identities` doc. Calling revokeIdentityTokens(identityId)
+   invalidates every token across every school sharing that credential
+   — the correct behavior for a password/MFA change, since the
+   credential itself changed. revokeUserTokens stays exactly as it was
+   — role-change/deactivation revocation is intentionally still
+   school-scoped, not identity-scoped (Decision 4).
 
    The in-process cache (5-minute TTL) avoids a DB hit on every
    authenticated request.  Cache invalidation on revocation ensures
@@ -16,7 +26,9 @@
 const { _model } = require('./model');
 
 // Map<userId, { version: number, fetchedAt: number }>
-const _cache    = new Map();
+const _cache = new Map();
+// Map<identityId, { version: number, fetchedAt: number }>
+const _identityCache = new Map();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 /**
@@ -45,4 +57,29 @@ async function revokeUserTokens(userId) {
   _cache.delete(userId);
 }
 
-module.exports = { getTokenVersion, revokeUserTokens };
+/**
+ * Return the current tokenVersion for an Identity (shared credential).
+ * Falls back to 0 if the field is not yet set.
+ */
+async function getIdentityTokenVersion(identityId) {
+  const hit = _identityCache.get(identityId);
+  if (hit && (Date.now() - hit.fetchedAt) < CACHE_TTL) {
+    return hit.version;
+  }
+
+  const doc     = await _model('identities').findOne({ id: identityId }, { tokenVersion: 1 }).lean();
+  const version = doc?.tokenVersion ?? 0;
+  _identityCache.set(identityId, { version, fetchedAt: Date.now() });
+  return version;
+}
+
+/**
+ * Invalidate every outstanding token for an Identity, across every
+ * school sharing its credential. Call this after a password/MFA change.
+ */
+async function revokeIdentityTokens(identityId) {
+  await _model('identities').updateOne({ id: identityId }, { $inc: { tokenVersion: 1 } });
+  _identityCache.delete(identityId);
+}
+
+module.exports = { getTokenVersion, revokeUserTokens, getIdentityTokenVersion, revokeIdentityTokens };

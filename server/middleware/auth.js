@@ -1,7 +1,7 @@
 const crypto               = require('crypto');
 const jwt                  = require('jsonwebtoken');
 const { verify }           = require('../utils/jwt');
-const { getTokenVersion }  = require('../utils/token-version');
+const { getTokenVersion, getIdentityTokenVersion } = require('../utils/token-version');
 const { _model }           = require('../utils/model');
 
 /* Standard error envelope — matches { success, error: { code, message } } used everywhere */
@@ -51,7 +51,19 @@ async function authMiddleware(req, res, next) {
       }
     }
 
-    req.jwtUser = payload;   // { userId, schoolId, role, roles, email, tv, guardianOf? … }
+    // Identity token version check (C8/MR-001 Phase 1, ADR-0003 Decision 4) —
+    // additive, same "missing claim passes through" convention as `tv` above.
+    // Only tokens for users with a shared credential (users.identityId set)
+    // carry `itv`; a password/MFA change bumps identities.tokenVersion,
+    // invalidating every token across every school sharing that credential.
+    if (typeof payload.itv === 'number' && payload.identityId) {
+      const currentIdentityVersion = await getIdentityTokenVersion(payload.identityId);
+      if (payload.itv < currentIdentityVersion) {
+        return _unauth(res, 'UNAUTHENTICATED', 'Session has been revoked. Please sign in again.');
+      }
+    }
+
+    req.jwtUser = payload;   // { userId, schoolId, role, roles, email, tv, identityId?, itv?, guardianOf? … }
 
     // Record activity for session idle tracking — rate-limited to one DB write per 5 min.
     if (payload.sessionId) _touchActivity(payload.sessionId, payload.userId);

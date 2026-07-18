@@ -18,7 +18,7 @@ const nodemailer = require('nodemailer');
 const { authMiddleware }    = require('../middleware/auth');
 const { _model }            = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
-const { revokeUserTokens }  = require('../utils/token-version');
+const { revokeUserTokens, revokeIdentityTokens } = require('../utils/token-version');
 const emailUtil             = require('../utils/email');
 const { encrypt, smtpEncryptReady } = require('../utils/smtpEncrypt');
 const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY } = require('../utils/notif-settings');
@@ -149,6 +149,27 @@ router.put('/', authMiddleware, async (req, res) => {
         $set:   { password: hash, passwordChangedAt: now, updatedAt: now },
         $unset: { passwordHash: '' },
       });
+
+      // C8/MR-001 Phase 1 (ADR-0003 Decision 3/4) — dual-write the identical
+      // hash (never re-hash) to the shared credential when this user has
+      // one, note: `identities.passwordHash` is a same-named but distinct
+      // field on a different collection from the legacy `users.passwordHash`
+      // just $unset above. Always revoke this school's tokens (closes a
+      // pre-existing gap); also revoke the shared identity's tokens across
+      // every school when identityId is set.
+      try {
+        if (user.identityId) {
+          await _model('identities').updateOne(
+            { id: user.identityId },
+            { $set: { passwordHash: hash, updatedAt: now } }
+          );
+        }
+        await revokeUserTokens(req.jwtUser.userId);
+        if (user.identityId) await revokeIdentityTokens(user.identityId);
+      } catch (revokeErr) {
+        console.error('[settings] PUT / dual-write/revocation failed (non-fatal):', revokeErr.message);
+      }
+
       return res.json({ success: true, message: 'Password updated.' });
     }
 
@@ -802,6 +823,26 @@ router.post('/users/:id/reset-password', authMiddleware, rbac('settings', 'updat
         $unset: { mustChangePwd: 1, mustChangePassword: 1 },
       }
     );
+
+    // C8/MR-001 Phase 1 (ADR-0003 Decision 3/4) — dual-write to the TARGET
+    // user's shared credential when they have one, then revoke the
+    // TARGET's sessions (not the admin performing the reset). Always
+    // revoke this school's tokens (closes a pre-existing gap); also
+    // revoke the shared identity's tokens across every school when
+    // identityId is set.
+    const _resetTargetId = target.id || target._id.toString();
+    try {
+      if (target.identityId) {
+        await _model('identities').updateOne(
+          { id: target.identityId },
+          { $set: { passwordHash: hash, updatedAt: now } }
+        );
+      }
+      await revokeUserTokens(_resetTargetId);
+      if (target.identityId) await revokeIdentityTokens(target.identityId);
+    } catch (revokeErr) {
+      console.error('[settings] reset-password dual-write/revocation failed (non-fatal):', revokeErr.message);
+    }
 
     /* Attempt email — non-fatal */
     const school = await School.findOne({ id: schoolId }).lean();

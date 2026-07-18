@@ -10,7 +10,7 @@ const { authMiddleware }   = require('../middleware/auth');
 const rateLimit  = require('express-rate-limit');
 const email      = require('../utils/email');
 const SessionService       = require('../services/sessionService');
-const { revokeUserTokens } = require('../utils/token-version');
+const { revokeUserTokens, revokeIdentityTokens, getIdentityTokenVersion } = require('../utils/token-version');
 const AuditService         = require('../services/audit');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
 
@@ -88,7 +88,7 @@ const MFA_ROLES = new Set(['superadmin', 'admin', 'deputy', 'principal', 'financ
  * @param {string} schoolId
  * @returns {Object}      — payload passed to sign()
  */
-function _buildTokenPayload(user, schoolId) {
+async function _buildTokenPayload(user, schoolId) {
   const role  = user.primaryRole || user.role;
   const payload = {
     userId:   user.id || user._id.toString(),
@@ -107,6 +107,15 @@ function _buildTokenPayload(user, schoolId) {
   // Include studentId for student role so portal endpoints can scope data
   if (role === 'student') {
     payload.studentId = user.studentId || null;
+  }
+
+  // C8/MR-001 Phase 1 (ADR-0003 Decision 4) — additive. Only users with a
+  // shared credential (users.identityId set, C8/MR-001 Phase 0) carry these;
+  // a password/MFA change bumps identities.tokenVersion, invalidating every
+  // token across every school sharing that credential.
+  if (user.identityId) {
+    payload.identityId = user.identityId;
+    payload.itv = await getIdentityTokenVersion(user.identityId);
   }
 
   return payload;
@@ -308,7 +317,7 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
       req.headers['user-agent'] || '',
     );
 
-    const token = sign({ ..._buildTokenPayload(user, req.school.id), sessionId, absoluteExpiry });
+    const token = sign({ ...(await _buildTokenPayload(user, req.school.id)), sessionId, absoluteExpiry });
 
     // Check trial expiry and send reminder if needed
     _checkTrialAndNotify(req.school).catch(() => {});
@@ -381,7 +390,7 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
       req.headers['user-agent'] || '',
     );
 
-    const token = sign({ ..._buildTokenPayload(user, user.schoolId), sessionId: otpSessionId, absoluteExpiry: otpAbsExpiry });
+    const token = sign({ ...(await _buildTokenPayload(user, user.schoolId)), sessionId: otpSessionId, absoluteExpiry: otpAbsExpiry });
 
     // Attach merged role permissions so sidebar filters correctly (same as regular login)
     const safeUser = { ...user, password: undefined, mfaOtp: undefined, mfaExpiry: undefined };
@@ -523,10 +532,34 @@ router.post('/force-change', forceChangeLimiter, tenantMiddleware, async (req, r
       lastLogin:          now,
     });
 
+    const _fcUserId = user.id || user._id.toString();
+
+    // C8/MR-001 Phase 1 (ADR-0003 Decision 3/4) — dual-write the identical
+    // hash to the shared credential when this user has one, then revoke
+    // sessions on every OTHER device. Ordering matters: revoke BEFORE
+    // building the new token payload below, and patch the local `user`
+    // object's tokenVersion to match — otherwise the token this route is
+    // about to issue would carry the stale pre-revocation `tv` and reject
+    // itself on its very next request. (itv needs no such patch —
+    // _buildTokenPayload resolves it via a fresh, cache-invalidated
+    // getIdentityTokenVersion() call, not from the `user` object.)
+    try {
+      if (user.identityId) {
+        await _model('identities').updateOne(
+          { id: user.identityId },
+          { $set: { passwordHash: hashed, updatedAt: now } }
+        );
+      }
+      await revokeUserTokens(_fcUserId);
+      user.tokenVersion = (user.tokenVersion || 0) + 1;
+      if (user.identityId) await revokeIdentityTokens(user.identityId);
+    } catch (revokeErr) {
+      console.error('[auth/force-change] dual-write/revocation failed (non-fatal):', revokeErr.message);
+    }
+
     const School = _model('schools');
     const school = await School.findOne({ id: user.schoolId }).lean();
 
-    const _fcUserId   = user.id || user._id.toString();
     const _fcUserRole = user.primaryRole || user.role;
 
     const { sessionId: fcSessionId, absoluteExpiry: fcAbsExpiry } = await SessionService.createSession(
@@ -536,7 +569,7 @@ router.post('/force-change', forceChangeLimiter, tenantMiddleware, async (req, r
     );
 
     // Issue JWT
-    const token = sign({ ..._buildTokenPayload(user, user.schoolId), sessionId: fcSessionId, absoluteExpiry: fcAbsExpiry });
+    const token = sign({ ...(await _buildTokenPayload(user, user.schoolId)), sessionId: fcSessionId, absoluteExpiry: fcAbsExpiry });
 
     // Send security confirmation email (non-blocking)
     email.sendPasswordChanged({
@@ -805,7 +838,7 @@ router.get('/google/callback', async (req, res) => {
       return res.redirect(`${publicUrl}/login?error=account_inactive`);
     }
 
-    const token = sign(_buildTokenPayload(user, school.id));
+    const token = sign(await _buildTokenPayload(user, school.id));
     // Issue a short-lived exchange code — JWT never appears in the URL or logs
     const code = _issueExchangeCode(token);
     res.redirect(`${publicUrl}/login?code=${code}&school=${encodeURIComponent(school.slug)}&provider=google`);
@@ -918,7 +951,7 @@ router.get('/microsoft/callback', async (req, res) => {
 
     if (!user.isActive) return res.redirect(`${publicUrl}/login?error=account_inactive`);
 
-    const token = sign(_buildTokenPayload(user, school.id));
+    const token = sign(await _buildTokenPayload(user, school.id));
     const code  = _issueExchangeCode(token);
     res.redirect(`${publicUrl}/login?code=${code}&school=${encodeURIComponent(school.slug)}&provider=microsoft`);
   } catch (err) {
@@ -965,6 +998,25 @@ router.post('/change-password', authMiddleware, async (req, res) => {
       passwordChangedAt: new Date().toISOString(),
       mustChangePassword: false
     });
+
+    // C8/MR-001 Phase 1 (ADR-0003 Decision 3/4) — dual-write the identical
+    // hash (never re-hash — bcrypt is salted per call) to the shared
+    // credential when this user has one, then revoke sessions. Always
+    // revoke this school's tokens (closes a pre-existing gap: password
+    // change never revoked anything before this); also revoke the shared
+    // identity's tokens across every school when identityId is set.
+    try {
+      if (user.identityId) {
+        await _model('identities').updateOne(
+          { id: user.identityId },
+          { $set: { passwordHash: hashed, updatedAt: new Date().toISOString() } }
+        );
+      }
+      await revokeUserTokens(req.jwtUser.userId);
+      if (user.identityId) await revokeIdentityTokens(user.identityId);
+    } catch (revokeErr) {
+      console.error('[auth/change-password] dual-write/revocation failed (non-fatal):', revokeErr.message);
+    }
 
     // Send security confirmation email (non-blocking)
     const School = _model('schools');
