@@ -178,7 +178,7 @@ function SchoolFinderPage() {
   const navigate = useNavigate();
 
   const [query,       setQuery]       = useState('');
-  const [suggestions, setSuggestions] = useState([]);   // [{slug,name,shortName,logoUrl,primaryColor}]
+  const [suggestions, setSuggestions] = useState([]);   // [{slug,name,shortName,logoUrl,primaryColor,organizationName}]
   const [searching,   setSearching]   = useState(false);
   const [showDrop,    setShowDrop]    = useState(false);
   const [notFound,    setNotFound]    = useState(false);
@@ -334,7 +334,12 @@ function SchoolFinderPage() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-slate-800 truncate">{s.name}</p>
-                        <p className="text-[11px] text-slate-400">{s.slug}.msingi.io</p>
+                        <p className="text-[11px] text-slate-400 truncate">
+                          {s.slug}.msingi.io
+                          {/* Auto-created 1:1 orgs share the school's own name — only show it
+                              when it actually adds information (a real multi-school org). */}
+                          {s.organizationName && s.organizationName !== s.name && <> · {s.organizationName}</>}
+                        </p>
                       </div>
                     </button>
                   ))

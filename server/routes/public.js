@@ -65,9 +65,12 @@ router.get('/school-info', async (req, res) => {
 
 /* GET /api/public/schools/search
    Query: ?q=greenwood
-   Returns up to 10 schools whose name or slug starts with / contains the
-   query string. Used by the school-finder autocomplete on the login page.
-   Only active schools are returned; only public-safe fields exposed.
+   Returns up to 10 schools whose name, slug, OR organization's name/slug
+   contains the query string — so searching "Green Valley Schools" (an
+   organization with multiple campuses) surfaces every campus under it,
+   not just a school whose own name happens to match. Used by the
+   school-finder autocomplete on the login page. Only active schools are
+   returned; only public-safe fields exposed.
 */
 router.get('/schools/search', async (req, res) => {
   try {
@@ -75,24 +78,48 @@ router.get('/schools/search', async (req, res) => {
     if (!q || q.length < 2) return res.json({ schools: [] });
 
     const School  = _model('schools');
+    const Org     = _model('organizations');
     const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex   = new RegExp(escaped, 'i');
 
+    // Organizations matching the query — their schools should surface too,
+    // even if an individual school's own name/slug doesn't match at all.
+    const matchingOrgs = await Org.find({ $or: [{ name: regex }, { slug: regex }] })
+      .select('id name')
+      .limit(20)
+      .lean();
+    const matchingOrgIds = matchingOrgs.map(o => o.id);
+
     const schools = await School.find({
       isActive: { $ne: false },
-      $or: [{ name: regex }, { shortName: regex }, { slug: regex }],
+      $or: [
+        { name: regex }, { shortName: regex }, { slug: regex },
+        ...(matchingOrgIds.length ? [{ organizationId: { $in: matchingOrgIds } }] : []),
+      ],
     })
-      .select('slug name shortName logoUrl primaryColor accentColor')
+      .select('slug name shortName logoUrl primaryColor accentColor organizationId')
       .limit(10)
       .lean();
 
+    // Look up organization names for every result (not just the ones that
+    // matched by org) so the dropdown can always show which group a school
+    // belongs to when it shares an organization with other schools.
+    const orgIds = [...new Set(schools.map(s => s.organizationId).filter(Boolean))];
+    const orgMap = Object.fromEntries(matchingOrgs.filter(o => orgIds.includes(o.id)).map(o => [o.id, o.name]));
+    const missingOrgIds = orgIds.filter(id => !(id in orgMap));
+    if (missingOrgIds.length) {
+      const extraOrgs = await Org.find({ id: { $in: missingOrgIds } }).select('id name').lean();
+      extraOrgs.forEach(o => { orgMap[o.id] = o.name; });
+    }
+
     res.json({
       schools: schools.map(s => ({
-        slug:         s.slug,
-        name:         s.name      || 'School Portal',
-        shortName:    s.shortName || s.name || 'School',
-        logoUrl:      s.logoUrl   || null,
-        primaryColor: s.primaryColor || '#4f46e5',
+        slug:             s.slug,
+        name:             s.name      || 'School Portal',
+        shortName:        s.shortName || s.name || 'School',
+        logoUrl:          s.logoUrl   || null,
+        primaryColor:     s.primaryColor || '#4f46e5',
+        organizationName: s.organizationId ? (orgMap[s.organizationId] || null) : null,
       })),
     });
   } catch (err) {
