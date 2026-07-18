@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.74.0] — 2026-07-18 — feat(auth): Identity separation Phase 0 — Shadow (C8/MR-001)
+
+### Added
+
+- **`identities` collection** — new, additive, `{orgId,email}`-scoped credential registry per ADR-0003 (Accepted 2026-07-18). Owns `passwordHash`, `mfaEnabled`, `tokenVersion`, `status` (`active`/`collision_pending`/`merged`/`archived`). `users` is **structurally unchanged** — same collection, same `{schoolId,email}` index, only a new `identityId` FK added.
+- **`server/utils/provision-identities.js`** — `provisionIdentityForUser()`/`provisionIdentities()`, mirroring `provision-memberships.js`'s idempotent, self-healing pattern. Implements the never-auto-merge collision policy: two users sharing an email within the same organization only merge into one Identity when an existing Membership grant (the shipped Link Identity flow) already vouches they're the same person; otherwise both are flagged `collision_pending` and keep authenticating exactly as today, permanently, until a human resolves it. Chained into boot after `provisionMemberships()`.
+- **13 AST-verified `users`-creation sites got a one-line provisioning hook** (11 production: `onboard.js` superadmin registration, `auth.js` Google/Microsoft OAuth auto-provision, `settings.js` invite + bulk-invite, `students.js` portal-account + bulk-portal-accounts + parent-account, `users.js` invite + bulk-invite, `import-export.js` teacher CSV `insertMany`; 2 demo seed scripts deliberately left to the batch backfill's self-heal instead). The original governance-doc "10-file blast radius" list was re-verified via a dedicated AST/semantic pass first (a hard prerequisite ADR-0003 itself named) — 4 of those 10 files turned out to be false positives (query/update `users` by `schoolId`, never create), and 3 real creation sites (`students.js`, `users.js`, `import-export.js` were on the list but under-counted) plus 2 demo scripts weren't on it at all.
+- 12 new jest tests: `provision-identities.test.js` — fresh-identity creation, no-collision path, self-heal of missing `organizationId`, the merge-when-vouched-for path, the never-auto-merge collision_pending path, org-scoping (different orgs never collide), idempotency, malformed docs, batch backfill.
+
+### Not done (deliberately — this is Phase 0 of 4)
+
+**Nothing reads the `identities` collection anywhere.** `auth.js` still authenticates against `users.password` exclusively; `rbac.js` and `scopeMiddleware.js` are completely unchanged (confirmed, not assumed). Phases 1-3 (Dual-write — touches `/change-password`; Verify — extends `qa-health.js`'s gate pattern; Cutover — `auth.js`'s credential check) have not started. Per ADR-0003's own adoption gate, each remaining phase is independently verified before the next begins.
+
+### Governance
+
+D-003 (Identity ownership) ratified via ADR-0003 — ADR-0003 was drafted, presented for review, and explicitly approved before any code was written (the ADR's own adoption gate: "no implementation may begin until this ADR is explicitly approved, separately from any plan-mode approval that produced the document"). `docs/adr/ADR-0003-identity-separation-index-migration.md`'s Status/Implementation lines and the dependency graph's C8 row updated to reflect Phase 0 shipped.
+
+Verification: full jest suite, 26 test suites, 306/306 passed.
+
+---
+
 ## [v4.73.0] — 2026-07-18 — feat(platform): Capability/Entitlement registry (C3)
 
 ### Added

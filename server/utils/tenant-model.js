@@ -26,8 +26,13 @@ const { _model } = require('./model');
 
 /* Platform/org-level collections that legitimately carry no schoolId.
    These must be accessed via _model() directly — never tenantModel().
-   `users` is deliberately NOT here: it stays tenant-scoped until D-001
-   decides identity scope (ADR-0001 §3). */
+   `users` is deliberately NOT here, and per ADR-0003 (C8/MR-001) never
+   will be: D-001 is ratified, but that migration's design keeps `users`
+   permanently tenant-scoped and structurally unchanged. It's the NEW
+   `identities` collection that owns credentials and is org-scoped
+   instead — accessed via _model() directly, same as `memberships` and
+   `entitlements`, none of which need listing here since nothing ever
+   attempts to tenantModel() them. */
 const PLATFORM_COLLECTIONS = new Set([
   'schools',
   'organizations',

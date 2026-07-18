@@ -17,6 +17,7 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { revokeUserTokens } = require('../utils/token-version');
 const email                = require('../utils/email');
 const AuditService         = require('../services/audit');
+const { provisionIdentityForUser } = require('../utils/provision-identities');
 
 const router = express.Router();
 
@@ -117,6 +118,13 @@ router.post('/invite', authMiddleware, inviteLimiter, rbac('settings', 'users'),
       ...extra
     });
 
+    // C8/MR-001 Phase 0 (ADR-0003, Shadow) — non-blocking, self-healing.
+    try {
+      await provisionIdentityForUser(user);
+    } catch (err) {
+      console.error('[users/invite] identity provisioning failed (will self-heal at next restart):', err.message);
+    }
+
     const userObj = user.toObject();
     delete userObj.password;
     delete userObj.mfaOtp;
@@ -191,6 +199,13 @@ router.post('/bulk-invite', authMiddleware, inviteLimiter, rbac('settings', 'use
         createdAt: now,
         createdBy: req.jwtUser.userId
       });
+
+      // C8/MR-001 Phase 0 (ADR-0003, Shadow) — non-blocking, self-healing.
+      try {
+        await provisionIdentityForUser(user);
+      } catch (err) {
+        console.error('[users/bulk-invite] identity provisioning failed (will self-heal at next restart):', err.message);
+      }
 
       results.created.push({ name, email: userEmail, role: safeRole, id: user.id });
 

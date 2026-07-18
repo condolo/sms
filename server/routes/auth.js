@@ -12,6 +12,7 @@ const email      = require('../utils/email');
 const SessionService       = require('../services/sessionService');
 const { revokeUserTokens } = require('../utils/token-version');
 const AuditService         = require('../services/audit');
+const { provisionIdentityForUser } = require('../utils/provision-identities');
 
 const router = express.Router();
 
@@ -782,8 +783,15 @@ router.get('/google/callback', async (req, res) => {
         createdAt:     now,
         updatedAt:     now,
       };
-      await User.create(newUser);
+      const createdUser = await User.create(newUser);
       user = newUser;
+      // C8/MR-001 Phase 0 (ADR-0003, Shadow) — non-blocking, self-healing,
+      // same convention as onboard.js's immediate org provisioning.
+      try {
+        await provisionIdentityForUser(createdUser);
+      } catch (err) {
+        console.error('[auth/google] identity provisioning failed (will self-heal at next restart):', err.message);
+      }
     } else {
       // Update Google ID if first time using OAuth
       if (!user.googleId) {
@@ -895,8 +903,15 @@ router.get('/microsoft/callback', async (req, res) => {
         createdAt:    now,
         updatedAt:    now,
       };
-      await User.create(newUser);
+      const createdUser = await User.create(newUser);
       user = newUser;
+      // C8/MR-001 Phase 0 (ADR-0003, Shadow) — non-blocking, self-healing,
+      // same convention as onboard.js's immediate org provisioning.
+      try {
+        await provisionIdentityForUser(createdUser);
+      } catch (err) {
+        console.error('[auth/microsoft] identity provisioning failed (will self-heal at next restart):', err.message);
+      }
     } else {
       await User.updateOne({ id: user.id }, { $set: { microsoftId: msId, lastLogin: new Date().toISOString() } });
     }

@@ -20,6 +20,7 @@ const { nextAdmissionNumber, reserveAdmissionNumbers } = require('../utils/count
 const { ok, created, fail, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
 const AuditService            = require('../services/audit');
+const { provisionIdentityForUser } = require('../utils/provision-identities');
 
 const router = express.Router();
 const PLAN   = planGate('students');
@@ -566,7 +567,15 @@ router.post('/bulk-portal-accounts', authMiddleware, PLAN, rbac('students', 'upd
           };
           // Omit email when absent — email: null collides on the unique (schoolId, email) index
           if (student.schoolEmail) bulkDoc.email = student.schoolEmail.toLowerCase();
-          await Users.create(bulkDoc);
+          const createdUser = await Users.create(bulkDoc);
+          // C8/MR-001 Phase 0 (ADR-0003, Shadow) — non-blocking, self-healing.
+          // No-op for the common case (no schoolEmail — student accounts log
+          // in by username, Identity is meaningless without an email).
+          try {
+            await provisionIdentityForUser(createdUser);
+          } catch (err) {
+            console.error('[students] bulk-portal-accounts identity provisioning failed (will self-heal at next restart):', err.message);
+          }
         }
         await Students.updateOne({ _id: student._id }, { $set: { hasPortalAccount: true, updatedAt: now } });
         credentials.push({ name, admissionNumber: student.admissionNumber, username, tempPassword, action: existing ? 'reset' : 'created' });
@@ -702,7 +711,13 @@ router.post('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'updat
       };
       if (student.schoolEmail) userDoc.email = student.schoolEmail.toLowerCase();
       try {
-        await Users.create(userDoc);
+        const createdUser = await Users.create(userDoc);
+        // C8/MR-001 Phase 0 (ADR-0003, Shadow) — non-blocking, self-healing.
+        try {
+          await provisionIdentityForUser(createdUser);
+        } catch (err) {
+          console.error('[students] portal-account identity provisioning failed (will self-heal at next restart):', err.message);
+        }
       } catch (createErr) {
         if (createErr.code === 11000) {
           if (createErr.keyPattern?.email && userDoc.email) {
@@ -710,6 +725,9 @@ router.post('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'updat
             // (username login still works).
             const { email, ...noEmailDoc } = userDoc;
             await Users.create({ ...noEmailDoc, id: uuidv4() });
+            // No identity hook here — the retry path exists precisely
+            // because this account has no usable email (collided), so
+            // provisionIdentityForUser would be a permanent no-op anyway.
           } else if (createErr.keyPattern?.username) {
             // Username conflict — another account exists with this username.
             // Find it and reset instead of failing.
@@ -819,7 +837,7 @@ router.post('/:id/parent-account', authMiddleware, PLAN, rbac('students', 'updat
         $set: { password: hash, isActive: true, updatedAt: now },
       });
     } else {
-      await Users.create({
+      const createdUser = await Users.create({
         id:         uuidv4(),
         schoolId,
         role:       'parent',
@@ -834,6 +852,12 @@ router.post('/:id/parent-account', authMiddleware, PLAN, rbac('students', 'updat
         updatedAt:  now,
         createdBy:  userId,
       });
+      // C8/MR-001 Phase 0 (ADR-0003, Shadow) — non-blocking, self-healing.
+      try {
+        await provisionIdentityForUser(createdUser);
+      } catch (err) {
+        console.error('[students] parent-account identity provisioning failed (will self-heal at next restart):', err.message);
+      }
     }
 
     // Mark student as having a parent portal account

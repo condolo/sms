@@ -32,6 +32,7 @@ const {
   reserveInvoiceNumbers,
 } = require('../utils/counters');
 const { ok, fail, E }         = require('../utils/response');
+const { provisionIdentityForUser } = require('../utils/provision-identities');
 const emailUtil               = require('../utils/email');
 const { enqueueBatch }        = require('../utils/email-queue');
 
@@ -815,6 +816,20 @@ async function _importTeachers(rows, schoolId, userId) {
           );
         } catch (writeErr) {
           console.error('[import/teachers] userId write-back failed (non-fatal):', writeErr.message);
+        }
+
+        // C8/MR-001 Phase 0 (ADR-0003, Shadow) — non-blocking, self-healing.
+        // insertMany doesn't give per-document lifecycle hooks, so this runs
+        // as a follow-up loop over the subset that actually inserted
+        // (insertMany assigns _id client-side to every doc regardless of
+        // write outcome, so userDocs[i]._id is safe to reuse here).
+        try {
+          const insertedDocs = userDocs.filter(u => insertedEmails.has(u.email.toLowerCase()));
+          for (const doc of insertedDocs) {
+            await provisionIdentityForUser(doc);
+          }
+        } catch (identityErr) {
+          console.error('[import/teachers] identity provisioning failed (will self-heal at next restart):', identityErr.message);
         }
 
         // Send welcome emails only for successfully created accounts — non-fatal

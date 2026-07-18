@@ -666,6 +666,28 @@ const INDEXES = [
       { key: { schoolId: 1 },         name: 'ent_school' },
     ],
   },
+
+  /* ── identities (C8/MR-001 Phase 0 · shadow) ──────────────────
+     Platform/org-level. Owns credentials only (passwordHash, MFA) per
+     ADR-0003 — NOT YET CONSULTED by auth.js; `users.password` remains
+     the sole credential source until the Dual-write/Cutover phases.
+     `users` is NOT restructured — this collection is purely additive,
+     linked via a new `users.identityId` FK (added at the application
+     layer, not indexed here since it is looked up FROM a resolved
+     identity, never queried in the reverse direction).
+     {orgId,email} partial-unique (not sparse — a collision_pending
+     identity has email:null, which the partial filter, not sparse,
+     correctly excludes from the uniqueness constraint, mirroring the
+     existing users_school_email_str idiom at the top of this file). */
+  {
+    col: 'identities',
+    indexes: [
+      { key: { id: 1 },              name: 'idt_id',            unique: true, sparse: true },
+      { key: { orgId: 1, email: 1 }, name: 'idt_org_email',     unique: true, partialFilterExpression: { email: { $type: 'string' } } },
+      { key: { collisionKey: 1 },    name: 'idt_collision_key', unique: true, partialFilterExpression: { status: 'collision_pending' } },
+      { key: { orgId: 1 },           name: 'idt_org' },
+    ],
+  },
 ];
 
 /* ── One-time index migrations ──────────────────────────────────

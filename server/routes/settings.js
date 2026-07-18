@@ -25,6 +25,7 @@ const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY } = require('../utils/notif-set
 const { rbac, invalidatePermCache } = require('../middleware/rbac');
 const { peekAdmissionCounter, setAdmissionCounter } = require('../utils/counters');
 const { MODULE_REGISTRY, MODULE_KEYS } = require('../config/moduleRegistry');
+const { provisionIdentityForUser } = require('../utils/provision-identities');
 
 const router = express.Router();
 
@@ -504,7 +505,14 @@ router.post('/users/invite', authMiddleware, rbac('settings', 'create'), async (
       updatedAt:         now,
     };
 
-    await Users.create(newUser);
+    const createdUser = await Users.create(newUser);
+
+    // C8/MR-001 Phase 0 (ADR-0003, Shadow) — non-blocking, self-healing.
+    try {
+      await provisionIdentityForUser(createdUser);
+    } catch (err) {
+      console.error('[settings] identity provisioning failed (will self-heal at next restart):', err.message);
+    }
 
     // Send welcome email (non-fatal)
     try {
@@ -564,13 +572,20 @@ router.post('/users/bulk-invite', authMiddleware, rbac('settings', 'create'), as
         const hash = await bcrypt.hash(tempPassword, 10);
         const name = (s.name || email.split('@')[0]).trim();
 
-        await Users.create({
+        const createdUser = await Users.create({
           id: _uid(), schoolId,
           name, email, role, roles: [role],
           password: hash, passwordChangedAt: now,
           isActive: true, mustChangePassword: true,
           createdAt: now, updatedAt: now, createdBy: userId,
         });
+
+        // C8/MR-001 Phase 0 (ADR-0003, Shadow) — non-blocking, self-healing.
+        try {
+          await provisionIdentityForUser(createdUser);
+        } catch (err) {
+          console.error('[settings] bulk-invite identity provisioning failed (will self-heal at next restart):', err.message);
+        }
 
         // Send welcome email (non-fatal)
         try {

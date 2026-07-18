@@ -13,6 +13,7 @@ const { sign }   = require('../utils/jwt');
 const email      = require('../utils/email');
 const { tenantModel } = require('../utils/tenant-model');
 const { provisionOrganizationForSchool } = require('../utils/provision-organizations');
+const { provisionIdentityForUser } = require('../utils/provision-identities');
 
 const router = express.Router();
 
@@ -274,6 +275,16 @@ async function _provisionInDB(data, res) {
     await provisionOrganizationForSchool(school);
   } catch (err) {
     console.error('[ONBOARD] immediate org provisioning failed (will self-heal at next restart):', err.message);
+  }
+
+  // C8/MR-001 Phase 0 (ADR-0003, Shadow) — provision this superadmin's
+  // Identity immediately, same non-blocking/self-healing convention as the
+  // org provisioning above. NOT YET CONSULTED — login still authenticates
+  // against users.password exclusively.
+  try {
+    await provisionIdentityForUser(user);
+  } catch (err) {
+    console.error('[ONBOARD] immediate identity provisioning failed (will self-heal at next restart):', err.message);
   }
 
   const schoolObj = school.toObject();

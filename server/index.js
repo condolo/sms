@@ -14,6 +14,7 @@ const { ensureIndexes }       = require('./utils/indexes');
 const { repairPermissions }   = require('./utils/repairPermissions');
 const { provisionOrganizations } = require('./utils/provision-organizations');
 const { provisionMemberships } = require('./utils/provision-memberships');
+const { provisionIdentities } = require('./utils/provision-identities');
 const { seedDemo }            = require('./scripts/seed-demo');
 
 /* ── Monitoring: initialise BEFORE anything else ──────────────
@@ -615,9 +616,14 @@ async function start() {
     // organizations so schools already have organizationId when memberships
     // are backfilled (provisionMemberships self-heals a missing one anyway).
     // NON-AUTHORITATIVE — nothing reads this collection yet either.
+    //
+    // Phase 0 (C8/MR-001 · ADR-0003 Shadow): provision an Identity per
+    // email-bearing user, chained last. NOT YET CONSULTED — auth.js still
+    // authenticates against users.password exclusively; see ADR-0003.
     provisionOrganizations()
       .then(() => provisionMemberships())
-      .catch(err => console.error('[provisionOrganizations/provisionMemberships] Unhandled error:', err));
+      .then(() => provisionIdentities())
+      .catch(err => console.error('[provisionOrganizations/provisionMemberships/provisionIdentities] Unhandled error:', err));
 
     // Lesson coverage reminder cron jobs (Friday + Saturday)
     try {
