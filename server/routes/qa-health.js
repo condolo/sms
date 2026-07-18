@@ -61,6 +61,52 @@ const CRITICAL_COLLECTIONS = [
   { key: 'audit_logs',           label: 'Audit Logs' },
 ];
 
+/* ── Identity migration checks (C8/MR-001 Phase 2 · ADR-0003) ───
+   Defined as standalone functions (not inline closures like the other
+   7 checks below) so they're independently unit-testable without
+   mocking this route's unrelated dependencies (RBAC scan, release-cert
+   file reads, test-directory scan). Called from _integrityChecks() via
+   the same check(label, fn) wrapper as everything else. */
+
+/* users.identityId pointing at a nonexistent identities doc. */
+async function _checkDanglingIdentityFK() {
+  const linked = await _model('users')
+    .find({ identityId: { $exists: true, $ne: null } })
+    .select('id email identityId').limit(1000).lean();
+  if (!linked.length) return { count: 0, samples: [] };
+
+  const ids = [...new Set(linked.map(u => u.identityId))];
+  const existing = await _model('identities').find({ id: { $in: ids } }).select('id').lean();
+  const existingSet = new Set(existing.map(i => i.id));
+
+  const dangling = linked.filter(u => !existingSet.has(u.identityId));
+  return { count: dangling.length, samples: dangling.slice(0, 5).map(u => u.email || u.id) };
+}
+
+/* users.password vs the linked identity's passwordHash — should always
+   match post-Phase-1 (dual-write hashes once, writes twice). Both sides
+   null-normalized: OAuth users legitimately have neither set
+   (passwordHash: user.password || null at provisioning time,
+   provision-identities.js), which must never read as a false-positive
+   mismatch. Dangling FKs (no matching identity) are skipped here —
+   that's _checkDanglingIdentityFK's job, not this one's. */
+async function _checkPasswordHashMismatch() {
+  const linked = await _model('users')
+    .find({ identityId: { $exists: true, $ne: null } })
+    .select('id email password identityId').limit(1000).lean();
+  if (!linked.length) return { count: 0, samples: [] };
+
+  const ids = [...new Set(linked.map(u => u.identityId))];
+  const identities = await _model('identities').find({ id: { $in: ids } }).select('id passwordHash').lean();
+  const hashById = Object.fromEntries(identities.map(i => [i.id, i.passwordHash ?? null]));
+
+  const mismatches = linked.filter(u => {
+    if (!(u.identityId in hashById)) return false; // dangling FK — not this check's concern
+    return hashById[u.identityId] !== (u.password ?? null);
+  });
+  return { count: mismatches.length, samples: mismatches.slice(0, 5).map(u => u.email || u.id) };
+}
+
 /* ── Data integrity checks ───────────────────────────────────── */
 async function _integrityChecks() {
   const checks = [];
@@ -148,6 +194,12 @@ async function _integrityChecks() {
     return { count: orphans.length, samples: orphans.map(d => d.classId) };
   });
 
+  // 8. Dangling identityId FKs (C8/MR-001 Phase 2)
+  await check('users.identityId pointing to a nonexistent identity', _checkDanglingIdentityFK);
+
+  // 9. Dual-write divergence between users.password and identities.passwordHash (C8/MR-001 Phase 2)
+  await check('users.password / identities.passwordHash mismatch (dual-write divergence)', _checkPasswordHashMismatch);
+
   return checks;
 }
 
@@ -206,6 +258,41 @@ async function _migrationStatus() {
   }
 }
 
+/* ── Identity migration status (C8/MR-001 Phase 2 · ADR-0003) ───
+   Separate gate from _migrationStatus() above — a different migration
+   (the report-card-snapshot backfill), unrelated to identities.
+
+   A user counts as backfilled once their id appears in ANY identities
+   doc's sourceUserIds array — active OR collision_pending. This is
+   deliberate: collision_pending is a PERMANENT, safe fallback per the
+   ADR ("not a temporary blocking state"), not an unfinished migration
+   step. Counting those users as still-pending would mean this gate
+   could never reach 'complete' in any organization with an unresolved
+   collision, contradicting the ADR's own framing. collisionPending is
+   reported separately, purely informational — a nonzero count here is
+   expected and does not fail the gate. */
+async function _identityMigrationStatus() {
+  try {
+    const emailUsers = await _model('users')
+      .find({ email: { $exists: true, $type: 'string' } })
+      .select('id').lean();
+
+    const allIdentities = await _model('identities').find({}).select('sourceUserIds').lean();
+    const processedUserIds = new Set(allIdentities.flatMap(i => i.sourceUserIds || []));
+
+    const pending = emailUsers.filter(u => !processedUserIds.has(u.id)).length;
+    const collisionPending = await _model('identities').countDocuments({ status: 'collision_pending' });
+
+    return {
+      identityBackfillPending: pending,
+      collisionPending,
+      status: pending === 0 ? 'complete' : 'pending',
+    };
+  } catch {
+    return { status: 'unknown' };
+  }
+}
+
 /* ════════════════════════════════════════════════════════════════ */
 /*  GET /api/qa/health                                             */
 /* ════════════════════════════════════════════════════════════════ */
@@ -218,12 +305,14 @@ router.get('/health', authMiddleware, _superadmin, async (req, res) => {
       collectionCounts,
       integrityResults,
       migrationStatus,
+      identityStatus,
     ] = await Promise.all([
       Promise.all(CRITICAL_COLLECTIONS.map(async ({ key, label }) => ({
         key, label, count: await _safeCount(key),
       }))),
       _integrityChecks(),
       _migrationStatus(),
+      _identityMigrationStatus(),
     ]);
 
     const rbac    = _rbacScan();
@@ -241,6 +330,7 @@ router.get('/health', authMiddleware, _superadmin, async (req, res) => {
       rbac:      { passed: rbac.passed,       label: 'RBAC Coverage',         value: `${rbac.coverage.toFixed(2)}%` },
       integrity: { passed: integrityClean,     label: 'Data Integrity',        value: integrityWarning ? 'WARN' : integrityError ? 'ERROR' : 'PASS' },
       migration: { passed: migrationStatus.status === 'complete', label: 'Migrations', value: migrationStatus.status },
+      identity:  { passed: identityStatus.status === 'complete', label: 'Identity Migration (C8)', value: identityStatus.status },
       tests:     { passed: tests.fileCount > 0, label: 'Test Suite',           value: `${tests.fileCount} file(s)` },
     };
 
@@ -263,6 +353,7 @@ router.get('/health', authMiddleware, _superadmin, async (req, res) => {
         collections:  collectionCounts,
         integrity:    integrityResults,
         migration:    migrationStatus,
+        identityMigration: identityStatus,
         tests,
         errors,
         latestCert:   cert,
@@ -275,3 +366,11 @@ router.get('/health', authMiddleware, _superadmin, async (req, res) => {
 });
 
 module.exports = router;
+// Attached for direct unit testing (C8/MR-001 Phase 2) — avoids mocking
+// this route's unrelated dependencies (RBAC scan, release-cert file
+// reads, test-directory scan) just to test these 3 functions.
+// `module.exports = router` above is unchanged — `require()`ing this
+// file still returns the router directly, same as every other route.
+router._checkDanglingIdentityFK  = _checkDanglingIdentityFK;
+router._checkPasswordHashMismatch = _checkPasswordHashMismatch;
+router._identityMigrationStatus  = _identityMigrationStatus;

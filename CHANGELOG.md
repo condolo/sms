@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.76.0] — 2026-07-18 — feat(platform): Identity separation Phase 2 — Verify (C8/MR-001)
+
+### Added
+
+- **`identity` gate** in `GET /api/qa/health` (`server/routes/qa-health.js`) — `_identityMigrationStatus()`, mirroring the existing `_migrationStatus()`'s `{fieldName: N, status}` shape. Reports `identityBackfillPending` (email-bearing users not yet processed at all) and `collisionPending` (informational only — a nonzero count is expected and does not fail the gate) separately. **Deliberately excludes `collision_pending` users from the "pending" count** — a user counts as processed once their id appears in any `identities.sourceUserIds` array, active or collision-flagged. Without this distinction the gate could never reach `'complete'` in any organization with an unresolved collision, contradicting ADR-0003's own framing of `collision_pending` as a permanent, safe fallback rather than an unfinished migration step.
+- **Two new integrity checks**, wired into the existing `_integrityChecks()`/`check()` pattern: `_checkDanglingIdentityFK` (a `users.identityId` pointing at a nonexistent `identities` doc) and `_checkPasswordHashMismatch` (divergence between `users.password` and the linked identity's `passwordHash` — should always be 0 given Phase 1's dual-write; both sides null-normalized so OAuth users, who legitimately have neither field set, never false-positive).
+- Both new checks and the new status function defined as standalone, individually-exported functions (attached on the router: `router._checkDanglingIdentityFK` etc.) rather than inline closures — `module.exports = router` is unchanged, but this makes them directly unit-testable without mocking the route's unrelated dependencies (RBAC scan, release-cert file reads, test-directory scan).
+- `server/__tests__/routes/qa-health.test.js` — first test coverage this route has ever had. 12 tests, including a load-bearing one proving the `identity` gate reaches `'complete'` even with an active, unresolved collision.
+
+### Not done (deliberately — this is Phase 2 of 4)
+
+Still nothing reads `identities` to authenticate anyone — `auth.js`'s credential check is unchanged. This phase only adds visibility into whether the dual-write from Phase 1 is landing cleanly, ahead of Phase 3 (Cutover), which per ADR-0003's adoption gate may not begin while this gate is red.
+
+### Governance
+
+ADR-0003's Status/Implementation lines and the dependency graph's C8 row updated to reflect Phases 0-2 shipped.
+
+Verification: full jest suite, 31 test suites, 349/349 passed.
+
+---
+
 ## [v4.75.0] — 2026-07-18 — feat(auth): Identity separation Phase 1 — Dual-write (C8/MR-001)
 
 ### Added
