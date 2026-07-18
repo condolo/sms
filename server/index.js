@@ -13,6 +13,7 @@ const { connect }             = require('./config/db');
 const { ensureIndexes }       = require('./utils/indexes');
 const { repairPermissions }   = require('./utils/repairPermissions');
 const { provisionOrganizations } = require('./utils/provision-organizations');
+const { provisionMemberships } = require('./utils/provision-memberships');
 const { seedDemo }            = require('./scripts/seed-demo');
 
 /* ── Monitoring: initialise BEFORE anything else ──────────────
@@ -609,8 +610,14 @@ async function start() {
     // Phase A (C1/C2): provision a 1:1 Organization for every existing school.
     // Purely additive — nothing reads organizationId yet. Self-heals a freshly
     // seeded demo school on the next boot if it races this run.
+    //
+    // Phase 1 (C7): provision a Membership per existing user, chained after
+    // organizations so schools already have organizationId when memberships
+    // are backfilled (provisionMemberships self-heals a missing one anyway).
+    // NON-AUTHORITATIVE — nothing reads this collection yet either.
     provisionOrganizations()
-      .catch(err => console.error('[provisionOrganizations] Unhandled error:', err));
+      .then(() => provisionMemberships())
+      .catch(err => console.error('[provisionOrganizations/provisionMemberships] Unhandled error:', err));
 
     // Lesson coverage reminder cron jobs (Friday + Saturday)
     try {

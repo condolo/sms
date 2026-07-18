@@ -689,6 +689,11 @@ function viewOrgSchools(orgId) {
       <td style="padding:8px 10px;font-weight:600">${s.name}</td>
       <td style="padding:8px 10px"><span class="plan-pill ${s.plan||'core'}">${s.plan||'core'}</span></td>
       <td style="padding:8px 10px">${s.isActive ? '<span style="color:#22c55e">Active</span>' : '<span style="color:#ef4444">Inactive</span>'}</td>
+      <td style="padding:8px 10px">
+        <button class="pa-btn" style="padding:4px 10px;font-size:12px" title="Grant an existing person access to this school" onclick="showLinkIdentity('${s.id}', '${(s.name||'').replace(/'/g, "\\'")}')">
+          <i class="fas fa-link"></i> Link Identity
+        </button>
+      </td>
     </tr>`).join('');
 
   showModal(
@@ -699,12 +704,89 @@ function viewOrgSchools(orgId) {
           <th style="text-align:left;padding:8px 10px;color:#64748b;font-size:11px;text-transform:uppercase">School</th>
           <th style="text-align:left;padding:8px 10px;color:#64748b;font-size:11px;text-transform:uppercase">Plan</th>
           <th style="text-align:left;padding:8px 10px;color:#64748b;font-size:11px;text-transform:uppercase">Status</th>
+          <th style="text-align:left;padding:8px 10px;color:#64748b;font-size:11px;text-transform:uppercase">Identity</th>
         </tr>
       </thead>
-      <tbody>${rows || '<tr><td colspan="3" style="padding:12px;color:#94a3b8">No schools linked.</td></tr>'}</tbody>
+      <tbody>${rows || '<tr><td colspan="4" style="padding:12px;color:#94a3b8">No schools linked.</td></tr>'}</tbody>
     </table>`,
     [{ label: 'Close', cls: 'pa-btn', action: 'closeModal()' }]
   );
+}
+
+/* Search-and-confirm modal for granting an existing person access to a
+   second school under the SAME organization. Record-only on the backend
+   (POST /memberships) — the success toast echoes the API's `note` field
+   verbatim so the limitation (doesn't enable login yet) is visible in
+   the moment, not just documented in a comment. */
+function showLinkIdentity(schoolId, schoolName) {
+  showModal(
+    `Link Identity — ${schoolName}`,
+    `<div style="display:flex;flex-direction:column;gap:12px;text-align:left">
+      <p style="font-size:12px;color:#64748b;margin:0">
+        Search for an existing person by email, then grant them access to <strong>${schoolName}</strong>.
+        This only links people already registered under the same organization — it does not create a new account,
+        and it does not by itself let them log into this school yet.
+      </p>
+      <div style="display:flex;gap:8px">
+        <input id="li-email" class="pa-input" placeholder="Search by email…" style="flex:1" onkeydown="if(event.key==='Enter'){searchLinkIdentity('${schoolId}')}">
+        <button class="pa-btn" onclick="searchLinkIdentity('${schoolId}')"><i class="fas fa-search"></i> Search</button>
+      </div>
+      <div id="li-results" style="min-height:20px"></div>
+      <div id="li-error" style="display:none;padding:8px 12px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:12px;color:#b91c1c"></div>
+    </div>`,
+    [{ label: 'Close', cls: 'pa-btn', action: 'closeModal()' }]
+  );
+}
+
+async function searchLinkIdentity(schoolId) {
+  const email     = document.getElementById('li-email')?.value.trim();
+  const resultsEl = document.getElementById('li-results');
+  const errEl     = document.getElementById('li-error');
+  errEl.style.display = 'none';
+
+  if (!email || email.length < 3) {
+    errEl.textContent = 'Type at least 3 characters of the email to search.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  resultsEl.innerHTML = '<div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Searching…</div>';
+  try {
+    const json  = await api('GET', `/users/search?email=${encodeURIComponent(email)}`);
+    const users = json.users || [];
+
+    if (!users.length) {
+      resultsEl.innerHTML = '<p style="font-size:12px;color:#94a3b8;margin:0">No matching users found.</p>';
+      return;
+    }
+
+    resultsEl.innerHTML = users.map(u => `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:6px">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:#111827">${u.name || u.email}</div>
+          <div style="font-size:11px;color:#94a3b8">${u.email} · ${u.role || '—'} · ${u.schoolName || 'no current school'}</div>
+        </div>
+        <button class="pa-btn primary" style="padding:4px 10px;font-size:12px" onclick="grantLinkIdentity('${u.id}', '${schoolId}')">
+          <i class="fas fa-link"></i> Grant Access
+        </button>
+      </div>`).join('');
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  }
+}
+
+async function grantLinkIdentity(userId, schoolId) {
+  const errEl = document.getElementById('li-error');
+  errEl.style.display = 'none';
+  try {
+    const json = await api('POST', '/memberships', { userId, schoolId });
+    closeModal();
+    toast(json.note || 'Membership created.', 'success');
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  }
 }
 
 function showCreateOrganization() {

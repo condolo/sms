@@ -33,10 +33,10 @@
 
 | ID | Decision | Status |
 |---|---|---|
-| D-001 | Multi-membership identity model (one identity, many school memberships) | Pending |
+| D-001 | Multi-membership identity model (one identity, many school memberships) | **Ratified 2026-07-18 — Organization-Scoped Identity**, per `ARCHITECTURE_CONSTITUTION.md` §6-10: one Identity per person per Organization; the same person at two unrelated Organizations holds two independent Identities. Resolves C1 (below). Gates C8 (`IMPLEMENTATION_DEPENDENCY_GRAPH_v1.md`) — the authoritative identity migration — not C7 (the additive Membership shadow collection), which depends only on C1/C4 and is unblocked regardless of this ratification. |
 | D-002 | Token-revocation fail-open/closed policy, and whether it's role-sensitive | Pending |
 | D-003 | Identity ownership (proposed: the user, not platform/school/org) | Pending — proposed, not ratified |
-| D-004 | Session/JWT storage architecture (HttpOnly cookie vs. Constitution §7's sessionStorage-per-tab model) | Pending — same fork as D-001 |
+| D-004 | Session/JWT storage architecture (HttpOnly cookie vs. Constitution §7's sessionStorage-per-tab model) | **Resolves with D-001** — same fork, same ratification. Constitution §7's `sessionStorage`-per-tab, many-context-sessions model is the approved implementation once Membership becomes authoritative (C8/C9); not yet built. |
 
 ---
 

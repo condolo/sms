@@ -69,10 +69,11 @@ Gated by decision D-001 and by all of Phase A/B existing beneath it.
 | Component | Status |
 |---|---|
 | C1 Organization collection | ✅ Done — `31a3f1b` |
-| C2 Organization provisioning | ✅ Done — `31a3f1b` (not yet run against a live DB) |
-| C4 Tenant enforcement | 🟡 In progress — mechanism `tenantModel()` (`4b20f08`), ADR-0001 Accepted, first route (attendance) migrated + isolation test (`4b2b482`), CI ratchet live (baseline 822 direct `_model()` sites, monotonically decreasing). Remaining: migrate the other 52 route files behind the ratchet, each with an isolation test. |
+| C2 Organization provisioning | ✅ Done — `31a3f1b`; `provisionOrganizationForSchool()` also called immediately (not just at boot) from platform.js/onboard.js provisioning paths |
+| C4 Tenant enforcement | ✅ **Done** — ADR-0001 Accepted, `tenantModel()` rolled out across all mechanical/dynamic route files, CI ratchet down from baseline 822 to **24** documented platform-level exceptions (all in platform.js/qa-health.js, each reviewed). See `ADR-0001-tenant-context-enforcement.md`. |
+| C7 Membership collection (shadow) | 🟡 In progress — Phase 1: `provision-memberships.js` (idempotent, additive backfill, chained after `provisionOrganizations()` in boot), `memberships` indexes added, platform-admin `GET /users/search` + `POST /memberships` routes (organization-scoped grant, 409 on cross-org or duplicate), "Link Identity" UI in the Organizations panel. **Still non-authoritative** — auth.js/JWT/rbac.js/scopeMiddleware.js unchanged; nothing reads this collection for login yet. See ADR-0002. |
 | C3 / C5 (rest of Phase A) | ⬜ Not started |
-| Phase B onward | ⬜ Gated |
+| C8 onward (Phase C — identity authoritative) | ⬜ Gated — requires D-001 (now ratified) + C7 fully populated + C4 (done) |
 
 ## 6. Freeze rule
 

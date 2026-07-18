@@ -632,6 +632,23 @@ const INDEXES = [
       { key: { organizationId: 1 }, name: 'schools_org', sparse: true },
     ],
   },
+
+  /* ── memberships (Phase 1 · C7) ─────────────────────────────
+     Platform/org-level shadow collection — records who has access to
+     which school(s). NON-AUTHORITATIVE: auth.js/rbac.js/scopeMiddleware
+     still read role straight off the JWT; nothing reads this collection
+     yet. {userId,schoolId} is the real-world invariant and the
+     idempotency key used by provision-memberships.js's upsert. */
+  {
+    col: 'memberships',
+    indexes: [
+      { key: { id: 1 },                  name: 'mem_id',          unique: true, sparse: true },
+      { key: { userId: 1, schoolId: 1 }, name: 'mem_user_school', unique: true },
+      { key: { schoolId: 1 },            name: 'mem_school' },
+      { key: { orgId: 1 },               name: 'mem_org', sparse: true },
+      { key: { userId: 1 },              name: 'mem_user' },
+    ],
+  },
 ];
 
 /* ── One-time index migrations ──────────────────────────────────

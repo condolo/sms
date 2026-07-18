@@ -15,6 +15,7 @@ const { sign } = require('../utils/jwt');
 const email    = require('../utils/email');
 const { tenantModel } = require('../utils/tenant-model');
 const { provisionOrganizationForSchool } = require('../utils/provision-organizations');
+const { provisionMembershipForUser } = require('../utils/provision-memberships');
 
 const router = express.Router();
 
@@ -372,6 +373,122 @@ router.post('/organizations', async (req, res) => {
     res.status(201).json({ organization: org });
   } catch (err) {
     console.error('[platform/organizations POST]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* GET /api/platform/users/search?email=... — cross-school identity search.
+   Something /api/users can't do (it's always school-scoped by design).
+   Used by the "Link Identity" flow to find an existing person before
+   granting them access to a second school. Strips credentials/MFA/token
+   fields — this is platform-admin tooling, not a general user lookup. */
+router.get('/users/search', async (req, res) => {
+  try {
+    const email = (req.query.email || '').trim();
+    if (!email || email.length < 3) {
+      return res.status(400).json({ error: 'email query (min 3 chars) is required' });
+    }
+
+    const User    = _model('users');
+    const School  = _model('schools');
+    const escaped = email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex   = new RegExp(escaped, 'i');
+
+    const users = await User.find({ email: regex }).limit(10).lean();
+    const schoolIds = [...new Set(users.map(u => u.schoolId).filter(Boolean))];
+    const schools = schoolIds.length
+      ? await School.find({ id: { $in: schoolIds } }).select('id name organizationId').lean()
+      : [];
+    const schoolMap = Object.fromEntries(schools.map(s => [s.id, s]));
+
+    res.json({
+      users: users.map(u => {
+        const school = u.schoolId ? schoolMap[u.schoolId] : null;
+        return {
+          id:             u.id || u._id?.toString(),
+          name:           u.name || null,
+          email:          u.email,
+          role:           u.role,
+          schoolId:       u.schoolId || null,
+          schoolName:     school ? school.name : null,
+          organizationId: school ? (school.organizationId || null) : null,
+        };
+      }),
+    });
+  } catch (err) {
+    console.error('[platform/users/search GET]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* POST /api/platform/memberships — grant an existing person access to a
+   SECOND school under the SAME organization (Constitution §6 boundary:
+   identity is organization-scoped, not platform-global — cross-org linking
+   is explicitly out of scope for this phase and is rejected with 409
+   rather than silently allowed).
+
+   RECORD-ONLY: this writes to the `memberships` shadow collection but
+   makes NO change to auth.js/JWT/sessionService/rbac — the granted user
+   still cannot log into the target school with this alone (Constitution
+   §10 Stage 3, not yet built). The response's `note` field says so
+   explicitly, so the limitation is visible to whoever uses this, not
+   just documented in a comment. */
+router.post('/memberships', async (req, res) => {
+  try {
+    const { userId, schoolId, role } = req.body;
+    if (!userId || !schoolId) {
+      return res.status(400).json({ error: 'userId and schoolId are required' });
+    }
+
+    const User        = _model('users');
+    const School       = _model('schools');
+    const Org          = _model('organizations');
+    const Memberships  = _model('memberships');
+
+    const user = await User.findOne({ id: userId }).lean();
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const targetSchool = await School.findOne({ id: schoolId }).lean();
+    if (!targetSchool) return res.status(404).json({ error: 'School not found' });
+
+    const currentSchool = user.schoolId ? await School.findOne({ id: user.schoolId }).lean() : null;
+    const currentOrgId  = currentSchool ? currentSchool.organizationId : null;
+    const targetOrgId   = targetSchool.organizationId;
+
+    if (!currentOrgId || !targetOrgId || currentOrgId !== targetOrgId) {
+      return res.status(409).json({
+        error: "Cross-organization identity linking is not supported yet — the user's current school and the target school must belong to the same organization.",
+      });
+    }
+
+    const existing = await Memberships.findOne({ userId, schoolId }).lean();
+    if (existing) {
+      return res.status(409).json({ error: 'This user already has a membership for that school' });
+    }
+
+    const membership = await provisionMembershipForUser(
+      { ...user, schoolId, role: role || user.role },
+      { Schools: School, Orgs: Org, Memberships, opts: { isPrimary: false, source: 'platform_admin_grant', createdBy: 'platform-admin' } }
+    );
+    if (!membership) {
+      return res.status(500).json({ error: 'Could not create membership' });
+    }
+
+    AuditService.log({
+      action: 'platform.membership.grant',
+      actor:  { userId: 'platform', role: 'platform', email: null },
+      schoolId,
+      target: { type: 'user', id: userId, label: user.email },
+      details: { grantedSchoolId: schoolId, orgId: targetOrgId },
+      req,
+    });
+
+    res.status(201).json({
+      membership,
+      note: 'This creates a record only — it does not yet enable the user to log into this school. Login continues to be governed by the school assigned on their account.',
+    });
+  } catch (err) {
+    console.error('[platform/memberships POST]', err);
     res.status(500).json({ error: err.message });
   }
 });

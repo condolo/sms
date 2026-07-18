@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.72.0] — 2026-07-18 — feat(platform): Membership model Phase 1 (shadow collection, platform-admin identity linking)
+
+### Added
+
+- **`memberships` collection** — additive, non-authoritative shadow of who has access to which school(s) (Constitution §10 Stage 2 / `IMPLEMENTATION_DEPENDENCY_GRAPH_v1.md` C7). Indexed on unique `{id}`, unique `{userId, schoolId}`, plus `{schoolId}`/`{orgId}`/`{userId}` lookups. **Nothing reads this collection for login yet** — `auth.js`, `sessionService.js`, `rbac.js`, and `scopeMiddleware.js` are all unchanged; access continues to be governed solely by `users.schoolId`.
+- **`server/utils/provision-memberships.js`** — `provisionMembershipForUser()` (dependency-injectable, idempotent upsert on `{userId, schoolId}`, self-heals a missing `school.organizationId` via the existing `provisionOrganizationForSchool()`) and `provisionMemberships()` (batch backfill, one Membership per existing user, chained after `provisionOrganizations()` at boot). Same crash-safe, non-fatal, interruption-safe pattern as the Organizations backfill.
+- **`GET /api/platform/users/search?email=`** — cross-school identity search (something `/api/users` can't do, since it's always school-scoped by design). Strips password/MFA/token-version fields.
+- **`POST /api/platform/memberships`** (`{userId, schoolId, role?}`) — grants an existing person access to a second school **under the same organization only**: 409 if the target school belongs to a different organization (Constitution §6's boundary, enforced in code, not just on paper), 409 on a duplicate membership. Logs via `AuditService`. Response includes an explicit `note` field stating the grant is record-only and does not yet enable login.
+- **"Link Identity" action** in the platform dashboard's Organizations panel (per school, inside `viewOrgSchools()`) — search-by-email, pick a result, grant. The success toast echoes the API's `note` verbatim.
+- **`docs/adr/ADR-0002-membership-model-phase1.md`** — scoped ownership section for Identity/Membership/Organization/School, explicit non-goals (no auth/JWT/RBAC changes, no School Switcher, no self-service org management, no cross-org linking).
+- 23 new jest tests: `provision-memberships.test.js` (11 — backfill, self-heal, idempotency, malformed docs, DI'd single-user path) and `routes/platform-memberships.test.js` (12 — search + field stripping, 404s, the cross-org 409, the duplicate 409, and an explicit assertion that granting a membership never writes to the `users` collection).
+
+### Governance
+
+D-001 (multi-membership identity model) ratified in `ARCHITECTURE_GOVERNANCE_REVIEW_v1.md` as **Organization-Scoped Identity**, resolving D-004 with it. Per the dependency graph's own Freeze Rule, D-001 gates C8 (making identity authoritative), not C7 (this shadow collection) — C7 depends only on C1+C4, both already done, so this phase was not blocked on ratification, though ratifying it first removed any ambiguity before writing the organization-boundary check into `POST /memberships`. Fixed the dependency graph's stale §5 build-status table (C4 was still marked "in progress... baseline 822" — corrected to Done at ratchet 24; added C7's in-progress status).
+
+Verification: full jest suite, 23 test suites, 275/275 passed.
+
+---
+
 ## [v4.71.0] — 2026-07-18 — test: fix jest running a stale worktree's tests; fix stale login-response assertion
 
 ### Fixed
