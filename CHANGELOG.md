@@ -6,6 +6,37 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.77.0] — 2026-07-18 — feat(auth): Identity separation Phase 3 — Cutover (C8/MR-001)
+
+### Added
+
+- **`server/utils/identity-cutover.js`** — `isIdentityCutoverEnabled()`, an opt-in kill switch (`process.env.IDENTITY_CUTOVER_ENABLED === 'true'`, exact-string match only, no truthy leniency) gating whether the credential check reads `identities` at all. **Disabled by default** — merging this release changes nothing in any running deployment.
+- **`/login`, `/change-password`, `PUT /api/settings` now read `identities.passwordHash`/`mfaEnabled`** when a user has an `identityId` and the switch is on. `/login` fetches the identity once and reuses it for both the password check and the `mfaEnabled` read (Decision 4's Open Question 3 — now a deliberate, tested decision). A dangling `identityId` or unusable `passwordHash` fails closed to a credential mismatch — never a silent fallback to `users.password`, which would mask exactly the divergence the Phase 2 `identity` gate exists to catch before cutover is ever turned on.
+- **`GET /api/qa/health`'s `identityMigration` field gains `cutoverEnabled`** — operator visibility into whether the switch is currently live, alongside the existing backfill-completeness gate.
+- 17 new jest tests (63 total across Phases 1-3) — cutover on/off at all three check sites, identity-hash match/mismatch, dangling-FK fail-closed, and `mfaEnabled` source-switching, verified at the full HTTP-route level (real signed JWTs, real bcrypt).
+
+### Fixed
+
+Two real bugs, both caught by this phase's own tests, not manual review:
+- **The cutover read logic's first draft used one nullable variable for two different facts** — "identity lookup wasn't attempted" and "identity lookup found nothing" were indistinguishable, so a dangling `identityId` silently fell back to `users.password` instead of failing closed, the exact behavior the design explicitly ruled out. Fixed by tracking `identityLookupAttempted` as its own boolean at all three cutover sites.
+- **A pre-existing bug in `auth-session.test.js`**, unrelated to this feature until now: one test (`returns 403 for inactive user`) permanently replaced the shared `_model` mock's implementation via `.mockImplementation()`, which `jest.clearAllMocks()` does not undo — every test running afterward in that file silently inherited the override, masking the mock's `identities` branch. Latent for as long as no later test needed that branch; Phase 3's new tests did. Fixed by switching that one test to `.mockImplementationOnce()`, which self-expires after the two calls it's actually meant to cover.
+
+### Not done (deliberately — this ships the mechanism, not the activation)
+
+**Code-complete is not the same as live.** The actual behavioral cutover — `identities.passwordHash` genuinely becoming authoritative for a real login — only happens once an operator explicitly sets `IDENTITY_CUTOVER_ENABLED=true` in a real deployment, and that decision belongs outside this codebase change: it should wait for `GET /api/qa/health`'s `identity` gate to report `status: 'complete'` against real production data. Rolling back at that point is unsetting the env var — instant, no code revert, no redeploy, stronger than the rollback story ADR-0003's own text originally described.
+
+### Governance
+
+ADR-0003's Status/Implementation lines, Consequences (both bugs documented), and Adoption Gate (explicit "code-complete ≠ live" language) updated. Dependency graph's C8 row marked code-complete across all 4 phases; C9's gate clarified to require `IDENTITY_CUTOVER_ENABLED=true` with a green gate, not merely this code being merged. `docs/PLATFORM_ADMIN_GUIDE.md` gained an "Optional environment variables" subsection documenting the switch and the pre-flip check.
+
+### Also fixed (test infrastructure)
+
+Raised jest's global `testTimeout` from the 5000ms default to 15000ms (`package.json`). This session's growing set of password-path test suites do several sequential bcrypt cost-12 operations per test (hash + compare, sometimes twice for dual-write assertions) — deliberately slow by bcrypt's own design — and were occasionally timing out under sustained CPU load from repeated full-suite runs, unrelated to any product bug.
+
+Verification: full jest suite, 32 test suites, 366/366 passed (confirmed clean across multiple runs, including after the timeout fix).
+
+---
+
 ## [v4.76.0] — 2026-07-18 — feat(platform): Identity separation Phase 2 — Verify (C8/MR-001)
 
 ### Added

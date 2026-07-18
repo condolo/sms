@@ -131,6 +131,10 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockUserDoc = makeUser();
   mockIdentityDoc = null;
+  // C8/MR-001 Phase 3 — guarantee a deterministic "cutover disabled"
+  // baseline regardless of any other test file's env state (defense
+  // against cross-file process.env leakage within a shared jest worker).
+  delete process.env.IDENTITY_CUTOVER_ENABLED;
 });
 
 describe('POST /api/auth/change-password', () => {
@@ -248,5 +252,62 @@ describe('POST /api/auth/force-change', () => {
     const payload = verify(token);
     expect(payload.tv).toBe(1);
     expect(payload.identityId).toBeUndefined();
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════
+   POST /api/auth/change-password — C8/MR-001 Phase 3 (Cutover)
+   Same identityLookupAttempted/fail-closed pattern as /login
+   (auth-session.test.js), applied to the currentPassword check here.
+══════════════════════════════════════════════════════════════ */
+describe('POST /api/auth/change-password — C8/MR-001 Phase 3 cutover', () => {
+  function authCookie(payload) {
+    return `token=${sign(payload)}`;
+  }
+  let IDENTITY_HASHED_PASSWORD;
+  beforeAll(async () => {
+    IDENTITY_HASHED_PASSWORD = await bcrypt.hash('IdentityCurrentPassword!', 10);
+  });
+
+  test('cutover disabled (default): the users.password hash is authoritative even with a diverging identity', async () => {
+    mockUserDoc = makeUser({ identityId: 'idt_demo_001' }); // password: 'OldPassword123!'
+    mockIdentityDoc = { id: 'idt_demo_001', passwordHash: IDENTITY_HASHED_PASSWORD };
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/change-password')
+      .set('Cookie', authCookie({ userId: 'usr_demo_001', schoolId: 'sch_demo_001', tv: 0 }))
+      .send({ currentPassword: 'OldPassword123!', newPassword: 'NewPassword123!' }); // the USERS password
+
+    expect(res.status).toBe(200);
+  });
+
+  test('cutover enabled, identity hash does NOT match — 401 even though users.password would have', async () => {
+    process.env.IDENTITY_CUTOVER_ENABLED = 'true';
+    mockUserDoc = makeUser({ identityId: 'idt_demo_001' }); // password: 'OldPassword123!'
+    mockIdentityDoc = { id: 'idt_demo_001', passwordHash: IDENTITY_HASHED_PASSWORD }; // different password
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/change-password')
+      .set('Cookie', authCookie({ userId: 'usr_demo_001', schoolId: 'sch_demo_001', tv: 0 }))
+      .send({ currentPassword: 'OldPassword123!', newPassword: 'NewPassword123!' }); // matches users.password only
+
+    expect(res.status).toBe(401);
+    expect(mockUsersUpdateOne).not.toHaveBeenCalled();
+  });
+
+  test('cutover enabled, dangling identityId (no matching identity doc): 401, not a silent fallback', async () => {
+    process.env.IDENTITY_CUTOVER_ENABLED = 'true';
+    mockUserDoc = makeUser({ identityId: 'idt_missing' }); // password: 'OldPassword123!' — would match
+    mockIdentityDoc = null;
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/change-password')
+      .set('Cookie', authCookie({ userId: 'usr_demo_001', schoolId: 'sch_demo_001', tv: 0 }))
+      .send({ currentPassword: 'OldPassword123!', newPassword: 'NewPassword123!' });
+
+    expect(res.status).toBe(401);
   });
 });

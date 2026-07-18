@@ -13,6 +13,7 @@ const SessionService       = require('../services/sessionService');
 const { revokeUserTokens, revokeIdentityTokens, getIdentityTokenVersion } = require('../utils/token-version');
 const AuditService         = require('../services/audit');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
+const { isIdentityCutoverEnabled } = require('../utils/identity-cutover');
 
 const router = express.Router();
 
@@ -228,9 +229,27 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
       return res.status(403).json({ error: 'Account inactive. Please contact your school administrator.' });
     }
 
-    const match = user.password?.startsWith('$2')
-      ? await bcrypt.compare(password, user.password)
-      : false; // reject any account that lacks a bcrypt hash
+    // C8/MR-001 Phase 3 (ADR-0003, Cutover) — fetch the shared identity
+    // ONCE, reused below for both the password check and the mfaEnabled
+    // read further down. Disabled by default — see
+    // server/utils/identity-cutover.js. `identityLookupAttempted` is
+    // tracked SEPARATELY from `identity` itself: a dangling identityId
+    // (fetch attempted, resolves null) or an unusable passwordHash must
+    // be treated as a credential mismatch, not silently fall back to
+    // users.password — falling back would mask exactly the divergence
+    // the Phase 2 qa-health gate exists to catch before cutover is ever
+    // turned on. Collapsing these into one nullable variable was a real
+    // bug caught by this phase's own tests: `identity` alone can't
+    // distinguish "never looked up" from "looked up, found nothing."
+    const identityLookupAttempted = isIdentityCutoverEnabled() && !!user.identityId;
+    let identity = null;
+    if (identityLookupAttempted) {
+      identity = await _model('identities').findOne({ id: user.identityId }).lean();
+    }
+
+    const match = identityLookupAttempted
+      ? (identity?.passwordHash?.startsWith('$2') ? await bcrypt.compare(password, identity.passwordHash) : false)
+      : (user.password?.startsWith('$2') ? await bcrypt.compare(password, user.password) : false); // reject any account that lacks a bcrypt hash
 
     if (!match) {
       const clientIp = req.headers['cf-connecting-ip'] || req.ip;
@@ -278,9 +297,13 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
     // Applies to: superadmin, admin, deputy, finance
     // Can be disabled per-user with mfaEnabled: false
     // Skipped for the demo school — demo accounts have no real email inboxes
-    const userRole = user.primaryRole || user.role;
-    const isDemo   = req.school?.slug === 'demo';
-    if (!isDemo && MFA_ROLES.has(userRole) && user.mfaEnabled !== false) {
+    const userRole   = user.primaryRole || user.role;
+    const isDemo     = req.school?.slug === 'demo';
+    // C8/MR-001 Phase 3 — mfaEnabled becomes identity-level once cutover
+    // is live and this user has one (ADR-0003 Decision 4, Open Question
+    // 3 — a deliberate, tested decision, not a silent behavior change).
+    const mfaEnabled = identity ? identity.mfaEnabled : user.mfaEnabled;
+    if (!isDemo && MFA_ROLES.has(userRole) && mfaEnabled !== false) {
       const otp      = _genOTP();
       const otpHash  = _hashOTP(otp);          // store hash, not plaintext
       const expiry   = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 min
@@ -987,9 +1010,19 @@ router.post('/change-password', authMiddleware, async (req, res) => {
     const user = await User.findOne({ id: req.jwtUser.userId, schoolId: req.jwtUser.schoolId }).lean();
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const match = user.password?.startsWith('$2')
-      ? await bcrypt.compare(currentPassword, user.password)
-      : false;
+    // C8/MR-001 Phase 3 (ADR-0003, Cutover) — same identity-fetch-and-use
+    // pattern as /login, including the identityLookupAttempted tracking
+    // that keeps a dangling identityId from silently falling back to
+    // users.password — see the matching comment in /login above.
+    const identityLookupAttempted = isIdentityCutoverEnabled() && !!user.identityId;
+    let identity = null;
+    if (identityLookupAttempted) {
+      identity = await _model('identities').findOne({ id: user.identityId }).lean();
+    }
+
+    const match = identityLookupAttempted
+      ? (identity?.passwordHash?.startsWith('$2') ? await bcrypt.compare(currentPassword, identity.passwordHash) : false)
+      : (user.password?.startsWith('$2') ? await bcrypt.compare(currentPassword, user.password) : false);
     if (!match) return res.status(401).json({ error: 'Current password incorrect' });
 
     const hashed = await bcrypt.hash(newPassword, 12);

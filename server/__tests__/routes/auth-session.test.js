@@ -86,7 +86,8 @@ jest.mock('../../services/audit', () => ({
 }));
 
 /* ── Mock _model — returns test doubles for users + schools ─── */
-let mockUserDoc = null;  // set per test
+let mockUserDoc = null;      // set per test
+let mockIdentityDoc = null;  // C8/MR-001 Phase 3 — set per cutover test, null otherwise
 
 jest.mock('../../utils/model', () => {
   const mockUpdateOne = jest.fn().mockResolvedValue({});
@@ -103,6 +104,14 @@ jest.mock('../../utils/model', () => {
       if (collection === 'schools') {
         return {
           findOne:  jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ isActive: true }) }),
+          updateOne: mockUpdateOne,
+        };
+      }
+      if (collection === 'identities') {
+        return {
+          findOne: jest.fn().mockReturnValue({
+            lean: jest.fn().mockImplementation(() => Promise.resolve(mockIdentityDoc)),
+          }),
           updateOne: mockUpdateOne,
         };
       }
@@ -157,7 +166,12 @@ function makeUser(overrides = {}) {
 
 beforeEach(() => {
   mockUserDoc = makeUser();
+  mockIdentityDoc = null;
   jest.clearAllMocks();
+  // C8/MR-001 Phase 3 — guarantee a deterministic "cutover disabled"
+  // baseline regardless of any other test file's env state (defense
+  // against cross-file process.env leakage within a shared jest worker).
+  delete process.env.IDENTITY_CUTOVER_ENABLED;
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -315,23 +329,22 @@ describe('POST /api/auth/login — error paths', () => {
     // Inactive user at an active school → 403 (not 401 — distinct error)
     mockUserDoc = makeUser({ isActive: false });
 
-    // Re-mock schools to return an active school
+    // Override just the next two _model() calls (users, then schools — the
+    // exact order /login makes them in) so this test's `status: 'active'`
+    // schools shape doesn't leak into later tests. `.mockImplementation()`
+    // (no "Once") would persist for the rest of the file, since
+    // jest.clearAllMocks() in beforeEach clears call history but does NOT
+    // reset a custom implementation back to the base factory — a real bug
+    // this exact test caused, caught while adding the C8/MR-001 Phase 3
+    // cutover tests below, which need the original `identities`-aware mock.
     const { _model } = require('../../utils/model');
-    _model.mockImplementation((collection) => {
-      if (collection === 'users') {
-        return {
-          findOne: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(mockUserDoc) }),
-          updateOne: jest.fn().mockResolvedValue({}),
-        };
-      }
-      if (collection === 'schools') {
-        return {
-          findOne: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ isActive: true, status: 'active' }) }),
-          updateOne: jest.fn().mockResolvedValue({}),
-        };
-      }
-      return { findOne: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }), updateOne: jest.fn() };
-    });
+    _model.mockImplementationOnce((collection) => ({
+      findOne: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(mockUserDoc) }),
+      updateOne: jest.fn().mockResolvedValue({}),
+    })).mockImplementationOnce((collection) => ({
+      findOne: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ isActive: true, status: 'active' }) }),
+      updateOne: jest.fn().mockResolvedValue({}),
+    }));
 
     const app = buildApp();
     const res = await supertest(app)
@@ -356,5 +369,115 @@ describe('POST /api/auth/login — error paths', () => {
     expect(res.body.reason).toBe('first_login');
     // No token should be issued — user must change password first
     expect(res.body.token).toBeUndefined();
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════
+   POST /api/auth/login — C8/MR-001 Phase 3 (ADR-0003, Cutover)
+   The credential check switches source of truth from users.password
+   to identities.passwordHash when isIdentityCutoverEnabled() and
+   user.identityId are both set. Disabled by default — the FIRST test
+   below is the specific regression this phase must never break: with
+   the flag unset (every real deployment today), behavior must stay
+   byte-for-byte identical to before this phase, even for a user whose
+   identityId is set and whose linked identity has a totally different
+   password.
+══════════════════════════════════════════════════════════════ */
+describe('POST /api/auth/login — C8/MR-001 Phase 3 cutover', () => {
+  let IDENTITY_HASHED_PASSWORD;
+  beforeAll(async () => {
+    IDENTITY_HASHED_PASSWORD = await bcrypt.hash('IdentityPassword456!', 10);
+  });
+
+  test('cutover disabled (default): users.password is authoritative even when identityId is set and the identity has a DIFFERENT password', async () => {
+    mockUserDoc = makeUser({ identityId: 'idt_demo_001' }); // password: 'Password123!'
+    mockIdentityDoc = { id: 'idt_demo_001', passwordHash: IDENTITY_HASHED_PASSWORD, mfaEnabled: false }; // different password
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ email: 'admin@demo.school', password: 'Password123!' }); // the USERS password
+
+    expect(res.status).toBe(200); // succeeds — identity is never consulted while disabled
+  });
+
+  test('cutover enabled, no identityId: unchanged fallback to users.password', async () => {
+    process.env.IDENTITY_CUTOVER_ENABLED = 'true';
+    mockUserDoc = makeUser(); // no identityId
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ email: 'admin@demo.school', password: 'Password123!' });
+
+    expect(res.status).toBe(200);
+  });
+
+  test('cutover enabled, identityId set, identity hash MATCHES the candidate: succeeds via identities.passwordHash', async () => {
+    process.env.IDENTITY_CUTOVER_ENABLED = 'true';
+    mockUserDoc = makeUser({ identityId: 'idt_demo_001', password: 'not-even-a-valid-bcrypt-hash' }); // users.password deliberately broken
+    mockIdentityDoc = { id: 'idt_demo_001', passwordHash: IDENTITY_HASHED_PASSWORD, mfaEnabled: false };
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ email: 'admin@demo.school', password: 'IdentityPassword456!' }); // the IDENTITY's password
+
+    expect(res.status).toBe(200); // proves identities.passwordHash is what was actually checked
+  });
+
+  test('cutover enabled, identityId set, identity hash does NOT match — 401 even though users.password WOULD have matched', async () => {
+    process.env.IDENTITY_CUTOVER_ENABLED = 'true';
+    mockUserDoc = makeUser({ identityId: 'idt_demo_001' }); // password: 'Password123!' — would succeed under the old check
+    mockIdentityDoc = { id: 'idt_demo_001', passwordHash: IDENTITY_HASHED_PASSWORD, mfaEnabled: false }; // a different password
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ email: 'admin@demo.school', password: 'Password123!' }); // matches users.password, NOT identities.passwordHash
+
+    expect(res.status).toBe(401); // identities.passwordHash is now authoritative once cutover is live
+  });
+
+  test('cutover enabled, identityId set, no matching identity doc (dangling FK): treated as a mismatch, not a silent fallback', async () => {
+    process.env.IDENTITY_CUTOVER_ENABLED = 'true';
+    mockUserDoc = makeUser({ identityId: 'idt_missing' });
+    mockIdentityDoc = null; // dangling FK — findOne resolves null
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ email: 'admin@demo.school', password: 'Password123!' }); // would have matched users.password
+
+    expect(res.status).toBe(401); // fails closed rather than silently falling back
+  });
+
+  test('mfaEnabled is read from the identity, not the user, once cutover is live for a linked account', async () => {
+    process.env.IDENTITY_CUTOVER_ENABLED = 'true';
+    // Non-demo school so the MFA gate's isDemo skip doesn't mask this test.
+    module.exports.__MOCK_SCHOOL__ = { ...MOCK_SCHOOL, slug: 'not-demo' };
+    try {
+      mockUserDoc = makeUser({ identityId: 'idt_demo_001', mfaEnabled: false, role: 'admin' }); // user says MFA off
+      mockIdentityDoc = { id: 'idt_demo_001', passwordHash: HASHED_PASSWORD, mfaEnabled: true }; // identity says MFA on
+
+      const app = buildApp();
+      const res = await supertest(app)
+        .post('/api/auth/login')
+        .set('X-School-Slug', 'not-demo')
+        .send({ email: 'admin@demo.school', password: 'Password123!' });
+
+      // If mfaEnabled were still read from the user (false), login would
+      // succeed directly with a token. Reading it from the identity (true)
+      // means MFA triggers instead — proving the source actually switched.
+      expect(res.status).toBe(200);
+      expect(res.body.mfaRequired).toBe(true);
+    } finally {
+      delete module.exports.__MOCK_SCHOOL__;
+    }
   });
 });

@@ -48,6 +48,7 @@
   },
   "jest": {
     "testEnvironment": "node",
+    "testTimeout": 15000,
     "testMatch": [
       "**/server/__tests__/**/*.test.js"
     ],

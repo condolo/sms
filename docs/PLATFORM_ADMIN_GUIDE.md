@@ -92,6 +92,12 @@ InnoLearn.com / app.InnoLearn.com
 
 > **Gmail App Password**: Go to your Google Account → Security → 2-Step Verification → App Passwords. Generate one for "Mail / Other" and paste it as `SMTP_PASS`. Do not use your regular Gmail password.
 
+### Optional environment variables
+
+| Variable | Description | Default |
+|---|---|---|
+| `IDENTITY_CUTOVER_ENABLED` | **C8/MR-001 Phase 3 kill switch.** When `true`, login and password-change credential checks read `identities.passwordHash`/`mfaEnabled` for any user with a shared identity (ADR-0003), instead of `users.password`. **Do not set this to `true` without first confirming `GET /api/qa/health`'s `identityMigration.status` field reports `"complete"`** — that means the identity backfill has finished and every linked user's dual-written hash matches. Rolling back is unsetting the var — instant, no redeploy needed to take effect on the next request. | unset (disabled) |
+
 ### Setting on Render
 
 1. Go to your Render dashboard → **innolearn-ecosystem** service

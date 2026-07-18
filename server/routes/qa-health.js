@@ -22,6 +22,7 @@ const mongoose = require('mongoose');
 
 const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
+const { isIdentityCutoverEnabled } = require('../utils/identity-cutover');
 
 const router = express.Router();
 
@@ -353,7 +354,7 @@ router.get('/health', authMiddleware, _superadmin, async (req, res) => {
         collections:  collectionCounts,
         integrity:    integrityResults,
         migration:    migrationStatus,
-        identityMigration: identityStatus,
+        identityMigration: { ...identityStatus, cutoverEnabled: isIdentityCutoverEnabled() },
         tests,
         errors,
         latestCert:   cert,

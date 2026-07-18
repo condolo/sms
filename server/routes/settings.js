@@ -26,6 +26,7 @@ const { rbac, invalidatePermCache } = require('../middleware/rbac');
 const { peekAdmissionCounter, setAdmissionCounter } = require('../utils/counters');
 const { MODULE_REGISTRY, MODULE_KEYS } = require('../config/moduleRegistry');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
+const { isIdentityCutoverEnabled } = require('../utils/identity-cutover');
 
 const router = express.Router();
 
@@ -137,9 +138,25 @@ router.put('/', authMiddleware, async (req, res) => {
       }
       const user = await Users.findOne({ id: req.jwtUser.userId, schoolId: req.jwtUser.schoolId }).lean();
       if (!user) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } });
-      // Support both field names during migration — compare against whichever is present
-      const storedHash = user.password || user.passwordHash || '';
-      const ok = await bcrypt.compare(currentPassword, storedHash);
+
+      // C8/MR-001 Phase 3 (ADR-0003, Cutover) — same identity-fetch-and-use
+      // pattern as auth.js's /login and /change-password, including the
+      // identityLookupAttempted tracking that keeps a dangling identityId
+      // from silently falling back to users.password.
+      const identityLookupAttempted = isIdentityCutoverEnabled() && !!user.identityId;
+      let identity = null;
+      if (identityLookupAttempted) {
+        identity = await _model('identities').findOne({ id: user.identityId }).lean();
+      }
+
+      let ok;
+      if (identityLookupAttempted) {
+        ok = identity?.passwordHash?.startsWith('$2') ? await bcrypt.compare(currentPassword, identity.passwordHash) : false;
+      } else {
+        // Support both field names during migration — compare against whichever is present
+        const storedHash = user.password || user.passwordHash || '';
+        ok = await bcrypt.compare(currentPassword, storedHash);
+      }
       if (!ok) return res.status(400).json({ success: false, error: { code: 'INVALID_PASSWORD', message: 'Current password is incorrect.' } });
       const hash = await bcrypt.hash(newPassword, 12);
       const now  = new Date().toISOString();
