@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.73.0] — 2026-07-18 — feat(platform): Capability/Entitlement registry (C3)
+
+### Added
+
+- **`entitlements` collection** — additive registry recording that a school holds a specific capability (e.g. `ai_reports`, `payroll`, `quickbooks_integration`) independent of its plan tier (`PLATFORM_ARCHITECTURE_EVOLUTION_v1.md` §8: "plans and features must never be coupled"). One doc per `{schoolId, key}` — granting an already-revoked key re-activates the same doc rather than duplicating it, preserving the grant history.
+- **`server/utils/entitlements.js`** — `hasEntitlement(schoolId, key)`: pure, dependency-injectable read helper (active + non-expired). Not called from anywhere yet — exists as a tested primitive for the future gate-activation phase (dependency graph C10) to call instead of writing raw queries under a Kernel-tier change.
+- **`GET/POST/DELETE /api/platform/schools/:id/entitlements[/:key]`** — list, grant (`{key, notes?, expiresAt?}`, 400 on an invalid key), and soft-revoke (status flips to `revoked`, the doc is never deleted). Grant responses include a `note` field stating the entitlement is recorded only and not yet consulted by any feature gate.
+- **"Entitlements" action** on the Schools list (`_schoolRow()`) — a modal listing current grants with per-row Revoke, plus a small grant form (key / notes / optional expiry). The success toast echoes the API's `note` verbatim, same transparency convention as Membership Phase 1's Link Identity.
+- `docs/PLATFORM_ADMIN_GUIDE.md` §6 gained "Link Identity" and "Entitlements" subsections (the former was missing from the guide since Membership Phase 1 shipped last version — added now alongside; also corrected a stale line claiming D-001 "remains unratified," which this session's earlier work already resolved).
+- 19 new jest tests: `entitlements.test.js` (7 — active/expired/revoked/missing/DI'd) and `routes/platform-entitlements.test.js` (12 — list, grant, re-activation-not-duplication, soft-revoke, 404s, 400 on invalid key, and an explicit pinning test that granting/revoking never touches the `schools` collection or the plan cache).
+
+### Governance
+
+Confirmed via research: no entitlement/capability code existed anywhere in the repo before this — a clean, additive build, same risk class as Membership Phase 1. Per `IMPLEMENTATION_DEPENDENCY_GRAPH_v1.md`'s own component matrix, C3 is "additive as a table... reversible... not user-visible until activated" — it does not meet ADR-0001's Kernel-tier bar (no query-layer or auth-layer behavior change), so no new ADR was required; `server/middleware/plan.js`'s `FEATURE_PLAN`/`planGate()` are completely untouched. Fixed the dependency graph's §5 status table: C3 marked done (registry only), C7 promoted from "in progress" to "done" (Phase 1 scope), C6 (Organization services) explicitly marked paused per direct instruction — schools remain operationally independent except for shared identity (C7) — and added a C10 row noting its dual-read design requirement.
+
+Verification: full jest suite, 25 test suites, 294/294 passed.
+
+---
+
 ## [v4.72.0] — 2026-07-18 — feat(platform): Membership model Phase 1 (shadow collection, platform-admin identity linking)
 
 ### Added

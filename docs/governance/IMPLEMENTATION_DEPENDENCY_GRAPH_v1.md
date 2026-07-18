@@ -71,9 +71,12 @@ Gated by decision D-001 and by all of Phase A/B existing beneath it.
 | C1 Organization collection | ✅ Done — `31a3f1b` |
 | C2 Organization provisioning | ✅ Done — `31a3f1b`; `provisionOrganizationForSchool()` also called immediately (not just at boot) from platform.js/onboard.js provisioning paths |
 | C4 Tenant enforcement | ✅ **Done** — ADR-0001 Accepted, `tenantModel()` rolled out across all mechanical/dynamic route files, CI ratchet down from baseline 822 to **24** documented platform-level exceptions (all in platform.js/qa-health.js, each reviewed). See `ADR-0001-tenant-context-enforcement.md`. |
-| C7 Membership collection (shadow) | 🟡 In progress — Phase 1: `provision-memberships.js` (idempotent, additive backfill, chained after `provisionOrganizations()` in boot), `memberships` indexes added, platform-admin `GET /users/search` + `POST /memberships` routes (organization-scoped grant, 409 on cross-org or duplicate), "Link Identity" UI in the Organizations panel. **Still non-authoritative** — auth.js/JWT/rbac.js/scopeMiddleware.js unchanged; nothing reads this collection for login yet. See ADR-0002. |
-| C3 / C5 (rest of Phase A) | ⬜ Not started |
+| C7 Membership collection (shadow) | ✅ Done (Phase 1 scope) — `provision-memberships.js` (idempotent, additive backfill, chained after `provisionOrganizations()` in boot), `memberships` indexes, platform-admin `GET /users/search` + `POST /memberships` routes (organization-scoped grant, 409 on cross-org or duplicate), "Link Identity" UI in the Organizations panel. **Still non-authoritative** — auth.js/JWT/rbac.js/scopeMiddleware.js unchanged; nothing reads this collection for login yet. See ADR-0002. |
+| C3 Capability/Entitlement registry | ✅ Done (registry only) — `entitlements` collection + indexes, `hasEntitlement()` read primitive (`server/utils/entitlements.js`, unused so far — exists for C10 to call), platform-admin `GET/POST/DELETE .../entitlements` routes (freeform key, soft-revoke, re-activates instead of duplicating), Entitlements UI on the Schools list. **Not consulted anywhere** — `plan.js`'s `FEATURE_PLAN`/`planGate()` are untouched; a grant here has zero effect on what a school can access until C10. |
+| C5 (rest of Phase A — audit correlation ID) | ⬜ Not started |
+| C6 Organization services | ⬜ Explicitly paused — schools stay operationally independent for now; only Identity/Membership is shared across an org (C7), not shared calendars/docs/announcements. |
 | C8 onward (Phase C — identity authoritative) | ⬜ Gated — requires D-001 (now ratified) + C7 fully populated + C4 (done) |
+| C10 Entitlement activation | ⬜ Gated — requires C3 (done) + a dual-read design so a school with no explicit entitlement still gets exactly what `FEATURE_PLAN` grants today (§3b) |
 
 ## 6. Freeze rule
 

@@ -578,6 +578,9 @@ function _schoolRow(s) {
           <button class="pa-btn" title="Change plan" onclick="changePlan('${s._id}','${s.plan}','${s.name}')">
             <i class="fas fa-layer-group"></i> Plan
           </button>
+          <button class="pa-btn" title="Grant/revoke capabilities independent of plan tier" onclick="showEntitlements('${s._id}','${s.name.replace(/'/g,"\\'")}')">
+            <i class="fas fa-unlock-alt"></i> Entitlements
+          </button>
           ${s.isActive
             ? `<button class="pa-btn danger" title="Suspend school" onclick="toggleActive('${s._id}',false,'${s.name}')"><i class="fas fa-ban"></i></button>`
             : `<button class="pa-btn success" title="Reinstate school" onclick="toggleActive('${s._id}',true,'${s.name}')"><i class="fas fa-check"></i></button>`
@@ -1050,6 +1053,120 @@ async function doChangePlan(schoolId) {
     await api('PATCH', `/schools/${schoolId}`, { plan });
     toast('Plan updated to ' + plan, 'success');
     renderSchools();
+  } catch (err) {
+    toast('Failed: ' + err.message, 'error');
+  }
+}
+
+/* ── Entitlements (C3) ────────────────────────────────────
+   Per-school capability grants, independent of plan tier. NOT yet
+   consulted by any feature gate — see the API's `note` field, echoed
+   in the success toast so the limitation is visible in the moment. */
+function showEntitlements(schoolId, schoolName) {
+  showModal(
+    `Entitlements — ${schoolName}`,
+    `<div style="display:flex;flex-direction:column;gap:12px;text-align:left">
+      <p style="font-size:12px;color:#64748b;margin:0">
+        Grant a capability to <strong>${schoolName}</strong> independent of its plan tier (e.g. an enterprise
+        contract or a promo). This records the grant only — no feature gate reads it yet.
+      </p>
+      <div id="ent-list" style="min-height:20px">
+        <div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading…</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;border-top:1px solid #e5e7eb;padding-top:12px">
+        <div style="flex:1;min-width:140px">
+          <label class="pa-label" style="font-size:11px">Key</label>
+          <input id="ent-key" class="pa-input" placeholder="e.g. ai_reports" style="width:100%">
+        </div>
+        <div style="flex:1;min-width:140px">
+          <label class="pa-label" style="font-size:11px">Notes (optional)</label>
+          <input id="ent-notes" class="pa-input" placeholder="e.g. Enterprise pilot" style="width:100%">
+        </div>
+        <div style="min-width:150px">
+          <label class="pa-label" style="font-size:11px">Expires (optional)</label>
+          <input id="ent-expires" type="date" class="pa-input" style="width:100%">
+        </div>
+        <button class="pa-btn primary" onclick="grantEntitlement('${schoolId}')"><i class="fas fa-plus"></i> Grant</button>
+      </div>
+      <div id="ent-error" style="display:none;padding:8px 12px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:12px;color:#b91c1c"></div>
+    </div>`,
+    [{ label: 'Close', cls: 'pa-btn', action: 'closeModal()' }]
+  );
+  loadEntitlements(schoolId);
+}
+
+async function loadEntitlements(schoolId) {
+  const listEl = document.getElementById('ent-list');
+  if (!listEl) return;
+  try {
+    const json  = await api('GET', `/schools/${schoolId}/entitlements`);
+    const items = json.entitlements || [];
+    if (!items.length) {
+      listEl.innerHTML = '<p style="font-size:12px;color:#94a3b8;margin:0">No entitlements granted yet.</p>';
+      return;
+    }
+    listEl.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="border-bottom:1px solid #e2e8f0">
+          <th style="text-align:left;padding:6px 8px;color:#64748b;font-size:11px;text-transform:uppercase">Key</th>
+          <th style="text-align:left;padding:6px 8px;color:#64748b;font-size:11px;text-transform:uppercase">Status</th>
+          <th style="text-align:left;padding:6px 8px;color:#64748b;font-size:11px;text-transform:uppercase">Notes</th>
+          <th style="text-align:left;padding:6px 8px;color:#64748b;font-size:11px;text-transform:uppercase">Expires</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>${items.map(e => `
+        <tr>
+          <td style="padding:6px 8px"><code>${e.key}</code></td>
+          <td style="padding:6px 8px">${e.status === 'active' ? '<span style="color:#22c55e">Active</span>' : '<span style="color:#94a3b8">Revoked</span>'}</td>
+          <td style="padding:6px 8px;color:#64748b">${e.notes || '—'}</td>
+          <td style="padding:6px 8px;color:#64748b">${e.expiresAt ? new Date(e.expiresAt).toLocaleDateString('en-GB') : '—'}</td>
+          <td style="padding:6px 8px">${e.status === 'active'
+            ? `<button class="pa-btn" style="padding:2px 8px;font-size:11px" onclick="revokeEntitlement('${schoolId}','${e.key}')">Revoke</button>`
+            : ''}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+  } catch (err) {
+    listEl.innerHTML = `<p style="font-size:12px;color:#b91c1c;margin:0">Failed to load: ${err.message}</p>`;
+  }
+}
+
+async function grantEntitlement(schoolId) {
+  const key       = document.getElementById('ent-key')?.value.trim();
+  const notes     = document.getElementById('ent-notes')?.value.trim();
+  const expiresAt = document.getElementById('ent-expires')?.value;
+  const errEl     = document.getElementById('ent-error');
+  errEl.style.display = 'none';
+
+  if (!key) {
+    errEl.textContent = 'Key is required (e.g. ai_reports).';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  try {
+    const json = await api('POST', `/schools/${schoolId}/entitlements`, {
+      key,
+      notes:     notes || undefined,
+      expiresAt: expiresAt ? new Date(expiresAt).toISOString() : undefined,
+    });
+    document.getElementById('ent-key').value     = '';
+    document.getElementById('ent-notes').value    = '';
+    document.getElementById('ent-expires').value  = '';
+    toast(json.note || 'Entitlement granted.', 'success');
+    loadEntitlements(schoolId);
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  }
+}
+
+async function revokeEntitlement(schoolId, key) {
+  try {
+    await api('DELETE', `/schools/${schoolId}/entitlements/${key}`);
+    toast(`Revoked "${key}".`, 'info');
+    loadEntitlements(schoolId);
   } catch (err) {
     toast('Failed: ' + err.message, 'error');
   }

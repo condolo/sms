@@ -649,6 +649,23 @@ const INDEXES = [
       { key: { userId: 1 },              name: 'mem_user' },
     ],
   },
+
+  /* ── entitlements (C3) ───────────────────────────────────────
+     Platform-level registry of per-school capability grants, independent
+     of plan tier (PLATFORM_ARCHITECTURE_EVOLUTION_v1.md §8: "plans and
+     features must never be coupled"). NOT YET CONSULTED by plan.js's
+     FEATURE_PLAN/planGate() — that wiring is a separate future phase
+     (C10). {schoolId,key} is the idempotency key: granting an
+     already-revoked key re-activates the same doc rather than
+     duplicating it, preserving the audit trail. */
+  {
+    col: 'entitlements',
+    indexes: [
+      { key: { id: 1 },               name: 'ent_id',          unique: true, sparse: true },
+      { key: { schoolId: 1, key: 1 }, name: 'ent_school_key',  unique: true },
+      { key: { schoolId: 1 },         name: 'ent_school' },
+    ],
+  },
 ];
 
 /* ── One-time index migrations ──────────────────────────────────

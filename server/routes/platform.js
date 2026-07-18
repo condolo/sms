@@ -603,6 +603,135 @@ router.patch('/schools/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+function _findSchoolQuery(rid) {
+  return mongoose.isValidObjectId(rid)
+    ? { $or: [{ _id: rid }, { id: rid }] }
+    : { id: rid };
+}
+
+/* GET /api/platform/schools/:id/entitlements — list all entitlements
+   (active + revoked) for a school, for audit visibility. Independent of
+   plan tier — see PLATFORM_ARCHITECTURE_EVOLUTION_v1.md §8. */
+router.get('/schools/:id/entitlements', async (req, res) => {
+  try {
+    const School       = _model('schools');
+    const Entitlements = _model('entitlements');
+
+    const school = await School.findOne(_findSchoolQuery(req.params.id)).lean();
+    if (!school) return res.status(404).json({ error: 'School not found' });
+
+    const schoolId     = school.id || school._id.toString();
+    const entitlements = await Entitlements.find({ schoolId }).sort({ createdAt: -1 }).lean();
+
+    res.json({ entitlements });
+  } catch (err) {
+    console.error('[platform/schools/:id/entitlements GET]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+const _ENTITLEMENT_KEY_RE = /^[a-z][a-z0-9_]{1,49}$/;
+
+/* POST /api/platform/schools/:id/entitlements — grant a capability to a
+   school, independent of its plan tier (PLATFORM_ARCHITECTURE_EVOLUTION_v1.md
+   §8: "plans and features must never be coupled"). NOT YET CONSULTED by
+   plan.js's FEATURE_PLAN/planGate() — see the `note` field in the
+   response; that wiring is a separate future phase (dependency graph
+   C10). Upserts on {schoolId,key}: granting an already-revoked key
+   re-activates the same doc (audit trail preserved) instead of
+   creating a duplicate. */
+router.post('/schools/:id/entitlements', async (req, res) => {
+  try {
+    const { key, notes, expiresAt } = req.body;
+    if (!key || !_ENTITLEMENT_KEY_RE.test(key)) {
+      return res.status(400).json({ error: 'key is required and must be a lowercase slug (letters, digits, underscores, starting with a letter)' });
+    }
+
+    const School       = _model('schools');
+    const Entitlements = _model('entitlements');
+
+    const school = await School.findOne(_findSchoolQuery(req.params.id)).lean();
+    if (!school) return res.status(404).json({ error: 'School not found' });
+
+    const schoolId = school.id || school._id.toString();
+    const now      = new Date().toISOString();
+
+    const entitlement = await Entitlements.findOneAndUpdate(
+      { schoolId, key },
+      {
+        $setOnInsert: {
+          id:        `ent_${crypto.randomUUID()}`,
+          schoolId,
+          key,
+          source:    'platform_grant',
+          createdAt: now,
+        },
+        $set: {
+          status:    'active',
+          notes:     notes || null,
+          expiresAt: expiresAt || null,
+          grantedBy: 'platform-admin',
+          updatedAt: now,
+        },
+      },
+      { upsert: true, new: true }
+    ).lean();
+
+    AuditService.log({
+      action: 'platform.entitlement.grant',
+      actor:  { userId: 'platform', role: 'platform', email: null },
+      schoolId,
+      target: { type: 'school', id: schoolId, label: school.name },
+      details: { key, expiresAt: expiresAt || null },
+      req,
+    });
+
+    res.status(201).json({
+      entitlement,
+      note: "This entitlement is recorded only — it is not yet consulted by any feature gate. Access continues to be governed entirely by the school's plan tier.",
+    });
+  } catch (err) {
+    console.error('[platform/schools/:id/entitlements POST]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* DELETE /api/platform/schools/:id/entitlements/:key — revoke a
+   capability. Soft: sets status:'revoked', never deletes the doc, so
+   the grant history stays auditable. */
+router.delete('/schools/:id/entitlements/:key', async (req, res) => {
+  try {
+    const School       = _model('schools');
+    const Entitlements = _model('entitlements');
+
+    const school = await School.findOne(_findSchoolQuery(req.params.id)).lean();
+    if (!school) return res.status(404).json({ error: 'School not found' });
+
+    const schoolId = school.id || school._id.toString();
+    const key      = req.params.key;
+
+    const existing = await Entitlements.findOne({ schoolId, key }).lean();
+    if (!existing) return res.status(404).json({ error: 'No entitlement found for that key' });
+
+    const now = new Date().toISOString();
+    await Entitlements.updateOne({ schoolId, key }, { $set: { status: 'revoked', updatedAt: now } });
+
+    AuditService.log({
+      action: 'platform.entitlement.revoke',
+      actor:  { userId: 'platform', role: 'platform', email: null },
+      schoolId,
+      target: { type: 'school', id: schoolId, label: school.name },
+      details: { key },
+      req,
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[platform/schools/:id/entitlements DELETE]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* POST /api/platform/schools/:id/impersonate — get a JWT for any school's superadmin */
 router.post('/schools/:id/impersonate', async (req, res) => {
   /* Gate: disabled in production unless ALLOW_IMPERSONATION=true is explicitly set */

@@ -316,7 +316,42 @@ curl -X POST https://innolearn-ecosystem.onrender.com/api/platform/organizations
 
 **Adding a school to an existing organization**: in **Provision School**, pick the organization from the new **Organization** dropdown instead of leaving it on "Create new organization for this school." The school's slug is automatically namespaced under the organization's slug — e.g. organization `green-valley` + a school slug of `eldoret` becomes `green-valley-eldoret` — so schools sharing an organization are recognizable by URL. Via the API, pass `organizationId` in the `POST /schools` body (see §7 below); leave it out to get the default behavior (a new, separate 1:1 organization, created immediately, not on the next server restart).
 
-**What this does and does not enable**: this groups schools under one organization for admin visibility and reporting — nothing more. It does **not** let one login/admin account manage multiple schools, does **not** enable a school switcher, and does **not** activate Membership-based auth. Per `docs/ARCHITECTURE_CONSTITUTION.md` §10 Stage 3, that's what the `multiSchoolEnabled` flag on an Organization means — and this dashboard never sets it to `true`. Each school under a shared organization still has its own completely independent admin login, exactly as before. Multi-school login is a separate, larger decision (D-001) that remains unratified — see `docs/governance/ARCHITECTURE_GOVERNANCE_REVIEW_v1.md`.
+**What this does and does not enable**: this groups schools under one organization for admin visibility and reporting — nothing more. It does **not** let one login/admin account manage multiple schools, does **not** enable a school switcher, and does **not** activate Membership-based auth. Per `docs/ARCHITECTURE_CONSTITUTION.md` §10 Stage 3, that's what the `multiSchoolEnabled` flag on an Organization means — and this dashboard never sets it to `true`. Each school under a shared organization still has its own completely independent admin login, exactly as before. Multi-school login depends on decision D-001 (Organization-Scoped Identity) — now **ratified** — but is still unbuilt (Constitution §10 Stages 3-4); see `docs/governance/ARCHITECTURE_GOVERNANCE_REVIEW_v1.md`.
+
+### Link Identity — grant an existing person access to a second school
+
+**Platform dashboard → Organizations → View Schools → Link Identity** (per school) lets you search for an existing person by email and record that they also have access to a second school **under the same organization**. Cross-organization linking is rejected (409) — Constitution §6's boundary is enforced in code, not just documented.
+
+```bash
+curl "https://innolearn-ecosystem.onrender.com/api/platform/users/search?email=jane" \
+  -H "X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY"
+
+curl -X POST https://innolearn-ecosystem.onrender.com/api/platform/memberships \
+  -H "Content-Type: application/json" \
+  -H "X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY" \
+  -d '{ "userId": "usr_...", "schoolId": "sch_..." }'
+```
+
+**What this does and does not enable**: this writes a record to the non-authoritative `memberships` collection — it does **not** let the person log into the newly-linked school. Login is still governed entirely by the `schoolId` on their own account. The API response's `note` field says this explicitly, and the UI's success toast echoes it verbatim. See `docs/adr/ADR-0002-membership-model-phase1.md` for the full design.
+
+### Entitlements — grant a capability independent of plan tier
+
+**Schools list → Entitlements** (per school) lets you grant or revoke a capability key (e.g. `ai_reports`, `payroll`, `quickbooks_integration`) independent of the school's plan tier — for enterprise contracts, promos, or grandfathering. Revoking is soft (the record stays for audit history; only its status flips).
+
+```bash
+curl https://innolearn-ecosystem.onrender.com/api/platform/schools/SCH_ID/entitlements \
+  -H "X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY"
+
+curl -X POST https://innolearn-ecosystem.onrender.com/api/platform/schools/SCH_ID/entitlements \
+  -H "Content-Type: application/json" \
+  -H "X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY" \
+  -d '{ "key": "ai_reports", "notes": "Enterprise pilot" }'
+
+curl -X DELETE https://innolearn-ecosystem.onrender.com/api/platform/schools/SCH_ID/entitlements/ai_reports \
+  -H "X-Platform-Key: YOUR_PLATFORM_ADMIN_KEY"
+```
+
+**What this does and does not enable**: this only records the grant. Per `PLATFORM_ARCHITECTURE_EVOLUTION_v1.md` §8, plans and features must never be coupled — but today `server/middleware/plan.js`'s `FEATURE_PLAN` map is still the *only* thing that gates any feature. No route reads this registry yet; a school's actual access is unaffected by any grant made here until a future phase wires the gate to consult it (dependency graph C10). The API response's `note` field says this explicitly.
 
 ---
 
