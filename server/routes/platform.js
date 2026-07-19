@@ -634,12 +634,12 @@ const _ENTITLEMENT_KEY_RE = /^[a-z][a-z0-9_]{1,49}$/;
 
 /* POST /api/platform/schools/:id/entitlements — grant a capability to a
    school, independent of its plan tier (PLATFORM_ARCHITECTURE_EVOLUTION_v1.md
-   §8: "plans and features must never be coupled"). NOT YET CONSULTED by
-   plan.js's FEATURE_PLAN/planGate() — see the `note` field in the
-   response; that wiring is a separate future phase (dependency graph
-   C10). Upserts on {schoolId,key}: granting an already-revoked key
-   re-activates the same doc (audit trail preserved) instead of
-   creating a duplicate. */
+   §8: "plans and features must never be coupled"). Consulted by
+   plan.js's planGate() as an additive override — see ADR-0004
+   (dependency graph C10): it only ever grants access beyond what the
+   school's plan tier already provides, never suppresses it. Upserts on
+   {schoolId,key}: granting an already-revoked key re-activates the same
+   doc (audit trail preserved) instead of creating a duplicate. */
 router.post('/schools/:id/entitlements', async (req, res) => {
   try {
     const { key, notes, expiresAt } = req.body;
@@ -688,7 +688,7 @@ router.post('/schools/:id/entitlements', async (req, res) => {
 
     res.status(201).json({
       entitlement,
-      note: "This entitlement is recorded only — it is not yet consulted by any feature gate. Access continues to be governed entirely by the school's plan tier.",
+      note: "This entitlement is consulted by plan.js's planGate() as an override when the school's plan tier alone would deny the feature. It never suppresses access the plan already grants.",
     });
   } catch (err) {
     console.error('[platform/schools/:id/entitlements POST]', err);

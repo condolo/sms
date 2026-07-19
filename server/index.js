@@ -15,6 +15,7 @@ const { repairPermissions }   = require('./utils/repairPermissions');
 const { provisionOrganizations } = require('./utils/provision-organizations');
 const { provisionMemberships } = require('./utils/provision-memberships');
 const { provisionIdentities } = require('./utils/provision-identities');
+const { correlationIdMiddleware } = require('./utils/correlation-id');
 const { seedDemo }            = require('./scripts/seed-demo');
 
 /* ── Monitoring: initialise BEFORE anything else ──────────────
@@ -51,6 +52,12 @@ const PORT = process.env.PORT || 3005;
    of the real client IP.  Level 1 = trust exactly one hop.
    Required for M-Pesa IP allowlist and rate-limit IP accuracy.  */
 app.set('trust proxy', 1);
+
+/* ── Correlation ID (C5/MR-002) ──────────────────────────────────
+   Assigns every request a correlation ID before anything else runs,
+   so AuditService.log() can attach it to every audit entry a single
+   request produces. See server/utils/correlation-id.js.            */
+app.use(correlationIdMiddleware);
 
 /* ── Block sensitive path access ────────────────────────────── */
 app.use((req, res, next) => {

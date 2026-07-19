@@ -18,6 +18,13 @@
  * never propagate to the caller. A broken audit log must never block
  * a school's workflow.
  *
+ * C5/MR-002: every entry is additionally, automatically enriched with
+ * `correlationId` (from req.correlationId — see utils/correlation-id.js)
+ * and `orgId`/`membershipId` (derived via a `{userId,schoolId}` lookup
+ * against the `memberships` collection, null when no membership exists
+ * or schoolId/actor.userId is absent). No call site needs to change —
+ * both are derived from the params every call site already passes.
+ *
  * Collection: audit_logs (append-only — documents are never updated or deleted)
  */
 'use strict';
@@ -117,13 +124,28 @@ const ACTIONS = {
 async function log({ action, actor, schoolId, target, details, severity, req } = {}) {
   try {
     const defaultSeverity = ACTIONS[action]?.severity ?? 'info';
+    const userId = actor?.userId ?? actor?.id ?? null;
+
+    // C5/MR-002 — membership/org enrichment. Non-fatal: a lookup failure
+    // (or simply no matching membership, e.g. platform-operator actions
+    // with no per-school membership) must never block the audit write.
+    // Skipped entirely when there's no schoolId/userId to look up against.
+    let orgId = null, membershipId = null;
+    if (schoolId && userId) {
+      const membership = await _model('memberships').findOne({ userId, schoolId }).lean().catch(() => null);
+      orgId        = membership?.orgId ?? null;
+      membershipId = membership?.id    ?? null;
+    }
 
     await _model(COLLECTION).create({
       action,
       severity:   severity ?? defaultSeverity,
       schoolId:   schoolId ?? null,
+      orgId,
+      membershipId,
+      correlationId: req?.correlationId ?? null,
       actor: {
-        userId:  actor?.userId   ?? actor?.id ?? null,
+        userId,
         role:    actor?.role     ?? null,
         email:   actor?.email    ?? null,
       },
@@ -147,14 +169,17 @@ async function log({ action, actor, schoolId, target, details, severity, req } =
  * Paginated query for audit logs.
  * School admins see only their own school. Superadmin can query all.
  *
- * @param {{ schoolId?, action?, actorId?, severity?, from?, to?, page?, limit? }} opts
+ * @param {{ schoolId?, action?, actorId?, severity?, correlationId?, orgId?, membershipId?, from?, to?, page?, limit? }} opts
  */
-async function query({ schoolId, action, actorId, severity, from, to, page = 1, limit = 50 } = {}) {
+async function query({ schoolId, action, actorId, severity, correlationId, orgId, membershipId, from, to, page = 1, limit = 50 } = {}) {
   const filter = {};
-  if (schoolId)  filter.schoolId       = schoolId;
-  if (action)    filter.action         = action;
-  if (actorId)   filter['actor.userId']= actorId;
-  if (severity)  filter.severity       = severity;
+  if (schoolId)       filter.schoolId          = schoolId;
+  if (action)         filter.action            = action;
+  if (actorId)        filter['actor.userId']   = actorId;
+  if (severity)       filter.severity          = severity;
+  if (correlationId)  filter.correlationId     = correlationId;
+  if (orgId)           filter.orgId            = orgId;
+  if (membershipId)    filter.membershipId     = membershipId;
   if (from || to) {
     filter.createdAt = {};
     if (from) filter.createdAt.$gte = from;

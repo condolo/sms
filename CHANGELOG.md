@@ -6,6 +6,41 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.80.0] — 2026-07-18 — feat(platform): Audit extensions — correlation ID + membership/org fields (C5/MR-002)
+
+### Added
+
+- **`server/utils/correlation-id.js`** (new) — assigns every incoming request a correlation ID (`req.correlationId`), reusing an incoming `x-request-id`/`x-correlation-id` header when present and shape-safe, otherwise generating a fresh `crypto.randomUUID()`. Wired in as the very first middleware in `server/index.js`, right after `trust proxy`. No response header is echoed back — this is a write-side/internal-tracing concern (Security Invariant 12 is a requirement on audit records, not the client-facing response contract), stated as a deliberate scope boundary, not silently decided.
+- **`AuditService.log()` now writes `correlationId` and `orgId`/`membershipId`** on every entry — zero changes needed at any of the 20 existing call sites across 6 route files, since both are derived internally from params every call site already passes (`req.correlationId`, plus a `{userId,schoolId}` lookup against `memberships`). The membership lookup is non-fatal (a failure degrades to `null`, never blocks the write) and skipped entirely when there's no `schoolId`/`actor.userId` to look up against (covers `platform.js`'s operator-actor calls without a wasted query).
+- **`AuditService.query()` and `GET /api/audit`** gain optional `correlationId`/`orgId`/`membershipId` filters, same passthrough pattern as the existing `schoolId`/`action`/`severity` filters. No change to the existing admin/superadmin school-scoping guard.
+- **`audit_logs` index block** (`server/utils/indexes.js`) gains `al_correlation` and `al_org_date` entries.
+- 24 new tests: `correlation-id.test.js` (8, pure-function coverage of the ID resolution logic including log-injection/oversized-header defense), `audit.test.js` (11, first-ever direct coverage of `AuditService` — correlation ID, membership enrichment, non-fatal degradation, query filters), `routes/audit.test.js` (5, first-ever coverage of the read route — new filter passthrough plus the pre-existing scoping guard, confirmed unaffected).
+
+### Governance
+
+C5 was the lightest-risk item remaining on the dependency graph (`Additive, reversible, not user-visible`) and MR-002 itself is rated Low/Low in the Migration Risk Register — no ADR required, matching C3/C7/C9's bundled treatment rather than C10's. Its listed blocker ("membership/org fields need C7") is satisfied now that Membership is a live collection. Dependency graph's C5 row updated to done.
+
+Verification: mutation-tested the membership-lookup-skip guard (temporarily forced the lookup to always run, confirmed 3 tests fail, restored) to prove the new coverage isn't decorative — same discipline applied to C10's `plan.test.js`. Full suite: 37/37 suites, 415/415 tests, zero regressions.
+
+---
+
+## [v4.79.0] — 2026-07-18 — feat(platform): Entitlement activation (C10/ADR-0004)
+
+### Added
+
+- **`planGate()` (`server/middleware/plan.js`) now consults the C3 entitlement registry as a dual-read override.** If a school's plan tier alone already grants a feature, behavior is byte-for-byte unchanged — `hasEntitlement()` isn't even called. Only on the plan-would-deny path is an explicit, active entitlement for that feature key checked; if present, it grants access the plan alone wouldn't. **Strictly additive, never subtractive** — an entitlement can never take away access a plan already provides, on the first request or any request after.
+- **Entitlement-lookup failures resolve to the pre-existing 403**, not a new 500 — a local try/catch around `hasEntitlement()` ensures a transient DB error degrades to exactly today's plan-derived denial, preserving the dual-read guarantee even under failure.
+- The platform-admin entitlement grant/revoke UI (built under C3, previously inert) is now functionally live — `POST .../entitlements`'s response note updated accordingly.
+- 8 new tests in `server/__tests__/plan.test.js` — first-ever direct test coverage of `planGate()`'s internals (every existing route test file stubs the whole module). Covers: plan-grants-no-lookup (verified with a mutation test — see Verification), plan-denies+no-entitlement, plan-denies+active-entitlement, entitlement-lookup-throws→403-not-500, unknown-feature-key fail-closed with zero lookups, missing-auth 401, and plan-cache pinning.
+
+### Governance — the Kernel-tier ADR gate this time, not the bundled treatment
+
+Unlike C3/C7/C9, this shipped through the heavier process ADR-0001/ADR-0003 required: `docs/adr/ADR-0004-entitlement-activation.md` was drafted as its own deliverable — no code — and required your explicit acceptance, separate from approving the plan that produced it, before any implementation began. The dependency graph and `ARCHITECTURE_GOVERNANCE_REVIEW_v1.md` both independently classify C10 as Kernel-tier despite a blast-radius finding that every one of the 21 feature keys actually reaching `planGate()` today resolves to `'core'` tier — meaning the deny branch has never fired in production for any real route, and this activation was near-zero-risk in practice. Low practical risk didn't exempt it from the governance gate; the ADR states that distinction explicitly rather than using the risk finding as an excuse to skip the process.
+
+Verification: mutation-tested the plan-grants fast path (temporarily disabled the early-return, confirmed the corresponding tests fail, then restored) to prove the new coverage isn't decorative. Full jest suite: 34/34 suites, 391/391 tests, zero regressions.
+
+---
+
 ## [v4.78.0] — 2026-07-18 — feat(auth): School switching (C9/D-004)
 
 ### Added

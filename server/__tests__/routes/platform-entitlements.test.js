@@ -5,10 +5,12 @@
    Verifies the platform-admin Capability/Entitlement registry (C3):
    listing, granting (including re-activating a revoked key instead of
    duplicating it), soft-revoking, and — critically — that none of this
-   touches server/middleware/plan.js's FEATURE_PLAN/planGate or the
-   school's own `plan` field. This registry is additive and not yet
-   consulted by any feature gate (that wiring is a separate future
-   phase, C10).
+   writes to server/middleware/plan.js's plan cache or the school's own
+   `plan` field. Since ADR-0004/C10, granted entitlements ARE consulted
+   by planGate() (server/middleware/plan.js), but only as an additive
+   override on the path where a school's plan tier alone would already
+   deny a feature — see server/__tests__/plan.test.js for that side of
+   the contract; this file only covers the CRUD routes themselves.
 
    All DB calls are mocked — no MongoDB required.
    ============================================================ */
@@ -117,14 +119,14 @@ describe('GET /api/platform/schools/:id/entitlements', () => {
 });
 
 describe('POST /api/platform/schools/:id/entitlements', () => {
-  test('grants a new entitlement and returns the record-only note', async () => {
+  test('grants a new entitlement and returns the override-note (ADR-0004/C10: consulted by planGate as an additive override)', async () => {
     const res = await supertest(app())
       .post('/api/platform/schools/sch_a/entitlements')
       .send({ key: 'ai_reports' });
 
     expect(res.status).toBe(201);
     expect(res.body.entitlement).toMatchObject({ schoolId: 'sch_a', key: 'ai_reports', status: 'active', source: 'platform_grant' });
-    expect(res.body.note).toMatch(/not yet consulted/i);
+    expect(res.body.note).toMatch(/planGate|override|plan tier alone would deny/i);
   });
 
   test('rejects a missing or invalid key', async () => {

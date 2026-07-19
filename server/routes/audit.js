@@ -6,7 +6,9 @@
    Superadmin: can query across all schools (omit schoolId param
                to get platform-wide; pass ?schoolId= to filter).
 
-   GET /api/audit            — paginated log list
+   GET /api/audit            — paginated log list (also accepts
+                                correlationId/orgId/membershipId filters,
+                                C5/MR-002 — see AuditService.query())
    GET /api/audit/actions    — list of known action types (for filter UI)
    ============================================================ */
 'use strict';
@@ -42,11 +44,14 @@ router.get('/', authMiddleware, _adminGuard, async (req, res) => {
 
     const { docs, total } = await AuditService.query({
       schoolId,
-      action:   req.query.action   || undefined,
-      actorId:  req.query.actorId  || undefined,
-      severity: req.query.severity || undefined,
-      from:     req.query.from     || undefined,
-      to:       req.query.to       || undefined,
+      action:        req.query.action        || undefined,
+      actorId:       req.query.actorId       || undefined,
+      severity:      req.query.severity      || undefined,
+      correlationId: req.query.correlationId || undefined,
+      orgId:         req.query.orgId         || undefined,
+      membershipId:  req.query.membershipId  || undefined,
+      from:          req.query.from          || undefined,
+      to:            req.query.to            || undefined,
       page,
       limit,
     });

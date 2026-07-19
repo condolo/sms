@@ -5,13 +5,11 @@
    independent of its plan tier (PLATFORM_ARCHITECTURE_EVOLUTION_v1.md
    §8: "plans and features must never be coupled").
 
-   NOT YET WIRED UP. `server/middleware/plan.js`'s FEATURE_PLAN /
-   planGate() do not call this — nothing in the app makes an access
-   decision from this collection yet. This file exists so that future
-   work (dependency graph C10 — flipping the plan gate to a dual-read
-   entitlement check) has a tested primitive to call instead of writing
-   raw queries against a new collection for the first time under a
-   Kernel-tier change.
+   Consulted by `server/middleware/plan.js`'s `planGate()` as an
+   additive override (ADR-0004, dependency graph C10) — only checked
+   when a school's plan tier alone would deny a feature; never
+   consulted, and never able to suppress access, when the plan already
+   grants it.
    ============================================================ */
 'use strict';
 

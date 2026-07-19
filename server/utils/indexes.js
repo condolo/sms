@@ -41,7 +41,8 @@ const INDEXES = [
 
   /* ── audit_logs ─────────────────────────────────────────────
      Append-only. Primary query: school + date desc.
-     Secondary: filter by action, actor, severity. */
+     Secondary: filter by action, actor, severity, correlationId
+     (C5/MR-002: traces every entry one HTTP request produced), orgId. */
   {
     col: 'audit_logs',
     indexes: [
@@ -50,6 +51,8 @@ const INDEXES = [
       { key: { 'actor.userId': 1 },          name: 'al_actor' },
       { key: { severity: 1,  createdAt: -1 }, name: 'al_severity_date' },
       { key: { createdAt: -1 },               name: 'al_date_desc' },
+      { key: { correlationId: 1 },            name: 'al_correlation' },
+      { key: { orgId: 1, createdAt: -1 },     name: 'al_org_date' },
     ],
   },
 
@@ -653,11 +656,11 @@ const INDEXES = [
   /* ── entitlements (C3) ───────────────────────────────────────
      Platform-level registry of per-school capability grants, independent
      of plan tier (PLATFORM_ARCHITECTURE_EVOLUTION_v1.md §8: "plans and
-     features must never be coupled"). NOT YET CONSULTED by plan.js's
-     FEATURE_PLAN/planGate() — that wiring is a separate future phase
-     (C10). {schoolId,key} is the idempotency key: granting an
-     already-revoked key re-activates the same doc rather than
-     duplicating it, preserving the audit trail. */
+     features must never be coupled"). Consulted by plan.js's
+     planGate() as an additive override (ADR-0004, C10) — only checked
+     when plan tier alone would deny a feature. {schoolId,key} is the
+     idempotency key: granting an already-revoked key re-activates the
+     same doc rather than duplicating it, preserving the audit trail. */
   {
     col: 'entitlements',
     indexes: [

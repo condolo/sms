@@ -9,6 +9,7 @@
    Plan is cached per schoolId for 5 minutes.
    ============================================================ */
 const { _model } = require('../utils/model');
+const { hasEntitlement } = require('../utils/entitlements');
 
 /* ── Plan hierarchy ─────────────────────────────────────────── */
 // Canonical names: base / student / family / enterprise
@@ -137,19 +138,34 @@ function planGate(feature) {
       const schoolLevel    = PLAN_LEVELS[schoolPlan]    || 1;
       const requiredLevel  = PLAN_LEVELS[requiredPlan]  || 1;
 
-      if (schoolLevel < requiredLevel) {
-        return res.status(403).json({
-          success: false,
-          error: {
-            code: 'PLAN_UPGRADE_REQUIRED',
-            message: `This feature requires the '${requiredPlan}' plan or higher. Your current plan is '${schoolPlan}'.`,
-            currentPlan: schoolPlan,
-            requiredPlan
-          }
-        });
+      if (schoolLevel >= requiredLevel) {
+        return next(); // Plan alone grants it — entitlements are never consulted on this path (ADR-0004 Decision 1).
       }
 
-      next();
+      // Plan alone would deny. Check for an explicit override entitlement
+      // before failing. Dual-read (ADR-0004): absence of a doc, or any
+      // lookup error, must resolve to exactly today's plan-derived denial
+      // — never a new failure mode and never an accidental grant.
+      let granted = false;
+      try {
+        granted = await hasEntitlement(schoolId, feature);
+      } catch (entErr) {
+        console.error(`[PlanGate] Entitlement lookup failed for school '${schoolId}', feature '${feature}' — falling back to plan-derived denial:`, entErr);
+        granted = false;
+      }
+      if (granted) {
+        return next();
+      }
+
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'PLAN_UPGRADE_REQUIRED',
+          message: `This feature requires the '${requiredPlan}' plan or higher. Your current plan is '${schoolPlan}'.`,
+          currentPlan: schoolPlan,
+          requiredPlan
+        }
+      });
     } catch (err) {
       console.error('[PlanGate] Error checking plan:', err);
       res.status(500).json({ success: false, error: { code: 'PLAN_CHECK_ERROR', message: 'Failed to verify plan' } });
