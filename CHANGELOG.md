@@ -6,6 +6,31 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.83.0] — 2026-07-19 — fix(security): tenant-isolation ratchet repair + mark-entry version conflicts (BUG-003/BUG-004)
+
+### Fixed — tenant-isolation CI ratchet (24 → 47 → 34)
+
+Requested a real audit of what's actually implemented and whether the system is stable/secure — not what the docs claim. Running the tenant-isolation ratchet directly (`scripts/verify-tenant-coverage.js`) found it would fail CI right now: direct `_model()` usage on tenant collections had grown from a baseline of 24 to 47 as `identities`/`memberships`/`entitlements` work landed across recent sessions without the `PLATFORM_COLLECTIONS` exemption list keeping pace. Traced every one of the 18 new sites individually — not a new security hole:
+
+- `identities` added to `PLATFORM_COLLECTIONS` — every real call site filters by `{id: identityId}`, never `schoolId`; the collection is org/credential-scoped by design (ADR-0003), so `tenantModel()` cannot meaningfully apply to it.
+- `auth.js`'s two genuinely single-tenant `memberships` lookups (`_buildTokenPayload`, `POST /switch-school`) migrated to `tenantModel('memberships', {schoolId})` — a real hardening, not just a ratchet workaround.
+- The remaining 34 sites documented in `ADR-0001` as reviewed platform-admin/cross-school exceptions, matching the existing carve-out for `platform.js`/`qa-health.js`. Baseline re-set to 34, the new honest, reviewed count.
+
+### Fixed — BUG-003 and BUG-004: concurrent mark-entry silently overwrote grades
+
+Asked to also close BUG-003's remaining client-side gap. Fixing it surfaced something bigger: `ExamResultsTab.jsx` (the component BUG-003 named) is not rendered by any route — `ExamsPage.jsx`'s own header comment says its unified Markbook *"replaces Results + CA Marks."* The fix there is correct but reaches no real user. Checking the endpoint the *live* Markbook actually calls (`POST /api/assessment/marks/bulk`) found the identical, previously-undocumented defect (**BUG-004**): a plain `bulkWrite` with no version check at all.
+
+- **BUG-003**: `ExamResultsTab.jsx` now reads/sends `_v` and surfaces `conflicts` in a banner — complete, correct, but dead code. Left in place (harmless) rather than reverted.
+- **BUG-004**: `assessment.js`'s `MarkSchema` gained the same optional `_v` field; existing marks pre-fetched by composite key (`studentId+subjectId+termNumber+assessmentType+instance+academicYearId`, since uniqueness here isn't a bare `studentId`), a stale version excluded from the write and reported in `conflicts`, mirroring `exam_results`' proven pattern exactly. Client: `ExamsPage.jsx`'s `MarkbookTab` — the actual, reachable Markbook — now tracks `_v` per cell, sends it on save, and surfaces conflicts in a banner plus a red-flagged cell, without ever silently clearing the teacher's unsaved entry.
+- Verified end-to-end in-browser (mocked API responses — no live MongoDB in this sandbox): edited a mark, saved, got a real conflict response back, confirmed the banner, the red cell, and the retained typed value all render correctly together.
+- 3 new server tests (`assessment-mark-conflict.test.js`, mutation-tested — 2 of 3 genuinely fail when the conflict check is broken).
+
+### Governance
+
+`ARCHITECTURE_GOVERNANCE_REVIEW_v1.md`'s BUG-003 entry corrected to explain the dead-code finding; new BUG-004 entry added. `ADR-0001` gained the `identities`/`memberships`/`entitlements` exception documentation this fix required. Full suite: 39/39 suites, 431/431 tests, zero regressions.
+
+---
+
 ## [v4.82.0] — 2026-07-18 — feat(platform): Job queue infrastructure — Phase 1 of C11 (Integration Framework, ADR-0006)
 
 ### Added

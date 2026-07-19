@@ -3,18 +3,24 @@
    ============================================================ */
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { AnimatePresence } from 'framer-motion';
 import {
   Loader2, Save, ClipboardList, BookOpen,
-  Check, TrendingUp, TrendingDown, Award, Users2,
+  Check, TrendingUp, TrendingDown, Award, Users2, AlertTriangle, X,
 } from 'lucide-react';
 import { classes as classesApi, exams as examsApi } from '@/api/client.js';
-import { Skeleton, EmptyMsg, StatusBadge } from './GradesPrimitives.jsx';
+import { Skeleton, EmptyMsg, StatusBadge, Toast } from './GradesPrimitives.jsx';
 
 export default function ExamResultsTab() {
-  const [examId, setExamId] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [edits, setEdits]   = useState({});
-  const [saved, setSaved]   = useState(false);
+  const [examId, setExamId]     = useState('');
+  const [saving, setSaving]     = useState(false);
+  const [edits, setEdits]       = useState({});
+  const [saved, setSaved]       = useState(false);
+  const [toast, setToast]       = useState(null);
+  // BUG-003 — students whose save was rejected because someone else's
+  // edit landed first (stale _v). Kept separate from `edits` so a
+  // conflicted student's in-progress typing is never silently dropped.
+  const [conflicts, setConflicts] = useState([]);
 
   const { data: examsData } = useQuery({
     queryKey: ['exams', 'list', { page: 1 }],
@@ -30,7 +36,12 @@ export default function ExamResultsTab() {
     enabled:  !!examId,
     staleTime: 0,
   });
-  const results    = resultsData?.data ?? [];
+  // BUG-003 (and prerequisite fix): GET /:id/results returns
+  // { results, stats, exam }, not a bare array — resultsData.data was
+  // being treated as the array itself, which would throw on .map()
+  // the moment this tab actually loaded real data. Each result already
+  // carries its Mongo-doc `_v` field (no server change needed for that).
+  const results    = resultsData?.data?.results ?? [];
   const resultsMap = Object.fromEntries(results.map(r => [r.studentId, r]));
 
   const { data: stuData, isLoading: stuLoading } = useQuery({
@@ -58,18 +69,52 @@ export default function ExamResultsTab() {
           studentId: sid,
           score:     edit.score   !== undefined ? Number(edit.score)  : (orig.score   ?? null),
           grade:     edit.grade   !== undefined ? edit.grade   : (orig.grade   ?? ''),
-          comment:   edit.comment !== undefined ? edit.comment : (orig.comment ?? ''),
+          // ResultSchema's field is `notes`, not `comment` — `comment` was
+          // silently stripped server-side (zod drops unrecognized keys),
+          // so a teacher's comment never actually persisted. Fixed here
+          // since it's the same object literal BUG-003's _v needs.
+          notes:     edit.comment !== undefined ? edit.comment : (orig.notes ?? ''),
+          // BUG-003 — only send _v when editing a result that already
+          // exists (orig._v defined). A brand-new result has nothing to
+          // conflict with, and omitting _v is exactly how the server
+          // knows to skip the version check for it.
+          ...(orig._v !== undefined ? { _v: orig._v } : {}),
         };
       }).filter(r => r.score !== null);
-      await examsApi.results.bulkUpsert(examId, { results: records });
-      setEdits({});
-      setSaved(true);
+
+      const res = await examsApi.results.bulkUpsert(examId, { results: records });
+      const newConflicts = res?.data?.conflicts ?? [];
+
+      if (newConflicts.length > 0) {
+        // Keep only the conflicted students' in-progress edits — theirs
+        // weren't saved, so their typing must not disappear. Everyone
+        // else's edit succeeded and can be cleared.
+        const conflictedIds = new Set(newConflicts.map(c => c.studentId));
+        setEdits(e => Object.fromEntries(Object.entries(e).filter(([sid]) => conflictedIds.has(sid))));
+        setConflicts(newConflicts);
+        setToast({
+          msg: `${newConflicts.length} result${newConflicts.length === 1 ? '' : 's'} couldn't be saved — someone else edited ${newConflicts.length === 1 ? 'it' : 'them'} first. See below.`,
+          type: 'error',
+        });
+      } else {
+        setEdits({});
+        setConflicts([]);
+        setSaved(true);
+        setToast({ msg: 'All results saved.', type: 'success' });
+      }
+      // Refetch either way — conflicted rows need the current _v/score
+      // so the next save attempt compares against reality, not stale data.
       refetchResults();
     } catch (err) {
-      alert(err?.message ?? 'Failed to save results');
+      setToast({ msg: err?.message ?? 'Failed to save results', type: 'error' });
     } finally {
       setSaving(false);
     }
+  }
+
+  function studentName(studentId) {
+    const s = students.find(st => (st.id ?? st._id) === studentId);
+    return s ? `${s.firstName} ${s.lastName}` : studentId;
   }
 
   const hasEdits = Object.keys(edits).length > 0;
@@ -89,7 +134,7 @@ export default function ExamResultsTab() {
           <label className="block text-xs font-medium text-slate-700 mb-1.5">Select Exam</label>
           <select
             value={examId}
-            onChange={e => { setExamId(e.target.value); setEdits({}); setSaved(false); }}
+            onChange={e => { setExamId(e.target.value); setEdits({}); setSaved(false); setConflicts([]); }}
             className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 text-slate-800"
           >
             <option value="">Choose an exam…</option>
@@ -112,7 +157,43 @@ export default function ExamResultsTab() {
             <Check size={15} />Results saved
           </div>
         )}
+        <AnimatePresence>
+          {toast && <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}
+        </AnimatePresence>
       </div>
+
+      {/* BUG-003 — results rejected because someone else's edit landed
+          first. The conflicted student's own typed value stays in the
+          grid below (never cleared); this just explains why and shows
+          what's currently saved so the teacher can decide what to do. */}
+      {conflicts.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={16} className="text-amber-600 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-sm font-semibold text-amber-800">
+                  {conflicts.length} result{conflicts.length === 1 ? '' : 's'} not saved — someone else edited {conflicts.length === 1 ? 'it' : 'them'} first
+                </p>
+                <p className="text-xs text-amber-700 mt-0.5">Your entry is still in the box below. Review what's currently saved, then save again to overwrite it.</p>
+              </div>
+            </div>
+            <button onClick={() => setConflicts([])} className="text-amber-600 hover:text-amber-800 shrink-0">
+              <X size={16} />
+            </button>
+          </div>
+          <ul className="mt-3 space-y-1.5">
+            {conflicts.map(c => (
+              <li key={c.studentId} className="text-xs text-amber-800 bg-white/60 rounded-lg px-3 py-2">
+                <span className="font-medium">{studentName(c.studentId)}</span>
+                {' — currently saved: '}
+                <span className="font-medium">{c.currentScore ?? '—'}</span>
+                {' (your entry has not been saved yet)'}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {!examId ? (
         <EmptyMsg icon={<ClipboardList size={36} />} title="Select an exam" subtitle="Choose an exam above to enter or view results" />
@@ -143,17 +224,21 @@ export default function ExamResultsTab() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {students.map(s => {
-                const sid     = s.id ?? s._id;
-                const orig    = resultsMap[sid] ?? {};
-                const edit    = edits[sid]      ?? {};
-                const score   = edit.score   !== undefined ? edit.score   : (orig.score   ?? '');
-                const grade   = edit.grade   !== undefined ? edit.grade   : (orig.grade   ?? '');
-                const comment = edit.comment !== undefined ? edit.comment : (orig.comment ?? '');
-                const changed = edit.score !== undefined || edit.grade !== undefined || edit.comment !== undefined;
+                const sid       = s.id ?? s._id;
+                const orig      = resultsMap[sid] ?? {};
+                const edit      = edits[sid]      ?? {};
+                const score     = edit.score   !== undefined ? edit.score   : (orig.score   ?? '');
+                const grade     = edit.grade   !== undefined ? edit.grade   : (orig.grade   ?? '');
+                const comment   = edit.comment !== undefined ? edit.comment : (orig.notes   ?? '');
+                const changed   = edit.score !== undefined || edit.grade !== undefined || edit.comment !== undefined;
+                const conflicted = conflicts.some(c => c.studentId === sid);
                 return (
-                  <tr key={sid} className={`hover:bg-slate-50 transition-colors ${changed ? 'bg-amber-50/40' : ''}`}>
+                  <tr key={sid} className={`hover:bg-slate-50 transition-colors ${conflicted ? 'bg-red-50/60' : changed ? 'bg-amber-50/40' : ''}`}>
                     <td className="px-4 py-2.5">
-                      <p className="font-medium text-slate-800">{s.firstName} {s.lastName}</p>
+                      <p className="font-medium text-slate-800 flex items-center gap-1.5">
+                        {s.firstName} {s.lastName}
+                        {conflicted && <AlertTriangle size={12} className="text-red-500" title="Not saved — someone else edited this first" />}
+                      </p>
                     </td>
                     <td className="px-4 py-2.5">
                       <input type="number" min="0" max={selectedExam?.maxScore ?? 9999}

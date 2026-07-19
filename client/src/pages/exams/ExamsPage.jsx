@@ -432,13 +432,14 @@ function ExamsTab({ years, assessmentWeights, subjectsList, canCreate }) {
    ══════════════════════════════════════════════════════════════ */
 
 /* ─── Grid cell ─────────────────────────────────────────────── */
-function GridCell({ value, rowIdx, colIdx, isLocked, onChange, onNavigate, cellRef }) {
+function GridCell({ value, rowIdx, colIdx, isLocked, hasConflict, onChange, onNavigate, cellRef }) {
   return (
     <input
       ref={cellRef}
       type="number" min="0" max="100" step="0.5"
       disabled={isLocked}
       value={value ?? ''}
+      title={hasConflict ? 'Not saved — someone else edited this first. Save again to overwrite.' : undefined}
       onChange={e => {
         const v = e.target.value === '' ? undefined : Number(e.target.value);
         if (v === undefined || (v >= 0 && v <= 100)) onChange(v);
@@ -454,11 +455,13 @@ function GridCell({ value, rowIdx, colIdx, isLocked, onChange, onNavigate, cellR
       className={`w-full rounded border px-2 py-1 text-right text-sm tabular-nums focus:outline-none transition
         ${isLocked
           ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-          : value == null
-            ? 'border-slate-200 bg-white focus:border-slate-400 focus:ring-1 focus:ring-slate-900/10'
-            : value >= 50
-              ? 'border-emerald-200 bg-emerald-50/40 focus:border-emerald-400'
-              : 'border-red-200 bg-red-50/40 focus:border-red-400'
+          : hasConflict
+            ? 'border-red-300 bg-red-50 focus:border-red-500 ring-1 ring-red-200'
+            : value == null
+              ? 'border-slate-200 bg-white focus:border-slate-400 focus:ring-1 focus:ring-slate-900/10'
+              : value >= 50
+                ? 'border-emerald-200 bg-emerald-50/40 focus:border-emerald-400'
+                : 'border-red-200 bg-red-50/40 focus:border-red-400'
         }`}
       placeholder="—"
     />
@@ -494,7 +497,20 @@ function MarkbookTab({ years }) {
   const [scores,     setScores]     = useState({});
   const [dirty,      setDirty]      = useState(false);
   const [toast,      setToast]      = useState(null);
+  // BUG-003 (live endpoint) — per-cell version, mirrors `scores`' shape.
+  // Populated from GET /marks (every mark now carries _v), sent back on
+  // save so the server can detect a stale overwrite.
+  const [versions,   setVersions]   = useState({});
+  // Cells the last save rejected because someone else edited them first.
+  // The typed value stays in `scores` (never silently cleared) until the
+  // teacher dismisses the banner or a later save for that cell succeeds.
+  const [conflicts,  setConflicts]  = useState([]);
   const cellRefs = useRef({});
+
+  const conflictedCellKeys = useMemo(
+    () => new Set(conflicts.map(c => `${c.studentId}|${c.assessmentType}${c.instance > 1 ? `_${c.instance}` : ''}`)),
+    [conflicts]
+  );
 
   /* ── Auto-select current year ── */
   const currentYear = useMemo(() => years.find(y => y.isCurrent), [years]);
@@ -611,17 +627,31 @@ function MarkbookTab({ years }) {
 
   useEffect(() => {
     if (!existingData?.data) return;
-    const map = {};
-    for (const m of existingData.data) {
-      const colId = m.instance > 1 ? `${m.assessmentType}_${m.instance}` : m.assessmentType;
-      map[m.studentId] ??= {};
-      map[m.studentId][colId] = m.rawScore;
-    }
-    setScores(map);
-    setDirty(false);
+    const vMap = {};
+    setScores(prev => {
+      // BUG-003 (live endpoint) — a cell still showing an unresolved
+      // conflict keeps the teacher's typed value; every other cell syncs
+      // to the fresh server value as before. Versions always sync,
+      // conflicted or not, so the next save compares against reality.
+      const map = {};
+      for (const m of existingData.data) {
+        const colId = m.instance > 1 ? `${m.assessmentType}_${m.instance}` : m.assessmentType;
+        map[m.studentId] ??= {};
+        vMap[m.studentId] ??= {};
+        vMap[m.studentId][colId] = m._v ?? 0;
+        const key = `${m.studentId}|${colId}`;
+        map[m.studentId][colId] = conflictedCellKeys.has(key)
+          ? (prev[m.studentId]?.[colId] ?? m.rawScore)
+          : m.rawScore;
+      }
+      return map;
+    });
+    setVersions(vMap);
+    setDirty(conflictedCellKeys.size > 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existingData]);
 
-  useEffect(() => { setScores({}); setDirty(false); }, [classId, subjectId, scheduleId]);
+  useEffect(() => { setScores({}); setVersions({}); setConflicts([]); setDirty(false); }, [classId, subjectId, scheduleId]);
 
   const setCell = useCallback((studentId, colId, value) => {
     setScores(prev => ({ ...prev, [studentId]: { ...(prev[studentId] ?? {}), [colId]: value } }));
@@ -669,22 +699,40 @@ function MarkbookTab({ years }) {
         for (const col of cols) {
           const v = scores[sid]?.[col.colId];
           if (v == null) continue;
+          const existingV = versions[sid]?.[col.colId];
           marksToSave.push({
             studentId: sid, subjectId, classId,
             termNumber:     selectedEntry.termNumber,
             assessmentType: col.typeKey,
             instance:       col.instance,
             rawScore:       v,
+            // BUG-003 (live endpoint) — only send _v for a cell that has a
+            // known prior version (editing something that already
+            // exists). A brand-new cell has nothing to conflict with;
+            // omitting _v is exactly how the server knows to skip the
+            // version check for it.
+            ...(existingV !== undefined ? { _v: existingV } : {}),
           });
         }
       }
       return assessmentApi.bulkMarks({ marks: marksToSave });
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
+      const newConflicts = res?.data?.conflicts ?? [];
       qc.invalidateQueries({ queryKey: ['assessment', 'marks'] });
       qc.invalidateQueries({ queryKey: ['assessment', 'report'] });
-      setDirty(false);
-      setToast({ msg: 'Marks saved successfully.', type: 'success' });
+      setConflicts(newConflicts);
+      if (newConflicts.length > 0) {
+        setToast({
+          msg: `${newConflicts.length} mark${newConflicts.length === 1 ? '' : 's'} couldn't be saved — someone else edited ${newConflicts.length === 1 ? 'it' : 'them'} first. See below.`,
+          type: 'error',
+        });
+        // dirty stays true — the conflicted cells are still unsaved. The
+        // existingData-sync effect will flip it back once fresh data lands.
+      } else {
+        setDirty(false);
+        setToast({ msg: 'Marks saved successfully.', type: 'success' });
+      }
     },
     onError: err => setToast({ msg: err?.message ?? 'Save failed.', type: 'error' }),
   });
@@ -692,6 +740,11 @@ function MarkbookTab({ years }) {
   const status = entryStatus(selectedEntry);
   const badge  = SCHED_BADGE[status];
   const ready  = canQuery && students.length > 0;
+
+  function studentName(studentId) {
+    const s = students.find(st => (st.id ?? st._id) === studentId);
+    return s ? `${s.firstName} ${s.lastName}` : studentId;
+  }
 
   /* ── Column stats ── */
   const colStats = useMemo(() => {
@@ -720,6 +773,39 @@ function MarkbookTab({ years }) {
       <AnimatePresence>
         {toast && <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}
       </AnimatePresence>
+
+      {/* BUG-003 (live endpoint) — marks rejected because someone else
+          edited them first. The conflicted cell's own typed value stays
+          in the grid below (never cleared); this explains why and shows
+          what's currently saved so the teacher can decide what to do. */}
+      {conflicts.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={16} className="text-amber-600 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-sm font-semibold text-amber-800">
+                  {conflicts.length} mark{conflicts.length === 1 ? '' : 's'} not saved — someone else edited {conflicts.length === 1 ? 'it' : 'them'} first
+                </p>
+                <p className="text-xs text-amber-700 mt-0.5">Your entry is still in the grid below. Review what's currently saved, then save again to overwrite it.</p>
+              </div>
+            </div>
+            <button onClick={() => setConflicts([])} className="text-amber-600 hover:text-amber-800 shrink-0">
+              <X size={16} />
+            </button>
+          </div>
+          <ul className="mt-3 space-y-1.5">
+            {conflicts.map((c, i) => (
+              <li key={`${c.studentId}-${c.assessmentType}-${c.instance}-${i}`} className="text-xs text-amber-800 bg-white/60 rounded-lg px-3 py-2">
+                <span className="font-medium">{studentName(c.studentId)}</span>
+                {' — currently saved: '}
+                <span className="font-medium">{c.currentRawScore ?? '—'}</span>
+                {' (your entry has not been saved yet)'}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* ── Selection panel ── */}
       <div className="bg-white rounded-xl border border-slate-200 p-5">
@@ -913,6 +999,7 @@ function MarkbookTab({ years }) {
                             value={scores[sid]?.[col.colId]}
                             rowIdx={rowIdx} colIdx={colIdx}
                             isLocked={selectedEntry?.isLocked ?? false}
+                            hasConflict={conflictedCellKeys.has(`${sid}|${col.colId}`)}
                             onChange={v => setCell(sid, col.colId, v)}
                             onNavigate={navigate}
                             cellRef={el => { cellRefs.current[`${rowIdx}_${colIdx}`] = el; }}

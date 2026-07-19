@@ -810,6 +810,11 @@ const MarkSchema = z.object({
   rawScore:       z.number().min(0).max(100),
   label:          z.string().max(100).optional(),
   isPublished:    z.boolean().default(true),
+  // Optimistic concurrency (mirrors exam_results/ResultSchema's _v — see
+  // POST /api/exams/:id/results). Optional: omitting it skips the version
+  // check entirely, same "no behavior change until a client sends it"
+  // contract as the exam-results endpoint.
+  _v:             z.number().int().min(0).optional(),
 });
 
 const BulkMarkSchema = z.object({
@@ -998,7 +1003,50 @@ router.post('/marks/bulk', authMiddleware, PLAN, rbac('grades', 'create'), async
     if (lockedSample) {
       return _err(res, 'Some marks in this batch are locked. Submit an unlock request via the approval workflow.', 403);
     }
-    const ops = marks.map(d => ({
+
+    // Optimistic concurrency (mirrors exams.js's POST /:id/results — same
+    // pattern, applied here because this endpoint, not exam_results, is
+    // the one live mark-entry UI (ExamsPage's Markbook) actually calls).
+    // Composite key since uniqueness here is a 6-field tuple, not a bare
+    // studentId. Fetch existing docs once, split submitted marks into
+    // conflicts (stale _v) and writable; conflicts are never sent to
+    // bulkWrite — encoding _v into an upsert filter would make a stale
+    // version silently create a duplicate instead of correctly failing to
+    // match. Omitting _v (as older clients do) skips the check entirely.
+    const _markKey = d => `${d.studentId}|${d.subjectId}|${d.termNumber}|${d.assessmentType}|${d.instance}|${d.academicYearId || ''}`;
+    const existingMarks = await Marks.find({
+      schoolId,
+      $or: marks.map(d => ({
+        studentId:      d.studentId,
+        subjectId:      d.subjectId,
+        termNumber:     d.termNumber,
+        assessmentType: d.assessmentType,
+        instance:       d.instance,
+        academicYearId: d.academicYearId || null,
+      })),
+    }).lean();
+    const existingMarkMap = Object.fromEntries(existingMarks.map(m => [_markKey(m), m]));
+
+    const conflicts = [];
+    const writableMarks = [];
+    for (const d of marks) {
+      const existing = existingMarkMap[_markKey(d)];
+      if (existing && d._v != null && Number(d._v) !== (existing._v ?? 0)) {
+        conflicts.push({
+          studentId:       d.studentId,
+          subjectId:       d.subjectId,
+          assessmentType:  d.assessmentType,
+          instance:        d.instance,
+          yourVersion:     Number(d._v),
+          currentVersion:  existing._v ?? 0,
+          currentRawScore: existing.rawScore,
+        });
+        continue;
+      }
+      writableMarks.push(d);
+    }
+
+    const ops = writableMarks.map(d => ({
       updateOne: {
         filter: {
           schoolId,
@@ -1022,16 +1070,20 @@ router.post('/marks/bulk', authMiddleware, PLAN, rbac('grades', 'create'), async
             schoolId,
             createdBy: userId,
           },
+          $inc: { _v: 1 },
         },
         upsert: true,
       },
     }));
 
-    const result = await Marks.bulkWrite(ops, { ordered: false });
+    const result = ops.length
+      ? await Marks.bulkWrite(ops, { ordered: false })
+      : { upsertedCount: 0, modifiedCount: 0 };
     return _ok(res, {
-      upserted: result.upsertedCount,
-      modified: result.modifiedCount,
-      total:    marks.length,
+      upserted:  result.upsertedCount,
+      modified:  result.modifiedCount,
+      total:     marks.length,
+      conflicts,
     }, null, 201);
   } catch (err) {
     console.error('[assessment/marks/bulk POST]', err);

@@ -1,7 +1,7 @@
 # Platform Concurrency Model v1.0
 
 **Status:** Draft — pending review
-**Purpose:** Documents how Msingi behaves under concurrent operations — conflicting writes, retried external events, and shared in-process state — as distinct from how it behaves under load. Correctness under concurrency and throughput under load are different problems; this document addresses only the first one. Two concrete defects surfaced during this review are tracked in `ARCHITECTURE_GOVERNANCE_REVIEW_v1.md`'s Production Defects register (BUG-002, BUG-003), not here — this document explains them; that one tracks their resolution.
+**Purpose:** Documents how Msingi behaves under concurrent operations — conflicting writes, retried external events, and shared in-process state — as distinct from how it behaves under load. Correctness under concurrency and throughput under load are different problems; this document addresses only the first one. Concrete defects surfaced during this review are tracked in `ARCHITECTURE_GOVERNANCE_REVIEW_v1.md`'s Production Defects register (BUG-002, BUG-003, BUG-004 — all fixed as of 2026-07-19), not here — this document explains them; that one tracks their resolution.
 
 **Metadata**
 
