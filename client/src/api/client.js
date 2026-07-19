@@ -34,14 +34,25 @@ function isSessionActive() {
 
 // ─── Core fetch ───────────────────────────────────────────────────────────────
 
-async function _req(method, path, body = null, params = null) {
+async function _req(method, path, body = null, params = null, opts = {}) {
   const headers = { 'Content-Type': 'application/json' };
 
   // Auto-send the school slug on every request so the server can resolve
   // the tenant without the user typing it. Detected from subdomain first,
   // then ?school= query param, then localStorage.
+  //
+  // opts.schoolSlug is an explicit override that WINS over all three —
+  // required for organization-first login's post-credential-check calls
+  // (verify-otp before a school-scoped JWT exists yet): on the org's
+  // shared subdomain, detectSchool() resolves to the ORGANIZATION's own
+  // slug (subdomain detection can't distinguish the two), which sits
+  // ABOVE localStorage in priority — so priming localStorage alone is
+  // not sufficient to make the right slug win once a real subdomain or
+  // ?school= param is present. An explicit override is the only thing
+  // that reliably beats it.
   const { slug } = detectSchool();
-  if (slug) headers['X-School-Slug'] = slug;
+  const effectiveSlug = opts.schoolSlug || slug;
+  if (effectiveSlug) headers['X-School-Slug'] = effectiveSlug;
 
   let url = `${BASE}${path}`;
   if (params) {
@@ -90,7 +101,7 @@ async function _req(method, path, body = null, params = null) {
 // ─── Method helpers ───────────────────────────────────────────────────────────
 
 export const _get = (path, params)       => _req('GET',    path, null, params);
-const _post   = (path, body)         => _req('POST',   path, body);
+const _post   = (path, body, opts)   => _req('POST',   path, body, null, opts);
 const _put    = (path, body)         => _req('PUT',    path, body);
 const _patch  = (path, body)         => _req('PATCH',  path, body);
 const _delete = (path, body)         => _req('DELETE', path, body);
@@ -111,11 +122,13 @@ function _resource(base) {
 export const publicApi = {
   /** Fetch school branding — no auth required */
   schoolInfo: (slug) => _get(`/public/school-info${slug ? `?slug=${slug}` : ''}`),
+  /** Resolve a slug to a school or a shared-login organization — no auth required */
+  resolvePortal: (slug) => _get(`/public/resolve-portal${slug ? `?slug=${slug}` : ''}`),
 };
 
 export const auth = {
   login:           (credentials)  => _post('/auth/login', credentials),
-  verifyOtp:       (data)         => _post('/auth/verify-otp', data),
+  verifyOtp:       (data, opts)   => _post('/auth/verify-otp', data, opts),
   forceChange:     (data)         => _post('/auth/force-change', data),
   logout:          ()             => _post('/auth/logout'),
   ping:            ()             => _post('/auth/ping'),
@@ -127,6 +140,8 @@ export const auth = {
   revokeAllSessions:(userId)      => _post('/auth/sessions/revoke-all', { userId }),
   switchSchool:    (schoolId)     => _post('/auth/switch-school', { schoolId }),
   exchange:        (code)         => _post('/auth/exchange', { code }),
+  orgLogin:        (data)         => _post('/auth/org-login', data),
+  completeOrgLogin:(data)         => _post('/auth/complete-org-login', data),
 };
 
 export const profile = {

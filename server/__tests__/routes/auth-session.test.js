@@ -90,9 +90,9 @@ let mockUserDoc = null;         // set per test
 let mockIdentityDoc = null;     // C8/MR-001 Phase 3 — set per cutover test, null otherwise
 let mockSchoolDoc = { isActive: true }; // C9 — override organizationId per test, null otherwise
 let mockOrgDoc = null;          // C9 — set per multi-school test, null otherwise
-let mockMembershipDoc = null;   // C9 — set per multi-school test, null otherwise
-let mockMembershipDocs = [];    // C9 — .find() results for _availableSchools, [] otherwise
-let mockOtherSchoolDocs = [];   // C9 — .find() results for _availableSchools' school lookup, [] otherwise
+let mockMembershipDoc = null;   // C9 — set per multi-school test, null otherwise (still used by _buildTokenPayload's own orgId/membershipId enrichment)
+let mockOtherSchoolDocs = [];   // C9 — .find({organizationId}) results: the org's schools, used by _resolveIdentitySchools' join
+let mockEligibleUserDocs = [];  // C9 — .find({identityId,...}) results: which schools an identity has a real account at, used by _resolveIdentitySchools
 
 // Supports both .lean() directly and .select(...).lean() — the two chain
 // shapes real Mongoose query builders (and this codebase's call sites)
@@ -111,6 +111,12 @@ jest.mock('../../utils/model', () => {
           findOne:  jest.fn().mockReturnValue({
             lean: jest.fn().mockImplementation(() => Promise.resolve(mockUserDoc)),
           }),
+          // _resolveIdentitySchools' reverse-direction lookup (C9 availableSchools/switch-school).
+          find: jest.fn((filter) => mockChain(() => mockEligibleUserDocs.filter(u =>
+            u.identityId === filter.identityId &&
+            (filter.schoolId?.$in || []).includes(u.schoolId) &&
+            u.isActive !== false
+          ))),
           updateOne: mockUpdateOne,
         };
       }
@@ -193,8 +199,8 @@ beforeEach(() => {
   mockSchoolDoc = { isActive: true }; // C9 — no organizationId by default
   mockOrgDoc = null;
   mockMembershipDoc = null;
-  mockMembershipDocs = [];
   mockOtherSchoolDocs = [];
+  mockEligibleUserDocs = [];
   jest.clearAllMocks();
   // C8/MR-001 Phase 3 — guarantee a deterministic "cutover disabled"
   // baseline regardless of any other test file's env state (defense
@@ -608,31 +614,17 @@ describe('POST /api/auth/login — C9 multi-school JWT fields', () => {
 ══════════════════════════════════════════════════════════════ */
 describe('POST /api/auth/login — C9 availableSchools', () => {
   test('multiSchoolEnabled false (every real org today): availableSchools absent from the response', async () => {
+    mockUserDoc = makeUser({ identityId: 'idt_demo_001' });
     mockSchoolDoc = { isActive: true, organizationId: 'org_demo' };
     mockOrgDoc = { multiSchoolEnabled: false };
     mockMembershipDoc = { id: 'mem_demo_001', orgId: 'org_demo' };
-    mockMembershipDocs = [
-      { id: 'mem_demo_001', schoolId: 'sch_demo_001', orgId: 'org_demo', isActive: true },
-      { id: 'mem_other_001', schoolId: 'sch_other_001', orgId: 'org_demo', isActive: true },
-    ];
-    mockOtherSchoolDocs = [{ id: 'sch_other_001', name: 'Other Campus' }];
-
-    const app = buildApp();
-    const res = await supertest(app)
-      .post('/api/auth/login')
-      .set('X-School-Slug', 'demo')
-      .send({ email: 'admin@demo.school', password: 'Password123!' });
-
-    expect(res.status).toBe(200);
-    expect(res.body.availableSchools).toBeUndefined();
-  });
-
-  test('multiSchoolEnabled true but only one active membership (this school): availableSchools absent', async () => {
-    mockSchoolDoc = { isActive: true, organizationId: 'org_demo' };
-    mockOrgDoc = { multiSchoolEnabled: true };
-    mockMembershipDoc = { id: 'mem_demo_001', orgId: 'org_demo' };
-    mockMembershipDocs = [
-      { id: 'mem_demo_001', schoolId: 'sch_demo_001', orgId: 'org_demo', isActive: true },
+    // Irrelevant here — payload.orgId is never set when multiSchoolEnabled
+    // is false, so _availableSchools short-circuits before ever calling
+    // the resolver these mocks would otherwise feed.
+    mockOtherSchoolDocs = [{ id: 'sch_other_001', name: 'Other Campus', slug: 'other' }];
+    mockEligibleUserDocs = [
+      { id: 'usr_demo_001', schoolId: 'sch_demo_001', identityId: 'idt_demo_001', isActive: true },
+      { id: 'usr_other_001', schoolId: 'sch_other_001', identityId: 'idt_demo_001', isActive: true },
     ];
 
     const app = buildApp();
@@ -645,15 +637,39 @@ describe('POST /api/auth/login — C9 availableSchools', () => {
     expect(res.body.availableSchools).toBeUndefined();
   });
 
-  test('multiSchoolEnabled true AND a second active membership exists: availableSchools lists the other school, excluding the current one', async () => {
+  test('multiSchoolEnabled true but the identity has no account at any other school: availableSchools absent', async () => {
+    mockUserDoc = makeUser({ identityId: 'idt_demo_001' });
     mockSchoolDoc = { isActive: true, organizationId: 'org_demo' };
     mockOrgDoc = { multiSchoolEnabled: true };
     mockMembershipDoc = { id: 'mem_demo_001', orgId: 'org_demo' };
-    mockMembershipDocs = [
-      { id: 'mem_demo_001', schoolId: 'sch_demo_001', orgId: 'org_demo', isActive: true },
-      { id: 'mem_other_001', schoolId: 'sch_other_001', orgId: 'org_demo', isActive: true },
+    mockOtherSchoolDocs = [{ id: 'sch_demo_001', name: 'Demo School', slug: 'demo' }];
+    mockEligibleUserDocs = [
+      { id: 'usr_demo_001', schoolId: 'sch_demo_001', identityId: 'idt_demo_001', isActive: true },
     ];
-    mockOtherSchoolDocs = [{ id: 'sch_other_001', name: 'Other Campus' }];
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ email: 'admin@demo.school', password: 'Password123!' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.availableSchools).toBeUndefined();
+  });
+
+  test('multiSchoolEnabled true AND the identity has a real account at a second school: availableSchools lists it, excluding the current one', async () => {
+    mockUserDoc = makeUser({ identityId: 'idt_demo_001' });
+    mockSchoolDoc = { isActive: true, organizationId: 'org_demo' };
+    mockOrgDoc = { multiSchoolEnabled: true };
+    mockMembershipDoc = { id: 'mem_demo_001', orgId: 'org_demo' };
+    mockOtherSchoolDocs = [
+      { id: 'sch_demo_001',  name: 'Demo School',  slug: 'demo' },
+      { id: 'sch_other_001', name: 'Other Campus', slug: 'other' },
+    ];
+    mockEligibleUserDocs = [
+      { id: 'usr_demo_001',  schoolId: 'sch_demo_001',  identityId: 'idt_demo_001', isActive: true },
+      { id: 'usr_other_001', schoolId: 'sch_other_001', identityId: 'idt_demo_001', isActive: true },
+    ];
 
     const app = buildApp();
     const res = await supertest(app)
@@ -665,16 +681,63 @@ describe('POST /api/auth/login — C9 availableSchools', () => {
     expect(res.body.availableSchools).toEqual([{ id: 'sch_other_001', name: 'Other Campus' }]);
   });
 
-  test('a membership doc for the current school only (as an active-filtered query would return) yields no switcher entries', async () => {
+  test('a deactivated account at the other school is excluded (isActive:false filtered at the resolver, not just at the DB)', async () => {
+    mockUserDoc = makeUser({ identityId: 'idt_demo_001' });
     mockSchoolDoc = { isActive: true, organizationId: 'org_demo' };
     mockOrgDoc = { multiSchoolEnabled: true };
     mockMembershipDoc = { id: 'mem_demo_001', orgId: 'org_demo' };
-    // Simulates the result of the real query's isActive:{$ne:false} filter
-    // already having excluded a revoked membership at the DB layer —
-    // _availableSchools then has nothing but the current school to work
-    // with, so it must still resolve to no switcher entries.
-    mockMembershipDocs = [
-      { id: 'mem_demo_001', schoolId: 'sch_demo_001', orgId: 'org_demo', isActive: true },
+    mockOtherSchoolDocs = [
+      { id: 'sch_demo_001',  name: 'Demo School',  slug: 'demo' },
+      { id: 'sch_other_001', name: 'Other Campus', slug: 'other' },
+    ];
+    mockEligibleUserDocs = [
+      { id: 'usr_demo_001',  schoolId: 'sch_demo_001',  identityId: 'idt_demo_001', isActive: true },
+      { id: 'usr_other_001', schoolId: 'sch_other_001', identityId: 'idt_demo_001', isActive: false }, // deactivated
+    ];
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ email: 'admin@demo.school', password: 'Password123!' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.availableSchools).toBeUndefined();
+  });
+
+  test('LOAD-BEARING: a real account at a school belonging to a DIFFERENT organization is never listed, even if the identity has one there', async () => {
+    mockUserDoc = makeUser({ identityId: 'idt_demo_001' });
+    mockSchoolDoc = { isActive: true, organizationId: 'org_demo' };
+    mockOrgDoc = { multiSchoolEnabled: true };
+    mockMembershipDoc = { id: 'mem_demo_001', orgId: 'org_demo' };
+    // Only org_demo's own schools are returned by schools.find({organizationId}) —
+    // sch_foreign_001 (a real account, same identityId, but a DIFFERENT
+    // organization) is structurally excluded by the resolver's own
+    // schoolId:{$in: orgSchoolIds} query, not by an application-level check.
+    mockOtherSchoolDocs = [{ id: 'sch_demo_001', name: 'Demo School', slug: 'demo' }];
+    mockEligibleUserDocs = [
+      { id: 'usr_demo_001',    schoolId: 'sch_demo_001',    identityId: 'idt_demo_001', isActive: true },
+      { id: 'usr_foreign_001', schoolId: 'sch_foreign_001', identityId: 'idt_demo_001', isActive: true },
+    ];
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ email: 'admin@demo.school', password: 'Password123!' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.availableSchools).toBeUndefined();
+  });
+
+  test('no identityId on the account: availableSchools absent even with multiSchoolEnabled true and a real account elsewhere', async () => {
+    mockUserDoc = makeUser(); // no identityId — pre-identity-migration account
+    mockSchoolDoc = { isActive: true, organizationId: 'org_demo' };
+    mockOrgDoc = { multiSchoolEnabled: true };
+    mockMembershipDoc = { id: 'mem_demo_001', orgId: 'org_demo' };
+    mockOtherSchoolDocs = [{ id: 'sch_other_001', name: 'Other Campus', slug: 'other' }];
+    mockEligibleUserDocs = [
+      { id: 'usr_other_001', schoolId: 'sch_other_001', identityId: 'idt_demo_001', isActive: true },
     ];
 
     const app = buildApp();

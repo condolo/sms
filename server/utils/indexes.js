@@ -160,6 +160,7 @@ const INDEXES = [
       { key: { schoolId: 1, username: 1 }, name: 'users_school_username_str', unique: true, partialFilterExpression: { username: { $type: 'string' } } },
       { key: { studentId: 1 },             name: 'users_student_id',      sparse: true },
       { key: { id: 1 },                    name: 'users_id',              unique: true, sparse: true },
+      { key: { identityId: 1, schoolId: 1 }, name: 'users_identity_school', sparse: true },
     ],
   },
 
@@ -699,8 +700,10 @@ const INDEXES = [
      the sole credential source until the Dual-write/Cutover phases.
      `users` is NOT restructured — this collection is purely additive,
      linked via a new `users.identityId` FK (added at the application
-     layer, not indexed here since it is looked up FROM a resolved
-     identity, never queried in the reverse direction).
+     layer). Originally looked up FROM a resolved identity only — the
+     reverse-direction query (given an identityId, which schools can it
+     log into) is now real, backing school-switching and org-first login
+     (`users_identity_school`, users block above).
      {orgId,email} partial-unique (not sparse — a collision_pending
      identity has email:null, which the partial filter, not sparse,
      correctly excludes from the uniqueness constraint, mirroring the

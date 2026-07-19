@@ -2,14 +2,23 @@
    Integration tests — POST /api/auth/switch-school
    (C9, D-004, Constitution §10 Stage 4)
 
-   First test coverage for this route. Verifies the provably-inert
-   design: fails closed at the multiSchoolEnabled check for every
-   organization that hasn't explicitly opted in (currently all of
-   them), the same-organization boundary (409 on cross-org, mirroring
-   POST /memberships), the Membership-grant-without-users-doc gap
-   (a Membership existing does not guarantee login credentials exist
-   at the target school), and the happy path minting a correctly
-   re-scoped token via the existing exchange-code mechanism.
+   Rewritten (not patched) after a real bug was found while designing
+   organization-first login: the original implementation validated the
+   target account via TargetUsers.findOne({id: userId, ...}) — matching
+   the CURRENT session's userId against the TARGET school's users.id.
+   But every per-school account gets its own independently-generated id
+   (confirmed across every user-creation path), so that lookup could
+   never succeed for a real two-school account. Every mock in the
+   PREVIOUS version of this file hardcoded the same id on both schools'
+   fixtures — the bug was encoded as a test assumption, not caught by
+   one. Fixed: resolution now goes through _resolveIdentitySchools
+   (auth.js), keyed on the JWT's identityId, never on userId.
+
+   Verifies: the identityId-required fail-closed gate, the
+   multiSchoolEnabled/cross-org boundaries (unchanged), the
+   no-account-at-target-school case via the resolver (replaces the old
+   Membership-without-users-doc test), and the happy path minting a
+   correctly re-scoped token via the existing exchange-code mechanism.
 
    All DB calls are mocked — no MongoDB required.
    ============================================================ */
@@ -23,10 +32,10 @@ jest.mock('../../services/sessionService', () => ({
 
 jest.mock('../../services/audit', () => ({ log: jest.fn().mockResolvedValue(undefined) }));
 
-let mockMembershipDoc = null;
-let mockSchoolDocs = {}; // keyed by id
-let mockOrgDocs = {};    // keyed by id
-let mockTargetUserDoc = null;
+let mockSchoolDocs = {};       // keyed by id
+let mockOrgDocs = {};          // keyed by id
+let mockEligibleUserDocs = []; // what _resolveIdentitySchools's users.find() should see: {id, schoolId, identityId, isActive}
+let mockTargetUserDoc = null;  // full doc returned by the final users.findOne() re-fetch
 
 // Supports both `.findOne(...).lean()` and `.findOne(...).select(...).lean()`
 // chain shapes, since production call sites use both.
@@ -37,19 +46,30 @@ function mockChain(resolveFn) {
 
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((collection) => {
-    if (collection === 'memberships') {
-      return { findOne: jest.fn(() => mockChain(() => mockMembershipDoc)) };
-    }
     if (collection === 'schools') {
-      return { findOne: jest.fn((filter) => mockChain(() => mockSchoolDocs[filter.id] || null)) };
+      return {
+        findOne: jest.fn((filter) => mockChain(() => mockSchoolDocs[filter.id] || null)),
+        find:    jest.fn((filter) => mockChain(() => Object.values(mockSchoolDocs).filter(s => s.organizationId === filter.organizationId))),
+      };
     }
     if (collection === 'organizations') {
       return { findOne: jest.fn((filter) => mockChain(() => mockOrgDocs[filter.id] || null)) };
     }
     if (collection === 'users') {
-      return { findOne: jest.fn(() => mockChain(() => mockTargetUserDoc)) };
+      return {
+        find: jest.fn((filter) => mockChain(() => mockEligibleUserDocs.filter(u =>
+          u.identityId === filter.identityId &&
+          (filter.schoolId?.$in || []).includes(u.schoolId) &&
+          u.isActive !== false
+        ))),
+        findOne: jest.fn((filter) => mockChain(() =>
+          (mockTargetUserDoc && mockTargetUserDoc.id === filter.id && mockTargetUserDoc.schoolId === filter.schoolId)
+            ? mockTargetUserDoc
+            : null
+        )),
+      };
     }
-    return { findOne: jest.fn(() => mockChain(() => null)) };
+    return { findOne: jest.fn(() => mockChain(() => null)), find: jest.fn(() => mockChain(() => [])) };
   }),
 }));
 
@@ -72,9 +92,9 @@ function authCookie(payload) {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockMembershipDoc = null;
   mockSchoolDocs = {};
   mockOrgDocs = {};
+  mockEligibleUserDocs = [];
   mockTargetUserDoc = null;
   delete process.env.IDENTITY_CUTOVER_ENABLED;
 });
@@ -84,7 +104,7 @@ describe('POST /api/auth/switch-school', () => {
     const app = buildApp();
     const res = await supertest(app)
       .post('/api/auth/switch-school')
-      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a' }))
+      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a', identityId: 'idt_1' }))
       .send({});
 
     expect(res.status).toBe(400);
@@ -94,97 +114,124 @@ describe('POST /api/auth/switch-school', () => {
     const app = buildApp();
     const res = await supertest(app)
       .post('/api/auth/switch-school')
-      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a' }))
+      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a', identityId: 'idt_1' }))
       .send({ schoolId: 'sch_a' });
 
     expect(res.status).toBe(400);
   });
 
-  test('404s when the caller has no membership for the target school', async () => {
-    mockMembershipDoc = null;
+  test('404s when the caller\'s token has no identityId (pre-identity-migration account) — even with a fully valid target otherwise', async () => {
+    // Everything else about the target is valid — proves the identityId
+    // guard itself is what blocks this, not a downstream 404 for an
+    // unrelated reason (school/org not found).
+    mockSchoolDocs.sch_a = { id: 'sch_a', organizationId: 'org_x' };
+    mockSchoolDocs.sch_b = { id: 'sch_b', organizationId: 'org_x', name: 'Campus B' };
+    mockOrgDocs.org_x = { id: 'org_x', multiSchoolEnabled: true };
+    mockEligibleUserDocs = [{ id: 'usr_2', schoolId: 'sch_b', identityId: 'idt_1', isActive: true }];
+    mockTargetUserDoc = {
+      _id: 'oid_target', id: 'usr_2', email: 'jane@example.com',
+      role: 'teacher', primaryRole: 'teacher', roles: ['teacher'],
+      schoolId: 'sch_b', identityId: 'idt_1', isActive: true,
+    };
 
     const app = buildApp();
     const res = await supertest(app)
       .post('/api/auth/switch-school')
-      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a' }))
+      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a' })) // no identityId
       .send({ schoolId: 'sch_b' });
 
     expect(res.status).toBe(404);
+    expect(res.body.error).toBe('You do not have access to that school.');
   });
 
   test('403s when the target organization does not have multiSchoolEnabled — the provably-inert case (every org today)', async () => {
-    mockMembershipDoc = { userId: 'usr_1', schoolId: 'sch_b', isActive: true };
+    mockSchoolDocs.sch_a = { id: 'sch_a', organizationId: 'org_x' };
     mockSchoolDocs.sch_b = { id: 'sch_b', organizationId: 'org_x', name: 'Campus B' };
-    mockOrgDocs.org_x = { multiSchoolEnabled: false }; // the real state of every org today
+    mockOrgDocs.org_x = { id: 'org_x', multiSchoolEnabled: false }; // the real state of every org today
 
     const app = buildApp();
     const res = await supertest(app)
       .post('/api/auth/switch-school')
-      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a' }))
+      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a', identityId: 'idt_1' }))
       .send({ schoolId: 'sch_b' });
 
     expect(res.status).toBe(403);
   });
 
   test('403s when the target school has no organization at all', async () => {
-    mockMembershipDoc = { userId: 'usr_1', schoolId: 'sch_b', isActive: true };
     mockSchoolDocs.sch_b = { id: 'sch_b', name: 'Campus B' }; // no organizationId
 
     const app = buildApp();
     const res = await supertest(app)
       .post('/api/auth/switch-school')
-      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a' }))
+      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a', identityId: 'idt_1' }))
       .send({ schoolId: 'sch_b' });
 
     expect(res.status).toBe(403);
   });
 
-  test('409s on a cross-organization switch attempt, even with a valid membership and multiSchoolEnabled', async () => {
-    mockMembershipDoc = { userId: 'usr_1', schoolId: 'sch_b', isActive: true };
+  test('409s on a cross-organization switch attempt, even with multiSchoolEnabled true', async () => {
     mockSchoolDocs.sch_a = { id: 'sch_a', organizationId: 'org_x' }; // current school, org_x
     mockSchoolDocs.sch_b = { id: 'sch_b', organizationId: 'org_y' }; // target school, DIFFERENT org
-    mockOrgDocs.org_y = { multiSchoolEnabled: true };
+    mockOrgDocs.org_y = { id: 'org_y', multiSchoolEnabled: true };
 
     const app = buildApp();
     const res = await supertest(app)
       .post('/api/auth/switch-school')
-      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a' }))
+      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a', identityId: 'idt_1' }))
       .send({ schoolId: 'sch_b' });
 
     expect(res.status).toBe(409);
   });
 
-  test('404s when a Membership exists but no users doc exists at the target school yet (Link Identity grant without an account)', async () => {
-    mockMembershipDoc = { userId: 'usr_1', schoolId: 'sch_b', isActive: true };
+  test('404s when the identity has no account at the target school (resolver finds no match)', async () => {
     mockSchoolDocs.sch_a = { id: 'sch_a', organizationId: 'org_x' };
     mockSchoolDocs.sch_b = { id: 'sch_b', organizationId: 'org_x' };
-    mockOrgDocs.org_x = { multiSchoolEnabled: true };
-    mockTargetUserDoc = null; // membership granted, but no users doc created (ADR-0002's own boundary)
+    mockOrgDocs.org_x = { id: 'org_x', multiSchoolEnabled: true };
+    mockEligibleUserDocs = []; // identity has no users doc anywhere in this org
 
     const app = buildApp();
     const res = await supertest(app)
       .post('/api/auth/switch-school')
-      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a' }))
+      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a', identityId: 'idt_1' }))
       .send({ schoolId: 'sch_b' });
 
     expect(res.status).toBe(404);
   });
 
-  test('happy path: mints a token scoped to the target school and returns an exchange code', async () => {
-    mockMembershipDoc = { userId: 'usr_1', schoolId: 'sch_b', isActive: true };
+  test('404s when the resolver finds a match but the fresh re-fetch comes back empty (deactivated in the gap)', async () => {
+    mockSchoolDocs.sch_a = { id: 'sch_a', organizationId: 'org_x' };
+    mockSchoolDocs.sch_b = { id: 'sch_b', organizationId: 'org_x' };
+    mockOrgDocs.org_x = { id: 'org_x', multiSchoolEnabled: true };
+    mockEligibleUserDocs = [{ id: 'usr_2', schoolId: 'sch_b', identityId: 'idt_1', isActive: true }];
+    mockTargetUserDoc = null; // fresh re-fetch finds nothing (e.g. deactivated since resolution)
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/switch-school')
+      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a', identityId: 'idt_1' }))
+      .send({ schoolId: 'sch_b' });
+
+    expect(res.status).toBe(404);
+  });
+
+  test('happy path: mints a token scoped to the target school using the resolver-matched userId, not the session userId', async () => {
     mockSchoolDocs.sch_a = { id: 'sch_a', organizationId: 'org_x' };
     mockSchoolDocs.sch_b = { id: 'sch_b', organizationId: 'org_x', name: 'Campus B' };
-    mockOrgDocs.org_x = { multiSchoolEnabled: true };
+    mockOrgDocs.org_x = { id: 'org_x', multiSchoolEnabled: true };
+    // Deliberately a DIFFERENT id than the session's 'usr_1' — proves the fix
+    // no longer requires (or assumes) the same users.id across schools.
+    mockEligibleUserDocs = [{ id: 'usr_2', schoolId: 'sch_b', identityId: 'idt_1', isActive: true }];
     mockTargetUserDoc = {
-      _id: 'oid_target', id: 'usr_1', email: 'jane@example.com',
+      _id: 'oid_target', id: 'usr_2', email: 'jane@example.com',
       role: 'teacher', primaryRole: 'teacher', roles: ['teacher'],
-      schoolId: 'sch_b',
+      schoolId: 'sch_b', identityId: 'idt_1', isActive: true,
     };
 
     const app = buildApp();
     const res = await supertest(app)
       .post('/api/auth/switch-school')
-      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a' }))
+      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a', identityId: 'idt_1' }))
       .send({ schoolId: 'sch_b' });
 
     expect(res.status).toBe(200);
@@ -194,21 +241,21 @@ describe('POST /api/auth/switch-school', () => {
     expect(res.body.token).toBeUndefined();
   });
 
-  test('the exchange code from switch-school actually redeems to a cookie scoped to the target school', async () => {
-    mockMembershipDoc = { id: 'mem_1', userId: 'usr_1', schoolId: 'sch_b', orgId: 'org_x', isActive: true };
+  test('the exchange code from switch-school actually redeems to a cookie scoped to the target school and the resolved (not session) userId', async () => {
     mockSchoolDocs.sch_a = { id: 'sch_a', organizationId: 'org_x' };
     mockSchoolDocs.sch_b = { id: 'sch_b', organizationId: 'org_x', name: 'Campus B' };
-    mockOrgDocs.org_x = { multiSchoolEnabled: true };
+    mockOrgDocs.org_x = { id: 'org_x', multiSchoolEnabled: true };
+    mockEligibleUserDocs = [{ id: 'usr_2', schoolId: 'sch_b', identityId: 'idt_1', isActive: true }];
     mockTargetUserDoc = {
-      _id: 'oid_target', id: 'usr_1', email: 'jane@example.com',
+      _id: 'oid_target', id: 'usr_2', email: 'jane@example.com',
       role: 'teacher', primaryRole: 'teacher', roles: ['teacher'],
-      schoolId: 'sch_b', isActive: true,
+      schoolId: 'sch_b', identityId: 'idt_1', isActive: true,
     };
 
     const app = buildApp();
     const switchRes = await supertest(app)
       .post('/api/auth/switch-school')
-      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a' }))
+      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a', identityId: 'idt_1' }))
       .send({ schoolId: 'sch_b' });
 
     expect(switchRes.status).toBe(200);
@@ -225,6 +272,6 @@ describe('POST /api/auth/switch-school', () => {
     expect(tokenCookie).toBeDefined();
     const payload = verify(tokenCookie.split(';')[0].split('=')[1]);
     expect(payload.schoolId).toBe('sch_b');
-    expect(payload.orgId).toBe('org_x');
+    expect(payload.userId).toBe('usr_2'); // resolved id, not the session's original 'usr_1'
   });
 });

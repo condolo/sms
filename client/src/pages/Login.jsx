@@ -5,7 +5,7 @@ import useAuthStore from '@/store/auth.js';
 import { auth as authApi, publicApi, APIError } from '@/api/client.js';
 import { detectSchool, storeSchoolSlug } from '@/utils/schoolDetect.js';
 import { setFavicon, DEFAULT_FAVICON, DEFAULT_TITLE } from '@/utils/favicon.js';
-import { Loader2 as Loader2Icon, Search, Mail, KeyRound, Eye, EyeOff, AlertTriangle } from 'lucide-react';
+import { Loader2 as Loader2Icon, Search, Mail, KeyRound, Eye, EyeOff, AlertTriangle, Users } from 'lucide-react';
 
 /* ── School branding hook ──────────────────────────────────────
    Fetches public school info once on mount. Used to brand the
@@ -18,7 +18,11 @@ function useSchoolBranding(slug) {
   useEffect(() => {
     if (!slug) { setLoadingBranding(false); return; }
     setLoadingBranding(true);
-    publicApi.schoolInfo(slug)
+    // resolve-portal returns the same shape school-info always has (plus
+    // type:'school') when the slug is a school, or type:'organization'
+    // when it's a multi-school org that has opted into shared-slug login
+    // (server/routes/public.js) — one call now serves both cases.
+    publicApi.resolvePortal(slug)
       .then(data => { setBranding(data); setLoadingBranding(false); })
       .catch(() => { setBranding(null); setLoadingBranding(false); });
   }, [slug]);
@@ -31,6 +35,7 @@ const MODES = {
   LOGIN:           'login',
   OTP:             'otp',
   CHANGE_PASSWORD: 'change-password',
+  PICKER:          'picker', // organization-first login, 2+ eligible schools
 };
 
 /* ── Demo Quick-Login panel ─────────────────────────────────────────────────
@@ -484,8 +489,10 @@ export default function Login() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [otp, setOtp]                 = useState('');
-  const [pendingMfa, setPendingMfa]   = useState(null); // { userId, schoolId }
+  const [pendingMfa, setPendingMfa]   = useState(null); // { userId, schoolId, schoolSlug? }
   const [pendingPw, setPendingPw]     = useState(null);  // { userId, schoolId, reason }
+  const [pendingPicker, setPendingPicker] = useState(null); // { code, schools } — organization-first login, 2+ eligible schools
+  const [pickerLoading, setPickerLoading] = useState(false);
   const [loading, setLoading]         = useState(false);
   const [error, setError]             = useState('');
   const [lockoutUntil, setLockoutUntil] = useState(null);  // ms timestamp
@@ -516,6 +523,7 @@ export default function Login() {
   function clearError() { setError(''); }
 
   // ─── Branding helpers ────────────────────────────────────────────────────────
+  const isOrgPortal  = branding?.type === 'organization'; // organization-first login (shared-slug)
   const schoolName   = branding?.name     || (slug ? slug.toUpperCase() : 'Msingi');
   const shortName    = branding?.shortName || schoolName;
   const logoUrl      = branding?.logoUrl   || null;
@@ -549,11 +557,26 @@ export default function Login() {
     if (!email.trim() || !password) return;
     setLoading(true); setError('');
     try {
-      const res = await authApi.login({ identifier: email.trim().toLowerCase(), password });
+      // Organization-first login (shared-slug portal): a different
+      // credential-check endpoint, since no single school is known yet.
+      // Its mfaRequired/success response shapes deliberately mirror
+      // POST /login's exactly, so everything below this branch — OTP,
+      // session-setting, navigation — is shared, unchanged code.
+      const res = isOrgPortal
+        ? await authApi.orgLogin({ orgSlug: slug, email: email.trim().toLowerCase(), password })
+        : await authApi.login({ identifier: email.trim().toLowerCase(), password });
+
+      // 2+ eligible schools — show the picker, nothing minted yet
+      if (res?.schools) {
+        setPendingPicker({ code: res.code, schools: res.schools });
+        setMode(MODES.PICKER);
+        setLoading(false);
+        return;
+      }
 
       // 2FA required
       if (res?.mfaRequired) {
-        setPendingMfa({ userId: res.userId, schoolId: res.schoolId });
+        setPendingMfa({ userId: res.userId, schoolId: res.schoolId, schoolSlug: res.schoolSlug });
         setMode(MODES.OTP);
         setLoading(false);
         return;
@@ -579,17 +602,51 @@ export default function Login() {
     }
   }
 
+  // ─── Organization-first login: school picker ───────────────────────────────
+  async function handlePickSchool(schoolId) {
+    setPickerLoading(true); setError('');
+    try {
+      const res = await authApi.completeOrgLogin({ code: pendingPicker.code, schoolId });
+
+      if (res?.mfaRequired) {
+        setPendingMfa({ userId: res.userId, schoolId: res.schoolId, schoolSlug: res.schoolSlug });
+        setMode(MODES.OTP);
+        setPickerLoading(false);
+        return;
+      }
+
+      setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry });
+      navigate(from || _defaultDest(res.user?.role), { replace: true });
+    } catch (err) {
+      setError(err instanceof APIError ? err.message : 'Could not complete sign-in. Please try again.');
+      setMode(MODES.LOGIN);
+    } finally {
+      setPickerLoading(false);
+    }
+  }
+
   // ─── OTP verify ─────────────────────────────────────────────────────────────
   async function handleOtp(e) {
     e.preventDefault();
     if (!otp.trim()) return;
     setLoading(true); setError('');
     try {
+      // Organization-first login lands on the org's shared subdomain,
+      // where detectSchool() resolves to the ORGANIZATION's own slug
+      // (subdomain detection can't distinguish an org portal from a
+      // school one) — which sits ABOVE localStorage in detectSchool()'s
+      // priority order, so priming localStorage alone is not enough to
+      // make the right slug win here. Pass an explicit override (client.js)
+      // that beats auto-detection outright, and persist it via
+      // storeSchoolSlug too, since it's genuinely correct behavior for
+      // this device's next visit regardless.
+      if (pendingMfa.schoolSlug) storeSchoolSlug(pendingMfa.schoolSlug);
+
       const res = await authApi.verifyOtp({
         userId:   pendingMfa.userId,
         schoolId: pendingMfa.schoolId,
         otp:      otp.trim(),
-      });
+      }, pendingMfa.schoolSlug ? { schoolSlug: pendingMfa.schoolSlug } : undefined);
       setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry });
       navigate(from || _defaultDest(res.user?.role), { replace: true });
     } catch (err) {
@@ -748,14 +805,16 @@ export default function Login() {
         {mode === MODES.LOGIN && (
           <>
             <p className="text-sm font-medium text-slate-600 text-center mb-5">
-              Welcome back — sign in to continue
+              {isOrgPortal
+                ? 'Sign in once to access any of your schools'
+                : 'Welcome back — sign in to continue'}
             </p>
 
             <form id="login-form" onSubmit={handleLogin} className="space-y-4">
               <ErrorBanner />
 
               <div>
-                <label htmlFor="email" className="form-label">Username / Email / Admission No.</label>
+                <label htmlFor="email" className="form-label">{isOrgPortal ? 'Email' : 'Username / Email / Admission No.'}</label>
                 <input
                   id="email" type="text" autoComplete="username" required
                   value={email}
@@ -801,7 +860,7 @@ export default function Login() {
               </button>
             </form>
 
-            <SocialLoginButtons slug={slug} primary={primary} />
+            {!isOrgPortal && <SocialLoginButtons slug={slug} primary={primary} />}
 
             <p className="mt-5 text-center text-[11px] text-slate-400">
               Powered by{' '}
@@ -810,7 +869,45 @@ export default function Login() {
               </a>
             </p>
 
-            {slug === 'demo' && <DemoPanel onPick={handleQuickLogin} />}
+            {!isOrgPortal && slug === 'demo' && <DemoPanel onPick={handleQuickLogin} />}
+          </>
+        )}
+
+        {/* ── PICKER MODE (organization-first login, 2+ eligible schools) ── */}
+        {mode === MODES.PICKER && pendingPicker && (
+          <>
+            <div className="flex flex-col items-center gap-2 mb-1">
+              <Users size={28} className="text-slate-400" />
+              <h2 className="text-xl font-bold text-slate-800 text-center">Choose a school</h2>
+            </div>
+            <p className="text-sm text-slate-500 text-center mb-6">
+              You have access to more than one school in {schoolName}.
+            </p>
+
+            <ErrorBanner />
+
+            <div className="space-y-2">
+              {pendingPicker.schools.map(s => (
+                <button
+                  key={s.id}
+                  type="button"
+                  disabled={pickerLoading}
+                  onClick={() => handlePickSchool(s.id)}
+                  className="w-full flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3 text-left text-sm font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50 transition-colors disabled:opacity-60"
+                >
+                  {s.name}
+                  {pickerLoading ? <Spinner size="sm" /> : <span aria-hidden>→</span>}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => { setMode(MODES.LOGIN); setPendingPicker(null); clearError(); }}
+              className="w-full text-sm text-slate-500 hover:text-slate-700 py-1 mt-4"
+            >
+              ← Back to sign in
+            </button>
           </>
         )}
 

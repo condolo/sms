@@ -147,37 +147,72 @@ async function _buildTokenPayload(user, schoolId) {
 }
 
 /**
+ * Which schools can this identity actually log into, within one
+ * organization? The single source of truth for "eligible schools" used
+ * by both school-switching (_availableSchools/switch-school below) and
+ * org-first login (auth-org-login, a separate file). Deliberately does
+ * NOT consult `memberships` — a Membership grant (e.g. the Link Identity
+ * flow, platform.js POST /memberships) records authorization intent but
+ * is NOT created alongside a per-school `users` doc, so it cannot answer
+ * "can this identity actually log in here." A real `users` doc carrying
+ * a matching `identityId` is the only thing that can. The org boundary
+ * is pushed into the query itself (schoolId: {$in: orgSchoolIds}), not
+ * applied as an application-level post-filter, for defense-in-depth.
+ *
+ * @param {string} identityId
+ * @param {string} orgId
+ * @returns {Promise<Array<{schoolId: string, userId: string, slug: string, name: string}>>}
+ */
+async function _resolveIdentitySchools(identityId, orgId) {
+  if (!identityId || !orgId) return [];
+  try {
+    const orgSchools = await _model('schools')
+      .find({ organizationId: orgId })
+      .select('id name slug')
+      .lean();
+    if (!orgSchools.length) return [];
+    const orgSchoolIds = orgSchools.map(s => s.id);
+    const schoolMap = Object.fromEntries(orgSchools.map(s => [s.id, s]));
+
+    const eligibleUsers = await _model('users')
+      .find({ identityId, schoolId: { $in: orgSchoolIds }, isActive: { $ne: false } })
+      .select('id schoolId')
+      .lean();
+
+    return eligibleUsers
+      .filter(u => schoolMap[u.schoolId])
+      .map(u => ({
+        schoolId: u.schoolId,
+        userId:   u.id,
+        slug:     schoolMap[u.schoolId].slug,
+        name:     schoolMap[u.schoolId].name,
+      }));
+  } catch (err) {
+    console.error('[auth] _resolveIdentitySchools lookup failed (non-fatal):', err.message);
+    return [];
+  }
+}
+
+/**
  * C9 (D-004) — other schools this user can switch to without
  * re-authenticating, for the client to render a School Switcher.
- * Only non-empty when the token payload carries orgId (i.e. this
- * user's current school's organization has multiSchoolEnabled: true —
- * false for every organization today, so this returns [] in every
- * current deployment) and at least one other active Membership exists
- * in that same organization.
+ * Only non-empty when the token payload carries both orgId (this
+ * user's current school's organization has multiSchoolEnabled: true)
+ * and identityId (this account has been linked to a shared identity,
+ * C8/MR-001 Phase 0 — unconditional, not gated by cutover). Sourced
+ * from _resolveIdentitySchools, not `memberships` — see that function's
+ * comment for why a Membership grant alone cannot answer this.
  *
  * @param {Object} payload — a built token payload (from _buildTokenPayload,
  *   or a verified JWT payload — same shape)
  * @returns {Promise<Array<{id: string, name: string}>>}
  */
 async function _availableSchools(payload) {
-  if (!payload.orgId) return [];
-  try {
-    const memberships = await _model('memberships')
-      .find({ userId: payload.userId, orgId: payload.orgId, isActive: { $ne: false } })
-      .lean();
-    const otherSchoolIds = [...new Set(
-      memberships.map(m => m.schoolId).filter(id => id && id !== payload.schoolId)
-    )];
-    if (otherSchoolIds.length === 0) return [];
-    const schools = await _model('schools')
-      .find({ id: { $in: otherSchoolIds } })
-      .select('id name')
-      .lean();
-    return schools.map(s => ({ id: s.id, name: s.name }));
-  } catch (err) {
-    console.error('[auth] _availableSchools lookup failed (non-fatal):', err.message);
-    return [];
-  }
+  if (!payload.orgId || !payload.identityId) return [];
+  const eligible = await _resolveIdentitySchools(payload.identityId, payload.orgId);
+  return eligible
+    .filter(s => s.schoolId !== payload.schoolId)
+    .map(s => ({ id: s.schoolId, name: s.name }));
 }
 
 /* ── Temp password generator (for new user invites) ────── */
@@ -1250,11 +1285,13 @@ router.post('/switch-school', authMiddleware, switchSchoolLimiter, async (req, r
 
     const userId = req.jwtUser.userId;
 
-    // Membership required for the target school (ADR-0002, C7) — this
-    // records access authorization, not credentials (see below).
-    const Memberships = tenantModel('memberships', { schoolId: targetSchoolId });
-    const membership  = await Memberships.findOne({ userId }).lean();
-    if (!membership || membership.isActive === false) {
+    // Every real per-school account minted since identity provisioning
+    // (ADR-0003 Phase 0, unconditional, not gated by cutover) carries
+    // identityId on the JWT. Its absence means this account predates
+    // identity provisioning or was never backfilled — fail closed rather
+    // than fall back to the userId-matching bug this replaces (see below).
+    const identityId = req.jwtUser.identityId;
+    if (!identityId) {
       return res.status(404).json({ error: 'You do not have access to that school.' });
     }
 
@@ -1284,19 +1321,32 @@ router.post('/switch-school', authMiddleware, switchSchoolLimiter, async (req, r
       return res.status(409).json({ error: 'Cross-organization switching is not supported.' });
     }
 
-    // A Membership grant (Link Identity, ADR-0002) records authorization
-    // but deliberately does NOT create a per-school users doc — so a
-    // valid Membership does not guarantee login credentials exist at
-    // the target school yet. Failing closed here, not silently
-    // provisioning one, is the correct behavior for that boundary.
+    // Resolve via the shared identity-based resolver (auth.js, above),
+    // not a Membership grant or a userId match — see that function's
+    // comment. This was previously TargetUsers.findOne({id: userId,
+    // schoolId: targetSchoolId}), which matched the CURRENT session's
+    // userId against the TARGET school's users.id — but every per-school
+    // account gets its own independently-generated id (confirmed across
+    // every user-creation path), so that lookup could never succeed for
+    // a real two-school account. Fixed here: the correct target-school
+    // userId comes from the resolver's own result, never from the
+    // session's current userId.
+    const eligible = await _resolveIdentitySchools(identityId, targetOrg.id);
+    const match    = eligible.find(s => s.schoolId === targetSchoolId);
+    if (!match) {
+      return res.status(404).json({ error: 'No account exists for you at that school yet.' });
+    }
+
+    // Re-fetch fresh rather than trust the resolver's snapshot verbatim —
+    // catches deactivation in the gap between resolution and mint.
     const TargetUsers = tenantModel('users', { schoolId: targetSchoolId });
-    const targetUser  = await TargetUsers.findOne({ id: userId, schoolId: targetSchoolId }).lean();
+    const targetUser  = await TargetUsers.findOne({ id: match.userId, schoolId: targetSchoolId, isActive: { $ne: false } }).lean();
     if (!targetUser) {
       return res.status(404).json({ error: 'No account exists for you at that school yet.' });
     }
 
     const { sessionId, absoluteExpiry } = await SessionService.createSession(
-      userId, targetSchoolId, targetUser.primaryRole || targetUser.role,
+      targetUser.id, targetSchoolId, targetUser.primaryRole || targetUser.role,
       req.headers['cf-connecting-ip'] || req.ip,
       req.headers['user-agent'] || '',
     );
@@ -1304,6 +1354,16 @@ router.post('/switch-school', authMiddleware, switchSchoolLimiter, async (req, r
     const token = sign({ ...(await _buildTokenPayload(targetUser, targetSchoolId)), sessionId, absoluteExpiry });
     const code  = _issueExchangeCode(token);
 
+    // NOTE: AuditService.log()'s internal org/membership enrichment looks
+    // up memberships.findOne({userId: actor.userId, schoolId}) — using
+    // the CURRENT (source) school's userId against the TARGET schoolId,
+    // which will not match a native target-school membership doc (keyed
+    // on the target school's own userId). Non-fatal, enrichment-only:
+    // orgId/membershipId simply stay null on this specific action's audit
+    // entry. Not fixed here — using the target-school id as `actor.userId`
+    // would make the stored actor identity inconsistent with actor.role/
+    // actor.email (still the source session), a worse tradeoff than a
+    // blank enrichment field for a non-security, display-only gap.
     AuditService.log({
       action: 'auth.school_switch',
       actor:  { userId, role: req.jwtUser.role, email: req.jwtUser.email },
@@ -1319,5 +1379,271 @@ router.post('/switch-school', authMiddleware, switchSchoolLimiter, async (req, r
     res.status(500).json({ error: 'School switch failed' });
   }
 });
+
+/* ══════════════════════════════════════════════════════════════
+   Organization-first login (org-shared-slug login)
+
+   User visits an organization's single URL, authenticates once, and
+   either lands directly in their one school or picks from several —
+   completing the Organization/Identity/Membership layer's intended
+   behavior (PLATFORM_ARCHITECTURE_EVOLUTION_v1.md §15), not a new one.
+
+   Three independent gates, none redundant:
+     - organizations.multiSchoolEnabled — JWT orgId/membershipId + C9
+       switching, already exists, per-org, platform-admin togglable.
+     - organizations.orgSlugLoginEnabled — this org's slug becomes a
+       public login surface, already exists, per-org, deliberately
+       separate so enabling switching never silently opens this too.
+     - IDENTITY_CUTOVER_ENABLED — platform-global env var. Dual-write
+       (ADR-0003 Phase 1, already shipped, unconditional) keeps
+       identities.passwordHash correct regardless of this flag, so it
+       is not strictly required for correctness here — requiring it
+       anyway is a deliberate, near-zero-cost conservative choice: this
+       new public credential-check endpoint cannot go live in any
+       deployment until an operator has made the informed, platform-
+       wide decision that identities are authoritative.
+
+   Unlike switch-school (an already-authenticated user re-scoping,
+   handed off via the OAuth exchange-code mechanism), org-login and
+   complete-org-login are first-time credential entry — same shape as
+   POST /login and POST /verify-otp, both of which mint the token and
+   set the HttpOnly cookie directly in the same response. Following
+   that existing, proven pattern here rather than introducing a second
+   one: no exchange code anywhere in this section.
+   ══════════════════════════════════════════════════════════════ */
+const orgLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
+  message: { error: 'Too many login attempts. Please try again in 15 minutes.' },
+});
+
+/* Single-use, ~2-minute picker codes — a Map SEPARATE from
+   _exchangeCodes above. Entries here are never a signed JWT, only a
+   server-computed, server-locked allowlist of {schoolId, userId} pairs
+   an already-password-verified identity may redeem from. Structurally
+   incapable of being handed to POST /exchange (different Map, entirely
+   different entry shape) — the class of bug this guards against is a
+   partially-verified "identity confirmed, no school chosen yet" code
+   ever being redeemable as if it were a full session. 120s TTL (a human
+   clicking a picker), not the 30s used for machine-immediate OAuth/
+   switch-school codes. */
+const _orgPickCodes = new Map();
+function _issueOrgPickCode(entry) {
+  const code = crypto.randomBytes(32).toString('hex');
+  _orgPickCodes.set(code, { ...entry, expiresAt: Date.now() + 120_000 });
+  for (const [k, v] of _orgPickCodes) {
+    if (v.expiresAt <= Date.now()) _orgPickCodes.delete(k);
+  }
+  return code;
+}
+
+/* POST /api/auth/org-login
+   Body: { orgSlug, email, password }
+   Not tenantMiddleware-gated — no school is known yet; this route
+   resolves the organization itself, independently. */
+router.post('/org-login', orgLoginLimiter, async (req, res) => {
+  try {
+    const { orgSlug, email: rawEmail, password } = req.body;
+    const email = (rawEmail || '').toLowerCase().trim();
+    if (!orgSlug || !email || !password) {
+      return res.status(400).json({ error: 'orgSlug, email, and password are required' });
+    }
+
+    // Same not-found shape whether the slug matches nothing, matches an
+    // org that hasn't opted in, or any other negative — no existence
+    // leakage via response-shape difference (mirrors resolve-portal).
+    const NOT_FOUND = () => res.status(404).json({ error: 'Portal not found' });
+
+    const Org = _model('organizations');
+    const org = await Org.findOne({ slug: orgSlug.toLowerCase() }).lean();
+    if (!org?.multiSchoolEnabled || !org?.orgSlugLoginEnabled || !isIdentityCutoverEnabled()) {
+      return NOT_FOUND();
+    }
+
+    // Layer 2 lockout, reused unmodified — orgId passed in the schoolId
+    // slot, which SecurityService accepts fine (_key() is just a string
+    // composite, not schema-bound to a real school).
+    const retryAfter = await SecurityService.checkAccountLock(org.id, email);
+    if (retryAfter !== null) {
+      return res.status(429).json({
+        error: 'Too many failed login attempts. Please wait before trying again.',
+        retryAfter,
+      });
+    }
+
+    // status:'active' excludes collision_pending identities by
+    // construction — never matches this query, never a separate branch,
+    // so "not found," "collision_pending," and "wrong password" all
+    // produce the byte-identical response below (closes the enumeration
+    // side-channel a collision_pending state would otherwise open).
+    const Identities = _model('identities');
+    const identity = await Identities.findOne({ orgId: org.id, email, status: 'active' }).lean();
+    const match = identity?.passwordHash?.startsWith('$2')
+      ? await bcrypt.compare(password, identity.passwordHash)
+      : false;
+
+    if (!match) {
+      const clientIp = req.headers['cf-connecting-ip'] || req.ip;
+      SecurityService.recordFail(org.id, email, clientIp, org).catch(() => {});
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+    SecurityService.clearFail(org.id, email).catch(() => {});
+
+    const eligible = await _resolveIdentitySchools(identity.id, org.id);
+    if (eligible.length === 0) {
+      return res.status(403).json({ error: 'No school access found for this account in this organization.' });
+    }
+
+    if (eligible.length > 1) {
+      const code = _issueOrgPickCode({
+        identityId: identity.id,
+        orgId: org.id,
+        allowedSchools: eligible,
+      });
+      return res.json({
+        schools: eligible.map(s => ({ id: s.schoolId, name: s.name, slug: s.slug })),
+        code,
+      });
+    }
+
+    // Exactly one eligible school — complete the session now, identical
+    // shape to the single-school POST /login below this point.
+    const target = eligible[0];
+    const TargetUsers = tenantModel('users', { schoolId: target.schoolId });
+    const user = await TargetUsers.findOne({ id: target.userId, schoolId: target.schoolId, isActive: { $ne: false } }).lean();
+    if (!user) {
+      return res.status(403).json({ error: 'No school access found for this account in this organization.' });
+    }
+
+    const Schools = _model('schools');
+    const school = await Schools.findOne({ id: target.schoolId }).lean();
+    return await _completeOrgLoginSession(req, res, user, school, identity);
+  } catch (err) {
+    console.error('[auth/org-login]', err);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+/* POST /api/auth/complete-org-login
+   Body: { code, schoolId }
+   Redeems a picker code from org-login's 2+-eligible-schools branch. */
+router.post('/complete-org-login', orgLoginLimiter, async (req, res) => {
+  try {
+    const { code, schoolId } = req.body;
+    if (!code || !schoolId) {
+      return res.status(400).json({ error: 'code and schoolId are required' });
+    }
+
+    const entry = _orgPickCodes.get(code);
+    _orgPickCodes.delete(code); // single-use regardless of outcome
+
+    if (!entry || entry.expiresAt <= Date.now()) {
+      return res.status(400).json({ error: 'This selection has expired. Please sign in again.' });
+    }
+
+    // The hard security boundary: the server never trusts the client's
+    // school choice beyond selecting from the set it already locked in
+    // at org-login time. `match.userId` — never anything client-supplied
+    // — is what gets used below.
+    const match = entry.allowedSchools.find(s => s.schoolId === schoolId);
+    if (!match) {
+      return res.status(403).json({ error: 'That school is not available for this account.' });
+    }
+
+    // TOCTOU re-check: re-fetch the school fresh and confirm it still
+    // belongs to the org the identity was authenticated against — closes
+    // the narrow window (up to 120s) where a platform admin could
+    // re-parent the school to a different organization between org-login
+    // and this redemption.
+    const Schools = _model('schools');
+    const school = await Schools.findOne({ id: schoolId }).lean();
+    if (!school || school.organizationId !== entry.orgId) {
+      return res.status(403).json({ error: 'That school is not available for this account.' });
+    }
+
+    // Re-fetch the specific user doc fresh via the userId captured at
+    // mint time — never re-derived from anything client-supplied —
+    // catching deactivation in the gap since org-login ran.
+    const TargetUsers = tenantModel('users', { schoolId });
+    const user = await TargetUsers.findOne({ id: match.userId, schoolId, isActive: { $ne: false } }).lean();
+    if (!user) {
+      return res.status(403).json({ error: 'That school is not available for this account.' });
+    }
+
+    const Identities = _model('identities');
+    const identity = await Identities.findOne({ id: entry.identityId }).lean();
+
+    return await _completeOrgLoginSession(req, res, user, school, identity);
+  } catch (err) {
+    console.error('[auth/complete-org-login]', err);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+/* Shared terminal step for org-login (1-eligible fast path) and
+   complete-org-login (post-picker) — MFA branch mirrors POST /login's
+   exactly (same MFA_ROLES set, same mfaOtp/mfaExpiry write, same
+   response shape, handed off to the EXISTING, unmodified
+   POST /verify-otp — no parallel OTP-verification logic here), then
+   mints the token and sets the cookie directly, matching /login's and
+   /verify-otp's own pattern (no exchange code — see section header). */
+async function _completeOrgLoginSession(req, res, user, school, identity) {
+  const userRole = user.primaryRole || user.role;
+  const isDemo   = school?.slug === 'demo';
+  const mfaEnabled = identity ? identity.mfaEnabled : user.mfaEnabled;
+
+  if (!isDemo && MFA_ROLES.has(userRole) && mfaEnabled !== false) {
+    const otp     = _genOTP();
+    const otpHash = _hashOTP(otp);
+    const expiry  = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    await tenantModel('users', { schoolId: school.id }).updateOne({ _id: user._id }, { mfaOtp: otpHash, mfaExpiry: expiry });
+
+    email.sendLoginOTP({
+      name:        user.name,
+      email:       user.email,
+      otp,
+      schoolName:  school.name || school.slug,
+      schoolEmail: school.systemEmail || '',
+      schoolId:    school.id,
+    }).catch(err => console.error('[org-login 2FA email]', err.message));
+
+    return res.json({
+      mfaRequired: true,
+      userId:      user.id || user._id.toString(),
+      schoolId:    school.id,
+      schoolSlug:  school.slug,
+      hint:        `A 6-digit code has been sent to ${user.email.replace(/(.{2})(.*)(@.*)/, '$1***$3')}`,
+    });
+  }
+
+  await tenantModel('users', { schoolId: school.id }).updateOne({ _id: user._id }, { lastLogin: new Date().toISOString() });
+  AuditService.log({ action: 'auth.login', actor: { userId: user.id, role: userRole, email: user.email }, schoolId: school.id, details: { via: 'org_login' }, req });
+
+  const { sessionId, absoluteExpiry } = await SessionService.createSession(
+    user.id, school.id, userRole,
+    req.headers['cf-connecting-ip'] || req.ip,
+    req.headers['user-agent'] || '',
+  );
+
+  const tokenPayload = await _buildTokenPayload(user, school.id);
+  const token = sign({ ...tokenPayload, sessionId, absoluteExpiry });
+
+  const safeUser = { ...user, password: undefined };
+  const allRoles = Array.isArray(user.roles) && user.roles.length ? user.roles : [userRole];
+  const mergedPerms = await _loadMergedPermissions(school.id, allRoles, user.id);
+  if (mergedPerms !== null) safeUser.permissions = mergedPerms;
+
+  const availableSchools = await _availableSchools(tokenPayload);
+
+  _checkTrialAndNotify(school).catch(() => {});
+  _setAuthCookie(res, token, absoluteExpiry);
+  res.json({
+    user: safeUser, school, absoluteExpiry,
+    ...(availableSchools.length ? { availableSchools } : {}),
+  });
+}
 
 module.exports = router;
