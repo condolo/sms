@@ -6,6 +6,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.81.0] — 2026-07-18 — docs(governance): Billing ratification — subscription belongs to the School (C12/ADR-0005)
+
+### Changed
+
+- **`docs/ARCHITECTURE_CONSTITUTION.md` §12 rewritten.** Previously described an Organization-owned subscription model that was never built, flagged `⚠ SUPERSEDED PENDING BILLING ADR` since 2026-07-16. Replaced with the model every billing code path already implements: the subscription belongs to the **School** — `server/routes/billing.js`'s `billing_snapshots` (tenant-scoped, no `organizationId` field), `server/routes/mpesa.js`'s subscription STK-push flow, and `server/middleware/plan.js`'s `plan`/`planExpiry` fields on the `schools` collection were all already correct. This ADR closes a documentation gap, not a code gap.
+- **`docs/adr/ADR-0005-billing-ratification.md`** (new) — ratifies the School-owned model, explicitly fences off a future central "Organization Billing Account" (named as aspirational in `PLATFORM_ARCHITECTURE_EVOLUTION_v1.md` §16) as unbuilt, out-of-scope future work rather than something this ADR designs or commits to.
+- `ARCHITECTURE_GOVERNANCE_REVIEW_v1.md`'s §12 status row and Decision Register row R2 marked resolved. Dependency graph's C12 row corrected — its original "org billing account, central invoicing" framing was itself inaccurate; marked done as a ratification, not a build.
+
+### Governance
+
+Unlike ADR-0004/C10 (Kernel-tier, required a separate explicit acceptance gate), this ADR resolves Governance Review row R2, which carries no such qualifier — proposed and accepted in the same pass, matching ADR-0002's (C7) lighter precedent. **No code changed.** This closes C12; C11 (Integration framework) remains explicitly deferred — confirmed still blocked on queue infrastructure that doesn't exist anywhere in the codebase (`node-cron` only, no Redis/BullMQ, no retry-queue semantics), matching the governance corpus's own recommendation to keep it deferred until a concrete integration justifies the investment.
+
+Verification: docs-only phase, no jest run needed — confirmed no executable code was touched. Read-through of the ADR and rewritten §12 for internal consistency against `billing.js`/`plan.js`'s actual behavior.
+
+---
+
 ## [v4.80.0] — 2026-07-18 — feat(platform): Audit extensions — correlation ID + membership/org fields (C5/MR-002)
 
 ### Added

@@ -43,8 +43,8 @@ These definitions are authoritative. If code or documentation contradicts them, 
 | **Employment Record** | The record of a person's work at a specific School. Local to that School. Not shared across Schools even within the same Organization. |
 | **Student Enrollment** | The record of a student's attendance at a specific School for a specific academic period. Local to that School. Transfers create new Enrollment records; they do not move existing ones. |
 | **Tenant** | Synonymous with School for all transactional purposes. Every data query must resolve to exactly one tenant (School). |
-| **Subscription** | The billing relationship between an Organization and Msingi. Organizations own subscriptions. Schools inherit access from their Organization's subscription. |
-| **Licensing** | Module-level access within a School. An Organization may subscribe to a plan that licenses specific modules across its Schools. |
+| **Subscription** | The billing relationship between a School and Msingi (ratified by ADR-0005, §12). Each School owns its own subscription independently — an Organization has no subscription object of its own and is never billed directly. |
+| **Licensing** | Module-level access within a School, independent of and unrelated to any other School's licensing, even within the same Organization. |
 
 ---
 
@@ -385,7 +385,7 @@ Build Organization-level analytics and executive dashboards using dedicated `/ap
 | Notifications | No change | No change | No change |
 | Imports / Exports | No change | No change | No change |
 | Platform Dashboard | No change | Additive (org view) | Additive |
-| Billing | No change | No change | Migration (org-level subscription) |
+| Billing | No change | No change | No change — subscription stays School-owned (§12, ADR-0005); no org-level migration |
 | users collection | No change | No change | Additive (orgId field) |
 | schools collection | Additive (orgId field) | No change | No change |
 
@@ -393,31 +393,46 @@ Build Organization-level analytics and executive dashboards using dedicated `/ap
 
 ## 12. Billing and Licensing Model
 
-> **⚠ SUPERSEDED PENDING BILLING ADR (2026-07-16).** The model below vests the subscription
-> in the Organization. The adopted target-state direction (`docs/governance/PLATFORM_ARCHITECTURE_EVOLUTION_v1.md`
-> §7 & §16) instead vests the **subscription in the School** — the Platform invoices the
-> Organization, but each School is licensed independently. That direction matches the current
-> implementation (`server/middleware/plan.js:106`, `server/routes/mpesa.js:598` both store the
-> plan per-School). The text below is retained for audit trail until the Billing ADR formally
-> amends it. See `docs/governance/ARCHITECTURE_GOVERNANCE_REVIEW_v1.md §12 (R2)`. Do not build
-> against the model below without checking the ADR outcome first.
+**Ratified by ADR-0005 (C12), 2026-07-18.** The subscription belongs to the **School**, not
+the Organization. This section previously described an Organization-owned subscription model
+that was never built; every billing code path (`server/routes/billing.js`,
+`server/utils/billing-cron.js`, `server/routes/mpesa.js`'s subscription-payment flow,
+`server/middleware/plan.js`'s `plan`/`planExpiry` fields on the `schools` collection)
+independently arrived at the School-owned model below, and ADR-0005 formally adopted that
+reality into the Constitution rather than leaving code and governance in disagreement. See
+`docs/adr/ADR-0005-billing-ratification.md` and `docs/governance/ARCHITECTURE_GOVERNANCE_REVIEW_v1.md`
+Decision Register row R2.
 
 ### Ownership
 
 ```
-Organization  →  Subscription (plan, billing contact, invoice)
-  └── School  →  Modules (which features are licensed)
+School  →  Subscription (plan, planExpiry, addOns, billing_snapshots)
 ```
 
-One Organization, one invoice. The Organization admin manages the subscription. Schools inherit access from the Organization plan.
+Every School carries its own plan tier, billing history, and subscription-payment trail,
+independently — tenant-scoped exactly like every other operational collection under
+`tenantModel()` (§4/ADR-0001). An Organization has no subscription object of its own; it is a
+governance/identity grouping (§6-10), not a billing unit. Two Schools in the same Organization
+may sit on different plan tiers with no relationship to each other's billing.
+
+There is no consolidated, cross-school invoice today. A future, optional central "Organization
+Billing Account" that aggregates payment across an Organization's schools is named as
+aspirational future work in `PLATFORM_ARCHITECTURE_EVOLUTION_v1.md` §16 — ADR-0005 explicitly
+does not design or build it; it remains unscoped, genuinely open work should an Organization
+customer ever request it.
 
 ### Existing Schools
 
-Every existing school already has its own plan (core / standard / premium). In Phase 1, this does not change — the Organization wraps the existing School and inherits its plan. Organization-level billing becomes available when a school explicitly creates a multi-school Organization and opts in.
+Every school has its own plan (core/base, standard/student, premium/family, enterprise) and
+always has — this was never a Phase 1 transitional state. Organizations do not change how a
+School is billed; a School's subscription is identical whether or not it belongs to a
+multi-school Organization.
 
 ### Module Licensing
 
-Individual Schools within an Organization may have different module configurations. A Diocese running five schools might license the Hostel module only for the boarding school, not all five.
+Individual Schools within an Organization may have different module configurations. A Diocese
+running five schools might license the Hostel module only for the boarding school, not all
+five. Independent of, and unrelated to, plan/subscription ownership above.
 
 ---
 

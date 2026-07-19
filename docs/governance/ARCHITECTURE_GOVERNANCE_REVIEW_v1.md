@@ -140,7 +140,7 @@ Unlike Security Policy Conflicts (§3), these have no legitimate trade-off or po
 |---|---|---|
 | §7 — Session Architecture | Pending ADR (D-004) | Pending |
 | §9 — Identity guarantees | Pending ADR (D-001) | Pending |
-| §12 — Billing and Licensing Model | Architecture Evolution Plan §7/§16 (subscription belongs to School, not Organization) — matches current code (`plan.js:106`, `mpesa.js:598`); Constitution currently vests subscription in the Organization | Pending Billing ADR — Constitution §12 annotated as superseded pending that ADR |
+| §12 — Billing and Licensing Model | Architecture Evolution Plan §7/§16 (subscription belongs to School, not Organization) — matches current code (`plan.js:106`, `mpesa.js:598`); Constitution now vests subscription in the School | **Resolved — ADR-0005**, 2026-07-18. Constitution §12 rewritten, superseded banner removed. |
 
 ---
 
@@ -199,7 +199,7 @@ Only then may Phase 1 (ADR drafting) commence.
 | # | Plan element | Relationship to committed docs | Action |
 |---|---|---|---|
 | R1 | Identity / Membership / Authorization split (§9–11), security invariants 1/9/10 (§17) | **Already aligned** with `IDENTITY_DOMAIN_MODEL_v1.md` and `PLATFORM_CONCURRENCY_MODEL.md` | None — confirm and proceed |
-| R2 | Subscription belongs to School (§7, §16) | **Contradicts** Constitution §12 (subscription vests in Organization). **Matches current code** (`plan.js:106`, `mpesa.js:598`) | Amend Constitution §12 via Billing ADR (registered in §8 above); §12 annotated as superseded-pending |
+| R2 | Subscription belongs to School (§7, §16) | **Resolved.** Matched current code (`plan.js:106`, `mpesa.js:598`) all along; Constitution §12 now agrees, via ADR-0005 (2026-07-18) | Done — no further action |
 | R3 | Plans vs Entitlements decoupling (§8) | **Net-new** — today `plan.js:33-80` hard-couples plan→feature in one static map | Own ADR (Kernel-tier); not "foundation," sequence deliberately |
 | R4 | Integration as a foundation domain (§13) | **Sequencing conflict** with this review's Non-Decisions register (Integration Marketplace / Public API deferred) and `PLATFORM_CONCURRENCY_MODEL.md` (no queue infra exists) | Keep deferred; own ADR off the identity critical path |
 | R5 | Nine-domain taxonomy (§3–4) | **Overlaps/collides** with `PLATFORM_OPERATING_MODEL.md §2`'s seven Platform Kernel subsystems | Reconcile taxonomies explicitly — one must absorb or supersede the other |
