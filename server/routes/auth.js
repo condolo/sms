@@ -132,7 +132,7 @@ async function _buildTokenPayload(user, schoolId) {
     if (school?.organizationId) {
       const org = await _model('organizations').findOne({ id: school.organizationId }).select('multiSchoolEnabled').lean();
       if (org?.multiSchoolEnabled) {
-        const membership = await _model('memberships').findOne({ userId: payload.userId, schoolId }).select('id orgId').lean();
+        const membership = await tenantModel('memberships', { schoolId }).findOne({ userId: payload.userId }).select('id orgId').lean();
         if (membership) {
           payload.orgId = membership.orgId;
           payload.membershipId = membership.id;
@@ -1252,8 +1252,8 @@ router.post('/switch-school', authMiddleware, switchSchoolLimiter, async (req, r
 
     // Membership required for the target school (ADR-0002, C7) — this
     // records access authorization, not credentials (see below).
-    const Memberships = _model('memberships');
-    const membership  = await Memberships.findOne({ userId, schoolId: targetSchoolId }).lean();
+    const Memberships = tenantModel('memberships', { schoolId: targetSchoolId });
+    const membership  = await Memberships.findOne({ userId }).lean();
     if (!membership || membership.isActive === false) {
       return res.status(404).json({ error: 'You do not have access to that school.' });
     }

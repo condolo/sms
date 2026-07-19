@@ -30,9 +30,20 @@ const { _model } = require('./model');
    will be: D-001 is ratified, but that migration's design keeps `users`
    permanently tenant-scoped and structurally unchanged. It's the NEW
    `identities` collection that owns credentials and is org-scoped
-   instead — accessed via _model() directly, same as `memberships` and
-   `entitlements`, none of which need listing here since nothing ever
-   attempts to tenantModel() them. */
+   instead — every real call site filters by `{id: identityId}`
+   (or an unscoped platform-wide aggregate in qa-health.js), never by
+   schoolId, so tenantModel() cannot meaningfully apply to it (it would
+   either force-inject a schoolId field the documents don't carry, or
+   silently couple an org-scoped credential to one school).
+
+   `memberships`/`entitlements` are deliberately NOT here — unlike
+   `identities`, their documents DO carry a real schoolId, and several
+   call sites (auth.js's _buildTokenPayload/switch-school) use
+   tenantModel() for exactly that reason. Their remaining direct
+   _model() sites are genuinely cross-school (platform-admin routes
+   managing an arbitrary target school, or a caller listing every
+   school in an org) — reviewed exceptions per ADR-0001 §4, documented
+   there, not blanket-exempted here. */
 const PLATFORM_COLLECTIONS = new Set([
   'schools',
   'organizations',
@@ -42,6 +53,7 @@ const PLATFORM_COLLECTIONS = new Set([
   'landing_content',      // singleton CMS doc (id:'global'), no schoolId concept
   'system_announcements', // platform-wide notices shown on every school's dashboard
   'queue_jobs',           // C11 Phase 1 / ADR-0006 — job queue; not every job is school-scoped
+  'identities',           // C8/MR-001 — org/credential-scoped, not schoolId-shaped (see above)
 ]);
 
 /* ── Tenant context ─────────────────────────────────────────────
