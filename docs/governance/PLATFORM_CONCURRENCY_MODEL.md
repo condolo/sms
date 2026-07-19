@@ -17,7 +17,7 @@
 
 - Single Node.js process today. No `maxPoolSize` set on `mongoose.connect()` (`server/config/db.js:17` — default: 100). No clustering/PM2 config found.
 - Scheduled tasks run via `node-cron` (confirmed dependency) — in-process, on a timer, not dispatched to external workers.
-- **No distributed queue exists** (no BullMQ/Bull/Agenda/Redis-backed job system found). "Background jobs" today means in-process cron only. The requirement that a queued job must snapshot its tenant context rather than re-reading a live session is a *future* requirement, for whenever a real queue gets built — not a current gap, since there is nothing to snapshot yet.
+- **No distributed queue exists** (no BullMQ/Bull/Agenda/Redis-backed job system found). "Background jobs" today means in-process `node-cron` plus, since ADR-0006 (C11 Phase 1, 2026-07-18), a single-process, MongoDB-collection-based retry queue (`server/utils/job-queue.js`) for one job type (security alert webhooks) — still not distributed, still one process, still no external worker. The requirement that a queued job must snapshot its tenant context rather than re-reading a live session remains a *future* requirement for whenever a genuinely tenant-scoped job type gets queued — the current queue's only job type is platform-level, not tenant-scoped, so there is still nothing to snapshot yet.
 
 ## 2. Consistency Model
 
@@ -42,9 +42,7 @@ Where neither mechanism applies, the default is last-write-wins, silently, with 
 
 ## 4. Idempotency — Per Endpoint
 
-**`POST /api/mpesa/callback` — no idempotency guard.** The handler finds the transaction by `checkoutRequestId` and, on success, unconditionally runs `Payments.create(...)` with no check for `txn.status === 'completed'` beforehand. Safaricom's own callback behavior includes retries — the code's own comment acknowledges this. A retried successful callback creates a **second, duplicate Payment record for the same money.** Tracked as BUG-002.
-
-**`POST /api/mpesa/subscription/callback`** — same missing guard, structurally, but performs only `$set` updates (plan expiry, paid-at), not a `$create` — idempotent by accident, not by design. Same root cause as BUG-002, lower severity; noted under the same fix.
+**`POST /api/mpesa/callback` and `POST /api/mpesa/subscription/callback` — fixed (BUG-002).** *Corrected 2026-07-18, discovered stale while grounding ADR-0006/C11 Phase 1.* Both callbacks now atomically claim the transaction — `findOneAndUpdate({checkoutRequestId, status:{$ne:'completed'}}, {$set:{status:'completed',...}})` — before creating/updating a Payment. A retried callback (Safaricom's own documented behavior) finds `status` already `'completed'`, matches nothing, and is skipped before a second Payment can be created. Regression test: `server/__tests__/routes/mpesa-idempotency.test.js`. See `ARCHITECTURE_GOVERNANCE_REVIEW_v1.md` §4 for the authoritative fix record — this section previously described the pre-fix, present-tense "no guard" state and was itself the stale document.
 
 **Email sends, report-card publish retries, other webhook paths** — not audited this pass.
 
@@ -62,7 +60,7 @@ RBAC permission cache, DataScope cache, and token-version/revocation cache are a
 | Token-version cache | Likely yes | Same single-process limitation |
 | Session storage | Not yet — depends on D-004 | Don't decide ahead of the pending session/JWT architecture decision |
 | Rate limiting | Needs verification | `express-rate-limit`'s default store is also in-memory per-process; not confirmed whether this codebase overrides that |
-| Background jobs | Not applicable yet | No queue exists to migrate |
+| Background jobs | Not yet | A Mongo-based queue exists since ADR-0006 (single process, one job type) — revisit Redis only if it needs to scale beyond one process or beyond low volume |
 
 Redis is not a default answer — each candidate was reasoned about individually.
 
@@ -72,8 +70,9 @@ A session's active Membership must come only from that request's own validated t
 
 ## 8. Retry Strategy
 
-- Retries currently happen **without** idempotency protection on both M-Pesa callback paths (§4).
+- Both M-Pesa callback paths now have idempotency protection (§4, BUG-002 fixed) — a retried Safaricom callback is safely skipped, not reprocessed.
 - Retries are inherently safe where sequential counters are used (`$inc` on a per-school counter document) — naturally idempotent regardless of retry count.
+- The job queue (`server/utils/job-queue.js`, ADR-0006) adds a third retry mechanism: exponential backoff with a bounded attempt count, moving to `dead_letter` rather than retrying forever. Distinct from the two above — this is for *internal* jobs the platform itself schedules, not external callbacks arriving unprompted.
 
 ## 9. Failure Modes, Observability
 

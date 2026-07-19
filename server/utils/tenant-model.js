@@ -41,6 +41,7 @@ const PLATFORM_COLLECTIONS = new Set([
   'platform_settings',    // singleton config doc (id:'global'), no schoolId concept
   'landing_content',      // singleton CMS doc (id:'global'), no schoolId concept
   'system_announcements', // platform-wide notices shown on every school's dashboard
+  'queue_jobs',           // C11 Phase 1 / ADR-0006 — job queue; not every job is school-scoped
 ]);
 
 /* ── Tenant context ─────────────────────────────────────────────

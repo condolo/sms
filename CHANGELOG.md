@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.82.0] — 2026-07-18 — feat(platform): Job queue infrastructure — Phase 1 of C11 (Integration Framework, ADR-0006)
+
+### Added
+
+- **`server/utils/job-queue.js`** (new) — a MongoDB-collection-based retry queue (no Redis/BullMQ — nothing here justifies a new external infra dependency). `enqueueJob({type, payload, maxAttempts})` writes a `queue_jobs` doc; `registerHandler(type, fn)` maps a job type to an async handler; `processQueueOnce()` atomically claims due jobs (`findOneAndUpdate({status:'pending'},...,{new:true})`, mirroring the proven-correct claim idiom already in `mpesa.js`'s callbacks) and runs the handler, with exponential backoff on failure (1min → 2min → 4min ... capped at 30min) and a `dead_letter` terminal state once `maxAttempts` (default 5) is exceeded; `startQueueWorker()` schedules it every minute via `node-cron`, with an overlap guard (a new requirement — every existing cron file in this codebase runs daily/weekly and never needed one).
+- **One real integration**: `server/services/audit.js`'s security-alert webhook (previously fire-and-forget, silently dropping failures) now enqueues instead of firing inline. The webhook-POST logic is split into `_postSecurityAlertWebhook()`, which returns a real Promise that rejects on a non-2xx response or a request error — the previous version swallowed both, which is exactly why it could never be retried.
+- `queue_jobs` added to `tenant-model.js`'s `PLATFORM_COLLECTIONS` — not every job is school-scoped (e.g. platform-operator security alerts), and this makes the platform-level decision structurally enforced (`tenantModel('queue_jobs', ...)` now throws immediately) rather than just conventional.
+- 13 new tests (9 in `job-queue.test.js` — first-ever coverage, reusing `mpesa-idempotency.test.js`'s exact stateful-mock idiom for the atomic-claim cases; 4 extending `audit.test.js`), mutation-tested (temporarily zeroed the backoff formula, confirmed the corresponding test fails, restored).
+
+### Governance — scoped deliberately, contradiction-checked before starting
+
+C11 was the last item still marked "deferred" on the dependency graph. The user clarified only C6 (Organization services) was a deliberate pause — C11's deferral was a technical-prerequisite gap (no queue infrastructure existed), not a standing decision — and asked to proceed unless it contradicted something. It didn't: the one governance objection on record (`ARCHITECTURE_GOVERNANCE_REVIEW_v1.md` row R4) partly cited a "Non-Decisions register" entry that, checked directly, **doesn't exist** — that citation is corrected, not obeyed. The other half of R4 (no queue infra) was real and is what this phase builds — scoped narrowly, not the full Integration Domain (`ADR-0006`, Major not Kernel, proposed-and-accepted in one pass like ADR-0002/0005). Connector Registry, OAuth Framework, Webhook Engine, API Gateway, Sync Engine, Monitoring, and Rate Limiting all remain deferred — no concrete integration justifies them yet.
+
+Two stale governance-doc claims, found while grounding this exact work, corrected alongside it: `PLATFORM_CONCURRENCY_MODEL.md` §4 still described M-Pesa's webhook idempotency gap (`BUG-002`) as unfixed, present tense — it's already fixed and tested; `monitoring.js`'s crash-path webhook sender was deliberately left un-queued (queue-ifying an alert that fires immediately before `process.exit(1)` would make it less reliable, not more, since the next worker tick may not run before the process dies).
+
+Verification: full jest suite, 38/38 suites, 428/428 tests, zero regressions.
+
+---
+
 ## [v4.81.0] — 2026-07-18 — docs(governance): Billing ratification — subscription belongs to the School (C12/ADR-0005)
 
 ### Changed

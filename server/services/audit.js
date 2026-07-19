@@ -25,11 +25,16 @@
  * or schoolId/actor.userId is absent). No call site needs to change —
  * both are derived from the params every call site already passes.
  *
+ * C11 Phase 1 / ADR-0006: ALERT_ACTIONS entries enqueue a retried
+ * webhook delivery (utils/job-queue.js) instead of firing it inline —
+ * see _postSecurityAlertWebhook below.
+ *
  * Collection: audit_logs (append-only — documents are never updated or deleted)
  */
 'use strict';
 
 const { _model } = require('../utils/model');
+const { enqueueJob, registerHandler } = require('../utils/job-queue');
 
 /* ── Critical-event alert actions ───────────────────────────────
    These fire a webhook alert in addition to writing the audit log.
@@ -42,12 +47,20 @@ const ALERT_ACTIONS = new Set([
   'report_card.moderation_bypassed',
 ]);
 
-function _sendSecurityAlert({ action, actor, schoolId, target, details }) {
+/* C11 Phase 1 / ADR-0006 — the security alert webhook now goes through
+   the job queue instead of firing fire-and-forget. This is the pure
+   POST logic, registered as the queue's handler for this job type; it
+   returns a real Promise that REJECTS on a non-2xx response or a
+   request error, which is what lets the queue actually retry — the
+   previous inline version swallowed both silently. */
+function _postSecurityAlertWebhook({ action, actor, schoolId, target, details }) {
   const webhook = process.env.ALERT_WEBHOOK_URL;
-  if (!webhook) return;
-  try {
-    const https = require('https');
-    const http  = require('http');
+  return new Promise((resolve, reject) => {
+    if (!webhook) return resolve(); // shouldn't normally be enqueued without it — see log()'s guard
+
+    let url;
+    try { url = new URL(webhook); } catch (err) { return reject(err); }
+
     const lines = [
       `🔴 **Security Alert — ${action}**`,
       `School: \`${schoolId ?? 'unknown'}\``,
@@ -56,12 +69,9 @@ function _sendSecurityAlert({ action, actor, schoolId, target, details }) {
       details ? `Details: \`${JSON.stringify(details).slice(0, 200)}\`` : null,
       `Time: ${new Date().toISOString()}`,
     ].filter(Boolean).join('\n');
-
     const body = JSON.stringify({ content: lines });
-    let url;
-    try { url = new URL(webhook); } catch (_) { return; }
 
-    const lib  = url.protocol === 'https:' ? https : http;
+    const lib  = url.protocol === 'https:' ? require('https') : require('http');
     const opts = {
       hostname: url.hostname,
       port:     url.port || (url.protocol === 'https:' ? 443 : 80),
@@ -69,12 +79,18 @@ function _sendSecurityAlert({ action, actor, schoolId, target, details }) {
       method:   'POST',
       headers:  { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
     };
-    const req = lib.request(opts, (res) => { res.resume(); });
-    req.on('error', () => { /* non-fatal */ });
+    const req = lib.request(opts, (res) => {
+      res.resume();
+      if (res.statusCode >= 200 && res.statusCode < 300) resolve();
+      else reject(new Error(`webhook responded ${res.statusCode}`));
+    });
+    req.on('error', reject);
     req.write(body);
     req.end();
-  } catch (_) { /* non-fatal — alerts must never block a workflow */ }
+  });
 }
+
+registerHandler('security_alert_webhook', _postSecurityAlertWebhook);
 
 const COLLECTION = 'audit_logs';
 
@@ -155,9 +171,19 @@ async function log({ action, actor, schoolId, target, details, severity, req } =
       userAgent: req?.headers?.['user-agent'] ?? null,
       createdAt: new Date().toISOString(),
     });
-    // Fire webhook alert for critical security actions (non-blocking)
-    if (ALERT_ACTIONS.has(action)) {
-      _sendSecurityAlert({ action, actor, schoolId, target, details });
+    // C11 Phase 1 / ADR-0006 — critical security actions enqueue a
+    // retried webhook delivery instead of firing fire-and-forget.
+    // Guard stays here (not inside the handler) so no queue_jobs doc is
+    // written at all when the env var is unset, matching the previous
+    // early-return behavior. Own try/catch, separate from the audit-log
+    // write above — an enqueue failure must not be misreported as a
+    // failure to write the audit log itself, which already succeeded.
+    if (ALERT_ACTIONS.has(action) && process.env.ALERT_WEBHOOK_URL) {
+      try {
+        await enqueueJob({ type: 'security_alert_webhook', payload: { action, actor, schoolId, target, details }, maxAttempts: 5 });
+      } catch (err) {
+        console.error(`[AuditService] Failed to enqueue security alert for "${action}":`, err.message);
+      }
     }
   } catch (err) {
     // Non-fatal — logging must never break a school workflow

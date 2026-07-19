@@ -31,6 +31,15 @@ jest.mock('../utils/model', () => ({
   }),
 }));
 
+// C11 Phase 1 / ADR-0006 — critical actions now enqueue a webhook
+// delivery instead of firing it inline; mock the queue boundary so
+// these tests assert against enqueueJob, not real HTTP/DB behavior.
+const mockEnqueueJob = jest.fn().mockResolvedValue('job_mock_001');
+jest.mock('../utils/job-queue', () => ({
+  enqueueJob: (...args) => mockEnqueueJob(...args),
+  registerHandler: jest.fn(),
+}));
+
 const AuditService = require('../services/audit');
 
 beforeEach(() => {
@@ -47,6 +56,8 @@ beforeEach(() => {
   mockMembershipFindOne = jest.fn().mockReturnValue({
     lean: jest.fn().mockImplementation(() => Promise.resolve(mockMembershipDoc)),
   });
+  mockEnqueueJob.mockResolvedValue('job_mock_001');
+  delete process.env.ALERT_WEBHOOK_URL;
 });
 
 describe('AuditService.log — correlation ID', () => {
@@ -193,5 +204,60 @@ describe('AuditService.query — new filters', () => {
     expect(filterArg).not.toHaveProperty('correlationId');
     expect(filterArg).not.toHaveProperty('orgId');
     expect(filterArg).not.toHaveProperty('membershipId');
+  });
+});
+
+describe('AuditService.log — security alert webhook (C11 Phase 1 / ADR-0006)', () => {
+  test('a critical ALERT_ACTIONS action with ALERT_WEBHOOK_URL set enqueues, does not fire a raw HTTP call', async () => {
+    process.env.ALERT_WEBHOOK_URL = 'https://example.com/hook';
+
+    await AuditService.log({
+      action: 'platform.school_deleted',
+      actor: { userId: 'platform', role: 'platform', email: null },
+      schoolId: 'sch_1',
+    });
+
+    expect(mockEnqueueJob).toHaveBeenCalledWith({
+      type: 'security_alert_webhook',
+      payload: expect.objectContaining({ action: 'platform.school_deleted', schoolId: 'sch_1' }),
+      maxAttempts: 5,
+    });
+  });
+
+  test('a critical action with ALERT_WEBHOOK_URL unset does not enqueue at all', async () => {
+    delete process.env.ALERT_WEBHOOK_URL;
+
+    await AuditService.log({
+      action: 'platform.school_deleted',
+      actor: { userId: 'platform', role: 'platform', email: null },
+      schoolId: 'sch_1',
+    });
+
+    expect(mockEnqueueJob).not.toHaveBeenCalled();
+  });
+
+  test('a non-ALERT_ACTIONS action never enqueues, even with ALERT_WEBHOOK_URL set', async () => {
+    process.env.ALERT_WEBHOOK_URL = 'https://example.com/hook';
+
+    await AuditService.log({
+      action: 'auth.login',
+      actor: { userId: 'usr_1', role: 'admin' },
+      schoolId: 'sch_1',
+    });
+
+    expect(mockEnqueueJob).not.toHaveBeenCalled();
+  });
+
+  test('enqueueJob rejecting does not throw out of AuditService.log() — the audit write already succeeded', async () => {
+    process.env.ALERT_WEBHOOK_URL = 'https://example.com/hook';
+    mockEnqueueJob.mockRejectedValue(new Error('queue write failed'));
+
+    await expect(AuditService.log({
+      action: 'platform.school_deleted',
+      actor: { userId: 'platform', role: 'platform', email: null },
+      schoolId: 'sch_1',
+    })).resolves.not.toThrow();
+
+    expect(mockCreate).toHaveBeenCalled(); // the audit_logs write itself still happened
   });
 });

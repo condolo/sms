@@ -611,6 +611,19 @@ const INDEXES = [
     ],
   },
 
+  /* ── queue_jobs (C11 Phase 1 / ADR-0006) ────────────────────
+     Platform-level (no schoolId — not every job is school-scoped, e.g.
+     platform-operator security alerts). Primary query: the worker's
+     due-job claim (status + nextAttemptAt). */
+  {
+    col: 'queue_jobs',
+    indexes: [
+      { key: { status: 1, nextAttemptAt: 1 }, name: 'qj_status_next' },
+      { key: { type: 1, createdAt: -1 },      name: 'qj_type_created' },
+      { key: { id: 1 },                       name: 'qj_id', unique: true, sparse: true },
+    ],
+  },
+
   /* ── organizations (Phase A · C1) ───────────────────────────
      Platform/org-level (no schoolId). One org per customer; 1:1 with a
      school today, one-to-many once multi-school activates.

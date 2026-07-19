@@ -655,6 +655,19 @@ async function start() {
     } catch (err) {
       console.error('[backup-cron] Failed to start:', err.message);
     }
+
+    // Job queue worker (C11 Phase 1 / ADR-0006) — every minute, retries
+    // due jobs with backoff. require('./services/audit') first as
+    // explicit, self-documenting insurance that its 'security_alert_webhook'
+    // handler is registered before the worker can claim one (already true
+    // transitively via route-mounting order, but not relied on implicitly).
+    try {
+      require('./services/audit');
+      const { startQueueWorker } = require('./utils/job-queue');
+      startQueueWorker();
+    } catch (err) {
+      console.error('[job-queue] Failed to start:', err.message);
+    }
   });
 }
 
