@@ -6,6 +6,37 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.84.0] — 2026-07-19 — feat(platform): Organization shared URL slug — Phase 0/Phase 1 (C13, ADR-0007 drafted)
+
+Requested: organizations should be able to use one shared URL slug for all their schools, reflected in platform admin, with the intended design (confirmed by the user) being one shared org login portal with a post-authentication school picker for multi-membership users, built on the already-shipped C9 switcher. Research (direct code reads plus a Plan-agent pressure-test) found **no existing mechanism anywhere authenticates a user before a single school is resolved** — `tenantMiddleware` hard-400s without one, every credential check is school-scoped, and C9's `switch-school` requires an already-valid session. A genuinely new login mechanism is required, and it independently hits both of the Constitution's explicit ADR-trigger categories (Authentication, Multi-tenancy/school-context resolution) — so this ships in two parts: an additive, inert Phase 0/1 now, and `ADR-0007` drafted (not yet accepted) for the actual credential-check flow.
+
+### Fixed — slug-collision hazard (Phase 0)
+
+Research surfaced a real, pre-existing bug, not just a gap: `organizations.slug` and `schools.slug` are two separate uniqueness namespaces that never cross-checked each other. A new school's slug could collide with an unrelated organization's slug, at which point `provisionOrganizationForSchool`'s upsert throws a duplicate-key error that gets silently swallowed (`platform.js`'s existing catch block) — permanently orphaning the school (`organizationId: null` forever; the boot backfill retries and fails on the same slug every restart). Also, `schools.slug` had no DB-level unique index at all, only an app-level check — a real TOCTOU race between two concurrent creates.
+
+- `indexes.js`: added a unique sparse index on `schools.slug` (mirrors the existing `org_slug` index).
+- `platform.js`: `POST /schools` (both the 1:1-auto-org and org-attached paths) and `POST /organizations` now cross-check the *other* collection before allowing a slug, 409ing on a genuine collision. Explicitly does **not** flag `org.slug === school.slug` for a 1:1-genesis org — that's the deliberate, by-design steady state (`provision-organizations.js:61`); only a collision against an *unrelated* school/org is rejected.
+- `qa-health.js`: new read-only diagnostic (`_checkOrgSchoolSlugCollisions`) flags any pre-existing collision in real data, correctly excluding the by-design genesis case.
+
+### Added — platform-admin visibility + activation toggles (Phase 1)
+
+Two new, independent, per-organization flags — deliberately not folded into one switch:
+
+- **`multiSchoolEnabled`** (existing flag, previously hardcoded `false` everywhere with no route to ever set it) gets its first-ever admin-settable routes: `POST /organizations/:id/enable-multi-school` / `disable-multi-school`. Activates JWT `orgId`/`membershipId` enrichment and the C9 school switcher for an org's already-authenticated staff — nothing more.
+- **`orgSlugLoginEnabled`** (new field, default `false`) — a *separate* switch for the org's slug becoming a public, unauthenticated login surface. Hard-requires `multiSchoolEnabled` already `true` (409 otherwise) — flipping switching on for an org's staff must never silently also open a new public credential-check endpoint. `disable-multi-school` cascades this off too, so the invariant can never be left stale.
+- Both toggle routes are audit-logged and, for `enable-org-slug-login`, surface `qa-health.js`'s existing identity-migration readiness (informational only — the platform-wide `IDENTITY_CUTOVER_ENABLED` env var is entirely outside these routes' authority, and the response says so explicitly).
+- `platform.html` Organizations panel: new "Shared Portal URL" column, and a "Multi-School" settings modal per organization showing both switches, their precondition relationship, and the cutover-readiness dependency this dashboard can't verify or flip.
+
+### Drafted, not accepted — `docs/adr/ADR-0007-org-slug-login.md`
+
+Covers the actual credential flow this feature needs: a new public `resolve-portal` endpoint, `POST /auth/org-login`/`complete-org-login`, a separate `_orgPickCodes` mechanism (deliberately not reusing C9's `_exchangeCodes` — a partially-verified "identity confirmed, no school chosen" code must be structurally incapable of redeeming a real session), a new `{identityId,schoolId}` index on `users` (the first reverse-direction identity lookup in the codebase), MFA placement, and client changes. Ships no code — per the same separate-acceptance-gate discipline as ADR-0001/0003/0004, implementation begins only after explicit sign-off on the document's contents, distinct from approval of the plan that produced it.
+
+### Tests
+
+`platform-organizations-slug.test.js` (new, 12 tests) — collision 409s, toggle-route preconditions/cascade/audit-log/response shape. `qa-health.test.js` extended (4 tests) for the new diagnostic, including the load-bearing case that a 1:1-genesis org's `slug === school.slug` is never flagged. Mutation-tested both the collision check and the `multiSchoolEnabled` precondition guard — both genuinely fail their tests when disabled. Full suite: 40/40 suites, 447/447 tests, zero regressions. Verified end-to-end in-browser (mocked API — no live MongoDB in this sandbox): toggles flip correctly, the precondition button disables correctly, cutover-readiness text renders, and the table row refreshes on modal close.
+
+---
+
 ## [v4.83.0] — 2026-07-19 — fix(security): tenant-isolation ratchet repair + mark-entry version conflicts (BUG-003/BUG-004)
 
 ### Fixed — tenant-isolation CI ratchet (24 → 47 → 34)

@@ -20,6 +20,8 @@
 
 let mockUserDocs = [];
 let mockIdentityDocs = [];
+let mockOrgDocs = [];
+let mockSchoolDocs = [];
 
 // Supports both .select().lean() and .select().limit(N).lean() — the two
 // chain shapes the real qa-health.js code actually uses.
@@ -44,6 +46,20 @@ jest.mock('../../utils/model', () => ({
         countDocuments: jest.fn((filter) => Promise.resolve(mockIdentityDocs.filter(i => mockMatchesIdentityFilter(i, filter)).length)),
       };
     }
+    if (collection === 'organizations') {
+      return {
+        find: jest.fn((filter) => ({
+          select: () => mockChain(() => mockOrgDocs.filter(o => mockMatchesOrgFilter(o, filter))),
+        })),
+      };
+    }
+    if (collection === 'schools') {
+      return {
+        find: jest.fn((filter) => ({
+          select: () => mockChain(() => mockSchoolDocs.filter(s => mockMatchesSchoolFilter(s, filter))),
+        })),
+      };
+    }
     return { find: () => ({ select: () => mockChain(() => []) }), countDocuments: () => Promise.resolve(0) };
   }),
 }));
@@ -58,6 +74,14 @@ function mockMatchesIdentityFilter(i, filter) {
   if (filter.status) return i.status === filter.status;
   return true;
 }
+function mockMatchesOrgFilter(o, filter) {
+  if (filter.slug && filter.slug.$exists) return o.slug != null; // { $exists: true, $ne: null }
+  return true;
+}
+function mockMatchesSchoolFilter(s, filter) {
+  if (filter.slug && filter.slug.$in) return filter.slug.$in.includes(s.slug);
+  return true;
+}
 
 jest.mock('../../middleware/auth', () => ({ authMiddleware: (req, _res, next) => next() }));
 
@@ -66,6 +90,8 @@ const qaHealth = require('../../routes/qa-health');
 beforeEach(() => {
   mockUserDocs = [];
   mockIdentityDocs = [];
+  mockOrgDocs = [];
+  mockSchoolDocs = [];
 });
 
 describe('_checkDanglingIdentityFK', () => {
@@ -187,5 +213,40 @@ describe('_identityMigrationStatus', () => {
     const result = await qaHealth._identityMigrationStatus();
     expect(result.identityBackfillPending).toBe(0);
     expect(result.status).toBe('complete');
+  });
+});
+
+describe('_checkOrgSchoolSlugCollisions (org-shared-slug feature, Phase 0)', () => {
+  test('returns 0 when no organization has a slug', async () => {
+    mockOrgDocs = [{ id: 'org_1', slug: null }];
+    const result = await qaHealth._checkOrgSchoolSlugCollisions();
+    expect(result).toEqual({ count: 0, samples: [] });
+  });
+
+  test('LOAD-BEARING: org.slug === school.slug for a 1:1 genesis org is by design, NOT a collision', async () => {
+    mockOrgDocs = [{ id: 'org_1', slug: 'eldoret', provisionedFromSchoolId: 'sch_1' }];
+    mockSchoolDocs = [{ id: 'sch_1', slug: 'eldoret' }]; // same school the org was provisioned FROM
+
+    const result = await qaHealth._checkOrgSchoolSlugCollisions();
+    expect(result).toEqual({ count: 0, samples: [] });
+  });
+
+  test('flags a real collision: org slug matches a DIFFERENT, unrelated school', async () => {
+    mockOrgDocs = [{ id: 'org_1', slug: 'eldoret', provisionedFromSchoolId: 'sch_1' }];
+    mockSchoolDocs = [{ id: 'sch_1', slug: 'eldoret' }, { id: 'sch_other', slug: 'eldoret' }];
+
+    const result = await qaHealth._checkOrgSchoolSlugCollisions();
+    expect(result.count).toBe(1);
+    expect(result.samples[0]).toContain('org:org_1');
+    expect(result.samples[0]).toContain('sch_other');
+    expect(result.samples[0]).not.toContain('sch_1)'); // the genesis school must be excluded from the flagged list
+  });
+
+  test('an explicitly-created org (no provisionedFromSchoolId) colliding with any school is always genuine', async () => {
+    mockOrgDocs = [{ id: 'org_standalone', slug: 'shared-slug', provisionedFromSchoolId: undefined }];
+    mockSchoolDocs = [{ id: 'sch_x', slug: 'shared-slug' }];
+
+    const result = await qaHealth._checkOrgSchoolSlugCollisions();
+    expect(result.count).toBe(1);
   });
 });

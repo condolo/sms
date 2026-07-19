@@ -61,6 +61,7 @@ async function provisionOrganizationForSchool(school, { Schools, Orgs } = {}) {
         slug:                    school.slug || null,
         status:                  'active',
         multiSchoolEnabled:      false,   // opt-in later (Constitution §10 Stage 3)
+        orgSlugLoginEnabled:     false,   // opt-in later, requires multiSchoolEnabled first (org-shared-slug feature)
         provisionedFromSchoolId: schoolId,
         createdBy:               'system:provision',
         createdAt:               now,

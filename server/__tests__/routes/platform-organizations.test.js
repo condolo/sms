@@ -39,7 +39,10 @@ jest.mock('mongoose', () => {
         };
       }
       if (col === 'schools') {
-        return { find: () => ({ select: () => ({ lean: () => Promise.resolve(mockSchoolDocs) }) }) };
+        return {
+          find:    () => ({ select: () => ({ lean: () => Promise.resolve(mockSchoolDocs) }) }),
+          findOne: (filter) => ({ lean: () => Promise.resolve(mockSchoolDocs.find(s => s.slug === filter.slug) || null) }),
+        };
       }
       return { find: () => ({ lean: () => Promise.resolve([]) }) };
     }),

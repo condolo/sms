@@ -638,14 +638,24 @@ const INDEXES = [
     ],
   },
 
-  /* ── schools (Phase A · C2) ─────────────────────────────────
-     schools was previously unindexed here (relied on _id). Only the new
-     organizationId FK is added — sparse, since it is null until a school
-     is provisioned. Non-unique: one org may own many schools. */
+  /* ── schools (Phase A · C2, slug uniqueness added for the org-shared-
+     slug feature) ─────────────────────────────────────────────
+     schools was previously unindexed here (relied on _id). The
+     organizationId FK is sparse, since it is null until a school is
+     provisioned — non-unique, one org may own many schools. `slug` is
+     newly indexed here too: platform.js's POST /schools always checked
+     uniqueness via a `findOne` before insert, but with no DB-level
+     constraint backing it, two concurrent requests could both pass that
+     check before either insert lands (TOCTOU). This closes that race —
+     app-level checks in platform.js remain the primary UX (they return a
+     clean 409 with a message; a raw duplicate-key error is the backstop,
+     not the normal path). Sparse because system/seed schools may
+     legitimately lack a slug. */
   {
     col: 'schools',
     indexes: [
       { key: { organizationId: 1 }, name: 'schools_org', sparse: true },
+      { key: { slug: 1 },           name: 'schools_slug', unique: true, sparse: true },
     ],
   },
 

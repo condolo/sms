@@ -108,6 +108,37 @@ async function _checkPasswordHashMismatch() {
   return { count: mismatches.length, samples: mismatches.slice(0, 5).map(u => u.email || u.id) };
 }
 
+/* Organizations whose slug collides with a school outside their own 1:1
+   genesis pairing (org-shared-slug feature, Phase 0). NOT an error by
+   itself: org.slug === school.slug is the deliberate, by-design steady
+   state for a 1:1-genesis org (provisionedFromSchoolId links them) —
+   only a match against a DIFFERENT school is a real collision. Purely
+   informational/non-blocking; catches any pre-existing collision in real
+   data (from before the platform.js cross-collection checks existed)
+   before the org-slug-login feature (ADR-0007, Phase 2) would make such
+   a collision actively dangerous rather than just messy. */
+async function _checkOrgSchoolSlugCollisions() {
+  const orgs = await _model('organizations')
+    .find({ slug: { $exists: true, $ne: null } })
+    .select('id slug provisionedFromSchoolId').limit(1000).lean();
+  if (!orgs.length) return { count: 0, samples: [] };
+
+  const slugs = [...new Set(orgs.map(o => o.slug))];
+  const schools = await _model('schools')
+    .find({ slug: { $in: slugs } })
+    .select('id slug').lean();
+  const schoolsBySlug = {};
+  for (const s of schools) (schoolsBySlug[s.slug] = schoolsBySlug[s.slug] || []).push(s);
+
+  const collisions = [];
+  for (const org of orgs) {
+    const matches = schoolsBySlug[org.slug] || [];
+    const genuine = matches.filter(s => s.id !== org.provisionedFromSchoolId);
+    if (genuine.length) collisions.push(`${org.slug} (org:${org.id} vs school:${genuine.map(s => s.id).join(',')})`);
+  }
+  return { count: collisions.length, samples: collisions.slice(0, 5) };
+}
+
 /* ── Data integrity checks ───────────────────────────────────── */
 async function _integrityChecks() {
   const checks = [];
@@ -200,6 +231,9 @@ async function _integrityChecks() {
 
   // 9. Dual-write divergence between users.password and identities.passwordHash (C8/MR-001 Phase 2)
   await check('users.password / identities.passwordHash mismatch (dual-write divergence)', _checkPasswordHashMismatch);
+
+  // 10. Organization/school slug collisions outside a 1:1 genesis pairing (org-shared-slug feature, Phase 0)
+  await check('organization slug colliding with an unrelated school', _checkOrgSchoolSlugCollisions);
 
   return checks;
 }
@@ -375,3 +409,4 @@ module.exports = router;
 router._checkDanglingIdentityFK  = _checkDanglingIdentityFK;
 router._checkPasswordHashMismatch = _checkPasswordHashMismatch;
 router._identityMigrationStatus  = _identityMigrationStatus;
+router._checkOrgSchoolSlugCollisions = _checkOrgSchoolSlugCollisions;
