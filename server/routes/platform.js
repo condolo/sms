@@ -642,6 +642,20 @@ router.post('/memberships', async (req, res) => {
       return res.status(500).json({ error: 'Could not create membership' });
     }
 
+    // C8/MR-001's collision-to-merge path only re-scans on the next server
+    // boot (provisionIdentities(), server/index.js) — without this, the
+    // grant just made would sit unvouched until the next restart, and the
+    // C9 School Switcher (which needs both users sharing one identityId)
+    // would silently do nothing today even though the admin just told the
+    // system these are the same person. Re-running the same idempotent
+    // check inline makes the merge (or the correct no-op, if no sibling
+    // account with a matching email exists yet) happen immediately.
+    try {
+      await provisionIdentityForUser(user, { Schools: School, Orgs: Org, Memberships });
+    } catch (err) {
+      console.error('[platform/memberships POST] identity merge failed (will self-heal at next restart):', err.message);
+    }
+
     AuditService.log({
       action: 'platform.membership.grant',
       actor:  { userId: 'platform', role: 'platform', email: null },

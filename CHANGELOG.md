@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.93.0] — 2026-07-20 — fix(auth): Link Identity merge deferred to next server restart instead of happening immediately
+
+Follow-up to a direct report of the School Switcher still not appearing after using platform admin's "Link Identity." Traced the actual mechanics: C8/MR-001's collision-to-merge logic (`provisionIdentityForUser`) only re-scans and merges two same-email accounts into one shared identity on the *next server boot* — `POST /api/platform/memberships` (what "Link Identity"'s "Grant Access" button calls) only ever wrote the authorization-intent record, never triggered the merge itself. So clicking "Grant Access" looked like it worked (200 response, success toast) but the actual effect — the two accounts sharing one `identityId`, which is what the Switcher's `availableSchools` resolution depends on — silently didn't happen until whenever the server next happened to restart.
+
+### Fixed
+
+- `server/routes/platform.js` — `POST /memberships` now calls `provisionIdentityForUser` inline, immediately after the membership grant succeeds, re-running the exact same idempotent collision/merge check the boot backfill runs. If a sibling account with a matching email already exists at the target school, both accounts get the same `identityId` right away, not after a restart. Non-blocking (a failure here doesn't fail the membership grant itself — the boot backfill remains the fallback, same self-healing convention as every other identity-provisioning call site).
+
+### Note — this only helps if the second account already exists
+
+Link Identity vouches that two *already-existing* accounts (same email, independently created at two different schools) are the same person — it has never created a new account or granted new login access on its own (the route's own response `note` says so explicitly, unchanged by this fix). If a person only has one real account today, Link Identity plus this fix still won't produce a switcher for them — there's nothing to merge with. That's a separate, larger piece of work (Constitution §10 Stage 3, not built) if it's ever needed.
+
+### Tests
+
+- `server/__tests__/routes/platform-memberships.test.js` (extended) — a sibling account eligible for merge now gets `identityId` set immediately in the same request, not deferred; a merge failure doesn't fail the membership grant; the pre-existing "no sibling exists" case still correctly does nothing. The prior test asserting the route "never writes to the users collection" was accurate only by accident of an incomplete mock — replaced with real coverage of the new behavior.
+- Full suite: 48/48 suites, 512/512 tests. `node scripts/security-scan.js` and the tenant-isolation ratchet (held at 34) both clean. Mutation-tested: reverting the fix fails the new regression test.
+
+---
+
 ## [v4.92.0] — 2026-07-20 — fix(security): cross-tenant data leak — any school's own admin could see every other school's audit log and platform health data
 
 **Severity: high.** Triggered by a direct report: a school's own admin could see platform-wide operational data through a "Platform Operations" card in their own Settings page. Confirmed and fixed two real cross-tenant leaks in the same root cause.

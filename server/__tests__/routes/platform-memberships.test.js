@@ -5,8 +5,16 @@
    Verifies the platform-admin "Link Identity" API: cross-school email
    search (credentials/MFA stripped), and granting an existing user
    access to a second school — restricted to the SAME organization
-   (Constitution §6), record-only (never touches auth.js/JWT/rbac),
-   and never writes to the `users` collection.
+   (Constitution §6), and never touches auth.js/JWT/rbac directly.
+
+   Also covers a real gap found via a direct report: C8/MR-001's
+   collision-to-merge check (provisionIdentityForUser) only re-scanned on
+   the next server boot, so a fresh Link Identity grant sat unvouched
+   until the next restart — the C9 School Switcher would silently show
+   nothing even though the admin had just vouched two accounts were the
+   same person. POST /memberships now re-runs that same idempotent check
+   inline, so an already-eligible merge (a sibling account, same email,
+   in the same org) happens immediately instead of waiting for a restart.
 
    All DB calls are mocked — no MongoDB required.
    ============================================================ */
@@ -23,7 +31,13 @@ let mockUserDocs = [];
 let mockSchoolDocs = [];
 let mockMembershipDocs = [];
 let mockMembershipCreateCalls = [];
-const mockUsersUpdateOne = jest.fn();
+let mockIdentityDocs = [];
+const mockUsersUpdateOne  = jest.fn(() => Promise.resolve({}));
+const mockUsersUpdateMany = jest.fn((filter, update) => {
+  const ids = filter.id?.$in || [];
+  mockUserDocs.forEach(u => { if (ids.includes(u.id)) Object.assign(u, update.$set); });
+  return Promise.resolve({});
+});
 
 // platform.js defines its OWN local _model(col) — a lazy schema-less
 // mongoose.model() factory, not the shared utils/model._model — so the
@@ -41,15 +55,28 @@ jest.mock('mongoose', () => {
             limit: () => ({
               lean: () => Promise.resolve(mockUserDocs.filter(u => !filter.email || filter.email.test(u.email))),
             }),
+            // provisionIdentityForUser's sibling-lookup: same org's schools, excluding self
+            select: () => ({
+              lean: () => Promise.resolve(
+                mockUserDocs.filter(u => (filter.schoolId?.$in || []).includes(u.schoolId) && u._id !== filter._id?.$ne)
+              ),
+            }),
           }),
           findOne: (filter) => ({ lean: () => Promise.resolve(mockUserDocs.find(u => u.id === filter.id) || null) }),
-          updateOne: mockUsersUpdateOne,
+          updateOne:  mockUsersUpdateOne,
+          updateMany: mockUsersUpdateMany,
         };
       }
       if (col === 'schools') {
         return {
           find: (filter) => ({
-            select: () => ({ lean: () => Promise.resolve(mockSchoolDocs.filter(s => (filter.id?.$in || []).includes(s.id))) }),
+            select: () => ({
+              lean: () => Promise.resolve(
+                filter.organizationId
+                  ? mockSchoolDocs.filter(s => s.organizationId === filter.organizationId)
+                  : mockSchoolDocs.filter(s => (filter.id?.$in || []).includes(s.id))
+              ),
+            }),
           }),
           findOne: (filter) => ({ lean: () => Promise.resolve(mockSchoolDocs.find(s => s.id === filter.id) || null) }),
         };
@@ -57,10 +84,44 @@ jest.mock('mongoose', () => {
       if (col === 'organizations') {
         return { findOneAndUpdate: jest.fn() };
       }
+      if (col === 'identities') {
+        return {
+          findOneAndUpdate: jest.fn((filter, update) => ({
+            lean: () => {
+              let doc = mockIdentityDocs.find(d =>
+                (filter.id && d.id === filter.id) ||
+                (filter.orgId && filter.email && d.orgId === filter.orgId && d.email === filter.email) ||
+                (filter.collisionKey && d.collisionKey === filter.collisionKey)
+              );
+              if (!doc) {
+                doc = { ...update.$setOnInsert };
+                mockIdentityDocs.push(doc);
+              }
+              Object.assign(doc, update.$set);
+              if (update.$addToSet?.sourceUserIds) {
+                const toAdd = update.$addToSet.sourceUserIds.$each || [update.$addToSet.sourceUserIds];
+                doc.sourceUserIds = [...new Set([...(doc.sourceUserIds || []), ...toAdd])];
+              }
+              return Promise.resolve(doc);
+            },
+          })),
+        };
+      }
       if (col === 'memberships') {
         return {
+          find: (filter) => ({
+            lean: () => Promise.resolve(mockMembershipDocs.filter(m =>
+              (filter.$or || []).some(c => m.userId === c.userId && m.schoolId === c.schoolId)
+            )),
+          }),
           findOne: (filter) => ({
-            lean: () => Promise.resolve(mockMembershipDocs.find(m => m.userId === filter.userId && m.schoolId === filter.schoolId) || null),
+            lean: () => {
+              const clauses = filter.$or || [filter];
+              const doc = mockMembershipDocs.find(m =>
+                clauses.some(c => m.userId === c.userId && m.schoolId === c.schoolId)
+              );
+              return Promise.resolve(doc || null);
+            },
           }),
           findOneAndUpdate: jest.fn((filter, update) => ({
             lean: () => {
@@ -93,6 +154,7 @@ beforeEach(() => {
   mockSchoolDocs = [];
   mockMembershipDocs = [];
   mockMembershipCreateCalls = [];
+  mockIdentityDocs = [];
 });
 
 describe('GET /api/platform/users/search', () => {
@@ -209,8 +271,41 @@ describe('POST /api/platform/memberships', () => {
     expect(mockMembershipCreateCalls).toHaveLength(0);
   });
 
-  test('never writes to the users collection — record-only, does not touch identity/auth', async () => {
+  test('with no sibling account at the target school, no identity is merged (nothing to merge with)', async () => {
     await supertest(app()).post('/api/platform/memberships').send({ userId: 'usr_1', schoolId: 'sch_b' });
-    expect(mockUsersUpdateOne).not.toHaveBeenCalled();
+    expect(mockUsersUpdateMany).not.toHaveBeenCalled();
+  });
+
+  test('regression: an already-eligible sibling account is merged immediately, not deferred to next server boot', async () => {
+    // usr_2 already exists at sch_b, same email as usr_1 — the exact
+    // "same person, two independently-created accounts" scenario Link
+    // Identity exists for. Before this fix, granting the membership alone
+    // did nothing to users.identityId until the next server restart's
+    // provisionIdentities() backfill re-scanned and found the new
+    // membership link — the School Switcher would show nothing until then.
+    mockUserDocs.push({ _id: 'oid_2', id: 'usr_2', email: 'jane@greenvalley.ac.ke', role: 'teacher', schoolId: 'sch_b' });
+
+    const res = await supertest(app()).post('/api/platform/memberships').send({ userId: 'usr_1', schoolId: 'sch_b' });
+
+    expect(res.status).toBe(201);
+    expect(mockUsersUpdateMany).toHaveBeenCalledWith(
+      { id: { $in: expect.arrayContaining(['usr_1', 'usr_2']) } },
+      { $set: { identityId: expect.stringMatching(/^idt_/) } },
+    );
+    const usr1 = mockUserDocs.find(u => u.id === 'usr_1');
+    const usr2 = mockUserDocs.find(u => u.id === 'usr_2');
+    expect(usr1.identityId).toBeDefined();
+    expect(usr1.identityId).toBe(usr2.identityId); // same shared identity — this is what makes the switcher work
+  });
+
+  test('a failure in the identity-merge step does not fail the membership grant itself', async () => {
+    // Simulate the merge step throwing (e.g. a transient DB error) —
+    // the membership grant, which already succeeded, must still return
+    // 201; the merge just self-heals at the next server restart instead.
+    mockUserDocs.push({ _id: 'oid_2', id: 'usr_2', email: 'jane@greenvalley.ac.ke', role: 'teacher', schoolId: 'sch_b' });
+    mockUsersUpdateMany.mockImplementationOnce(() => Promise.reject(new Error('boom')));
+
+    const res = await supertest(app()).post('/api/platform/memberships').send({ userId: 'usr_1', schoolId: 'sch_b' });
+    expect(res.status).toBe(201);
   });
 });
