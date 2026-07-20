@@ -40,6 +40,23 @@ const { v4: uuidv4 } = require('uuid');
 const { _model } = require('./model');
 const { provisionOrganizationForSchool } = require('./provision-organizations');
 
+/* Preserve tri-state instead of coercing to boolean. Found live (real-DB
+   production validation, not a mock): `!!user.mfaEnabled` turns "never
+   explicitly set" into an explicit `false` on the identity doc. Every MFA
+   check in auth.js reads `mfaEnabled !== false` to decide whether an
+   MFA_ROLES user gets challenged — intentionally "on unless explicitly
+   opted out." Coercing an unset value to `false` silently opts EVERY
+   identity-linked MFA-eligible user OUT the moment their identity is
+   provisioned (which is unconditional and happens for virtually every
+   email-bearing account) — an MFA bypass for superadmin/admin/deputy/
+   principal/finance, not a hypothetical: it fires the first time any of
+   those roles' identities resolve, including on every org-login call. */
+function _mfaTriState(user) {
+  if (user.mfaEnabled === true)  return true;
+  if (user.mfaEnabled === false) return false;
+  return null;
+}
+
 /**
  * Get-or-create the Identity owning one User's credentials, handling the
  * collision policy above. Shared by the batch backfill below and by
@@ -105,7 +122,7 @@ async function provisionIdentityForUser(user, { Schools, Orgs, Users, Identities
           orgId,
           email,
           passwordHash:  user.password || null,
-          mfaEnabled:    !!user.mfaEnabled,
+          mfaEnabled:    _mfaTriState(user),
           tokenVersion:  0,
           status:        'active',
           mergedInto:    null,
@@ -150,7 +167,7 @@ async function provisionIdentityForUser(user, { Schools, Orgs, Users, Identities
           orgId,
           email,
           passwordHash: user.password || null,
-          mfaEnabled:   !!user.mfaEnabled,
+          mfaEnabled:   _mfaTriState(user),
           tokenVersion: 0,
           status:       'active',
           mergedInto:   null,

@@ -6,6 +6,33 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.85.1] — 2026-07-20 — fix(security): three bugs found by real-database production validation of C13
+
+Requested production-readiness validation of C13 (org-first login) explicitly demanded a real database, not mocked responses. `mongodb-memory-server` was already a devDependency, unused until now — spun up a genuine ephemeral MongoDB, booted the real `server/index.js` against it, and drove every check over real HTTP: two organizations, three schools, six role journeys, a real identity merge across two independently-created accounts, cross-org isolation attempts, password reset, MFA (OTP recovered by reading the sha256 hash straight from Mongo and brute-forcing the 900,000-value keyspace — no SMTP provider in this sandbox), session revocation, disabled-school and disabled-org behavior, and a switch-school regression check. First pass: 44 pass, 6 fail. Three of the six failures were real bugs the mocked test suite had never been in a position to catch; the other three were this validation script's own wrong assumptions about response shapes, corrected in place. Re-run after fixes: 50/50 (44 pass, 6 info, 0 fail).
+
+### Fixed
+
+- **`_resolveIdentitySchools` never checked `schools.isActive`.** A school an operator had disabled (`PATCH .../schools/:id {isActive:false}`) still appeared in the org-login picker and was still redeemable via `complete-org-login`, even though direct login at that school's own subdomain was already correctly blocked by `tenantMiddleware`. Caught live: disabled School A2 mid-run, and it stayed in Tina's picker response. Fixed — the resolver's `schools.find()` now filters `isActive:{$ne:false}`, same standard it already applied to the user doc. `switch-school` inherits the fix automatically (same shared resolver).
+- **`_buildTokenPayload`'s `orgId` enrichment depended on a `memberships` doc existing for the current school — which nothing creates inline at invite time, only a one-time boot backfill.** Caught live: freshly invited Tina, logged in fresh at A1, got `availableSchools: []` even though she genuinely has a second account at A2 — because her A1 account predates the boot backfill and no membership doc for her at A1 exists. This silently broke the School Switcher UI for any user invited after server boot, indefinitely, even though `_resolveIdentitySchools` independently proved they have real access. Fixed — `orgId` is now set directly from `school.organizationId` once `multiSchoolEnabled` is true, never gated on a membership lookup; `membershipId` stays best-effort (it's only ever consumed as an optional audit-query filter, `server/routes/audit.js` — nothing authorization-relevant depended on it).
+- **`provisionIdentityForUser` coerced `mfaEnabled` to `false` via `!!user.mfaEnabled` instead of preserving "never set."** Every MFA check in `auth.js` reads `mfaEnabled !== false` — intentionally "on unless explicitly opted out." Coercing an unset value to an explicit `false` silently opted every identity-linked MFA_ROLES account (`superadmin`/`admin`/`deputy`/`principal`/`finance`) OUT of MFA the moment their identity resolved — which happens on every `org-login` call, and would happen on every `/login` call the moment `IDENTITY_CUTOVER_ENABLED` is genuinely flipped platform-wide. Caught live: Fiona (finance, MFA_ROLES) got a direct successful login through `org-login` with no OTP challenge at all. Fixed — new `_mfaTriState(user)` helper preserves `true`/`false`/`null` instead of collapsing to boolean; `null` (never set) now correctly still triggers MFA for an eligible role.
+
+### Confirmed correct, no fix needed
+
+Tenant isolation held under every adversarial attempt: cross-org identity lookup (401, generic), the `complete-org-login` allowlist rejecting an out-of-set school (403), cross-org `switch-school` (404/409), and the response-shape identity check between "foreign org" and "wrong password" (byte-identical, no enumeration side-channel).
+
+### Gaps found, not fixed (reported, not silently built)
+
+- No dedicated `DELETE`/revoke route exists for the `memberships` collection at all — `POST /api/platform/memberships` only grants. Not a blocker for this feature (the resolver never consults `memberships` for authorization), but a real gap if "revoke a Membership" is ever expected as a standalone admin action. Practical, currently-functioning revocation lever today: deactivate the target school's own `users` doc.
+- No way to fully "disable an organization" as a single operation. `disable-org-slug-login` closes the shared-portal entry point, but each member school's own direct login keeps working — correctly, since schools aren't disabled by that toggle, but there's no single lever that suspends everything at once.
+
+### Tests
+
+- `server/__tests__/routes/auth-session.test.js` — the stale test asserting `orgId` stays absent without a membership doc rewritten to assert the fixed behavior; new test proving a disabled school is excluded from `availableSchools` even with a real active account there (the `schools.find()` mock now genuinely filters on `isActive`, not just returning canned docs regardless of the query).
+- `server/__tests__/provision-identities.test.js` — new tri-state test: never-set stays `null`, explicit `true`/`false` preserved exactly.
+- Full suite: 41/41 suites, 475/475 tests. Tenant-isolation ratchet: held at 34, no new unprotected `_model()` sites (both fixes stayed inside `auth.js`/`provision-identities.js`, no new tenant-collection access added).
+
+---
+
 ## [v4.85.0] — 2026-07-19 — feat(auth): Organization-first login (C13, ADR-0007 accepted) + fix(security): switch-school never worked for real two-school accounts
 
 You clarified the intended model directly: the Organization is a first-class entity, authentication is identity-first, not school-first — visit the org's one URL, authenticate once, land in your one school or pick from several, and switching later reuses the exact same resolution. You were explicit this is not new architecture (it's completing behavior the Organization/Identity/Membership layer already committed to, `PLATFORM_ARCHITECTURE_EVOLUTION_v1.md` §15) and asked for an implementation plan, not a new ADR — `docs/adr/ADR-0007-org-slug-login.md` (drafted last session, still unaccepted) already had the researched design, so this plan absorbed its decisions directly rather than re-deriving them or running a second acceptance round.

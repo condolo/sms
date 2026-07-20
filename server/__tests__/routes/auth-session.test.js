@@ -123,7 +123,12 @@ jest.mock('../../utils/model', () => {
       if (collection === 'schools') {
         return {
           findOne:  jest.fn(() => mockChain(() => mockSchoolDoc)),
-          find:     jest.fn(() => mockChain(() => mockOtherSchoolDocs)),
+          // Emulates isActive:{$ne:false} for real — a school doc with
+          // isActive:false in the fixture is excluded, same as the real
+          // query would exclude it at the DB level.
+          find:     jest.fn((filter) => mockChain(() => mockOtherSchoolDocs.filter(s =>
+            filter?.isActive?.$ne === false ? s.isActive !== false : true
+          ))),
           updateOne: mockUpdateOne,
         };
       }
@@ -591,7 +596,15 @@ describe('POST /api/auth/login — C9 multi-school JWT fields', () => {
     expect(payload.role).toBe('admin');
   });
 
-  test('multiSchoolEnabled true but NO membership doc for this user/school: orgId/membershipId stay absent, login still succeeds', async () => {
+  test('multiSchoolEnabled true but NO membership doc for this user/school: orgId is set directly from the school, membershipId stays absent, login still succeeds', async () => {
+    // Found live (real-DB production validation, not a mock): a freshly-
+    // invited user never gets an inline Membership record for their own
+    // home school — only the one-time boot backfill creates those — so
+    // gating orgId on a membership doc's mere existence silently broke
+    // _availableSchools (and the School Switcher UI) for anyone invited
+    // after boot, even though they have real, valid multi-school access.
+    // orgId must come from the school's own organizationId unconditionally
+    // once multiSchoolEnabled is true; membershipId alone stays best-effort.
     mockSchoolDoc = { isActive: true, organizationId: 'org_demo' };
     mockOrgDoc = { multiSchoolEnabled: true };
     mockMembershipDoc = null; // no membership record
@@ -604,7 +617,7 @@ describe('POST /api/auth/login — C9 multi-school JWT fields', () => {
 
     expect(res.status).toBe(200); // never blocks login — additive only
     const payload = tokenFromResponse(res);
-    expect(payload.orgId).toBeUndefined();
+    expect(payload.orgId).toBe('org_demo');
     expect(payload.membershipId).toBeUndefined();
   });
 });
@@ -738,6 +751,36 @@ describe('POST /api/auth/login — C9 availableSchools', () => {
     mockOtherSchoolDocs = [{ id: 'sch_other_001', name: 'Other Campus', slug: 'other' }];
     mockEligibleUserDocs = [
       { id: 'usr_other_001', schoolId: 'sch_other_001', identityId: 'idt_demo_001', isActive: true },
+    ];
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/auth/login')
+      .set('X-School-Slug', 'demo')
+      .send({ email: 'admin@demo.school', password: 'Password123!' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.availableSchools).toBeUndefined();
+  });
+
+  test('a disabled school (operator PATCH .../schools/:id {isActive:false}) is excluded, even though the identity has a real active account there', async () => {
+    // Found live (real-DB production validation, not a mock): before this
+    // fix, _resolveIdentitySchools' schools.find() had no isActive filter,
+    // so a school an operator had disabled still appeared in both
+    // availableSchools and the org-login picker, and was still redeemable —
+    // even though direct login at that school's own subdomain was already
+    // correctly blocked by tenantMiddleware.
+    mockUserDoc = makeUser({ identityId: 'idt_demo_001' });
+    mockSchoolDoc = { isActive: true, organizationId: 'org_demo' };
+    mockOrgDoc = { multiSchoolEnabled: true };
+    mockMembershipDoc = { id: 'mem_demo_001', orgId: 'org_demo' };
+    mockOtherSchoolDocs = [
+      { id: 'sch_demo_001',  name: 'Demo School',  slug: 'demo' },
+      { id: 'sch_other_001', name: 'Other Campus', slug: 'other', isActive: false }, // disabled by an operator
+    ];
+    mockEligibleUserDocs = [
+      { id: 'usr_demo_001',  schoolId: 'sch_demo_001',  identityId: 'idt_demo_001', isActive: true },
+      { id: 'usr_other_001', schoolId: 'sch_other_001', identityId: 'idt_demo_001', isActive: true }, // account itself is fine
     ];
 
     const app = buildApp();

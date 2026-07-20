@@ -136,6 +136,24 @@ describe('provisionIdentityForUser', () => {
     expect(updateArg).toEqual({ $set: { identityId: identity.id } });
   });
 
+  test('mfaEnabled preserves tri-state — "never set" stays null, not coerced to false (MFA bypass regression)', async () => {
+    // Found live (real-DB production validation, not a mock): every MFA
+    // check in auth.js reads `mfaEnabled !== false` — "on unless explicitly
+    // opted out." The old `!!user.mfaEnabled` coercion turned "never set"
+    // into an explicit false, silently opting every identity-linked
+    // MFA_ROLES user (superadmin/admin/deputy/principal/finance) OUT of MFA
+    // the moment their identity resolves — which happens on every
+    // org-login call, and on every /login call once cutover is live.
+    const neverSet = await provisionIdentityForUser({ _id: 'oid_1', id: 'usr_1', schoolId: 'sch_a', email: 'a@x.com', password: '$2hash' });
+    expect(neverSet.mfaEnabled).toBeNull();
+
+    const explicitTrue = await provisionIdentityForUser({ _id: 'oid_2', id: 'usr_2', schoolId: 'sch_a', email: 'b@x.com', password: '$2hash', mfaEnabled: true });
+    expect(explicitTrue.mfaEnabled).toBe(true);
+
+    const explicitFalse = await provisionIdentityForUser({ _id: 'oid_3', id: 'usr_3', schoolId: 'sch_a', email: 'c@x.com', password: '$2hash', mfaEnabled: false });
+    expect(explicitFalse.mfaEnabled).toBe(false);
+  });
+
   test('returns null for a user with no email (student/username-only account)', async () => {
     const identity = await provisionIdentityForUser({ _id: 'oid_2', id: 'usr_2', schoolId: 'sch_a' });
     expect(identity).toBeNull();

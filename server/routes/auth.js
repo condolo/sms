@@ -119,22 +119,28 @@ async function _buildTokenPayload(user, schoolId) {
     payload.itv = await getIdentityTokenVersion(user.identityId);
   }
 
-  // C9 (D-004, Constitution §10 Stage 4) — orgId/membershipId only when
-  // this school's organization has explicitly opted into multi-school
-  // (multiSchoolEnabled: true). Every organization is multiSchoolEnabled:
-  // false today (Stage 3 activation is a separate, later operator
-  // decision — see docs/adr/ for C8's identical disabled-by-default
-  // posture), so this block never executes in any current deployment;
-  // that's the specific regression this addition's own tests pin. Never
-  // fatal — a lookup failure here must not block token issuance.
+  // C9 (D-004, Constitution §10 Stage 4) — orgId only when this school's
+  // organization has explicitly opted into multi-school (multiSchoolEnabled:
+  // true). Set directly from school.organizationId — NOT gated on a
+  // `memberships` doc existing for this user at this school. Found live
+  // (real-DB production validation, not a mock): a freshly-invited user
+  // never gets an inline Membership record for their OWN home school —
+  // only the one-time boot backfill (provisionMemberships()) creates those,
+  // so anyone invited after boot had payload.orgId silently never set,
+  // which broke _availableSchools (and therefore the School Switcher UI)
+  // for them even though _resolveIdentitySchools independently proved they
+  // have real multi-school access. membershipId stays best-effort metadata
+  // (audit-query filter only, see server/routes/audit.js — nothing
+  // authorization-relevant depends on it), looked up but never required.
+  // Never fatal — a lookup failure here must not block token issuance.
   try {
     const school = await _model('schools').findOne({ id: schoolId }).select('organizationId').lean();
     if (school?.organizationId) {
       const org = await _model('organizations').findOne({ id: school.organizationId }).select('multiSchoolEnabled').lean();
       if (org?.multiSchoolEnabled) {
-        const membership = await tenantModel('memberships', { schoolId }).findOne({ userId: payload.userId }).select('id orgId').lean();
+        payload.orgId = school.organizationId;
+        const membership = await tenantModel('memberships', { schoolId }).findOne({ userId: payload.userId }).select('id').lean();
         if (membership) {
-          payload.orgId = membership.orgId;
           payload.membershipId = membership.id;
         }
       }
@@ -166,8 +172,15 @@ async function _buildTokenPayload(user, schoolId) {
 async function _resolveIdentitySchools(identityId, orgId) {
   if (!identityId || !orgId) return [];
   try {
+    // isActive: {$ne:false} — found live (real-DB production validation):
+    // without this filter, a school an operator has disabled (PATCH
+    // .../schools/:id {isActive:false}) still appeared in the org-login
+    // picker and was still redeemable via complete-org-login, even though
+    // direct login at that school's own subdomain is correctly blocked by
+    // tenantMiddleware's isActive check. Same standard the rest of the
+    // resolver already applies to the user doc.
     const orgSchools = await _model('schools')
-      .find({ organizationId: orgId })
+      .find({ organizationId: orgId, isActive: { $ne: false } })
       .select('id name slug')
       .lean();
     if (!orgSchools.length) return [];
