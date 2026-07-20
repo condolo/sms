@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Menu, X, ChevronDown } from 'lucide-react';
 import { EASE } from '@/utils/animations';
 import { setFavicon, DEFAULT_FAVICON } from '@/utils/favicon.js';
+import { getPlatformSettings } from '@/utils/landingCMS';
 
 const NAV = [
   {
@@ -39,6 +40,7 @@ export default function PublicNav() {
   const [scrolled,    setScrolled]    = useState(false);
   const [mobileOpen,  setMobileOpen]  = useState(false);
   const [openDropdown, setOpenDropdown] = useState(null);
+  const [branding,    setBranding]    = useState(null); // {logoUrl, faviconUrl, primaryColor} once fetched
   const location = useLocation();
 
   useEffect(() => { window.scrollTo({ top: 0, behavior: 'instant' }); }, [location.pathname]);
@@ -48,9 +50,18 @@ export default function PublicNav() {
   // behind by AppShell/Login, which can only clean up via React unmount —
   // a no-op on a hard navigation/reload, since the browser tears down that
   // JS context before any cleanup runs) never lingers on the public site.
+  // Runs once immediately with the safe static default, then again once the
+  // platform's own custom favicon (if any) has loaded — never the other way
+  // around, so a slow settings fetch can't leave the default showing stale.
   // Title is intentionally untouched here — each page sets its own via
   // react-helmet-async.
   useLayoutEffect(() => { setFavicon(DEFAULT_FAVICON); }, []);
+  useEffect(() => {
+    getPlatformSettings().then(s => {
+      setBranding(s);
+      if (s.faviconUrl) setFavicon(s.faviconUrl);
+    });
+  }, []);
 
   useEffect(() => {
     function onScroll() {
@@ -78,10 +89,19 @@ export default function PublicNav() {
       }`}
     >
       <div className="max-w-7xl mx-auto px-6 lg:px-8 h-16 flex items-center justify-between">
-        {/* Logo */}
+        {/* Logo — a platform-admin-uploaded logo replaces the "M" wordmark once loaded */}
         <Link to="/" className="flex items-center gap-2.5 group flex-shrink-0">
-          <div className="w-7 h-7 rounded-lg bg-slate-900 flex items-center justify-center text-white text-[10px] font-bold group-hover:bg-indigo-600 transition-colors">M</div>
-          <span className="text-base font-bold text-slate-900 tracking-tight">Msingi</span>
+          {branding?.logoUrl ? (
+            <img src={branding.logoUrl} alt="Msingi" className="h-7 w-auto max-w-[140px] object-contain" />
+          ) : (
+            <div
+              className={`w-7 h-7 rounded-lg flex items-center justify-center text-white text-[10px] font-bold transition-colors ${branding?.primaryColor ? '' : 'bg-slate-900 group-hover:bg-indigo-600'}`}
+              style={branding?.primaryColor ? { backgroundColor: branding.primaryColor } : undefined}
+            >
+              M
+            </div>
+          )}
+          <span className="text-base font-bold text-slate-900 tracking-tight">{branding?.platformName || 'Msingi'}</span>
         </Link>
 
         {/* Desktop nav */}

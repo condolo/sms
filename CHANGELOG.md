@@ -6,6 +6,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.87.0] — 2026-07-20 — feat(platform): direct logo/favicon upload for platform branding
+
+Platform admin's Settings panel previously took a plain "Logo URL" / "Favicon URL" text field. A pasted Google Drive "file" share link looked plausible but is an HTML viewer page, not raw image bytes — it silently rendered nothing on the public site. Replaced with direct upload, mirroring the already-shipped per-school logo pattern (`PUT /api/settings/school/logo`) exactly, and wired the public landing/marketing pages to actually consume the result — the second half of the original feature that was built but never connected.
+
+### Added — server
+
+- `server/routes/platform.js` — `PUT/DELETE /api/platform/settings/logo` (500KB cap) and `.../favicon` (100KB cap). Both validate the payload is a genuine base64 image data URL (`_validateBase64Image`), store it directly on the `platform_settings` doc, and return the binary-serving asset URL. DELETE clears both the stored bytes and the URL field.
+- `server/routes/public.js` — `GET /api/public/platform-asset/:type` (`logo`/`favicon`), serving the stored bytes with mime-sniffed `Content-Type` and a `public` cache header — the platform-wide counterpart to the existing per-school `GET /api/public/school-asset/:type`.
+
+### Changed — client
+
+- `platform.html` — Logo/Favicon URL text inputs replaced with upload UI (preview box, Choose File / Remove), reading the file client-side via `FileReader` and PUTting the base64 payload directly.
+- `client/src/components/landing/PublicNav.jsx`, `PublicFooter.jsx` — now fetch `getPlatformSettings()` and render the uploaded logo/platform name/brand colour in the site-wide wordmark, falling back to the default "M" mark and "Msingi" name when nothing has been uploaded (or the request fails) — the fetch is cached, no extra cost across the two components. `PublicNav`'s favicon-reset effect also applies a custom favicon once loaded, without disturbing its existing defensive-reset-on-mount behavior.
+- `client/src/pages/Landing.jsx` — removed a dead, never-called `getPlatformSettings` import left over from before this wiring existed.
+
+### Tests
+
+- `server/__tests__/routes/platform-branding-asset.test.js` (new) — 10 tests: missing-field / invalid-image / oversized 400s for both asset types, successful upload writes the correct doc fields and returns the correct URL, delete clears both fields.
+- `server/__tests__/routes/public-platform-asset.test.js` (new) — 5 tests: invalid type 400, no-asset 404 (including no-doc-at-all), correct `Content-Type`/`Cache-Control` on serve, logo/favicon stored and served independently.
+- Full suite: 43/43 suites, 486/486 tests. `node scripts/security-scan.js` and the tenant-isolation ratchet (held at 34) both clean.
+- Browser-verified end-to-end with a mocked `/api/platform/settings` response: uploaded logo/name/colour render correctly in both `PublicNav` and `PublicFooter` on a client-side (React Router) navigation, and the no-custom-branding fallback (real endpoint unreachable in this sandbox — no live backend) correctly renders the default "M" mark and "Msingi" name with no broken image or console error.
+
+---
+
 ## [v4.86.0] — 2026-07-20 — feat(auth): collapse org-slug login to a single gate + search resolves to organizations
 
 Triggered by a real screenshot: searching "tis" on the landing page showed two schools under one organization ("Trinitas International SChool" / "Trinity International SChool") as separate, confusingly-similar results. Working through it surfaced two decisions, both implemented here.

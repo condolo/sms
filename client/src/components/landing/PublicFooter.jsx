@@ -1,6 +1,8 @@
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, MessageCircle, ShieldCheck } from 'lucide-react';
 import { useWaUrl } from '@/hooks/useWaUrl';
+import { getPlatformSettings } from '@/utils/landingCMS';
 
 const COLS = [
   {
@@ -49,6 +51,10 @@ const COLS = [
 
 export default function PublicFooter() {
   const waUrl = useWaUrl();
+  // getPlatformSettings() is module-level cached (client/src/utils/landingCMS.js),
+  // so this costs nothing extra beyond PublicNav's own identical fetch.
+  const [branding, setBranding] = useState(null);
+  useEffect(() => { getPlatformSettings().then(setBranding); }, []);
   return (
     <footer className="bg-slate-950 text-slate-400">
       <div className="h-px bg-gradient-to-r from-transparent via-slate-800 to-transparent" />
@@ -59,8 +65,17 @@ export default function PublicFooter() {
           {/* Brand col — spans 2 */}
           <div className="lg:col-span-2">
             <Link to="/" className="inline-flex items-center gap-2.5 mb-5 group">
-              <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-sm font-bold shadow-lg group-hover:scale-105 transition-transform">M</div>
-              <span className="text-lg font-bold text-white tracking-tight">Msingi</span>
+              {branding?.logoUrl ? (
+                <img src={branding.logoUrl} alt="Msingi" className="h-9 w-auto max-w-[160px] object-contain group-hover:scale-105 transition-transform" />
+              ) : (
+                <div
+                  className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-sm font-bold shadow-lg group-hover:scale-105 transition-transform"
+                  style={{ backgroundColor: branding?.primaryColor || '#4f46e5' }}
+                >
+                  M
+                </div>
+              )}
+              <span className="text-lg font-bold text-white tracking-tight">{branding?.platformName || 'Msingi'}</span>
             </Link>
             <p className="text-sm text-slate-500 leading-relaxed mb-6 max-w-xs">
               School management built for Africa — attendance, grades, M-Pesa fees, admissions, report cards, and parent portals in one platform.

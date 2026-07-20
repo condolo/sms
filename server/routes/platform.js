@@ -1577,6 +1577,108 @@ router.put('/settings', async (req, res) => {
   }
 });
 
+/* ── Platform branding asset upload (logo/favicon) ──────────────
+   Mirrors settings.js's PUT /school/logo pattern exactly — a school
+   already uploads its own logo this way (base64 stored directly on its
+   own doc, served back via a public binary-serving GET route) — same
+   shape here, on the single global platform_settings doc instead of a
+   school doc. No new file-storage infra (S3, multer-to-disk, etc.):
+   base64-in-Mongo is what the already-shipped school-side feature uses,
+   and a 500KB cap keeps that cheap. Replaces the old plain-URL text
+   fields, which only ever accepted a real direct image URL — a pasted
+   Google Drive "file" share link is an HTML viewer page, never a raw
+   image, so it silently rendered nothing no matter what the rest of
+   this feature did. */
+function _validateBase64Image(b64, maxKB) {
+  if (!/^data:image\/(jpeg|jpg|png|webp|gif|svg\+xml|x-icon|vnd\.microsoft\.icon);base64,/.test(b64)) {
+    return 'Invalid image. Use JPEG, PNG, WebP, GIF, SVG, or ICO.';
+  }
+  const data = b64.split(',')[1] || '';
+  const sizeBytes = Math.ceil(data.length * 0.75);
+  if (sizeBytes > maxKB * 1024) {
+    return `Image too large. Maximum size is ${maxKB} KB.`;
+  }
+  return null;
+}
+
+/* PUT /api/platform/settings/logo */
+router.put('/settings/logo', async (req, res) => {
+  try {
+    const { logoBase64 } = req.body;
+    if (!logoBase64) return res.status(400).json({ error: 'logoBase64 is required.' });
+    const err = _validateBase64Image(logoBase64, 500);
+    if (err) return res.status(400).json({ error: err });
+
+    const Settings = _model('platform_settings');
+    const logoUrl  = '/api/public/platform-asset/logo';
+    const now      = new Date().toISOString();
+    await Settings.updateOne(
+      { id: 'global' },
+      { $set: { id: 'global', logoBase64, logoUrl, updatedAt: now } },
+      { upsert: true }
+    );
+    res.json({ success: true, logoUrl });
+  } catch (err) {
+    console.error('[platform/settings/logo PUT]', err);
+    res.status(500).json({ error: 'Failed to upload logo.' });
+  }
+});
+
+/* DELETE /api/platform/settings/logo — revert to the default wordmark */
+router.delete('/settings/logo', async (req, res) => {
+  try {
+    const Settings = _model('platform_settings');
+    await Settings.updateOne(
+      { id: 'global' },
+      { $set: { logoUrl: null, updatedAt: new Date().toISOString() }, $unset: { logoBase64: '' } },
+      { upsert: true }
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[platform/settings/logo DELETE]', err);
+    res.status(500).json({ error: 'Failed to remove logo.' });
+  }
+});
+
+/* PUT /api/platform/settings/favicon */
+router.put('/settings/favicon', async (req, res) => {
+  try {
+    const { faviconBase64 } = req.body;
+    if (!faviconBase64) return res.status(400).json({ error: 'faviconBase64 is required.' });
+    const err = _validateBase64Image(faviconBase64, 100);
+    if (err) return res.status(400).json({ error: err });
+
+    const Settings   = _model('platform_settings');
+    const faviconUrl = '/api/public/platform-asset/favicon';
+    const now        = new Date().toISOString();
+    await Settings.updateOne(
+      { id: 'global' },
+      { $set: { id: 'global', faviconBase64, faviconUrl, updatedAt: now } },
+      { upsert: true }
+    );
+    res.json({ success: true, faviconUrl });
+  } catch (err) {
+    console.error('[platform/settings/favicon PUT]', err);
+    res.status(500).json({ error: 'Failed to upload favicon.' });
+  }
+});
+
+/* DELETE /api/platform/settings/favicon — revert to the default favicon */
+router.delete('/settings/favicon', async (req, res) => {
+  try {
+    const Settings = _model('platform_settings');
+    await Settings.updateOne(
+      { id: 'global' },
+      { $set: { faviconUrl: null, updatedAt: new Date().toISOString() }, $unset: { faviconBase64: '' } },
+      { upsert: true }
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[platform/settings/favicon DELETE]', err);
+    res.status(500).json({ error: 'Failed to remove favicon.' });
+  }
+});
+
 /* ── School-side dismiss (uses platform router via /api/platform/announcements/:id/dismiss)
    But schools need JWT auth, not platform key. So we expose a separate public endpoint
    in the main collections route instead. Dismiss is tracked as schoolId in dismissedBy[].

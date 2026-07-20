@@ -13,7 +13,7 @@ import {
 import { ECOSYSTEM_NODES } from '@/data/landingData';
 import { EASE, fadeUp, stagger, VP } from '@/utils/animations';
 import { schoolPortalUrl, storeSchoolSlug } from '@/utils/schoolDetect.js';
-import { getLandingCMS, getPlatformSettings } from '@/utils/landingCMS';
+import { getLandingCMS } from '@/utils/landingCMS';
 import { CMS_DEFAULTS } from '@/data/landingData';
 import PublicNav    from '@/components/landing/PublicNav';
 import PublicFooter from '@/components/landing/PublicFooter';

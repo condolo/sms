@@ -1695,14 +1695,34 @@ async function renderBranding() {
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div>
-            <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Logo URL</label>
-            <input id="ps-logo" type="url" placeholder="https://…/logo.png" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;box-sizing:border-box"/>
-            <p style="font-size:11px;color:#9ca3af;margin:4px 0 0">Recommended: 200×50px PNG/SVG</p>
+            <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Logo</label>
+            <div style="display:flex;align-items:center;gap:12px">
+              <div id="ps-logo-preview" onclick="document.getElementById('ps-logo-file').click()"
+                   style="width:80px;height:48px;border:2px dashed #d1d5db;border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;background:#f9fafb;flex-shrink:0">
+                <i class="fas fa-image" style="color:#9ca3af;font-size:16px"></i>
+              </div>
+              <div>
+                <input id="ps-logo-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" style="display:none" onchange="uploadBrandAsset('logo', this)"/>
+                <button type="button" onclick="document.getElementById('ps-logo-file').click()" style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer">Choose File</button>
+                <button type="button" onclick="removeBrandAsset('logo')" style="background:none;color:#dc2626;border:none;font-size:12px;font-weight:600;cursor:pointer;margin-left:6px">Remove</button>
+              </div>
+            </div>
+            <p style="font-size:11px;color:#9ca3af;margin:6px 0 0">Recommended: 200×50px PNG/SVG, max 500KB</p>
           </div>
           <div>
-            <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Favicon URL</label>
-            <input id="ps-favicon" type="url" placeholder="https://…/favicon.ico" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;box-sizing:border-box"/>
-            <p style="font-size:11px;color:#9ca3af;margin:4px 0 0">32×32px ICO or PNG</p>
+            <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Favicon</label>
+            <div style="display:flex;align-items:center;gap:12px">
+              <div id="ps-favicon-preview" onclick="document.getElementById('ps-favicon-file').click()"
+                   style="width:40px;height:40px;border:2px dashed #d1d5db;border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;background:#f9fafb;flex-shrink:0">
+                <i class="fas fa-star" style="color:#9ca3af;font-size:14px"></i>
+              </div>
+              <div>
+                <input id="ps-favicon-file" type="file" accept="image/png,image/x-icon,image/vnd.microsoft.icon,image/svg+xml" style="display:none" onchange="uploadBrandAsset('favicon', this)"/>
+                <button type="button" onclick="document.getElementById('ps-favicon-file').click()" style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer">Choose File</button>
+                <button type="button" onclick="removeBrandAsset('favicon')" style="background:none;color:#dc2626;border:none;font-size:12px;font-weight:600;cursor:pointer;margin-left:6px">Remove</button>
+              </div>
+            </div>
+            <p style="font-size:11px;color:#9ca3af;margin:6px 0 0">32×32px ICO, PNG, or SVG, max 100KB</p>
           </div>
         </div>
         <div>
@@ -1781,8 +1801,8 @@ async function renderBranding() {
     const s = await res.json();
     document.getElementById('ps-name').value    = s.platformName   || '';
     document.getElementById('ps-tagline').value = s.tagline        || '';
-    document.getElementById('ps-logo').value    = s.logoUrl        || '';
-    document.getElementById('ps-favicon').value = s.faviconUrl     || '';
+    _renderAssetPreview('logo', s.logoUrl);
+    _renderAssetPreview('favicon', s.faviconUrl);
     document.getElementById('ps-email').value   = s.contactEmail   || '';
     document.getElementById('ps-phone').value   = s.contactPhone   || '';
     const c = s.primaryColor || '#4f46e5';
@@ -1803,8 +1823,6 @@ async function saveBranding() {
   const payload = {
     platformName:  document.getElementById('ps-name').value,
     tagline:       document.getElementById('ps-tagline').value,
-    logoUrl:       document.getElementById('ps-logo').value,
-    faviconUrl:    document.getElementById('ps-favicon').value,
     primaryColor:  document.getElementById('ps-color').value,
     contactEmail:  document.getElementById('ps-email').value,
     contactPhone:  document.getElementById('ps-phone').value,
@@ -1836,6 +1854,50 @@ async function saveBranding() {
     msgEl.style.color = '#991b1b';
     msgEl.style.fontSize = '14px';
     msgEl.innerHTML = '❌ Failed to save: ' + e.message;
+  }
+}
+
+/* ── Branding asset upload (logo/favicon) ────────────────────────
+   Direct file upload replaces the old plain-URL text fields — those
+   only ever accepted a real direct image URL, and a pasted Google
+   Drive "file" share link is an HTML viewer page, never raw image
+   bytes, so it silently rendered nothing no matter what else worked.
+   File → base64 (FileReader, in-browser) → PUT, uploads immediately
+   on file choice, same as the school-side logo uploader this mirrors. */
+function _renderAssetPreview(type, url) {
+  const el = document.getElementById(`ps-${type}-preview`);
+  const fallbackIcon = type === 'logo' ? 'fa-image' : 'fa-star';
+  el.innerHTML = url
+    ? `<img src="${url}?t=${Date.now()}" alt="${type}" style="max-width:100%;max-height:100%;object-fit:contain"/>`
+    : `<i class="fas ${fallbackIcon}" style="color:#9ca3af;font-size:${type === 'logo' ? 16 : 14}px"></i>`;
+}
+
+function uploadBrandAsset(type, inputEl) {
+  const file = inputEl.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async (ev) => {
+    const b64 = ev.target.result;
+    try {
+      const body = type === 'logo' ? { logoBase64: b64 } : { faviconBase64: b64 };
+      const json = await api('PUT', `/settings/${type}`, body);
+      _renderAssetPreview(type, json[type === 'logo' ? 'logoUrl' : 'faviconUrl']);
+      toast(`${type === 'logo' ? 'Logo' : 'Favicon'} uploaded.`, 'success');
+    } catch (e) {
+      toast(`Failed to upload ${type}: ${e.message}`, 'error');
+    }
+  };
+  reader.readAsDataURL(file);
+  inputEl.value = '';
+}
+
+async function removeBrandAsset(type) {
+  try {
+    await api('DELETE', `/settings/${type}`, {});
+    _renderAssetPreview(type, null);
+    toast(`${type === 'logo' ? 'Logo' : 'Favicon'} removed — reverted to default.`, 'success');
+  } catch (e) {
+    toast(`Failed to remove ${type}: ${e.message}`, 'error');
   }
 }
 

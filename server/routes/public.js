@@ -289,6 +289,39 @@ router.get('/school-asset/:type', async (req, res) => {
   }
 });
 
+/* GET /api/public/platform-asset/logo
+   GET /api/public/platform-asset/favicon
+   Serves the platform's own logo/favicon as a binary image — mirrors
+   school-asset above exactly, minus the slug lookup (a single global
+   platform_settings doc, not one per school). No auth needed so the
+   public marketing site can display it before login. */
+router.get('/platform-asset/:type', async (req, res) => {
+  try {
+    const { type } = req.params;
+    if (type !== 'logo' && type !== 'favicon') {
+      return res.status(400).json({ error: 'type must be logo or favicon' });
+    }
+
+    const Settings = _model('platform_settings');
+    const settings = await Settings.findOne({ id: 'global' }).lean();
+    const field    = type === 'logo' ? 'logoBase64' : 'faviconBase64';
+    const b64      = settings?.[field];
+
+    if (!b64) return res.status(404).json({ error: `No ${type} set` });
+
+    const [header, data] = b64.split(',');
+    const mimeMatch = header?.match(/data:(image\/[\w+.-]+);base64/);
+    const mime = mimeMatch?.[1] || 'image/png';
+
+    res.set('Content-Type', mime);
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.send(Buffer.from(data, 'base64'));
+  } catch (err) {
+    console.error('[public/platform-asset]', err.message);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 /* GET /api/public/ping — simple liveness check (no DB) */
 router.get('/ping', (req, res) => res.json({ ok: true }));
 
