@@ -6,6 +6,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.95.0] — 2026-07-20 — fix(compliance): Google Analytics ran on every visitor with no consent — added a real cookie banner
+
+Triggered by a direct question: "have I ever seen a cookie banner?" Answer was no, and the reason was real — `client/index.html` loaded Google Analytics (GA4) unconditionally, in the `<head>`, before any visitor did anything. It set `_ga`/`_ga_*` cookies to every landing-page visitor and tracked every route change (including inside the authenticated school app), with zero consent mechanism anywhere in the codebase. This directly contradicted the site's own Privacy Policy, which explicitly claimed "we do not use third-party analytics that profile individual users."
+
+### Added
+
+- `client/src/utils/analytics.js` — Google Analytics now only loads after explicit consent. `initAnalyticsIfConsented()` (called once on app boot) loads it immediately if a prior visit already accepted; otherwise GA stays fully unloaded — no script tag, no network request, no cookie — until `setCookieConsent('accepted')` is called.
+- `client/src/components/CookieConsentBanner.jsx` — shown once, on any page, until a choice is made. Accept / Decline, plus a link to the Privacy Policy. Mounted alongside the router in `main.jsx` (same pattern as the existing `FloatingWidgets`), so it covers the public site and the authenticated app alike.
+- "Cookie Preferences" link in `PublicFooter.jsx` — lets a visitor change their mind at any time without clearing all browser storage; clears the stored decision and reloads, so the banner reappears and GA stays unloaded until a fresh choice is made.
+
+### Changed
+
+- `client/index.html` — the unconditional GA `<script>` block removed entirely.
+- `client/src/main.jsx` — GA page-view tracking on route change already guarded on `typeof window.gtag === 'function'`, so it silently no-ops for a visitor who hasn't accepted (or declined) — no change needed there beyond the boot-time consent check.
+- `client/src/pages/legal/PrivacyPolicy.jsx` — cookie table corrected to list Google Analytics as a real, consent-gated row instead of omitting it; "what we do NOT use" updated to state plainly that no analytics or tracking cookie is ever set before a visitor has made a choice.
+
+### Verified live
+
+Confirmed all three states directly in the browser: fresh load → `window.gtag` is `undefined`, no `googletagmanager` script tag exists, banner visible. Click Accept → GA script injects, `window.gtag` becomes callable, choice persists in `localStorage`. Click Decline → GA never loads, choice persists, banner closes. "Cookie Preferences" → clears the choice, reloads, GA stays unloaded, banner reappears for a fresh decision.
+
+---
+
 ## [v4.94.0] — 2026-07-20 — fix(auth): School Switcher disappeared the moment it was actually used
 
 Triggered by a direct report: switching schools worked once, but the destination school had no switcher back. Root cause was in the client session store, not the switch-school flow itself (which was already correct end to end, including the fresh-merge fix from the previous release).

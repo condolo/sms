@@ -476,24 +476,25 @@ export default function PrivacyPolicy() {
             </Section>
 
             <Section id="cookies" title="13. Cookies and Tracking Technologies">
-              <p>The Msingi platform uses the following session storage technologies:</p>
+              <p>The Msingi platform uses the following session storage technologies. The first three are strictly necessary and are never gated behind a cookie banner; Google Analytics is the only one that requires — and gets — your explicit opt-in first.</p>
               <Table
-                headers={['Technology', 'Purpose', 'Duration']}
+                headers={['Technology', 'Purpose', 'Duration', 'Requires consent?']}
                 rows={[
-                  ['Authentication token (browser localStorage)', 'Maintains your login session so you do not have to re-authenticate on every page', 'Until you log out or the token expires (typically 7 days)'],
-                  ['School slug (browser localStorage)', 'Remembers your school so the correct branded login page is shown on return visits', 'Until cleared by the user'],
-                  ['Functional session state', 'Maintains UI state (e.g., selected tab, expanded sections) within a session', 'Session only — cleared when browser is closed'],
+                  ['Authentication cookie (HttpOnly)', 'Maintains your login session so you do not have to re-authenticate on every page', 'Until you log out or the session expires (typically 8 hours)', 'No — strictly necessary'],
+                  ['School slug (browser localStorage)', 'Remembers your school so the correct branded login page is shown on return visits', 'Until cleared by the user', 'No — strictly necessary'],
+                  ['Functional session state', 'Maintains UI state (e.g., selected tab, expanded sections) within a session', 'Session only — cleared when browser is closed', 'No — strictly necessary'],
+                  ['Google Analytics (_ga, _ga_*)', 'Understands aggregate site usage (pages viewed, general traffic patterns) — never loaded until you accept', 'Up to 13 months, per Google’s default retention', 'Yes — shown on your first visit, declinable at any time'],
                 ]}
               />
               <Sub title="What we do NOT use">
                 <ul className="space-y-1.5 list-disc list-inside">
                   <li>Advertising or retargeting cookies</li>
                   <li>Cross-site tracking technologies</li>
-                  <li>Third-party analytics that profile individual user behaviour (such as Google Analytics with advertising features enabled)</li>
                   <li>Fingerprinting or device tracking technologies</li>
+                  <li>Any analytics or tracking cookie set before you have made a choice in the cookie banner</li>
                 </ul>
               </Sub>
-              <p className="text-sm text-slate-500">You may clear browser storage at any time through your browser settings. This will require you to log in again on your next visit.</p>
+              <p className="text-sm text-slate-500">You may clear browser storage at any time through your browser settings — this will require you to log in again on your next visit. To change your analytics choice specifically without clearing everything else, use "Cookie Preferences" in the site footer at any time.</p>
             </Section>
 
             <Section id="changes" title="14. Changes to This Privacy Policy">

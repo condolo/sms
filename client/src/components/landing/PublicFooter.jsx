@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, MessageCircle, ShieldCheck } from 'lucide-react';
 import { useWaUrl } from '@/hooks/useWaUrl';
 import { getPlatformSettings } from '@/utils/landingCMS';
+import { reopenCookiePreferences } from '@/utils/analytics.js';
 
 const COLS = [
   {
@@ -150,6 +151,7 @@ export default function PublicFooter() {
             <Link to="/privacy" className="hover:text-slate-400 transition-colors">Privacy</Link>
             <Link to="/terms"   className="hover:text-slate-400 transition-colors">Terms</Link>
             <Link to="/security" className="hover:text-slate-400 transition-colors">Security</Link>
+            <button type="button" onClick={reopenCookiePreferences} className="hover:text-slate-400 transition-colors">Cookie Preferences</button>
           </div>
         </div>
       </div>

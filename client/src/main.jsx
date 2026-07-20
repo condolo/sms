@@ -8,10 +8,19 @@ import { HelmetProvider } from 'react-helmet-async';
 import { router } from './App.jsx';
 import ErrorBoundary from '@/components/guards/ErrorBoundary.jsx';
 import FloatingWidgets from '@/components/FloatingWidgets.jsx';
+import CookieConsentBanner from '@/components/CookieConsentBanner.jsx';
+import { initAnalyticsIfConsented } from '@/utils/analytics.js';
 
-// Fire a GA4 page_view on every client-side navigation.
-// The first call is skipped because gtag('config') in index.html already
-// fires the initial page_view on hard load.
+// Loads GA immediately only if a prior visit already accepted the cookie
+// banner — otherwise this is a no-op and GA never loads at all. See
+// CookieConsentBanner.jsx / utils/analytics.js.
+initAnalyticsIfConsented();
+
+// Fire a GA4 page_view on every client-side navigation. window.gtag only
+// exists once analytics.js has actually loaded GA (post-consent), so this
+// silently no-ops for a visitor who hasn't accepted (or has declined).
+// The first call is skipped because analytics.js's own gtag('config', ...)
+// already fires the initial page_view when GA first loads.
 let _gaInitialSkipped = false;
 router.subscribe((state) => {
   if (!_gaInitialSkipped) { _gaInitialSkipped = true; return; }
@@ -64,6 +73,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
         <QueryClientProvider client={queryClient}>
           <RouterProvider router={router} />
           <FloatingWidgets />
+          <CookieConsentBanner />
           {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
         </QueryClientProvider>
       </ErrorBoundary>
