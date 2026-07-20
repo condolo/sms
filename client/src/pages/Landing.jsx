@@ -181,16 +181,6 @@ export default function Landing() {
               <motion.div initial="hidden" animate="visible" variants={stagger(0.07)}
                 className="min-w-0 text-center lg:text-left">
 
-                {/* Purpose-first label */}
-                <motion.div variants={fadeUp} className="flex justify-center lg:justify-start mb-8">
-                  <Link to="/why"
-                    className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 backdrop-blur-sm px-4 py-1.5 text-xs font-medium text-slate-400 hover:border-slate-500 hover:text-slate-200 transition-all">
-                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0" />
-                    Built by an educator who taught in these schools
-                    <ChevronRight size={12} className="text-slate-600" />
-                  </Link>
-                </motion.div>
-
                 <motion.h1 variants={fadeUp}
                   className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tighter text-white leading-[1.1] mb-7">
                   The school management platform
