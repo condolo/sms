@@ -6,6 +6,40 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.91.0] — 2026-07-20 — fix(auth): School Switcher missing for impersonated/platform-provisioned admins
+
+Triggered by a direct report: impersonated a school's superadmin in a multi-school-enabled org, expected a way to switch to the org's other campus, saw nothing. Verified everything in this release against a real ephemeral MongoDB + a real spawned server process (no mocks) — the same methodology used for C13's original production validation — because the previous session's fixes were mock-verified only and this report specifically asked whether platform-admin edits are actually DB-recorded.
+
+### Fixed — impersonation never built a real token payload
+
+`POST /schools/:id/impersonate` hand-rolled its own JWT payload instead of reusing `auth.js`'s `_buildTokenPayload` (the same function every real login goes through) — so an impersonated session never carried `orgId`/`membershipId` (C9) or `identityId`/`itv` (ADR-0003). The School Switcher's gate (`availableSchools.length > 0`) can only ever be non-empty when those fields are present, so the switcher could never appear for an impersonated session, regardless of the org's `multiSchoolEnabled` state.
+
+- `server/routes/auth.js` — `_buildTokenPayload`/`_availableSchools` exposed on the router export (same lightweight in-process reuse convention as `qa-health.js`'s `_identityMigrationStatus`; no HTTP round trip, same server).
+- `server/routes/platform.js` — impersonate route now builds its token via those two functions instead of a hand-rolled payload, and returns `availableSchools` in its response, mirroring `/api/auth/login`'s shape.
+- `platform.html` — `doImpersonate()` now carries `availableSchools` into the session it hands the client SPA.
+
+### Fixed — a platform-provisioned school's own admin could never get a working switcher, impersonated or not
+
+Live-DB testing surfaced a second, deeper bug: every OTHER user-creation call site (`users.js`, `settings.js`, `onboard.js`, `students.js`, `import-export.js`, `auth.js`) calls `provisionIdentityForUser()` inline right after creating a user — `platform.js`'s `POST /schools` (which creates the school's own initial superadmin, via the raw Mongo driver) never did. That admin's `identityId` was permanently unset, which independently blocks the switcher — `_availableSchools()` requires `identityId`, not just `orgId` — no matter how correct the token-building fix above is.
+
+- `server/routes/platform.js` — `POST /schools` now calls `provisionIdentityForUser()` for the new admin, placed after the org-attachment step so the fresh `schools.organizationId` read inside it resolves correctly; non-blocking/self-healing, matching every other call site's convention. The raw-driver `insertOne` result is now captured so the object passed to `provisionIdentityForUser` has a real `_id` — passing one without it would silently break that function's own sibling-exclusion query.
+
+### Verified live — not just against mocks
+
+Ran end-to-end against a real ephemeral MongoDB (`mongodb-memory-server`) and a real, separately spawned `node server/index.js` process, driven entirely over real HTTP, directly answering "are these DB-recorded or just surfaced":
+
+- School and organization rename (`v4.89.0`): the API response *and* a direct Mongo read (bypassing the API) both show the new name; an attempted `slug` change in the same request is silently ignored in the persisted document.
+- Impersonation now returns the full `school` doc and `availableSchools`; the returned `availableSchools` entry is real (the org's other campus); calling the actual `/api/auth/switch-school` → `/api/auth/exchange` flow with the impersonation-issued session cookie genuinely lands on the target school.
+- 15/15 live checks passed.
+
+### Tests
+
+- `server/__tests__/routes/platform-impersonate.test.js` (extended) — impersonation builds its token via `_buildTokenPayload`; `availableSchools` is included when the identity has 2+ eligible schools and omitted (not an empty array) when it doesn't.
+- `server/__tests__/routes/platform-school-identity-provisioning.test.js` (new) — `POST /schools` calls `provisionIdentityForUser` with a real `_id`; a failure in that call doesn't fail school creation.
+- Full suite: 47/47 suites, 505/505 tests. `node scripts/security-scan.js` and the tenant-isolation ratchet (held at 34) both clean. Both fixes mutation-tested (reverting each fails the corresponding new tests).
+
+---
+
 ## [v4.90.0] — 2026-07-20 — fix(billing): platform admin is now the sole authority over a school's plan tier
 
 Follow-up to v4.89.0's finding: `POST /api/mpesa/subscription` let a school admin pick any tier in Settings and pay for it, silently overwriting whatever plan platform admin had set — a second, uncoordinated writer to `schools.plan`. Asked directly which model was intended; the answer: platform admin should be the sole authority. Implemented that decision.

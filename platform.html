@@ -1088,6 +1088,11 @@ async function doImpersonate(schoolId) {
     const sessionPayload = {
       user:   { ...u, id: u.id || (u._id ? String(u._id) : undefined), password: undefined },
       school: data.school || {},
+      // Populated only when the school's organization has multiSchoolEnabled
+      // and this admin has 2+ eligible schools — makes the School Switcher
+      // (TopBar.jsx) show up for an impersonated session exactly as it
+      // would for a real login, instead of never appearing at all.
+      availableSchools: data.availableSchools || [],
     };
     localStorage.setItem('msingi_session', JSON.stringify(sessionPayload));
 

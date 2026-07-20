@@ -1667,4 +1667,13 @@ async function _completeOrgLoginSession(req, res, user, school, identity) {
   });
 }
 
+// Exposed for platform.js's impersonate route so an impersonated session
+// gets an identically-shaped JWT (orgId/membershipId/identityId/itv) and
+// availableSchools list to a real login — same lightweight in-process reuse
+// convention as qa-health.js's _identityMigrationStatus (no HTTP round trip,
+// same server, lazily required to avoid loading auth.js's dependency graph
+// into every module that merely requires platform.js).
+router._buildTokenPayload = _buildTokenPayload;
+router._availableSchools  = _availableSchools;
+
 module.exports = router;

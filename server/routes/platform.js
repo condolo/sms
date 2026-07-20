@@ -16,6 +16,7 @@ const email    = require('../utils/email');
 const { tenantModel } = require('../utils/tenant-model');
 const { provisionOrganizationForSchool } = require('../utils/provision-organizations');
 const { provisionMembershipForUser } = require('../utils/provision-memberships');
+const { provisionIdentityForUser } = require('../utils/provision-identities');
 
 const router = express.Router();
 
@@ -226,12 +227,14 @@ router.post('/schools', async (req, res) => {
 
     // Create superadmin user
     const hashed = await bcrypt.hash(adminPassword, 12);
-    await db.collection('users').insertOne({
+    const adminUserDoc = {
       id: userId, schoolId, name: adminName || adminEmail,
       email: adminEmail.toLowerCase(), password: hashed,
       role: 'superadmin', primaryRole: 'superadmin', roles: ['superadmin'],
       isActive: true, createdAt: new Date().toISOString()
-    });
+    };
+    const userInsertResult = await db.collection('users').insertOne(adminUserDoc);
+    adminUserDoc._id = userInsertResult.insertedId;
 
     // Seed essential base records (academic year, role_permissions, etc.)
     await _seedBaseData(schoolId);
@@ -246,6 +249,23 @@ router.post('/schools', async (req, res) => {
       } catch (err) {
         console.error('[platform/schools POST] immediate org provisioning failed (will self-heal at next restart):', err.message);
       }
+    }
+
+    // C8/MR-001 Phase 0 (ADR-0003, Shadow) — non-blocking, self-healing.
+    // Every OTHER user-creation call site has this inline hook (users.js,
+    // settings.js, onboard.js, students.js, import-export.js, auth.js) —
+    // this one didn't, a real gap found via live-DB testing: the school's
+    // own admin user, created here via the raw driver, never got an
+    // identityId. Beyond the boot backfill eventually catching it, the
+    // concrete symptom is that the C9 School Switcher can never appear for
+    // this admin (it requires identityId, not just orgId) even when
+    // multiSchoolEnabled is later turned on for the org. Placed after the
+    // org-attachment block above so provisionIdentityForUser's own fresh
+    // schools.organizationId read already resolves correctly.
+    try {
+      await provisionIdentityForUser(adminUserDoc);
+    } catch (err) {
+      console.error('[platform/schools POST] identity provisioning failed (will self-heal at next restart):', err.message);
     }
 
     res.status(201).json({ school: schoolDoc, adminUserId: userId });
@@ -922,15 +942,20 @@ router.post('/schools/:id/impersonate', async (req, res) => {
 
     /* Use the schoolId stored on the user — it's what the app already knows */
     const resolvedSchoolId = admin.schoolId || school.id || req.params.id;
-    const token = sign({
-      userId:      admin.id,
-      schoolId:    resolvedSchoolId,
-      email:       admin.email,
-      role:        'superadmin',
-      roles:       ['superadmin'],
-      schoolName:  school.name,
-      impersonated: true
-    });
+
+    /* Build the token exactly like a real /api/auth/login would — reusing
+       auth.js's own _buildTokenPayload (see its export at the bottom of
+       auth.js) rather than hand-rolling a payload. A hand-rolled payload
+       previously omitted orgId/membershipId (C9) and identityId/itv
+       (ADR-0003), which meant an impersonated session could never show the
+       School Switcher even when the org had multiSchoolEnabled on — the
+       switcher's gate (availableSchools.length > 0) can only ever be
+       non-empty when those fields are present. */
+    const authRouter    = require('./auth');
+    const tokenPayload  = await authRouter._buildTokenPayload(admin, resolvedSchoolId);
+    tokenPayload.impersonated = true;
+    const token = sign(tokenPayload);
+    const availableSchools = await authRouter._availableSchools(tokenPayload);
 
     AuditService.log({ action: 'platform.impersonate', actor: { userId: 'platform', role: 'platform', email: null }, schoolId: resolvedSchoolId, target: { type: 'school', id: resolvedSchoolId, label: school.name }, details: { targetEmail: admin.email }, req });
 
@@ -956,6 +981,7 @@ router.post('/schools/:id/impersonate', async (req, res) => {
         schoolId:   resolvedSchoolId,
       },
       school,
+      ...(availableSchools.length ? { availableSchools } : {}),
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
