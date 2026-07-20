@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.90.0] — 2026-07-20 — fix(billing): platform admin is now the sole authority over a school's plan tier
+
+Follow-up to v4.89.0's finding: `POST /api/mpesa/subscription` let a school admin pick any tier in Settings and pay for it, silently overwriting whatever plan platform admin had set — a second, uncoordinated writer to `schools.plan`. Asked directly which model was intended; the answer: platform admin should be the sole authority. Implemented that decision.
+
+### Changed
+
+- `server/routes/mpesa.js`'s `POST /subscription` no longer reads a tier from the request body at all. The tier being charged for is now derived server-side from the school's own current `plan` field — a client can only ever pay for the tier platform admin already set, never select a different one. A school on Enterprise (no self-service rate) or with no plan set gets a clear 400 pointing at platform admin/sales instead of a fabricated charge.
+- `client/src/pages/settings/SettingsPage.jsx`'s `SubscriptionTab` — the "Choose a Portal Tier" clickable picker is now a read-only comparison (the school's current tier is labeled "Your Plan"; the copy tells the admin to contact platform admin to change tier). The M-Pesa payment section pays for the current tier only and is hidden entirely for Enterprise schools, which have no self-service rate.
+
+### Tests
+
+- `server/__tests__/routes/mpesa-subscription-plan-authority.test.js` (new) — a client-supplied `tier`/legacy `plan` is ignored in favor of the school's real stored plan (both the charged amount and the transaction record reflect the real plan); Enterprise and no-plan-set both reject cleanly. Mutation-tested: reverting the server fix fails all 4 tests.
+- Full suite: 46/46 suites, 500/500 tests. `node scripts/security-scan.js` and the tenant-isolation ratchet (held at 34) both clean.
+- Client bundle verified to compile cleanly (Vite dev transform of the edited file returns 200). Full click-through wasn't possible in this sandbox (no live MongoDB).
+
+---
+
 ## [v4.89.0] — 2026-07-20 — feat(platform): rename school/organization (name only) + fix stale plan display in school Settings
 
 ### Added — school/organization rename

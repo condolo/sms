@@ -467,18 +467,25 @@ router.post('/subscription', authMiddleware, async (req, res) => {
     }
 
     const { schoolId } = req.jwtUser;
-    const { phone, tier, plan, studentCount } = req.body;
+    const { phone, studentCount } = req.body;
 
     if (!phone) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'phone is required.' } });
     }
 
-    // Accept new 'tier' param or legacy 'plan' param
-    const rawTier    = (tier || _LEGACY_TO_TIER[plan] || 'student').toLowerCase();
-    const targetPlan = rawTier; // stored as tier key going forward
+    // The tier being paid for is derived from the school's own current plan —
+    // never from the request body. Platform admin is the sole authority over
+    // which tier a school is on (set via PATCH /api/platform/schools/:id);
+    // this endpoint only ever collects payment for whatever tier that is.
+    // A school admin can no longer self-select a different tier here.
+    const Schools = _model('schools');
+    const school  = await Schools.findOne({ id: schoolId }).lean();
+
+    const rawTier    = _LEGACY_TO_TIER[school?.plan] || school?.plan || null;
+    const targetPlan = rawTier;
     const rate       = STUDENT_RATE[rawTier];
     if (!rate) {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Enterprise plans require direct sales contact. Valid tiers: base, student, family.` } });
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `This school's plan (${school?.plan || 'not set'}) isn't a self-service tier. Contact platform admin to set a Base, Student, or Family plan, or sales for Enterprise.` } });
     }
     const count  = Math.max(1, parseInt(studentCount, 10) || 1);
     const amount = rate * count;
@@ -495,9 +502,6 @@ router.post('/subscription', authMiddleware, async (req, res) => {
       console.error('[mpesa/subscription] Platform M-Pesa credentials not configured');
       return res.status(503).json({ success: false, error: { code: 'NOT_CONFIGURED', message: 'Subscription payments are not yet enabled. Contact support.' } });
     }
-
-    const Schools = _model('schools');
-    const school  = await Schools.findOne({ id: schoolId }).lean();
 
     const normalizedPhone = mpesa.normalizePhone(phone);
     const callbackUrl     = `${base}/api/mpesa/subscription/callback`;

@@ -3928,7 +3928,6 @@ function SubscriptionTab() {
   }, [livePlanResp]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [phone,        setPhone]        = useState(user?.phone || '');
-  const [selTier,      setSelTier]      = useState(() => LEGACY_TO_TIER[school?.plan] || 'student');
   const [studentCount, setStudentCount] = useState(300);
   const [loading,      setLoading]      = useState(false);
   const [generating,   setGenerating]   = useState(false);
@@ -3950,7 +3949,11 @@ function SubscriptionTab() {
   });
 
   const invoice      = invoiceData;
-  const selectedRate = PORTAL_TIERS_SETTINGS[selTier]?.rate || 0;
+  // The tier being paid for is always the school's current plan — platform
+  // admin is the sole authority over which tier that is (see server-side
+  // enforcement in mpesa.js's /subscription route, which derives the tier
+  // from schools.plan directly and ignores anything the client sends).
+  const selectedRate = currentTierMeta.rate || 0;
   // If there's a pending invoice, use its amount; otherwise calculate from manual input
   const termAmount   = invoice ? invoice.totalAmount : selectedRate * Math.max(1, studentCount);
 
@@ -3985,7 +3988,7 @@ function SubscriptionTab() {
     if (studentCount < 1)  { setError('Enter a valid student count.'); return; }
     setLoading(true); setError(''); setResult(null);
     try {
-      const json = await mpesaApi.subscription({ phone: phone.trim(), tier: selTier, studentCount });
+      const json = await mpesaApi.subscription({ phone: phone.trim(), studentCount });
       if (!json.success) throw new Error(json.error?.message || 'Payment initiation failed.');
       setResult(json);
     } catch (err) {
@@ -4025,29 +4028,30 @@ function SubscriptionTab() {
         </div>
       </div>
 
-      {/* Portal tier selector */}
+      {/* Portal tiers — informational only. Changing tier is a platform-admin
+          action (Platform Dashboard → Schools → Change Plan), not something a
+          school can do here — this pays for the current tier, it doesn't
+          select a new one. */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
         <div>
-          <h3 className="text-sm font-semibold text-slate-700">Choose a Portal Tier</h3>
-          <p className="text-xs text-slate-400 mt-0.5">All tiers include every ERP module. The tier controls which portals students and parents can log in to.</p>
+          <h3 className="text-sm font-semibold text-slate-700">Portal Tiers</h3>
+          <p className="text-xs text-slate-400 mt-0.5">All tiers include every ERP module. To change your school's tier, contact your platform administrator.</p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {Object.entries(PORTAL_TIERS_SETTINGS).filter(([k]) => k !== 'enterprise').map(([key, meta]) => (
-            <button
+            <div
               key={key}
-              type="button"
-              onClick={() => setSelTier(key)}
-              className={`relative text-left p-4 rounded-xl border-2 transition-all ${selTier === key ? `${meta.border} ${meta.bg}` : 'border-slate-200 hover:border-slate-300'}`}
+              className={`relative text-left p-4 rounded-xl border-2 ${currentTierKey === key ? `${meta.border} ${meta.bg}` : 'border-slate-200'}`}
             >
-              {meta.popular && (
-                <span className="absolute -top-2.5 left-3 bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">Popular</span>
+              {currentTierKey === key && (
+                <span className="absolute -top-2.5 left-3 bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">Your Plan</span>
               )}
               <p className={`text-sm font-semibold ${meta.color}`}>{meta.label}</p>
               <p className="text-xl font-bold text-slate-800 mt-1">
                 KSh {meta.rate}<span className="text-xs font-normal text-slate-400"> /student/term</span>
               </p>
               <p className="text-xs text-slate-400 mt-1">{meta.tagline}</p>
-            </button>
+            </div>
           ))}
         </div>
 
@@ -4063,7 +4067,9 @@ function SubscriptionTab() {
         </div>
       </div>
 
-      {/* Payment */}
+      {/* Payment — pays for the school's current tier only; not shown for
+          Enterprise, which has no self-service rate. */}
+      {!isEnterprise && (
       <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
         <div className="flex items-center gap-2">
           <Smartphone size={14} className="text-emerald-500" />
@@ -4167,6 +4173,7 @@ function SubscriptionTab() {
           Payment is processed directly by Safaricom. Msingi does not store M-Pesa PINs.
         </p>
       </div>
+      )}
 
       {/* Billing history */}
       <BillingHistory />
