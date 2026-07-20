@@ -12,9 +12,8 @@ const RELEASES = [
     changes: [
       { type: 'new', text: 'AuditService (server/services/audit.js) — append-only audit log with non-fatal log() and paginated query(). A broken audit log never blocks a school workflow.' },
       { type: 'new', text: '16-action catalogue: auth.login, auth.login_failed, user.role_changed, student.deleted, student.deactivated, report_card.publish, platform.impersonate, and more — each with a default severity (info / warn / critical).' },
-      { type: 'new', text: 'GET /api/audit — filterable by action, severity, actor, and date range. School admins see only their school; superadmin gets platform-wide view.' },
+      { type: 'new', text: 'GET /api/audit — filterable by action, severity, actor, and date range, always scoped to the caller’s own school.' },
       { type: 'new', text: 'Settings → Audit Log tab — admin-only view with filter bar (action, severity, date range) and paginated table showing time, action, severity badge, actor, and target.' },
-      { type: 'new', text: 'Platform Console → Recent Critical Events — superadmin section showing last 20 critical events across all schools.' },
       { type: 'improvement', text: 'auth.login instrumented — every successful login now recorded with actor, school, IP, and user-agent.' },
       { type: 'improvement', text: 'student.deleted and student.deactivated instrumented on the student soft-delete and deactivate routes.' },
       { type: 'improvement', text: 'report_card.publish instrumented — batch publish records batchId, class, term, and student count.' },

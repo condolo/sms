@@ -4317,25 +4317,15 @@ function SystemTab() {
         </div>
       </div>
 
-      {/* Platform Console link — superadmin only */}
-      {user?.role === 'superadmin' && (
-        <div className="bg-violet-50 border border-violet-200 rounded-xl p-5">
-          <div className="flex items-center gap-2 pb-2 border-b border-violet-100">
-            <MonitorPlay size={14} className="text-violet-500" />
-            <h3 className="text-xs font-semibold text-violet-600 uppercase tracking-wider">Platform Operations</h3>
-          </div>
-          <p className="text-sm text-slate-600 mt-3">
-            Platform-level health monitoring, data integrity scans, compliance checks, and release history are managed in the Platform Console.
-          </p>
-          <a
-            href="/ops"
-            className="inline-flex items-center gap-1.5 mt-3 text-xs font-semibold px-3 py-1.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors"
-          >
-            Open Platform Console
-            <ArrowRight size={12} />
-          </a>
-        </div>
-      )}
+      {/* No "Open Platform Console" card here — it was gated on
+          user.role === 'superadmin', a per-school RBAC role every school's
+          own admin holds, not a platform credential. Every school's admin
+          saw this as if it were a real feature; /api/ops/health and
+          /api/ops/certs behind it ran unscoped, platform-wide across every
+          school. Now gated on a genuine platform-admin session (which a
+          school login never has), so this card would only ever 401 for
+          anyone who could see it — removed rather than left as a dead
+          link. Platform operators use platform.html for this. */}
 
       {/* Danger zone */}
       <div className="bg-white border border-red-200 rounded-xl p-5 space-y-4">

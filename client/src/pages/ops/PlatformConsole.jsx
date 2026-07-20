@@ -16,7 +16,7 @@ import {
   Activity, ShieldCheck, Database, FileCheck, RefreshCcw,
   Loader2, CheckCircle2, AlertTriangle, XCircle, ChevronDown,
   ChevronUp, GitCommit, TrendingUp, Server, Lock, Layers,
-  Eye, ArrowRight, ClipboardList,
+  Eye, ArrowRight,
 } from 'lucide-react';
 import useAuthStore from '@/store/auth.js';
 import { _get } from '@/api/client.js';
@@ -24,7 +24,15 @@ import { _get } from '@/api/client.js';
 /* ── Data fetchers ─────────────────────────────────────────── */
 const fetchHealth = ()  => _get('/ops/health');
 const fetchCerts  = ()  => _get('/ops/certs?limit=30');
-const fetchAudit  = ()  => _get('/audit?limit=20&severity=critical');
+// No platform-wide audit fetcher here — /api/audit is school-scoped only
+// (see server/routes/audit.js), and this page's own role check below
+// can't distinguish a genuine platform operator from any school's own
+// 'superadmin'. A "Recent Critical Events" section here previously called
+// that school-scoped endpoint anyway, which meant it either leaked another
+// school's data (if the viewer also had a school session) or silently
+// showed nothing (if they only had a platform session) — never correct
+// for its actual audience either way. Removed until a real
+// platformSession-gated platform-wide audit route exists.
 
 /* ── Status helpers ────────────────────────────────────────── */
 const statusColor = {
@@ -209,16 +217,8 @@ export default function PlatformConsole() {
     retry: 1,
   });
 
-  const { data: auditRes } = useQuery({
-    queryKey: ['ops', 'audit'],
-    queryFn:  fetchAudit,
-    staleTime: 60_000,
-    retry: 1,
-  });
-
   const d          = healthRes?.data;
   const certs      = certsRes?.data ?? [];
-  const auditLogs  = auditRes?.data  ?? [];
 
   /* Derive top-level gate statuses from engine summaries */
   const healthStatus     = d ? (d.health?.summary?.down > 0 ? 'error' : d.health?.summary?.degraded > 0 ? 'warn' : 'ok') : null;
@@ -329,37 +329,6 @@ export default function PlatformConsole() {
                 <code className="bg-slate-100 px-1 rounded">npm run platform:release-cert</code>{' '}
                 after each deploy to build your release history.
               </p>
-            )}
-          </EngineSection>
-
-          {/* ── Platform Audit Log ──────────────────────────── */}
-          <EngineSection icon={ClipboardList} title="Recent Critical Events" badge="last 20 critical" badgeColor="bg-red-50 text-red-600" defaultOpen={false}>
-            <p className="text-xs text-slate-500 mb-3">Platform-wide critical audit events. Use School Audit Log in Settings for per-school view.</p>
-            {auditLogs.length === 0 ? (
-              <p className="text-sm text-slate-400">No critical events recorded.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="text-slate-400 border-b border-slate-100">
-                      <th className="text-left py-2 pr-4">Time</th>
-                      <th className="text-left py-2 pr-4">Action</th>
-                      <th className="text-left py-2 pr-4">Actor</th>
-                      <th className="text-left py-2">Target</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {auditLogs.map((log, i) => (
-                      <tr key={log._id ?? i} className="border-b border-slate-50">
-                        <td className="py-2 pr-4 text-slate-400 whitespace-nowrap">{new Date(log.createdAt).toLocaleString()}</td>
-                        <td className="py-2 pr-4 font-mono text-slate-700">{log.action}</td>
-                        <td className="py-2 pr-4 text-slate-500">{log.actor?.email ?? log.actor?.userId ?? '—'}</td>
-                        <td className="py-2 text-slate-500">{log.target?.label ?? log.target?.id ?? '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
             )}
           </EngineSection>
 

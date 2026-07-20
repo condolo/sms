@@ -1,14 +1,19 @@
 /* ============================================================
    Msingi — /api/audit
-   Audit log query endpoint.
+   Audit log query endpoint. School-scoped only — every caller (admin
+   or superadmin) is locked to their own school, always. 'superadmin'
+   is a per-school RBAC role every school's own admin holds, not a
+   platform credential; a prior version of this route let 'superadmin'
+   omit schoolId to get a platform-wide view, meaning any school's own
+   admin could see every OTHER school's audit log — a real cross-tenant
+   leak, found via a direct report, not a scan. Platform-wide audit
+   visibility, when it's built, belongs behind platform.js's
+   platformSession gate, the same as every other platform-wide read.
 
-   School admins: see their own school's logs only.
-   Superadmin: can query across all schools (omit schoolId param
-               to get platform-wide; pass ?schoolId= to filter).
-
-   GET /api/audit            — paginated log list (also accepts
-                                correlationId/orgId/membershipId filters,
-                                C5/MR-002 — see AuditService.query())
+   GET /api/audit            — paginated log list, own school only
+                                (also accepts correlationId/orgId/
+                                membershipId filters, C5/MR-002 — see
+                                AuditService.query())
    GET /api/audit/actions    — list of known action types (for filter UI)
    ============================================================ */
 'use strict';
@@ -34,16 +39,11 @@ function _adminGuard(req, res, next) {
    ════════════════════════════════════════════════════════════════ */
 router.get('/', authMiddleware, _adminGuard, async (req, res) => {
   try {
-    const { role, schoolId: actorSchoolId } = req.jwtUser;
+    const { schoolId: actorSchoolId } = req.jwtUser;
     const { page, limit } = parsePagination(req.query);
 
-    // Superadmin can see all schools or filter; admin is locked to own school
-    const schoolId = role === 'superadmin'
-      ? (req.query.schoolId || undefined)
-      : actorSchoolId;
-
     const { docs, total } = await AuditService.query({
-      schoolId,
+      schoolId: actorSchoolId,
       action:        req.query.action        || undefined,
       actorId:       req.query.actorId       || undefined,
       severity:      req.query.severity      || undefined,

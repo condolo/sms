@@ -6,6 +6,33 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.92.0] — 2026-07-20 — fix(security): cross-tenant data leak — any school's own admin could see every other school's audit log and platform health data
+
+**Severity: high.** Triggered by a direct report: a school's own admin could see platform-wide operational data through a "Platform Operations" card in their own Settings page. Confirmed and fixed two real cross-tenant leaks in the same root cause.
+
+### Root cause
+
+Two routes gated access on `req.jwtUser.role === 'superadmin'` as if that meant "platform operator." It doesn't — `superadmin` is the ordinary top-tier RBAC role every single school's own admin holds, from a normal school login. There is no platform authority in that claim at all. This is a different mechanism from `platformSession` (the real platform-admin token, issued only by `platform.html`'s own login, checked everywhere in `platform.js`) — these two routes were the only places in the codebase that conflated the two.
+
+- **`GET /api/audit`** — documented, working-as-coded behavior: "superadmin can query across all schools; omit schoolId for platform-wide." Any school's own admin could omit `schoolId` (or pass another school's) and read that school's full audit log — logins, role changes, deletions, security alerts, everything.
+- **`GET/POST /api/ops/health`, `/ops/certs`, `/ops/certs/:id`** — gated the same way. `ops.fullReport()` runs unscoped health/integrity/compliance checks across the *entire* platform, every school. Any school's own admin who found `/ops` (surfaced right in their own Settings page) saw all of it.
+
+### Fixed
+
+- `server/routes/audit.js` — `GET /api/audit` is now unconditionally scoped to the caller's own school. No role, and no query param, can cross that boundary anymore.
+- `server/routes/ops.js` — all four routes now require `platformSession` (the real platform-admin token) instead of a school-session role check. A normal school login — including a school's own superadmin — never has a `platform_token` cookie, so these routes are now structurally unreachable from any school session, not just blocked by a role check that happened to be wrong.
+- `client/src/pages/settings/SettingsPage.jsx` — removed the "Platform Operations" card that surfaced `/ops` to every school's superadmin as if it were a real feature; after the server fix it would only ever 401 for them, so it's gone rather than left as a dead link.
+- `client/src/pages/ops/PlatformConsole.jsx` — removed its "Recent Critical Events" section, which called the now-correctly-scoped `/api/audit` and so could never show genuinely platform-wide data to its actual intended audience (a real platform operator viewing `/ops` has no school session to scope against). Platform-wide audit visibility, if wanted, needs a dedicated route behind `platformSession` — not built here, flagged as follow-up.
+- `client/src/pages/changelog/ChangelogPage.jsx` — corrected two historical changelog lines that described the leaky behavior as a shipped feature.
+
+### Tests
+
+- `server/__tests__/routes/audit.test.js` — the existing test asserting "superadmin can query across schools" (the leak, encoded as an expected behavior) rewritten to assert the opposite: a `schoolId` query param from any role, including superadmin, is now ignored.
+- `server/__tests__/routes/ops.test.js` (new, first coverage for this route) — uses the real `platformSession` middleware, not a mock, so the gate itself is under test: 401 with no `platform_token`, 401 even with a role claim that used to be sufficient, 200 with a genuine platform token.
+- Full suite: 48/48 suites, 510/510 tests. `node scripts/security-scan.js` and the tenant-isolation ratchet (held at 34) both clean. Both fixes mutation-tested (reverting each fails the corresponding new/updated tests).
+
+---
+
 ## [v4.91.0] — 2026-07-20 — fix(auth): School Switcher missing for impersonated/platform-provisioned admins
 
 Triggered by a direct report: impersonated a school's superadmin in a multi-school-enabled org, expected a way to switch to the org's other campus, saw nothing. Verified everything in this release against a real ephemeral MongoDB + a real spawned server process (no mocks) — the same methodology used for C13's original production validation — because the previous session's fixes were mock-verified only and this report specifically asked whether platform-admin edits are actually DB-recorded.

@@ -1,11 +1,15 @@
 /* ============================================================
-   GET /api/audit — first-ever route-level coverage.
+   GET /api/audit — route-level coverage.
 
-   Not a full behavior re-proof (the admin/superadmin school-scoping
-   guard is pre-existing and unchanged) — just confirms the C5/MR-002
-   query-param additions (correlationId/orgId/membershipId) actually
-   reach AuditService.query(), and that the existing scoping guard
-   still governs schoolId exactly as before.
+   Confirms the C5/MR-002 query-param additions (correlationId/orgId/
+   membershipId) actually reach AuditService.query(), and that every
+   caller — including 'superadmin' — is locked to their own school.
+   'superadmin' used to be able to omit/override schoolId to get a
+   platform-wide view; that was a real cross-tenant leak ('superadmin'
+   is a per-school RBAC role every school's own admin holds, not a
+   platform credential) found via a direct report, not a scan. Fixed:
+   schoolId is now always the caller's own, full stop, regardless of role
+   or query param.
 
    All DB calls are mocked — no MongoDB required.
    ============================================================ */
@@ -70,7 +74,7 @@ describe('GET /api/audit — new C5/MR-002 filter passthrough', () => {
   });
 });
 
-describe('GET /api/audit — pre-existing scoping guard, unaffected', () => {
+describe('GET /api/audit — always scoped to the caller\'s own school', () => {
   test('admin is locked to their own school regardless of a schoolId query param', async () => {
     mockJwtUser = { userId: 'usr_admin', role: 'admin', schoolId: 'sch_a' };
 
@@ -90,13 +94,16 @@ describe('GET /api/audit — pre-existing scoping guard, unaffected', () => {
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
-  test('superadmin can query across schools by passing schoolId explicitly', async () => {
+  test('regression: superadmin can NOT cross into another school by passing schoolId explicitly', async () => {
     mockJwtUser = { userId: 'usr_super', role: 'superadmin', schoolId: 'sch_a' };
 
     await supertest(buildApp()).get('/api/audit').query({ schoolId: 'sch_other' });
 
+    // Must be the caller's OWN school (sch_a), never the requested sch_other —
+    // this is the exact leak: any school's own 'superadmin' could previously
+    // read every other school's audit log this way.
     expect(mockQuery).toHaveBeenCalledWith(
-      expect.objectContaining({ schoolId: 'sch_other' })
+      expect.objectContaining({ schoolId: 'sch_a' })
     );
   });
 });
