@@ -131,6 +131,11 @@ const ACTIONS = {
   'leave.step_rejected':     { severity: 'warn' },
   'leave.hr_confirmed':      { severity: 'info' },
   'leave.hr_rejected':       { severity: 'warn' },
+  // Marks — unlock workflow (Governance Spec §3)
+  'marks.unlock_requested':        { severity: 'info' },
+  'marks.unlocked':                { severity: 'warn' },
+  'marks.unlock_request_rejected': { severity: 'info' },
+  'marks.auto_relocked':           { severity: 'info' },
   // Platform (operator-level)
   'platform.impersonate':    { severity: 'critical' },
   'platform.school_deleted': { severity: 'critical' },

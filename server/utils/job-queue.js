@@ -43,8 +43,9 @@ function _backoff(attempts) {
   return new Date(Date.now() + delay);
 }
 
-/** Enqueue a job. Returns the new job's id. */
-async function enqueueJob({ type, payload, maxAttempts = DEFAULT_MAX_ATTEMPTS } = {}) {
+/** Enqueue a job. `runAt` (optional Date) delays the first attempt — e.g. the
+    marks-editing workflow's 24h auto-relock; omit for "as soon as possible". */
+async function enqueueJob({ type, payload, maxAttempts = DEFAULT_MAX_ATTEMPTS, runAt } = {}) {
   if (!type) throw new Error('[job-queue] enqueueJob requires a type');
   const now = new Date();
   const QueueJobs = _model('queue_jobs');
@@ -55,7 +56,7 @@ async function enqueueJob({ type, payload, maxAttempts = DEFAULT_MAX_ATTEMPTS } 
     status: 'pending',
     attempts: 0,
     maxAttempts,
-    nextAttemptAt: now,
+    nextAttemptAt: runAt instanceof Date ? runAt : now,
     lastError: null,
     createdAt: now,
     updatedAt: now,

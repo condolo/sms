@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.97.0] — 2026-07-20 — feat(exams): mark-unlock now requires a request + approval, with a 24h auto-relock
+
+Second implementation phase from `docs/governance/GOVERNANCE_WORKFLOW_SPECIFICATION_v1.md` §3. Unlocking a locked mark submission was a unilateral admin/principal action — one click, no review, and it stayed unlocked indefinitely until someone remembered to re-lock it. Reuses the same `workflow_configs` mechanism §1 introduced for Leave, this time as a single-step approver (no 2-step minimum — that floor is specific to Leave).
+
+### Added
+
+- `POST /api/mark-submissions/:id/request-unlock` — teacher requests an unlock with a mandatory reason. Notifies the resolved approver (the school's configured `marks_unlock` step, or admin/principal if unconfigured) via a system message.
+- `POST /api/mark-submissions/:id/reject-unlock-request` — the resolved approver can decline instead of unlocking.
+- 24h auto-relock: every successful unlock now schedules a `marks_relock` job on the existing `job-queue.js` durable queue (`server/utils/job-queue.js` gained an optional `runAt` param on `enqueueJob` for this — additive, existing callers unaffected). The job re-locks the submission and its underlying marks unless an admin already moved it on manually in the meantime.
+- `AuditService.log()` wiring on request/unlock/reject/auto-relock (`marks.unlock_requested`/`marks.unlocked`/`marks.unlock_request_rejected`/`marks.auto_relocked`) — none of this workflow was audited before.
+
+### Changed
+
+- `POST /:id/unlock` — when a school has configured a `marks_unlock` approver, this now requires a pending request first and checks the caller against the resolved approver (not just `role in [admin, principal]`). **Schools with no configured approver keep today's exact unilateral behavior, unchanged** — the gate only activates once a school explicitly configures it, same inert-until-opted-in posture as §1's leave chain.
+- `docs/adr/ADR-0001-tenant-context-enforcement.md` — documented a new reviewed exception: the auto-relock job handler runs with no `req` (background worker), so it uses `_model()` directly with an explicit `schoolId` from the job payload, matching the existing pattern for other background jobs. Ratchet baseline raised 34→36 for these two sites.
+
+Growth Profile and Resources — the remaining areas from the same spec — follow as separate phases.
+
+---
+
 ## [v4.96.0] — 2026-07-20 — feat(hr): school-configurable leave approval chain (Governance Spec §0/§1)
 
 First implementation phase from `docs/governance/GOVERNANCE_WORKFLOW_SPECIFICATION_v1.md`. Leave approval was a single hardcoded step (`hr.js`, `pending → approved/rejected`, no audit trail). Schools now author their own approval chain — any number of steps ≥2, each pointing at a role or a specific person, before HR's own fixed final confirmation — instead of the platform assuming a HOD → Principal → HR shape that not every school has.
