@@ -304,7 +304,6 @@ router.get('/organizations', async (req, res) => {
         slug:                o.slug,
         status:              o.status,
         multiSchoolEnabled:  !!o.multiSchoolEnabled,
-        orgSlugLoginEnabled: !!o.orgSlugLoginEnabled,
         logoUrl:             o.logoUrl || null,
         primaryColor:        o.primaryColor || null,
         tagline:             o.tagline || null,
@@ -393,8 +392,7 @@ router.post('/organizations', async (req, res) => {
       name:                name.trim(),
       slug:                finalSlug,
       status:              'active',
-      multiSchoolEnabled:  false,
-      orgSlugLoginEnabled: false,   // opt-in later, requires multiSchoolEnabled first
+      multiSchoolEnabled:  false,   // opt-in later — platform-admin only (Constitution §10 Stage 3)
       // Branding is optional and additive — org-level fields, distinct from
       // a school's own branding. Not yet consumed by anything (see
       // ADR-0007's future public org-info endpoint); safe to leave null.
@@ -414,23 +412,15 @@ router.post('/organizations', async (req, res) => {
   }
 });
 
-/* ── Organization activation toggles (org-shared-slug feature, Phase 1) ──
-   Three independent gates, none redundant with each other:
-     - multiSchoolEnabled     — capability tier: JWT orgId/membershipId,
-       C9 switching for already-authenticated users. Existing flag; these
-       are its first-ever admin-settable routes (previously hardcoded
-       false everywhere, unsettable by design per Constitution §10 Stage 3
-       until D-001 — now ratified — made it safe to expose).
-     - orgSlugLoginEnabled    — capability tier: this org's slug becomes a
-       public, unauthenticated login surface. Requires multiSchoolEnabled
-       already true (enforced below, not just documented) — flipping
-       switching on for an org's staff must never silently also open a
-       brand-new public credential-check endpoint.
-     - IDENTITY_CUTOVER_ENABLED — infrastructure tier: a platform-global
-       env var, entirely outside these routes' control. Org-slug login is
-       functionally live only once all three are true. See ADR-0007
-       (drafted, pending acceptance) — these routes ship the first two
-       gates only; no new credential-check code exists yet. */
+/* ── Organization activation toggle (org-shared-slug feature) ──
+   Single gate: multiSchoolEnabled. Activates both JWT orgId/membershipId +
+   C9 switching, AND the org-slug public login surface (auth.js's
+   POST /auth/org-login) — subject also to the platform-global
+   IDENTITY_CUTOVER_ENABLED env var, entirely outside this route's
+   control. Originally two separate flags (this one plus a since-removed
+   orgSlugLoginEnabled requiring it first); collapsed into one after real
+   usage showed the split added an activation step without adding real
+   safety — see ADR-0007's amendment note for the reasoning. */
 
 async function _findOrgOr404(id, res) {
   const Org = _model('organizations');
@@ -439,7 +429,13 @@ async function _findOrgOr404(id, res) {
   return org;
 }
 
-/* POST /api/platform/organizations/:id/enable-multi-school */
+/* POST /api/platform/organizations/:id/enable-multi-school
+   Includes qa-health.js's identity-migration status in the response,
+   called as a direct in-process function (both files run in the same
+   server; no new HTTP round trip) purely for platform-admin visibility
+   into cutover-readiness — informational only, never a hard block here,
+   since IDENTITY_CUTOVER_ENABLED is a platform-global operator lever this
+   route has no authority over. */
 router.post('/organizations/:id/enable-multi-school', async (req, res) => {
   try {
     const org = await _findOrgOr404(req.params.id, res);
@@ -448,6 +444,15 @@ router.post('/organizations/:id/enable-multi-school', async (req, res) => {
     const Org = _model('organizations');
     const now = new Date().toISOString();
     await Org.updateOne({ id: org.id }, { $set: { multiSchoolEnabled: true, updatedAt: now } });
+
+    let identityMigration = null;
+    try {
+      // Lazy require: qa-health.js pulls in authMiddleware and other
+      // route-level dependencies at module scope. Requiring it eagerly at
+      // the top of this file would load all of that into every test/route
+      // that merely requires platform.js. Loaded here, on-demand, instead.
+      identityMigration = await require('./qa-health')._identityMigrationStatus();
+    } catch { /* informational only */ }
 
     AuditService.log({
       action: 'platform.organization.multi_school_enabled',
@@ -460,7 +465,8 @@ router.post('/organizations/:id/enable-multi-school', async (req, res) => {
 
     res.json({
       organization: { ...org, multiSchoolEnabled: true, updatedAt: now },
-      note: 'This activates JWT orgId/membershipId enrichment and the school switcher (C9) for members of this organization. It does NOT by itself expose the shared-slug public login page — that requires orgSlugLoginEnabled, a separate toggle.',
+      identityMigration,
+      note: 'This activates JWT orgId/membershipId enrichment, the school switcher (C9), and the shared org-slug login page for this organization. The org-slug login page additionally requires the platform-global IDENTITY_CUTOVER_ENABLED environment variable, which this route cannot set or verify — identityMigration above reflects current backfill/cutover readiness for informational purposes only.',
     });
   } catch (err) {
     console.error('[platform/organizations/:id/enable-multi-school POST]', err);
@@ -468,13 +474,7 @@ router.post('/organizations/:id/enable-multi-school', async (req, res) => {
   }
 });
 
-/* POST /api/platform/organizations/:id/disable-multi-school
-   Cascades: orgSlugLoginEnabled is forced off too, since it can never be
-   true while multiSchoolEnabled is false (the invariant enforced on
-   enable-org-slug-login below). Without this cascade, disabling switching
-   could leave a stale orgSlugLoginEnabled:true behind — inert, since the
-   invariant is re-checked wherever it matters, but misleading in the
-   platform admin UI and audit trail. */
+/* POST /api/platform/organizations/:id/disable-multi-school */
 router.post('/organizations/:id/disable-multi-school', async (req, res) => {
   try {
     const org = await _findOrgOr404(req.params.id, res);
@@ -482,100 +482,20 @@ router.post('/organizations/:id/disable-multi-school', async (req, res) => {
 
     const Org = _model('organizations');
     const now = new Date().toISOString();
-    const cascaded = !!org.orgSlugLoginEnabled;
-    await Org.updateOne(
-      { id: org.id },
-      { $set: { multiSchoolEnabled: false, orgSlugLoginEnabled: false, updatedAt: now } }
-    );
+    await Org.updateOne({ id: org.id }, { $set: { multiSchoolEnabled: false, updatedAt: now } });
 
     AuditService.log({
       action: 'platform.organization.multi_school_disabled',
       actor:  { userId: 'platform', role: 'platform', email: null },
       schoolId: null,
       target: { type: 'organization', id: org.id, label: org.name },
-      details: { cascadedOrgSlugLoginDisable: cascaded },
+      details: {},
       req,
     });
 
-    res.json({ organization: { ...org, multiSchoolEnabled: false, orgSlugLoginEnabled: false, updatedAt: now } });
+    res.json({ organization: { ...org, multiSchoolEnabled: false, updatedAt: now } });
   } catch (err) {
     console.error('[platform/organizations/:id/disable-multi-school POST]', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/* POST /api/platform/organizations/:id/enable-org-slug-login
-   Hard precondition: multiSchoolEnabled must already be true (409
-   otherwise) — see the header comment above for why this isn't optional.
-   Includes qa-health.js's identity-migration status in the response,
-   called as a direct in-process function (both files run in the same
-   server; no new HTTP round trip) purely for platform-admin visibility
-   into cutover-readiness — informational only, never a hard block here,
-   since IDENTITY_CUTOVER_ENABLED is a platform-global operator lever this
-   route has no authority over. */
-router.post('/organizations/:id/enable-org-slug-login', async (req, res) => {
-  try {
-    const org = await _findOrgOr404(req.params.id, res);
-    if (!org) return;
-    if (!org.multiSchoolEnabled) {
-      return res.status(409).json({ error: 'multiSchoolEnabled must be enabled for this organization first' });
-    }
-
-    const Org = _model('organizations');
-    const now = new Date().toISOString();
-    await Org.updateOne({ id: org.id }, { $set: { orgSlugLoginEnabled: true, updatedAt: now } });
-
-    let identityMigration = null;
-    try {
-      // Lazy require: qa-health.js pulls in authMiddleware and other
-      // route-level dependencies at module scope. Requiring it eagerly at
-      // the top of this file would load all of that into every test/route
-      // that merely requires platform.js. Loaded here, on-demand, instead.
-      identityMigration = await require('./qa-health')._identityMigrationStatus();
-    } catch { /* informational only */ }
-
-    AuditService.log({
-      action: 'platform.organization.org_slug_login_enabled',
-      actor:  { userId: 'platform', role: 'platform', email: null },
-      schoolId: null,
-      target: { type: 'organization', id: org.id, label: org.name },
-      details: {},
-      req,
-    });
-
-    res.json({
-      organization: { ...org, orgSlugLoginEnabled: true, updatedAt: now },
-      identityMigration,
-      note: 'This flag alone does not yet make org-wide login live — no such endpoint exists in the codebase today (see ADR-0007, pending acceptance). It also requires the platform-global IDENTITY_CUTOVER_ENABLED environment variable, which this route cannot set or verify — identityMigration above reflects current backfill/cutover readiness for informational purposes only.',
-    });
-  } catch (err) {
-    console.error('[platform/organizations/:id/enable-org-slug-login POST]', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/* POST /api/platform/organizations/:id/disable-org-slug-login */
-router.post('/organizations/:id/disable-org-slug-login', async (req, res) => {
-  try {
-    const org = await _findOrgOr404(req.params.id, res);
-    if (!org) return;
-
-    const Org = _model('organizations');
-    const now = new Date().toISOString();
-    await Org.updateOne({ id: org.id }, { $set: { orgSlugLoginEnabled: false, updatedAt: now } });
-
-    AuditService.log({
-      action: 'platform.organization.org_slug_login_disabled',
-      actor:  { userId: 'platform', role: 'platform', email: null },
-      schoolId: null,
-      target: { type: 'organization', id: org.id, label: org.name },
-      details: {},
-      req,
-    });
-
-    res.json({ organization: { ...org, orgSlugLoginEnabled: false, updatedAt: now } });
-  } catch (err) {
-    console.error('[platform/organizations/:id/disable-org-slug-login POST]', err);
     res.status(500).json({ error: err.message });
   }
 });

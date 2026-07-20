@@ -5,11 +5,11 @@
    matches on the school's own name/shortName/slug AND on its
    organization's name/slug — so searching an organization's name
    surfaces every campus under it, not just a school whose own name
-   happens to match. Also verifies organizationName is only surfaced
-   when it adds information (auto-created 1:1 orgs share the school's
-   own name and shouldn't be shown redundantly by the frontend, but
-   the backend always returns it — that filtering is a frontend
-   concern, tested here only at the data level).
+   happens to match. Results are grouped by organization (2026-07-20
+   restructure): every school belongs to exactly one organization, so
+   resolving to organizations is universal, not a special case for
+   multi-school customers. See server/routes/public.js's handler
+   comment for the three result types this covers.
 
    All DB calls are mocked — no MongoDB required.
    ============================================================ */
@@ -28,6 +28,9 @@ jest.mock('../../utils/model', () => ({
             }),
           }),
         })),
+        countDocuments: jest.fn((filter) =>
+          Promise.resolve(mockSchoolDocs.filter(s => s.organizationId === filter.organizationId).length)
+        ),
       };
     }
     if (collection === 'organizations') {
@@ -82,18 +85,58 @@ beforeEach(() => {
 });
 
 describe('GET /api/public/schools/search', () => {
-  test('matches a school by its own name', async () => {
+  test('matches a school by its own name — plain school result, no org', async () => {
     mockSchoolDocs = [{ slug: 'greenwood', name: 'Greenwood Academy', isActive: true }];
 
     const res = await supertest(app()).get('/api/public/schools/search?q=greenwood');
 
     expect(res.status).toBe(200);
-    expect(res.body.schools).toHaveLength(1);
-    expect(res.body.schools[0].slug).toBe('greenwood');
+    expect(res.body.results).toHaveLength(1);
+    expect(res.body.results[0]).toMatchObject({ type: 'school', slug: 'greenwood' });
+  });
+
+  test('a 1:1-genesis org (one school) still returns a plain school result, not a group', async () => {
+    mockOrgDocs = [{ id: 'org_solo', name: 'Solo Academy', slug: 'solo', multiSchoolEnabled: false }];
+    mockSchoolDocs = [{ slug: 'solo', name: 'Solo Academy', isActive: true, organizationId: 'org_solo' }];
+
+    const res = await supertest(app()).get('/api/public/schools/search?q=solo');
+
+    expect(res.body.results).toHaveLength(1);
+    expect(res.body.results[0].type).toBe('school');
+  });
+
+  test('a real multi-school org with multiSchoolEnabled OFF groups its matching schools without promising a live portal', async () => {
+    // The exact Trinity/Trinitas scenario this restructure was triggered by.
+    mockOrgDocs = [{ id: 'org_trinity', name: 'Trinity-Trinitas Schools', slug: 'tis', multiSchoolEnabled: false }];
+    mockSchoolDocs = [
+      { slug: 'trinitas-tis', name: 'Trinitas International School', isActive: true, organizationId: 'org_trinity' },
+      { slug: 'trinity-tis',  name: 'Trinity International School',  isActive: true, organizationId: 'org_trinity' },
+    ];
+
+    const res = await supertest(app()).get('/api/public/schools/search?q=tis');
+
+    expect(res.body.results).toHaveLength(1); // ONE grouped entry, not two confusing near-duplicates
+    const group = res.body.results[0];
+    expect(group.type).toBe('organization-group');
+    expect(group.orgSlug).toBe('tis');
+    expect(group.schools.map(s => s.slug).sort()).toEqual(['trinitas-tis', 'trinity-tis']);
+  });
+
+  test('the SAME org with multiSchoolEnabled ON collapses to a single portal-navigable entry instead', async () => {
+    mockOrgDocs = [{ id: 'org_trinity', name: 'Trinity-Trinitas Schools', slug: 'tis', multiSchoolEnabled: true }];
+    mockSchoolDocs = [
+      { slug: 'trinitas-tis', name: 'Trinitas International School', isActive: true, organizationId: 'org_trinity' },
+      { slug: 'trinity-tis',  name: 'Trinity International School',  isActive: true, organizationId: 'org_trinity' },
+    ];
+
+    const res = await supertest(app()).get('/api/public/schools/search?q=tis');
+
+    expect(res.body.results).toHaveLength(1);
+    expect(res.body.results[0]).toMatchObject({ type: 'organization', slug: 'tis', name: 'Trinity-Trinitas Schools' });
   });
 
   test('matches every school under an organization when the query matches the ORG name, not any school name', async () => {
-    mockOrgDocs = [{ id: 'org_trinity', name: 'Trinity-Trinitas Schools', slug: 'tis' }];
+    mockOrgDocs = [{ id: 'org_trinity', name: 'Trinity-Trinitas Schools', slug: 'tis', multiSchoolEnabled: false }];
     mockSchoolDocs = [
       { slug: 'nairobi-tis', name: 'Trinitas Nairobi', isActive: true, organizationId: 'org_trinity' },
       { slug: 'eldoret-tis', name: 'Trinitas Eldoret', isActive: true, organizationId: 'org_trinity' },
@@ -103,55 +146,46 @@ describe('GET /api/public/schools/search', () => {
     const res = await supertest(app()).get('/api/public/schools/search?q=Trinity-Trinitas');
 
     expect(res.status).toBe(200);
-    const slugs = res.body.schools.map(s => s.slug).sort();
-    expect(slugs).toEqual(['eldoret-tis', 'nairobi-tis']);
+    expect(res.body.results).toHaveLength(1);
+    expect(res.body.results[0].schools.map(s => s.slug).sort()).toEqual(['eldoret-tis', 'nairobi-tis']);
   });
 
   test('matches by the organization slug too (e.g. a short code)', async () => {
-    mockOrgDocs = [{ id: 'org_trinity', name: 'Trinity-Trinitas Schools', slug: 'tis' }];
+    mockOrgDocs = [{ id: 'org_trinity', name: 'Trinity-Trinitas Schools', slug: 'tis', multiSchoolEnabled: false }];
     mockSchoolDocs = [
       { slug: 'nairobi-tis', name: 'Trinitas Nairobi', isActive: true, organizationId: 'org_trinity' },
+      { slug: 'eldoret-tis', name: 'Trinitas Eldoret', isActive: true, organizationId: 'org_trinity' },
     ];
 
     const res = await supertest(app()).get('/api/public/schools/search?q=tis');
 
     expect(res.status).toBe(200);
-    expect(res.body.schools.map(s => s.slug)).toEqual(['nairobi-tis']);
+    expect(res.body.results[0].type).toBe('organization-group');
+    expect(res.body.results[0].schools.map(s => s.slug).sort()).toEqual(['eldoret-tis', 'nairobi-tis']);
   });
 
-  test('every result carries its organization name for display', async () => {
-    mockOrgDocs = [{ id: 'org_trinity', name: 'Trinity-Trinitas Schools', slug: 'tis' }];
-    mockSchoolDocs = [
-      { slug: 'nairobi-tis', name: 'Trinitas Nairobi', isActive: true, organizationId: 'org_trinity' },
-    ];
-
-    const res = await supertest(app()).get('/api/public/schools/search?q=nairobi');
-
-    expect(res.body.schools[0].organizationName).toBe('Trinity-Trinitas Schools');
-  });
-
-  test('a school with no organizationId returns organizationName: null, not a crash', async () => {
+  test('a school with no organizationId returns a plain school result, not a crash', async () => {
     mockSchoolDocs = [{ slug: 'orphan', name: 'Orphan School', isActive: true }];
 
     const res = await supertest(app()).get('/api/public/schools/search?q=orphan');
 
     expect(res.status).toBe(200);
-    expect(res.body.schools[0].organizationName).toBeNull();
+    expect(res.body.results[0]).toMatchObject({ type: 'school', slug: 'orphan' });
   });
 
   test('inactive schools are excluded even if their org matches', async () => {
-    mockOrgDocs = [{ id: 'org_trinity', name: 'Trinity-Trinitas Schools', slug: 'tis' }];
+    mockOrgDocs = [{ id: 'org_trinity', name: 'Trinity-Trinitas Schools', slug: 'tis', multiSchoolEnabled: false }];
     mockSchoolDocs = [
       { slug: 'closed-tis', name: 'Trinitas Closed Campus', isActive: false, organizationId: 'org_trinity' },
     ];
 
     const res = await supertest(app()).get('/api/public/schools/search?q=Trinity-Trinitas');
 
-    expect(res.body.schools).toEqual([]);
+    expect(res.body.results).toEqual([]);
   });
 
   test('returns an empty list for a query shorter than 2 characters', async () => {
     const res = await supertest(app()).get('/api/public/schools/search?q=a');
-    expect(res.body.schools).toEqual([]);
+    expect(res.body.results).toEqual([]);
   });
 });

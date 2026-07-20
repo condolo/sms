@@ -6,6 +6,39 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.86.0] — 2026-07-20 — feat(auth): collapse org-slug login to a single gate + search resolves to organizations
+
+Triggered by a real screenshot: searching "tis" on the landing page showed two schools under one organization ("Trinitas International SChool" / "Trinity International SChool") as separate, confusingly-similar results. Working through it surfaced two decisions, both implemented here.
+
+### Changed — `organizations.orgSlugLoginEnabled` removed; `multiSchoolEnabled` alone gates org-slug login
+
+C13 originally shipped with two independent flags — `multiSchoolEnabled` (switching) and `orgSlugLoginEnabled` (the public org-login surface), deliberately kept separate so enabling one could never silently expose the other. Real usage showed that split added a manual activation step without adding real safety: `multiSchoolEnabled` is already a rare, platform-admin-only action, and the single-eligible-school fast path already means a person whose org has 2+ schools but only one account of their own never sees a picker or learns the others exist — the "expose a new public endpoint" risk doesn't scale with the org's size, only with how many schools *that identity* can reach.
+
+- `server/routes/public.js` (`resolve-portal`), `server/routes/auth.js` (`org-login`) — condition drops to `multiSchoolEnabled` alone (`IDENTITY_CUTOVER_ENABLED` unaffected, still required).
+- `server/routes/platform.js` — `enable/disable-org-slug-login` routes removed outright. `enable-multi-school`'s response now carries the identity-migration cutover-readiness info that route used to surface. `disable-multi-school` no longer cascades a second flag — nothing left to cascade.
+- `server/utils/provision-organizations.js`, `POST /organizations` — drop the now-removed field's default. Existing orgs keep a stray `orgSlugLoginEnabled` field in the DB — harmless, never read again; not worth a migration for a boolean nobody will look at.
+- `platform.html` — Organizations panel collapses to one toggle; portal-URL indicator no longer depends on a second flag.
+- `docs/adr/ADR-0007-org-slug-login.md` — amended in place (correction 6, dated), not rewritten — the original two-flag decision stays as historical record with a pointer to the amendment, matching this document's existing "corrections found during implementation" convention.
+
+### Added — school search resolves to organizations, not individual schools
+
+Every school already belongs to exactly one organization (a 1:1-genesis org for the common single-school case). `GET /api/public/schools/search` now groups matches accordingly instead of returning a flat school list:
+
+- **1:1-genesis org** — unchanged: a plain school result.
+- **Real multi-school org, `multiSchoolEnabled` on** — one result for the whole org; picking it goes straight to the shared portal (`resolve-portal` already resolves the org's slug correctly).
+- **Real multi-school org, `multiSchoolEnabled` still off** — one grouped result (avoiding exactly the Trinity/Trinitas confusion) that expands in place, client-side, to the individual matching schools — no promise of a portal that isn't live yet.
+
+`client/src/pages/Login.jsx`'s `SchoolFinderPage` renders all three shapes; the existing `pickSchool()` function is reused unchanged for every leaf click (school, organization, or a group's child school) — `resolve-portal` already resolves either a school or org slug correctly, so no new navigation logic was needed.
+
+### Tests
+
+- `server/__tests__/routes/platform-organizations-slug.test.js`, `auth-org-login.test.js` — dead tests for the removed routes/flag deleted, not left disabled; remaining fixtures updated to the single-gate shape.
+- `server/__tests__/routes/public-school-search.test.js` — rewritten for the grouped-`results` shape, including the exact Trinity/Trinitas scenario (multi-school org, flag off → grouped; flag on → single portal entry) as a dedicated test.
+- Full suite: 41/41 suites, 472/472 tests. Mutation-tested the gate-collapse condition (`auth.js`/`public.js`) and the search classification branch — both confirmed to fail the relevant tests when reverted. `node scripts/security-scan.js` and the tenant-isolation ratchet (held at 34) both clean.
+- Browser-verified `SchoolFinderPage` end-to-end with a mocked `/api/public/schools/search` response covering all three result types (no live MongoDB in this sandbox): the organization-group row expands in place with zero network calls, and picking a child school correctly navigates via the existing `pickSchool()` path.
+
+---
+
 ## [v4.85.1] — 2026-07-20 — fix(security): three bugs found by real-database production validation of C13
 
 Requested production-readiness validation of C13 (org-first login) explicitly demanded a real database, not mocked responses. `mongodb-memory-server` was already a devDependency, unused until now — spun up a genuine ephemeral MongoDB, booted the real `server/index.js` against it, and drove every check over real HTTP: two organizations, three schools, six role journeys, a real identity merge across two independently-created accounts, cross-org isolation attempts, password reset, MFA (OTP recovered by reading the sha256 hash straight from Mongo and brute-forcing the 900,000-value keyspace — no SMTP provider in this sandbox), session revocation, disabled-school and disabled-org behavior, and a switch-school regression check. First pass: 44 pass, 6 fail. Three of the six failures were real bugs the mocked test suite had never been in a position to catch; the other three were this validation script's own wrong assumptions about response shapes, corrected in place. Re-run after fixes: 50/50 (44 pass, 6 info, 0 fail).

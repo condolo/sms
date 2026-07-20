@@ -87,7 +87,7 @@ router.get('/school-info', async (req, res) => {
 
    Deliberately returns the SAME 404 shape whether nothing matches at all
    OR a real organization exists at that slug but hasn't opted in
-   (multiSchoolEnabled/orgSlugLoginEnabled false, or fewer than 2 schools)
+   (multiSchoolEnabled false, or fewer than 2 schools)
    — response-shape differences must never leak organization existence to
    an unauthenticated caller guessing a slug. */
 router.get('/resolve-portal', async (req, res) => {
@@ -105,7 +105,7 @@ router.get('/resolve-portal', async (req, res) => {
 
     const Org = _model('organizations');
     const org = await Org.findOne({ slug }).lean();
-    if (org?.multiSchoolEnabled && org?.orgSlugLoginEnabled) {
+    if (org?.multiSchoolEnabled) {
       const schoolCount = await School.countDocuments({ organizationId: org.id });
       if (schoolCount >= 2) {
         return res.json({
@@ -128,17 +128,34 @@ router.get('/resolve-portal', async (req, res) => {
 
 /* GET /api/public/schools/search
    Query: ?q=greenwood
-   Returns up to 10 schools whose name, slug, OR organization's name/slug
-   contains the query string — so searching "Green Valley Schools" (an
-   organization with multiple campuses) surfaces every campus under it,
-   not just a school whose own name happens to match. Used by the
-   school-finder autocomplete on the login page. Only active schools are
-   returned; only public-safe fields exposed.
+   Returns up to 10 matching schools GROUPED BY ORGANIZATION — every
+   school belongs to exactly one organization (a 1:1-genesis org for the
+   common single-school case, or a real multi-school org), so search
+   results resolve to organizations universally, not as a special case
+   for multi-school customers. Matches name/slug/org-name/org-slug, same
+   query logic as before this restructure — only the response shaping
+   changed. Only active schools are returned; only public-safe fields
+   exposed.
+
+   Each entry in `results` is one of:
+     {type:'organization', slug, name, logoUrl, primaryColor}
+       — org has multiSchoolEnabled:true and 2+ schools total (not just
+       matching ones). Clicking this goes straight to the shared portal
+       (resolve-portal already resolves this slug to type:'organization').
+     {type:'organization-group', orgName, orgSlug, schools:[...]}
+       — org has 2+ schools total but multiSchoolEnabled is still off, so
+       org.slug isn't portal-navigable yet (resolve-portal would 404 it).
+       Grouped visually so two campuses of the same org never look like
+       two confusingly-similar, unrelated results, but expands to
+       individual schools on click rather than promising a live portal.
+     {type:'school', slug, name, shortName, logoUrl, primaryColor}
+       — no grouping needed: a 1:1-genesis org (unchanged from before
+       this restructure) or a school with no organizationId at all.
 */
 router.get('/schools/search', async (req, res) => {
   try {
     const q = (req.query.q || '').trim();
-    if (!q || q.length < 2) return res.json({ schools: [] });
+    if (!q || q.length < 2) return res.json({ results: [] });
 
     const School  = _model('schools');
     const Org     = _model('organizations');
@@ -148,7 +165,7 @@ router.get('/schools/search', async (req, res) => {
     // Organizations matching the query — their schools should surface too,
     // even if an individual school's own name/slug doesn't match at all.
     const matchingOrgs = await Org.find({ $or: [{ name: regex }, { slug: regex }] })
-      .select('id name')
+      .select('id')
       .limit(20)
       .lean();
     const matchingOrgIds = matchingOrgs.map(o => o.id);
@@ -164,27 +181,73 @@ router.get('/schools/search', async (req, res) => {
       .limit(10)
       .lean();
 
-    // Look up organization names for every result (not just the ones that
-    // matched by org) so the dropdown can always show which group a school
-    // belongs to when it shares an organization with other schools.
+    // Classify every organizationId among the matched schools: fetch full
+    // org docs (not just the name-only matchingOrgs list, which may not
+    // even cover every org a matched school belongs to) plus each org's
+    // TRUE total school count — the real roster, not just how many of its
+    // schools happened to match this search — since that total is what
+    // decides whether it's a 1:1-genesis org (no grouping needed) or a
+    // real multi-school org (grouped, portal-ready or not).
     const orgIds = [...new Set(schools.map(s => s.organizationId).filter(Boolean))];
-    const orgMap = Object.fromEntries(matchingOrgs.filter(o => orgIds.includes(o.id)).map(o => [o.id, o.name]));
-    const missingOrgIds = orgIds.filter(id => !(id in orgMap));
-    if (missingOrgIds.length) {
-      const extraOrgs = await Org.find({ id: { $in: missingOrgIds } }).select('id name').lean();
-      extraOrgs.forEach(o => { orgMap[o.id] = o.name; });
+    const orgDocs = orgIds.length
+      ? await Org.find({ id: { $in: orgIds } }).select('id name slug logoUrl primaryColor multiSchoolEnabled').lean()
+      : [];
+    const orgMap = Object.fromEntries(orgDocs.map(o => [o.id, o]));
+    const schoolCounts = orgIds.length
+      ? Object.fromEntries(await Promise.all(orgIds.map(async id => [id, await School.countDocuments({ organizationId: id })])))
+      : {};
+
+    const results = [];
+    const seenOrgIds = new Set();
+    const schoolsByOrg = {};
+    for (const s of schools) {
+      const key = s.organizationId || '';
+      (schoolsByOrg[key] = schoolsByOrg[key] || []).push(s);
     }
 
-    res.json({
-      schools: schools.map(s => ({
-        slug:             s.slug,
-        name:             s.name      || 'School Portal',
-        shortName:        s.shortName || s.name || 'School',
-        logoUrl:          s.logoUrl   || null,
-        primaryColor:     s.primaryColor || '#4f46e5',
-        organizationName: s.organizationId ? (orgMap[s.organizationId] || null) : null,
-      })),
-    });
+    function mapSchool(s) {
+      return {
+        type:      'school',
+        slug:      s.slug,
+        name:      s.name      || 'School Portal',
+        shortName: s.shortName || s.name || 'School',
+        logoUrl:   s.logoUrl   || null,
+        primaryColor: s.primaryColor || '#4f46e5',
+      };
+    }
+
+    for (const s of schools) {
+      const org = s.organizationId ? orgMap[s.organizationId] : null;
+      const totalSchools = org ? (schoolCounts[org.id] || 0) : 0;
+
+      if (!org || totalSchools < 2) {
+        // No org, or a 1:1-genesis org — plain school result, unchanged.
+        results.push(mapSchool(s));
+        continue;
+      }
+
+      if (seenOrgIds.has(org.id)) continue; // already emitted this org's grouped entry
+      seenOrgIds.add(org.id);
+
+      if (org.multiSchoolEnabled) {
+        results.push({
+          type:         'organization',
+          slug:         org.slug,
+          name:         org.name || 'Organization Portal',
+          logoUrl:      org.logoUrl || null,
+          primaryColor: org.primaryColor || null,
+        });
+      } else {
+        results.push({
+          type:    'organization-group',
+          orgName: org.name || 'Organization',
+          orgSlug: org.slug,
+          schools: schoolsByOrg[org.id].map(mapSchool),
+        });
+      }
+    }
+
+    res.json({ results: results.slice(0, 10) });
   } catch (err) {
     console.error('[public/schools/search]', err.message);
     res.status(500).json({ error: 'Server error' });

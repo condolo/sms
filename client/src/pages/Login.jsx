@@ -5,7 +5,7 @@ import useAuthStore from '@/store/auth.js';
 import { auth as authApi, publicApi, APIError } from '@/api/client.js';
 import { detectSchool, storeSchoolSlug } from '@/utils/schoolDetect.js';
 import { setFavicon, DEFAULT_FAVICON, DEFAULT_TITLE } from '@/utils/favicon.js';
-import { Loader2 as Loader2Icon, Search, Mail, KeyRound, Eye, EyeOff, AlertTriangle, Users } from 'lucide-react';
+import { Loader2 as Loader2Icon, Search, Mail, KeyRound, Eye, EyeOff, AlertTriangle, Users, ChevronDown } from 'lucide-react';
 
 /* ── School branding hook ──────────────────────────────────────
    Fetches public school info once on mount. Used to brand the
@@ -183,12 +183,16 @@ function SchoolFinderPage() {
   const navigate = useNavigate();
 
   const [query,       setQuery]       = useState('');
-  const [suggestions, setSuggestions] = useState([]);   // [{slug,name,shortName,logoUrl,primaryColor,organizationName}]
+  // Each entry is {type:'school'|'organization', slug, name, shortName?,
+  // logoUrl, primaryColor} or {type:'organization-group', orgName, orgSlug,
+  // schools:[...]} — see server/routes/public.js's schools/search handler.
+  const [suggestions, setSuggestions] = useState([]);
   const [searching,   setSearching]   = useState(false);
   const [showDrop,    setShowDrop]    = useState(false);
   const [notFound,    setNotFound]    = useState(false);
   const [error,       setError]       = useState('');
   const [going,       setGoing]       = useState(false);
+  const [expandedGroup, setExpandedGroup] = useState(null); // orgSlug of an expanded organization-group, or null
 
   const debounceRef = useRef(null);
   const inputRef    = useRef(null);
@@ -213,6 +217,7 @@ function SchoolFinderPage() {
     setNotFound(false);
     setError('');
     setSuggestions([]);
+    setExpandedGroup(null);
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
@@ -223,9 +228,9 @@ function SchoolFinderPage() {
       try {
         const res  = await fetch(`/api/public/schools/search?q=${encodeURIComponent(val.trim())}`);
         const data = await res.json();
-        setSuggestions(data.schools || []);
+        setSuggestions(data.results || []);
         setShowDrop(true);
-        setNotFound((data.schools || []).length === 0);
+        setNotFound((data.results || []).length === 0);
       } catch {
         /* ignore network blips */
       } finally {
@@ -234,6 +239,9 @@ function SchoolFinderPage() {
     }, 300);
   }
 
+  // Works for both a school slug and an organization slug — resolve-portal
+  // (called from useSchoolBranding once this navigation lands) resolves
+  // either kind and Login.jsx branches on the response's type.
   function pickSchool(slug) {
     storeSchoolSlug(slug);
     setGoing(true);
@@ -251,8 +259,15 @@ function SchoolFinderPage() {
 
   async function handleSubmit(e) {
     e.preventDefault();
-    // If there's exactly one suggestion, go straight to it
-    if (suggestions.length === 1) { pickSchool(suggestions[0].slug); return; }
+    // If there's exactly one suggestion, go straight to it — unless it's an
+    // organization-group (not portal-navigable, no top-level slug), which
+    // expands instead of submitting.
+    if (suggestions.length === 1) {
+      const only = suggestions[0];
+      if (only.type === 'organization-group') { setExpandedGroup(only.orgSlug); return; }
+      pickSchool(only.slug);
+      return;
+    }
 
     const slug = _parseSlug(query);
     if (!slug) { setError('Enter your school name or web address.'); return; }
@@ -320,34 +335,82 @@ function SchoolFinderPage() {
                 className="absolute z-20 w-full mt-1 bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden"
               >
                 {suggestions.length > 0 ? (
-                  suggestions.map(s => (
-                    <button
-                      key={s.slug}
-                      type="button"
-                      onMouseDown={() => pickSchool(s.slug)}
-                      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-0"
-                    >
-                      {/* Mini logo / initial */}
-                      <div
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                        style={{ background: s.primaryColor || '#4f46e5' }}
+                  suggestions.map(s => {
+                    if (s.type === 'organization-group') {
+                      const isOpen = expandedGroup === s.orgSlug;
+                      return (
+                        <div key={s.orgSlug} className="border-b border-slate-100 last:border-0">
+                          <button
+                            type="button"
+                            onMouseDown={() => setExpandedGroup(isOpen ? null : s.orgSlug)}
+                            className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors"
+                          >
+                            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0 bg-indigo-600">
+                              {(s.orgName || '?')[0].toUpperCase()}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-slate-800 truncate">{s.orgName}</p>
+                              <p className="text-[11px] text-slate-400 truncate">{s.schools.length} schools · select yours</p>
+                            </div>
+                            <ChevronDown size={14} className={`text-slate-400 flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                          </button>
+                          {isOpen && (
+                            <div className="bg-slate-50">
+                              {s.schools.map(child => (
+                                <button
+                                  key={child.slug}
+                                  type="button"
+                                  onMouseDown={() => pickSchool(child.slug)}
+                                  className="w-full flex items-center gap-3 pl-11 pr-4 py-2.5 text-left hover:bg-slate-100 transition-colors"
+                                >
+                                  <div
+                                    className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+                                    style={{ background: child.primaryColor || '#4f46e5' }}
+                                  >
+                                    {child.logoUrl
+                                      ? <img src={child.logoUrl} alt="" className="w-6 h-6 rounded-md object-contain" />
+                                      : (child.shortName || child.name || '?')[0].toUpperCase()
+                                    }
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm text-slate-700 truncate">{child.name}</p>
+                                    <p className="text-[11px] text-slate-400 truncate">{child.slug}.msingi.io</p>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <button
+                        key={s.slug}
+                        type="button"
+                        onMouseDown={() => pickSchool(s.slug)}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-0"
                       >
-                        {s.logoUrl
-                          ? <img src={s.logoUrl} alt="" className="w-8 h-8 rounded-lg object-contain" />
-                          : (s.shortName || s.name || '?')[0].toUpperCase()
-                        }
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-slate-800 truncate">{s.name}</p>
-                        <p className="text-[11px] text-slate-400 truncate">
-                          {s.slug}.msingi.io
-                          {/* Auto-created 1:1 orgs share the school's own name — only show it
-                              when it actually adds information (a real multi-school org). */}
-                          {s.organizationName && s.organizationName !== s.name && <> · {s.organizationName}</>}
-                        </p>
-                      </div>
-                    </button>
-                  ))
+                        {/* Mini logo / initial */}
+                        <div
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                          style={{ background: s.primaryColor || '#4f46e5' }}
+                        >
+                          {s.logoUrl
+                            ? <img src={s.logoUrl} alt="" className="w-8 h-8 rounded-lg object-contain" />
+                            : (s.shortName || s.name || '?')[0].toUpperCase()
+                          }
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-slate-800 truncate">{s.name}</p>
+                          <p className="text-[11px] text-slate-400 truncate">
+                            {s.slug}.msingi.io
+                            {s.type === 'organization' && <> · shared login for all schools</>}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })
                 ) : (
                   <div className="px-4 py-3 text-sm text-slate-500">
                     No schools found for <strong>"{query}"</strong>

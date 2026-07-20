@@ -1401,12 +1401,20 @@ router.post('/switch-school', authMiddleware, switchSchoolLimiter, async (req, r
    completing the Organization/Identity/Membership layer's intended
    behavior (PLATFORM_ARCHITECTURE_EVOLUTION_v1.md §15), not a new one.
 
-   Three independent gates, none redundant:
+   Two independent gates, none redundant:
      - organizations.multiSchoolEnabled — JWT orgId/membershipId + C9
-       switching, already exists, per-org, platform-admin togglable.
-     - organizations.orgSlugLoginEnabled — this org's slug becomes a
-       public login surface, already exists, per-org, deliberately
-       separate so enabling switching never silently opens this too.
+       switching AND the org-slug public login surface, per-org,
+       platform-admin togglable. Originally split into two separate
+       flags (this one plus a since-removed orgSlugLoginEnabled) so
+       enabling switching could never silently expose the public login
+       endpoint too. Collapsed into one (ADR-0007 amendment) once real
+       usage showed the split added an activation step without adding
+       real safety: multiSchoolEnabled is already a deliberate, rare,
+       platform-admin-only action, and the single-eligible-school fast
+       path below means a person whose org has 2+ schools but who only
+       has an account at one of them never sees a picker or learns the
+       others exist — the "public surface" risk doesn't scale with org
+       size, only with how many schools *that identity* can reach.
      - IDENTITY_CUTOVER_ENABLED — platform-global env var. Dual-write
        (ADR-0003 Phase 1, already shipped, unconditional) keeps
        identities.passwordHash correct regardless of this flag, so it
@@ -1472,7 +1480,7 @@ router.post('/org-login', orgLoginLimiter, async (req, res) => {
 
     const Org = _model('organizations');
     const org = await Org.findOne({ slug: orgSlug.toLowerCase() }).lean();
-    if (!org?.multiSchoolEnabled || !org?.orgSlugLoginEnabled || !isIdentityCutoverEnabled()) {
+    if (!org?.multiSchoolEnabled || !isIdentityCutoverEnabled()) {
       return NOT_FOUND();
     }
 

@@ -6,13 +6,13 @@
        POST /api/platform/schools and POST /api/platform/organizations
        (closes the silent-orphan hazard described in indexes.js's
        schools_slug comment — see docs/adr/ADR-0007 context)
-     - the two-flag activation toggles (multiSchoolEnabled,
-       orgSlugLoginEnabled), including the enable-org-slug-login
-       precondition and the disable-multi-school cascade
+     - the multiSchoolEnabled activation toggle (single gate —
+       originally two, orgSlugLoginEnabled removed 2026-07-20 per
+       ADR-0007 correction 6; multiSchoolEnabled alone now also
+       controls the org-slug login surface)
 
    ADR-0007's actual credential-check flow (org-login,
-   complete-org-login) is NOT covered here — it doesn't exist yet;
-   this file only covers Phase 0/Phase 1's additive, inert changes.
+   complete-org-login) is covered separately in auth-org-login.test.js.
    ============================================================ */
 
 jest.mock('../../middleware/auth', () => ({
@@ -112,7 +112,7 @@ describe('POST /api/platform/organizations — cross-collection slug collision',
       .send({ name: 'Fresh Org', slug: 'fresh-org' });
 
     expect(res.status).toBe(201);
-    expect(res.body.organization).toMatchObject({ slug: 'fresh-org', orgSlugLoginEnabled: false });
+    expect(res.body.organization).toMatchObject({ slug: 'fresh-org', multiSchoolEnabled: false });
   });
 });
 
@@ -141,7 +141,7 @@ describe('POST /api/platform/schools — cross-collection slug collision', () =>
 
 describe('POST /api/platform/organizations/:id/enable-multi-school', () => {
   beforeEach(() => {
-    mockOrgDocs = [{ id: 'org_a', name: 'Org A', slug: 'org-a', multiSchoolEnabled: false, orgSlugLoginEnabled: false }];
+    mockOrgDocs = [{ id: 'org_a', name: 'Org A', slug: 'org-a', multiSchoolEnabled: false }];
   });
 
   test('404s for an unknown organization', async () => {
@@ -149,13 +149,14 @@ describe('POST /api/platform/organizations/:id/enable-multi-school', () => {
     expect(res.status).toBe(404);
   });
 
-  test('sets multiSchoolEnabled true, audit-logs, and warns the note does not also open org-slug login', async () => {
+  test('sets multiSchoolEnabled true, audit-logs, and surfaces identity-migration readiness for visibility only', async () => {
     const AuditService = require('../../services/audit');
     const res = await supertest(app()).post('/api/platform/organizations/org_a/enable-multi-school');
 
     expect(res.status).toBe(200);
     expect(res.body.organization.multiSchoolEnabled).toBe(true);
-    expect(res.body.note).toMatch(/orgSlugLoginEnabled/);
+    expect(res.body.identityMigration).toEqual({ status: 'complete', identityBackfillPending: 0, collisionPending: 0 });
+    expect(res.body.note).toMatch(/IDENTITY_CUTOVER_ENABLED/);
     expect(mockOrgUpdateOne).toHaveBeenCalledWith(
       { id: 'org_a' },
       expect.objectContaining({ $set: expect.objectContaining({ multiSchoolEnabled: true }) })
@@ -164,81 +165,34 @@ describe('POST /api/platform/organizations/:id/enable-multi-school', () => {
       expect.objectContaining({ action: 'platform.organization.multi_school_enabled', target: expect.objectContaining({ id: 'org_a' }) })
     );
   });
+
+  test('a failure reading identity-migration status does not block the toggle (informational only)', async () => {
+    const qaHealth = require('../../routes/qa-health');
+    qaHealth._identityMigrationStatus.mockRejectedValueOnce(new Error('boom'));
+
+    const res = await supertest(app()).post('/api/platform/organizations/org_a/enable-multi-school');
+
+    expect(res.status).toBe(200);
+    expect(res.body.organization.multiSchoolEnabled).toBe(true);
+    expect(res.body.identityMigration).toBeNull();
+  });
 });
 
 describe('POST /api/platform/organizations/:id/disable-multi-school', () => {
-  test('cascades orgSlugLoginEnabled to false and records the cascade in the audit log', async () => {
-    mockOrgDocs = [{ id: 'org_a', name: 'Org A', slug: 'org-a', multiSchoolEnabled: true, orgSlugLoginEnabled: true }];
+  test('sets multiSchoolEnabled false and audit-logs', async () => {
+    mockOrgDocs = [{ id: 'org_a', name: 'Org A', slug: 'org-a', multiSchoolEnabled: true }];
     const AuditService = require('../../services/audit');
 
     const res = await supertest(app()).post('/api/platform/organizations/org_a/disable-multi-school');
 
     expect(res.status).toBe(200);
     expect(res.body.organization.multiSchoolEnabled).toBe(false);
-    expect(res.body.organization.orgSlugLoginEnabled).toBe(false);
     expect(mockOrgUpdateOne).toHaveBeenCalledWith(
       { id: 'org_a' },
-      expect.objectContaining({ $set: expect.objectContaining({ multiSchoolEnabled: false, orgSlugLoginEnabled: false }) })
+      expect.objectContaining({ $set: expect.objectContaining({ multiSchoolEnabled: false }) })
     );
     expect(AuditService.log).toHaveBeenCalledWith(
-      expect.objectContaining({ details: { cascadedOrgSlugLoginDisable: true } })
+      expect.objectContaining({ action: 'platform.organization.multi_school_disabled', target: expect.objectContaining({ id: 'org_a' }) })
     );
-  });
-
-  test('does not falsely report a cascade when orgSlugLoginEnabled was already false', async () => {
-    mockOrgDocs = [{ id: 'org_a', name: 'Org A', slug: 'org-a', multiSchoolEnabled: true, orgSlugLoginEnabled: false }];
-    const AuditService = require('../../services/audit');
-
-    await supertest(app()).post('/api/platform/organizations/org_a/disable-multi-school');
-
-    expect(AuditService.log).toHaveBeenCalledWith(
-      expect.objectContaining({ details: { cascadedOrgSlugLoginDisable: false } })
-    );
-  });
-});
-
-describe('POST /api/platform/organizations/:id/enable-org-slug-login', () => {
-  test('409s when multiSchoolEnabled is not already true — the hard precondition', async () => {
-    mockOrgDocs = [{ id: 'org_a', name: 'Org A', slug: 'org-a', multiSchoolEnabled: false, orgSlugLoginEnabled: false }];
-
-    const res = await supertest(app()).post('/api/platform/organizations/org_a/enable-org-slug-login');
-
-    expect(res.status).toBe(409);
-    expect(mockOrgUpdateOne).not.toHaveBeenCalled();
-  });
-
-  test('succeeds when multiSchoolEnabled is true, and surfaces identity-migration readiness for visibility only', async () => {
-    mockOrgDocs = [{ id: 'org_a', name: 'Org A', slug: 'org-a', multiSchoolEnabled: true, orgSlugLoginEnabled: false }];
-
-    const res = await supertest(app()).post('/api/platform/organizations/org_a/enable-org-slug-login');
-
-    expect(res.status).toBe(200);
-    expect(res.body.organization.orgSlugLoginEnabled).toBe(true);
-    expect(res.body.identityMigration).toEqual({ status: 'complete', identityBackfillPending: 0, collisionPending: 0 });
-    expect(res.body.note).toMatch(/IDENTITY_CUTOVER_ENABLED/);
-  });
-
-  test('a failure reading identity-migration status does not block the toggle (informational only)', async () => {
-    mockOrgDocs = [{ id: 'org_a', name: 'Org A', slug: 'org-a', multiSchoolEnabled: true, orgSlugLoginEnabled: false }];
-    const qaHealth = require('../../routes/qa-health');
-    qaHealth._identityMigrationStatus.mockRejectedValueOnce(new Error('boom'));
-
-    const res = await supertest(app()).post('/api/platform/organizations/org_a/enable-org-slug-login');
-
-    expect(res.status).toBe(200);
-    expect(res.body.organization.orgSlugLoginEnabled).toBe(true);
-    expect(res.body.identityMigration).toBeNull();
-  });
-});
-
-describe('POST /api/platform/organizations/:id/disable-org-slug-login', () => {
-  test('sets orgSlugLoginEnabled false regardless of multiSchoolEnabled state', async () => {
-    mockOrgDocs = [{ id: 'org_a', name: 'Org A', slug: 'org-a', multiSchoolEnabled: true, orgSlugLoginEnabled: true }];
-
-    const res = await supertest(app()).post('/api/platform/organizations/org_a/disable-org-slug-login');
-
-    expect(res.status).toBe(200);
-    expect(res.body.organization.orgSlugLoginEnabled).toBe(false);
-    expect(res.body.organization.multiSchoolEnabled).toBe(true); // untouched
   });
 });

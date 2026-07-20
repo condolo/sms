@@ -670,7 +670,7 @@ function _orgRow(o) {
   const names   = o.schools.map(s => s.name).join(', ') || '—';
   const namesShort = names.length > 40 ? names.slice(0, 40) + '…' : names;
   const portalCell = o.multiSchoolEnabled
-    ? `<code style="font-size:11px;background:var(--gray-100);padding:2px 6px;border-radius:4px">${o.slug}.msingi.io</code>${o.orgSlugLoginEnabled ? ' <span title="Org-slug login enabled (still requires platform-wide identity cutover to be functionally live)" style="color:#22c55e;font-size:11px"><i class="fas fa-circle"></i></span>' : ''}`
+    ? `<code style="font-size:11px;background:var(--gray-100);padding:2px 6px;border-radius:4px">${o.slug}.msingi.io</code> <span title="Still requires platform-wide identity cutover to be functionally live" style="color:#22c55e;font-size:11px"><i class="fas fa-circle"></i></span>`
     : `<span style="color:var(--gray-400);font-size:12px">— (multi-school off)</span>`;
   return `
     <tr>
@@ -691,46 +691,34 @@ function _orgRow(o) {
     </tr>`;
 }
 
-/* Multi-school / org-slug-login activation modal (org-shared-slug
-   feature, Phase 1). Two independent toggles, deliberately not folded
-   into one switch — see platform.js's route-header comment for why.
-   Re-renders itself after each toggle call (rather than closing) so an
-   admin can see the resulting state and, for enable-org-slug-login,
+/* Multi-school activation modal (org-shared-slug feature). One switch —
+   originally two (multi-school mode, then a separate org-slug-login
+   surface requiring it first), collapsed into one after real usage
+   showed the split added an activation step without adding real safety
+   (see ADR-0007's amendment note). Re-renders itself after the toggle
+   call (rather than closing) so an admin can see the resulting state and
    the identity-migration readiness info returned by the API. */
 function showOrgActivation(orgId) {
   const org = _orgsCache.find(o => o.id === orgId);
   if (!org) return;
 
   const multiOn = !!org.multiSchoolEnabled;
-  const slugOn  = !!org.orgSlugLoginEnabled;
 
   showModal(
     `Multi-School Settings — ${org.name}`,
     `<div style="display:flex;flex-direction:column;gap:14px;text-align:left">
       <div style="padding:10px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:12px;color:#1e40af">
-        Two independent switches. Enabling multi-school alone only activates JWT enrichment and the school switcher for already-authenticated staff — it does <strong>not</strong> open a public login page. Org-slug login additionally requires this organization's slug (<code>${org.slug}.msingi.io</code>) to be reachable <em>and</em> the platform-wide <code>IDENTITY_CUTOVER_ENABLED</code> environment variable to be set — a global, operator-only lever this dashboard cannot flip or verify.
+        Enabling this activates JWT enrichment and the school switcher for already-authenticated staff, <strong>and</strong> makes this organization's slug (<code>${org.slug}.msingi.io</code>) a shared login page. The login page is only functionally live once the platform-wide <code>IDENTITY_CUTOVER_ENABLED</code> environment variable is also set — a global, operator-only lever this dashboard cannot flip or verify.
       </div>
 
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid #e5e7eb;border-radius:6px">
         <div>
           <div style="font-size:13px;font-weight:600;color:#111827">Multi-School Mode</div>
-          <div style="font-size:11px;color:#94a3b8">JWT orgId/membershipId + school switcher (C9)</div>
+          <div style="font-size:11px;color:#94a3b8">JWT orgId/membershipId, school switcher (C9), and shared org-slug login page</div>
         </div>
         ${multiOn
           ? `<button class="pa-btn" style="padding:4px 10px;font-size:12px;color:#b91c1c" onclick="doDisableMultiSchool('${org.id}')"><i class="fas fa-toggle-on"></i> Disable</button>`
           : `<button class="pa-btn primary" style="padding:4px 10px;font-size:12px" onclick="doEnableMultiSchool('${org.id}')"><i class="fas fa-toggle-off"></i> Enable</button>`}
-      </div>
-
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid #e5e7eb;border-radius:6px;${multiOn ? '' : 'opacity:0.5'}">
-        <div>
-          <div style="font-size:13px;font-weight:600;color:#111827">Org-Slug Login Surface</div>
-          <div style="font-size:11px;color:#94a3b8">${multiOn ? 'Requires multi-school mode (satisfied)' : 'Requires multi-school mode — enable that first'}</div>
-        </div>
-        ${!multiOn
-          ? `<button class="pa-btn" style="padding:4px 10px;font-size:12px" disabled>Enable</button>`
-          : slugOn
-            ? `<button class="pa-btn" style="padding:4px 10px;font-size:12px;color:#b91c1c" onclick="doDisableOrgSlugLogin('${org.id}')"><i class="fas fa-toggle-on"></i> Disable</button>`
-            : `<button class="pa-btn primary" style="padding:4px 10px;font-size:12px" onclick="doEnableOrgSlugLogin('${org.id}')"><i class="fas fa-toggle-off"></i> Enable</button>`}
       </div>
 
       <div id="org-activation-status" style="font-size:11px;color:#94a3b8"></div>
@@ -750,24 +738,6 @@ async function doEnableMultiSchool(orgId) {
     _updateOrgCache(orgId, { multiSchoolEnabled: true });
     toast(json.note || 'Multi-school mode enabled.', 'success');
     showOrgActivation(orgId);
-  } catch (err) { toast(err.message, 'error'); }
-}
-
-async function doDisableMultiSchool(orgId) {
-  try {
-    await api('POST', `/organizations/${orgId}/disable-multi-school`, {});
-    _updateOrgCache(orgId, { multiSchoolEnabled: false, orgSlugLoginEnabled: false });
-    toast('Multi-school mode disabled.', 'success');
-    showOrgActivation(orgId);
-  } catch (err) { toast(err.message, 'error'); }
-}
-
-async function doEnableOrgSlugLogin(orgId) {
-  try {
-    const json = await api('POST', `/organizations/${orgId}/enable-org-slug-login`, {});
-    _updateOrgCache(orgId, { orgSlugLoginEnabled: true });
-    toast(json.note || 'Org-slug login surface enabled.', 'success');
-    showOrgActivation(orgId);
     const statusEl = document.getElementById('org-activation-status');
     if (statusEl && json.identityMigration) {
       const im = json.identityMigration;
@@ -776,11 +746,11 @@ async function doEnableOrgSlugLogin(orgId) {
   } catch (err) { toast(err.message, 'error'); }
 }
 
-async function doDisableOrgSlugLogin(orgId) {
+async function doDisableMultiSchool(orgId) {
   try {
-    await api('POST', `/organizations/${orgId}/disable-org-slug-login`, {});
-    _updateOrgCache(orgId, { orgSlugLoginEnabled: false });
-    toast('Org-slug login surface disabled.', 'success');
+    await api('POST', `/organizations/${orgId}/disable-multi-school`, {});
+    _updateOrgCache(orgId, { multiSchoolEnabled: false });
+    toast('Multi-school mode disabled.', 'success');
     showOrgActivation(orgId);
   } catch (err) { toast(err.message, 'error'); }
 }

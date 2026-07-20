@@ -12,10 +12,11 @@
    this file focuses on the credential-check and picker-redemption
    layers built on top of it.
 
-   Three gates required for org-login to ever leave its "not found"
-   posture: organizations.multiSchoolEnabled, organizations.
-   orgSlugLoginEnabled, and the platform-global IDENTITY_CUTOVER_ENABLED
-   env var — each tested independently.
+   Two gates required for org-login to ever leave its "not found"
+   posture: organizations.multiSchoolEnabled (originally two flags —
+   orgSlugLoginEnabled removed 2026-07-20, ADR-0007 correction 6) and
+   the platform-global IDENTITY_CUTOVER_ENABLED env var — each tested
+   independently.
 
    The load-bearing security tests: complete-org-login must 403 when
    asked to redeem a schoolId outside the server-locked allowlist from
@@ -141,7 +142,7 @@ beforeEach(() => {
 });
 
 function setupOptedInOrg({ schoolCount = 2 } = {}) {
-  mockOrgDocs.org_x = { id: 'org_x', slug: 'green-valley', name: 'Green Valley', multiSchoolEnabled: true, orgSlugLoginEnabled: true };
+  mockOrgDocs.org_x = { id: 'org_x', slug: 'green-valley', name: 'Green Valley', multiSchoolEnabled: true };
   mockSchoolDocsById.sch_a = { id: 'sch_a', organizationId: 'org_x', slug: 'gv-a', name: 'Campus A' };
   if (schoolCount >= 2) {
     mockSchoolDocsById.sch_b = { id: 'sch_b', organizationId: 'org_x', slug: 'gv-b', name: 'Campus B' };
@@ -175,7 +176,7 @@ describe('GET /api/public/resolve-portal', () => {
     const nothingRes = await supertest(app).get('/api/public/resolve-portal?slug=green-valley');
 
     // State 2: a real organization exists at the exact same slug, just not opted in.
-    mockOrgDocs.org_x = { id: 'org_x', slug: 'green-valley', multiSchoolEnabled: false, orgSlugLoginEnabled: false };
+    mockOrgDocs.org_x = { id: 'org_x', slug: 'green-valley', multiSchoolEnabled: false };
     const notOptedInRes = await supertest(app).get('/api/public/resolve-portal?slug=green-valley');
 
     expect(nothingRes.status).toBe(404);
@@ -206,23 +207,15 @@ describe('POST /api/auth/org-login', () => {
   });
 
   test('404s the SAME shape when multiSchoolEnabled is false', async () => {
-    mockOrgDocs.org_x = { id: 'org_x', slug: 'green-valley', multiSchoolEnabled: false, orgSlugLoginEnabled: true };
+    mockOrgDocs.org_x = { id: 'org_x', slug: 'green-valley', multiSchoolEnabled: false };
     process.env.IDENTITY_CUTOVER_ENABLED = 'true';
     const app = buildApp();
     const res = await supertest(app).post('/api/auth/org-login').send({ orgSlug: 'green-valley', email: 'a@b.com', password: 'x' });
     expect(res.status).toBe(404);
   });
 
-  test('404s the SAME shape when orgSlugLoginEnabled is false', async () => {
-    mockOrgDocs.org_x = { id: 'org_x', slug: 'green-valley', multiSchoolEnabled: true, orgSlugLoginEnabled: false };
-    process.env.IDENTITY_CUTOVER_ENABLED = 'true';
-    const app = buildApp();
-    const res = await supertest(app).post('/api/auth/org-login').send({ orgSlug: 'green-valley', email: 'a@b.com', password: 'x' });
-    expect(res.status).toBe(404);
-  });
-
-  test('404s the SAME shape when IDENTITY_CUTOVER_ENABLED is not set, even with both org flags true', async () => {
-    mockOrgDocs.org_x = { id: 'org_x', slug: 'green-valley', multiSchoolEnabled: true, orgSlugLoginEnabled: true };
+  test('404s the SAME shape when IDENTITY_CUTOVER_ENABLED is not set, even with multiSchoolEnabled true', async () => {
+    mockOrgDocs.org_x = { id: 'org_x', slug: 'green-valley', multiSchoolEnabled: true };
     // IDENTITY_CUTOVER_ENABLED deliberately left unset
     const app = buildApp();
     const res = await supertest(app).post('/api/auth/org-login').send({ orgSlug: 'green-valley', email: 'a@b.com', password: 'x' });
