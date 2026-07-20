@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.94.0] — 2026-07-20 — fix(auth): School Switcher disappeared the moment it was actually used
+
+Triggered by a direct report: switching schools worked once, but the destination school had no switcher back. Root cause was in the client session store, not the switch-school flow itself (which was already correct end to end, including the fresh-merge fix from the previous release).
+
+### Root cause
+
+`TopBar.jsx`'s `handleSwitchSchool` deliberately hard-reloads the page after switching (`window.location.assign('/dashboard')`), to discard any school-scoped cached state rather than auditing every consumer for a schoolId-aware cache key. But `client/src/store/auth.js`'s `saveSession()` — the function that decides what survives a page reload — never included `availableSchools` in the persisted shape, only `user`/`school`/`absoluteExpiry`. The in-memory session had the right data for a moment; the hard reload that immediately follows every switch threw it away every time, on both schools, for everyone. It only ever looked like it worked because the very first time you see the switcher (right after login) is the one moment before any reload has happened.
+
+### Fixed
+
+- `client/src/store/auth.js` — `availableSchools` (just `{id, name}` pairs, no PII) is now included in the persisted session, so it survives the hard reload the switch flow already does.
+
+### Verified
+
+Live in the browser: called the real `setSession()` and confirmed `localStorage`'s persisted session now includes `availableSchools` (previously absent entirely). Couldn't demonstrate the full reload round-trip in this sandbox — there's no live backend here to keep an unconfirmed session from being logged out on load, a sandbox limitation rather than something this fix could route around. The read side (`loadSession()`) is an unconditional `JSON.parse` with no field-filtering, confirmed by direct inspection, so whatever is now persisted will come back on the next real load.
+
+---
+
 ## [v4.93.0] — 2026-07-20 — fix(auth): Link Identity merge deferred to next server restart instead of happening immediately
 
 Follow-up to a direct report of the School Switcher still not appearing after using platform admin's "Link Identity." Traced the actual mechanics: C8/MR-001's collision-to-merge logic (`provisionIdentityForUser`) only re-scans and merges two same-email accounts into one shared identity on the *next server boot* — `POST /api/platform/memberships` (what "Link Identity"'s "Grant Access" button calls) only ever wrote the authorization-intent record, never triggered the merge itself. So clicking "Grant Access" looked like it worked (200 response, success toast) but the actual effect — the two accounts sharing one `identityId`, which is what the Switcher's `availableSchools` resolution depends on — silently didn't happen until whenever the server next happened to restart.

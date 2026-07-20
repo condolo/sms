@@ -73,6 +73,14 @@ function saveSession(session) {
     user:            _slimUser(session.user),
     school:          _slimSchool(session.school),
     absoluteExpiry:  session.absoluteExpiry ?? undefined,
+    // availableSchools (just {id,name} pairs — no PII) — switching schools
+    // (TopBar.jsx's handleSwitchSchool) deliberately hard-reloads the page
+    // to discard school-scoped cache/component state, which wipes anything
+    // not persisted here. Without this, the School Switcher worked exactly
+    // once per login (only while the in-memory session from that /login
+    // response was still alive) and silently vanished the moment it was
+    // actually used, on both schools, every time.
+    availableSchools: session.availableSchools ?? undefined,
   };
   localStorage.setItem(SESSION_KEY, JSON.stringify(slim));
 }
