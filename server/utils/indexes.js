@@ -717,6 +717,20 @@ const INDEXES = [
       { key: { orgId: 1 },           name: 'idt_org' },
     ],
   },
+
+  /* ── workflow_configs (Governance Spec §0) ─────────────────────
+     School-authored, school-scoped approval chains — e.g. leave
+     approval, marks-unlock. Same tenant-isolation posture as
+     role_permissions. One doc per {schoolId, workflowKey}; steps[]
+     store only stable references (roleKey/users.id), never a copied
+     display name — see GOVERNANCE_WORKFLOW_SPECIFICATION_v1.md §0. */
+  {
+    col: 'workflow_configs',
+    indexes: [
+      { key: { id: 1 },                    name: 'wfc_id',              unique: true, sparse: true },
+      { key: { schoolId: 1, workflowKey: 1 }, name: 'wfc_school_key',   unique: true },
+    ],
+  },
 ];
 
 /* ── One-time index migrations ──────────────────────────────────

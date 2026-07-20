@@ -31,8 +31,11 @@ const RCUD = ['read', 'create', 'update', 'delete'];
 const ALL_MODULES = MODULE_KEYS;
 
 const ROLE_DEFAULTS = {
-  superadmin: Object.fromEntries(ALL_MODULES.map(m => [m, RCUD])),
-  admin:      Object.fromEntries(ALL_MODULES.map(m => [m, RCUD])),
+  // hr module additionally gets 'manage_workflow' (Governance Spec §0) —
+  // editing a school's workflow_configs chain (e.g. leave approval) is a
+  // distinct grantable permission from general hr module RCUD.
+  superadmin: { ...Object.fromEntries(ALL_MODULES.map(m => [m, RCUD])), hr: [...RCUD, 'manage_workflow'] },
+  admin:      { ...Object.fromEntries(ALL_MODULES.map(m => [m, RCUD])), hr: [...RCUD, 'manage_workflow'] },
 
   teacher: {
     students:     R,    teachers:     R,    classes:      R,
@@ -97,6 +100,10 @@ const ROLE_DEFAULTS = {
     students: R,
     messages: RCU,
     events:   R,
+    // 'hr' module: hr.js's leave-resolve route already checks rbac('hr','update') —
+    // this default was previously missing for the 'hr' role itself, fixed here
+    // alongside adding manage_workflow for the new leave-chain-config permission.
+    hr:       ['read', 'update', 'manage_workflow'],
   },
 
   timetabler: {

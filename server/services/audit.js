@@ -126,6 +126,11 @@ const ACTIONS = {
   'finance.fee_structure_updated':   { severity: 'info' },
   'finance.fee_structure_deleted':   { severity: 'warn' },
   'finance.bulk_invoices_generated': { severity: 'info' },
+  // HR — Leave workflow (Governance Spec §1)
+  'leave.step_approved':     { severity: 'info' },
+  'leave.step_rejected':     { severity: 'warn' },
+  'leave.hr_confirmed':      { severity: 'info' },
+  'leave.hr_rejected':       { severity: 'warn' },
   // Platform (operator-level)
   'platform.impersonate':    { severity: 'critical' },
   'platform.school_deleted': { severity: 'critical' },

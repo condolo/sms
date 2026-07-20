@@ -506,6 +506,9 @@ export const hr = {
     list:    (params)  => _get('/hr/leave', params),
     submit:  (data)    => _post('/hr/leave', data),
     resolve: (id, data)=> _patch(`/hr/leave/${id}/resolve`, data),
+    advance: (id, data)=> _patch(`/hr/leave/${id}/advance`, data),
+    workflowConfig:     ()      => _get('/hr/leave/workflow-config'),
+    saveWorkflowConfig: (data)  => _put('/hr/leave/workflow-config', data),
   },
   payroll: {
     list:      (params)  => _get('/hr/payroll', params),

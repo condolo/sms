@@ -17,6 +17,13 @@ const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
+const AuditService = require('../services/audit');
+const {
+  getWorkflowConfig, saveWorkflowConfig, resolveStep, resolveAssigneeLabel,
+} = require('../utils/workflow-config');
+
+const LEAVE_WORKFLOW_KEY = 'leave_approval';
+const LEAVE_MIN_STEPS    = 2; // platform floor: >=2 steps before HR's own final step
 
 const router = express.Router();
 const PLAN   = planGate('hr');
@@ -77,9 +84,23 @@ router.get('/leave', async (req, res) => {
     const { page, limit, skip } = parsePagination(req.query);
 
     const filter = { schoolId };
-    /* Non-HR staff only see their own requests */
+    /* Non-HR staff see their own requests, plus (if a leave chain is
+       configured) any pending request currently awaiting a step they're
+       eligible to act on — otherwise a HOD/Principal step approver could
+       never see the requests they need to advance. */
     if (!HR_ROLES.has(role)) {
-      filter.staffId = userId;
+      const ctx = tenantContext(req);
+      const config = await getWorkflowConfig(ctx, schoolId, LEAVE_WORKFLOW_KEY);
+      const eligibleStepOrders = [];
+      if (config) {
+        for (const step of config.steps) {
+          const eligible = await resolveStep(ctx, schoolId, step);
+          if (eligible.some(u => u.id === userId)) eligibleStepOrders.push(step.order);
+        }
+      }
+      filter.$or = eligibleStepOrders.length
+        ? [{ staffId: userId }, { currentStepOrder: { $in: eligibleStepOrders } }]
+        : [{ staffId: userId }];
     } else {
       if (staffId) filter.staffId = staffId;
     }
@@ -92,6 +113,85 @@ router.get('/leave', async (req, res) => {
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) {
     console.error('[hr/leave GET]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── Leave workflow helpers ──────────────────────────────────── */
+
+async function _sendSystemMessage(req, recipientUserId, subject, body) {
+  const { schoolId, userId: senderId } = req.jwtUser;
+  await tenantModel('messages', tenantContext(req)).create({
+    id: uuidv4(),
+    schoolId,
+    senderId,
+    senderName: 'System',
+    senderRole: 'system',
+    recipients: [recipientUserId],
+    subject,
+    body,
+    type: 'direct',
+    isRead: {},
+    createdAt: new Date().toISOString(),
+  });
+}
+
+async function _notifyStep(req, step, leaveDoc, text) {
+  try {
+    const { schoolId } = req.jwtUser;
+    const eligible = await resolveStep(tenantContext(req), schoolId, step);
+    for (const u of eligible) await _sendSystemMessage(req, u.id, 'Leave request pending your review', text);
+  } catch (err) { console.error('[hr/leave notify step]', err); }
+}
+
+async function _notifyHr(req, text) {
+  try {
+    const { schoolId } = req.jwtUser;
+    const hrUsers = await tenantModel('users', tenantContext(req))
+      .find({ schoolId, role: 'hr', isActive: { $ne: false } }).select('id').lean();
+    for (const u of hrUsers) await _sendSystemMessage(req, u.id, 'Leave request ready for HR confirmation', text);
+  } catch (err) { console.error('[hr/leave notify hr]', err); }
+}
+
+async function _notifyOnlyParties(req, config, text) {
+  if (!config?.notifyOnly?.length) return;
+  try {
+    const { schoolId } = req.jwtUser;
+    const Users = tenantModel('users', tenantContext(req));
+    for (const party of config.notifyOnly) {
+      const users = party.assigneeType === 'user'
+        ? await Users.find({ id: party.assigneeValue, schoolId }).select('id').lean()
+        : await Users.find({ schoolId, $or: [{ role: party.assigneeValue }, { roles: party.assigneeValue }, { extraRoles: party.assigneeValue }] }).select('id').lean();
+      for (const u of users) await _sendSystemMessage(req, u.id, 'Leave request update', text);
+    }
+  } catch (err) { console.error('[hr/leave notifyOnly]', err); }
+}
+
+function _leaveSummary(doc) {
+  return `${doc.staffName || 'A staff member'} — ${doc.type} leave, ${doc.startDate} to ${doc.endDate}.`;
+}
+
+/* GET/PUT /api/hr/leave/workflow-config — school-configured approval chain (Governance Spec §0/§1) */
+router.get('/leave/workflow-config', rbac('hr', 'manage_workflow'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const config = await getWorkflowConfig(tenantContext(req), schoolId, LEAVE_WORKFLOW_KEY);
+    return ok(res, config || { schoolId, workflowKey: LEAVE_WORKFLOW_KEY, steps: [], notifyOnly: [] });
+  } catch (err) {
+    console.error('[hr/leave/workflow-config GET]', err);
+    return E.serverError(res);
+  }
+});
+
+router.put('/leave/workflow-config', rbac('hr', 'manage_workflow'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { steps, notifyOnly } = req.body;
+    const doc = await saveWorkflowConfig(tenantContext(req), schoolId, LEAVE_WORKFLOW_KEY, { steps, notifyOnly }, userId, LEAVE_MIN_STEPS);
+    return ok(res, doc);
+  } catch (err) {
+    if (err.statusCode === 400) return E.badRequest(res, err.message);
+    console.error('[hr/leave/workflow-config PUT]', err);
     return E.serverError(res);
   }
 });
@@ -111,6 +211,8 @@ router.post('/leave', async (req, res) => {
       (new Date(data.endDate) - new Date(data.startDate)) / 86400000
     ) + 1);
 
+    const config = await getWorkflowConfig(tenantContext(req), schoolId, LEAVE_WORKFLOW_KEY);
+
     const doc = await tenantModel('leave_requests', tenantContext(req)).create({
       id:            `lr_${uuidv4().slice(0, 8)}`,
       schoolId,
@@ -123,27 +225,130 @@ router.post('/leave', async (req, res) => {
       reason:        data.reason ?? '',
       handoverNotes: data.handoverNotes ?? '',
       status:        'pending',
+      currentStepOrder: config ? 1 : null,
       createdBy:     userId,
       createdAt:     new Date().toISOString(),
     });
-    return created(res, doc.toObject ? doc.toObject() : doc);
+    const plain = doc.toObject ? doc.toObject() : doc;
+
+    if (config) await _notifyStep(req, config.steps[0], plain, _leaveSummary(plain));
+
+    return created(res, plain);
   } catch (err) {
     console.error('[hr/leave POST]', err);
     return E.serverError(res);
   }
 });
 
-/* PATCH /api/hr/leave/:id/resolve — approve or reject */
+/* PATCH /api/hr/leave/:id/advance — approve/reject a school-configured chain step
+   (schools with no workflow_configs doc never reach a state where this applies —
+   currentStepOrder stays null and /resolve alone handles them, unchanged). */
+router.patch('/leave/:id/advance', authMiddleware, async (req, res) => {
+  try {
+    const { schoolId, userId, name, role, email } = req.jwtUser;
+    const { status, notes } = req.body;
+    if (!['approved', 'rejected'].includes(status)) {
+      return E.badRequest(res, 'status must be "approved" or "rejected"');
+    }
+    if (status === 'rejected' && !notes?.trim()) {
+      return E.badRequest(res, 'A reason is required to reject a leave request');
+    }
+
+    const ctx   = tenantContext(req);
+    const Leave = tenantModel('leave_requests', ctx);
+    const existing = await Leave.findOne({ id: req.params.id, schoolId }).lean();
+    if (!existing) return E.notFound(res, 'Leave request not found');
+    if (existing.status !== 'pending') return E.badRequest(res, 'This request has already been resolved');
+
+    const config = await getWorkflowConfig(ctx, schoolId, LEAVE_WORKFLOW_KEY);
+    if (!config) return E.badRequest(res, 'No approval chain is configured for this school');
+
+    const stepOrder = existing.currentStepOrder;
+    if (!stepOrder || stepOrder > config.steps.length) {
+      return E.badRequest(res, 'This request is not at a configurable chain step');
+    }
+    const step = config.steps.find(s => s.order === stepOrder);
+    if (!step) return E.serverError(res);
+
+    const eligible = await resolveStep(ctx, schoolId, step);
+    if (!eligible.some(u => u.id === userId)) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'You are not an approver at this step' } });
+    }
+
+    const resolvedRoleLabel = await resolveAssigneeLabel(ctx, schoolId, step.assigneeType, step.assigneeValue);
+    const actor = { userId, role, email };
+
+    if (status === 'rejected') {
+      const doc = await Leave.findOneAndUpdate(
+        { id: req.params.id, schoolId },
+        { $set: { status: 'rejected', resolvedBy: name ?? '', resolvedById: userId, resolvedAt: new Date().toISOString(), notes: notes ?? '' } },
+        { new: true }
+      ).lean();
+      await AuditService.log({
+        action: 'leave.step_rejected', actor, schoolId,
+        target: { type: 'leave_request', id: doc.id },
+        details: { comment: notes ?? '', stepOrder, resolvedRoleLabel },
+        req,
+      });
+      await _notifyOnlyParties(req, config, `${_leaveSummary(doc)} Rejected at step ${stepOrder}: ${notes}`);
+      return ok(res, doc);
+    }
+
+    const nextStepOrder = stepOrder + 1;
+    const doc = await Leave.findOneAndUpdate(
+      { id: req.params.id, schoolId },
+      { $set: { currentStepOrder: nextStepOrder } },
+      { new: true }
+    ).lean();
+
+    await AuditService.log({
+      action: 'leave.step_approved', actor, schoolId,
+      target: { type: 'leave_request', id: doc.id },
+      details: { comment: notes ?? '', stepOrder, resolvedRoleLabel },
+      req,
+    });
+
+    if (nextStepOrder <= config.steps.length) {
+      const nextStep = config.steps.find(s => s.order === nextStepOrder);
+      if (nextStep) await _notifyStep(req, nextStep, doc, _leaveSummary(doc));
+    } else {
+      await _notifyHr(req, `${_leaveSummary(doc)} Cleared the full approval chain — needs HR confirmation.`);
+    }
+    await _notifyOnlyParties(req, config, `${_leaveSummary(doc)} Approved at step ${stepOrder}.`);
+
+    return ok(res, doc);
+  } catch (err) {
+    console.error('[hr/leave PATCH advance]', err);
+    return E.serverError(res);
+  }
+});
+
+/* PATCH /api/hr/leave/:id/resolve — HR's final confirmation (or, for schools with
+   no configured chain, the single-step legacy resolution — unchanged behavior). */
 router.patch('/leave/:id/resolve', rbac('hr', 'update'), async (req, res) => {
   try {
-    const { schoolId, userId, name } = req.jwtUser;
+    const { schoolId, userId, name, role, email } = req.jwtUser;
 
     const { status, notes } = req.body;
     if (!['approved', 'rejected'].includes(status)) {
       return E.badRequest(res, 'status must be "approved" or "rejected"');
     }
+    if (status === 'rejected' && !notes?.trim()) {
+      return E.badRequest(res, 'A reason is required to reject a leave request');
+    }
 
-    const doc = await tenantModel('leave_requests', tenantContext(req)).findOneAndUpdate(
+    const ctx   = tenantContext(req);
+    const Leave = tenantModel('leave_requests', ctx);
+    const existing = await Leave.findOne({ id: req.params.id, schoolId }).lean();
+    if (!existing) return E.notFound(res, 'Leave request not found');
+    if (existing.status !== 'pending') return E.badRequest(res, 'This request has already been resolved');
+
+    const config = await getWorkflowConfig(ctx, schoolId, LEAVE_WORKFLOW_KEY);
+    if (config && (existing.currentStepOrder ?? 0) <= config.steps.length) {
+      return E.badRequest(res, 'An earlier step in the approval chain is still pending');
+    }
+
+    const doc = await Leave.findOneAndUpdate(
       { id: req.params.id, schoolId },
       { $set: {
           status,
@@ -155,7 +360,16 @@ router.patch('/leave/:id/resolve', rbac('hr', 'update'), async (req, res) => {
       },
       { new: true }
     ).lean();
-    if (!doc) return E.notFound(res, 'Leave request not found');
+
+    await AuditService.log({
+      action: status === 'approved' ? 'leave.hr_confirmed' : 'leave.hr_rejected',
+      actor: { userId, role, email }, schoolId,
+      target: { type: 'leave_request', id: doc.id },
+      details: { comment: notes ?? '', stepOrder: config ? config.steps.length + 1 : 1, resolvedRoleLabel: 'HR' },
+      req,
+    });
+    if (config) await _notifyOnlyParties(req, config, `${_leaveSummary(doc)} HR ${status === 'approved' ? 'confirmed' : 'rejected'} this request.`);
+
     return ok(res, doc);
   } catch (err) {
     console.error('[hr/leave PATCH]', err);

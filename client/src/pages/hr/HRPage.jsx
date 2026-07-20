@@ -140,6 +140,118 @@ function LeaveForm({ onClose, onSubmit }) {
   );
 }
 
+/* ── Leave approval chain builder (Governance Spec §0/§1) ──
+   Steps store only stable references (a roleKey or a users.id) — never
+   a display-name string, since custom_roles.label is independently
+   editable and the role is deletable. The picker resolves names live
+   from the same sources; the saved value is always the key/id. */
+function emptyStep() { return { assigneeType: 'role', assigneeValue: '' }; }
+
+function AssigneePicker({ value, builtInRoles, customRoles, teachers, onChange }) {
+  const [kind, val] = value.assigneeValue
+    ? [value.assigneeType, value.assigneeValue]
+    : [value.assigneeType, ''];
+  const fCls = 'rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400/40';
+  return (
+    <div className="flex gap-2 flex-1">
+      <select value={kind} onChange={e => onChange({ ...value, assigneeType: e.target.value, assigneeValue: '' })} className={fCls}>
+        <option value="role">Role</option>
+        <option value="user">Specific person</option>
+      </select>
+      {kind === 'role' ? (
+        <select value={val} onChange={e => onChange({ ...value, assigneeValue: e.target.value })} className={`${fCls} flex-1`}>
+          <option value="">Select a role…</option>
+          {builtInRoles.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
+          {customRoles.map(r => <option key={r.key} value={r.key}>{r.label} (custom)</option>)}
+        </select>
+      ) : (
+        <select value={val} onChange={e => onChange({ ...value, assigneeValue: e.target.value })} className={`${fCls} flex-1`}>
+          <option value="">Select a person…</option>
+          {teachers.map(t => {
+            const id = t.userId ?? t.id ?? t._id;
+            return <option key={id} value={id}>{t.name ?? `${t.firstName} ${t.lastName}`}</option>;
+          })}
+        </select>
+      )}
+    </div>
+  );
+}
+
+function WorkflowConfigModal({ config, builtInRoles, customRoles, teachers, onClose, onSave, saving }) {
+  const [steps, setSteps] = useState(() => (config?.steps?.length ? config.steps.map(s => ({ ...s })) : [emptyStep(), emptyStep()]));
+  const [notifyOnly, setNotifyOnly] = useState(() => (config?.notifyOnly ?? []).map(p => ({ ...p })));
+
+  function updateStep(i, next) { setSteps(s => s.map((st, idx) => idx === i ? next : st)); }
+  function addStep() { setSteps(s => [...s, emptyStep()]); }
+  function removeStep(i) { setSteps(s => s.filter((_, idx) => idx !== i)); }
+
+  function addNotify() { setNotifyOnly(n => [...n, { assigneeType: 'role', assigneeValue: '' }]); }
+  function updateNotify(i, next) { setNotifyOnly(n => n.map((p, idx) => idx === i ? next : p)); }
+  function removeNotify(i) { setNotifyOnly(n => n.filter((_, idx) => idx !== i)); }
+
+  const incomplete = steps.some(s => !s.assigneeValue) || steps.length < 2;
+
+  function handleSave() {
+    const payload = {
+      steps: steps.map((s, idx) => ({ order: idx + 1, assigneeType: s.assigneeType, assigneeValue: s.assigneeValue, fallback: s.fallback ?? null })),
+      notifyOnly: notifyOnly.filter(p => p.assigneeValue),
+    };
+    onSave(payload);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-100">
+          <div>
+            <h2 className="font-bold text-slate-900">Leave Approval Chain</h2>
+            <p className="text-xs text-slate-500 mt-0.5">At least 2 steps required before HR's final confirmation. HR always confirms last.</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-1"><X size={16} /></button>
+        </div>
+        <div className="p-5 space-y-3">
+          {steps.map((step, i) => (
+            <div key={i} className="flex items-center gap-2 bg-slate-50 rounded-lg p-2.5">
+              <span className="w-6 h-6 rounded-full bg-violet-100 text-violet-700 text-xs font-bold flex items-center justify-center shrink-0">{i + 1}</span>
+              <AssigneePicker value={step} builtInRoles={builtInRoles} customRoles={customRoles} teachers={teachers} onChange={next => updateStep(i, next)} />
+              <button onClick={() => removeStep(i)} disabled={steps.length <= 2}
+                className="text-slate-400 hover:text-red-600 p-1 disabled:opacity-30 disabled:cursor-not-allowed shrink-0"><Trash2 size={14} /></button>
+            </div>
+          ))}
+          <button onClick={addStep} className="text-xs font-semibold text-violet-600 hover:underline flex items-center gap-1">
+            <Plus size={12} /> Add step
+          </button>
+          <div className="flex items-center gap-2 bg-slate-100 rounded-lg p-2.5 opacity-70">
+            <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold flex items-center justify-center shrink-0">{steps.length + 1}</span>
+            <span className="text-xs text-slate-600 font-medium">HR — final confirmation (fixed, always last)</span>
+          </div>
+
+          <div className="pt-3 border-t border-slate-100">
+            <p className="text-xs font-semibold text-slate-600 mb-2">Notify only (never gates approval)</p>
+            {notifyOnly.map((p, i) => (
+              <div key={i} className="flex items-center gap-2 mb-2">
+                <AssigneePicker value={p} builtInRoles={builtInRoles} customRoles={customRoles} teachers={teachers} onChange={next => updateNotify(i, next)} />
+                <button onClick={() => removeNotify(i)} className="text-slate-400 hover:text-red-600 p-1 shrink-0"><Trash2 size={14} /></button>
+              </div>
+            ))}
+            <button onClick={addNotify} className="text-xs font-semibold text-violet-600 hover:underline flex items-center gap-1">
+              <Plus size={12} /> Add notify-only party
+            </button>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+            <button onClick={handleSave} disabled={incomplete || saving}
+              className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 flex items-center gap-1.5 disabled:opacity-50">
+              {saving ? <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Saving…</> : <><Save size={13} /> Save Chain</>}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Document form ──────────────────────────────────────── */
 function DocForm({ teachers, onClose, onSubmit, saving }) {
   const [form, setForm] = useState({ staffId:'', staffName:'', name:'', type:'contract', issuedDate:'', expiryDate:'', notes:'', fileUrl:'', status:'active' });
@@ -429,6 +541,8 @@ export default function HRPage() {
   const { toast } = useToast();
   const [bulkInviteResult, setBulkInviteResult] = useState(null); // { created, skipped, errors }
   const [bulkInviting, setBulkInviting]         = useState(false);
+  const [showWorkflowConfig, setShowWorkflowConfig] = useState(false);
+  const [rejectPrompt, setRejectPrompt] = useState(null); // null | { id, kind: 'advance'|'resolve' }
 
   /* ── Queries ── */
   const { data: summaryData } = useQuery({
@@ -446,6 +560,13 @@ export default function HRPage() {
     queryKey: ['hr','leave'],
     queryFn:  () => hrApi.leave.list({}),
   });
+
+  const { data: workflowConfigData } = useQuery({
+    queryKey: ['hr','leave','workflow-config'],
+    queryFn:  () => hrApi.leave.workflowConfig(),
+    enabled:  isHR,
+  });
+  const workflowConfig = workflowConfigData?.data?.steps?.length ? workflowConfigData.data : null;
 
   const { data: payrollData, isLoading: payLoading } = useQuery({
     queryKey: ['hr','payroll', payPeriod],
@@ -563,12 +684,31 @@ export default function HRPage() {
   });
 
   const resolveLeave = useMutation({
-    mutationFn: ({ id, status }) => hrApi.leave.resolve(id, { status }),
+    mutationFn: ({ id, status, notes }) => hrApi.leave.resolve(id, { status, notes }),
     onSuccess:  (_, { status }) => {
       qc.invalidateQueries({ queryKey: ['hr','leave'] });
       toast.success(status === 'approved' ? 'Leave approved.' : 'Leave declined.');
     },
     onError: err => toast.error(err?.message ?? 'Failed to update leave request.'),
+  });
+
+  const advanceLeave = useMutation({
+    mutationFn: ({ id, status, notes }) => hrApi.leave.advance(id, { status, notes }),
+    onSuccess:  (_, { status }) => {
+      qc.invalidateQueries({ queryKey: ['hr','leave'] });
+      toast.success(status === 'approved' ? 'Step approved.' : 'Step rejected.');
+    },
+    onError: err => toast.error(err?.message ?? 'You are not an approver at this step.'),
+  });
+
+  const saveWorkflowConfig = useMutation({
+    mutationFn: (data) => hrApi.leave.saveWorkflowConfig(data),
+    onSuccess:  () => {
+      qc.invalidateQueries({ queryKey: ['hr','leave','workflow-config'] });
+      setShowWorkflowConfig(false);
+      toast.success('Approval chain saved.');
+    },
+    onError: err => toast.error(err?.message ?? 'Failed to save approval chain.'),
   });
 
   const savePayroll = useMutation({
@@ -1015,6 +1155,14 @@ export default function HRPage() {
       {/* ── LEAVE TAB ── */}
       {tab === 'leave' && (
         <div className="space-y-3">
+          {isHR && (
+            <div className="flex justify-end">
+              <button onClick={() => setShowWorkflowConfig(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
+                <Edit2 size={12} /> {workflowConfig ? 'Edit approval chain' : 'Configure approval chain'}
+              </button>
+            </div>
+          )}
           {leaves.length === 0 ? (
             <div className="text-center py-16">
               <Calendar size={32} className="mx-auto text-slate-300 mb-3" />
@@ -1022,37 +1170,96 @@ export default function HRPage() {
               <button onClick={() => setLeaveForm(true)} className="mt-3 text-violet-600 text-sm hover:underline">Submit your first request</button>
             </div>
           ) : (
-            leaves.map((l, i) => (
-              <motion.div key={l.id} initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} transition={{ delay: i * 0.04 }}
-                className="bg-white rounded-xl border border-slate-200 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Badge cls={LEAVE_COLORS[l.type] ?? 'bg-slate-100 text-slate-600'} text={LEAVE_TYPES[l.type] ?? l.type} />
-                      <Badge cls={STATUS_COLORS[l.status] ?? 'bg-slate-100 text-slate-600'} text={l.status} />
+            leaves.map((l, i) => {
+              const chained    = l.currentStepOrder != null;
+              const totalSteps = workflowConfig?.steps?.length ?? 0;
+              const inChain    = chained && l.status === 'pending' && l.currentStepOrder <= totalSteps;
+              const atHrFinal  = chained ? l.currentStepOrder > totalSteps : true;
+              return (
+                <motion.div key={l.id} initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} transition={{ delay: i * 0.04 }}
+                  className="bg-white rounded-xl border border-slate-200 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Badge cls={LEAVE_COLORS[l.type] ?? 'bg-slate-100 text-slate-600'} text={LEAVE_TYPES[l.type] ?? l.type} />
+                        <Badge cls={STATUS_COLORS[l.status] ?? 'bg-slate-100 text-slate-600'} text={l.status} />
+                        {chained && l.status === 'pending' && (
+                          <span className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold bg-violet-100 text-violet-700">
+                            {inChain ? `Step ${l.currentStepOrder} of ${totalSteps}` : 'Awaiting HR confirmation'}
+                          </span>
+                        )}
+                      </div>
+                      <p className="font-medium text-slate-900 text-sm">{l.staffName}</p>
+                      <p className="text-xs text-slate-500">{fmtDate(l.startDate)} – {fmtDate(l.endDate)} · {l.days} day{l.days !== 1 ? 's' : ''}</p>
+                      {l.reason && <p className="text-xs text-slate-600 mt-1 italic">"{l.reason}"</p>}
+                      {l.notes  && <p className="text-xs text-slate-500 mt-0.5">Note: {l.notes}</p>}
                     </div>
-                    <p className="font-medium text-slate-900 text-sm">{l.staffName}</p>
-                    <p className="text-xs text-slate-500">{fmtDate(l.startDate)} – {fmtDate(l.endDate)} · {l.days} day{l.days !== 1 ? 's' : ''}</p>
-                    {l.reason && <p className="text-xs text-slate-600 mt-1 italic">"{l.reason}"</p>}
-                    {l.notes  && <p className="text-xs text-slate-500 mt-0.5">Note: {l.notes}</p>}
+                    {l.status === 'pending' && inChain && (
+                      <div className="flex gap-1.5 shrink-0">
+                        <button onClick={() => advanceLeave.mutate({ id: l.id, status:'approved' })}
+                          className="flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition">
+                          <Check size={11} /> Approve
+                        </button>
+                        <button onClick={() => setRejectPrompt({ id: l.id, kind: 'advance' })}
+                          className="flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-red-700 transition">
+                          <X size={11} /> Reject
+                        </button>
+                      </div>
+                    )}
+                    {isHR && l.status === 'pending' && atHrFinal && (
+                      <div className="flex gap-1.5 shrink-0">
+                        <button onClick={() => resolveLeave.mutate({ id: l.id, status:'approved' })}
+                          className="flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition">
+                          <Check size={11} /> {chained ? 'Confirm' : 'Approve'}
+                        </button>
+                        <button onClick={() => setRejectPrompt({ id: l.id, kind: 'resolve' })}
+                          className="flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-red-700 transition">
+                          <X size={11} /> Reject
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  {isHR && l.status === 'pending' && (
-                    <div className="flex gap-1.5 shrink-0">
-                      <button onClick={() => resolveLeave.mutate({ id: l.id, status:'approved' })}
-                        className="flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition">
-                        <Check size={11} /> Approve
-                      </button>
-                      <button onClick={() => resolveLeave.mutate({ id: l.id, status:'rejected' })}
-                        className="flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-red-700 transition">
-                        <X size={11} /> Reject
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-            ))
+                </motion.div>
+              );
+            })
           )}
         </div>
+      )}
+
+      {rejectPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={e => e.target === e.currentTarget && setRejectPrompt(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5">
+            <h2 className="font-bold text-slate-900 mb-1">Reason for rejecting</h2>
+            <p className="text-xs text-slate-500 mb-3">A reason is required so the requester understands why.</p>
+            <form onSubmit={e => {
+              e.preventDefault();
+              const notes = e.target.elements.reason.value.trim();
+              if (!notes) return;
+              const mutation = rejectPrompt.kind === 'advance' ? advanceLeave : resolveLeave;
+              mutation.mutate({ id: rejectPrompt.id, status: 'rejected', notes });
+              setRejectPrompt(null);
+            }}>
+              <textarea name="reason" required rows={3} autoFocus placeholder="e.g. Insufficient notice given…"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400/40 resize-none" />
+              <div className="flex justify-end gap-2 pt-3">
+                <button type="button" onClick={() => setRejectPrompt(null)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+                <button type="submit" className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700">Reject</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showWorkflowConfig && (
+        <WorkflowConfigModal
+          config={workflowConfig}
+          builtInRoles={BUILT_IN_STAFF_ROLES}
+          customRoles={customRolesData ?? []}
+          teachers={teachers}
+          saving={saveWorkflowConfig.isPending}
+          onClose={() => setShowWorkflowConfig(false)}
+          onSave={data => saveWorkflowConfig.mutate(data)}
+        />
       )}
 
       {/* ── PAYROLL TAB ── */}

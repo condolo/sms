@@ -6,6 +6,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.96.0] — 2026-07-20 — feat(hr): school-configurable leave approval chain (Governance Spec §0/§1)
+
+First implementation phase from `docs/governance/GOVERNANCE_WORKFLOW_SPECIFICATION_v1.md`. Leave approval was a single hardcoded step (`hr.js`, `pending → approved/rejected`, no audit trail). Schools now author their own approval chain — any number of steps ≥2, each pointing at a role or a specific person, before HR's own fixed final confirmation — instead of the platform assuming a HOD → Principal → HR shape that not every school has.
+
+### Added
+
+- `server/utils/workflow-config.js` — the reusable `workflow_configs` mechanism (Governance Spec §0): `validateSteps`, `getWorkflowConfig`/`saveWorkflowConfig`, `resolveStep` (resolves a step to eligible users, checking both a vacant role and a dangling reference — a deleted custom role or a deactivated/deleted user — against the step's own configured `fallback`), and `resolveAssigneeLabel` (live display-name resolution, used only for point-in-time snapshots, never stored in the config). Steps store a stable `roleKey`/`users.id` reference only — never a copied display name, since `custom_roles.label` is independently editable and the role is deletable.
+- `GET`/`PUT /api/hr/leave/workflow-config` — read/save a school's leave chain. Editing is gated by a new `hr.manage_workflow` permission (`repairPermissions.js`), distinct from general `hr` module access — resolved through the existing `role_permissions`/per-user-override mechanism, not a hardcoded role check. Saving enforces the platform's one structural rule: at least 2 steps before HR's own final confirmation.
+- `PATCH /api/hr/leave/:id/advance` — approve/reject the request's current configured step; 403s if the caller isn't currently eligible for that step. Every step transition and HR's final confirmation now write an `AuditService.log()` entry (`leave.step_approved`/`leave.step_rejected`/`leave.hr_confirmed`/`leave.hr_rejected`) — none of the three leave actions were audited before this. A rejection at any point now requires a reason (400 if omitted).
+- Client: a "Configure approval chain" step-builder in the HR page's Leave tab (role/person picker sourced from the school's own custom + built-in roles and staff list, plus an optional notify-only list for parties who should be informed but never gate approval), and chain-aware Approve/Reject actions replacing the old single-step buttons for chain-configured requests.
+
+### Changed
+
+- `GET /api/hr/leave` — a non-HR staff member now also sees pending requests currently awaiting a step they're eligible to act on (previously restricted to only their own submissions), or a HOD/Principal step approver could never see the requests they need to advance.
+- Schools with no configured chain keep today's exact single-step behavior, unchanged — `currentStepOrder` stays `null` and `PATCH /:id/resolve` works exactly as before. The chain only activates once a school explicitly saves a `workflow_configs` doc.
+
+### Fixed
+
+- `repairPermissions.js` — the `hr` role's default permissions never actually included the `hr` module itself, despite `hr.js`'s leave-resolve route requiring `rbac('hr','update')` — meaning a user with role `hr` (not `admin`/`superadmin`) could not resolve leave requests by default. Fixed alongside adding the new `manage_workflow` action.
+
+Marks Editing Workflow, Growth Profile, and Resources — the remaining areas from the same spec — follow as separate phases.
+
+---
+
 ## [v4.95.0] — 2026-07-20 — fix(compliance): Google Analytics ran on every visitor with no consent — added a real cookie banner
 
 Triggered by a direct question: "have I ever seen a cookie banner?" Answer was no, and the reason was real — `client/index.html` loaded Google Analytics (GA4) unconditionally, in the `<head>`, before any visitor did anything. It set `_ga`/`_ga_*` cookies to every landing-page visitor and tracked every route change (including inside the authenticated school app), with zero consent mechanism anywhere in the codebase. This directly contradicted the site's own Privacy Policy, which explicitly claimed "we do not use third-party analytics that profile individual users."
