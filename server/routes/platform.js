@@ -412,6 +412,31 @@ router.post('/organizations', async (req, res) => {
   }
 });
 
+/* PATCH /api/platform/organizations/:id — rename an organization.
+   `slug` is deliberately never accepted here, same reasoning as schools'
+   PATCH route: it's fixed at creation time (used in the shared portal URL)
+   and stays that way regardless of how the org's display name changes. */
+router.patch('/organizations/:id', async (req, res) => {
+  try {
+    if (typeof req.body.name !== 'string' || !req.body.name.trim()) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+    const name = req.body.name.trim();
+
+    const Org = _model('organizations');
+    const doc = await Org.findOneAndUpdate(
+      { id: req.params.id },
+      { $set: { name, updatedAt: new Date().toISOString() } },
+      { new: true }
+    ).lean();
+    if (!doc) return res.status(404).json({ error: 'Organization not found' });
+    res.json({ organization: doc });
+  } catch (err) {
+    console.error('[platform/organizations/:id PATCH]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* ── Organization activation toggle (org-shared-slug feature) ──
    Single gate: multiSchoolEnabled. Activates both JWT orgId/membershipId +
    C9 switching, AND the org-slug public login surface (auth.js's
@@ -697,12 +722,19 @@ router.post('/schools/:id/reject', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-/* PATCH /api/platform/schools/:id — update plan/addOns/status
-   Accepts either MongoDB _id (ObjectId) or custom id string (sch_slug_ts) */
+/* PATCH /api/platform/schools/:id — update name/plan/addOns/status
+   Accepts either MongoDB _id (ObjectId) or custom id string (sch_slug_ts).
+   `slug` is deliberately never accepted here — it's fixed at provisioning
+   time (used in URLs, tenant resolution, etc.) and stays that way. */
 router.patch('/schools/:id', async (req, res) => {
   try {
     const School = _model('schools');
     const update = {};
+    if (typeof req.body.name === 'string') {
+      const name = req.body.name.trim();
+      if (!name) return res.status(400).json({ error: 'name cannot be empty' });
+      update.name = name;
+    }
     if (req.body.plan)     update.plan     = req.body.plan;
     if (req.body.addOns)   update.addOns   = req.body.addOns;
     if (typeof req.body.isActive === 'boolean') update.isActive = req.body.isActive;

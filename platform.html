@@ -578,6 +578,9 @@ function _schoolRow(s) {
           <button class="pa-btn" title="Change plan" onclick="changePlan('${s._id}','${s.plan}','${s.name}')">
             <i class="fas fa-layer-group"></i> Plan
           </button>
+          <button class="pa-btn" title="Edit school name (slug is fixed and cannot be changed)" onclick="editSchoolName('${s._id}','${s.name.replace(/'/g,"\\'")}')">
+            <i class="fas fa-pen"></i> Rename
+          </button>
           <button class="pa-btn" title="Grant/revoke capabilities independent of plan tier" onclick="showEntitlements('${s._id}','${s.name.replace(/'/g,"\\'")}')">
             <i class="fas fa-unlock-alt"></i> Entitlements
           </button>
@@ -686,6 +689,9 @@ function _orgRow(o) {
         </button>
         <button class="pa-btn" title="Multi-school & shared-slug-login settings" onclick="showOrgActivation('${o.id}')">
           <i class="fas fa-sliders-h"></i> Multi-School
+        </button>
+        <button class="pa-btn" title="Edit organization name (slug is fixed and cannot be changed)" onclick="editOrgName('${o.id}','${o.name.replace(/'/g,"\\'")}')">
+          <i class="fas fa-pen"></i> Rename
         </button>
       </td>
     </tr>`;
@@ -1125,6 +1131,63 @@ async function doChangePlan(schoolId) {
     await api('PATCH', `/schools/${schoolId}`, { plan });
     toast('Plan updated to ' + plan, 'success');
     renderSchools();
+  } catch (err) {
+    toast('Failed: ' + err.message, 'error');
+  }
+}
+
+/* ── Rename school / organization ──────────────────────────
+   Name only — the slug (used in URLs and tenant resolution) is fixed at
+   provisioning time and never editable here or anywhere else. */
+function editSchoolName(schoolId, currentName) {
+  showModal(
+    `Rename School`,
+    `<label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">School Name</label>
+     <input id="rename-input" type="text" value="${currentName.replace(/"/g,'&quot;')}"
+       style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:14px;font-family:inherit">
+     <p style="font-size:11px;color:#94a3b8;margin-top:8px">The URL slug is fixed and does not change when you rename the school.</p>`,
+    [
+      { label: 'Cancel', cls: 'pa-btn', action: 'closeModal()' },
+      { label: 'Save', cls: 'pa-btn primary', action: `doRenameSchool('${schoolId}')` }
+    ]
+  );
+}
+
+async function doRenameSchool(schoolId) {
+  const name = document.getElementById('rename-input')?.value.trim();
+  if (!name) { toast('Name cannot be empty', 'error'); return; }
+  closeModal();
+  try {
+    await api('PATCH', `/schools/${schoolId}`, { name });
+    toast('School renamed', 'success');
+    renderSchools();
+  } catch (err) {
+    toast('Failed: ' + err.message, 'error');
+  }
+}
+
+function editOrgName(orgId, currentName) {
+  showModal(
+    `Rename Organization`,
+    `<label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Organization Name</label>
+     <input id="rename-org-input" type="text" value="${currentName.replace(/"/g,'&quot;')}"
+       style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:14px;font-family:inherit">
+     <p style="font-size:11px;color:#94a3b8;margin-top:8px">The URL slug is fixed and does not change when you rename the organization.</p>`,
+    [
+      { label: 'Cancel', cls: 'pa-btn', action: 'closeModal()' },
+      { label: 'Save', cls: 'pa-btn primary', action: `doRenameOrg('${orgId}')` }
+    ]
+  );
+}
+
+async function doRenameOrg(orgId) {
+  const name = document.getElementById('rename-org-input')?.value.trim();
+  if (!name) { toast('Name cannot be empty', 'error'); return; }
+  closeModal();
+  try {
+    await api('PATCH', `/organizations/${orgId}`, { name });
+    toast('Organization renamed', 'success');
+    renderOrganizations();
   } catch (err) {
     toast('Failed: ' + err.message, 'error');
   }

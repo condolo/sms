@@ -6,6 +6,33 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.89.0] — 2026-07-20 — feat(platform): rename school/organization (name only) + fix stale plan display in school Settings
+
+### Added — school/organization rename
+
+Platform admin previously had no way to correct a school or organization name once set (e.g. a typo like "SChool" instead of "School"). The URL slug is intentionally never editable — it's fixed at provisioning time and used for tenant resolution.
+
+- `server/routes/platform.js` — `PATCH /schools/:id` now also accepts `name`; new `PATCH /organizations/:id` accepts `name` only. Both silently ignore any `slug` in the request body.
+- `platform.html` — "Rename" action added next to each school and organization row.
+
+### Fixed — Settings → Subscription tab showing a stale plan
+
+A school admin viewing Settings could see a plan that didn't match what platform admin had actually set — `session.school.plan` is a snapshot cached at login time and was never refreshed while the session stayed open, so a plan change made from platform admin was invisible to an already-logged-in admin until they logged out and back in.
+
+- `client/src/pages/settings/SettingsPage.jsx`'s `SubscriptionTab` now fetches the live school record (`GET /api/settings/school`, already existed) on mount and patches the session if `plan`/`planExpiresAt` differ from the cached value — same live-refresh problem class as the impersonation session bug fixed in v4.88.0, this time affecting every school-admin session, not just impersonation.
+
+### Note — self-service plan changes are a separate, real write path (not touched here)
+
+Confirmed while investigating the above: `POST /api/mpesa/subscription`'s payment callback (`server/routes/mpesa.js`) writes `schools.plan` directly from whatever tier the school admin selected in this same Settings tab — a second, independent path to the same field platform admin's "Change Plan" action writes, with no reconciliation between the two. This is a real design question (should self-service payment be able to override a platform-set plan at all?), not a bug fix — flagged for a decision, not resolved in this release.
+
+### Tests
+
+- `server/__tests__/routes/platform-rename.test.js` (new) — 8 tests: both routes update `name`, both silently ignore an attempted `slug` change, 400 on empty/missing name, 404 for an unknown id.
+- Full suite: 45/45 suites, 496/496 tests. `node scripts/security-scan.js` and the tenant-isolation ratchet (held at 34) both clean.
+- Client bundle verified to compile cleanly (Vite dev transform of the edited file returns 200, no parse/transform errors) — full click-through of the Subscription tab wasn't possible in this sandbox (no live MongoDB).
+
+---
+
 ## [v4.88.0] — 2026-07-20 — fix(security,platform): HSTS preload eligibility + impersonation session missing school data
 
 Two independent fixes triggered by real usage: an external security scan (UpGuard) of msingi.io, and a platform admin actually using impersonation for the first time and noticing the plan badge showed a plan the school isn't on.

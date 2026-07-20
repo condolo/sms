@@ -3906,8 +3906,27 @@ const PORTAL_TIERS_SETTINGS = {
 const LEGACY_TO_TIER = { core: 'base', standard: 'student', premium: 'family', base: 'base', student: 'student', family: 'family', enterprise: 'enterprise' };
 
 function SubscriptionTab() {
-  const school  = useAuthStore(s => s.session?.school);
-  const user    = useAuthStore(s => s.session?.user);
+  const school       = useAuthStore(s => s.session?.school);
+  const user         = useAuthStore(s => s.session?.user);
+  const patchSchool  = useAuthStore(s => s.patchSchool);
+
+  // session.school.plan is a snapshot cached at login — if platform admin
+  // changes the plan while this session is already open, it's invisible
+  // here until re-login. Since this tab is the one place a mismatch between
+  // "what platform set" and "what we're showing" actually matters, always
+  // pull the live value on mount rather than trusting the cached session.
+  const { data: livePlanResp } = useQuery({
+    queryKey:  ['settings', 'school', 'live-plan'],
+    queryFn:   () => settingsApi.school.get(),
+    staleTime: 0,
+  });
+  useEffect(() => {
+    const live = livePlanResp?.data;
+    if (live && (live.plan !== school?.plan || live.planExpiresAt !== school?.planExpiresAt)) {
+      patchSchool({ plan: live.plan, planExpiresAt: live.planExpiresAt });
+    }
+  }, [livePlanResp]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [phone,        setPhone]        = useState(user?.phone || '');
   const [selTier,      setSelTier]      = useState(() => LEGACY_TO_TIER[school?.plan] || 'student');
   const [studentCount, setStudentCount] = useState(300);
