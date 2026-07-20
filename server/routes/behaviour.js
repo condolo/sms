@@ -15,6 +15,7 @@ const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
+const AuditService = require('../services/audit');
 
 const router = express.Router();
 const PLAN   = planGate('behaviour');
@@ -124,6 +125,13 @@ router.get('/incidents/summary', authMiddleware, PLAN, rbac('behaviour', 'read')
       filter.date = {};
       if (req.query.dateFrom) filter.date.$gte = req.query.dateFrom;
       if (req.query.dateTo)   filter.date.$lte = req.query.dateTo;
+    } else {
+      // Governance Spec §2 — a points reset never touches incident history;
+      // it just moves the floor the running total is computed from. Only
+      // applies when the caller hasn't already asked for an explicit range.
+      const lastReset = await tenantModel('behaviour_points_resets', tenantContext(req))
+        .find({ schoolId }).sort({ resetAt: -1 }).limit(1).lean();
+      if (lastReset[0]) filter.date = { $gte: lastReset[0].resetAt.slice(0, 10) };
     }
 
     const Incidents = tenantModel('behaviour_incidents', tenantContext(req));
@@ -330,6 +338,28 @@ router.delete('/categories/:id', authMiddleware, PLAN, rbac('behaviour', 'delete
     if (!doc) return E.notFound(res, 'Category not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) { console.error('[behaviour/categories DELETE/:id]', err); return E.serverError(res); }
+});
+
+/* ── POST /api/behaviour/points-reset ────────────────────────────
+   Governance Spec §2 — zeroes the CURRENT running-total balance shown
+   by /incidents/summary without touching behaviour_incidents history,
+   which is never deleted, modified, or filtered out by this action.
+   Manual, admin-triggered (interim choice — automatic-on-date needs
+   an academic-year-transition hook that doesn't exist anywhere in the
+   codebase yet, left as an explicit open question in the spec). */
+router.post('/points-reset', authMiddleware, PLAN, rbac('behaviour', 'delete'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const now = new Date().toISOString();
+    const doc = await tenantModel('behaviour_points_resets', tenantContext(req)).create({
+      id: uuidv4(), schoolId, resetAt: now, resetBy: userId, note: req.body?.note?.trim() || '',
+    });
+    await AuditService.log({
+      action: 'behaviour.points_reset', actor: { userId, role: req.jwtUser.role, email: req.jwtUser.email }, schoolId,
+      target: { type: 'behaviour_points_reset', id: doc.id }, details: { resetAt: now }, req,
+    });
+    return created(res, doc.toObject ? doc.toObject() : doc);
+  } catch (err) { console.error('[behaviour/points-reset POST]', err); return E.serverError(res); }
 });
 
 module.exports = router;

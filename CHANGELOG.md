@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.98.0] — 2026-07-20 — fix(growth-profile): permanent-record guarantee — soft-delete + manual points reset
+
+Third implementation phase from `docs/governance/GOVERNANCE_WORKFLOW_SPECIFICATION_v1.md` §2. The finding: permanence for Growth Profile history was incidental, not guaranteed — `growth_leadership`/`activities`/`service`/`awards` (via `growth-records.js`), `growth-projects.js`, and `growth-recommendations.js` all supported genuine hard `DELETE`, while `behaviour_incidents` already soft-deleted. This brings the less-careful half of the module up to the standard the other half already met.
+
+### Changed
+
+- `growth-records.js`, `growth-projects.js`, `growth-recommendations.js` — `DELETE` routes now set `deletedAt`/`deletedBy` instead of calling `findOneAndDelete`, mirroring `behaviour_incidents`' existing pattern exactly. The record is retained forever, never destroyed, and excluded from default list/get/edit views (`GET`/`PUT` now filter `deletedAt: {$exists: false}`) — deliberately more careful than the `behaviour_incidents` precedent, which still shows resolved/deleted incidents by default; a deleted growth-profile achievement shouldn't clutter the list the same way a resolved incident legitimately should.
+
+### Added
+
+- `POST /api/behaviour/points-reset` — zeroes the *current running-total* balance `GET /incidents/summary` reports, without touching `behaviour_incidents` history at all. The summary aggregation floors its date range at the most recent reset (an explicit `dateFrom` query still overrides it). Manual, admin-triggered — the interim choice per the spec's own open question (§7.4): automatic reset on a date would need an academic-year-transition hook that doesn't exist anywhere in the codebase yet, out of scope for this pass.
+- `AuditService.log()` wiring on the reset action (`behaviour.points_reset`).
+
+Resources — the final area from the same spec — follows as a separate phase.
+
+---
+
 ## [v4.97.0] — 2026-07-20 — feat(exams): mark-unlock now requires a request + approval, with a 24h auto-relock
 
 Second implementation phase from `docs/governance/GOVERNANCE_WORKFLOW_SPECIFICATION_v1.md` §3. Unlocking a locked mark submission was a unilateral admin/principal action — one click, no review, and it stayed unlocked indefinitely until someone remembered to re-lock it. Reuses the same `workflow_configs` mechanism §1 introduced for Leave, this time as a single-step approver (no 2-step minimum — that floor is specific to Leave).

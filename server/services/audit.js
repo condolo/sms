@@ -136,6 +136,8 @@ const ACTIONS = {
   'marks.unlocked':                { severity: 'warn' },
   'marks.unlock_request_rejected': { severity: 'info' },
   'marks.auto_relocked':           { severity: 'info' },
+  // Growth Profile / Behaviour (Governance Spec §2)
+  'behaviour.points_reset':        { severity: 'warn' },
   // Platform (operator-level)
   'platform.impersonate':    { severity: 'critical' },
   'platform.school_deleted': { severity: 'critical' },

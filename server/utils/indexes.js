@@ -731,6 +731,18 @@ const INDEXES = [
       { key: { schoolId: 1, workflowKey: 1 }, name: 'wfc_school_key',   unique: true },
     ],
   },
+
+  /* ── behaviour_points_resets (Governance Spec §2) ──────────────
+     One doc per manual reset. Never touches behaviour_incidents —
+     /incidents/summary's live aggregation reads the most recent
+     reset's date as the floor for the current running total. */
+  {
+    col: 'behaviour_points_resets',
+    indexes: [
+      { key: { id: 1 },                  name: 'bpr_id',          unique: true, sparse: true },
+      { key: { schoolId: 1, resetAt: -1 }, name: 'bpr_school_date' },
+    ],
+  },
 ];
 
 /* ── One-time index migrations ──────────────────────────────────

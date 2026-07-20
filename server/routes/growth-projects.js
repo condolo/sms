@@ -56,7 +56,7 @@ router.get('/', authMiddleware, PLAN, rbac('growth_profile', 'read'), async (req
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
 
-    const filter = { schoolId };
+    const filter = { schoolId, deletedAt: { $exists: false } };
     if (req.query.studentId)          filter.studentId          = req.query.studentId;
     if (req.query.supervisorId)       filter.supervisorId       = req.query.supervisorId;
     if (req.query.status)             filter.status             = req.query.status;
@@ -74,7 +74,7 @@ router.get('/', authMiddleware, PLAN, rbac('growth_profile', 'read'), async (req
 router.get('/:id', authMiddleware, PLAN, rbac('growth_profile', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await tenantModel('growth_projects', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
+    const doc = await tenantModel('growth_projects', tenantContext(req)).findOne({ id: req.params.id, schoolId, deletedAt: { $exists: false } }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Project not found');
     return ok(res, doc);
   } catch (err) { console.error('[growth-projects GET/:id]', err); return E.serverError(res); }
@@ -110,7 +110,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('growth_profile', 'update'), async
     delete data.schoolId; delete data.id;
 
     const doc = await tenantModel('growth_projects', tenantContext(req)).findOneAndUpdate(
-      { id: req.params.id, schoolId },
+      { id: req.params.id, schoolId, deletedAt: { $exists: false } },
       { ...data, updatedBy: userId, updatedAt: new Date().toISOString() },
       { new: true, runValidators: false }
     ).lean();
@@ -119,11 +119,17 @@ router.put('/:id', authMiddleware, PLAN, rbac('growth_profile', 'update'), async
   } catch (err) { console.error('[growth-projects PUT/:id]', err); return E.serverError(res); }
 });
 
-/* ── DELETE /api/growth-projects/:id ────────────────────────── */
+/* ── DELETE /api/growth-projects/:id ────────────────────────────
+   Soft-delete only (Governance Spec §2) — matches growth-records.js
+   and the pre-existing behaviour_incidents pattern. */
 router.delete('/:id', authMiddleware, PLAN, rbac('growth_profile', 'delete'), async (req, res) => {
   try {
-    const { schoolId } = req.jwtUser;
-    const doc = await tenantModel('growth_projects', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
+    const { schoolId, userId } = req.jwtUser;
+    const doc = await tenantModel('growth_projects', tenantContext(req)).findOneAndUpdate(
+      { id: req.params.id, schoolId, deletedAt: { $exists: false } },
+      { deletedAt: new Date().toISOString(), deletedBy: userId },
+      { new: true }
+    ).lean();
     if (!doc) return E.notFound(res, 'Project not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) { console.error('[growth-projects DELETE/:id]', err); return E.serverError(res); }

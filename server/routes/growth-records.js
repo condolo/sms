@@ -72,7 +72,7 @@ router.get('/:type', authMiddleware, PLAN, rbac('growth_profile', 'read'), _type
     const col = TYPE_COLLECTIONS[req.params.type];
     const { page, limit, skip } = parsePagination(req.query);
 
-    const filter = { schoolId };
+    const filter = { schoolId, deletedAt: { $exists: false } };
     if (req.query.studentId)          filter.studentId          = req.query.studentId;
     if (req.query.category)           filter.category           = req.query.category;
     if (req.query.verificationStatus) filter.verificationStatus = req.query.verificationStatus;
@@ -90,7 +90,7 @@ router.get('/:type/:id', authMiddleware, PLAN, rbac('growth_profile', 'read'), _
   try {
     const { schoolId } = req.jwtUser;
     const col = TYPE_COLLECTIONS[req.params.type];
-    const doc = await tenantModel(col, tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
+    const doc = await tenantModel(col, tenantContext(req)).findOne({ id: req.params.id, schoolId, deletedAt: { $exists: false } }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Record not found');
     return ok(res, doc);
   } catch (err) { console.error(`[growth-records GET /${req.params.type}/:id]`, err); return E.serverError(res); }
@@ -130,7 +130,7 @@ router.put('/:type/:id', authMiddleware, PLAN, rbac('growth_profile', 'update'),
     delete data.schoolId; delete data.id;
 
     const doc = await tenantModel(col, tenantContext(req)).findOneAndUpdate(
-      { id: req.params.id, schoolId },
+      { id: req.params.id, schoolId, deletedAt: { $exists: false } },
       { ...data, updatedBy: userId, updatedAt: new Date().toISOString() },
       { new: true, runValidators: false }
     ).lean();
@@ -139,12 +139,22 @@ router.put('/:type/:id', authMiddleware, PLAN, rbac('growth_profile', 'update'),
   } catch (err) { console.error(`[growth-records PUT /${req.params.type}/:id]`, err); return E.serverError(res); }
 });
 
-/* ── DELETE /api/growth-records/:type/:id ───────────────────── */
+/* ── DELETE /api/growth-records/:type/:id ───────────────────────
+   Soft-delete only (Governance Spec §2) — permanence is a stated
+   guarantee for Growth Profile history, not an accident. Mirrors
+   behaviour_incidents' existing deletedAt/deletedBy pattern, the more
+   careful half of the module this brings the rest up to. The record is
+   retained forever and excluded from default reads (above), never
+   destroyed. */
 router.delete('/:type/:id', authMiddleware, PLAN, rbac('growth_profile', 'delete'), _typeGuard, async (req, res) => {
   try {
-    const { schoolId } = req.jwtUser;
+    const { schoolId, userId } = req.jwtUser;
     const col = TYPE_COLLECTIONS[req.params.type];
-    const doc = await tenantModel(col, tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
+    const doc = await tenantModel(col, tenantContext(req)).findOneAndUpdate(
+      { id: req.params.id, schoolId, deletedAt: { $exists: false } },
+      { deletedAt: new Date().toISOString(), deletedBy: userId },
+      { new: true }
+    ).lean();
     if (!doc) return E.notFound(res, 'Record not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) { console.error(`[growth-records DELETE /${req.params.type}/:id]`, err); return E.serverError(res); }

@@ -59,7 +59,7 @@ router.get('/', authMiddleware, PLAN, rbac('growth_profile', 'read'), async (req
     const { schoolId, role, userId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
 
-    const filter = { schoolId };
+    const filter = { schoolId, deletedAt: { $exists: false } };
     if (req.query.studentId) filter.studentId = req.query.studentId;
     if (req.query.authorId)  filter.authorId  = req.query.authorId;
     if (req.query.type)      filter.type      = req.query.type;
@@ -82,7 +82,7 @@ router.get('/', authMiddleware, PLAN, rbac('growth_profile', 'read'), async (req
 router.get('/:id', authMiddleware, PLAN, rbac('growth_profile', 'read'), async (req, res) => {
   try {
     const { schoolId, role } = req.jwtUser;
-    const doc = await tenantModel('growth_recommendations', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
+    const doc = await tenantModel('growth_recommendations', tenantContext(req)).findOne({ id: req.params.id, schoolId, deletedAt: { $exists: false } }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Recommendation not found');
 
     // Hide confidential recommendations from restricted roles
@@ -120,13 +120,15 @@ router.post('/', authMiddleware, PLAN, rbac('growth_profile', 'create'), async (
   } catch (err) { console.error('[growth-recommendations POST]', err); return E.serverError(res); }
 });
 
-/* ── DELETE /api/growth-recommendations/:id ────────────────── */
+/* ── DELETE /api/growth-recommendations/:id ──────────────────────
+   Soft-delete only (Governance Spec §2) — matches growth-records.js/
+   growth-projects.js and the pre-existing behaviour_incidents pattern. */
 router.delete('/:id', authMiddleware, PLAN, rbac('growth_profile', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
 
     // Only admin/superadmin or the original author can delete a recommendation
-    const doc = await tenantModel('growth_recommendations', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
+    const doc = await tenantModel('growth_recommendations', tenantContext(req)).findOne({ id: req.params.id, schoolId, deletedAt: { $exists: false } }).lean();
     if (!doc) return E.notFound(res, 'Recommendation not found');
 
     const isAdmin  = ['admin', 'superadmin'].includes(role);
@@ -135,7 +137,10 @@ router.delete('/:id', authMiddleware, PLAN, rbac('growth_profile', 'delete'), as
       return E.forbidden(res, 'You can only delete recommendations you wrote');
     }
 
-    await tenantModel('growth_recommendations', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
+    await tenantModel('growth_recommendations', tenantContext(req)).findOneAndUpdate(
+      { id: req.params.id, schoolId },
+      { deletedAt: new Date().toISOString(), deletedBy: userId },
+    ).lean();
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) { console.error('[growth-recommendations DELETE/:id]', err); return E.serverError(res); }
 });
