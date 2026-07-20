@@ -6,6 +6,34 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.88.0] — 2026-07-20 — fix(security,platform): HSTS preload eligibility + impersonation session missing school data
+
+Two independent fixes triggered by real usage: an external security scan (UpGuard) of msingi.io, and a platform admin actually using impersonation for the first time and noticing the plan badge showed a plan the school isn't on.
+
+### Fixed — HSTS not meeting preload-list threshold
+
+`helmet()`'s own default `hsts` config (180 days, no `preload` directive) was below what hstspreload.org requires (1 year minimum, `includeSubDomains`, `preload`) — external scanners flag this as "HSTS not enforced" even though the header was already present.
+
+- `server/index.js` — `helmet()`'s `hsts` option set explicitly: `maxAge: 31536000` (1 year), `includeSubDomains: true`, `preload: true`.
+- Everything else the scan flagged (DMARC, SPF, DNSSEC, TLS 1.2 cipher suites, HSTS preload-list submission) is DNS/edge configuration outside this codebase — not addressed here, needs to be done directly on the DNS provider / Cloudflare dashboard.
+
+### Fixed — impersonation session missing the school object entirely
+
+`POST /api/platform/schools/:id/impersonate`'s response only ever included `{ token, user }` — never `school`, unlike `/api/auth/login`'s `{ user, school: req.school, ... }`. `platform.html`'s `doImpersonate()` then wrote a hardcoded `school: {}` into the `localStorage` session it hands the client SPA. Every session field the client reads off `session.school` (plan, logoUrl, primaryColor, moduleConfig) came back `undefined` for the entire impersonated session.
+
+The visible symptom: `TopBar.jsx`'s plan badge reads `session?.school?.plan ?? session?.user?.plan ?? 'core'` — with `school` empty and `user` (a `users` doc) carrying no `plan` field of its own, it fell through both checks straight to the literal `'core'` fallback — the oldest legacy tier name — regardless of the school's real, currently-registered plan (confirmed correct in platform admin's own Change Plan dropdown).
+
+- `server/routes/platform.js` — impersonate route now returns the already-fetched `school` doc in its response, mirroring `/login`'s shape.
+- `platform.html` — `doImpersonate()` now stores `data.school` instead of a hardcoded `{}`.
+
+### Tests
+
+- `server/__tests__/routes/platform-impersonate.test.js` (new, first coverage for this route) — response includes the full school doc with the correct plan; production gate (`ALLOW_IMPERSONATION`) still enforced. Mutation-tested: reverting the fix fails the new test, confirming it actually catches the regression.
+- Full suite: 44/44 suites, 488/488 tests. `node scripts/security-scan.js` and the tenant-isolation ratchet (held at 34) both clean.
+- Live-confirmed the HSTS header value directly against a locally running instance (`Strict-Transport-Security: max-age=31536000; includeSubDomains; preload`). The impersonation flow itself could not be exercised end-to-end in this sandbox (no live MongoDB, no platform-admin credentials configured) — verified via the mutation-tested unit test and direct comparison against `/login`'s already-correct response shape instead.
+
+---
+
 ## [v4.87.0] — 2026-07-20 — feat(platform): direct logo/favicon upload for platform branding
 
 Platform admin's Settings panel previously took a plain "Logo URL" / "Favicon URL" text field. A pasted Google Drive "file" share link looked plausible but is an HTML viewer page, not raw image bytes — it silently rendered nothing on the public site. Replaced with direct upload, mirroring the already-shipped per-school logo pattern (`PUT /api/settings/school/logo`) exactly, and wired the public landing/marketing pages to actually consume the result — the second half of the original feature that was built but never connected.

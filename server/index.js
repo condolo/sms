@@ -78,6 +78,15 @@ try {
   const helmet = require('helmet');
   app.use(helmet({
     crossOriginEmbedderPolicy: false,
+    // 1 year + includeSubDomains + preload — helmet's own default (180 days,
+    // no preload directive) is below the threshold hstspreload.org requires,
+    // which is also why external scans flag HSTS as "not enforced" even
+    // though the header was already present.
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true,
+    },
     contentSecurityPolicy: {
       directives: {
         defaultSrc:     ["'self'"],

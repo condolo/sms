@@ -1081,7 +1081,7 @@ async function doImpersonate(schoolId) {
     const u = data.user || {};
     const sessionPayload = {
       user:   { ...u, id: u.id || (u._id ? String(u._id) : undefined), password: undefined },
-      school: {},
+      school: data.school || {},
     };
     localStorage.setItem('msingi_session', JSON.stringify(sessionPayload));
 

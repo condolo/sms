@@ -910,7 +910,11 @@ router.post('/schools/:id/impersonate', async (req, res) => {
       maxAge:   8 * 60 * 60 * 1000,
     });
 
-    /* Merge schoolName into the user object so the React SPA sidebar can display it */
+    /* Merge schoolName into the user object so the React SPA sidebar can display it.
+       Also return the full school doc — mirrors /api/auth/login's `school: req.school`
+       shape exactly — so the client's session has real plan/branding/moduleConfig
+       instead of silently falling back to hardcoded defaults (e.g. TopBar's plan
+       badge falling all the way through to the literal 'core' fallback). */
     res.json({
       token,
       user: {
@@ -918,7 +922,8 @@ router.post('/schools/:id/impersonate', async (req, res) => {
         password:   undefined,
         schoolName: school.name,
         schoolId:   resolvedSchoolId,
-      }
+      },
+      school,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
