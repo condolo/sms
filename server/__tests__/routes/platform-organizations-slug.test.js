@@ -122,7 +122,7 @@ describe('POST /api/platform/schools — cross-collection slug collision', () =>
 
     const res = await supertest(app())
       .post('/api/platform/schools')
-      .send({ name: 'Eldoret Campus', slug: 'eldoret', adminEmail: 'a@b.com', adminPassword: 'secret123' });
+      .send({ name: 'Eldoret Campus', slug: 'eldoret', adminEmail: 'a@b.com', adminPassword: 'TestPass123!' });
 
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(/already taken by an organization/i);
@@ -132,7 +132,7 @@ describe('POST /api/platform/schools — cross-collection slug collision', () =>
   test('succeeds and provisions a 1:1 org when the slug is free in both collections', async () => {
     const res = await supertest(app())
       .post('/api/platform/schools')
-      .send({ name: 'Fresh Campus', slug: 'fresh-campus', adminEmail: 'a@b.com', adminPassword: 'secret123' });
+      .send({ name: 'Fresh Campus', slug: 'fresh-campus', adminEmail: 'a@b.com', adminPassword: 'TestPass123!' });
 
     expect(res.status).toBe(201);
     expect(mockInsertOne).toHaveBeenCalled();

@@ -625,8 +625,10 @@ async function start() {
     // NON-AUTHORITATIVE — nothing reads this collection yet either.
     //
     // Phase 0 (C8/MR-001 · ADR-0003 Shadow): provision an Identity per
-    // email-bearing user, chained last. NOT YET CONSULTED — auth.js still
-    // authenticates against users.password exclusively; see ADR-0003.
+    // email-bearing user, chained last. Credential checks against it are
+    // gated behind IDENTITY_CUTOVER_ENABLED for /login and /settings (ADR-0003
+    // Phase 3); org-login, complete-org-login, switch-school, and
+    // availableSchools (C13) consult it unconditionally.
     provisionOrganizations()
       .then(() => provisionMemberships())
       .then(() => provisionIdentities())
