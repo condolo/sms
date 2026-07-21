@@ -38,7 +38,7 @@ jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => ne
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../utils/model', () => ({ _model: jest.fn((col) => mockStores[col]) }));
 jest.mock('../../services/audit', () => ({ log: jest.fn().mockResolvedValue(undefined) }));
-jest.mock('../../utils/notify-dispatch', () => ({ dispatchNotification: (...args) => mockDispatch(...args) }));
+jest.mock('../../utils/notify-students', () => ({ notifyGuardiansForStudents: (...args) => mockDispatch(...args) }));
 jest.mock('../../utils/email', () => ({ sendBehaviourIncidentAlert: jest.fn() }));
 
 const express   = require('express');
@@ -82,16 +82,16 @@ test('creating an incident notifies exactly the student\'s guardians, not unrela
   expect(mockDispatch).toHaveBeenCalledTimes(1);
   const call = mockDispatch.mock.calls[0][0];
   expect(call.eventKey).toBe('behaviour_incident');
-  expect(call.recipients.map(r => r.userId).sort()).toEqual(['u_parent1', 'u_parent2']);
-  expect(call.recipients.map(r => r.userId)).not.toContain('u_other_parent');
-  expect(call.inAppSubject).toContain('Jane Doe');
+  expect(call.items).toHaveLength(1);
+  expect(call.items[0].studentId).toBe('stu_1');
+  expect(call.items[0].inAppSubject).toContain('Jane Doe');
 });
 
-test('an incident for a student with no guardians on record does not call dispatch', async () => {
-  mockStores.students = makeStore([{ id: 'stu_no_parent', schoolId: SCHOOL, firstName: 'Solo', lastName: 'Kid' }]);
+test('an incident for a student not found in the DB never calls the fan-out helper', async () => {
+  mockStores.students = makeStore([]); // studentId won't resolve
   const app = buildApp();
   const res = await supertest(app).post('/api/behaviour/incidents').send({
-    studentId: 'stu_no_parent', type: 'merit', title: 'Great effort',
+    studentId: 'stu_missing', type: 'merit', title: 'Great effort',
   });
   expect(res.status).toBe(201);
   await new Promise(r => setImmediate(r));

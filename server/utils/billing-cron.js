@@ -83,44 +83,18 @@ async function _sendInvoiceEmail(school, snapshot, Users) {
 
     for (const admin of admins) {
       if (!admin.email) continue;
-      await emailUtil.sendEmail({
-        to:      admin.email,
-        subject: `[Msingi] Invoice ${snapshot.invoiceRef} — ${school.name}`,
-        html: `
-          <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#1e293b;">
-            <div style="background:#4f46e5;padding:24px 32px;border-radius:12px 12px 0 0;">
-              <h1 style="margin:0;color:#fff;font-size:20px;font-weight:700;">Msingi Platform Invoice</h1>
-              <p style="margin:4px 0 0;color:#c7d2fe;font-size:13px;">${school.name}</p>
-            </div>
-            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-top:none;padding:28px 32px;border-radius:0 0 12px 12px;">
-              <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
-                <tr><td style="padding:6px 0;color:#64748b;font-size:13px;">Invoice ref</td>
-                    <td style="padding:6px 0;font-weight:700;text-align:right;font-size:13px;">${snapshot.invoiceRef}</td></tr>
-                <tr><td style="padding:6px 0;color:#64748b;font-size:13px;">Academic year</td>
-                    <td style="padding:6px 0;text-align:right;font-size:13px;">${snapshot.academicYear} — Term ${snapshot.term}</td></tr>
-                <tr><td style="padding:6px 0;color:#64748b;font-size:13px;">Active students</td>
-                    <td style="padding:6px 0;text-align:right;font-size:13px;">${snapshot.activeCount}</td></tr>
-                <tr><td style="padding:6px 0;color:#64748b;font-size:13px;">Rate</td>
-                    <td style="padding:6px 0;text-align:right;font-size:13px;">KSh ${snapshot.ratePerStudent} / student</td></tr>
-                <tr style="border-top:2px solid #e2e8f0;">
-                  <td style="padding:12px 0;font-weight:700;font-size:16px;">Total due</td>
-                  <td style="padding:12px 0;font-weight:700;font-size:20px;color:#4f46e5;text-align:right;">KSh ${snapshot.totalAmount.toLocaleString()}</td>
-                </tr>
-              </table>
-              <p style="font-size:13px;color:#64748b;margin:0 0 16px;">
-                Log in to your school portal, go to <strong>Settings → Subscription</strong>, and pay via M-Pesa STK Push.
-                Your platform access continues uninterrupted while your invoice is pending.
-              </p>
-              <a href="https://msingi.io/platform"
-                 style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 24px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;">
-                Open Subscription Settings →
-              </a>
-            </div>
-            <p style="font-size:11px;color:#94a3b8;text-align:center;margin-top:16px;">
-              Msingi · support@msingi.io · msingi.io
-            </p>
-          </div>
-        `,
+      await emailUtil.sendInvoiceEmail({
+        name:           admin.name,
+        email:          admin.email,
+        schoolName:     school.name,
+        schoolEmail:    school.systemEmail,
+        schoolId:       school.id,
+        invoiceRef:     snapshot.invoiceRef,
+        academicYear:   snapshot.academicYear,
+        term:           snapshot.term,
+        activeCount:    snapshot.activeCount,
+        ratePerStudent: snapshot.ratePerStudent,
+        totalAmount:    snapshot.totalAmount,
       });
       console.log(`[billing-cron] Invoice email sent to ${admin.email} for ${snapshot.invoiceRef}`);
     }

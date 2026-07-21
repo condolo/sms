@@ -577,6 +577,30 @@ async function sendAssessmentReminder({
   return _sendAsSchool(toEmail, `${statusDetails.icon} ${schoolName} — ${assessment} (Term ${termNumber}) ${status}`, html, { schoolName, schoolEmail, schoolId });
 }
 
+/* 13b. Platform invoice — school admin/principal */
+async function sendInvoiceEmail({
+  name, email, schoolName, schoolEmail, schoolId = null,
+  invoiceRef, academicYear, term, activeCount, ratePerStudent, totalAmount,
+}) {
+  const html = _wrap(`
+    <h2>🧾 Platform Invoice — ${schoolName}</h2>
+    <p>Hi ${name || 'Administrator'},</p>
+    <p>A new billing invoice has been generated for <strong>${schoolName}</strong>.</p>
+    <div class="info">
+      <p><strong>Invoice ref:</strong> ${invoiceRef}</p>
+      <p><strong>Academic year:</strong> ${academicYear} — Term ${term}</p>
+      <p><strong>Active students:</strong> ${activeCount}</p>
+      <p><strong>Rate:</strong> KSh ${ratePerStudent} / student</p>
+      <p><strong>Total due:</strong> <span style="font-weight:700;color:#4f46e5">KSh ${totalAmount.toLocaleString()}</span></p>
+    </div>
+    <p>Log in to your school portal, go to <strong>Settings → Subscription</strong>, and pay via M-Pesa STK Push. Your platform access continues uninterrupted while your invoice is pending.</p>
+    <p style="text-align:center">
+      <a href="${APP_URL}/platform" class="btn">Open Subscription Settings →</a>
+    </p>
+  `, schoolName);
+  return _sendAsSchool(email, `[Msingi] Invoice ${invoiceRef} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+}
+
 /* 14. Birthday wish — student (direct) */
 async function sendBirthdayWishToStudent({
   firstName, toEmail, age, schoolName, schoolEmail, schoolId = null,
@@ -660,6 +684,139 @@ async function sendDigestSummary({
   return _sendAsSchool(recipientEmail, `📬 Daily Summary — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
 }
 
+/* 18. Report card published — parent/guardian */
+async function sendReportCardPublishedAlert({
+  recipientName, recipientEmail, studentName, termName, academicYear,
+  schoolName, schoolEmail, schoolId = null, appUrl,
+}) {
+  const url = appUrl || APP_URL;
+  const html = _wrap(`
+    <h2>📄 Report Card Published</h2>
+    <p>Dear ${recipientName || 'Parent/Guardian'},</p>
+    <p>${termName || 'This term'}'s report card for <strong>${studentName}</strong>${academicYear ? ` (${academicYear})` : ''} is now available on <strong>${schoolName}</strong>.</p>
+    <p style="text-align:center">
+      <a href="${url}" class="btn">View Report Card →</a>
+    </p>
+    <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
+  `, schoolName);
+  return _sendAsSchool(recipientEmail, `📄 Report Card Published — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+}
+
+/* 19. Exam results published — parent/guardian */
+async function sendExamResultsAlert({
+  recipientName, recipientEmail, studentName, examName,
+  schoolName, schoolEmail, schoolId = null, appUrl,
+}) {
+  const url = appUrl || APP_URL;
+  const html = _wrap(`
+    <h2>📝 Exam Results Published</h2>
+    <p>Dear ${recipientName || 'Parent/Guardian'},</p>
+    <p>Results for <strong>${examName}</strong> are now available for <strong>${studentName}</strong> on <strong>${schoolName}</strong>.</p>
+    <p style="text-align:center">
+      <a href="${url}" class="btn">View Results →</a>
+    </p>
+    <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
+  `, schoolName);
+  return _sendAsSchool(recipientEmail, `📝 Exam Results Published — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+}
+
+/* 20. Fee invoice created — parent/guardian (distinct from platform billing's sendInvoiceEmail) */
+async function sendFeeInvoiceCreatedAlert({
+  recipientName, recipientEmail, studentName, invoiceNumber, total, currency, dueDate,
+  schoolName, schoolEmail, schoolId = null, appUrl,
+}) {
+  const url = appUrl || APP_URL;
+  const html = _wrap(`
+    <h2>🧾 New Invoice</h2>
+    <p>Dear ${recipientName || 'Parent/Guardian'},</p>
+    <p>A new invoice <strong>${invoiceNumber}</strong> of <strong>${currency} ${total}</strong> has been issued for <strong>${studentName}</strong> at <strong>${schoolName}</strong>${dueDate ? `, due ${dueDate}` : ''}.</p>
+    <p style="text-align:center">
+      <a href="${url}" class="btn">View Invoice →</a>
+    </p>
+    <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
+  `, schoolName);
+  return _sendAsSchool(recipientEmail, `🧾 New Invoice — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+}
+
+/* 21. Fee payment received — parent/guardian receipt */
+async function sendFeePaymentReceivedAlert({
+  recipientName, recipientEmail, studentName, receiptNumber, amount, currency, balance,
+  schoolName, schoolEmail, schoolId = null, appUrl,
+}) {
+  const url = appUrl || APP_URL;
+  const html = _wrap(`
+    <h2>✅ Payment Received</h2>
+    <p>Dear ${recipientName || 'Parent/Guardian'},</p>
+    <p>We've received a payment of <strong>${currency} ${amount}</strong> (receipt <strong>${receiptNumber}</strong>) for <strong>${studentName}</strong> at <strong>${schoolName}</strong>.</p>
+    <p>${balance > 0 ? `Remaining balance: <strong>${currency} ${balance}</strong>.` : 'This invoice is now fully paid.'}</p>
+    <p style="text-align:center">
+      <a href="${url}" class="btn">View Receipt →</a>
+    </p>
+    <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
+  `, schoolName);
+  return _sendAsSchool(recipientEmail, `✅ Payment Received — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+}
+
+/* 22. Absence alert — parent/guardian */
+async function sendAbsenceAlert({
+  recipientName, recipientEmail, studentName, date,
+  schoolName, schoolEmail, schoolId = null, appUrl,
+}) {
+  const url = appUrl || APP_URL;
+  const html = _wrap(`
+    <h2>🚸 Absence Alert</h2>
+    <p>Dear ${recipientName || 'Parent/Guardian'},</p>
+    <p><strong>${studentName}</strong> was marked <strong>absent</strong> on <strong>${date}</strong> at <strong>${schoolName}</strong>.</p>
+    <p>If this is unexpected, please contact the school office.</p>
+    <p style="text-align:center">
+      <a href="${url}" class="btn">View Attendance →</a>
+    </p>
+    <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
+  `, schoolName);
+  return _sendAsSchool(recipientEmail, `🚸 Absence Alert — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+}
+
+/* 23. Overdue invoice reminder — parent/guardian */
+async function sendInvoiceOverdueAlert({
+  recipientName, recipientEmail, studentName, invoiceNumber, balance, currency, dueDate,
+  schoolName, schoolEmail, schoolId = null, appUrl,
+}) {
+  const url = appUrl || APP_URL;
+  const html = _wrap(`
+    <h2>⏰ Overdue Invoice Reminder</h2>
+    <p>Dear ${recipientName || 'Parent/Guardian'},</p>
+    <p>Invoice <strong>${invoiceNumber}</strong> for <strong>${studentName}</strong> at <strong>${schoolName}</strong> was due on <strong>${dueDate}</strong> and has an outstanding balance of <strong>${currency} ${balance}</strong>.</p>
+    <p style="text-align:center">
+      <a href="${url}" class="btn">Pay Now →</a>
+    </p>
+    <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
+  `, schoolName);
+  return _sendAsSchool(recipientEmail, `⏰ Overdue Invoice — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+}
+
+/* 24. Daily attendance summary — admin/principal staff */
+async function sendAttendanceSummaryAlert({
+  recipientName, recipientEmail, date, total, present, absent, late,
+  schoolName, schoolEmail, schoolId = null, appUrl,
+}) {
+  const url = appUrl || APP_URL;
+  const html = _wrap(`
+    <h2>📊 Daily Attendance Summary</h2>
+    <p>Hi ${recipientName || 'there'},</p>
+    <p>Attendance summary for <strong>${schoolName}</strong> on <strong>${date}</strong>:</p>
+    <div class="info" style="margin:12px 0">
+      <p style="margin:0">✅ Present: <strong>${present}</strong></p>
+      <p style="margin:4px 0 0">🚸 Absent: <strong>${absent}</strong></p>
+      <p style="margin:4px 0 0">⏰ Late: <strong>${late}</strong></p>
+      <p style="margin:4px 0 0">Total records: <strong>${total}</strong></p>
+    </div>
+    <p style="text-align:center">
+      <a href="${url}" class="btn">View Attendance →</a>
+    </p>
+  `, schoolName);
+  return _sendAsSchool(recipientEmail, `📊 Daily Attendance Summary — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+}
+
 module.exports = {
   invalidateSmtpCache,
   sendRegistrationPending,
@@ -676,9 +833,17 @@ module.exports = {
   sendRoleChanged,
   sendSystemUpdateNotice,
   sendMessageNotification,
+  sendInvoiceEmail,
   sendAssessmentReminder,
   sendBirthdayWishToStudent,
   sendBirthdayWishToParent,
   sendBehaviourIncidentAlert,
   sendDigestSummary,
+  sendReportCardPublishedAlert,
+  sendExamResultsAlert,
+  sendFeeInvoiceCreatedAlert,
+  sendFeePaymentReceivedAlert,
+  sendAbsenceAlert,
+  sendInvoiceOverdueAlert,
+  sendAttendanceSummaryAlert,
 };

@@ -16,7 +16,7 @@ const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 const AuditService = require('../services/audit');
-const { dispatchNotification } = require('../utils/notify-dispatch');
+const { notifyGuardiansForStudents } = require('../utils/notify-students');
 const email = require('../utils/email');
 const { _model } = require('../utils/model');
 
@@ -201,24 +201,21 @@ async function _notifyGuardians(req, incident) {
   const schoolName  = school?.name || '';
   const schoolEmail = school?.systemEmail || '';
 
-  const guardians = await tenantModel('users', ctx)
-    .find({ schoolId, role: 'parent', studentIds: incident.studentId, isActive: { $ne: false } })
-    .select('id name email').lean();
-  if (!guardians.length) return;
-
-  await dispatchNotification({
-    ctx, schoolId, eventKey: 'behaviour_incident', actorUserId: 'system',
-    recipients: guardians.map(g => ({ userId: g.id, name: g.name, email: g.email })),
-    inAppSubject: `Behaviour incident logged for ${studentName}`,
-    inAppBody:    `${incident.type} — ${incident.title}${incident.description ? `: ${incident.description}` : ''}`,
-    emailDigestSubject: `Behaviour incident — ${studentName}`,
-    emailDigestBody:    `${incident.type}: ${incident.title}`,
-    sendEmail: (recipient) => email.sendBehaviourIncidentAlert({
-      recipientName: recipient.name, recipientEmail: recipient.email,
-      studentName, type: incident.type, title: incident.title,
-      description: incident.description, points: incident.points,
-      schoolName, schoolEmail, schoolId,
-    }),
+  await notifyGuardiansForStudents({
+    ctx, schoolId, eventKey: 'behaviour_incident',
+    items: [{
+      studentId: incident.studentId,
+      inAppSubject: `Behaviour incident logged for ${studentName}`,
+      inAppBody:    `${incident.type} — ${incident.title}${incident.description ? `: ${incident.description}` : ''}`,
+      emailDigestSubject: `Behaviour incident — ${studentName}`,
+      emailDigestBody:    `${incident.type}: ${incident.title}`,
+      sendEmail: (recipient) => email.sendBehaviourIncidentAlert({
+        recipientName: recipient.name, recipientEmail: recipient.email,
+        studentName, type: incident.type, title: incident.title,
+        description: incident.description, points: incident.points,
+        schoolName, schoolEmail, schoolId,
+      }),
+    }],
   });
 }
 

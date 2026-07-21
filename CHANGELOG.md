@@ -6,6 +6,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.2.0] — 2026-07-21 — feat(notifications): activate every remaining "Coming soon" event
+
+v5.1.0 shipped the real dispatch mechanism but scoped it to Behaviour incidents only, explicitly leaving Finance, Attendance, and the rest of Academic as registered-but-unimplemented. This phase wires all of them to real trigger sites — nothing in the notification registry says "Coming soon" anymore.
+
+### Added
+
+- `server/utils/notify-students.js` — shared guardian fan-out helper, `notifyGuardiansForStudents({ctx, schoolId, eventKey, items})`: resolves each student's parent/guardian(s) via `users.studentIds` and dispatches one notification per student, so a single trigger covering many students (a published report-card batch, a whole class's exam results) sends each guardian a correctly-scoped message, not a generic broadcast. One student's guardian lookup failing never blocks the rest. `behaviour.js` refactored to use it instead of calling `dispatchNotification` directly — no behavior change, same mechanism reused.
+- **`report_published`** — `report-cards.js`'s `POST /publish` now notifies every published student's guardian(s) once the batch is written.
+- **`exam_results`** — `exams.js`'s `PUT /:id` notifies every student who sat the exam (resolved via `exam_results`) when status transitions to `published`.
+- **`invoice_created`** / **`payment_received`** — `finance.js`'s `POST /invoices` and `POST /payments` notify the invoiced/paying student's guardian(s) immediately after each is recorded.
+- **`absence_alert`** — `attendance.js`'s `POST /` and `POST /bulk` notify guardians whenever a record's status is `absent` (single and bulk-upsert paths both covered).
+- **`invoice_overdue`** — new `server/utils/invoice-overdue-cron.js`, daily sweep (default 07:00 Nairobi, `INVOICE_OVERDUE_CRON` override) across every school for unpaid/partial invoices past `dueDate`, reminding guardians. Deliberately re-fires daily while an invoice stays overdue — a recurring reminder, not a one-time alert.
+- **`attendance_summary`** — new `server/utils/attendance-summary-cron.js`, daily end-of-day rollup (default 18:00 Nairobi, `ATTENDANCE_SUMMARY_CRON` override) to each school's admin/principal staff — present/absent/late/total — for any school with attendance marked that day. Uses `dispatchNotification` directly (staff audience, not per-student fan-out).
+- `email.js` gained six new templates following the existing `_wrap`/`_sendAsSchool` pattern: `sendReportCardPublishedAlert`, `sendExamResultsAlert`, `sendFeeInvoiceCreatedAlert`, `sendFeePaymentReceivedAlert`, `sendAbsenceAlert`, `sendInvoiceOverdueAlert`, `sendAttendanceSummaryAlert`.
+- Both new cron jobs wired into `server/index.js`'s boot sequence alongside the existing billing/backup/digest crons.
+
+### Fixed
+
+- **`announcement`** notifications were also showing "Coming soon" despite the underlying send/recipient-resolution logic in `messages.js` already being real and working — the bug was a single wrong toggle key: `POST /messages` was checking `isEnabled(schoolId, 'new_message', ...)` for announcements too, instead of `'announcement'`. Two-line fix, no new mechanism needed.
+- `notif-settings.js`: `announcement`, `report_published`, `exam_results`, `invoice_created`, `payment_received`, `invoice_overdue`, `absence_alert`, and `attendance_summary` all flipped from `implemented: false` to `true` — every event in the registry is now real.
+
+---
+
 ## [v5.1.0] — 2026-07-21 — feat(notifications): real trigger + school-configured frequency, starting with Behaviour
 
 The notifications system had a real registry (`server/utils/notif-settings.js`) and a real settings UI, but almost nothing behind it: only `new_message` actually fired a notification anywhere in the codebase — Behaviour, Finance, Attendance, and most of Academic were pure "Coming soon" placeholders with zero trigger code. The client's Settings > Notifications panel also had its own hand-copied duplicate of the server's event registry, already silently drifted (a `disabled={!ev.implemented && false}` bug meant "Coming soon" toggles were never actually disabled).

@@ -17,6 +17,9 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { isYearArchived } = require('../utils/archival');
 const { getConfig: _getAssessmentConfig } = require('./assessment');
+const { _model } = require('../utils/model');
+const { notifyGuardiansForStudents } = require('../utils/notify-students');
+const email = require('../utils/email');
 
 const router = express.Router();
 const PLAN   = planGate('exams');
@@ -410,9 +413,55 @@ router.put('/:id', authMiddleware, PLAN, rbac('exams', 'update'), async (req, re
       { ...data, updatedBy: userId },
       { new: true, runValidators: false }
     ).lean();
+
+    if (data.status === 'published' && existing.status !== 'published') {
+      _notifyExamResultsPublished(req, doc).catch(err => console.error('[exams/:id notify]', err));
+    }
+
     return ok(res, doc);
   } catch (err) { console.error('[exams PUT/:id]', err); return E.serverError(res); }
 });
+
+/* Notify each student's parent(s)/guardian(s) that this exam's results were
+   published — school-configured channel + frequency, same shared mechanism
+   as behaviour_incident/report_published. One dispatch per student sitting
+   the exam, resolved from exam_results (the exam doc itself has no student
+   list). */
+async function _notifyExamResultsPublished(req, exam) {
+  const { schoolId } = req.jwtUser;
+  const ctx = tenantContext(req);
+
+  const [results, school] = await Promise.all([
+    tenantModel('exam_results', ctx).find({ schoolId, examId: exam.id }).select('studentId').lean(),
+    _model('schools').findOne({ id: schoolId }).select('name systemEmail').lean(),
+  ]);
+  const studentIds = [...new Set(results.map(r => r.studentId).filter(Boolean))];
+  if (!studentIds.length) return;
+
+  const students = await tenantModel('students', ctx).find({ id: { $in: studentIds } }).select('id firstName lastName').lean();
+  const nameById = Object.fromEntries(students.map(s => [s.id, `${s.firstName} ${s.lastName}`]));
+  const schoolName  = school?.name || '';
+  const schoolEmail = school?.systemEmail || '';
+
+  await notifyGuardiansForStudents({
+    ctx, schoolId, eventKey: 'exam_results',
+    items: studentIds.map(studentId => {
+      const studentName = nameById[studentId] || studentId;
+      return {
+        studentId,
+        inAppSubject: `Exam results published for ${studentName}`,
+        inAppBody:    `Results for "${exam.title || 'the exam'}" are now available for ${studentName}.`,
+        emailDigestSubject: `Exam results published — ${studentName}`,
+        emailDigestBody:    `Results for "${exam.title || 'the exam'}" are now available.`,
+        sendEmail: (recipient) => email.sendExamResultsAlert({
+          recipientName: recipient.name, recipientEmail: recipient.email,
+          studentName, examName: exam.title || 'Exam',
+          schoolName, schoolEmail, schoolId,
+        }),
+      };
+    }),
+  });
+}
 
 router.delete('/:id', authMiddleware, PLAN, rbac('exams', 'delete'), async (req, res) => {
   try {
@@ -720,5 +769,8 @@ router.get('/results/all', authMiddleware, PLAN, rbac('exams', 'read'), async (r
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) { console.error('[exams/results/all GET]', err); return E.serverError(res); }
 });
+
+// Exposed for direct unit testing (same convention as report-cards.js).
+router._notifyExamResultsPublished = _notifyExamResultsPublished;
 
 module.exports = router;

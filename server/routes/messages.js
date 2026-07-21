@@ -124,8 +124,12 @@ router.post('/', rbac('messages', 'create'), async (req, res) => {
     const isDirect    = type === 'direct';
     const notifyJobs  = [];
 
-    // Check once whether email notifications are enabled for this school
-    const emailEnabled = await notif.isEnabled(schoolId, 'new_message', 'email');
+    // Check once whether email notifications are enabled for this school —
+    // announcements and direct messages are separately configurable events
+    // (each has its own toggle in Settings), so the check must key off the
+    // actual event, not always 'new_message' regardless of type.
+    const notifEventKey = isDirect ? 'new_message' : 'announcement';
+    const emailEnabled = await notif.isEnabled(schoolId, notifEventKey, 'email');
 
     for (const recipient of recipientList) {
       if (recipient === 'all') {

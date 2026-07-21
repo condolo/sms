@@ -14,6 +14,9 @@ const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 const ScopeEngine         = require('../utils/scopeEngine');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
+const { _model } = require('../utils/model');
+const { notifyGuardiansForStudents } = require('../utils/notify-students');
+const email = require('../utils/email');
 
 /* First route migrated to tenantModel() (C4 · ADR-0001). attendance is
    entirely self-contained (one tenant-owned collection; every filter
@@ -180,6 +183,10 @@ router.post('/', authMiddleware, PLAN, rbac('attendance', 'create'), async (req,
       { upsert: true, new: true, runValidators: false }
     ).lean();
 
+    if (doc.status === 'absent') {
+      _notifyAbsences(req, [{ studentId: doc.studentId, date: doc.date }]).catch(err => console.error('[attendance/absence notify]', err));
+    }
+
     return created(res, doc);
   } catch (err) {
     console.error('[attendance POST]', err);
@@ -210,6 +217,11 @@ router.post('/bulk', authMiddleware, PLAN, rbac('attendance', 'create'), async (
     }));
 
     const result = await Attendance.bulkWrite(ops, { ordered: false });
+
+    const absentees = records.filter(r => r.status === 'absent').map(r => ({ studentId: r.studentId, date }));
+    if (absentees.length) {
+      _notifyAbsences(req, absentees).catch(err => console.error('[attendance/bulk absence notify]', err));
+    }
 
     return ok(res, {
       upserted: result.upsertedCount,
@@ -259,5 +271,42 @@ router.delete('/:id', authMiddleware, PLAN, rbac('attendance', 'delete'), async 
     return E.serverError(res);
   }
 });
+
+/* ── Notification trigger (attendance) ───────────────────────── */
+async function _notifyAbsences(req, records) {
+  if (!records.length) return;
+  const { schoolId } = req.jwtUser;
+  const ctx = tenantContext(req);
+
+  const studentIds = [...new Set(records.map(r => r.studentId))];
+  const [students, school] = await Promise.all([
+    tenantModel('students', ctx).find({ id: { $in: studentIds } }).select('id firstName lastName').lean(),
+    _model('schools').findOne({ id: schoolId }).select('name systemEmail').lean(),
+  ]);
+  const nameById = Object.fromEntries(students.map(s => [s.id, `${s.firstName} ${s.lastName}`]));
+  const schoolName  = school?.name || '';
+  const schoolEmail = school?.systemEmail || '';
+
+  await notifyGuardiansForStudents({
+    ctx, schoolId, eventKey: 'absence_alert',
+    items: records.map(r => {
+      const studentName = nameById[r.studentId] || r.studentId;
+      return {
+        studentId: r.studentId,
+        inAppSubject: `${studentName} marked absent`,
+        inAppBody:    `${studentName} was marked absent on ${r.date}.`,
+        emailDigestSubject: `Absence alert — ${studentName}`,
+        emailDigestBody:    `${studentName} was marked absent on ${r.date}.`,
+        sendEmail: (recipient) => email.sendAbsenceAlert({
+          recipientName: recipient.name, recipientEmail: recipient.email,
+          studentName, date: r.date,
+          schoolName, schoolEmail, schoolId,
+        }),
+      };
+    }),
+  });
+}
+
+router._notifyAbsences = _notifyAbsences;
 
 module.exports = router;

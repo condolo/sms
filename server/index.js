@@ -703,6 +703,25 @@ async function start() {
     } catch (err) {
       console.error('[notification-digest-cron] Failed to start:', err.message);
     }
+
+    // Invoice overdue reminder cron — daily sweep across all schools for
+    // unpaid invoices past their due date (notif-settings.js's invoice_overdue).
+    try {
+      const { startInvoiceOverdueCron } = require('./utils/invoice-overdue-cron');
+      startInvoiceOverdueCron();
+    } catch (err) {
+      console.error('[invoice-overdue-cron] Failed to start:', err.message);
+    }
+
+    // Attendance summary cron — daily end-of-day rollup to admin/principal
+    // staff for schools with attendance marked that day (notif-settings.js's
+    // attendance_summary).
+    try {
+      const { startAttendanceSummaryCron } = require('./utils/attendance-summary-cron');
+      startAttendanceSummaryCron();
+    } catch (err) {
+      console.error('[attendance-summary-cron] Failed to start:', err.message);
+    }
   });
 }
 

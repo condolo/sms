@@ -39,7 +39,7 @@ const EVENT_REGISTRY = {
     group:       'communication',
     audience:    ['staff', 'parents', 'students'],
     channels:    { email: true, inApp: true },
-    implemented: false,
+    implemented: true,
   },
 
   /* ── Academic ────────────────────────────────────────────── */
@@ -57,7 +57,7 @@ const EVENT_REGISTRY = {
     group:       'academic',
     audience:    ['parents', 'students'],
     channels:    { email: true, inApp: true },
-    implemented: false,
+    implemented: true,
   },
   exam_results: {
     label:       'Exam Results Released',
@@ -65,7 +65,7 @@ const EVENT_REGISTRY = {
     group:       'academic',
     audience:    ['parents', 'students'],
     channels:    { email: true, inApp: true },
-    implemented: false,
+    implemented: true,
   },
 
   /* ── Finance ─────────────────────────────────────────────── */
@@ -75,7 +75,7 @@ const EVENT_REGISTRY = {
     group:       'finance',
     audience:    ['parents'],
     channels:    { email: true, inApp: true },
-    implemented: false,
+    implemented: true,
   },
   payment_received: {
     label:       'Payment Received',
@@ -83,7 +83,7 @@ const EVENT_REGISTRY = {
     group:       'finance',
     audience:    ['parents'],
     channels:    { email: true, inApp: true },
-    implemented: false,
+    implemented: true,
   },
   invoice_overdue: {
     label:       'Overdue Invoice Reminder',
@@ -91,7 +91,7 @@ const EVENT_REGISTRY = {
     group:       'finance',
     audience:    ['parents'],
     channels:    { email: true, inApp: false },
-    implemented: false,
+    implemented: true,
   },
 
   /* ── Attendance ──────────────────────────────────────────── */
@@ -101,7 +101,7 @@ const EVENT_REGISTRY = {
     group:       'attendance',
     audience:    ['parents'],
     channels:    { email: true, inApp: true },
-    implemented: false,
+    implemented: true,
   },
   attendance_summary: {
     label:       'Daily Attendance Summary',
@@ -109,7 +109,7 @@ const EVENT_REGISTRY = {
     group:       'attendance',
     audience:    ['staff'],
     channels:    { email: false, inApp: true },
-    implemented: false,
+    implemented: true,
   },
 
   /* ── Behaviour ───────────────────────────────────────────── */

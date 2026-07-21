@@ -39,6 +39,8 @@ const { getConfig: _getAssessmentConfig } = require('./assessment');
 const { isYearArchived } = require('../utils/archival');
 const AuditService       = require('../services/audit');
 const { sanitisePdfStr } = require('../utils/sanitisePdf');
+const { notifyGuardiansForStudents } = require('../utils/notify-students');
+const email = require('../utils/email');
 const {
   aggregateGrades,
   aggregateExamResults,
@@ -579,6 +581,9 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
 
     console.log(`[REPORT-CARDS] Batch ${batchId}: ${newSnaps.length} published (${finalStatus}) by ${userId}`);
     AuditService.log({ action: 'report_card.publish', actor: req.jwtUser, schoolId, target: { type: 'class', id: classId, label: className }, details: { batchId, termId, studentCount: newSnaps.length, status: finalStatus }, req });
+
+    _notifyReportCardsPublished(req, newSnaps).catch(err => console.error('[report-cards/publish notify]', err));
+
     return ok(res, response, null, 201);
 
   } catch (err) {
@@ -589,6 +594,35 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
     return E.serverError(res);
   }
 });
+
+/* Notify each published student's parent(s)/guardian(s) — school-configured
+   channel + frequency, same shared mechanism as behaviour_incident. One
+   dispatch per student so each guardian's message is scoped to their own
+   child, not a generic "reports were published" broadcast. */
+async function _notifyReportCardsPublished(req, snaps) {
+  if (!snaps.length) return;
+  const { schoolId } = req.jwtUser;
+  const ctx = tenantContext(req);
+  const school = await _model('schools').findOne({ id: schoolId }).select('name systemEmail').lean();
+  const schoolName  = school?.name || '';
+  const schoolEmail = school?.systemEmail || '';
+
+  await notifyGuardiansForStudents({
+    ctx, schoolId, eventKey: 'report_published',
+    items: snaps.map(snap => ({
+      studentId: snap.studentId,
+      inAppSubject: `Report card published for ${snap.studentName}`,
+      inAppBody:    `${snap.termName || 'This term'}'s report card for ${snap.studentName} is now available.`,
+      emailDigestSubject: `Report card published — ${snap.studentName}`,
+      emailDigestBody:    `${snap.termName || 'This term'}'s report card is now available.`,
+      sendEmail: (recipient) => email.sendReportCardPublishedAlert({
+        recipientName: recipient.name, recipientEmail: recipient.email,
+        studentName: snap.studentName, termName: snap.termName, academicYear: snap.academicYear,
+        schoolName, schoolEmail, schoolId,
+      }),
+    })),
+  });
+}
 
 /* ══════════════════════════════════════════════════════════════
    GET /publish-batches
@@ -1323,5 +1357,10 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
     return E.serverError(res);
   }
 });
+
+// Exposed for direct unit testing without exercising the full (transaction-
+// wrapped, config-loading) /publish route — same lightweight-testability
+// convention as qa-health.js's exported check functions.
+router._notifyReportCardsPublished = _notifyReportCardsPublished;
 
 module.exports = router;

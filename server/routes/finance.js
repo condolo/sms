@@ -17,6 +17,8 @@ const { nextInvoiceNumber, nextReceiptNumber } = require('../utils/counters');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
 const AuditService = require('../services/audit');
+const { notifyGuardiansForStudents } = require('../utils/notify-students');
+const email = require('../utils/email');
 
 const router = express.Router();
 const PLAN   = planGate('finance');
@@ -168,6 +170,7 @@ router.post('/invoices', authMiddleware, PLAN, rbac('finance', 'create'), async 
     });
 
     AuditService.log({ action: 'finance.invoice_created', actor: req.jwtUser, schoolId, target: { type: 'invoice', id: doc.id, label: invoiceNumber }, details: { studentId: data.studentId, total: totals.total, currency: data.currency }, req });
+    _notifyInvoiceCreated(req, doc.toObject ? doc.toObject() : doc).catch(err => console.error('[finance/invoices notify]', err));
     return created(res, doc.toObject ? doc.toObject() : doc);
   } catch (err) {
     console.error('[finance POST /invoices]', err);
@@ -340,6 +343,7 @@ router.post('/payments', authMiddleware, PLAN, rbac('finance', 'create'), async 
     );
 
     AuditService.log({ action: 'finance.payment_recorded', actor: req.jwtUser, schoolId, target: { type: 'payment', id: payment.id, label: receiptNumber }, details: { invoiceId: data.invoiceId, amount: data.amount, method: data.method, invoiceStatus: bal.status }, req });
+    _notifyPaymentReceived(req, payment.toObject ? payment.toObject() : payment, { currency: invoice.currency, balance: bal.balance }).catch(err => console.error('[finance/payments notify]', err));
     return created(res, {
       payment: payment.toObject ? payment.toObject() : payment,
       invoiceStatus:  bal.status,
@@ -540,5 +544,59 @@ router.get('/summary', authMiddleware, PLAN, rbac('finance', 'read'), async (req
     return E.serverError(res);
   }
 });
+
+/* ── Notification triggers (finance) ─────────────────────────── */
+async function _notifyInvoiceCreated(req, invoice) {
+  const { schoolId } = req.jwtUser;
+  const ctx = tenantContext(req);
+  const school = await _model('schools').findOne({ id: schoolId }).select('name systemEmail').lean();
+  const schoolName  = school?.name || '';
+  const schoolEmail = school?.systemEmail || '';
+
+  await notifyGuardiansForStudents({
+    ctx, schoolId, eventKey: 'invoice_created',
+    items: [{
+      studentId: invoice.studentId,
+      inAppSubject: `New invoice: ${invoice.invoiceNumber}`,
+      inAppBody:    `A new invoice of ${invoice.currency} ${invoice.total} has been issued${invoice.dueDate ? `, due ${invoice.dueDate}` : ''}.`,
+      emailDigestSubject: `New invoice — ${invoice.invoiceNumber}`,
+      emailDigestBody:    `A new invoice of ${invoice.currency} ${invoice.total} has been issued.`,
+      sendEmail: (recipient) => email.sendFeeInvoiceCreatedAlert({
+        recipientName: recipient.name, recipientEmail: recipient.email,
+        studentName: invoice.studentName || '', invoiceNumber: invoice.invoiceNumber,
+        total: invoice.total, currency: invoice.currency, dueDate: invoice.dueDate,
+        schoolName, schoolEmail, schoolId,
+      }),
+    }],
+  });
+}
+
+async function _notifyPaymentReceived(req, payment, { currency, balance }) {
+  const { schoolId } = req.jwtUser;
+  const ctx = tenantContext(req);
+  const school = await _model('schools').findOne({ id: schoolId }).select('name systemEmail').lean();
+  const schoolName  = school?.name || '';
+  const schoolEmail = school?.systemEmail || '';
+
+  await notifyGuardiansForStudents({
+    ctx, schoolId, eventKey: 'payment_received',
+    items: [{
+      studentId: payment.studentId,
+      inAppSubject: `Payment received — receipt ${payment.receiptNumber}`,
+      inAppBody:    `A payment of ${currency} ${payment.amount} was recorded (receipt ${payment.receiptNumber}).`,
+      emailDigestSubject: `Payment received — ${payment.receiptNumber}`,
+      emailDigestBody:    `A payment of ${currency} ${payment.amount} was recorded.`,
+      sendEmail: (recipient) => email.sendFeePaymentReceivedAlert({
+        recipientName: recipient.name, recipientEmail: recipient.email,
+        studentName: payment.studentName || '', receiptNumber: payment.receiptNumber,
+        amount: payment.amount, currency, balance,
+        schoolName, schoolEmail, schoolId,
+      }),
+    }],
+  });
+}
+
+router._notifyInvoiceCreated   = _notifyInvoiceCreated;
+router._notifyPaymentReceived  = _notifyPaymentReceived;
 
 module.exports = router;
