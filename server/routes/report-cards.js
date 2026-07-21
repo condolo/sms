@@ -123,6 +123,25 @@ function _convertCustomTypesToWeights(customTypes) {
 }
 
 /**
+ * Normalise a gradingSchema into the single {min, grade, points, label} shape,
+ * regardless of source format — grade_boundaries already uses this shape;
+ * academic_config.gradingSchema uses {minScore, maxScore, descriptor, remarks}.
+ * This is the schema the client renders from; it must always describe
+ * exactly the bands the server used in computeFinalScores/resolveGrade for
+ * THIS response, never a locally-invented client-side default (Audit §6.2 —
+ * the client and server previously disagreed on the fallback scale when a
+ * school had no grade_boundaries default configured).
+ */
+function _normalizeGradeScaleBands(bands) {
+  return (bands || []).map(b => ({
+    min:    b.min    ?? b.minScore ?? 0,
+    grade:  b.grade,
+    points: b.points ?? 0,
+    label:  b.label  ?? b.descriptor ?? '',
+  }));
+}
+
+/**
  * Merge old gradebook data (grades collection) with new CA marks data (assessment_marks).
  * CA marks win on conflict per assessmentType within the same student+subject.
  */
@@ -272,7 +291,12 @@ router.post('/generate', authMiddleware, PLAN, rbac('grades', 'read'), async (re
         rankingEnabled: config.rankingEnabled, rankingSubjectStrategy: config.rankingSubjectStrategy,
         assessmentWeights: _convertCustomTypesToWeights(caConfig.customTypes),
         customTypes: caConfig.customTypes ?? null,
-        gradeScale:  caConfig.gradeScale  ?? null,
+        // Always the exact bands used to grade this response's subjects —
+        // never null, normalised to one shape regardless of whether they
+        // came from grade_boundaries or the academic_config fallback (Audit
+        // §6.2 — the client must never fall back to its own local default,
+        // it has to render from what the server actually used).
+        gradeScale: { bands: _normalizeGradeScaleBands(activeSchema) },
       },
       students,
     });
@@ -1362,5 +1386,6 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
 // wrapped, config-loading) /publish route — same lightweight-testability
 // convention as qa-health.js's exported check functions.
 router._notifyReportCardsPublished = _notifyReportCardsPublished;
+router._normalizeGradeScaleBands = _normalizeGradeScaleBands;
 
 module.exports = router;

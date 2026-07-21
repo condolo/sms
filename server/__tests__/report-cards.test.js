@@ -334,3 +334,52 @@ describe('Verify endpoint tenant isolation', () => {
     expect(res.body.schoolName).toBe('School A'); // still the correct school
   });
 });
+
+/* ============================================================
+   _normalizeGradeScaleBands — the fix for the client/server grading-
+   scale mismatch (Audit §6.2): whatever the client renders must be
+   the EXACT bands the server used in computeFinalScores/resolveGrade
+   for this response, in one consistent shape, regardless of whether
+   they came from grade_boundaries ({min,...}) or the academic_config
+   fallback ({minScore, maxScore, descriptor, ...}).
+   ============================================================ */
+describe('_normalizeGradeScaleBands', () => {
+  const normalize = reportCardsRouter._normalizeGradeScaleBands;
+
+  test('passes through grade_boundaries-shaped bands ({min}) unchanged in meaning', () => {
+    const out = normalize([{ min: 80, grade: 'A', points: 12, label: 'Excellent' }]);
+    expect(out).toEqual([{ min: 80, grade: 'A', points: 12, label: 'Excellent' }]);
+  });
+
+  test('normalises academic_config-shaped bands ({minScore, descriptor}) into the same shape', () => {
+    const out = normalize([
+      { grade: 'A', minScore: 80, maxScore: 100, points: 4.0, descriptor: 'Excellent', remarks: 'Outstanding' },
+    ]);
+    expect(out).toEqual([{ min: 80, grade: 'A', points: 4.0, label: 'Excellent' }]);
+  });
+
+  test('defaults missing points/label without throwing', () => {
+    const out = normalize([{ grade: 'E', minScore: 0 }]);
+    expect(out).toEqual([{ min: 0, grade: 'E', points: 0, label: '' }]);
+  });
+
+  test('handles null/empty input safely', () => {
+    expect(normalize(null)).toEqual([]);
+    expect(normalize([])).toEqual([]);
+  });
+
+  test('a client rendering these bands would grade a boundary score consistently with the server, unlike the old client-local default scale', () => {
+    // The bug this fixes: client/constants.js's own DEFAULT_GRADE_SCALE used
+    // 80='A' on a 12-point scale; academic-config.js's DEFAULT_GRADING_SCHEMA
+    // (what the server actually grades against when no grade_boundaries
+    // scale is configured) is an 8-band, 4.0-point scale. Confirm the
+    // normalized output carries the SERVER's real points value through,
+    // not a value a client-side default could have silently substituted.
+    const serverDefault = [
+      { grade: 'A', minScore: 80, maxScore: 100, points: 4.0, descriptor: 'Excellent' },
+      { grade: 'B+', minScore: 75, maxScore: 79, points: 3.5, descriptor: 'Very Good' },
+    ];
+    const out = normalize(serverDefault);
+    expect(out.find(b => b.grade === 'A').points).toBe(4.0); // NOT 12 (the old client default's scale)
+  });
+});

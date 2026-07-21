@@ -24,7 +24,7 @@
    ============================================================ */
 import { Fragment, useState, useCallback, useEffect } from 'react';
 import { Printer, Save, Check, BarChart2, MessageSquare, Award, CheckCircle } from 'lucide-react';
-import { DEFAULT_GRADE_SCALE, DEFAULT_CUSTOM_TYPES, _gradeFromScale } from '../constants.js';
+import { DEFAULT_CUSTOM_TYPES, _gradeFromScale } from '../constants.js';
 
 /* ── Helpers ─────────────────────────────────────────────── */
 function buildColumns(types) {
@@ -91,7 +91,11 @@ export default function StudentReportCard({
   studentDeviations, behaviourSummary, snapshot,
 }) {
   const types      = customTypes ?? DEFAULT_CUSTOM_TYPES;
-  const bands      = [...(gradeScale?.bands ?? DEFAULT_GRADE_SCALE)].sort((a, b) => b.min - a.min);
+  // No local fallback — the server always returns the exact bands it used
+  // to grade this student's subjects (report-cards.js's _normalizeGradeScaleBands).
+  // An empty array here means "fail visibly" (─ / no grade shown), never
+  // "silently compute against a different scale than the subject grades did."
+  const bands      = [...(gradeScale?.bands ?? [])].sort((a, b) => b.min - a.min);
   const columns    = buildColumns(types);
   const meanGrade  = _gradeFromScale(student.averageScore, bands);
 
