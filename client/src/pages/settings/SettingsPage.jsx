@@ -3,7 +3,7 @@
    /platform-audit: lucide icons, invite slide-over, currency +
    timezone fields, houses config, no old components, no alert()
    ============================================================ */
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect } from 'react';
@@ -4371,146 +4371,30 @@ function DataAction({ icon, title, desc, buttonLabel, buttonColor, loading, onCl
    Per-event, per-channel notification configuration matrix.
    ══════════════════════════════════════════════════════════════ */
 
-/* ── Event registry (mirrors server/utils/notif-settings.js) ── */
-const NOTIF_GROUPS = [
-  { key: 'communication', label: 'Communication',      Icon: MessageSquare },
-  { key: 'academic',      label: 'Academic',            Icon: BookOpen      },
-  { key: 'finance',       label: 'Finance',             Icon: CreditCard    },
-  { key: 'attendance',    label: 'Attendance',          Icon: Calendar      },
-  { key: 'account',       label: 'Account & Security',  Icon: Shield        },
-];
-
-const NOTIF_EVENTS = [
-  /* Communication */
-  {
-    key: 'new_message', group: 'communication',
-    label: 'New Message',
-    desc:  'When a user receives a direct or group message',
-    audience: ['staff', 'parents'],
-    channels: ['email', 'inApp'],
-    implemented: true,
-  },
-  {
-    key: 'announcement', group: 'communication',
-    label: 'School Announcement',
-    desc:  'When a school-wide announcement is posted',
-    audience: ['staff', 'parents', 'students'],
-    channels: ['email', 'inApp'],
-    implemented: false,
-  },
-  /* Academic */
-  {
-    key: 'assessment_reminder', group: 'academic',
-    label: 'Assessment Reminder',
-    desc:  'Reminder for upcoming or overdue teacher assessments',
-    audience: ['staff'],
-    channels: ['email', 'inApp'],
-    implemented: true,
-  },
-  {
-    key: 'report_published', group: 'academic',
-    label: 'Report Cards Published',
-    desc:  'When report cards are released for a term',
-    audience: ['parents', 'students'],
-    channels: ['email', 'inApp'],
-    implemented: false,
-  },
-  {
-    key: 'exam_results', group: 'academic',
-    label: 'Exam Results Released',
-    desc:  'When exam results are published for a class',
-    audience: ['parents', 'students'],
-    channels: ['email', 'inApp'],
-    implemented: false,
-  },
-  /* Finance */
-  {
-    key: 'invoice_created', group: 'finance',
-    label: 'Invoice Generated',
-    desc:  'When a new fee invoice is created for a student',
-    audience: ['parents'],
-    channels: ['email', 'inApp'],
-    implemented: false,
-  },
-  {
-    key: 'payment_received', group: 'finance',
-    label: 'Payment Received',
-    desc:  'Payment receipt sent after a fee payment is recorded',
-    audience: ['parents'],
-    channels: ['email', 'inApp'],
-    implemented: false,
-  },
-  {
-    key: 'invoice_overdue', group: 'finance',
-    label: 'Overdue Invoice Reminder',
-    desc:  'Reminder for unpaid invoices past their due date',
-    audience: ['parents'],
-    channels: ['email', 'inApp'],
-    implemented: false,
-  },
-  /* Attendance */
-  {
-    key: 'absence_alert', group: 'attendance',
-    label: 'Absence Alert',
-    desc:  'Sent to parents when a student is marked absent',
-    audience: ['parents'],
-    channels: ['email', 'inApp'],
-    implemented: false,
-  },
-  {
-    key: 'attendance_summary', group: 'attendance',
-    label: 'Daily Attendance Summary',
-    desc:  'End-of-day attendance summary report for administrators',
-    audience: ['staff'],
-    channels: ['email', 'inApp'],
-    implemented: false,
-  },
-  /* Account */
-  {
-    key: 'welcome_user', group: 'account',
-    label: 'Welcome / Account Created',
-    desc:  'Login credentials email sent to newly invited users',
-    audience: ['staff', 'parents'],
-    channels: ['email'],
-    alwaysOn: true,
-    implemented: true,
-  },
-  {
-    key: 'role_changed', group: 'account',
-    label: 'Role or Permission Changed',
-    desc:  'Notifies a user when their role or access level is updated',
-    audience: ['staff'],
-    channels: ['email', 'inApp'],
-    alwaysOn: true,
-    implemented: true,
-  },
-  {
-    key: 'password_expiry', group: 'account',
-    label: 'Password Expiry Warning',
-    desc:  'Security reminder sent before a user\'s password expires',
-    audience: ['staff'],
-    channels: ['email'],
-    alwaysOn: true,
-    implemented: true,
-  },
-];
-
-/* Defaults for events when the school has no saved setting */
-const NOTIF_DEFAULTS = {
-  new_message:          { email: true,  inApp: true  },
-  announcement:         { email: true,  inApp: true  },
-  assessment_reminder:  { email: true,  inApp: false },
-  report_published:     { email: true,  inApp: true  },
-  exam_results:         { email: true,  inApp: true  },
-  invoice_created:      { email: true,  inApp: true  },
-  payment_received:     { email: true,  inApp: true  },
-  invoice_overdue:      { email: true,  inApp: false },
-  absence_alert:        { email: true,  inApp: true  },
-  attendance_summary:   { email: false, inApp: true  },
-  welcome_user:         { email: true,  inApp: false },
-  role_changed:         { email: true,  inApp: true  },
-  password_expiry:      { email: true,  inApp: false },
+/* ── Event registry — fetched live from GET /api/settings/notifications'
+   `registry`/`groups` fields (server/utils/notif-settings.js), never
+   hand-copied here. A client-side duplicate of this exact list used to
+   exist and had already drifted out of sync with the server (the
+   "Coming soon" disabled-toggle bug below was a symptom of exactly that:
+   a client-only implemented flag nobody was keeping honest). ── */
+const GROUP_ICONS = {
+  communication: MessageSquare,
+  academic:      BookOpen,
+  finance:       CreditCard,
+  attendance:    Calendar,
+  behaviour:     ShieldCheck,
+  account:       Shield,
 };
+
+/* registry: { [key]: {label,desc,group,audience,channels,alwaysOn,implemented} }
+   → [{ key, ...fields, channels: ['email','inApp'] }] */
+function _eventsFromRegistry(registry) {
+  return Object.entries(registry || {}).map(([key, ev]) => ({
+    key,
+    ...ev,
+    channels: Object.keys(ev.channels || {}),
+  }));
+}
 
 const AUDIENCE_PILL = {
   staff:    'bg-violet-50 text-violet-700 border-violet-200',
@@ -4552,26 +4436,27 @@ function NotificationsTab() {
     setTimeout(() => setToast(null), 3500);
   };
 
-  /* ── Load current settings ─────────────────────────────── */
+  /* ── Load current settings — data/registry/groups all come from the
+     same response, live, so the client never re-derives or hand-copies
+     server/utils/notif-settings.js's registry. ──────────────────── */
   const { data, isLoading } = useQuery({
     queryKey: ['settings', 'notifications'],
     queryFn:  () => settingsApi.notifications.get(),
     staleTime: 30_000,
   });
 
+  const NOTIF_EVENTS = useMemo(() => _eventsFromRegistry(data?.registry), [data?.registry]);
+  const NOTIF_GROUPS = useMemo(() => (data?.groups ?? []).map(g => ({ ...g, Icon: GROUP_ICONS[g.key] ?? Bell })), [data?.groups]);
+
   /* ── Local editable state ──────────────────────────────── */
   const [cfg, setCfg] = useState(null);
 
-  // Initialise local state from server data
+  // Server's response is already fully merged with defaults (channels +
+  // frequency) — the client just adopts it as-is, once.
   const serverCfg = data?.data;
   const [initialised, setInitialised] = useState(false);
   if (serverCfg && !initialised) {
-    // Merge server data with defaults for any missing keys
-    const merged = {};
-    for (const ev of NOTIF_EVENTS) {
-      merged[ev.key] = { ...NOTIF_DEFAULTS[ev.key], ...(serverCfg[ev.key] ?? {}) };
-    }
-    setCfg(merged);
+    setCfg(serverCfg);
     setInitialised(true);
   }
 
@@ -4593,19 +4478,19 @@ function NotificationsTab() {
     }));
   }
 
-  /* ── Dirty check ────────────────────────────────────────── */
-  const isDirty = cfg && serverCfg
-    ? JSON.stringify(cfg) !== JSON.stringify(
-        Object.fromEntries(
-          NOTIF_EVENTS.map(ev => [
-            ev.key,
-            { ...NOTIF_DEFAULTS[ev.key], ...(serverCfg[ev.key] ?? {}) },
-          ])
-        )
-      )
-    : false;
+  /* ── Immediate vs daily-digest — email channel only ──────── */
+  function setFrequency(eventKey, frequency) {
+    setCfg(prev => ({
+      ...prev,
+      [eventKey]: { ...prev[eventKey], frequency },
+    }));
+  }
 
-  const activeCfg = cfg ?? NOTIF_DEFAULTS;
+  /* ── Dirty check — serverCfg is already fully merged, so a plain
+     deep-equal is enough. ─────────────────────────────────────── */
+  const isDirty = cfg && serverCfg ? JSON.stringify(cfg) !== JSON.stringify(serverCfg) : false;
+
+  const activeCfg = cfg ?? {};
 
   return (
     <div className="space-y-6">
@@ -4680,7 +4565,7 @@ function NotificationsTab() {
               {/* Events */}
               <div className="divide-y divide-slate-100">
                 {groupEvents.map((ev, idx) => {
-                  const evCfg = activeCfg[ev.key] ?? NOTIF_DEFAULTS[ev.key] ?? {};
+                  const evCfg = activeCfg[ev.key] ?? {};
 
                   return (
                     <div
@@ -4752,12 +4637,28 @@ function NotificationsTab() {
                                 <Toggle
                                   checked={isOn}
                                   onChange={val => toggle(ev.key, ch, val)}
-                                  disabled={!ev.implemented && false}
+                                  disabled={!ev.implemented}
                                 />
                               )}
                             </div>
                           );
                         })}
+
+                        {/* Frequency — email channel only, and only once it's actually on */}
+                        {ev.channels.includes('email') && !ev.alwaysOn && (evCfg.email ?? false) && (
+                          <div className="w-[104px] flex flex-col items-center gap-1">
+                            <span className="text-[10px] font-medium text-slate-500">Frequency</span>
+                            <select
+                              value={evCfg.frequency ?? 'immediate'}
+                              onChange={e => setFrequency(ev.key, e.target.value)}
+                              disabled={!ev.implemented}
+                              className="text-[11px] rounded-md border border-slate-200 px-1.5 py-1 bg-white text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              <option value="immediate">Immediate</option>
+                              <option value="daily_digest">Daily digest</option>
+                            </select>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -4779,13 +4680,7 @@ function NotificationsTab() {
           >
             <span className="text-slate-300">You have unsaved notification changes</span>
             <button
-              onClick={() => {
-                const merged = {};
-                for (const ev of NOTIF_EVENTS) {
-                  merged[ev.key] = { ...NOTIF_DEFAULTS[ev.key], ...(serverCfg?.[ev.key] ?? {}) };
-                }
-                setCfg(merged);
-              }}
+              onClick={() => setCfg(serverCfg)}
               className="text-slate-400 hover:text-white transition text-xs px-2 py-1 rounded-lg hover:bg-slate-800"
             >
               Discard

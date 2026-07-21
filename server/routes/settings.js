@@ -21,7 +21,7 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { revokeUserTokens, revokeIdentityTokens } = require('../utils/token-version');
 const emailUtil             = require('../utils/email');
 const { encrypt, smtpEncryptReady } = require('../utils/smtpEncrypt');
-const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY } = require('../utils/notif-settings');
+const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY, GROUPS: NOTIF_GROUPS } = require('../utils/notif-settings');
 const { rbac, invalidatePermCache } = require('../middleware/rbac');
 const { peekAdmissionCounter, setAdmissionCounter } = require('../utils/counters');
 const { MODULE_REGISTRY, MODULE_KEYS } = require('../config/moduleRegistry');
@@ -915,10 +915,15 @@ router.get('/notifications', authMiddleware, rbac('settings', 'read'), async (re
     const saved   = school?.notificationSettings ?? {};
     const merged  = {};
     for (const [key, def] of Object.entries(NOTIF_DEFAULTS)) {
-      merged[key] = { ...def, ...(saved[key] ?? {}) };
+      merged[key] = { frequency: 'immediate', ...def, ...(saved[key] ?? {}) };
     }
 
-    res.json({ data: merged });
+    // registry/groups travel with every response so the client renders the
+    // event list, labels, and "coming soon" state live from this single
+    // source of truth instead of hand-copying it — a client-side duplicate
+    // of this exact registry previously existed and had already drifted
+    // (a disabled-toggle bug that silently never fired).
+    res.json({ data: merged, registry: EVENT_REGISTRY, groups: NOTIF_GROUPS });
   } catch (err) {
     console.error('[settings] GET /notifications error:', err);
     res.status(500).json({ error: 'Failed to load notification settings' });
@@ -945,6 +950,9 @@ router.put('/notifications', authMiddleware, rbac('settings', 'update'), async (
         if (typeof channels[ch] === 'boolean') {
           cleanChannels[ch] = channels[ch];
         }
+      }
+      if (channels.frequency === 'daily_digest' || channels.frequency === 'immediate') {
+        cleanChannels.frequency = channels.frequency;
       }
       if (Object.keys(cleanChannels).length) {
         sanitised[key] = cleanChannels;

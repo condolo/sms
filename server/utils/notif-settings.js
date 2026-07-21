@@ -112,6 +112,16 @@ const EVENT_REGISTRY = {
     implemented: false,
   },
 
+  /* ── Behaviour ───────────────────────────────────────────── */
+  behaviour_incident: {
+    label:       'Behaviour Incident Logged',
+    desc:        'Sent to parents/guardians when a behaviour incident is recorded for their child',
+    group:       'behaviour',
+    audience:    ['parents'],
+    channels:    { email: true, inApp: true },
+    implemented: true,
+  },
+
   /* ── Account / Security ──────────────────────────────────── */
   welcome_user: {
     label:       'Welcome / Account Created',
@@ -160,8 +170,11 @@ const GROUPS = [
   { key: 'academic',      label: 'Academic'      },
   { key: 'finance',       label: 'Finance'       },
   { key: 'attendance',    label: 'Attendance'    },
+  { key: 'behaviour',     label: 'Behaviour'     },
   { key: 'account',       label: 'Account & Security' },
 ];
+
+const DEFAULT_FREQUENCY = 'immediate';
 
 /* ── isEnabled ───────────────────────────────────────────────
    Returns true if the given event + channel combo should fire
@@ -189,4 +202,24 @@ async function isEnabled(schoolId, eventKey, channel = 'email') {
   }
 }
 
-module.exports = { isEnabled, DEFAULTS, ALWAYS_ON, EVENT_REGISTRY, GROUPS };
+/* ── getFrequency ────────────────────────────────────────────
+   'immediate' (default) sends the email as the event happens.
+   'daily_digest' batches it into notification_digests for the
+   once-daily summary email (see notification-digest-cron.js) —
+   only meaningful for the email channel; in-app messages are
+   always immediate. Fails open to 'immediate' on any error, same
+   posture as isEnabled().
+─────────────────────────────────────────────────────────────── */
+async function getFrequency(schoolId, eventKey) {
+  if (!EVENT_REGISTRY[eventKey]) return DEFAULT_FREQUENCY;
+  try {
+    const School = _model('schools');
+    const school = await School.findOne({ id: schoolId }, { notificationSettings: 1 }).lean();
+    const saved  = school?.notificationSettings?.[eventKey];
+    return saved?.frequency === 'daily_digest' ? 'daily_digest' : DEFAULT_FREQUENCY;
+  } catch {
+    return DEFAULT_FREQUENCY;
+  }
+}
+
+module.exports = { isEnabled, getFrequency, DEFAULTS, ALWAYS_ON, EVENT_REGISTRY, GROUPS, DEFAULT_FREQUENCY };

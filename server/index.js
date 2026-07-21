@@ -694,6 +694,15 @@ async function start() {
     } catch (err) {
       console.error('[job-queue] Failed to start:', err.message);
     }
+
+    // Notification digest cron — daily batch email for events a school has
+    // configured as 'daily_digest' instead of immediate (notif-settings.js).
+    try {
+      const { startNotificationDigestCron } = require('./utils/notification-digest-cron');
+      startNotificationDigestCron();
+    } catch (err) {
+      console.error('[notification-digest-cron] Failed to start:', err.message);
+    }
   });
 }
 

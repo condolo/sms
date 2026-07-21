@@ -6,6 +6,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.1.0] — 2026-07-21 — feat(notifications): real trigger + school-configured frequency, starting with Behaviour
+
+The notifications system had a real registry (`server/utils/notif-settings.js`) and a real settings UI, but almost nothing behind it: only `new_message` actually fired a notification anywhere in the codebase — Behaviour, Finance, Attendance, and most of Academic were pure "Coming soon" placeholders with zero trigger code. The client's Settings > Notifications panel also had its own hand-copied duplicate of the server's event registry, already silently drifted (a `disabled={!ev.implemented && false}` bug meant "Coming soon" toggles were never actually disabled).
+
+This wires the full pipeline end-to-end for **Behaviour incidents** — the case explicitly asked for — through a mechanism every other event can now plug into directly, not a one-off.
+
+### Added
+
+- `server/utils/notify-dispatch.js` — one shared dispatch helper. For each recipient: creates an in-app message if the school has that channel on, and for email either sends immediately or queues into a new `notification_digests` collection, per the school's own per-event frequency choice. One recipient failing never blocks the rest or the caller's request.
+- `notif-settings.js` gained a real `frequency` concept (`getFrequency()`, default `'immediate'`) and a new `behaviour_incident` event (its own `behaviour` group) — the event genuinely didn't exist in the registry before this.
+- `server/utils/notification-digest-cron.js` — daily batch job (reuses the existing node-cron pattern from `billing-cron.js`), groups pending digest rows by `{schoolId, userId}`, sends one combined email per recipient, clears sent rows. A failed send leaves its rows queued for the next run rather than losing them.
+- `behaviour.js`'s `POST /incidents` now resolves the incident's student's real parent/guardian(s) (`users.studentIds` — the same relationship `students.js` already writes) and dispatches through the new mechanism — not a bespoke one-off notification.
+- `email.js` gained `sendBehaviourIncidentAlert` and `sendDigestSummary`, following the same `_wrap`/`_sendAsSchool` template pattern every other email in that file already uses.
+
+### Fixed
+
+- `GET /api/settings/notifications` now returns the registry/groups alongside the saved config, and `SettingsPage.jsx`'s Notifications panel renders from that live data instead of a hand-copied duplicate that had already drifted. The real bug this uncovered: `disabled={!ev.implemented && false}` always evaluates to `false` — "Coming soon" toggles were never actually disabled, just visually labeled. Now `disabled={!ev.implemented}`, and a real immediate/daily-digest picker was added per event.
+
+### Explicitly not in this phase
+
+Finance (invoice/payment), Attendance (absence alert), and the remaining Academic events (report cards, exam results) are still registered-but-unimplemented — same mechanism, not yet wired to a trigger site. Extending them is now a mechanical repeat of exactly what `behaviour.js` does here, not a new build.
+
+---
+
 ## [v5.0.0] — 2026-07-21 — fix: school portal briefly flashed the marketing landing page on reload; missing favicon; cookie banner leaked into the portal
 
 Root-caused a real, reported bug: reloading any page inside a school's own portal (subdomain) showed the public marketing homepage for a moment before the correct portal content appeared. The cause was in `npm run build:ssg` (the SEO pre-render pass, `client/scripts/prerender.mjs`): it renders the marketing Landing page and writes it to `dist/index.html`, **overwriting** the plain SPA shell that file used to be. `server/index.js`'s wildcard fallback then served that same now-marketing-flavored `dist/index.html` for every app route with no prerendered page of its own (`/dashboard`, `/hr`, `/login`, literally anything past the ~24 public marketing routes) — so the browser painted the full rendered marketing homepage first, then React hydrated, resolved the real host/session, and replaced it. Confirmed live: before the fix, `curl /dashboard` returned 106 KB of rendered marketing markup; after, it returns the 4 KB empty shell.

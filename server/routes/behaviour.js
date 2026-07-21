@@ -16,6 +16,9 @@ const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 const AuditService = require('../services/audit');
+const { dispatchNotification } = require('../utils/notify-dispatch');
+const email = require('../utils/email');
+const { _model } = require('../utils/model');
 
 const router = express.Router();
 const PLAN   = planGate('behaviour');
@@ -174,9 +177,50 @@ router.post('/incidents', authMiddleware, PLAN, rbac('behaviour', 'create'), asy
       createdBy:   userId,
       updatedBy:   userId,
     });
-    return created(res, doc.toObject ? doc.toObject() : doc);
+    const plain = doc.toObject ? doc.toObject() : doc;
+
+    _notifyGuardians(req, plain).catch(err => console.error('[behaviour/incidents notify]', err));
+
+    return created(res, plain);
   } catch (err) { console.error('[behaviour/incidents POST]', err); return E.serverError(res); }
 });
+
+/* Notify the incident's student's parent(s)/guardian(s) — school-configured
+   channel + frequency (Governance-style: reuses the same real dispatch
+   mechanism every future event wires into, not a bespoke one-off). */
+async function _notifyGuardians(req, incident) {
+  const { schoolId } = req.jwtUser;
+  const ctx = tenantContext(req);
+
+  const [student, school] = await Promise.all([
+    tenantModel('students', ctx).findOne({ id: incident.studentId, schoolId }).select('firstName lastName').lean(),
+    _model('schools').findOne({ id: schoolId }).select('name systemEmail').lean(),
+  ]);
+  if (!student) return;
+  const studentName = `${student.firstName} ${student.lastName}`;
+  const schoolName  = school?.name || '';
+  const schoolEmail = school?.systemEmail || '';
+
+  const guardians = await tenantModel('users', ctx)
+    .find({ schoolId, role: 'parent', studentIds: incident.studentId, isActive: { $ne: false } })
+    .select('id name email').lean();
+  if (!guardians.length) return;
+
+  await dispatchNotification({
+    ctx, schoolId, eventKey: 'behaviour_incident', actorUserId: 'system',
+    recipients: guardians.map(g => ({ userId: g.id, name: g.name, email: g.email })),
+    inAppSubject: `Behaviour incident logged for ${studentName}`,
+    inAppBody:    `${incident.type} — ${incident.title}${incident.description ? `: ${incident.description}` : ''}`,
+    emailDigestSubject: `Behaviour incident — ${studentName}`,
+    emailDigestBody:    `${incident.type}: ${incident.title}`,
+    sendEmail: (recipient) => email.sendBehaviourIncidentAlert({
+      recipientName: recipient.name, recipientEmail: recipient.email,
+      studentName, type: incident.type, title: incident.title,
+      description: incident.description, points: incident.points,
+      schoolName, schoolEmail, schoolId,
+    }),
+  });
+}
 
 router.put('/incidents/:id', authMiddleware, PLAN, rbac('behaviour', 'update'), async (req, res) => {
   try {

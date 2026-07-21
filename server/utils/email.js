@@ -611,6 +611,55 @@ async function sendBirthdayWishToParent({
   return _sendAsSchool(toEmail, `🎂 Happy Birthday to ${studentFirstName}! — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
 }
 
+/* 16. Behaviour incident — parent/guardian */
+async function sendBehaviourIncidentAlert({
+  recipientName, recipientEmail, studentName, type, title, description, points,
+  schoolName, schoolEmail, schoolId = null, appUrl,
+}) {
+  const url  = appUrl || APP_URL;
+  const icon = type === 'merit' ? '⭐' : type === 'demerit' ? '⚠️' : '📋';
+  const html = _wrap(`
+    <h2>${icon} Behaviour Incident Logged</h2>
+    <p>Dear ${recipientName || 'Parent/Guardian'},</p>
+    <p>A behaviour record was logged for <strong>${studentName}</strong> at <strong>${schoolName}</strong>.</p>
+    <div class="info">
+      <p><strong>Type:</strong> ${type}</p>
+      <p><strong>Title:</strong> ${title}</p>
+      ${description ? `<p><strong>Details:</strong> ${description}</p>` : ''}
+      ${typeof points === 'number' ? `<p><strong>Points:</strong> ${points > 0 ? '+' : ''}${points}</p>` : ''}
+    </div>
+    <p style="text-align:center">
+      <a href="${url}" class="btn">Open ${schoolName} →</a>
+    </p>
+    <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
+  `, schoolName);
+  return _sendAsSchool(recipientEmail, `${icon} Behaviour Incident — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+}
+
+/* 17. Daily digest — batches every queued event for one recipient into one email */
+async function sendDigestSummary({
+  recipientName, recipientEmail, items, schoolName, schoolEmail, schoolId = null, appUrl,
+}) {
+  const url  = appUrl || APP_URL;
+  const rows = items.map(it => `
+    <div class="info" style="margin-bottom:8px">
+      <p style="margin:0"><strong>${it.subject}</strong></p>
+      <p style="margin:4px 0 0;color:#6b7280;font-size:13px">${it.body}</p>
+    </div>
+  `).join('');
+  const html = _wrap(`
+    <h2>📬 Your Daily Summary</h2>
+    <p>Hi ${recipientName || 'there'},</p>
+    <p>Here's what happened today at <strong>${schoolName}</strong> (${items.length} update${items.length === 1 ? '' : 's'}):</p>
+    ${rows}
+    <p style="text-align:center">
+      <a href="${url}" class="btn">Open ${schoolName} →</a>
+    </p>
+    <p style="font-size:12px;color:#9ca3af">You're receiving this as a daily digest instead of individual emails. Change this anytime in your notification preferences.</p>
+  `, schoolName);
+  return _sendAsSchool(recipientEmail, `📬 Daily Summary — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+}
+
 module.exports = {
   invalidateSmtpCache,
   sendRegistrationPending,
@@ -630,4 +679,6 @@ module.exports = {
   sendAssessmentReminder,
   sendBirthdayWishToStudent,
   sendBirthdayWishToParent,
+  sendBehaviourIncidentAlert,
+  sendDigestSummary,
 };

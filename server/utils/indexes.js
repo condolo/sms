@@ -762,6 +762,20 @@ const INDEXES = [
       { key: { schoolId: 1, memberUserIds: 1 }, name: 'resgrp_school_member' },
     ],
   },
+
+  /* ── notification_digests ──────────────────────────────────────
+     A school configures an event's email to send as a daily digest
+     instead of immediately (notif-settings.js's getFrequency()) —
+     each occurrence lands here instead of triggering an email right
+     away; notification-digest-cron.js groups by {schoolId,userId}
+     once a day and sends one combined email, then clears the rows. */
+  {
+    col: 'notification_digests',
+    indexes: [
+      { key: { id: 1 },                          name: 'ndig_id', unique: true, sparse: true },
+      { key: { schoolId: 1, userId: 1, createdAt: 1 }, name: 'ndig_school_user_date' },
+    ],
+  },
 ];
 
 /* ── One-time index migrations ──────────────────────────────────
