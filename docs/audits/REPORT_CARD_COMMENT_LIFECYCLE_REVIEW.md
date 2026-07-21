@@ -3,6 +3,7 @@
 **Date:** 2026-07-21
 **Status:** Architecture only. No code changed.
 **Depends on:** [REPORT_CARD_PLATFORM_FUNCTIONAL_ARCHITECTURE.md](REPORT_CARD_PLATFORM_FUNCTIONAL_ARCHITECTURE.md) §6-§8 (module ownership, Template vs Configuration boundary). This document narrows to one question left open there: the complete lifecycle of every comment type, and whether Comment Banks should be a shared service.
+**Amended 2026-07-21 (see end of document):** the Functional Architecture document was subsequently revised to model comment participants as school-configurable, not fixed roles (its §11-§12). The four-row table below remains accurate as an evidence-tracing exercise — it documents what exists in the schema and UI today, Head of Section correctly identified as not existing at all — but should be read through that later capability lens, not as a proposal for four hardcoded fields. See the amendment at the end of this document for the reconciled model.
 
 ---
 
@@ -116,3 +117,17 @@ One precision worth adding, so this doesn't read as contradicting the ownership 
 | Signature/stamp image assets | School admin | N/A | **School Global Settings** (unchanged from the Functional Architecture document) |
 
 This closes the comment-architecture question this review chain opened: four real types (three of which — Subject, Class Teacher, Principal — exist today in some form; Head of Section is entirely new), one real cross-cutting gap (draft-to-published carry-forward) that needs fixing regardless of ownership decisions, one existing mechanism (`workflow-config.js`) that should be reused rather than rebuilt, and one clean extension of the Template/Configuration test already established rather than a new rule.
+
+---
+
+## Amendment — reconciling the four-row table above with the configurable-capability model
+
+The table above named four fixed comment types, including a specific new field for "Head of Section." That framing is superseded by a subsequent revision (Functional Architecture §11-§12): **no comment role should be hardcoded, including Head of Section** — different schools genuinely use different structures (Head of Department, Year Leader, Deputy Principal, or none of the above), and modeling one specific title as a first-class field would repeat, at the schema level, the exact "assume every school works the same way" mistake this whole review has been correcting elsewhere.
+
+**What changes, precisely, without invalidating the evidence-tracing above:**
+
+- **Subject Teacher Comment** — unchanged conclusion (Assessment → Comments), but reframed as a **capability toggle** (`Enable Subject Teacher Comments`), not a permanently-present field. If disabled, the field disappears from Mark Entry, Assessment stops expecting it, and Publication Policy's "require subject comments" rule (if configured) simply doesn't apply.
+- **Class Teacher / Head of Section / Principal — collapse into one mechanism**: a school-configured, ordered list of report-level remark steps, each `{assigneeType, assigneeValue, label}`, executed by `workflow-config.js` under a new `workflowKey` (e.g. `report_comment_approval`), exactly as the "Approval Workflow" section above already recommended. A school with no Head of Section configures a two-step chain (Class Teacher → Principal); a school with Head of Department *and* Deputy Principal configures a four-step chain; nothing in Report Cards' code names any of these roles specifically. The "Approves" column in the table above ("New — third step," etc.) was describing a fixed three-step chain — read it instead as "however many steps this school configured, each both writing a remark and advancing the record."
+- **The row-per-fixed-role table above stays useful as a worked example** (what it looks like *if* a school enables all three report-level steps) — not as the data model. The data model is one configurable list, not four named columns.
+
+This does not change any other conclusion in this document — the draft-to-published gap, the `workflow-config.js` reuse recommendation, and the Comment-Banks-as-shared-service decision all hold exactly as stated above; only the assumption that comment *roles* are fixed is corrected.

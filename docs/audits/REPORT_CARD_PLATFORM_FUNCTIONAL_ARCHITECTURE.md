@@ -19,6 +19,17 @@ Three different collections, three different admins clicking through three diffe
 
 ---
 
+## 0.5 Governing principle: Configuration is Executable
+
+Every finding in §0 (and, per the Comment Lifecycle review, `subjectAssignmentEnforced`) is an instance of the same violation: **a configuration surface with no runtime consumer.** The principle this review now adopts as the test for every remaining design decision in this module: *if a setting cannot be traced to code that actually branches on it, either the setting shouldn't exist yet, or the feature is incomplete — never ship the appearance of a capability without the capability.*
+
+Two scope boundaries on how this document applies that principle, stated explicitly so they aren't assumed:
+
+- **This is adopted as the governing test for the Report Card module's design, not asserted as a verified platform-wide fact.** Every violation found so far came from auditing this one module. A platform-wide ADR making this claim for every configuration surface in Msingi (`moduleConfig`, `admissionConfig`, `staffResponsibilities`, `hiddenSystemRoles`, and everything else) would need its own audit pass across those modules before it could honestly claim compliance rather than aspiration — that audit has not been done and is out of scope here. This document commits to the principle for Report Cards' own design and to fixing the four violations already found; it does not claim the rest of the platform has been checked.
+- **The principle targets silent, undocumented inertness — not staged rollout.** This session's own `identities` collection (ADR-0003 Phase 0, shipped with zero consumers for an entire phase, explicitly documented as inert-until-cutover) and `multiSchoolEnabled` (shipped inert until a platform admin deliberately activates it) are not violations — they're the same "no runtime effect yet" state as `rc_templates`, but paired with a stated reason and a stated activation trigger. The test isn't "does a consumer exist right now" — it's "if it doesn't yet, is that documented as deliberate, and is there a defined trigger for when it will." `rc_templates` and the dead `academic_config` settings fail that test; the identity migration's phases pass it. Any future report-card configuration shipped ahead of its consumer needs to pass the same test explicitly, not be assumed compliant by analogy.
+
+---
+
 ## 1. The complete lifecycle, and who owns each stage today
 
 | Stage | What it means | Current owner (evidenced) |
@@ -135,7 +146,7 @@ Real, live, already correct: `attendanceSummary()` (in `academic-calc.js`) queri
 
 ### Comment Banks
 
-**A genuine correction to how this should be scoped, found during this research.** Comment Banks is not currently "a Report Cards dependency" in the sense of being consumed by report card comment entry at all (§0, finding 3) — it's a fully-built, entirely separate CRUD feature (Grades → Config → Comment Banks) with zero wiring into `StudentReportCard.jsx`'s actual comment fields. Its `category` enum even includes `'behaviour'`, suggesting it may have been intended as a cross-module picklist (report card remarks *and* behaviour incident descriptions) rather than report-card-exclusive — but nothing consumes it from either direction today. **Recommend**: decide this deliberately, not by default. If the intended use is "reusable remark snippets for report card comments specifically," it should move under Report Cards' ownership and get wired into the comment UI. If it's meant to be a platform-wide reusable-text picklist (report cards, behaviour incidents, elsewhere), it should stay a small shared utility module of its own, consumed by whichever features want it — but either way, **the current state (a management screen with no consumer) is the one option that shouldn't continue.**
+**Resolved in the Comment Lifecycle Review, superseding the "decide deliberately" framing this section originally used.** Comment Banks is not currently "a Report Cards dependency" in the sense of being consumed by report card comment entry at all (§0, finding 3) — it's a fully-built, entirely separate CRUD feature (Grades → Config → Comment Banks) with zero wiring into `StudentReportCard.jsx`'s actual comment fields. Its `category` enum even includes `'behaviour'`, confirming it was designed for cross-module reuse and simply never got a second consumer. **Decision: Comment Banks becomes a Shared Platform Service** (the same architectural tier `academic-calc.js`, `ranking.js`, and `notify-dispatch.js` already occupy — consumed by specific modules, owned by none of them), available to Assessment's Subject Comments, Report Cards' report-level remarks, and future Behaviour/reference-letter features. No schema change needed to make this true — only relocating ownership of the route and wiring an actual picker into each consumer's comment-entry UI, since **the one thing that must end is a management screen with no consumer**, regardless of which final ownership model was chosen.
 
 ### Academic Year
 
@@ -172,9 +183,12 @@ One owner per capability, as requested. "Report Cards" here means the standalone
 | QR Verification | **Report Cards** *(future, unbuilt)* | Just encodes the existing verify URL — no new owner needed when built |
 | Report snapshot versioning | **Report Cards** | Already correct |
 | Template versioning | **Report Cards** | Consolidation Plan §2.2 — snapshotted the same way |
-| Draft Comments | **Report Cards** | Pre-publish workspace, report-card-specific |
+| Subject Teacher Comments | **Assessment → Comments** *(superseded — see Comment Lifecycle Review)* | Already written during Mark Entry today, not report-card generation; per-subject, gathered upstream of any approval chain |
+| Report-level remarks (Class Teacher, Head of Section, Principal, or whichever a school configures) | **Report Cards**, as a configurable ordered list of workflow steps | Publication-process content, not assessment evidence — no fixed roles assumed (see §11-adjacent revision below) |
+| Draft Comments (report-level) | **Report Cards** | Pre-publish workspace for the configured remark steps |
 | Published Comments | **Report Cards** | Part of the immutable snapshot |
-| Comment Banks (the picklist) | **Decide deliberately — see §6** | Currently unowned-in-practice; recommend Report Cards *if* scoped to report-card remarks specifically |
+| Comment Banks (the picklist) | **Shared Platform Service** *(superseded — see Comment Lifecycle Review)* | Consumed by Assessment, Report Cards, and future Behaviour/reference modules — not owned by any one of them |
+| Publication Policy (moderation-required, comments-required, notify-on-publish, republish rules, etc.) | **Report Cards** | Domain-specific operational rules for the publish action itself — see §11; not a platform-wide capability toggle, so it doesn't belong in the general Settings layer |
 | Grade Scale | **Assessment** | Cross-cutting — used at mark entry, not just on the eventual report card |
 | Assessment Weights | **Assessment** | Same reasoning |
 | Pass Mark | **Assessment** | Same reasoning |
@@ -215,7 +229,7 @@ Per the request not to simply validate — three places where the proposal, take
 
 **1. Don't let "Report Cards becomes a standalone module" imply Assessment's grading/weighting logic should move with it.** The framing throughout the reviewer's message groups Grade Scale, Assessment Weights, Pass Mark, Ranking, Moderation, and Exam Results together under "review whether these should remain inside Assessment" — treating them as one bundle. They aren't one bundle. §6 traced actual usage and found a real split: Grade Scale/Weights/Pass Mark are genuinely cross-cutting (used before any report card exists) and moving them would recreate, on the Report Cards side, exactly the kind of hidden-dependency mess this whole exercise is trying to eliminate from the Settings side. Ranking, by contrast, has no other consumer and *should* move. Treating the whole assessment bundle as one decision would get three of four items wrong.
 
-**2. Comment Banks should not be assumed into Report Cards by default just because it's report-card-adjacent.** Its own `category` enum (`academic/behaviour/general/subject`) is evidence it may have been designed for broader reuse than report card remarks alone. Claiming it for Report Cards without checking whether Behaviour incident entry was ever meant to consume it too would repeat, at the ownership-decision level, the exact "assume the obvious owner without checking" mistake that produced the `rc_templates`/`academic_config` gaps in the first place (§0). This is flagged as an open question in §6/§7, deliberately not resolved here.
+**2. Comment Banks should not be assumed into Report Cards by default just because it's report-card-adjacent.** Its own `category` enum (`academic/behaviour/general/subject`) is evidence it may have been designed for broader reuse than report card remarks alone. Claiming it for Report Cards without checking whether Behaviour incident entry was ever meant to consume it too would repeat, at the ownership-decision level, the exact "assume the obvious owner without checking" mistake that produced the `rc_templates`/`academic_config` gaps in the first place (§0). This was left as an open question here — **now resolved in the Comment Lifecycle Review: Shared Platform Service**, not owned by either module (§6/§7 updated accordingly).
 
 **3. The proposed hierarchy (School → Section → Generation-time Override → Published Snapshot) is right, but "Generation-time Override" needs a stated permission and audit model before it's built, not left as "optional."** An unaudited per-run template swap available to whoever generates a report undermines the very consistency guarantee (§2) the reviewer's own closing framing cares about — a Head Teacher trusting that "every report from this school looks the same" is not compatible with a quiet per-run override nobody has to justify. This document recommends mirroring the existing `skipModerationCheck` pattern (mandatory reason, mandatory audit log, restricted to specific roles) rather than treating the override as a simple picker anyone with generate access can use.
 
@@ -229,3 +243,37 @@ This document does not restate Consolidation Plan §5 (sequencing, no-breaking-c
 
 - **The RBAC split found in `report-cards.js`** (`rbac('grades', ...)` for most routes, `rbac('report_cards', ...)` for the draft-comments routes) needs a decision before or alongside module extraction — whichever key is chosen as canonical, existing role assignments granting only one of the two would need remapping, which is a real, if small, migration step touching live permission data, not a pure code change.
 - **If `rc_templates`/comment-bank data already exists in any school's database** (plausible, since both screens are live and usable today, just silently ineffective), the eventual functional spec should state explicitly whether that data is absorbed into whatever replaces it or discarded with notice — this document doesn't resolve that, per the open question already raised to the user in the prior turn.
+
+---
+
+## 11. Configurable capabilities, not fixed roles
+
+Revising every place above that named a fixed comment role: **no comment type should be modeled as a hardcoded field.** A school configures which report-level remark steps it wants — some schools run Subject Teacher → Class Teacher → Principal, others insert a Head of Department or Year Leader, others want Subject Teacher comments only. The architecture should model *configurable participants*, not assume any school's organizational structure.
+
+This resolves cleanly into two different mechanisms, not one unified list, because the two things being configured have different shapes:
+
+- **Report-level remarks (Class Teacher, and whatever else a school configures — Head of Section, Deputy Principal, Principal, etc.) fit `workflow-config.js`'s existing chain model directly.** Sequential, single-value-per-student, each step both writes a remark and advances the record — exactly the shape `getWorkflowConfig`/`saveWorkflowConfig`/`_resolveAssignee` already support, proven across two other workflows (`leave_approval`, `marks_unlock`) this session. A school defines its own ordered step list; Report Cards executes whatever is configured, with zero hardcoded roles anywhere in the module.
+- **Subject Teacher Comments do not fit that same shape** and shouldn't be forced into it. There are N of them per student (one per subject), gathered upstream in Assessment before any report-level chain begins — not a single sequential step. This is a capability toggle owned by Assessment (`Enable Subject Teacher Comments` → the field appears or disappears in Mark Entry), and its completeness becomes an input to Publication Policy (§12) — "require subject comments before publish" — rather than another step in the same chain.
+
+**The render-time consequence, stated precisely so it isn't built as a naive boolean**: a disabled capability must produce zero trace in the output — no section header, no "Comment not provided" placeholder, nothing. This means the IR-building step (Consolidation Plan §4.1) must check **both** the capability flag **and** actual data presence before including a section block, not the template's static toggle alone. A template saying "show subject comments" means "if the capability is enabled and content exists for this student" — never an unconditional instruction to render a block regardless of whether there's anything in it.
+
+---
+
+## 12. Publication Policy
+
+A concept this document did not previously separate out: the operational rules governing *whether a specific report may be published*, distinct from both Template (presentation) and the academic Configuration owned by Assessment/Attendance/etc. (§8).
+
+**Ownership: Report Cards, not the general platform Settings layer.** Reasoning: every rule in this category — require moderation complete, require all marks finalized, require subject comments complete, require the class-teacher-comment step done, respect the fee clearance policy, notify parents/students automatically, allow draft downloads, allow republishing — is specifically "what must be true before *this module's* publish action may proceed." Nothing outside Report Cards' own publish logic could enforce it. Placing it in a generic platform-wide configuration bucket would recreate exactly the fragmentation problem (§0) this whole review has been diagnosing, just moved one level up.
+
+**Most of Publication Policy is not new scope — it's consolidating rules that already exist, scattered and mostly not school-configurable:**
+
+| Rule | Exists today? | Where |
+|---|---|---|
+| Moderation must be complete before publish | Yes | Hardcoded inside `POST /publish` — not currently a per-school toggle; every school gets the same rule, bypassable only via the audited `skipModerationCheck` override |
+| Respect fee clearance policy | Yes | Reads `schools.portalConfig.reportCardFeeThreshold` — already school-configurable, already correctly scoped (§6) |
+| Notify parents/students on publish | Yes | Governed by the Notifications module's own per-event settings (`report_published`), not a Report-Cards-specific toggle today |
+| Require subject/class-teacher comments complete | No | New — becomes possible once §11's capability model exists |
+| Allow draft downloads | Partially | The DRAFT watermark path exists (Audit §2.2); whether a school may *disable* draft downloads entirely does not |
+| Allow republishing | Implicitly yes, always | No school can currently say "no, once published, an academic year's report is final" — versioning always permits a new publish |
+
+The work here is less "build eight new rules" and more "take three already-real, mostly-hardcoded behaviors, make them a coherent per-school-configurable object Report Cards' publish action reads as one unit, and add the genuinely new ones (comment-completeness, draft-download and republish permissions) using the same object." Consistent with §0.5: each of these needs a verified runtime consumer before it ships as a toggle — the moderation and fee-clearance rules already have one; the new ones don't yet, and shouldn't be exposed in any settings UI until they do.
