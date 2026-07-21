@@ -272,6 +272,93 @@ router.post('/schools', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+/* GET /api/platform/schools/:id/superadmins — list superadmin accounts for one school.
+   A school can validly have 2+ superadmins (co-founders, a client added after
+   initial registration, group-level staff acting as school admin, etc.) — this
+   is deliberately not capped at one. */
+router.get('/schools/:id/superadmins', async (req, res) => {
+  try {
+    const School = _model('schools');
+    const rid = req.params.id;
+    const schoolQuery = mongoose.isValidObjectId(rid) ? { $or: [{ _id: rid }, { id: rid }] } : { id: rid };
+    const school = await School.findOne(schoolQuery).lean();
+    if (!school) return res.status(404).json({ error: 'School not found' });
+
+    // Single, already-resolved school — tenantModel(), not the ratchet-tracked
+    // cross-tenant _model() escape hatch (that's reserved for orphans/impersonate,
+    // which genuinely must search across every school).
+    const User = tenantModel('users', { schoolId: school.id });
+    const admins = await User.find({ role: 'superadmin' })
+      .select('id name email isActive mustChangePassword createdAt identityId')
+      .lean();
+    res.json({ superadmins: admins });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* POST /api/platform/schools/:id/superadmins — add a superadmin to an EXISTING
+   school. Distinct from POST /schools' inline admin creation (that route only
+   runs at first provisioning). Before this route existed, the only way to add
+   an admin to an already-live school was the self-service "invite" flow
+   (users.js/settings.js) — which requires an already-logged-in admin at that
+   school. A school that loses its last superadmin (e.g. the 2026-07-21
+   orphan-purge incident) had no recovery path except a one-off script. This
+   closes that gap generally, not just for that incident. */
+router.post('/schools/:id/superadmins', async (req, res) => {
+  try {
+    const { name, email: rawEmail, password } = req.body || {};
+    const email = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : '';
+    if (!name || !email) return res.status(400).json({ error: 'name and email are required' });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Invalid email address' });
+
+    const School = _model('schools');
+    const rid = req.params.id;
+    const schoolQuery = mongoose.isValidObjectId(rid) ? { $or: [{ _id: rid }, { id: rid }] } : { id: rid };
+    const school = await School.findOne(schoolQuery).lean();
+    if (!school) return res.status(404).json({ error: 'School not found' });
+
+    const User = tenantModel('users', { schoolId: school.id });
+
+    // {schoolId, email} is DB-uniquely indexed — check first for a clean 409
+    // rather than surfacing a raw duplicate-key error.
+    const existing = await User.findOne({ email }).lean();
+    if (existing) return res.status(409).json({ error: `A user with this email already exists at this school (role: ${existing.role})` });
+
+    const tempPassword = password && String(password).length >= 8 ? String(password) : crypto.randomBytes(9).toString('base64').replace(/[+/=]/g, '').slice(0, 12);
+    const hashed = await bcrypt.hash(tempPassword, 12);
+    const userId = `u_${school.slug || school.id}_${Date.now().toString(36)}`;
+
+    const db = mongoose.connection.db;
+    const userDoc = {
+      id: userId, schoolId: school.id, name, email, password: hashed,
+      role: 'superadmin', primaryRole: 'superadmin', roles: ['superadmin'],
+      isActive: true, mustChangePassword: !password, createdAt: new Date().toISOString(),
+    };
+    const insertResult = await db.collection('users').insertOne(userDoc);
+    userDoc._id = insertResult.insertedId;
+
+    try {
+      await provisionIdentityForUser(userDoc);
+    } catch (err) {
+      console.error('[platform/schools/:id/superadmins] identity provisioning failed (will self-heal at next restart):', err.message);
+    }
+
+    await AuditService.log({
+      action: 'platform.superadmin_added', actor: { userId: 'platform', role: 'platform', email: null },
+      schoolId: school.id, target: { type: 'user', id: userId }, details: { email, schoolName: school.name }, req,
+    });
+
+    res.status(201).json({
+      user: { id: userId, name, email, role: 'superadmin' },
+      // Only returned here, once — the caller (platform admin) is responsible
+      // for relaying it securely. Not logged, not stored anywhere in plaintext.
+      ...(userDoc.mustChangePassword ? { tempPassword } : {}),
+      note: userDoc.mustChangePassword
+        ? 'A temporary password was generated. It must be changed on first login.'
+        : 'Account created with the provided password.',
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 /* GET /api/platform/schools/pending — list schools awaiting approval */
 router.get('/schools/pending', async (req, res) => {
   try {

@@ -139,9 +139,10 @@ const ACTIONS = {
   // Growth Profile / Behaviour (Governance Spec §2)
   'behaviour.points_reset':        { severity: 'warn' },
   // Platform (operator-level)
-  'platform.impersonate':    { severity: 'critical' },
-  'platform.school_deleted': { severity: 'critical' },
-  'platform.backup_restored':{ severity: 'critical' },
+  'platform.impersonate':       { severity: 'critical' },
+  'platform.school_deleted':    { severity: 'critical' },
+  'platform.backup_restored':   { severity: 'critical' },
+  'platform.superadmin_added':  { severity: 'warn' },
 };
 
 /**

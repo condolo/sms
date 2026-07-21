@@ -6,6 +6,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.3.2] — 2026-07-21 — feat(platform): add superadmin to an already-existing school
+
+The 2026-07-21 orphan-purge incident (see v5.3.1) exposed a real gap, not just a bug: there was no way to add a superadmin to a school that already exists. The only account-creation paths were `POST /schools`' inline admin creation (first provisioning only) and the self-service "invite" flow (`users.js`/`settings.js`), which requires an already-logged-in admin at that school — useless once a school has zero working superadmins. A school losing its last superadmin had no recovery path except a one-off script.
+
+### Added
+- `GET /api/platform/schools/:id/superadmins` — list a school's superadmin accounts.
+- `POST /api/platform/schools/:id/superadmins` — create a new superadmin at an existing school. A school may validly have 2+ superadmins (co-founders, a client onboarded after initial registration, group-level staff acting as school admin). Generates a random temporary password (`mustChangePassword: true`) unless one is explicitly supplied; provisions the account's Identity inline (same as every other user-creation site); logs via `AuditService` (`platform.superadmin_added`, severity `warn`).
+- `platform.html` — "Superadmins" button on each school row opens a modal listing current superadmins with an inline add form; the generated temp password is shown once in the success panel.
+- `server/__tests__/routes/platform-superadmins.test.js` — 9 tests: listing, creation, multiple-superadmins-per-school, duplicate-email 409, validation, missing-school 404s.
+
+### Note
+Both routes resolve the school by ID/slug via the platform-exempt `schools` model, then scope the `users` lookup through `tenantModel('users', {schoolId})` rather than the raw `_model()` escape hatch — unlike `/orphans` or `/impersonate`, this route operates on one already-resolved school, not a cross-tenant search, so it follows the normal ADR-0001 tenant-scoping discipline (ratchet held at 36, no new exception needed).
+
+---
+
 ## [v5.3.1] — 2026-07-21 — fix(platform): orphaned-user purge deleted valid superadmins, breaking impersonation + org-login
 
 **Live production incident.** `DELETE /api/platform/orphans` flagged a superadmin account as "orphaned" (and deleted it) if the account's personal login email didn't equal the value in `schools.adminEmail` — a school's single contact-email field, not a registry of valid superadmin logins — **OR** its `schoolId` matched no existing school. These were OR'd, so a superadmin with a perfectly valid, still-existing `schoolId` was deleted anyway whenever their personal email happened to differ from that contact field — a normal, common case for any superadmin onboarded after a school's initial registration.

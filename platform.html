@@ -584,6 +584,9 @@ function _schoolRow(s) {
           <button class="pa-btn" title="Grant/revoke capabilities independent of plan tier" onclick="showEntitlements('${s._id}','${s.name.replace(/'/g,"\\'")}')">
             <i class="fas fa-unlock-alt"></i> Entitlements
           </button>
+          <button class="pa-btn" title="View/add superadmin accounts" onclick="showSuperadmins('${s._id}','${s.name.replace(/'/g,"\\'")}')">
+            <i class="fas fa-user-shield"></i> Superadmins
+          </button>
           ${s.isActive
             ? `<button class="pa-btn danger" title="Suspend school" onclick="toggleActive('${s._id}',false,'${s.name}')"><i class="fas fa-ban"></i></button>`
             : `<button class="pa-btn success" title="Reinstate school" onclick="toggleActive('${s._id}',true,'${s.name}')"><i class="fas fa-check"></i></button>`
@@ -1309,6 +1312,100 @@ async function revokeEntitlement(schoolId, key) {
     loadEntitlements(schoolId);
   } catch (err) {
     toast('Failed: ' + err.message, 'error');
+  }
+}
+
+/* ── Superadmins (view/add) ─────────────────────────────── */
+function showSuperadmins(schoolId, schoolName) {
+  showModal(
+    `Superadmins — ${schoolName}`,
+    `<div style="display:flex;flex-direction:column;gap:12px;text-align:left">
+      <p style="font-size:12px;color:#64748b;margin:0">
+        A school can have more than one superadmin (co-founders, a client onboarded after initial registration,
+        group-level staff acting as school admin, etc.). Adding one here is separate from the self-service "Invite"
+        flow inside the school itself — use this when there's no admin currently able to log in to invite anyone.
+      </p>
+      <div id="sa-list" style="min-height:20px">
+        <div class="pa-loading"><i class="fas fa-circle-notch fa-spin"></i> Loading…</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;border-top:1px solid #e5e7eb;padding-top:12px">
+        <div style="flex:1;min-width:140px">
+          <label class="pa-label" style="font-size:11px">Name</label>
+          <input id="sa-name" class="pa-input" placeholder="Full name" style="width:100%">
+        </div>
+        <div style="flex:1;min-width:180px">
+          <label class="pa-label" style="font-size:11px">Email</label>
+          <input id="sa-email" type="email" class="pa-input" placeholder="admin@example.com" style="width:100%">
+        </div>
+        <button class="pa-btn primary" onclick="addSuperadmin('${schoolId}')"><i class="fas fa-plus"></i> Add</button>
+      </div>
+      <p style="font-size:11px;color:#94a3b8;margin:0">A random temporary password is generated and shown once — the new admin must change it on first login.</p>
+      <div id="sa-result" style="display:none;padding:10px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;font-size:12px;color:#166534"></div>
+      <div id="sa-error" style="display:none;padding:8px 12px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:12px;color:#b91c1c"></div>
+    </div>`,
+    [{ label: 'Close', cls: 'pa-btn', action: 'closeModal()' }]
+  );
+  loadSuperadmins(schoolId);
+}
+
+async function loadSuperadmins(schoolId) {
+  const listEl = document.getElementById('sa-list');
+  if (!listEl) return;
+  try {
+    const json  = await api('GET', `/schools/${schoolId}/superadmins`);
+    const items = json.superadmins || [];
+    if (!items.length) {
+      listEl.innerHTML = '<p style="font-size:12px;color:#94a3b8;margin:0">No superadmins found for this school.</p>';
+      return;
+    }
+    listEl.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="border-bottom:1px solid #e2e8f0">
+          <th style="text-align:left;padding:6px 8px;color:#64748b;font-size:11px;text-transform:uppercase">Name</th>
+          <th style="text-align:left;padding:6px 8px;color:#64748b;font-size:11px;text-transform:uppercase">Email</th>
+          <th style="text-align:left;padding:6px 8px;color:#64748b;font-size:11px;text-transform:uppercase">Status</th>
+        </tr>
+      </thead>
+      <tbody>${items.map(u => `
+        <tr>
+          <td style="padding:6px 8px">${u.name || '—'}</td>
+          <td style="padding:6px 8px;color:#64748b">${u.email}</td>
+          <td style="padding:6px 8px">${u.isActive === false ? '<span style="color:#94a3b8">Inactive</span>' : '<span style="color:#22c55e">Active</span>'}${u.mustChangePassword ? ' <span style="color:#d97706">· must change password</span>' : ''}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+  } catch (err) {
+    listEl.innerHTML = `<p style="font-size:12px;color:#b91c1c;margin:0">Failed to load: ${err.message}</p>`;
+  }
+}
+
+async function addSuperadmin(schoolId) {
+  const name    = document.getElementById('sa-name')?.value.trim();
+  const email   = document.getElementById('sa-email')?.value.trim();
+  const errEl   = document.getElementById('sa-error');
+  const resEl   = document.getElementById('sa-result');
+  errEl.style.display = 'none';
+  resEl.style.display = 'none';
+
+  if (!name || !email) {
+    errEl.textContent = 'Name and email are required.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  try {
+    const json = await api('POST', `/schools/${schoolId}/superadmins`, { name, email });
+    document.getElementById('sa-name').value  = '';
+    document.getElementById('sa-email').value = '';
+    if (json.tempPassword) {
+      resEl.innerHTML = `<strong>${email}</strong> created. Temporary password (shown once — copy it now):<br><code style="user-select:all;font-size:13px">${json.tempPassword}</code>`;
+      resEl.style.display = 'block';
+    }
+    toast(json.note || 'Superadmin added.', 'success');
+    loadSuperadmins(schoolId);
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
   }
 }
 
