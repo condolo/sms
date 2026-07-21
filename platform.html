@@ -696,8 +696,69 @@ function _orgRow(o) {
         <button class="pa-btn" title="Edit organization name (slug is fixed and cannot be changed)" onclick="editOrgName('${o.id}','${o.name.replace(/'/g,"\\'")}')">
           <i class="fas fa-pen"></i> Rename
         </button>
+        <button class="pa-btn" title="Add a read-only Group Director/CEO account — sees a merged analytics view across every school in this org, nothing else" onclick="showAddDirector('${o.id}','${o.name.replace(/'/g,"\\'")}')" ${o._stats.activeCount === 0 ? 'disabled' : ''}>
+          <i class="fas fa-chart-line"></i> Add Director
+        </button>
       </td>
     </tr>`;
+}
+
+/* ── Group Director (read-only, cross-org analytics) ─────── */
+function showAddDirector(orgId, orgName) {
+  showModal(
+    `Add Group Director — ${orgName}`,
+    `<div style="display:flex;flex-direction:column;gap:12px;text-align:left">
+      <p style="font-size:12px;color:#64748b;margin:0">
+        Creates a read-only account that automatically sees a merged analytics dashboard across every
+        <strong>active school in this organization</strong> — attendance, fees, behaviour, and academic
+        performance rolled up and compared side by side. No access to any school's settings or day-to-day
+        operations. Adding a school to this org later means it appears here automatically, no extra step.
+      </p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div style="flex:1;min-width:140px">
+          <label class="pa-label" style="font-size:11px">Name</label>
+          <input id="dir-name" class="pa-input" placeholder="Full name" style="width:100%">
+        </div>
+        <div style="flex:1;min-width:180px">
+          <label class="pa-label" style="font-size:11px">Email</label>
+          <input id="dir-email" type="email" class="pa-input" placeholder="director@example.com" style="width:100%">
+        </div>
+      </div>
+      <button class="pa-btn primary" onclick="addDirector('${orgId}')" style="align-self:flex-start"><i class="fas fa-plus"></i> Create Account</button>
+      <p style="font-size:11px;color:#94a3b8;margin:0">A random temporary password is generated and shown once — the director must change it on first login.</p>
+      <div id="dir-result" style="display:none;padding:10px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;font-size:12px;color:#166534"></div>
+      <div id="dir-error" style="display:none;padding:8px 12px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:12px;color:#b91c1c"></div>
+    </div>`,
+    [{ label: 'Close', cls: 'pa-btn', action: 'closeModal()' }]
+  );
+}
+
+async function addDirector(orgId) {
+  const name  = document.getElementById('dir-name')?.value.trim();
+  const email = document.getElementById('dir-email')?.value.trim();
+  const errEl = document.getElementById('dir-error');
+  const resEl = document.getElementById('dir-result');
+  errEl.style.display = 'none';
+  resEl.style.display = 'none';
+
+  if (!name || !email) {
+    errEl.textContent = 'Name and email are required.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  try {
+    const json = await api('POST', `/organizations/${orgId}/director`, { name, email });
+    document.getElementById('dir-name').value  = '';
+    document.getElementById('dir-email').value = '';
+    resEl.innerHTML = `<strong>${email}</strong> created (anchored at ${json.anchorSchool?.name || '—'}).` +
+      (json.tempPassword ? ` Temporary password (shown once — copy it now):<br><code style="user-select:all;font-size:13px">${json.tempPassword}</code>` : '');
+    resEl.style.display = 'block';
+    toast(json.note || 'Group Director added.', 'success');
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  }
 }
 
 /* Multi-school activation modal (org-shared-slug feature). One switch —

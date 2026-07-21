@@ -62,6 +62,7 @@ const LessonsPage          = lazy(() => import('@/pages/lessons/LessonsPage.jsx'
 const ELearningPage        = lazy(() => import('@/pages/elearning/ELearningPage.jsx'));
 const StudentDashboard     = lazy(() => import('@/pages/student-portal/StudentDashboard.jsx'));
 const ParentDashboard      = lazy(() => import('@/pages/parent-portal/ParentDashboard.jsx'));
+const GroupDashboard       = lazy(() => import('@/pages/group-portal/GroupDashboard.jsx'));
 const PlatformConsole      = lazy(() => import('@/pages/ops/PlatformConsole.jsx'));
 
 function SuspenseWrapper({ children }) {
@@ -176,6 +177,9 @@ export const router = createBrowserRouter([
 
   // Parent portal — accessible after parent login (no AppShell)
   { path: '/parent-dashboard', element: <SuspenseWrapper><ParentDashboard /></SuspenseWrapper> },
+
+  // Group director portal — read-only, merged cross-school analytics only (no AppShell)
+  { path: '/group-dashboard', element: <SuspenseWrapper><GroupDashboard /></SuspenseWrapper> },
 
   // Platform Console — superadmin only, no AppShell (operator tool, not school UI)
   { path: '/ops', element: <SuspenseWrapper><PlatformConsole /></SuspenseWrapper> },

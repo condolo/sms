@@ -460,6 +460,7 @@ export default function Login() {
   function _defaultDest(role) {
     if (role === 'student') return '/student-dashboard';
     if (role === 'parent' || role === 'guardian') return '/parent-dashboard';
+    if (role === 'group_director') return '/group-dashboard';
     return '/dashboard';
   }
 

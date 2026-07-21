@@ -10,6 +10,7 @@ const jwt        = require('jsonwebtoken');
 const rateLimit  = require('express-rate-limit');
 const { platformSession } = require('../middleware/auth');
 const { invalidatePlanCache } = require('../middleware/plan');
+const { invalidatePermCache }  = require('../middleware/rbac');
 const AuditService      = require('../services/audit');
 const { sign } = require('../utils/jwt');
 const email    = require('../utils/email');
@@ -515,6 +516,94 @@ router.post('/organizations', async (req, res) => {
     res.status(201).json({ organization: org });
   } catch (err) {
     console.error('[platform/organizations POST]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* POST /api/platform/organizations/:id/director — create a read-only,
+   cross-school "Group Director/CEO" account for this organization. Unlike
+   a per-school superadmin, this role's whole point is NOT caring about any
+   one school's settings — it lands on a merged, org-wide analytics view
+   (GET /api/analytics/group) and automatically sees every school in this
+   org, including ones added to the org later, with no per-school account
+   or grant needed per school.
+
+   The account still needs exactly one "anchor" school to hold its users
+   doc (login is per-school-JWT, same mechanism as every other role) — the
+   org's oldest active school is used, chosen deterministically so re-runs
+   are predictable. That choice is otherwise invisible to the director: the
+   analytics route ignores their own schoolId beyond using it to look up
+   the org, then reads every school in it. */
+router.post('/organizations/:id/director', async (req, res) => {
+  try {
+    const { name, email: rawEmail, password } = req.body || {};
+    const email = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : '';
+    if (!name || !email) return res.status(400).json({ error: 'name and email are required' });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Invalid email address' });
+
+    const Org = _model('organizations');
+    const org = await Org.findOne({ id: req.params.id }).lean();
+    if (!org) return res.status(404).json({ error: 'Organization not found' });
+
+    const School = _model('schools');
+    const anchorSchool = await School.findOne({ organizationId: org.id, isActive: { $ne: false } })
+      .sort({ createdAt: 1 }).lean();
+    if (!anchorSchool) return res.status(400).json({ error: 'This organization has no active school to anchor the account to' });
+
+    const User = tenantModel('users', { schoolId: anchorSchool.id });
+    const existing = await User.findOne({ email }).lean();
+    if (existing) return res.status(409).json({ error: `A user with this email already exists at ${anchorSchool.name} (role: ${existing.role})` });
+
+    const tempPassword = password && String(password).length >= 8 ? String(password) : crypto.randomBytes(9).toString('base64').replace(/[+/=]/g, '').slice(0, 12);
+    const hashed = await bcrypt.hash(tempPassword, 12);
+    const userId = `u_director_${Date.now().toString(36)}`;
+
+    const db = mongoose.connection.db;
+    const userDoc = {
+      id: userId, schoolId: anchorSchool.id, name, email, password: hashed,
+      role: 'group_director', primaryRole: 'group_director', roles: ['group_director'],
+      isActive: true, mustChangePassword: !password, createdAt: new Date().toISOString(),
+    };
+    const insertResult = await db.collection('users').insertOne(userDoc);
+    userDoc._id = insertResult.insertedId;
+
+    try {
+      await provisionIdentityForUser(userDoc);
+    } catch (err) {
+      console.error('[platform/organizations/:id/director] identity provisioning failed (will self-heal at next restart):', err.message);
+    }
+
+    // Seed a read-only role_permissions doc for 'group_director' at the anchor
+    // school, ONLY if one doesn't already exist there — never overwrite a
+    // platform admin's prior customization on re-run. Granting exactly
+    // group_analytics:['read'] and nothing else is what actually enforces
+    // "no settings access" — the role name alone grants nothing.
+    const RolePerms = tenantModel('role_permissions', { schoolId: anchorSchool.id });
+    const existingPerm = await RolePerms.findOne({ roleKey: 'group_director' }).lean();
+    if (!existingPerm) {
+      await RolePerms.create({
+        id: `rp_group_director_${anchorSchool.id}`, roleKey: 'group_director',
+        permissions: { group_analytics: ['read'] }, createdAt: new Date().toISOString(),
+      });
+    }
+    invalidatePermCache(anchorSchool.id);
+
+    await AuditService.log({
+      action: 'platform.group_director_added', actor: { userId: 'platform', role: 'platform', email: null },
+      schoolId: anchorSchool.id, target: { type: 'user', id: userId },
+      details: { email, organizationId: org.id, organizationName: org.name, anchorSchool: anchorSchool.name }, req,
+    });
+
+    res.status(201).json({
+      user: { id: userId, name, email, role: 'group_director' },
+      anchorSchool: { id: anchorSchool.id, name: anchorSchool.name },
+      ...(userDoc.mustChangePassword ? { tempPassword } : {}),
+      note: userDoc.mustChangePassword
+        ? 'A temporary password was generated. It must be changed on first login. This account will see a merged analytics view across every school in this organization — not any single school\'s operational data or settings.'
+        : 'Account created with the provided password.',
+    });
+  } catch (err) {
+    console.error('[platform/organizations/:id/director] POST error:', err);
     res.status(500).json({ error: err.message });
   }
 });

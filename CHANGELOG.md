@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.3.3] — 2026-07-21 — feat(analytics): Group Director/CEO role — read-only, merged cross-school dashboard
+
+Activates the "exec reporting" slice of the long-paused C6 (Organization services) roadmap item, on explicit request — a read-only account for a group's Director/CEO who has no interest in any single school's settings or day-to-day operations, just a merged view of what matters across every school in their organization. Chosen design (confirmed): access spans every active school in the org automatically (add a school later, it appears with no per-account change), and the dashboard rolls up the existing single-school Leadership Analytics metrics rather than inventing new ones.
+
+### Added
+- `server/routes/analytics.js` — `GET /api/analytics/group?days=30`, gated on a new `group_analytics:read` permission (distinct from the single-school `analytics` permission, so an ordinary admin's existing analytics access never implicitly grants a cross-school view). Resolves the caller's own school's organization, finds every active school in it, runs the same 4-aggregation leadership snapshot for each in parallel, and returns both the per-school breakdown and a combined organization-wide summary (weighted averages for attendance/academic performance, straight sums for fees/behaviour — never a meaningless concatenation of one school's class list against another's). The existing `/leadership` route's aggregation logic was extracted into `_computeLeadershipSnapshot(schoolId, days)`, now schoolId-parameterized instead of derived from `req.jwtUser`, so both routes share one implementation.
+- `POST /api/platform/organizations/:id/director` — platform-admin route creating a `group_director` account, anchored at the organization's oldest active school (the only school it needs a real login record at — access to the rest of the org is automatic, not per-school). Seeds a `role_permissions` doc at that school granting **only** `group_analytics:['read']` — the mechanism that actually enforces "no settings access," not the role name alone. Never overwrites an existing customization on re-run.
+- `platform.html` — "Add Director" button on each Organizations row, opening a modal (name/email → temp password shown once).
+- `client/src/pages/group-portal/GroupDashboard.jsx` — standalone dashboard (no AppShell/sidebar, matching the existing student/parent portal pattern): summary cards (fee collection, attendance, academic average, behaviour incidents) plus a per-school comparison table.
+- `client/src/pages/Login.jsx` / `ProtectedRoute.jsx` — `group_director` routes to `/group-dashboard` on login and is redirected there if it ever reaches the staff AppShell (defense in depth; RBAC already blocks every module there since the role has no other grants).
+- Tests: `server/__tests__/routes/analytics-group.test.js` (5, first coverage for `analytics.js`) and `server/__tests__/routes/platform-director.test.js` (7) — rollup math, org/active-school filtering, permission seeding and non-overwrite, validation.
+
+### Note
+Full suite 72/72 suites, 649/649 tests; security-scan and tenant-coverage ratchet both clean (held at 36 — the new `users`/`role_permissions` access goes through `tenantModel()`, not the platform's cross-tenant escape hatch).
+
+---
+
 ## [v5.3.2] — 2026-07-21 — feat(platform): add superadmin to an already-existing school
 
 The 2026-07-21 orphan-purge incident (see v5.3.1) exposed a real gap, not just a bug: there was no way to add a superadmin to a school that already exists. The only account-creation paths were `POST /schools`' inline admin creation (first provisioning only) and the self-service "invite" flow (`users.js`/`settings.js`), which requires an already-logged-in admin at that school — useless once a school has zero working superadmins. A school losing its last superadmin had no recovery path except a one-off script.
