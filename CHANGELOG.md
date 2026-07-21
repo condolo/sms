@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.2.1] — 2026-07-21 — fix: org-shared-login blocked every real sign-in attempt despite showing a normal login page
+
+Reported live by a customer (Trinity-Trinitas Schools): the organization's shared login page rendered normally (branding, logo, "Sign in once to access any of your schools"), but every sign-in attempt — correct credentials or not — failed with a generic "Portal not found," indistinguishable from a broken link.
+
+Root cause: `POST /api/auth/org-login` required both `organizations.multiSchoolEnabled` (the same flag a platform admin toggles to activate the feature) **and** the separate, platform-global `IDENTITY_CUTOVER_ENABLED` environment variable — while `GET /api/public/resolve-portal` (the endpoint that decides whether the login page itself renders) only ever checked `multiSchoolEnabled`. A school admin turning on `multiSchoolEnabled` got a fully working-looking login page that could never actually complete a sign-in, because a second, undiscoverable, operator-only env var also had to be flipped, and nothing surfaced that requirement anywhere in the product.
+
+The extra gate was never protecting correctness: dual-write (ADR-0003 Phase 1, already unconditional) keeps `identities.passwordHash` in sync with `users.password` regardless of cutover, so `org-login`'s credential check was always reading a trustworthy hash. The gate was a deliberately conservative circuit breaker for a *different* decision (whether single-school `/login` trusts `identities` over `users.password`) that had been applied to this route "just in case," with no real dependency requiring it.
+
+### Fixed
+
+- `server/routes/auth.js` — `POST /api/auth/org-login` now gates on `organizations.multiSchoolEnabled` only, matching `resolve-portal` exactly. `IDENTITY_CUTOVER_ENABLED` is untouched everywhere else it's used (single-school `/login`, `/change-password`, `PUT /settings`).
+- The "Portal not found" message now echoes the caller's own submitted slug (`Portal '{slug}' not found`), matching `resolve-portal`'s existing message format — cosmetic, but closes a small inconsistency between the two "same shape" endpoints the code already claimed to mirror.
+- `docs/adr/ADR-0007-org-slug-login.md` — correction 7 added, documenting the asymmetry, why it was safe to remove, and what's regression-pinned against it recurring.
+- `server/__tests__/routes/auth-org-login.test.js` — replaced the test that pinned the old (buggy) behavior with a regression pin proving `org-login` does *not* 404 when `IDENTITY_CUTOVER_ENABLED` is unset, as long as `multiSchoolEnabled` is true.
+
+### A related gap, identified but not yet changed — flagged for a deliberate follow-up
+
+Investigating this surfaced a second, real finding in `server/utils/provision-identities.js`: when a person's two per-school accounts are merged into one shared Identity (the Unified Identity model — see ADR-0003), **there is no defined tie-breaker for which of the two accounts' passwords becomes the org-login password.** The code takes `user.password` from whichever of the two account docs happens to be processed first (arbitrary boot-cursor/creation order) — not, as earlier design notes described, "the `isPrimary` membership's account with a forced reset for the other holder." No forced-reset or notification flow exists for the non-canonical account either. In practice this means: for a person with genuinely different passwords at two schools before their identity was unified, org-login will only ever accept one of them, and there is currently no way for that person (or an admin) to know which one, or to be told to reset. Going forward, per unconditional dual-write, *whichever password was most recently changed on either school's login* becomes authoritative for org-login — so this gap is narrowest for accounts whose password has never been changed since identity provisioning ran. The existing `qa-health.js` diagnostic (`_checkPasswordHashMismatch`, ADR-0003 Phase 2) already detects this condition platform-wide (comparing `users.password` against the linked identity's `passwordHash`) and is the right first place to check for affected accounts before deciding on a fix (deterministic tie-break rule + forced-reset notification for the losing account) — deliberately not implemented in this pass, since it changes credential-merge policy and deserves its own explicit sign-off rather than being folded into an urgent bug fix.
+
+---
+
 ## [v5.2.0] — 2026-07-21 — feat(notifications): activate every remaining "Coming soon" event
 
 v5.1.0 shipped the real dispatch mechanism but scoped it to Behaviour incidents only, explicitly leaving Finance, Attendance, and the rest of Academic as registered-but-unimplemented. This phase wires all of them to real trigger sites — nothing in the notification registry says "Coming soon" anymore.

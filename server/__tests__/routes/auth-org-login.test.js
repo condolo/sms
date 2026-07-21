@@ -12,11 +12,16 @@
    this file focuses on the credential-check and picker-redemption
    layers built on top of it.
 
-   Two gates required for org-login to ever leave its "not found"
+   One gate required for org-login to ever leave its "not found"
    posture: organizations.multiSchoolEnabled (originally two flags —
-   orgSlugLoginEnabled removed 2026-07-20, ADR-0007 correction 6) and
-   the platform-global IDENTITY_CUTOVER_ENABLED env var — each tested
-   independently.
+   orgSlugLoginEnabled removed 2026-07-20, ADR-0007 correction 6). A
+   second, platform-global IDENTITY_CUTOVER_ENABLED gate was removed
+   2026-07-21 (ADR-0007 correction 7) after it silently blocked every
+   org-login attempt for a real customer whose org WAS opted in —
+   resolve-portal never checked this flag, so the branded org-login
+   page rendered fine while every sign-in attempt against it 404'd,
+   indistinguishable from a wrong password. Explicitly pinned below:
+   org-login must proceed past its gate regardless of that env var.
 
    The load-bearing security tests: complete-org-login must 403 when
    asked to redeem a schoolId outside the server-locked allowlist from
@@ -147,7 +152,8 @@ function setupOptedInOrg({ schoolCount = 2 } = {}) {
   if (schoolCount >= 2) {
     mockSchoolDocsById.sch_b = { id: 'sch_b', organizationId: 'org_x', slug: 'gv-b', name: 'Campus B' };
   }
-  process.env.IDENTITY_CUTOVER_ENABLED = 'true';
+  // IDENTITY_CUTOVER_ENABLED deliberately left unset here — org-login must
+  // not depend on it (ADR-0007 correction 7); see the pinning test below.
 }
 
 /* ══════════════════════════════════════════════════════════════ */
@@ -208,18 +214,22 @@ describe('POST /api/auth/org-login', () => {
 
   test('404s the SAME shape when multiSchoolEnabled is false', async () => {
     mockOrgDocs.org_x = { id: 'org_x', slug: 'green-valley', multiSchoolEnabled: false };
-    process.env.IDENTITY_CUTOVER_ENABLED = 'true';
     const app = buildApp();
     const res = await supertest(app).post('/api/auth/org-login').send({ orgSlug: 'green-valley', email: 'a@b.com', password: 'x' });
     expect(res.status).toBe(404);
   });
 
-  test('404s the SAME shape when IDENTITY_CUTOVER_ENABLED is not set, even with multiSchoolEnabled true', async () => {
+  test('REGRESSION PIN (ADR-0007 correction 7): does NOT 404 when IDENTITY_CUTOVER_ENABLED is unset, as long as multiSchoolEnabled is true — org-login must never depend on the platform-wide cutover flag, only resolve-portal\'s own gate', async () => {
     mockOrgDocs.org_x = { id: 'org_x', slug: 'green-valley', multiSchoolEnabled: true };
-    // IDENTITY_CUTOVER_ENABLED deliberately left unset
+    delete process.env.IDENTITY_CUTOVER_ENABLED; // explicit, even though beforeEach already clears it
     const app = buildApp();
     const res = await supertest(app).post('/api/auth/org-login').send({ orgSlug: 'green-valley', email: 'a@b.com', password: 'x' });
-    expect(res.status).toBe(404);
+    // No identity configured for this email, so it correctly falls through
+    // to "invalid credentials" — the point of this test is that it is NOT
+    // the 404 "Portal not found" shape a cutover-gated version would give.
+    expect(res.status).not.toBe(404);
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe('Invalid email or password');
   });
 
   test('429s when the account is locked out', async () => {

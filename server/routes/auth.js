@@ -1401,28 +1401,39 @@ router.post('/switch-school', authMiddleware, switchSchoolLimiter, async (req, r
    completing the Organization/Identity/Membership layer's intended
    behavior (PLATFORM_ARCHITECTURE_EVOLUTION_v1.md §15), not a new one.
 
-   Two independent gates, none redundant:
-     - organizations.multiSchoolEnabled — JWT orgId/membershipId + C9
-       switching AND the org-slug public login surface, per-org,
-       platform-admin togglable. Originally split into two separate
-       flags (this one plus a since-removed orgSlugLoginEnabled) so
-       enabling switching could never silently expose the public login
-       endpoint too. Collapsed into one (ADR-0007 amendment) once real
-       usage showed the split added an activation step without adding
-       real safety: multiSchoolEnabled is already a deliberate, rare,
-       platform-admin-only action, and the single-eligible-school fast
-       path below means a person whose org has 2+ schools but who only
-       has an account at one of them never sees a picker or learns the
-       others exist — the "public surface" risk doesn't scale with org
-       size, only with how many schools *that identity* can reach.
-     - IDENTITY_CUTOVER_ENABLED — platform-global env var. Dual-write
-       (ADR-0003 Phase 1, already shipped, unconditional) keeps
-       identities.passwordHash correct regardless of this flag, so it
-       is not strictly required for correctness here — requiring it
-       anyway is a deliberate, near-zero-cost conservative choice: this
-       new public credential-check endpoint cannot go live in any
-       deployment until an operator has made the informed, platform-
-       wide decision that identities are authoritative.
+   One gate: organizations.multiSchoolEnabled — JWT orgId/membershipId +
+   C9 switching AND the org-slug public login surface (both the page
+   AND the credential check below), per-org, platform-admin togglable.
+   Originally split into two separate flags (this one plus a
+   since-removed orgSlugLoginEnabled) so enabling switching could never
+   silently expose the public login endpoint too. Collapsed into one
+   (ADR-0007 amendment) once real usage showed the split added an
+   activation step without adding real safety: multiSchoolEnabled is
+   already a deliberate, rare, platform-admin-only action, and the
+   single-eligible-school fast path below means a person whose org has
+   2+ schools but who only has an account at one of them never sees a
+   picker or learns the others exist — the "public surface" risk
+   doesn't scale with org size, only with how many schools *that
+   identity* can reach.
+
+   2026-07-21 correction: this route ALSO required the platform-global
+   IDENTITY_CUTOVER_ENABLED env var, on top of multiSchoolEnabled — an
+   asymmetry with GET /api/public/resolve-portal (which only ever
+   checked multiSchoolEnabled). That meant an org whose admin had
+   turned multiSchoolEnabled on got a fully-rendered, branded org-login
+   PAGE (resolve-portal succeeded) that could never actually complete a
+   sign-in (this route 404'd "Portal not found" on every attempt,
+   indistinguishable from a wrong password) until a platform operator
+   separately flipped a global env var most schools have no way to know
+   exists — confirmed live, blocking a real customer. Dual-write
+   (ADR-0003 Phase 1, unconditional, already shipped) keeps
+   identities.passwordHash correct regardless of cutover, so the extra
+   gate was never protecting correctness here — it was a deliberately
+   conservative circuit breaker on a *different* thing (whether
+   single-school POST /login trusts identities over users.password),
+   applied to this route too "just in case," with no actual dependency
+   requiring it. Removed. This route now gates on multiSchoolEnabled
+   only, matching resolve-portal exactly — see ADR-0007 correction 7.
 
    Unlike switch-school (an already-authenticated user re-scoping,
    handed off via the OAuth exchange-code mechanism), org-login and
@@ -1475,12 +1486,15 @@ router.post('/org-login', orgLoginLimiter, async (req, res) => {
 
     // Same not-found shape whether the slug matches nothing, matches an
     // org that hasn't opted in, or any other negative — no existence
-    // leakage via response-shape difference (mirrors resolve-portal).
-    const NOT_FOUND = () => res.status(404).json({ error: 'Portal not found' });
+    // leakage via response-shape difference (mirrors resolve-portal,
+    // including now echoing the caller's own slug in the message, same
+    // as resolve-portal's `Portal '${slug}' not found` — safe, since
+    // it's only echoing input the caller already supplied).
+    const NOT_FOUND = () => res.status(404).json({ error: `Portal '${orgSlug}' not found` });
 
     const Org = _model('organizations');
     const org = await Org.findOne({ slug: orgSlug.toLowerCase() }).lean();
-    if (!org?.multiSchoolEnabled || !isIdentityCutoverEnabled()) {
+    if (!org?.multiSchoolEnabled) {
       return NOT_FOUND();
     }
 
