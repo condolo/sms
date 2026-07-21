@@ -743,6 +743,25 @@ const INDEXES = [
       { key: { schoolId: 1, resetAt: -1 }, name: 'bpr_school_date' },
     ],
   },
+
+  /* ── resources / resource_groups (Governance Spec §5) ──────────
+     Shared-links repository, multi-dimensional visibility. */
+  {
+    col: 'resources',
+    indexes: [
+      { key: { id: 1 },                 name: 'res_id',       unique: true, sparse: true },
+      { key: { schoolId: 1, createdAt: -1 }, name: 'res_school_date' },
+      { key: { schoolId: 1, category: 1 }, name: 'res_school_category' },
+    ],
+  },
+  {
+    col: 'resource_groups',
+    indexes: [
+      { key: { id: 1 },       name: 'resgrp_id',     unique: true, sparse: true },
+      { key: { schoolId: 1 }, name: 'resgrp_school' },
+      { key: { schoolId: 1, memberUserIds: 1 }, name: 'resgrp_school_member' },
+    ],
+  },
 ];
 
 /* ── One-time index migrations ──────────────────────────────────

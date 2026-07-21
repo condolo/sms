@@ -42,6 +42,7 @@ const ROLE_DEFAULTS = {
     attendance:   RCU,  grades:       RCU,  assessment:   RCU,
     timetable:    R,    messages:     RCU,  events:       R,
     report_cards: R,    exams:        R,    lessons:      RCUD,
+    resources:    RCU,
   },
 
   principal: {
@@ -49,7 +50,7 @@ const ROLE_DEFAULTS = {
     attendance:   RCUD, grades:       RCUD, assessment:   RCUD,
     exams:        RCUD, behaviour:    RCUD, timetable:    RCUD,
     messages:     RCUD, events:       RCUD, report_cards: RCU,
-    admissions:   RCU,  lessons:      RCUD,
+    admissions:   RCU,  lessons:      RCUD, resources:    RCUD,
   },
 
   deputy_principal: {
@@ -57,7 +58,7 @@ const ROLE_DEFAULTS = {
     attendance:   RCUD, grades:       RCUD, assessment:   RCUD,
     exams:        RCUD, behaviour:    RCUD, timetable:    RCUD,
     messages:     RCUD, events:       RCUD, report_cards: RCU,
-    admissions:   RCU,  lessons:      RCUD,
+    admissions:   RCU,  lessons:      RCUD, resources:    RCUD,
   },
 
   section_head: {
@@ -65,7 +66,7 @@ const ROLE_DEFAULTS = {
     attendance:   R, grades:   R, assessment: R,
     exams:        R, timetable: R, report_cards: R,
     admissions:   R, lessons:  RCU,
-    messages:     RCU, events:  R,
+    messages:     RCU, events:  R, resources: RCU,
   },
 
   admissions_officer: {
@@ -74,6 +75,7 @@ const ROLE_DEFAULTS = {
     classes:    R,
     messages:   RCU,
     events:     R,
+    resources:  RCU,
   },
 
   exams_officer: {
@@ -85,6 +87,7 @@ const ROLE_DEFAULTS = {
     report_cards: R,
     messages:     RCU,
     events:       R,
+    resources:    RCU,
   },
 
   finance: {
@@ -93,6 +96,7 @@ const ROLE_DEFAULTS = {
     report_cards: R,
     messages:     RCU,
     events:       R,
+    resources:    RCU,
   },
 
   hr: {
@@ -100,6 +104,7 @@ const ROLE_DEFAULTS = {
     students: R,
     messages: RCU,
     events:   R,
+    resources: RCU,
     // 'hr' module: hr.js's leave-resolve route already checks rbac('hr','update') —
     // this default was previously missing for the 'hr' role itself, fixed here
     // alongside adding manage_workflow for the new leave-chain-config permission.
@@ -112,6 +117,7 @@ const ROLE_DEFAULTS = {
     teachers:  R,
     messages:  RCU,
     events:    RCUD,
+    resources: RCU,
   },
 
   discipline_committee: {
@@ -119,17 +125,20 @@ const ROLE_DEFAULTS = {
     students:  R,
     messages:  RCU,
     events:    R,
+    resources: RCU,
   },
 
   parent: {
     messages:     R,
     report_cards: R,
     lessons:      R,
+    resources:    R,
   },
 
   student: {
     messages: R,
     lessons:  R,
+    resources: R,
   },
 };
 

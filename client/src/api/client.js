@@ -683,6 +683,18 @@ export const library = {
   },
 };
 
+export const resources = {
+  list:   (params)     => _get('/resources', params),
+  create: (data)        => _post('/resources', data),
+  update: (id, data)    => _put(`/resources/${id}`, data),
+  remove: (id)           => _delete(`/resources/${id}`),
+  groups: {
+    list:   ()           => _get('/resources/groups/list'),
+    create: (data)        => _post('/resources/groups', data),
+    remove: (id)           => _delete(`/resources/groups/${id}`),
+  },
+};
+
 export const transport = {
   summary: () => _get('/transport/summary'),
   routes: {

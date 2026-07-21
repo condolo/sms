@@ -6,6 +6,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v4.99.0] — 2026-07-20 — feat(resources): new shared-links repository with multi-dimensional visibility
+
+Final implementation phase from `docs/governance/GOVERNANCE_WORKFLOW_SPECIFICATION_v1.md` §5 — closes out the spec. Genuinely new: confirmed nothing to rename or repurpose (the "Library" module is an unrelated physical/digital book-lending system). The closest prior precedent for audience targeting, `messages.js`'s flat 5-option `recipients` field, had no class/individual/custom-group granularity at all.
+
+### Added
+
+- `server/routes/resources.js` — new `resources`/`resource_groups` collections, `tenantModel` pattern. `GET/POST/PUT/DELETE /api/resources`, plus `/api/resources/groups` for narrowly-scoped custom audience groups.
+- Multi-dimensional visibility: `{scope:'all'|'targeted', roles, sectionKeys, classIds, userIds, groupId}`. Class/section targeting resolves against the *caller's own* class membership (a student's own class, or a parent's linked children's classes) — the realistic "send this to Class 8A" case; teacher/staff-side class targeting is out of scope for this pass, staff reach relevant resources via role-based targeting instead.
+- Principal/admin/deputy get implicit full visibility (bypass audience targeting entirely) — expiry still applies to everyone, including them, since it's a lifecycle filter (`expiresAt` simply excludes a resource from listing once past, a query-time check, no cron job), not an audience-targeting concern.
+- `resources` RBAC module (`server/config/moduleRegistry.js`, default permissions in `repairPermissions.js` for every staff role plus read-only for parent/student) and `resources: 'core'` plan-gate entry.
+- Client: new `/resources` page (list + share/edit modal with a role/class visibility picker), sidebar entry.
+
+Closes the Governance & Workflow Specification's five implementation areas: Leave (v4.96.0), Marks (v4.97.0), Growth Profile (v4.98.0), and now Resources.
+
+---
+
 ## [v4.98.0] — 2026-07-20 — fix(growth-profile): permanent-record guarantee — soft-delete + manual points reset
 
 Third implementation phase from `docs/governance/GOVERNANCE_WORKFLOW_SPECIFICATION_v1.md` §2. The finding: permanence for Growth Profile history was incidental, not guaranteed — `growth_leadership`/`activities`/`service`/`awards` (via `growth-records.js`), `growth-projects.js`, and `growth-recommendations.js` all supported genuine hard `DELETE`, while `behaviour_incidents` already soft-deleted. This brings the less-careful half of the module up to the standard the other half already met.

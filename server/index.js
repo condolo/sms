@@ -249,6 +249,9 @@ app.use('/api/library',   require('./routes/library'));
 app.use('/api/transport', require('./routes/transport'));
 app.use('/api/hostel',    require('./routes/hostel'));
 
+/* ── Governance Spec §5: Resources (shared-links repository) ── */
+app.use('/api/resources', require('./routes/resources'));
+
 /* ── v4.33.0: Lessons / Syllabus Tracker ── */
 app.use('/api/lessons',  require('./routes/lessons'));
 

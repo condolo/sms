@@ -24,7 +24,7 @@ import {
   Wallet, Settings, LogOut, Library,
   MessageSquare, UserCog, TrendingUp, Tag, HelpCircle,
   BookMarked, Bus, BedDouble, X, BookCheck, MonitorPlay,
-  ChevronDown, BookMarked as ClassroomIcon, Video,
+  ChevronDown, BookMarked as ClassroomIcon, Video, Link2,
 } from 'lucide-react';
 import clsx from 'clsx';
 import useAuthStore from '@/store/auth.js';
@@ -48,6 +48,7 @@ const CONFIGURABLE_MODULES = [
   { key: 'lessons',    to: '/lessons',    Icon: BookCheck,      label: 'Lessons',             section: 'Academic'   },
   { key: 'elearning',  to: '/elearning',  Icon: MonitorPlay,    label: 'eLearning',           section: 'Academic'   },
   { key: 'library',    to: '/library',    Icon: BookMarked,     label: 'Library',             section: 'Operations' },
+  { key: 'resources',  to: '/resources',  Icon: Link2,          label: 'Resources',           section: 'Operations' },
   { key: 'transport',  to: '/transport',  Icon: Bus,            label: 'Transport',           section: 'Operations' },
   { key: 'hostel',     to: '/hostel',     Icon: BedDouble,      label: 'Hostel',              section: 'Operations' },
   { key: 'reports',    to: '/reports',    Icon: TrendingUp,     label: 'Reports & Analytics', section: 'Insights'   },

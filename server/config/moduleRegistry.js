@@ -141,6 +141,12 @@ const MODULE_REGISTRY = [
     { key: 'payroll_export', label: 'Export Payroll (CSV)' },
     { key: 'documents',      label: 'Manage Staff Documents' },
   ]},
+  { key: 'resources', label: 'Resources', section: 'Operations', subs: [
+    { key: 'read',   label: 'View Resources' },
+    { key: 'create', label: 'Share a Resource' },
+    { key: 'update', label: 'Edit a Resource' },
+    { key: 'delete', label: 'Delete a Resource' },
+  ]},
   { key: 'library', label: 'Library', section: 'Operations', subs: [
     { key: 'view',     label: 'View Catalogue & Records' },
     { key: 'issue',    label: 'Issue / Return Books' },
