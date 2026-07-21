@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.3.0] — 2026-07-21 — refactor(report-cards): split the PDF renderer into an IR + adapter (RC2)
+
+First step of the Report Card Platform rendering-pipeline consolidation (see `docs/audits/REPORT_CARD_ARCHITECTURE_CONSOLIDATION_PLAN.md` §4-§5). `_buildPDFPage` — one 250-line function deciding both *what* a report card contains and *how* to draw it with pdfkit — is split into `_computeReportSections` (a pure function: snapshot + config + attendance → a plain-data description of every section's content, zero pdfkit calls) and `_drawReportPage` (the one adapter that walks that data and makes the actual drawing calls). `_buildPDFPage` itself becomes a two-line wrapper preserving its exact original signature, so `GET /:id/pdf` and `GET /bulk-pdf` needed no changes.
+
+This is the prerequisite the Consolidation Plan calls for before anything else in the rendering pipeline changes: proving the split is behavior-preserving, not a redesign, before building a second (HTML) adapter on top of the same IR in the next phase.
+
+### Verification method
+
+Rather than trust a careful manual line-for-line translation, the exact pdfkit call sequence (`method` + `args`, in order) produced by the **original, pre-refactor** `_buildPDFPage` was captured against a spy `PDFDocument` for four fixtures covering every major branch — published/no-images, draft+all-three-images+second-page, superseded, and a "nothing configured" minimal case (empty assessment weights, no attendance, no ranking, no reportId) — committed as `server/__tests__/fixtures/report-card-pdf-golden.json`. `server/__tests__/report-cards-ir.test.js` re-runs the **refactored** code against the identical fixtures and asserts the call sequence is unchanged, byte-for-byte, across all 848 recorded calls. All four pass.
+
+### Added
+
+- `server/__tests__/fixtures/report-card-pdf-golden.json` — golden call-sequence fixture, four scenarios.
+- `server/__tests__/report-cards-ir.test.js` — the regression proof, plus direct unit tests on `_computeReportSections` (purity, watermark branching, safe fallbacks for the empty-config case).
+
+### Explicitly not in this phase
+
+No HTML adapter yet (closing the two-renderers gap against the client's separate `printCard()` preview is the next phase). No template selection — this ships as the one and only layout there's ever been, just now expressed as data-then-draw instead of one monolithic function.
+
+---
+
 ## [v5.2.1] — 2026-07-21 — fix: org-shared-login blocked every real sign-in attempt despite showing a normal login page
 
 Reported live by a customer (Trinity-Trinitas Schools): the organization's shared login page rendered normally (branding, logo, "Sign in once to access any of your schools"), but every sign-in attempt — correct credentials or not — failed with a generic "Portal not found," indistinguishable from a broken link.

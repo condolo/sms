@@ -1,0 +1,6674 @@
+{
+  "fixtures": [
+    {
+      "name": "published_basic",
+      "snap": {
+        "status": "published",
+        "superseded": false,
+        "version": 2,
+        "schoolName": "Greenwood Academy",
+        "studentName": "Jane Doe",
+        "admissionNo": "ADM-0042",
+        "className": "Form 2 Blue",
+        "termName": "Term 2",
+        "academicYear": "2026",
+        "moderationBypassed": true,
+        "assessmentWeights": [
+          {
+            "assessmentType": "CA",
+            "label": "Continuous Assessment"
+          },
+          {
+            "assessmentType": "MT",
+            "label": "Mid-Term"
+          },
+          {
+            "assessmentType": "ET",
+            "label": "End-Term"
+          }
+        ],
+        "passMark": 40,
+        "subjects": {
+          "Mathematics": {
+            "finalScore": 78.333,
+            "grade": "B+",
+            "breakdown": {
+              "CA": 80,
+              "MT": 75,
+              "ET": 79
+            },
+            "remarks": "Good effort"
+          },
+          "English": {
+            "finalScore": 35,
+            "grade": "E",
+            "breakdown": {
+              "CA": 40,
+              "MT": 30,
+              "ET": 35
+            },
+            "remarks": ""
+          },
+          "Biology": {
+            "finalScore": 91.2,
+            "grade": "A",
+            "breakdown": {
+              "CA": 90,
+              "MT": 92,
+              "ET": 91
+            },
+            "descriptor": "Outstanding"
+          }
+        },
+        "subjectBest": {
+          "Biology": true
+        },
+        "rankingSubjectsUsed": [
+          "Mathematics",
+          "Biology"
+        ],
+        "rankingSubjectStrategy": "best_n",
+        "rankingN": 2,
+        "rankings": {
+          "class": {
+            "rank": 3,
+            "outOf": 28
+          }
+        },
+        "totalScore": 204.5,
+        "averageScore": 68.2,
+        "gpa": 2.83,
+        "comments": {
+          "classTeacherRemark": "Great improvement this term.",
+          "principalRemark": ""
+        },
+        "batchId": "batch_xyz",
+        "reportId": "RC-2026-2-000123"
+      },
+      "config": {
+        "passMark": 40,
+        "showGPA": true,
+        "rankingEnabled": true,
+        "showAttendanceSummary": true,
+        "classTeacherSignatureLabel": "Class Teacher",
+        "principalSignatureLabel": "Principal",
+        "footerNote": "This report card is computer-generated."
+      },
+      "attendance": {
+        "daysPresent": 55,
+        "daysAbsent": 5,
+        "totalSchoolDays": 60,
+        "percentage": 91.7
+      },
+      "isFirstPage": true,
+      "images": {},
+      "calls": [
+        {
+          "method": "rect",
+          "args": [
+            40,
+            40,
+            515.28,
+            60
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            17
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Greenwood Academy",
+            50,
+            52,
+            {
+              "width": 495.28
+            }
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "ACADEMIC REPORT CARD",
+            50,
+            75,
+            {
+              "width": 495.28
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            115,
+            515.28,
+            90
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#f3f4f6"
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "STUDENT NAME",
+            50,
+            123
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            11
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Jane Doe",
+            50,
+            134,
+            {
+              "width": 200
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "ADMISSION NO.",
+            280,
+            123
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            11
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "ADM-0042",
+            280,
+            134,
+            {
+              "width": 130
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "CLASS",
+            50,
+            165
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            10
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Form 2 Blue",
+            50,
+            176
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "TERM / ACADEMIC YEAR",
+            280,
+            165
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            10
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Term 2 — 2026",
+            280,
+            176,
+            {
+              "width": 160
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            496.28,
+            125,
+            54,
+            70
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            497.28,
+            126,
+            52,
+            68
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#e2e8f0"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#94a3b8"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            6.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "PHOTO",
+            497.28,
+            156,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#059669"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "v2",
+            280,
+            152,
+            {
+              "width": 130,
+              "align": "left"
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            207,
+            515.28,
+            14
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#fef3c7"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#92400e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "⚠ Published with moderation check bypassed",
+            44,
+            210,
+            {
+              "width": 507.28
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            225,
+            515.28,
+            22
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#2563eb"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Subject",
+            43,
+            229,
+            {
+              "width": 152,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Continuous\n(%)",
+            203,
+            229,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Mid-Term\n(%)",
+            263,
+            229,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "End-Term\n(%)",
+            323,
+            229,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Score",
+            383,
+            229,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Grade",
+            430,
+            229,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Remarks",
+            477,
+            229,
+            {
+              "width": 77,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            247,
+            515.28,
+            18
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Mathematics ●",
+            43,
+            252,
+            {
+              "width": 152
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "80.0",
+            203,
+            252,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "75.0",
+            263,
+            252,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "79.0",
+            323,
+            252,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "78.3",
+            383,
+            252,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#2563eb"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "B+",
+            430,
+            252,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7.5
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Good effort",
+            477,
+            252,
+            {
+              "width": 77
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            265,
+            515.28,
+            18
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#f3f4f6"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#dc2626"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "English",
+            43,
+            270,
+            {
+              "width": 152
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "40.0",
+            203,
+            270,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "30.0",
+            263,
+            270,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "35.0",
+            323,
+            270,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "35.0",
+            383,
+            270,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#dc2626"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "E",
+            430,
+            270,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7.5
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "",
+            477,
+            270,
+            {
+              "width": 77
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            283,
+            515.28,
+            18
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "★ Biology ●",
+            43,
+            288,
+            {
+              "width": 152
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "90.0",
+            203,
+            288,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "92.0",
+            263,
+            288,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "91.0",
+            323,
+            288,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "91.2",
+            383,
+            288,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#2563eb"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "A",
+            430,
+            288,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7.5
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Outstanding",
+            477,
+            288,
+            {
+              "width": 77
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            225,
+            515.28,
+            76
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "● Subjects counted toward rank (Best 2)",
+            40,
+            304,
+            {
+              "width": 515.28
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            319,
+            515.28,
+            28
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#eff6ff"
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Total Score: 204.5",
+            50,
+            324
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Average: 68.2%",
+            160,
+            324
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "GPA: 2.83",
+            265,
+            324
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#2563eb"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Class Rank: 3 / 28",
+            355,
+            324
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            355,
+            515.28,
+            26
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#f3f4f6"
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "ATTENDANCE",
+            50,
+            359
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Present: 55   Absent: 5   Total Days: 60   Attendance: 91.7%",
+            50,
+            369,
+            {
+              "width": 495.28
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "CLASS TEACHER'S REMARK:",
+            40,
+            393
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            405,
+            515.28,
+            30
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Great improvement this term.",
+            46,
+            414,
+            {
+              "width": 503.28
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "PRINCIPAL'S COMMENT:",
+            40,
+            443
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            455,
+            515.28,
+            30
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "— No comment entered —",
+            46,
+            464,
+            {
+              "width": 503.28
+            }
+          ]
+        },
+        {
+          "method": "moveTo",
+          "args": [
+            40,
+            525
+          ]
+        },
+        {
+          "method": "lineTo",
+          "args": [
+            277.64,
+            525
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "moveTo",
+          "args": [
+            297.64,
+            525
+          ]
+        },
+        {
+          "method": "lineTo",
+          "args": [
+            555.28,
+            525
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Class Teacher",
+            40,
+            529,
+            {
+              "width": 247.64
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Principal",
+            297.64,
+            529,
+            {
+              "width": 247.64
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            786.89,
+            515.28,
+            0.5
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "This report card is computer-generated.",
+            40,
+            792.89,
+            {
+              "width": 515.28,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Report ID: RC-2026-2-000123",
+            40,
+            804.89,
+            {
+              "width": 257.64
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Verify at: /verify/RC-2026-2-000123",
+            297.64,
+            804.89,
+            {
+              "width": 257.64,
+              "align": "right"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            6.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Generated: <REDACTED>",
+            40,
+            814.89,
+            {
+              "width": 515.28,
+              "align": "center"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "draft_with_images_second_page",
+      "snap": {
+        "status": "draft",
+        "superseded": false,
+        "version": 1,
+        "schoolName": "Greenwood Academy",
+        "studentName": "Jane Doe",
+        "admissionNo": "ADM-0042",
+        "className": "Form 2 Blue",
+        "termName": "Term 2",
+        "academicYear": "2026",
+        "moderationBypassed": true,
+        "assessmentWeights": [
+          {
+            "assessmentType": "CA",
+            "label": "Continuous Assessment"
+          },
+          {
+            "assessmentType": "MT",
+            "label": "Mid-Term"
+          },
+          {
+            "assessmentType": "ET",
+            "label": "End-Term"
+          }
+        ],
+        "passMark": 40,
+        "subjects": {
+          "Mathematics": {
+            "finalScore": 78.333,
+            "grade": "B+",
+            "breakdown": {
+              "CA": 80,
+              "MT": 75,
+              "ET": 79
+            },
+            "remarks": "Good effort"
+          },
+          "English": {
+            "finalScore": 35,
+            "grade": "E",
+            "breakdown": {
+              "CA": 40,
+              "MT": 30,
+              "ET": 35
+            },
+            "remarks": ""
+          },
+          "Biology": {
+            "finalScore": 91.2,
+            "grade": "A",
+            "breakdown": {
+              "CA": 90,
+              "MT": 92,
+              "ET": 91
+            },
+            "descriptor": "Outstanding"
+          }
+        },
+        "subjectBest": {
+          "Biology": true
+        },
+        "rankingSubjectsUsed": [
+          "Mathematics",
+          "Biology"
+        ],
+        "rankingSubjectStrategy": "best_n",
+        "rankingN": 2,
+        "rankings": {
+          "class": {
+            "rank": 3,
+            "outOf": 28
+          }
+        },
+        "totalScore": 204.5,
+        "averageScore": 68.2,
+        "gpa": 2.83,
+        "comments": {
+          "classTeacherRemark": "Great improvement this term.",
+          "principalRemark": ""
+        },
+        "batchId": "batch_xyz",
+        "reportId": "RC-2026-2-000123"
+      },
+      "config": {
+        "passMark": 40,
+        "showGPA": true,
+        "rankingEnabled": true,
+        "showAttendanceSummary": true,
+        "classTeacherSignatureLabel": "Class Teacher",
+        "principalSignatureLabel": "Principal",
+        "footerNote": "This report card is computer-generated."
+      },
+      "attendance": {
+        "daysPresent": 55,
+        "daysAbsent": 5,
+        "totalSchoolDays": 60,
+        "percentage": 91.7
+      },
+      "isFirstPage": false,
+      "images": {
+        "studentPhoto": {
+          "type": "Buffer",
+          "data": [
+            102,
+            97,
+            107,
+            101,
+            45,
+            112,
+            104,
+            111,
+            116,
+            111
+          ]
+        },
+        "principalSignature": {
+          "type": "Buffer",
+          "data": [
+            102,
+            97,
+            107,
+            101,
+            45,
+            115,
+            105,
+            103
+          ]
+        },
+        "schoolStamp": {
+          "type": "Buffer",
+          "data": [
+            102,
+            97,
+            107,
+            101,
+            45,
+            115,
+            116,
+            97,
+            109,
+            112
+          ]
+        }
+      },
+      "calls": [
+        {
+          "method": "addPage",
+          "args": []
+        },
+        {
+          "method": "save",
+          "args": []
+        },
+        {
+          "method": "translate",
+          "args": [
+            297.64,
+            420.945
+          ]
+        },
+        {
+          "method": "rotate",
+          "args": [
+            -45
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            90
+          ]
+        },
+        {
+          "method": "fillOpacity",
+          "args": [
+            0.06
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#cc0000"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "DRAFT",
+            -200,
+            -45,
+            {
+              "width": 400,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "restore",
+          "args": []
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            40,
+            515.28,
+            60
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            17
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Greenwood Academy",
+            50,
+            52,
+            {
+              "width": 495.28
+            }
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "ACADEMIC REPORT CARD   [DRAFT — NOT OFFICIAL]",
+            50,
+            75,
+            {
+              "width": 495.28
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            115,
+            515.28,
+            90
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#f3f4f6"
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "STUDENT NAME",
+            50,
+            123
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            11
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Jane Doe",
+            50,
+            134,
+            {
+              "width": 200
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "ADMISSION NO.",
+            280,
+            123
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            11
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "ADM-0042",
+            280,
+            134,
+            {
+              "width": 130
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "CLASS",
+            50,
+            165
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            10
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Form 2 Blue",
+            50,
+            176
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "TERM / ACADEMIC YEAR",
+            280,
+            165
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            10
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Term 2 — 2026",
+            280,
+            176,
+            {
+              "width": 160
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            496.28,
+            125,
+            54,
+            70
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "image",
+          "args": [
+            {
+              "type": "Buffer",
+              "data": [
+                102,
+                97,
+                107,
+                101,
+                45,
+                112,
+                104,
+                111,
+                116,
+                111
+              ]
+            },
+            497.28,
+            126,
+            {
+              "width": 52,
+              "height": 68,
+              "cover": [
+                52,
+                68
+              ]
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            207,
+            515.28,
+            14
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#fef3c7"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#92400e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "⚠ Published with moderation check bypassed",
+            44,
+            210,
+            {
+              "width": 507.28
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            225,
+            515.28,
+            22
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#2563eb"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Subject",
+            43,
+            229,
+            {
+              "width": 152,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Continuous\n(%)",
+            203,
+            229,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Mid-Term\n(%)",
+            263,
+            229,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "End-Term\n(%)",
+            323,
+            229,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Score",
+            383,
+            229,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Grade",
+            430,
+            229,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Remarks",
+            477,
+            229,
+            {
+              "width": 77,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            247,
+            515.28,
+            18
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Mathematics ●",
+            43,
+            252,
+            {
+              "width": 152
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "80.0",
+            203,
+            252,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "75.0",
+            263,
+            252,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "79.0",
+            323,
+            252,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "78.3",
+            383,
+            252,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#2563eb"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "B+",
+            430,
+            252,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7.5
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Good effort",
+            477,
+            252,
+            {
+              "width": 77
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            265,
+            515.28,
+            18
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#f3f4f6"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#dc2626"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "English",
+            43,
+            270,
+            {
+              "width": 152
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "40.0",
+            203,
+            270,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "30.0",
+            263,
+            270,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "35.0",
+            323,
+            270,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "35.0",
+            383,
+            270,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#dc2626"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "E",
+            430,
+            270,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7.5
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "",
+            477,
+            270,
+            {
+              "width": 77
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            283,
+            515.28,
+            18
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "★ Biology ●",
+            43,
+            288,
+            {
+              "width": 152
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "90.0",
+            203,
+            288,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "92.0",
+            263,
+            288,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "91.0",
+            323,
+            288,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "91.2",
+            383,
+            288,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#2563eb"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "A",
+            430,
+            288,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7.5
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Outstanding",
+            477,
+            288,
+            {
+              "width": 77
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            225,
+            515.28,
+            76
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "● Subjects counted toward rank (Best 2)",
+            40,
+            304,
+            {
+              "width": 515.28
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            319,
+            515.28,
+            28
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#eff6ff"
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Total Score: 204.5",
+            50,
+            324
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Average: 68.2%",
+            160,
+            324
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "GPA: 2.83",
+            265,
+            324
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#2563eb"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Class Rank: 3 / 28",
+            355,
+            324
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            355,
+            515.28,
+            26
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#f3f4f6"
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "ATTENDANCE",
+            50,
+            359
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Present: 55   Absent: 5   Total Days: 60   Attendance: 91.7%",
+            50,
+            369,
+            {
+              "width": 495.28
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "CLASS TEACHER'S REMARK:",
+            40,
+            393
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            405,
+            515.28,
+            30
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Great improvement this term.",
+            46,
+            414,
+            {
+              "width": 503.28
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "PRINCIPAL'S COMMENT:",
+            40,
+            443
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            455,
+            515.28,
+            30
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "— No comment entered —",
+            46,
+            464,
+            {
+              "width": 503.28
+            }
+          ]
+        },
+        {
+          "method": "image",
+          "args": [
+            {
+              "type": "Buffer",
+              "data": [
+                102,
+                97,
+                107,
+                101,
+                45,
+                115,
+                105,
+                103
+              ]
+            },
+            297.64,
+            477,
+            {
+              "height": 28,
+              "fit": [
+                237.64,
+                28
+              ]
+            }
+          ]
+        },
+        {
+          "method": "image",
+          "args": [
+            {
+              "type": "Buffer",
+              "data": [
+                102,
+                97,
+                107,
+                101,
+                45,
+                115,
+                116,
+                97,
+                109,
+                112
+              ]
+            },
+            499.28,
+            469,
+            {
+              "height": 36,
+              "fit": [
+                50,
+                36
+              ]
+            }
+          ]
+        },
+        {
+          "method": "moveTo",
+          "args": [
+            40,
+            525
+          ]
+        },
+        {
+          "method": "lineTo",
+          "args": [
+            277.64,
+            525
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "moveTo",
+          "args": [
+            297.64,
+            525
+          ]
+        },
+        {
+          "method": "lineTo",
+          "args": [
+            555.28,
+            525
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Class Teacher",
+            40,
+            529,
+            {
+              "width": 247.64
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Principal",
+            297.64,
+            529,
+            {
+              "width": 247.64
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            786.89,
+            515.28,
+            0.5
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "This report card is computer-generated.",
+            40,
+            792.89,
+            {
+              "width": 515.28,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Report ID: RC-2026-2-000123",
+            40,
+            804.89,
+            {
+              "width": 257.64
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Verify at: /verify/RC-2026-2-000123",
+            297.64,
+            804.89,
+            {
+              "width": 257.64,
+              "align": "right"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            6.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Generated: <REDACTED>",
+            40,
+            814.89,
+            {
+              "width": 515.28,
+              "align": "center"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "superseded",
+      "snap": {
+        "status": "published",
+        "superseded": true,
+        "version": 2,
+        "schoolName": "Greenwood Academy",
+        "studentName": "Jane Doe",
+        "admissionNo": "ADM-0042",
+        "className": "Form 2 Blue",
+        "termName": "Term 2",
+        "academicYear": "2026",
+        "moderationBypassed": true,
+        "assessmentWeights": [
+          {
+            "assessmentType": "CA",
+            "label": "Continuous Assessment"
+          },
+          {
+            "assessmentType": "MT",
+            "label": "Mid-Term"
+          },
+          {
+            "assessmentType": "ET",
+            "label": "End-Term"
+          }
+        ],
+        "passMark": 40,
+        "subjects": {
+          "Mathematics": {
+            "finalScore": 78.333,
+            "grade": "B+",
+            "breakdown": {
+              "CA": 80,
+              "MT": 75,
+              "ET": 79
+            },
+            "remarks": "Good effort"
+          },
+          "English": {
+            "finalScore": 35,
+            "grade": "E",
+            "breakdown": {
+              "CA": 40,
+              "MT": 30,
+              "ET": 35
+            },
+            "remarks": ""
+          },
+          "Biology": {
+            "finalScore": 91.2,
+            "grade": "A",
+            "breakdown": {
+              "CA": 90,
+              "MT": 92,
+              "ET": 91
+            },
+            "descriptor": "Outstanding"
+          }
+        },
+        "subjectBest": {
+          "Biology": true
+        },
+        "rankingSubjectsUsed": [
+          "Mathematics",
+          "Biology"
+        ],
+        "rankingSubjectStrategy": "best_n",
+        "rankingN": 2,
+        "rankings": {
+          "class": {
+            "rank": 3,
+            "outOf": 28
+          }
+        },
+        "totalScore": 204.5,
+        "averageScore": 68.2,
+        "gpa": 2.83,
+        "comments": {
+          "classTeacherRemark": "Great improvement this term.",
+          "principalRemark": ""
+        },
+        "batchId": "batch_xyz",
+        "reportId": "RC-2026-2-000123"
+      },
+      "config": {
+        "passMark": 40,
+        "showGPA": true,
+        "rankingEnabled": true,
+        "showAttendanceSummary": true,
+        "classTeacherSignatureLabel": "Class Teacher",
+        "principalSignatureLabel": "Principal",
+        "footerNote": "This report card is computer-generated."
+      },
+      "attendance": {
+        "daysPresent": 55,
+        "daysAbsent": 5,
+        "totalSchoolDays": 60,
+        "percentage": 91.7
+      },
+      "isFirstPage": true,
+      "images": {},
+      "calls": [
+        {
+          "method": "save",
+          "args": []
+        },
+        {
+          "method": "translate",
+          "args": [
+            297.64,
+            420.945
+          ]
+        },
+        {
+          "method": "rotate",
+          "args": [
+            -45
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            90
+          ]
+        },
+        {
+          "method": "fillOpacity",
+          "args": [
+            0.06
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#cc0000"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "SUPERSEDED",
+            -200,
+            -45,
+            {
+              "width": 400,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "restore",
+          "args": []
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            40,
+            515.28,
+            60
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            17
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Greenwood Academy",
+            50,
+            52,
+            {
+              "width": 495.28
+            }
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "ACADEMIC REPORT CARD   [DRAFT — NOT OFFICIAL]",
+            50,
+            75,
+            {
+              "width": 495.28
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            115,
+            515.28,
+            90
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#f3f4f6"
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "STUDENT NAME",
+            50,
+            123
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            11
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Jane Doe",
+            50,
+            134,
+            {
+              "width": 200
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "ADMISSION NO.",
+            280,
+            123
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            11
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "ADM-0042",
+            280,
+            134,
+            {
+              "width": 130
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "CLASS",
+            50,
+            165
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            10
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Form 2 Blue",
+            50,
+            176
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "TERM / ACADEMIC YEAR",
+            280,
+            165
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            10
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Term 2 — 2026",
+            280,
+            176,
+            {
+              "width": 160
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            496.28,
+            125,
+            54,
+            70
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            497.28,
+            126,
+            52,
+            68
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#e2e8f0"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#94a3b8"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            6.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "PHOTO",
+            497.28,
+            156,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#dc2626"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "v2 (Superseded)",
+            280,
+            152,
+            {
+              "width": 130,
+              "align": "left"
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            207,
+            515.28,
+            14
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#fef3c7"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#92400e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "⚠ Published with moderation check bypassed",
+            44,
+            210,
+            {
+              "width": 507.28
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            225,
+            515.28,
+            22
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#2563eb"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Subject",
+            43,
+            229,
+            {
+              "width": 152,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Continuous\n(%)",
+            203,
+            229,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Mid-Term\n(%)",
+            263,
+            229,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "End-Term\n(%)",
+            323,
+            229,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Score",
+            383,
+            229,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Grade",
+            430,
+            229,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Remarks",
+            477,
+            229,
+            {
+              "width": 77,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            247,
+            515.28,
+            18
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Mathematics ●",
+            43,
+            252,
+            {
+              "width": 152
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "80.0",
+            203,
+            252,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "75.0",
+            263,
+            252,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "79.0",
+            323,
+            252,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "78.3",
+            383,
+            252,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#2563eb"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "B+",
+            430,
+            252,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7.5
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Good effort",
+            477,
+            252,
+            {
+              "width": 77
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            265,
+            515.28,
+            18
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#f3f4f6"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#dc2626"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "English",
+            43,
+            270,
+            {
+              "width": 152
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "40.0",
+            203,
+            270,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "30.0",
+            263,
+            270,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "35.0",
+            323,
+            270,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "35.0",
+            383,
+            270,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#dc2626"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "E",
+            430,
+            270,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7.5
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "",
+            477,
+            270,
+            {
+              "width": 77
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            283,
+            515.28,
+            18
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "★ Biology ●",
+            43,
+            288,
+            {
+              "width": 152
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "90.0",
+            203,
+            288,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "92.0",
+            263,
+            288,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "91.0",
+            323,
+            288,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "91.2",
+            383,
+            288,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#2563eb"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "A",
+            430,
+            288,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7.5
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Outstanding",
+            477,
+            288,
+            {
+              "width": 77
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            225,
+            515.28,
+            76
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "● Subjects counted toward rank (Best 2)",
+            40,
+            304,
+            {
+              "width": 515.28
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            319,
+            515.28,
+            28
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#eff6ff"
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Total Score: 204.5",
+            50,
+            324
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Average: 68.2%",
+            160,
+            324
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "GPA: 2.83",
+            265,
+            324
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#2563eb"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Class Rank: 3 / 28",
+            355,
+            324
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            355,
+            515.28,
+            26
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#f3f4f6"
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "ATTENDANCE",
+            50,
+            359
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Present: 55   Absent: 5   Total Days: 60   Attendance: 91.7%",
+            50,
+            369,
+            {
+              "width": 495.28
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "CLASS TEACHER'S REMARK:",
+            40,
+            393
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            405,
+            515.28,
+            30
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Great improvement this term.",
+            46,
+            414,
+            {
+              "width": 503.28
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "PRINCIPAL'S COMMENT:",
+            40,
+            443
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            455,
+            515.28,
+            30
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "— No comment entered —",
+            46,
+            464,
+            {
+              "width": 503.28
+            }
+          ]
+        },
+        {
+          "method": "moveTo",
+          "args": [
+            40,
+            525
+          ]
+        },
+        {
+          "method": "lineTo",
+          "args": [
+            277.64,
+            525
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "moveTo",
+          "args": [
+            297.64,
+            525
+          ]
+        },
+        {
+          "method": "lineTo",
+          "args": [
+            555.28,
+            525
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Class Teacher",
+            40,
+            529,
+            {
+              "width": 247.64
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Principal",
+            297.64,
+            529,
+            {
+              "width": 247.64
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            786.89,
+            515.28,
+            0.5
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "This report card is computer-generated.",
+            40,
+            792.89,
+            {
+              "width": 515.28,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Report ID: RC-2026-2-000123",
+            40,
+            804.89,
+            {
+              "width": 257.64
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Verify at: /verify/RC-2026-2-000123",
+            297.64,
+            804.89,
+            {
+              "width": 257.64,
+              "align": "right"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            6.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Generated: <REDACTED>",
+            40,
+            814.89,
+            {
+              "width": 515.28,
+              "align": "center"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "minimal_nothing_configured",
+      "snap": {
+        "status": "published",
+        "superseded": false,
+        "version": 1,
+        "schoolName": "",
+        "studentName": "",
+        "admissionNo": "",
+        "className": "",
+        "termName": "",
+        "academicYear": "",
+        "moderationBypassed": false,
+        "assessmentWeights": [],
+        "subjects": {},
+        "subjectBest": {},
+        "rankingSubjectsUsed": [],
+        "rankingSubjectStrategy": "all",
+        "rankings": {},
+        "totalScore": null,
+        "averageScore": null,
+        "gpa": null,
+        "comments": {},
+        "batchId": null,
+        "reportId": null
+      },
+      "config": {
+        "showGPA": false,
+        "rankingEnabled": false,
+        "showAttendanceSummary": false
+      },
+      "attendance": null,
+      "isFirstPage": true,
+      "images": {},
+      "calls": [
+        {
+          "method": "rect",
+          "args": [
+            40,
+            40,
+            515.28,
+            60
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            17
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "School Management System",
+            50,
+            52,
+            {
+              "width": 495.28
+            }
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "ACADEMIC REPORT CARD",
+            50,
+            75,
+            {
+              "width": 495.28
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            115,
+            515.28,
+            90
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#f3f4f6"
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "STUDENT NAME",
+            50,
+            123
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            11
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "—",
+            50,
+            134,
+            {
+              "width": 200
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "ADMISSION NO.",
+            280,
+            123
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            11
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "—",
+            280,
+            134,
+            {
+              "width": 130
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "CLASS",
+            50,
+            165
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            10
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "—",
+            50,
+            176
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "TERM / ACADEMIC YEAR",
+            280,
+            165
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            10
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "—",
+            280,
+            176,
+            {
+              "width": 160
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            496.28,
+            125,
+            54,
+            70
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            497.28,
+            126,
+            52,
+            68
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#e2e8f0"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#94a3b8"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            6.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "PHOTO",
+            497.28,
+            156,
+            {
+              "width": 52,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            211,
+            515.28,
+            22
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#2563eb"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Subject",
+            43,
+            215,
+            {
+              "width": 152,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Score",
+            203,
+            215,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Grade",
+            250,
+            215,
+            {
+              "width": 39,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Remarks",
+            297,
+            215,
+            {
+              "width": 77,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            211,
+            515.28,
+            22
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            239,
+            515.28,
+            28
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#eff6ff"
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Total Score: —",
+            50,
+            244
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Average: —%",
+            160,
+            244
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "CLASS TEACHER'S REMARK:",
+            40,
+            279
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            291,
+            515.28,
+            30
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "— No remark entered —",
+            46,
+            300,
+            {
+              "width": 503.28
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica-Bold"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "PRINCIPAL'S COMMENT:",
+            40,
+            329
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            341,
+            515.28,
+            30
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "white"
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            9
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "— No comment entered —",
+            46,
+            350,
+            {
+              "width": 503.28
+            }
+          ]
+        },
+        {
+          "method": "moveTo",
+          "args": [
+            40,
+            411
+          ]
+        },
+        {
+          "method": "lineTo",
+          "args": [
+            277.64,
+            411
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "moveTo",
+          "args": [
+            297.64,
+            411
+          ]
+        },
+        {
+          "method": "lineTo",
+          "args": [
+            555.28,
+            411
+          ]
+        },
+        {
+          "method": "stroke",
+          "args": [
+            "#1a1a2e"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            8
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Class Teacher",
+            40,
+            415,
+            {
+              "width": 247.64
+            }
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Principal",
+            297.64,
+            415,
+            {
+              "width": 247.64
+            }
+          ]
+        },
+        {
+          "method": "rect",
+          "args": [
+            40,
+            786.89,
+            515.28,
+            0.5
+          ]
+        },
+        {
+          "method": "fill",
+          "args": [
+            "#d1d5db"
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "This report card is computer-generated.",
+            40,
+            792.89,
+            {
+              "width": 515.28,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "method": "fillColor",
+          "args": [
+            "#555555"
+          ]
+        },
+        {
+          "method": "fontSize",
+          "args": [
+            7.5
+          ]
+        },
+        {
+          "method": "font",
+          "args": [
+            "Helvetica"
+          ]
+        },
+        {
+          "method": "text",
+          "args": [
+            "Generated: <REDACTED>",
+            40,
+            804.89,
+            {
+              "width": 515.28,
+              "align": "center"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

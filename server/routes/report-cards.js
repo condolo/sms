@@ -851,30 +851,129 @@ async function _fetchSignatureImages(snap) {
   return { principalSignature, schoolStamp };
 }
 
-function _buildPDFPage(doc, snap, config, attendance, isFirstPage, images = {}) {
+/* ── Report Card IR (Consolidation Plan §4) ──────────────────────
+   _computeReportSections is a PURE function: given a snapshot +
+   config + attendance, it decides WHAT the report contains — every
+   string already formatted, every conditional already resolved —
+   with zero pdfkit calls and zero layout math. _drawReportPage is
+   the one PDF adapter that walks this data and draws it. Splitting
+   these is what makes a future second adapter (HTML, for on-screen
+   preview and print — closing the two-renderers gap in Audit §2)
+   possible without a second copy of this decision logic. This first
+   pass ships as a direct, behavior-preserving extraction — verified
+   against a golden call-sequence fixture captured from the original
+   monolithic function before this split (server/__tests__/report-cards-ir.test.js)
+   — not a redesign of what's shown or how. */
+function _computeReportSections(snap, config, attendance) {
+  const isDraft = snap.status !== 'published' || snap.superseded;
+
+  const weights     = snap.assessmentWeights || [];
+  const typeEntries = weights.map(w => ({
+    key:   w.assessmentType,
+    label: (w.label || w.assessmentType).split(/[\s/]+/)[0],
+  }));
+
+  const passMark = snap.passMark ?? config.passMark ?? 40;
+
+  const rows = Object.entries(snap.subjects || {}).map(([subjectId, sub]) => {
+    const failed = sub.finalScore != null && sub.finalScore < passMark;
+    const isBest = !!snap.subjectBest?.[subjectId];
+    const isUsed = !!snap.rankingSubjectsUsed?.includes(subjectId);
+    return {
+      subjectId,
+      nameLine:    (isBest ? '★ ' : '') + subjectId + (isUsed && snap.rankingSubjectStrategy !== 'all' ? ' ●' : ''),
+      failed,
+      typeValues:  typeEntries.map(te => {
+        const val = sub.breakdown?.[te.key];
+        return val != null ? val.toFixed(1) : '—';
+      }),
+      scoreText:   sub.finalScore?.toFixed(1) ?? '—',
+      hasGrade:    !!sub.grade,
+      gradeText:   sub.grade || '—',
+      remarksText: sub.remarks || sub.descriptor || '',
+    };
+  });
+
+  const rankingNote = (snap.rankingSubjectStrategy && snap.rankingSubjectStrategy !== 'all')
+    ? `● Subjects counted toward rank (${snap.rankingSubjectStrategy === 'best_n' ? `Best ${snap.rankingN}` : 'Compulsory only'})`
+    : null;
+
+  const showRanking = !!(config.rankingEnabled && snap.rankings?.class);
+  const showAttendance = !!(config.showAttendanceSummary && attendance);
+
+  return {
+    isDraft,
+    watermarkText: isDraft ? (snap.superseded ? 'SUPERSEDED' : 'DRAFT') : null,
+    header: {
+      schoolName: snap.schoolName || 'School Management System',
+      subtitle:   'ACADEMIC REPORT CARD' + (isDraft ? '   [DRAFT — NOT OFFICIAL]' : ''),
+    },
+    studentInfo: {
+      studentName: snap.studentName || '—',
+      admissionNo: snap.admissionNo || '—',
+      className:   snap.className   || '—',
+      termLine:    [snap.termName, snap.academicYear].filter(Boolean).join(' — ') || '—',
+      versionBadge: (snap.version > 1 || snap.superseded)
+        ? { text: `v${snap.version}${snap.superseded ? ' (Superseded)' : ''}`, superseded: !!snap.superseded }
+        : null,
+      moderationBypassed: !!snap.moderationBypassed,
+    },
+    resultsTable: { typeEntries, rows, rankingNote },
+    summary: {
+      totalText:   `Total Score: ${snap.totalScore?.toFixed(1) ?? '—'}`,
+      averageText: `Average: ${snap.averageScore?.toFixed(1) ?? '—'}%`,
+      showGPA:     !!config.showGPA,
+      gpaText:     `GPA: ${snap.gpa?.toFixed(2) ?? '—'}`,
+      showRanking,
+      rankText:    showRanking ? `Class Rank: ${snap.rankings.class.rank} / ${snap.rankings.class.outOf}` : null,
+    },
+    attendance: showAttendance ? {
+      text: `Present: ${attendance.daysPresent}   Absent: ${attendance.daysAbsent}   Total Days: ${attendance.totalSchoolDays}` +
+            (attendance.percentage != null ? `   Attendance: ${attendance.percentage}%` : ''),
+    } : null,
+    comments: {
+      classTeacherRemark: sanitisePdfStr(snap.comments?.classTeacherRemark) || '— No remark entered —',
+      principalRemark:    sanitisePdfStr(snap.comments?.principalRemark)    || '— No comment entered —',
+    },
+    signatures: {
+      classTeacherLabel: config.classTeacherSignatureLabel || 'Class Teacher',
+      principalLabel:    config.principalSignatureLabel    || 'Principal',
+    },
+    footer: {
+      footerNote: config.footerNote || 'This report card is computer-generated.',
+      genLine:    `Generated: ${new Date().toUTCString()}  |  v${snap.version || 1}  |  Batch: ${snap.batchId || '—'}`,
+      reportId:   snap.reportId || null,
+    },
+  };
+}
+
+/* PDF adapter — walks the IR above and makes the pdfkit calls. Every
+   coordinate/color/size constant here is unchanged from the original
+   monolithic _buildPDFPage; only the source of each value moved from
+   `snap`/`config` directly to the pre-computed `s` (sections) object. */
+function _drawReportPage(doc, s, images, isFirstPage) {
   if (!isFirstPage) doc.addPage();
 
   const PAGE_WIDTH = doc.page.width - 80;
   const GRAY = '#555555', DARK = '#1a1a2e', ACCENT = '#2563eb', LIGHT_GRAY = '#f3f4f6', BORDER = '#d1d5db';
   const COL_GAP = 5;
-  const isDraft = snap.status !== 'published' || snap.superseded;
 
   /* DRAFT WATERMARK */
-  if (isDraft) {
+  if (s.watermarkText) {
     doc.save()
        .translate(doc.page.width / 2, doc.page.height / 2)
        .rotate(-45)
        .fontSize(90).fillOpacity(0.06).fillColor('#cc0000')
-       .text(snap.superseded ? 'SUPERSEDED' : 'DRAFT', -200, -45, { width: 400, align: 'center' })
+       .text(s.watermarkText, -200, -45, { width: 400, align: 'center' })
        .restore();
   }
 
   /* HEADER */
   doc.rect(40, 40, PAGE_WIDTH, 60).fill(DARK);
   doc.fillColor('white').fontSize(17).font('Helvetica-Bold')
-     .text(snap.schoolName || 'School Management System', 50, 52, { width: PAGE_WIDTH - 20 });
+     .text(s.header.schoolName, 50, 52, { width: PAGE_WIDTH - 20 });
   doc.fontSize(9).font('Helvetica')
-     .text('ACADEMIC REPORT CARD' + (isDraft ? '   [DRAFT — NOT OFFICIAL]' : ''), 50, 75, { width: PAGE_WIDTH - 20 });
+     .text(s.header.subtitle, 50, 75, { width: PAGE_WIDTH - 20 });
   doc.fillColor(DARK);
 
   /* STUDENT INFO — passport photo on right, text on left */
@@ -885,18 +984,17 @@ function _buildPDFPage(doc, snap, config, attendance, isFirstPage, images = {}) 
   const photoY  = infoTop + 11;
   doc.rect(40, infoTop, PAGE_WIDTH, infoHeight).fill(LIGHT_GRAY).stroke(BORDER);
 
-  // Text columns — leave room for photo on the right
   const textWidth = PAGE_WIDTH - PHOTO_W - 20;
   const c1 = 50, c2 = 280;
   doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('STUDENT NAME', c1, infoTop + 8);
-  doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold').text(snap.studentName || '—', c1, infoTop + 19, { width: Math.min(200, textWidth - c1 + 40) });
+  doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold').text(s.studentInfo.studentName, c1, infoTop + 19, { width: Math.min(200, textWidth - c1 + 40) });
   doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('ADMISSION NO.', c2, infoTop + 8);
-  doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold').text(snap.admissionNo || '—', c2, infoTop + 19, { width: 130 });
+  doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold').text(s.studentInfo.admissionNo, c2, infoTop + 19, { width: 130 });
   doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('CLASS', c1, infoTop + 50);
-  doc.fillColor(DARK).fontSize(10).font('Helvetica').text(snap.className || '—', c1, infoTop + 61);
+  doc.fillColor(DARK).fontSize(10).font('Helvetica').text(s.studentInfo.className, c1, infoTop + 61);
   doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('TERM / ACADEMIC YEAR', c2, infoTop + 50);
   doc.fillColor(DARK).fontSize(10).font('Helvetica')
-     .text([snap.termName, snap.academicYear].filter(Boolean).join(' — ') || '—', c2, infoTop + 61, { width: 160 });
+     .text(s.studentInfo.termLine, c2, infoTop + 61, { width: 160 });
 
   /* Passport photo — rendered if available, else a placeholder box */
   doc.rect(photoX - 1, photoY - 1, PHOTO_W + 2, PHOTO_H + 2).stroke(BORDER);
@@ -913,34 +1011,24 @@ function _buildPDFPage(doc, snap, config, attendance, isFirstPage, images = {}) 
   }
 
   /* VERSION BADGE */
-  if (snap.version > 1 || snap.superseded) {
-    doc.fillColor(snap.superseded ? '#dc2626' : '#059669').fontSize(8).font('Helvetica-Bold')
-       .text(`v${snap.version}${snap.superseded ? ' (Superseded)' : ''}`, c2, infoTop + 37, { width: 130, align: 'left' });
+  if (s.studentInfo.versionBadge) {
+    doc.fillColor(s.studentInfo.versionBadge.superseded ? '#dc2626' : '#059669').fontSize(8).font('Helvetica-Bold')
+       .text(s.studentInfo.versionBadge.text, c2, infoTop + 37, { width: 130, align: 'left' });
   }
 
   /* MODERATION BYPASS WARNING */
-  if (snap.moderationBypassed) {
+  if (s.studentInfo.moderationBypassed) {
     const warnY = infoTop + infoHeight + 2;
     doc.rect(40, warnY, PAGE_WIDTH, 14).fill('#fef3c7');
     doc.fillColor('#92400e').fontSize(7.5).font('Helvetica-Bold')
        .text('⚠ Published with moderation check bypassed', 44, warnY + 3, { width: PAGE_WIDTH - 8 });
   }
 
-  /* RESULTS TABLE — dynamic columns from snapshot's assessmentWeights */
-  const tableTop = infoTop + infoHeight + (snap.moderationBypassed ? 20 : 6);
+  /* RESULTS TABLE — dynamic columns from the IR's typeEntries */
+  const tableTop = infoTop + infoHeight + (s.studentInfo.moderationBypassed ? 20 : 6);
 
-  const weights     = snap.assessmentWeights || [];
-  // One column per assessment type, using the type's label (first word only to save space)
-  const typeEntries = weights.map(w => ({
-    key:   w.assessmentType,
-    label: (w.label || w.assessmentType).split(/[\s/]+/)[0],
-  }));
-
-  // Fixed column widths; type columns share the remaining space equally
-  const W_SUBJECT  = 155;
-  const W_SCORE    = 42;
-  const W_GRADE    = 42;
-  const W_REMARKS  = 80;
+  const typeEntries = s.resultsTable.typeEntries;
+  const W_SUBJECT  = 155, W_SCORE = 42, W_GRADE = 42, W_REMARKS = 80;
   const fixedTotal = W_SUBJECT + W_SCORE + W_GRADE + W_REMARKS;
   const totalGaps  = (typeEntries.length + 3) * COL_GAP;
   const W_TYPE     = typeEntries.length > 0
@@ -949,7 +1037,7 @@ function _buildPDFPage(doc, snap, config, attendance, isFirstPage, images = {}) 
 
   const colDefs = [
     { label: 'Subject',  width: W_SUBJECT },
-    ...typeEntries.map(t => ({ label: t.label + '\n(%)', width: W_TYPE, key: t.key })),
+    ...typeEntries.map(t => ({ label: t.label + '\n(%)', width: W_TYPE })),
     { label: 'Score',   width: W_SCORE   },
     { label: 'Grade',   width: W_GRADE   },
     { label: 'Remarks', width: W_REMARKS },
@@ -958,7 +1046,6 @@ function _buildPDFPage(doc, snap, config, attendance, isFirstPage, images = {}) 
   const colX = []; let cx = 40;
   for (const w of colWidths) { colX.push(cx); cx += w + COL_GAP; }
 
-  // Header row
   doc.rect(40, tableTop, PAGE_WIDTH, 22).fill(ACCENT);
   doc.fillColor('white').fontSize(8).font('Helvetica-Bold');
   colDefs.forEach((col, i) => {
@@ -966,52 +1053,40 @@ function _buildPDFPage(doc, snap, config, attendance, isFirstPage, images = {}) 
   });
 
   let rowY = tableTop + 22;
-  const passMark = snap.passMark ?? config.passMark ?? 40;
-
-  // Stable column indices for the fixed tail columns
   const typeStart = 1;
   const scoreIdx  = typeStart + typeEntries.length;
   const gradeIdx  = scoreIdx + 1;
   const rmrkIdx   = gradeIdx + 1;
 
-  Object.entries(snap.subjects || {}).forEach(([subjectId, sub], idx) => {
-    const rowH  = 18;
+  s.resultsTable.rows.forEach((row, idx) => {
+    const rowH = 18;
     doc.rect(40, rowY, PAGE_WIDTH, rowH).fill(idx % 2 === 0 ? 'white' : LIGHT_GRAY);
 
-    const failed = sub.finalScore != null && sub.finalScore < passMark;
-    const isBest = snap.subjectBest?.[subjectId];
-    const isUsed = snap.rankingSubjectsUsed?.includes(subjectId);
+    doc.fillColor(row.failed ? '#dc2626' : DARK).fontSize(8.5).font('Helvetica');
+    doc.text(row.nameLine, colX[0] + 3, rowY + 5, { width: colWidths[0] - 3 });
 
-    // Subject name
-    doc.fillColor(failed ? '#dc2626' : DARK).fontSize(8.5).font('Helvetica');
-    doc.text(
-      (isBest ? '★ ' : '') + subjectId + (isUsed && snap.rankingSubjectStrategy !== 'all' ? ' ●' : ''),
-      colX[0] + 3, rowY + 5, { width: colWidths[0] - 3 }
-    );
-    // One column per assessment type
-    typeEntries.forEach((te, ti) => {
-      const ci  = typeStart + ti;
-      const val = sub.breakdown?.[te.key];
+    row.typeValues.forEach((val, ti) => {
+      const ci = typeStart + ti;
       doc.fillColor(DARK).fontSize(8.5).font('Helvetica')
-         .text(val != null ? val.toFixed(1) : '—', colX[ci] + 3, rowY + 5, { width: colWidths[ci] - 3, align: 'center' });
+         .text(val, colX[ci] + 3, rowY + 5, { width: colWidths[ci] - 3, align: 'center' });
     });
-    // Score
+
     doc.fillColor(DARK).fontSize(8.5).font('Helvetica')
-       .text(sub.finalScore?.toFixed(1) ?? '—', colX[scoreIdx] + 3, rowY + 5, { width: colWidths[scoreIdx] - 3, align: 'center' });
-    // Grade
-    doc.font('Helvetica-Bold').fillColor(sub.grade ? (failed ? '#dc2626' : ACCENT) : GRAY)
-       .text(sub.grade || '—', colX[gradeIdx] + 3, rowY + 5, { width: colWidths[gradeIdx] - 3, align: 'center' });
-    // Remarks
+       .text(row.scoreText, colX[scoreIdx] + 3, rowY + 5, { width: colWidths[scoreIdx] - 3, align: 'center' });
+
+    doc.font('Helvetica-Bold').fillColor(row.hasGrade ? (row.failed ? '#dc2626' : ACCENT) : GRAY)
+       .text(row.gradeText, colX[gradeIdx] + 3, rowY + 5, { width: colWidths[gradeIdx] - 3, align: 'center' });
+
     doc.font('Helvetica').fillColor(GRAY).fontSize(7.5)
-       .text(sub.remarks || sub.descriptor || '', colX[rmrkIdx] + 3, rowY + 5, { width: colWidths[rmrkIdx] - 3 });
+       .text(row.remarksText, colX[rmrkIdx] + 3, rowY + 5, { width: colWidths[rmrkIdx] - 3 });
     rowY += rowH;
   });
 
   doc.rect(40, tableTop, PAGE_WIDTH, rowY - tableTop).stroke(BORDER);
 
-  if (snap.rankingSubjectStrategy && snap.rankingSubjectStrategy !== 'all') {
+  if (s.resultsTable.rankingNote) {
     doc.fillColor(GRAY).fontSize(7).font('Helvetica')
-       .text(`● Subjects counted toward rank (${snap.rankingSubjectStrategy === 'best_n' ? `Best ${snap.rankingN}` : 'Compulsory only'})`, 40, rowY + 3, { width: PAGE_WIDTH });
+       .text(s.resultsTable.rankingNote, 40, rowY + 3, { width: PAGE_WIDTH });
     rowY += 12;
   }
 
@@ -1019,55 +1094,49 @@ function _buildPDFPage(doc, snap, config, attendance, isFirstPage, images = {}) 
   rowY += 6;
   doc.rect(40, rowY, PAGE_WIDTH, 28).fill('#eff6ff').stroke(BORDER);
   doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold');
-  doc.text(`Total Score: ${snap.totalScore?.toFixed(1) ?? '—'}`, 50, rowY + 5);
-  doc.text(`Average: ${snap.averageScore?.toFixed(1) ?? '—'}%`, 160, rowY + 5);
-  if (config.showGPA) doc.text(`GPA: ${snap.gpa?.toFixed(2) ?? '—'}`, 265, rowY + 5);
-  if (config.rankingEnabled && snap.rankings?.class) {
-    const r = snap.rankings.class;
-    doc.fillColor(ACCENT).text(`Class Rank: ${r.rank} / ${r.outOf}`, 355, rowY + 5);
+  doc.text(s.summary.totalText, 50, rowY + 5);
+  doc.text(s.summary.averageText, 160, rowY + 5);
+  if (s.summary.showGPA) doc.text(s.summary.gpaText, 265, rowY + 5);
+  if (s.summary.showRanking) {
+    doc.fillColor(ACCENT).text(s.summary.rankText, 355, rowY + 5);
   }
   rowY += 28;
 
   /* ATTENDANCE */
-  if (config.showAttendanceSummary && attendance) {
+  if (s.attendance) {
     rowY += 8;
     doc.rect(40, rowY, PAGE_WIDTH, 26).fill(LIGHT_GRAY).stroke(BORDER);
     doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('ATTENDANCE', 50, rowY + 4);
     doc.fillColor(DARK).fontSize(9).font('Helvetica')
-       .text(`Present: ${attendance.daysPresent}   Absent: ${attendance.daysAbsent}   Total Days: ${attendance.totalSchoolDays}` +
-             (attendance.percentage != null ? `   Attendance: ${attendance.percentage}%` : ''),
-             50, rowY + 14, { width: PAGE_WIDTH - 20 });
+       .text(s.attendance.text, 50, rowY + 14, { width: PAGE_WIDTH - 20 });
     rowY += 26;
   }
 
   /* COMMENTS */
-  const comments = snap.comments || {};
   rowY += 12;
   doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text("CLASS TEACHER'S REMARK:", 40, rowY);
   rowY += 12;
   doc.rect(40, rowY, PAGE_WIDTH, 30).fill('white').stroke(BORDER);
   doc.fillColor(DARK).fontSize(9).font('Helvetica')
-     .text(sanitisePdfStr(comments.classTeacherRemark) || '— No remark entered —', 46, rowY + 9, { width: PAGE_WIDTH - 12 });
+     .text(s.comments.classTeacherRemark, 46, rowY + 9, { width: PAGE_WIDTH - 12 });
   rowY += 38;
 
   doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text("PRINCIPAL'S COMMENT:", 40, rowY);
   rowY += 12;
   doc.rect(40, rowY, PAGE_WIDTH, 30).fill('white').stroke(BORDER);
   doc.fillColor(DARK).fontSize(9).font('Helvetica')
-     .text(sanitisePdfStr(comments.principalRemark) || '— No comment entered —', 46, rowY + 9, { width: PAGE_WIDTH - 12 });
+     .text(s.comments.principalRemark, 46, rowY + 9, { width: PAGE_WIDTH - 12 });
   rowY += 42;
 
   /* SIGNATURES */
   const sigY = rowY + 8;
   const sigW = (PAGE_WIDTH - 20) / 2;
 
-  // Render principal signature image above the line (if available)
   if (images.principalSignature) {
     try {
       doc.image(images.principalSignature, 40 + sigW + 10, sigY - 28, { height: 28, fit: [sigW - 10, 28] });
     } catch (_) { /* non-fatal — skip image if corrupt */ }
   }
-  // Render school stamp (right of signatures, small)
   if (images.schoolStamp) {
     try {
       doc.image(images.schoolStamp, 40 + PAGE_WIDTH - 56, sigY - 36, { height: 36, fit: [50, 36] });
@@ -1077,27 +1146,31 @@ function _buildPDFPage(doc, snap, config, attendance, isFirstPage, images = {}) 
   doc.moveTo(40, sigY + 20).lineTo(40 + sigW - 10, sigY + 20).stroke(DARK);
   doc.moveTo(40 + sigW + 10, sigY + 20).lineTo(40 + PAGE_WIDTH, sigY + 20).stroke(DARK);
   doc.fillColor(GRAY).fontSize(8).font('Helvetica')
-     .text(config.classTeacherSignatureLabel || 'Class Teacher', 40, sigY + 24, { width: sigW })
-     .text(config.principalSignatureLabel    || 'Principal',      40 + sigW + 10, sigY + 24, { width: sigW });
+     .text(s.signatures.classTeacherLabel, 40, sigY + 24, { width: sigW })
+     .text(s.signatures.principalLabel,    40 + sigW + 10, sigY + 24, { width: sigW });
 
   /* FOOTER */
   const footerY = doc.page.height - 55;
   doc.rect(40, footerY, PAGE_WIDTH, 0.5).fill(BORDER);
   doc.fillColor(GRAY).fontSize(7.5).font('Helvetica')
-     .text(config.footerNote || 'This report card is computer-generated.', 40, footerY + 6, { width: PAGE_WIDTH, align: 'center' });
-  const genLine = `Generated: ${new Date().toUTCString()}  |  v${snap.version || 1}  |  Batch: ${snap.batchId || '—'}`;
-  if (snap.reportId) {
+     .text(s.footer.footerNote, 40, footerY + 6, { width: PAGE_WIDTH, align: 'center' });
+  if (s.footer.reportId) {
     const verifyRow = footerY + 18;
     doc.fillColor(DARK).fontSize(7).font('Helvetica-Bold')
-       .text(`Report ID: ${snap.reportId}`, 40, verifyRow, { width: PAGE_WIDTH / 2 });
+       .text(`Report ID: ${s.footer.reportId}`, 40, verifyRow, { width: PAGE_WIDTH / 2 });
     doc.fillColor(GRAY).fontSize(7).font('Helvetica')
-       .text(`Verify at: /verify/${snap.reportId}`, 40 + PAGE_WIDTH / 2, verifyRow, { width: PAGE_WIDTH / 2, align: 'right' });
+       .text(`Verify at: /verify/${s.footer.reportId}`, 40 + PAGE_WIDTH / 2, verifyRow, { width: PAGE_WIDTH / 2, align: 'right' });
     doc.fillColor(GRAY).fontSize(6.5).font('Helvetica')
-       .text(genLine, 40, footerY + 28, { width: PAGE_WIDTH, align: 'center' });
+       .text(s.footer.genLine, 40, footerY + 28, { width: PAGE_WIDTH, align: 'center' });
   } else {
     doc.fillColor(GRAY).fontSize(7.5).font('Helvetica')
-       .text(genLine, 40, footerY + 18, { width: PAGE_WIDTH, align: 'center' });
+       .text(s.footer.genLine, 40, footerY + 18, { width: PAGE_WIDTH, align: 'center' });
   }
+}
+
+function _buildPDFPage(doc, snap, config, attendance, isFirstPage, images = {}) {
+  const sections = _computeReportSections(snap, config, attendance);
+  _drawReportPage(doc, sections, images, isFirstPage);
 }
 
 /* ── Portal roles bypass RBAC; the handler does ownership + fee checks ── */
@@ -1387,5 +1460,7 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
 // convention as qa-health.js's exported check functions.
 router._notifyReportCardsPublished = _notifyReportCardsPublished;
 router._normalizeGradeScaleBands = _normalizeGradeScaleBands;
+router._buildPDFPage = _buildPDFPage;
+router._computeReportSections = _computeReportSections;
 
 module.exports = router;
