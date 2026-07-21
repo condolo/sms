@@ -1528,27 +1528,33 @@ router.delete('/announcements/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-/* DELETE /api/platform/orphans — purge user accounts with no matching school
+/* DELETE /api/platform/orphans — purge superadmin accounts whose schoolId
+   no longer matches any existing school (i.e. the school was deleted).
    Fixes emails that remain "remembered" after a wipe due to the Mongoose id virtual conflict */
 router.delete('/orphans', async (req, res) => {
   try {
     const School = _model('schools');
     // Not tenantModel() — this route's entire purpose is finding superadmin
-    // accounts across ALL schools whose email/schoolId no longer matches
-    // any existing school. Tenant-scoping it would defeat the search.
+    // accounts across ALL schools whose schoolId no longer matches any
+    // existing school. Tenant-scoping it would defeat the search.
     const User   = _model('users');
 
-    /* Get all active school adminEmails and custom schoolIds */
-    const allSchools  = await School.find({}).lean();
-    const activeEmails   = new Set(allSchools.map(s => s.adminEmail).filter(Boolean));
+    /* Get all existing custom schoolIds */
+    const allSchools      = await School.find({}).lean();
     const activeSchoolIds = new Set(allSchools.map(s => s.id).filter(Boolean));
 
-    /* Find users who are superadmins but whose school no longer exists */
+    /* Find users who are superadmins but whose school no longer exists.
+       A user's personal login email is NOT compared against school.adminEmail
+       here — that field is a school's contact address, not a registry of
+       valid superadmin logins, and a school can validly have superadmins
+       whose email never matches it (e.g. an onboarded client added after
+       initial registration). Only a schoolId with no matching school is
+       evidence the account is actually orphaned. A user with no schoolId
+       at all is left alone (ambiguous, not evidence of orphaning) rather
+       than guessed at. */
     const orphanedUsers = await User.find({ role: 'superadmin' }).lean();
     const toDelete = orphanedUsers.filter(u => {
-      const emailOrphaned   = u.email   && !activeEmails.has(u.email);
-      const schoolOrphaned  = u.schoolId && !activeSchoolIds.has(u.schoolId);
-      return emailOrphaned || schoolOrphaned;
+      return u.schoolId && !activeSchoolIds.has(u.schoolId);
     });
 
     if (toDelete.length === 0) {

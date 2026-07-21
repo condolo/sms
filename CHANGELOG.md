@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.3.1] — 2026-07-21 — fix(platform): orphaned-user purge deleted valid superadmins, breaking impersonation + org-login
+
+**Live production incident.** `DELETE /api/platform/orphans` flagged a superadmin account as "orphaned" (and deleted it) if the account's personal login email didn't equal the value in `schools.adminEmail` — a school's single contact-email field, not a registry of valid superadmin logins — **OR** its `schoolId` matched no existing school. These were OR'd, so a superadmin with a perfectly valid, still-existing `schoolId` was deleted anyway whenever their personal email happened to differ from that contact field — a normal, common case for any superadmin onboarded after a school's initial registration.
+
+In production this deleted a real client's (Collins Odhiambo, `c.ndolo@mla.ac.ke`) superadmin accounts at two active schools (Trinity/Trinitas), plus two unrelated superadmin accounts at Demo school and Masict Lab, all in one click of the "Purge Orphaned Users" platform-admin tool. The deletion cascaded into two more visible failures: `POST /schools/:id/impersonate` (which looks up a superadmin by `schoolId` or `adminEmail`) started 404ing with "No superadmin found for this school," and org-login's identity-to-school resolver (`_resolveIdentitySchools`, which depends on `users` docs carrying the identity's `schoolId`) started returning zero eligible schools, producing "No school access found for this account in this organization."
+
+**Fix**: the email/`adminEmail` comparison is removed entirely. Only a `schoolId` with no matching school is now evidence an account is orphaned; a user with no `schoolId` at all is left alone rather than guessed at. This route had zero prior test coverage — first-ever coverage added.
+
+### Fixed
+- `server/routes/platform.js` — `DELETE /orphans` no longer deletes superadmin accounts based on a mismatched contact email; only a genuinely dangling `schoolId` triggers deletion.
+
+### Added
+- `server/__tests__/routes/platform-orphans.test.js` — regression coverage: a valid `schoolId` with mismatched email survives; a genuinely dangling `schoolId` is purged; a missing `schoolId` is left alone; mixed batches only purge the genuinely orphaned entry.
+
+### Note on account recovery
+This fix prevents further data loss but does not restore the already-deleted accounts. Recovering Collins' and the deleted test accounts' exact records (hashed passwords, roles, identity links) requires either a recent nightly backup (see `server/utils/backup-cron.js`, which does back up the `users` collection, credentials stripped) or recreating the superadmin accounts fresh via platform admin. Neither was executed as part of this fix — pending a decision on which recovery path to take.
+
+---
+
 ## [v5.3.0] — 2026-07-21 — refactor(report-cards): split the PDF renderer into an IR + adapter (RC2)
 
 First step of the Report Card Platform rendering-pipeline consolidation (see `docs/audits/REPORT_CARD_ARCHITECTURE_CONSOLIDATION_PLAN.md` §4-§5). `_buildPDFPage` — one 250-line function deciding both *what* a report card contains and *how* to draw it with pdfkit — is split into `_computeReportSections` (a pure function: snapshot + config + attendance → a plain-data description of every section's content, zero pdfkit calls) and `_drawReportPage` (the one adapter that walks that data and makes the actual drawing calls). `_buildPDFPage` itself becomes a two-line wrapper preserving its exact original signature, so `GET /:id/pdf` and `GET /bulk-pdf` needed no changes.
