@@ -1,7 +1,7 @@
 import {
   Activity, BarChart3, BookCheck, BookMarked, BookOpen, Building2, Bus,
   Calendar, CalendarDays, CheckCircle, ClipboardList, DollarSign,
-  FileCheck2, FileText, GraduationCap, Layers, MessageSquare, MonitorPlay,
+  FileCheck2, FileText, GraduationCap, Layers, Link2, MessageSquare, MonitorPlay,
   ShieldCheck, TrendingUp, UserCheck, UserCog, Users,
 } from 'lucide-react';
 
@@ -30,7 +30,8 @@ export const ECOSYSTEM_NODES = [
   { label: 'Messages',        Icon: MessageSquare, color: 'bg-sky-600',     desc: 'Staff connected'    },
   { label: 'Events',          Icon: CalendarDays,  color: 'bg-yellow-500',  desc: 'School calendar'    },
   { label: 'HR & Payroll',    Icon: UserCog,       color: 'bg-slate-600',   desc: 'Staff & payroll'    },
-  { label: 'Library',         Icon: BookOpen,      color: 'bg-lime-600',    desc: 'Resources managed'  },
+  { label: 'Library',         Icon: BookOpen,      color: 'bg-lime-600',    desc: 'Books managed'      },
+  { label: 'Resources',       Icon: Link2,         color: 'bg-indigo-400',  desc: 'Links shared'       },
   // Insights
   { label: 'Reports',         Icon: FileText,      color: 'bg-purple-500',  desc: 'Governed publish'   },
   { label: 'Analytics',       Icon: TrendingUp,    color: 'bg-teal-500',    desc: 'Director insight'   },

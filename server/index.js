@@ -344,6 +344,18 @@ const ROOT_DIR   = path.join(__dirname, '..');
 const REACT_DIST = path.join(__dirname, '..', 'client', 'dist');
 const fs         = require('fs');
 const reactBuilt = fs.existsSync(path.join(REACT_DIST, 'index.html'));
+// SSG (npm run build:ssg) overwrites dist/index.html with the fully-rendered
+// marketing Landing page and snapshots the plain, un-prerendered SPA shell to
+// app-shell.html (see client/scripts/prerender.mjs). That snapshot — not the
+// marketing-prerendered index.html — is what every app route (/dashboard,
+// /hr, /login, a school subdomain reloading anything) must fall back to;
+// otherwise a school subdomain reload flashes the marketing homepage before
+// React hydrates and client-side routing corrects it. Builds without SSG
+// (plain `vite build`, e.g. local dev) have no app-shell.html — index.html
+// is already the plain shell in that case, so falling back to it is correct.
+const APP_SHELL_PATH = fs.existsSync(path.join(REACT_DIST, 'app-shell.html'))
+  ? path.join(REACT_DIST, 'app-shell.html')
+  : path.join(REACT_DIST, 'index.html');
 
 // In production, prefer the compiled React app; fall back to legacy app root.
 const STATIC_DIR = (process.env.NODE_ENV === 'production' && reactBuilt) ? REACT_DIST : ROOT_DIR;
@@ -428,7 +440,7 @@ app.get('*', (req, res) => {
       return res.sendFile(candidate);
     }
 
-    return res.sendFile(path.join(REACT_DIST, 'index.html'));
+    return res.sendFile(APP_SHELL_PATH);
   }
   // No build available (dev mode without running `npm run build`)
   res.status(503).send('<h2>Msingi is starting up — run <code>cd client && npm run build</code> first, or use <code>npm run dev:react</code> for development.</h2>');

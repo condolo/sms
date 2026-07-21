@@ -6,6 +6,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.0.0] — 2026-07-21 — fix: school portal briefly flashed the marketing landing page on reload; missing favicon; cookie banner leaked into the portal
+
+Root-caused a real, reported bug: reloading any page inside a school's own portal (subdomain) showed the public marketing homepage for a moment before the correct portal content appeared. The cause was in `npm run build:ssg` (the SEO pre-render pass, `client/scripts/prerender.mjs`): it renders the marketing Landing page and writes it to `dist/index.html`, **overwriting** the plain SPA shell that file used to be. `server/index.js`'s wildcard fallback then served that same now-marketing-flavored `dist/index.html` for every app route with no prerendered page of its own (`/dashboard`, `/hr`, `/login`, literally anything past the ~24 public marketing routes) — so the browser painted the full rendered marketing homepage first, then React hydrated, resolved the real host/session, and replaced it. Confirmed live: before the fix, `curl /dashboard` returned 106 KB of rendered marketing markup; after, it returns the 4 KB empty shell.
+
+### Fixed
+
+- `client/scripts/prerender.mjs` — snapshots the plain, un-prerendered `dist/index.html` to `dist/app-shell.html` before the render loop overwrites the original. `server/index.js`'s final SPA fallback now serves that snapshot (falling back to `index.html` unchanged if it's missing — e.g. a plain `vite build` in dev, with no SSG pass run). Marketing routes (including literal `/`) are untouched — they still resolve to their own prerendered file first, exactly as before.
+- `client/public/favicon.svg` — the file `client/index.html` and `src/utils/favicon.js`'s `DEFAULT_FAVICON` had always referenced never existed. Every school without its own uploaded favicon (every newly provisioned school) was silently 404ing on it and falling back to whatever the browser guessed, which is what looked like a "demo" icon.
+- `client/src/main.jsx` — the cookie-consent banner and Google Analytics (both marketing-site concerns) rendered/loaded unconditionally on every route, including inside an authenticated school portal. Both now gate on the same synchronous `detectSchool()` check `App.jsx`'s router already uses — never on a school subdomain.
+- `client/src/data/landingData.js` — the landing/platform-page module grid (`ECOSYSTEM_NODES`) hadn't been updated for the new Resources module; added it, and renamed Library's description from "Resources managed" to "Books managed" to stop the two modules colliding in copy.
+
+---
+
 ## [v4.99.0] — 2026-07-20 — feat(resources): new shared-links repository with multi-dimensional visibility
 
 Final implementation phase from `docs/governance/GOVERNANCE_WORKFLOW_SPECIFICATION_v1.md` §5 — closes out the spec. Genuinely new: confirmed nothing to rename or repurpose (the "Library" module is an unrelated physical/digital book-lending system). The closest prior precedent for audience targeting, `messages.js`'s flat 5-option `recipients` field, had no class/individual/custom-group granularity at all.

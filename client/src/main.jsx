@@ -10,11 +10,20 @@ import ErrorBoundary from '@/components/guards/ErrorBoundary.jsx';
 import FloatingWidgets from '@/components/FloatingWidgets.jsx';
 import CookieConsentBanner from '@/components/CookieConsentBanner.jsx';
 import { initAnalyticsIfConsented } from '@/utils/analytics.js';
+import { detectSchool } from '@/utils/schoolDetect.js';
+
+// Marketing analytics (GA) and its consent banner belong to the public
+// marketing site, not a school's own portal — a school subdomain is a
+// distinct application, not "part of the landing page" with tracking
+// along for the ride. Both are gated on the same synchronous host check
+// App.jsx's router already uses.
+const { isSchool } = detectSchool();
 
 // Loads GA immediately only if a prior visit already accepted the cookie
 // banner — otherwise this is a no-op and GA never loads at all. See
-// CookieConsentBanner.jsx / utils/analytics.js.
-initAnalyticsIfConsented();
+// CookieConsentBanner.jsx / utils/analytics.js. Never runs on a school
+// portal at all.
+if (!isSchool) initAnalyticsIfConsented();
 
 // Fire a GA4 page_view on every client-side navigation. window.gtag only
 // exists once analytics.js has actually loaded GA (post-consent), so this
@@ -23,6 +32,7 @@ initAnalyticsIfConsented();
 // already fires the initial page_view when GA first loads.
 let _gaInitialSkipped = false;
 router.subscribe((state) => {
+  if (isSchool) return;
   if (!_gaInitialSkipped) { _gaInitialSkipped = true; return; }
   if (typeof window.gtag === 'function') {
     window.gtag('event', 'page_view', {
@@ -73,7 +83,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
         <QueryClientProvider client={queryClient}>
           <RouterProvider router={router} />
           <FloatingWidgets />
-          <CookieConsentBanner />
+          {!isSchool && <CookieConsentBanner />}
           {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
         </QueryClientProvider>
       </ErrorBoundary>

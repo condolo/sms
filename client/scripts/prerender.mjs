@@ -94,6 +94,19 @@ async function prerender() {
     process.exit(1);
   }
 
+  // Snapshot the plain (un-prerendered) SPA shell BEFORE the loop below
+  // overwrites dist/index.html with the fully-rendered marketing Landing
+  // page. server/index.js's wildcard SPA fallback serves this snapshot for
+  // every app route (e.g. /dashboard, /hr, /login) that has no prerendered
+  // file of its own — without it, a school subdomain reloading any app
+  // route would briefly flash the prerendered marketing homepage before
+  // React hydrates and client-side routing corrects it (real bug, fixed
+  // 2026-07-20 — see server/index.js's app-shell.html fallback).
+  fs.copyFileSync(
+    path.join(DIST_DIR, 'index.html'),
+    path.join(DIST_DIR, 'app-shell.html'),
+  );
+
   const server  = await startServer();
   const browser = await puppeteer.launch({
     headless: true,
