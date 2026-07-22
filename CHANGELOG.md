@@ -6,6 +6,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.3.4] — 2026-07-21 — fix(identity): orphan purge left stale identities that broke recreated superadmin logins
+
+**Second-order bug from the 2026-07-21 orphan-purge incident.** `DELETE /api/platform/orphans` only ever deleted `users` docs, never `identities` — so when a superadmin was recreated (via the new "Add Superadmin" flow shipped for that same incident) at a school where their `identities` doc from before the purge still existed, `provisionIdentityForUser`'s upsert matched that stale doc and, because `passwordHash` was only ever set via `$setOnInsert`, silently kept the OLD password hash instead of the newly generated one. Org-login (`POST /api/auth/org-login`) checks `identities.passwordHash` exclusively — so the freshly generated, correctly-displayed temp password was rejected with "Invalid email or password" even though the account itself was created correctly.
+
+### Fixed
+- `server/utils/provision-identities.js` — `provisionIdentityForUser`'s no-collision branch now refreshes `passwordHash`/`mfaEnabled` via `$set` unconditionally (previously `$setOnInsert` only, silently preserved on an upsert-match). Safe by construction: this branch only runs when no other *live* user in the org shares the email, meaning the current user is unambiguously the sole rightful owner of the identity going forward — there is no other live account whose credentials this could clobber.
+
+### Added
+- `server/__tests__/provision-identities.test.js` — regression test: a stale, orphaned identity (surviving a deleted user) has its `passwordHash` correctly refreshed for a newly recreated user with the same email, not preserved.
+- `scripts/resync-identity-passwords.js` — one-off repair for accounts already broken by this bug before the fix landed (the code fix only prevents it going forward; an account whose `users.identityId` is already set short-circuits `provisionIdentityForUser` before ever reaching the now-fixed logic). Reuses `qa-health.js`'s own `_checkPasswordHashMismatch` detection query so the script and the health-check gate agree on what "broken" means. Idempotent, `--dry-run` supported.
+
+### Note
+Full suite 72/72 suites, 650/650 tests, security-scan and ratchet clean. Collins' account (and any other superadmin recreated between the orphan-purge fix and this one) needs `node scripts/resync-identity-passwords.js` run once against production to actually log in — the code fix alone does not repair already-created records.
+
+---
+
 ## [v5.3.3] — 2026-07-21 — feat(analytics): Group Director/CEO role — read-only, merged cross-school dashboard
 
 Activates the "exec reporting" slice of the long-paused C6 (Organization services) roadmap item, on explicit request — a read-only account for a group's Director/CEO who has no interest in any single school's settings or day-to-day operations, just a merged view of what matters across every school in their organization. Chosen design (confirmed): access spans every active school in the org automatically (add a school later, it appears with no per-account change), and the dashboard rolls up the existing single-school Leadership Analytics metrics rather than inventing new ones.

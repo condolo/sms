@@ -114,6 +114,18 @@ async function provisionIdentityForUser(user, { Schools, Orgs, Users, Identities
   const siblings = candidates.filter(c => c.email.trim().toLowerCase() === email);
 
   if (siblings.length === 0) {
+    // No other LIVE user in this org shares this email — this user is
+    // unambiguously the sole rightful owner of the {orgId,email} identity
+    // going forward, whether that identity doc is being created fresh or
+    // already exists as an orphan (e.g. left behind by a since-deleted
+    // account — confirmed live: the 2026-07-21 orphan-purge incident
+    // deleted `users` docs without touching `identities`, so a recreated
+    // account's upsert matched the stale doc and $setOnInsert silently
+    // skipped refreshing passwordHash, leaving org-login checking a
+    // password that no longer matched anything). passwordHash/mfaEnabled
+    // are therefore always refreshed via $set here, not just on insert —
+    // there is no OTHER live account whose credentials this could
+    // clobber, by definition of siblings.length === 0.
     const identity = await Identities.findOneAndUpdate(
       { orgId, email },
       {
@@ -121,16 +133,18 @@ async function provisionIdentityForUser(user, { Schools, Orgs, Users, Identities
           id:            `idt_${uuidv4()}`,
           orgId,
           email,
-          passwordHash:  user.password || null,
-          mfaEnabled:    _mfaTriState(user),
           tokenVersion:  0,
           status:        'active',
           mergedInto:    null,
-          sourceUserIds: [userId],
           createdBy:     opts?.createdBy || 'system:provision',
           createdAt:     now,
         },
-        $set: { updatedAt: now },
+        $set: {
+          passwordHash: user.password || null,
+          mfaEnabled:   _mfaTriState(user),
+          updatedAt:    now,
+        },
+        $addToSet: { sourceUserIds: userId },
       },
       { upsert: true, new: true }
     ).lean();

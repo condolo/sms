@@ -180,6 +180,30 @@ describe('provisionIdentityForUser', () => {
     expect(mockIdentitiesFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
+  test('refreshes passwordHash on a stale ORPHANED identity — no live sibling means this user now owns it (regression: 2026-07-21 orphan-purge incident)', async () => {
+    // The identity doc survives from a PREVIOUSLY DELETED user (e.g. purged
+    // by DELETE /api/platform/orphans, which only ever touched `users`,
+    // never `identities`) — it still holds that old, now-meaningless
+    // password hash. A brand new user is created with the SAME email in the
+    // SAME org (e.g. via "Add Superadmin") and has no live sibling sharing
+    // that email, so they are the sole rightful owner of the identity going
+    // forward. The stale hash must be replaced, not preserved — otherwise
+    // org-login (which checks identities.passwordHash exclusively) rejects
+    // the new user's correct, freshly-generated password.
+    identityDocs = [{
+      id: 'idt_stale', orgId: 'org_x', email: 'collins@example.com', status: 'active',
+      passwordHash: '$2boldOLDhash', mfaEnabled: false, tokenVersion: 0,
+      sourceUserIds: ['usr_deleted_long_ago'], createdAt: '2020-01-01',
+    }];
+    const newUser = { _id: 'oid_new', id: 'usr_recreated', schoolId: 'sch_a', email: 'collins@example.com', password: '$2newFRESHhash' };
+
+    const identity = await provisionIdentityForUser(newUser);
+
+    expect(identity.id).toBe('idt_stale'); // matched the existing doc, not a fresh insert
+    expect(identity.passwordHash).toBe('$2newFRESHhash'); // refreshed, not left stale
+    expect(identity.sourceUserIds).toEqual(expect.arrayContaining(['usr_deleted_long_ago', 'usr_recreated']));
+  });
+
   test('self-heals a missing school.organizationId via provisionOrganizationForSchool', async () => {
     schoolDocs.push({ id: 'sch_noorg', _id: 'oid_school_noorg' });
     const user = { _id: 'oid_4', id: 'usr_4', schoolId: 'sch_noorg', email: 'noorg@example.com' };
