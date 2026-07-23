@@ -102,7 +102,12 @@ const PayrollSchema = z.object({
   staffId:     z.string().min(1),
   staffName:   z.string().max(200).trim().optional().default(''),
   payPeriod:   z.string().regex(/^\d{4}-\d{2}$/, 'Pay period must be YYYY-MM'),
-  basicSalary: z.coerce.number().min(0),
+  // Optional — Payroll Phase 1 Step 5: when omitted, defaults from this
+  // staff member's most recent existing payroll record (any period),
+  // so a new month doesn't require re-entering an unchanged salary. See
+  // the Step 5 note below the schema for why this — not a new "Employee
+  // Payroll Profile" collection — is the evidence-scoped fix.
+  basicSalary: z.coerce.number().min(0).optional(),
   allowances:  z.coerce.number().min(0).default(0),
   // Itemized breakdown, validated against the school's own allowanceTypes
   // catalogue (Step 4) — when present, its sum OVERRIDES `allowances`
@@ -117,6 +122,33 @@ const PayrollSchema = z.object({
   applyStatutory: z.coerce.boolean().optional(),
   notes:       z.string().max(500).trim().optional().default(''),
 });
+
+/* ── Payroll Phase 1, Step 5 — "Employee Payroll Profiles" ────────
+   Evaluated against the actual codebase before building anything (per
+   explicit instruction, not assumption): does payroll's calculation
+   need a new Employee Profile abstraction bridging `users` and
+   `teachers`? No — computeStatutoryDeductions() (statutory/kenya.js)
+   computes PAYE/NSSF/SHIF/Housing-Levy purely from gross pay; it never
+   reads nationalId/nssfNo/shaNo/kraPinNo. Those sensitive fields exist
+   only on `teachers.js` (a teaching-staff-only collection), while
+   payroll's own `staffId` already correctly spans the broader `users`
+   population (confirmed: GET /payroll/mine filters {staffId: userId}).
+   That's real, demonstrated friction — a non-teaching staff member has
+   nowhere today to hold a KRA PIN — but it does NOT block Payroll
+   Phase 1's correctness, because nothing in this phase's calculation
+   reads those fields. Building a new profile collection now to hold
+   fields nothing consumes yet would repeat exactly the mistake the
+   Report Card audit flagged in rc_templates: a complete-looking system
+   nothing reads. Deliberately not built here. Revisit when statutory
+   FILING/reporting is actually implemented — that's the point those
+   fields become load-bearing, not before.
+
+   What Step 5 DOES fix, because it's a real gap already inside this
+   phase's own flow: `basicSalary` had no "current baseline" — every
+   new period required re-entering it from scratch (POST /payroll/copy
+   only helps when copying a whole period at once). Below, an omitted
+   basicSalary defaults from the staff member's own most recent payroll
+   record — no new collection, reusing `payroll` itself as history. */
 
 const DocSchema = z.object({
   staffId:    z.string().min(1),
@@ -542,6 +574,20 @@ router.post('/payroll', rbac('hr', 'create'), async (req, res) => {
     const { data, error } = _validate(PayrollSchema, req.body);
     if (error) return E.validation(res, error);
 
+    // Step 5 — an omitted basicSalary defaults from this staff member's
+    // own most recent payroll record (any prior period), so a routine
+    // month doesn't require re-entering an unchanged salary. Still
+    // required outright if this is genuinely their first-ever record.
+    let basicSalary = data.basicSalary;
+    if (basicSalary === undefined) {
+      const previous = await tenantModel('payroll', tenantContext(req))
+        .find({ schoolId, staffId: data.staffId }).sort({ payPeriod: -1 }).limit(1).lean();
+      if (!previous.length) {
+        return E.badRequest(res, 'basicSalary is required for a staff member\'s first payroll record');
+      }
+      basicSalary = previous[0].basicSalary;
+    }
+
     const now = new Date().toISOString();
 
     // Snapshot the school's currency AND country onto the record at
@@ -583,7 +629,7 @@ router.post('/payroll', rbac('hr', 'create'), async (req, res) => {
     // supplied, so a request can't ask for a different jurisdiction's
     // statutory math than the school it's actually payroll for.
     const { grossPay, statutory, totalDeductions, netPay } = computePayrollForPeriod({
-      basicSalary: data.basicSalary, allowances: allowancesTotal,
+      basicSalary, allowances: allowancesTotal,
       manualDeductions: deductionsTotal,
       applyStatutory, country: school?.country,
     });
@@ -595,7 +641,7 @@ router.post('/payroll', rbac('hr', 'create'), async (req, res) => {
       {
         $set: {
           staffName:   data.staffName,
-          basicSalary: data.basicSalary,
+          basicSalary,
           allowances:  allowancesTotal,
           allowanceItems: data.allowanceItems ?? null,
           deductions:  deductionsTotal,

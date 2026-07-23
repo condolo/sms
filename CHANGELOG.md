@@ -6,6 +6,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.6.1] — 2026-07-23 — feat(hr): payroll basicSalary defaults from history (Payroll Phase 1, Step 5)
+
+Payroll Phase 1, Step 5 ("Employee Payroll Profiles"). Evaluated against the codebase before building anything, per explicit instruction: `computeStatutoryDeductions()` (the Kenyan calculator, Step 3) computes PAYE/NSSF/SHIF/Housing-Levy purely from gross pay — it never reads `nationalId`/`nssfNo`/`shaNo`/`kraPinNo`. Those sensitive fields exist only on `teachers.js` (teaching staff only), while payroll's own `staffId` already correctly spans the broader `users` population. That's real friction — a non-teaching staff member has nowhere today to hold a KRA PIN — but it does not block this phase's calculation correctness, and building a new "Employee Profile" collection to hold fields nothing currently reads would repeat the exact mistake the Report Card audit flagged in `rc_templates`: a complete-looking system nothing consumes. **Deliberately not built.** Revisit when statutory filing/reporting is actually implemented — that's the point those fields become load-bearing.
+
+### Added
+- `POST /api/hr/payroll` — `basicSalary` is now optional. When omitted, it defaults from the staff member's own most recent existing payroll record (any prior period) — no new collection, reusing `payroll` itself as history. Still required outright for a genuinely first-ever record (400 otherwise). An explicit `basicSalary` always overrides the default.
+- 4 new tests: first-record-requires-it, later-period-defaults-from-most-recent, explicit-value-always-wins, and defaulting picks the most recent period specifically (not just any prior one).
+
+### Note
+Full suite 75/75 suites, 705/705 tests; security-scan and ratchet clean. The users/teachers friction is documented in code (`hr.js`, right above `PayrollSchema`) and here rather than silently resolved — a decision, not an oversight.
+
+---
+
 ## [v5.6.0] — 2026-07-23 — feat(hr): school-level payroll policy — allowance/deduction types, itemized entries
 
 Payroll Phase 1, Step 4. School-level configuration only — government statutory rates stay entirely inside `server/utils/statutory/kenya.js` (Step 3), not school-editable, per explicit instruction.

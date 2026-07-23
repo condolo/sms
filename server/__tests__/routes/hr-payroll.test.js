@@ -12,7 +12,16 @@
    ============================================================ */
 
 function chain(result) {
-  return { select: () => chain(result), lean: () => Promise.resolve(result) };
+  return {
+    select: () => chain(result),
+    sort:   (spec) => chain(Array.isArray(result) ? _sortDocs(result, spec) : result),
+    limit:  (n)    => chain(Array.isArray(result) ? result.slice(0, n) : result),
+    lean:   () => Promise.resolve(result),
+  };
+}
+function _sortDocs(docs, spec) {
+  const [[field, dir]] = Object.entries(spec);
+  return [...docs].sort((a, b) => (a[field] > b[field] ? 1 : a[field] < b[field] ? -1 : 0) * dir);
 }
 
 function makeStore(seed = []) {
@@ -378,6 +387,50 @@ describe('POST /api/hr/payroll — itemized allowances/deductions (Payroll Phase
     });
     expect(res.status).toBe(200);
     expect(res.body.data.allowances).toBe(3000);
+  });
+});
+
+describe('POST /api/hr/payroll — basicSalary defaulting from history (Payroll Phase 1, Step 5)', () => {
+  test('400s when basicSalary is omitted and this is the staff member\'s first-ever record', async () => {
+    const app = buildApp();
+    const res = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07',
+    });
+    expect(res.status).toBe(400);
+  });
+
+  test('a later period defaults basicSalary from the most recent prior record', async () => {
+    const app = buildApp();
+    await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 60000,
+    });
+
+    const res = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-08',
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.basicSalary).toBe(60000);
+  });
+
+  test('an explicit basicSalary always overrides the historical default', async () => {
+    const app = buildApp();
+    await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 60000,
+    });
+
+    const res = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-08', basicSalary: 65000,
+    });
+    expect(res.body.data.basicSalary).toBe(65000);
+  });
+
+  test('defaulting picks the MOST RECENT period, not the first one', async () => {
+    const app = buildApp();
+    await supertest(app).post('/api/hr/payroll').send({ staffId: 'u_staff_1', payPeriod: '2026-06', basicSalary: 50000 });
+    await supertest(app).post('/api/hr/payroll').send({ staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 60000 });
+
+    const res = await supertest(app).post('/api/hr/payroll').send({ staffId: 'u_staff_1', payPeriod: '2026-08' });
+    expect(res.body.data.basicSalary).toBe(60000);
   });
 });
 
