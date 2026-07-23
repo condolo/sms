@@ -88,6 +88,7 @@ beforeEach(() => {
   mockCurrentUser = { userId: 'u_hr', schoolId: SCHOOL, role: 'hr', roles: [], name: 'HR Person', email: 'hr@x.io' };
   mockStores = {
     payroll: makeStore(),
+    payroll_config: makeStore(),
     schools: makeStore([{ id: SCHOOL, name: 'Test School', currency: 'KES', systemEmail: 'ops@test.school' }]),
     users: makeStore([
       { id: 'u_staff_1', schoolId: SCHOOL, name: 'Staff One', email: 'staff1@x.io', role: 'teacher', isActive: true },
@@ -285,6 +286,98 @@ describe('POST /api/hr/payroll — Kenya statutory integration (Payroll Phase 1,
     const copied = mockStores.payroll._docs().find(d => d.payPeriod === '2026-08');
     expect(copied.statutoryDeductions).not.toBeNull();
     expect(copied.statutoryDeductions.country).toBe('KE');
+  });
+});
+
+describe('GET/PUT /api/hr/payroll-config — school policy (Payroll Phase 1, Step 4)', () => {
+  test('GET returns defaults when nothing is configured yet', async () => {
+    const app = buildApp();
+    const res = await supertest(app).get('/api/hr/payroll-config');
+    expect(res.status).toBe(200);
+    expect(res.body.data.allowanceTypes.map(t => t.key)).toContain('housing');
+    expect(res.body.data.deductionTypes.map(t => t.key)).toContain('loan');
+    expect(res.body.data.defaultApplyStatutory).toBe(true);
+  });
+
+  test('PUT saves a custom catalogue and GET reflects it', async () => {
+    const app = buildApp();
+    const putRes = await supertest(app).put('/api/hr/payroll-config').send({
+      allowanceTypes: [{ key: 'lunch', label: 'Lunch Allowance' }],
+      defaultApplyStatutory: false,
+    });
+    expect(putRes.status).toBe(200);
+    expect(putRes.body.data.allowanceTypes).toEqual([{ key: 'lunch', label: 'Lunch Allowance' }]);
+
+    const getRes = await supertest(app).get('/api/hr/payroll-config');
+    expect(getRes.body.data.allowanceTypes).toEqual([{ key: 'lunch', label: 'Lunch Allowance' }]);
+    expect(getRes.body.data.defaultApplyStatutory).toBe(false);
+  });
+
+  test('rejects duplicate keys within one catalogue', async () => {
+    const app = buildApp();
+    const res = await supertest(app).put('/api/hr/payroll-config').send({
+      allowanceTypes: [{ key: 'lunch', label: 'A' }, { key: 'lunch', label: 'B' }],
+    });
+    expect(res.status).toBe(400);
+  });
+
+  test('a school\'s defaultApplyStatutory:false becomes the default for new records with no explicit applyStatutory', async () => {
+    mockStores.schools = makeStore([{ id: SCHOOL, name: 'Test School', currency: 'KES', country: 'KE' }]);
+    const app = buildApp();
+    await supertest(app).put('/api/hr/payroll-config').send({ defaultApplyStatutory: false });
+
+    const res = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 100000,
+    });
+    expect(res.body.data.statutoryDeductions).toBeNull();
+    expect(res.body.data.applyStatutory).toBe(false);
+  });
+});
+
+describe('POST /api/hr/payroll — itemized allowances/deductions (Payroll Phase 1, Step 4)', () => {
+  test('itemized allowances sum into the flat total and are validated against the catalogue', async () => {
+    const app = buildApp();
+    const res = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 50000,
+      allowanceItems: [{ type: 'housing', amount: 10000 }, { type: 'transport', amount: 5000 }],
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.allowances).toBe(15000);
+    expect(res.body.data.grossSalary).toBe(65000);
+    expect(res.body.data.allowanceItems).toEqual([{ type: 'housing', amount: 10000 }, { type: 'transport', amount: 5000 }]);
+  });
+
+  test('an unknown allowance type is rejected with 400', async () => {
+    const app = buildApp();
+    const res = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 50000,
+      allowanceItems: [{ type: 'not_a_real_type', amount: 1000 }],
+    });
+    expect(res.status).toBe(400);
+  });
+
+  test('itemized deductions sum into the flat total and are validated', async () => {
+    const app = buildApp();
+    const res = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 50000,
+      deductionItems: [{ type: 'loan', amount: 2000 }],
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.deductions).toBe(2000);
+    expect(res.body.data.netSalary).toBe(48000);
+  });
+
+  test('a custom school-defined type is accepted once configured', async () => {
+    const app = buildApp();
+    await supertest(app).put('/api/hr/payroll-config').send({
+      allowanceTypes: [{ key: 'lunch', label: 'Lunch Allowance' }],
+    });
+    const res = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 50000,
+      allowanceItems: [{ type: 'lunch', amount: 3000 }],
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.allowances).toBe(3000);
   });
 });
 

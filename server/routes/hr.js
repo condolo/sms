@@ -48,19 +48,73 @@ const LeaveSchema = z.object({
   handoverNotes: z.string().max(1000).trim().optional(),
 });
 
+/* ── Payroll configuration (Payroll Phase 1, Step 4) ─────────────
+   School-level policy: allowance/deduction TYPE catalogues (for
+   itemizing a payroll record's allowances/deductions, instead of a
+   single opaque number) and payroll-wide defaults. Deliberately does
+   NOT let a school override government statutory rates — those stay
+   entirely inside server/utils/statutory/kenya.js, per explicit
+   instruction. Mirrors academic-config.js's exact shape: one doc per
+   school, merged over hardcoded defaults, upsert-on-save. */
+const DEFAULT_ALLOWANCE_TYPES = [
+  { key: 'housing',   label: 'Housing Allowance' },
+  { key: 'transport', label: 'Transport Allowance' },
+  { key: 'medical',   label: 'Medical Allowance' },
+  { key: 'other',     label: 'Other Allowance' },
+];
+const DEFAULT_DEDUCTION_TYPES = [
+  { key: 'loan',     label: 'Loan Repayment' },
+  { key: 'advance',  label: 'Salary Advance' },
+  { key: 'uniform',  label: 'Uniform / Equipment' },
+  { key: 'other',    label: 'Other Deduction' },
+];
+
+const PayrollTypeSchema = z.object({
+  key:   z.string().min(1).max(50).regex(/^[a-z][a-z0-9_]*$/, 'key must be lowercase, start with a letter'),
+  label: z.string().min(1).max(100),
+});
+
+const PayrollConfigSchema = z.object({
+  allowanceTypes: z.array(PayrollTypeSchema).max(30).optional(),
+  deductionTypes: z.array(PayrollTypeSchema).max(30).optional(),
+  // School-wide default for new payroll records' applyStatutory flag —
+  // e.g. a school running payroll through an external bureau might set
+  // this false so PAYE/NSSF/SHIF/Housing-Levy aren't double-applied.
+  // A specific record's own applyStatutory (PayrollSchema) always wins
+  // when explicitly given.
+  defaultApplyStatutory: z.boolean().optional(),
+});
+
+function _mergePayrollConfig(saved) {
+  return {
+    allowanceTypes:         saved?.allowanceTypes         ?? DEFAULT_ALLOWANCE_TYPES,
+    deductionTypes:         saved?.deductionTypes         ?? DEFAULT_DEDUCTION_TYPES,
+    defaultApplyStatutory:  saved?.defaultApplyStatutory  ?? true,
+  };
+}
+
+const PayrollItemSchema = z.object({
+  type:   z.string().min(1).max(50),
+  amount: z.coerce.number().min(0),
+});
+
 const PayrollSchema = z.object({
   staffId:     z.string().min(1),
   staffName:   z.string().max(200).trim().optional().default(''),
   payPeriod:   z.string().regex(/^\d{4}-\d{2}$/, 'Pay period must be YYYY-MM'),
   basicSalary: z.coerce.number().min(0),
   allowances:  z.coerce.number().min(0).default(0),
+  // Itemized breakdown, validated against the school's own allowanceTypes
+  // catalogue (Step 4) — when present, its sum OVERRIDES `allowances`
+  // above rather than needing both kept in sync by the caller.
+  allowanceItems: z.array(PayrollItemSchema).max(20).optional(),
   deductions:  z.coerce.number().min(0).default(0), // non-statutory (e.g. loan repayments) — statutory deductions are computed separately, see applyStatutory below
+  deductionItems: z.array(PayrollItemSchema).max(20).optional(),
   // Whether to auto-compute statutory deductions (PAYE/NSSF/SHIF/Housing
-  // Levy for a Kenyan school) for this record. Defaults on — "the
-  // standard payroll flow" per Payroll Phase 1 Step 3 — with an opt-out
-  // for e.g. a contractor paid outside PAYE, ahead of Step 4's proper
-  // per-school policy config.
-  applyStatutory: z.coerce.boolean().default(true),
+  // Levy for a Kenyan school) for this record. Omit to fall back to the
+  // school's own payroll_config.defaultApplyStatutory (Step 4), which
+  // itself defaults to true — "the standard payroll flow."
+  applyStatutory: z.coerce.boolean().optional(),
   notes:       z.string().max(500).trim().optional().default(''),
 });
 
@@ -393,6 +447,49 @@ router.patch('/leave/:id/resolve', rbac('hr', 'update'), async (req, res) => {
    Only HR_ROLES can create/edit. Only ADMIN_ROLES can delete.
    ══════════════════════════════════════════════════════════════ */
 
+/* GET /api/hr/payroll-config — fetch this school's payroll policy (with defaults) */
+router.get('/payroll-config', rbac('hr', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const saved = await tenantModel('payroll_config', tenantContext(req)).findOne({ schoolId }).lean();
+    return ok(res, _mergePayrollConfig(saved));
+  } catch (err) {
+    console.error('[hr/payroll-config GET]', err);
+    return E.serverError(res);
+  }
+});
+
+/* PUT /api/hr/payroll-config — save/update (upsert) */
+router.put('/payroll-config', rbac('hr', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { data, error } = _validate(PayrollConfigSchema, req.body);
+    if (error) return E.validation(res, error);
+
+    // Type keys must be unique within their own list — a duplicate key
+    // would make catalogue-membership validation on a payroll record
+    // ambiguous about which label it refers to.
+    for (const [field, items] of [['allowanceTypes', data.allowanceTypes], ['deductionTypes', data.deductionTypes]]) {
+      if (!items) continue;
+      const keys = items.map(i => i.key);
+      if (new Set(keys).size !== keys.length) {
+        return E.badRequest(res, `${field} contains duplicate keys`);
+      }
+    }
+
+    const doc = await tenantModel('payroll_config', tenantContext(req)).findOneAndUpdate(
+      { schoolId },
+      { $set: { ...data, schoolId, updatedBy: userId, updatedAt: new Date().toISOString() } },
+      { new: true, upsert: true, runValidators: false }
+    ).lean();
+
+    return ok(res, _mergePayrollConfig(doc));
+  } catch (err) {
+    console.error('[hr/payroll-config PUT]', err);
+    return E.serverError(res);
+  }
+});
+
 /* GET /api/hr/payroll/mine — current user's own payslips (no HR role needed) */
 router.get('/payroll/mine', async (req, res) => {
   try {
@@ -455,14 +552,40 @@ router.post('/payroll', rbac('hr', 'create'), async (req, res) => {
     const school = await _model('schools').findOne({ id: schoolId }, { currency: 1, country: 1 }).lean();
     const currency = school?.currency || 'KES';
 
+    const payrollConfig = await tenantModel('payroll_config', tenantContext(req)).findOne({ schoolId }).lean();
+    const mergedConfig  = _mergePayrollConfig(payrollConfig);
+
+    // Itemized allowances/deductions (Step 4) — each item's `type` must
+    // be a key the school has actually configured, same discipline
+    // workflow-config.js uses for assigneeType/assigneeValue: a typo'd
+    // or stale type key is rejected, not silently accepted.
+    let allowancesTotal = data.allowances;
+    if (data.allowanceItems) {
+      const validKeys = new Set(mergedConfig.allowanceTypes.map(t => t.key));
+      const badItem = data.allowanceItems.find(i => !validKeys.has(i.type));
+      if (badItem) return E.badRequest(res, `Unknown allowance type '${badItem.type}' — check Payroll Settings`);
+      allowancesTotal = data.allowanceItems.reduce((sum, i) => sum + i.amount, 0);
+    }
+    let deductionsTotal = data.deductions;
+    if (data.deductionItems) {
+      const validKeys = new Set(mergedConfig.deductionTypes.map(t => t.key));
+      const badItem = data.deductionItems.find(i => !validKeys.has(i.type));
+      if (badItem) return E.badRequest(res, `Unknown deduction type '${badItem.type}' — check Payroll Settings`);
+      deductionsTotal = data.deductionItems.reduce((sum, i) => sum + i.amount, 0);
+    }
+
+    // A record's own applyStatutory always wins when explicitly given;
+    // otherwise fall back to the school's configured default.
+    const applyStatutory = data.applyStatutory ?? mergedConfig.defaultApplyStatutory;
+
     // Single source of truth for the calculation — see payroll-engine.js.
     // country is resolved server-side from the school, never client-
     // supplied, so a request can't ask for a different jurisdiction's
     // statutory math than the school it's actually payroll for.
     const { grossPay, statutory, totalDeductions, netPay } = computePayrollForPeriod({
-      basicSalary: data.basicSalary, allowances: data.allowances,
-      manualDeductions: data.deductions,
-      applyStatutory: data.applyStatutory, country: school?.country,
+      basicSalary: data.basicSalary, allowances: allowancesTotal,
+      manualDeductions: deductionsTotal,
+      applyStatutory, country: school?.country,
     });
     const grossSalary = grossPay;
     const netSalary    = netPay;
@@ -473,9 +596,11 @@ router.post('/payroll', rbac('hr', 'create'), async (req, res) => {
         $set: {
           staffName:   data.staffName,
           basicSalary: data.basicSalary,
-          allowances:  data.allowances,
-          deductions:  data.deductions,
-          applyStatutory:    data.applyStatutory,
+          allowances:  allowancesTotal,
+          allowanceItems: data.allowanceItems ?? null,
+          deductions:  deductionsTotal,
+          deductionItems: data.deductionItems ?? null,
+          applyStatutory,
           statutoryDeductions: statutory,
           totalDeductions,
           grossSalary,

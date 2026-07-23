@@ -6,6 +6,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.6.0] — 2026-07-23 — feat(hr): school-level payroll policy — allowance/deduction types, itemized entries
+
+Payroll Phase 1, Step 4. School-level configuration only — government statutory rates stay entirely inside `server/utils/statutory/kenya.js` (Step 3), not school-editable, per explicit instruction.
+
+### Added
+- `GET/PUT /api/hr/payroll-config` — allowance/deduction type catalogues plus a `defaultApplyStatutory` policy flag, mirroring `academic-config.js`'s exact shape (one doc per school, upsert, merged over hardcoded defaults). `PUT` rejects duplicate keys within a catalogue.
+- `PayrollSchema` gains `allowanceItems`/`deductionItems` — optional itemized breakdowns. When provided, each item's `type` is validated against the school's own configured catalogue (same discipline `workflow-config.js` uses for assignee references — a typo'd or stale type key is rejected, not silently accepted) and their sum overrides the flat `allowances`/`deductions` total. Not an orphaned catalogue: this is real, immediate wiring into the Step 2 engine, not configuration built ahead of any consumer.
+- `applyStatutory` on a payroll record is no longer hardcoded to default `true` in the schema — when omitted, it now resolves from the school's own `payroll_config.defaultApplyStatutory` (itself defaulting to `true`), giving a school running payroll through an external bureau a real way to opt out platform-wide instead of per-record.
+- `server/utils/indexes.js` — `payroll_config` index block.
+- 12 new tests in `hr-payroll.test.js` — config CRUD, duplicate-key rejection, itemized-entry validation and summation, and the school-default-flows-into-new-records path.
+
+### Note
+Full suite 75/75 suites, 701/701 tests; security-scan and ratchet clean. No client UI yet for the config screen or itemized entry — both are Step 6 (Payroll Processing) concerns, same reasoning as `statutoryDeductions` display in v5.5.0.
+
+---
+
 ## [v5.5.0] — 2026-07-23 — feat(hr): payroll computation engine + Kenyan statutory deductions (PAYE/NSSF/SHIF/Housing Levy)
 
 Payroll Phase 1, Steps 2+3 (see `docs/audits/HR_PAYROLL_ARCHITECTURAL_REVIEW.md` §2/§3/§9). Built together rather than sequentially — Step 3's statutory calculation is exactly what Step 2's engine exists to host, so building the engine first without it would mean reworking it immediately after.

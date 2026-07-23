@@ -764,6 +764,16 @@ const INDEXES = [
       { key: { schoolId: 1, status: 1 },   name: 'lr_school_status' },
     ],
   },
+  /* ── payroll_config (Payroll Phase 1, Step 4) ───────────────────
+     One doc per school — allowance/deduction type catalogues +
+     payroll policy defaults. Same shape/cardinality as
+     academic_config, one level up in this same block. */
+  {
+    col: 'payroll_config',
+    indexes: [
+      { key: { schoolId: 1 }, name: 'pc_school', unique: true },
+    ],
+  },
 
   /* ── behaviour_points_resets (Governance Spec §2) ──────────────
      One doc per manual reset. Never touches behaviour_incidents —
