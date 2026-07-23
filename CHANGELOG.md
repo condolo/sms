@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.7.0] — 2026-07-23 — feat(hr): payroll approval workflow + record locking (Payroll Phase 1, Step 6)
+
+Payroll Phase 1, Step 6. Reuses `workflow-config.js` verbatim (per the architectural review's §8 finding, and per explicit instruction to "reuse the existing workflow, notification, and audit infrastructure") — zero new engine code, the same engine leave approval already uses, with a payroll-specific `workflowKey`.
+
+Also closes a real, independently-worth-fixing gap found while implementing this: editing an existing payroll record via `POST /payroll` never changed its `status`, even though the code's own comment said it should ("Reset status to draft on any edit") — meaning a `confirmed` or `paid` record's numbers could be silently overwritten with no re-approval and no trace that the figures had changed after sign-off.
+
+### Added
+- `GET/PUT /api/hr/payroll/workflow-config` — school-configured approval chain for `draft → confirmed`, mirroring `leave/workflow-config` exactly. No `>=2 steps` platform floor here (that was a leave-specific business rule, not a generic requirement) — 1+ steps allowed.
+- `PATCH /api/hr/payroll/:id/advance` — a configured chain-step approver approves (advances `currentStepOrder`) or rejects (sends the record back to `draft`, restarting the chain at step 1 — payroll has no separate terminal "rejected" state the way leave does, since a payroll record is always meant to be corrected and resubmitted, not permanently declined). Mirrors `leave/:id/advance`'s eligibility-checking and notification logic near-verbatim.
+- `PATCH /payroll/:id/status`'s `confirmed` transition is now blocked (400) until a configured chain is fully cleared — mirrors `leave/:id/resolve`'s exact guard. Schools with no chain configured keep today's direct-confirm behavior, unchanged. The separate `paid` transition stays `ADMIN_ROLES`-only regardless of any chain — a deliberate, simpler "who actually releases money" gate, not another configurable step.
+
+### Fixed
+- **Locking**: `POST /payroll` now blocks editing a `confirmed`/`paid` record unless the requester is `ADMIN_ROLES` (same gate `DELETE` already had) — and even an admin's edit resets the record to `draft` (+ restarts the chain), logged at `warn` severity with `revertedFromLocked: true`. Editing no longer silently coexists with a prior confirmation.
+
+### Note
+Full suite 75/75 suites, 716/716 tests; security-scan and ratchet clean. 15 new tests covering locking (non-admin blocked, admin allowed + reverts, draft edits unaffected) and the full chain lifecycle (no-chain unchanged behavior, chain-blocks-confirm, full approve-then-confirm flow, ineligible-approver 403, reject-sends-to-draft, reject-requires-reason).
+
+---
+
 ## [v5.6.1] — 2026-07-23 — feat(hr): payroll basicSalary defaults from history (Payroll Phase 1, Step 5)
 
 Payroll Phase 1, Step 5 ("Employee Payroll Profiles"). Evaluated against the codebase before building anything, per explicit instruction: `computeStatutoryDeductions()` (the Kenyan calculator, Step 3) computes PAYE/NSSF/SHIF/Housing-Levy purely from gross pay — it never reads `nationalId`/`nssfNo`/`shaNo`/`kraPinNo`. Those sensitive fields exist only on `teachers.js` (teaching staff only), while payroll's own `staffId` already correctly spans the broader `users` population. That's real friction — a non-teaching staff member has nowhere today to hold a KRA PIN — but it does not block this phase's calculation correctness, and building a new "Employee Profile" collection to hold fields nothing currently reads would repeat the exact mistake the Report Card audit flagged in `rc_templates`: a complete-looking system nothing consumes. **Deliberately not built.** Revisit when statutory filing/reporting is actually implemented — that's the point those fields become load-bearing.

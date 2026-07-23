@@ -98,6 +98,8 @@ beforeEach(() => {
   mockStores = {
     payroll: makeStore(),
     payroll_config: makeStore(),
+    workflow_configs: makeStore(),
+    custom_roles: makeStore(),
     schools: makeStore([{ id: SCHOOL, name: 'Test School', currency: 'KES', systemEmail: 'ops@test.school' }]),
     users: makeStore([
       { id: 'u_staff_1', schoolId: SCHOOL, name: 'Staff One', email: 'staff1@x.io', role: 'teacher', isActive: true },
@@ -431,6 +433,183 @@ describe('POST /api/hr/payroll — basicSalary defaulting from history (Payroll 
 
     const res = await supertest(app).post('/api/hr/payroll').send({ staffId: 'u_staff_1', payPeriod: '2026-08' });
     expect(res.body.data.basicSalary).toBe(60000);
+  });
+});
+
+describe('Payroll locking — editing a confirmed/paid record (Payroll Phase 1, Step 6)', () => {
+  async function createAndConfirm(app) {
+    const createRes = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 50000,
+    });
+    const id = createRes.body.data.id;
+    mockCurrentUser = { ...mockCurrentUser, role: 'admin' };
+    await supertest(app).patch(`/api/hr/payroll/${id}/status`).send({ status: 'confirmed' });
+    mockCurrentUser = { userId: 'u_hr', schoolId: SCHOOL, role: 'hr', roles: [], name: 'HR Person', email: 'hr@x.io' };
+    return id;
+  }
+
+  test('a non-admin cannot edit a confirmed record', async () => {
+    const app = buildApp();
+    await createAndConfirm(app);
+
+    const res = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 55000,
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test('an admin CAN edit a confirmed record, and it reverts to draft', async () => {
+    const app = buildApp();
+    await createAndConfirm(app);
+    mockCurrentUser = { ...mockCurrentUser, role: 'admin' };
+
+    const res = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 55000,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('draft');
+    expect(res.body.data.basicSalary).toBe(55000);
+  });
+
+  test('editing a still-draft record needs no special permission', async () => {
+    const app = buildApp();
+    await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 50000,
+    });
+    const res = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 51000,
+    });
+    expect(res.status).toBe(200);
+  });
+});
+
+describe('Payroll approval chain (Payroll Phase 1, Step 6, reusing workflow-config.js)', () => {
+  test('with no chain configured, PATCH /status confirms directly — unchanged legacy behavior', async () => {
+    const app = buildApp();
+    const createRes = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 50000,
+    });
+    const res = await supertest(app).patch(`/api/hr/payroll/${createRes.body.data.id}/status`).send({ status: 'confirmed' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('confirmed');
+  });
+
+  test('with a chain configured, PATCH /status confirmed is blocked until the chain clears', async () => {
+    const app = buildApp();
+    mockStores.workflow_configs = makeStore([{
+      schoolId: SCHOOL, workflowKey: 'payroll_approval',
+      steps: [{ order: 1, assigneeType: 'role', assigneeValue: 'principal' }],
+    }]);
+    mockStores.users = makeStore([
+      ...mockStores.users._docs(),
+      { id: 'u_principal', schoolId: SCHOOL, name: 'The Principal', role: 'principal', isActive: true },
+    ]);
+
+    const createRes = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 50000,
+    });
+    const id = createRes.body.data.id;
+    expect(createRes.body.data.currentStepOrder).toBe(1);
+
+    const res = await supertest(app).patch(`/api/hr/payroll/${id}/status`).send({ status: 'confirmed' });
+    expect(res.status).toBe(400);
+  });
+
+  test('full chain: principal approves via /advance, then confirm succeeds', async () => {
+    const app = buildApp();
+    mockStores.workflow_configs = makeStore([{
+      schoolId: SCHOOL, workflowKey: 'payroll_approval',
+      steps: [{ order: 1, assigneeType: 'role', assigneeValue: 'principal' }],
+    }]);
+    mockStores.users = makeStore([
+      ...mockStores.users._docs(),
+      { id: 'u_principal', schoolId: SCHOOL, name: 'The Principal', role: 'principal', isActive: true },
+    ]);
+
+    const createRes = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 50000,
+    });
+    const id = createRes.body.data.id;
+
+    mockCurrentUser = { userId: 'u_principal', schoolId: SCHOOL, role: 'principal', roles: [], name: 'The Principal', email: 'p@x.io' };
+    const advanceRes = await supertest(app).patch(`/api/hr/payroll/${id}/advance`).send({ status: 'approved' });
+    expect(advanceRes.status).toBe(200);
+    expect(advanceRes.body.data.currentStepOrder).toBe(2);
+
+    mockCurrentUser = { userId: 'u_hr', schoolId: SCHOOL, role: 'hr', roles: [], name: 'HR Person', email: 'hr@x.io' };
+    const confirmRes = await supertest(app).patch(`/api/hr/payroll/${id}/status`).send({ status: 'confirmed' });
+    expect(confirmRes.status).toBe(200);
+    expect(confirmRes.body.data.status).toBe('confirmed');
+  });
+
+  test('an ineligible user cannot advance the chain step', async () => {
+    const app = buildApp();
+    mockStores.workflow_configs = makeStore([{
+      schoolId: SCHOOL, workflowKey: 'payroll_approval',
+      steps: [{ order: 1, assigneeType: 'role', assigneeValue: 'principal' }],
+    }]);
+    const createRes = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 50000,
+    });
+    const res = await supertest(app).patch(`/api/hr/payroll/${createRes.body.data.id}/advance`).send({ status: 'approved' });
+    expect(res.status).toBe(403);
+  });
+
+  test('rejecting at a chain step sends it back to draft, restarting at step 1', async () => {
+    const app = buildApp();
+    mockStores.workflow_configs = makeStore([{
+      schoolId: SCHOOL, workflowKey: 'payroll_approval',
+      steps: [{ order: 1, assigneeType: 'role', assigneeValue: 'principal' }],
+    }]);
+    mockStores.users = makeStore([
+      ...mockStores.users._docs(),
+      { id: 'u_principal', schoolId: SCHOOL, name: 'The Principal', role: 'principal', isActive: true },
+    ]);
+    const createRes = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 50000,
+    });
+    const id = createRes.body.data.id;
+
+    mockCurrentUser = { userId: 'u_principal', schoolId: SCHOOL, role: 'principal', roles: [], name: 'The Principal', email: 'p@x.io' };
+    const res = await supertest(app).patch(`/api/hr/payroll/${id}/advance`).send({ status: 'rejected', notes: 'wrong numbers' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.currentStepOrder).toBe(1);
+  });
+
+  test('rejecting requires a reason', async () => {
+    const app = buildApp();
+    mockStores.workflow_configs = makeStore([{
+      schoolId: SCHOOL, workflowKey: 'payroll_approval',
+      steps: [{ order: 1, assigneeType: 'role', assigneeValue: 'principal' }],
+    }]);
+    mockStores.users = makeStore([
+      ...mockStores.users._docs(),
+      { id: 'u_principal', schoolId: SCHOOL, name: 'The Principal', role: 'principal', isActive: true },
+    ]);
+    const createRes = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 50000,
+    });
+    mockCurrentUser = { userId: 'u_principal', schoolId: SCHOOL, role: 'principal', roles: [], name: 'The Principal', email: 'p@x.io' };
+    const res = await supertest(app).patch(`/api/hr/payroll/${createRes.body.data.id}/advance`).send({ status: 'rejected' });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('GET/PUT /api/hr/payroll/workflow-config', () => {
+  test('GET returns empty steps when nothing configured', async () => {
+    const app = buildApp();
+    const res = await supertest(app).get('/api/hr/payroll/workflow-config');
+    expect(res.status).toBe(200);
+    expect(res.body.data.steps).toEqual([]);
+  });
+
+  test('PUT saves a chain (1-step floor, unlike leave\'s 2-step floor)', async () => {
+    const app = buildApp();
+    const res = await supertest(app).put('/api/hr/payroll/workflow-config').send({
+      steps: [{ order: 1, assigneeType: 'role', assigneeValue: 'principal' }],
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.steps).toHaveLength(1);
   });
 });
 

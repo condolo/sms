@@ -29,6 +29,13 @@ const {
 const LEAVE_WORKFLOW_KEY = 'leave_approval';
 const LEAVE_MIN_STEPS    = 2; // platform floor: >=2 steps before HR's own final step
 
+// Payroll Phase 1, Step 6 — reuses the exact same workflow-config engine
+// leave approval uses (no new engine code, per the architectural review's
+// §8 finding). No equivalent ">=2 steps" platform floor for payroll —
+// that was a leave-specific business rule, not a generic requirement.
+const PAYROLL_WORKFLOW_KEY = 'payroll_approval';
+const PAYROLL_MIN_STEPS    = 1;
+
 const router = express.Router();
 const PLAN   = planGate('hr');
 
@@ -475,9 +482,64 @@ router.patch('/leave/:id/resolve', rbac('hr', 'update'), async (req, res) => {
 
 /* ══════════════════════════════════════════════════════════════
    PAYROLL
-   Lifecycle: draft → confirmed → paid
-   Only HR_ROLES can create/edit. Only ADMIN_ROLES can delete.
+   Lifecycle: draft → [configured approval chain] → confirmed → paid
+   Only HR_ROLES can create/edit. Only ADMIN_ROLES can delete or mark
+   paid. Once confirmed/paid, only ADMIN_ROLES can edit at all — an
+   edit past that point resets the record to draft (Step 6 "lock").
    ══════════════════════════════════════════════════════════════ */
+
+/* ── Payroll approval-chain helpers (Payroll Phase 1, Step 6) ────
+   Deliberately mirrors the leave-approval helpers above almost
+   verbatim — same engine, same notification shape, different
+   collection/summary text. Payroll's chain only gates draft→confirmed;
+   confirmed→paid stays the existing ADMIN_ROLES-only gate regardless
+   of whether a chain is configured (a deliberate, separate "who
+   actually releases money" control, not another chain step). */
+function _payrollSummary(doc) {
+  return `${doc.staffName || 'A staff member'} — payroll for ${doc.payPeriod}, net ${doc.currency || 'KES'} ${Number(doc.netSalary || 0).toLocaleString()}.`;
+}
+
+async function _notifyPayrollStep(req, step, text) {
+  try {
+    const { schoolId } = req.jwtUser;
+    const eligible = await resolveStep(tenantContext(req), schoolId, step);
+    for (const u of eligible) await _sendSystemMessage(req, u.id, 'Payroll record pending your review', text);
+  } catch (err) { console.error('[hr/payroll notify step]', err); }
+}
+
+async function _notifyHrPayroll(req, text) {
+  try {
+    const { schoolId } = req.jwtUser;
+    const hrUsers = await tenantModel('users', tenantContext(req))
+      .find({ schoolId, role: 'hr', isActive: { $ne: false } }).select('id').lean();
+    for (const u of hrUsers) await _sendSystemMessage(req, u.id, 'Payroll record ready for confirmation', text);
+  } catch (err) { console.error('[hr/payroll notify hr]', err); }
+}
+
+/* GET/PUT /api/hr/payroll/workflow-config — school-configured approval chain */
+router.get('/payroll/workflow-config', rbac('hr', 'manage_workflow'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const config = await getWorkflowConfig(tenantContext(req), schoolId, PAYROLL_WORKFLOW_KEY);
+    return ok(res, config || { schoolId, workflowKey: PAYROLL_WORKFLOW_KEY, steps: [], notifyOnly: [] });
+  } catch (err) {
+    console.error('[hr/payroll/workflow-config GET]', err);
+    return E.serverError(res);
+  }
+});
+
+router.put('/payroll/workflow-config', rbac('hr', 'manage_workflow'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { steps, notifyOnly } = req.body;
+    const doc = await saveWorkflowConfig(tenantContext(req), schoolId, PAYROLL_WORKFLOW_KEY, { steps, notifyOnly }, userId, PAYROLL_MIN_STEPS);
+    return ok(res, doc);
+  } catch (err) {
+    if (err.statusCode === 400) return E.badRequest(res, err.message);
+    console.error('[hr/payroll/workflow-config PUT]', err);
+    return E.serverError(res);
+  }
+});
 
 /* GET /api/hr/payroll-config — fetch this school's payroll policy (with defaults) */
 router.get('/payroll-config', rbac('hr', 'read'), async (req, res) => {
@@ -569,10 +631,24 @@ router.get('/payroll', rbac('hr', 'read'), async (req, res) => {
 /* POST /api/hr/payroll — create or update a payroll record */
 router.post('/payroll', rbac('hr', 'create'), async (req, res) => {
   try {
-    const { schoolId, userId } = req.jwtUser;
+    const { schoolId, userId, role } = req.jwtUser;
 
     const { data, error } = _validate(PayrollSchema, req.body);
     if (error) return E.validation(res, error);
+
+    // Step 6 "lock" — a confirmed/paid record represents a number
+    // someone already signed off on (or actually paid). Editing it
+    // silently, with no status change and no re-approval, was a real
+    // gap: the record's `status` never moved on edit even though the
+    // figures did. Now: only ADMIN_ROLES may edit past that point, and
+    // doing so resets status to 'draft' (+ the approval chain, if one
+    // is configured) — editing invalidates any prior confirmation, it
+    // doesn't quietly coexist with it.
+    const existing = await tenantModel('payroll', tenantContext(req))
+      .findOne({ schoolId, staffId: data.staffId, payPeriod: data.payPeriod }).lean();
+    if (existing && ['confirmed', 'paid'].includes(existing.status) && !ADMIN_ROLES.has(role)) {
+      return E.forbidden(res, 'Only Admin can edit a confirmed or paid payroll record');
+    }
 
     // Step 5 — an omitted basicSalary defaults from this staff member's
     // own most recent payroll record (any prior period), so a routine
@@ -636,6 +712,14 @@ router.post('/payroll', rbac('hr', 'create'), async (req, res) => {
     const grossSalary = grossPay;
     const netSalary    = netPay;
 
+    const workflowConfig = await getWorkflowConfig(tenantContext(req), schoolId, PAYROLL_WORKFLOW_KEY);
+    const initialStepOrder = workflowConfig ? 1 : null;
+
+    // Editing an already-confirmed/paid record (admin-only, gated above)
+    // resets it to draft and restarts the approval chain — the edit
+    // invalidates whatever was previously signed off.
+    const wasLocked = existing && ['confirmed', 'paid'].includes(existing.status);
+
     const doc = await tenantModel('payroll', tenantContext(req)).findOneAndUpdate(
       { schoolId, staffId: data.staffId, payPeriod: data.payPeriod },
       {
@@ -654,7 +738,7 @@ router.post('/payroll', rbac('hr', 'create'), async (req, res) => {
           notes:       data.notes,
           updatedBy:   userId,
           updatedAt:   now,
-          // Reset status to draft on any edit (unless it's a new record)
+          ...(wasLocked ? { status: 'draft', currentStepOrder: initialStepOrder } : {}),
         },
         $setOnInsert: {
           id:        `pay_${uuidv4().slice(0, 8)}`,
@@ -663,6 +747,7 @@ router.post('/payroll', rbac('hr', 'create'), async (req, res) => {
           payPeriod: data.payPeriod,
           currency,
           status:    'draft',
+          currentStepOrder: initialStepOrder,
           createdBy: userId,
           createdAt: now,
         },
@@ -671,9 +756,10 @@ router.post('/payroll', rbac('hr', 'create'), async (req, res) => {
     ).lean();
 
     await AuditService.log({
-      action: 'payroll.record_saved', actor: { userId, role: req.jwtUser.role, email: req.jwtUser.email },
+      action: 'payroll.record_saved', actor: { userId, role, email: req.jwtUser.email },
       schoolId, target: { type: 'payroll', id: doc.id },
-      details: { staffId: doc.staffId, payPeriod: doc.payPeriod, netSalary: doc.netSalary }, req,
+      details: { staffId: doc.staffId, payPeriod: doc.payPeriod, netSalary: doc.netSalary, revertedFromLocked: wasLocked || undefined },
+      ...(wasLocked ? { severity: 'warn' } : {}), req,
     });
 
     return ok(res, doc);
@@ -694,17 +780,41 @@ router.patch('/payroll/:id/status', rbac('hr', 'update'), async (req, res) => {
       return E.badRequest(res, `status must be one of: ${VALID_STATUSES.join(', ')}`);
     }
 
-    /* Only admins can mark as "paid" */
+    /* Only admins can mark as "paid" — a separate, deliberately simpler
+       gate from the approval chain below (Step 6): "who actually
+       releases money" is not another configurable chain step. */
     if (status === 'paid' && !ADMIN_ROLES.has(role)) {
       return E.forbidden(res, 'Only Admin can mark payroll as paid');
     }
 
-    const doc = await tenantModel('payroll', tenantContext(req)).findOneAndUpdate(
+    const Payroll  = tenantModel('payroll', tenantContext(req));
+    const existing = await Payroll.findOne({ id: req.params.id, schoolId }).lean();
+    if (!existing) return E.notFound(res, 'Payroll record not found');
+
+    // Step 6 — if a payroll approval chain is configured, draft→confirmed
+    // requires it to be fully walked first (mirrors leave's /resolve
+    // guard exactly: currentStepOrder must have advanced past the last
+    // configured step via PATCH /payroll/:id/advance). Schools with no
+    // chain configured keep today's direct-confirm behavior, unchanged.
+    if (status === 'confirmed') {
+      const workflowConfig = await getWorkflowConfig(tenantContext(req), schoolId, PAYROLL_WORKFLOW_KEY);
+      if (workflowConfig && (existing.currentStepOrder ?? 0) <= workflowConfig.steps.length) {
+        return E.badRequest(res, 'The configured approval chain has not been fully cleared yet');
+      }
+    }
+
+    const doc = await Payroll.findOneAndUpdate(
       { id: req.params.id, schoolId },
-      { $set: { status, updatedBy: userId, updatedAt: new Date().toISOString() } },
+      {
+        $set: {
+          status, updatedBy: userId, updatedAt: new Date().toISOString(),
+          // Reverting to draft restarts the chain from step 1, same as a
+          // locked-record edit does in POST /payroll.
+          ...(status === 'draft' ? { currentStepOrder: existing.currentStepOrder != null ? 1 : null } : {}),
+        },
+      },
       { new: true }
     ).lean();
-    if (!doc) return E.notFound(res, 'Payroll record not found');
 
     // 'paid' is the highest-stakes transition (money has actually moved,
     // per the admin's own attestation) — same 'critical' treatment
@@ -750,6 +860,92 @@ router.patch('/payroll/:id/status', rbac('hr', 'update'), async (req, res) => {
     return ok(res, doc);
   } catch (err) {
     console.error('[hr/payroll PATCH status]', err);
+    return E.serverError(res);
+  }
+});
+
+/* PATCH /api/hr/payroll/:id/advance — approve/reject a school-configured
+   approval-chain step (draft → confirmed only; schools with no
+   workflow_configs doc never reach a state where this applies —
+   currentStepOrder stays null and PATCH /status alone handles them,
+   unchanged — exactly mirroring leave's /advance). */
+router.patch('/payroll/:id/advance', authMiddleware, async (req, res) => {
+  try {
+    const { schoolId, userId, role, email } = req.jwtUser;
+    const { status: action, notes } = req.body;
+    if (!['approved', 'rejected'].includes(action)) {
+      return E.badRequest(res, 'status must be "approved" or "rejected"');
+    }
+    if (action === 'rejected' && !notes?.trim()) {
+      return E.badRequest(res, 'A reason is required to send a payroll record back for revision');
+    }
+
+    const ctx     = tenantContext(req);
+    const Payroll = tenantModel('payroll', ctx);
+    const existing = await Payroll.findOne({ id: req.params.id, schoolId }).lean();
+    if (!existing) return E.notFound(res, 'Payroll record not found');
+    if (existing.status !== 'draft') return E.badRequest(res, 'This record is not awaiting chain approval');
+
+    const config = await getWorkflowConfig(ctx, schoolId, PAYROLL_WORKFLOW_KEY);
+    if (!config) return E.badRequest(res, 'No approval chain is configured for this school');
+
+    const stepOrder = existing.currentStepOrder;
+    if (!stepOrder || stepOrder > config.steps.length) {
+      return E.badRequest(res, 'This record is not at a configurable chain step');
+    }
+    const step = config.steps.find(s => s.order === stepOrder);
+    if (!step) return E.serverError(res);
+
+    const eligible = await resolveStep(ctx, schoolId, step);
+    if (!eligible.some(u => u.id === userId)) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'You are not an approver at this step' } });
+    }
+
+    const resolvedRoleLabel = await resolveAssigneeLabel(ctx, schoolId, step.assigneeType, step.assigneeValue);
+    const actor = { userId, role, email };
+
+    if (action === 'rejected') {
+      // No separate terminal "rejected" state for payroll (unlike leave)
+      // — sent back to draft for revision, chain restarted from step 1.
+      const doc = await Payroll.findOneAndUpdate(
+        { id: req.params.id, schoolId },
+        { $set: { currentStepOrder: 1, updatedBy: userId, updatedAt: new Date().toISOString() } },
+        { new: true }
+      ).lean();
+      await AuditService.log({
+        action: 'payroll.status_changed', actor, schoolId,
+        target: { type: 'payroll', id: doc.id },
+        details: { staffId: doc.staffId, payPeriod: doc.payPeriod, sentBackAtStep: stepOrder, comment: notes, resolvedRoleLabel },
+        req,
+      });
+      await _notifyHrPayroll(req, `${_payrollSummary(doc)} Sent back for revision at step ${stepOrder}: ${notes}`);
+      return ok(res, doc);
+    }
+
+    const nextStepOrder = stepOrder + 1;
+    const doc = await Payroll.findOneAndUpdate(
+      { id: req.params.id, schoolId },
+      { $set: { currentStepOrder: nextStepOrder, updatedBy: userId, updatedAt: new Date().toISOString() } },
+      { new: true }
+    ).lean();
+
+    await AuditService.log({
+      action: 'payroll.status_changed', actor, schoolId,
+      target: { type: 'payroll', id: doc.id },
+      details: { staffId: doc.staffId, payPeriod: doc.payPeriod, approvedAtStep: stepOrder, resolvedRoleLabel },
+      req,
+    });
+
+    if (nextStepOrder <= config.steps.length) {
+      const nextStep = config.steps.find(s => s.order === nextStepOrder);
+      if (nextStep) await _notifyPayrollStep(req, nextStep, _payrollSummary(doc));
+    } else {
+      await _notifyHrPayroll(req, `${_payrollSummary(doc)} Cleared the full approval chain — ready to confirm.`);
+    }
+
+    return ok(res, doc);
+  } catch (err) {
+    console.error('[hr/payroll PATCH advance]', err);
     return E.serverError(res);
   }
 });
