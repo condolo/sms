@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.5.0] — 2026-07-23 — feat(hr): payroll computation engine + Kenyan statutory deductions (PAYE/NSSF/SHIF/Housing Levy)
+
+Payroll Phase 1, Steps 2+3 (see `docs/audits/HR_PAYROLL_ARCHITECTURAL_REVIEW.md` §2/§3/§9). Built together rather than sequentially — Step 3's statutory calculation is exactly what Step 2's engine exists to host, so building the engine first without it would mean reworking it immediately after.
+
+**⚠ The statutory rates below need independent verification before this is used for a real payroll run** — see the disclaimer at the top of `server/utils/statutory/kenya.js`. They were populated from the model's training-data knowledge of Kenyan payroll law, not confirmed against a current KRA/NSSF/SHIF/Housing-Levy publication. This is a deliberate, explicit choice (confirmed with the user) to unblock the surrounding architecture now rather than block on rate verification — the numbers live in exactly one file specifically so correcting them later touches one place, not several.
+
+### Added
+- `server/utils/payroll-engine.js` — `computePayrollForPeriod()`, the single computation layer every payroll calculation now goes through (previously computed inline, duplicated across `POST /payroll` and `POST /payroll/copy`). Country-agnostic by construction — zero Kenya-specific numbers or branching; delegates to whatever calculator `statutory/index.js` resolves for a given country, and degrades to the pre-existing flat `gross − manualDeductions` behavior when no country/calculator applies (unregistered country, or `applyStatutory: false`).
+- `server/utils/statutory/kenya.js` — all Kenya-specific calculation logic and rates in one file, deliberately (per explicit instruction, so nothing scatters across multiple files): PAYE (banded, on income net of NSSF/SHIF/Housing-Levy, less the flat personal relief), NSSF (Tier I + Tier II), SHIF (percentage of gross, floored at a minimum — but never charged on zero/negative gross pay, a real edge case the test suite caught), and the Affordable Housing Levy (employee side only).
+- `server/utils/statutory/index.js` — country-keyed calculator registry (`KE` only, Phase 1 scope). The one place a future country's calculator gets registered — the engine and every route stay country-agnostic.
+- `server/routes/hr.js` — `PayrollSchema` gains `applyStatutory` (default `true` — "the standard payroll flow"; opt-out for e.g. a contractor paid outside PAYE, ahead of Step 4's proper per-school policy config). `POST /payroll` and `POST /payroll/copy` now call the engine, resolving `country` server-side from the school document (never client-supplied, so a request can't ask for a different jurisdiction's math than the school it's actually for). New `statutoryDeductions` and `totalDeductions` fields on the payroll record.
+- Tests: `server/__tests__/statutory-kenya.test.js` (19, hand-calculated pins for every function), `server/__tests__/payroll-engine.test.js` (9, legacy-behavior backward-compatibility + Kenya integration), plus 4 new integration tests in `hr-payroll.test.js` proving the route wiring end-to-end (including that `POST /payroll/copy` recomputes statutory for the target period rather than copying a stale breakdown verbatim).
+
+### Note
+Full suite 75/75 suites, 693/693 tests; security-scan and ratchet clean. No client changes yet — `statutoryDeductions` is stored but not yet displayed; surfacing the itemized breakdown fits more naturally as part of Step 6 (the full payroll processing UI) than as a standalone client change here.
+
+---
+
 ## [v5.4.0] — 2026-07-23 — fix(hr): stabilize existing payroll — audit, notifications, currency, indexes
 
 Payroll Phase 1, Step 1 (see `docs/audits/HR_PAYROLL_ARCHITECTURAL_REVIEW.md`). Closes the concrete gaps the review identified in the *existing*, already-shipped `hr.js` payroll feature, before any engine refactor or Kenyan statutory work begins.

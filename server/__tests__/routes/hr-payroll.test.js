@@ -238,6 +238,56 @@ describe('DELETE /api/hr/payroll/:id — audit severity by status', () => {
   });
 });
 
+describe('POST /api/hr/payroll — Kenya statutory integration (Payroll Phase 1, Step 2/3)', () => {
+  test('a school with country=KE gets statutory deductions computed automatically', async () => {
+    mockStores.schools = makeStore([{ id: SCHOOL, name: 'Test School', currency: 'KES', country: 'KE' }]);
+    const app = buildApp();
+    const res = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 100000, allowances: 0, deductions: 0,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.statutoryDeductions).not.toBeNull();
+    expect(res.body.data.statutoryDeductions.country).toBe('KE');
+    expect(res.body.data.totalDeductions).toBeCloseTo(res.body.data.statutoryDeductions.total, 2);
+    expect(res.body.data.netSalary).toBeCloseTo(100000 - res.body.data.statutoryDeductions.total, 2);
+  });
+
+  test('a school with no country gets no statutory deductions (unchanged legacy behavior)', async () => {
+    const app = buildApp(); // default mock school has no country
+    const res = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 100000, deductions: 5000,
+    });
+    expect(res.body.data.statutoryDeductions).toBeNull();
+    expect(res.body.data.netSalary).toBe(95000);
+  });
+
+  test('applyStatutory:false opts a record out even for a KE school', async () => {
+    mockStores.schools = makeStore([{ id: SCHOOL, name: 'Test School', currency: 'KES', country: 'KE' }]);
+    const app = buildApp();
+    const res = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 100000, applyStatutory: false,
+    });
+    expect(res.body.data.statutoryDeductions).toBeNull();
+    expect(res.body.data.netSalary).toBe(100000);
+  });
+
+  test('POST /payroll/copy recomputes statutory for the target period, not a verbatim copy', async () => {
+    mockStores.schools = makeStore([{ id: SCHOOL, name: 'Test School', currency: 'KES', country: 'KE' }]);
+    const app = buildApp();
+    await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 100000,
+    });
+
+    const res = await supertest(app).post('/api/hr/payroll/copy').send({
+      sourcePeriod: '2026-07', targetPeriod: '2026-08',
+    });
+    expect(res.status).toBe(200);
+    const copied = mockStores.payroll._docs().find(d => d.payPeriod === '2026-08');
+    expect(copied.statutoryDeductions).not.toBeNull();
+    expect(copied.statutoryDeductions.country).toBe('KE');
+  });
+});
+
 describe('POST /api/hr/payroll/copy — audit + currency carry-forward', () => {
   test('copies currency from the source record and logs payroll.copied', async () => {
     const app = buildApp();

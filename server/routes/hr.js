@@ -21,6 +21,7 @@ const { ok, created, paginate, parsePagination, E } = require('../utils/response
 const AuditService = require('../services/audit');
 const { dispatchNotification } = require('../utils/notify-dispatch');
 const email = require('../utils/email');
+const { computePayrollForPeriod } = require('../utils/payroll-engine');
 const {
   getWorkflowConfig, saveWorkflowConfig, resolveStep, resolveAssigneeLabel,
 } = require('../utils/workflow-config');
@@ -53,7 +54,13 @@ const PayrollSchema = z.object({
   payPeriod:   z.string().regex(/^\d{4}-\d{2}$/, 'Pay period must be YYYY-MM'),
   basicSalary: z.coerce.number().min(0),
   allowances:  z.coerce.number().min(0).default(0),
-  deductions:  z.coerce.number().min(0).default(0),
+  deductions:  z.coerce.number().min(0).default(0), // non-statutory (e.g. loan repayments) — statutory deductions are computed separately, see applyStatutory below
+  // Whether to auto-compute statutory deductions (PAYE/NSSF/SHIF/Housing
+  // Levy for a Kenyan school) for this record. Defaults on — "the
+  // standard payroll flow" per Payroll Phase 1 Step 3 — with an opt-out
+  // for e.g. a contractor paid outside PAYE, ahead of Step 4's proper
+  // per-school policy config.
+  applyStatutory: z.coerce.boolean().default(true),
   notes:       z.string().max(500).trim().optional().default(''),
 });
 
@@ -438,17 +445,27 @@ router.post('/payroll', rbac('hr', 'create'), async (req, res) => {
     const { data, error } = _validate(PayrollSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const grossSalary = data.basicSalary + data.allowances;
-    const netSalary   = grossSalary - data.deductions;
-    const now         = new Date().toISOString();
+    const now = new Date().toISOString();
 
-    // Snapshot the school's currency onto the record at creation time —
-    // same "stamp it once, never recompute" posture finance.js uses for
-    // invoices (finance.js's InvoiceCreateSchema). Only set on insert, not
-    // on later edits, so a mid-year currency change never silently
+    // Snapshot the school's currency AND country onto the record at
+    // creation time — same "stamp it once, never recompute" posture
+    // finance.js uses for invoices. Only set on insert, not on later
+    // edits, so a mid-year currency/country change never silently
     // reinterprets an already-created payroll record's figures.
-    const school = await _model('schools').findOne({ id: schoolId }, { currency: 1 }).lean();
+    const school = await _model('schools').findOne({ id: schoolId }, { currency: 1, country: 1 }).lean();
     const currency = school?.currency || 'KES';
+
+    // Single source of truth for the calculation — see payroll-engine.js.
+    // country is resolved server-side from the school, never client-
+    // supplied, so a request can't ask for a different jurisdiction's
+    // statutory math than the school it's actually payroll for.
+    const { grossPay, statutory, totalDeductions, netPay } = computePayrollForPeriod({
+      basicSalary: data.basicSalary, allowances: data.allowances,
+      manualDeductions: data.deductions,
+      applyStatutory: data.applyStatutory, country: school?.country,
+    });
+    const grossSalary = grossPay;
+    const netSalary    = netPay;
 
     const doc = await tenantModel('payroll', tenantContext(req)).findOneAndUpdate(
       { schoolId, staffId: data.staffId, payPeriod: data.payPeriod },
@@ -458,6 +475,9 @@ router.post('/payroll', rbac('hr', 'create'), async (req, res) => {
           basicSalary: data.basicSalary,
           allowances:  data.allowances,
           deductions:  data.deductions,
+          applyStatutory:    data.applyStatutory,
+          statutoryDeductions: statutory,
+          totalDeductions,
           grossSalary,
           netSalary,
           notes:       data.notes,
@@ -581,14 +601,28 @@ router.post('/payroll/copy', rbac('hr', 'create'), async (req, res) => {
       return ok(res, { copied: 0, message: `No payroll records found for ${sourcePeriod}` });
     }
 
+    const school = await _model('schools').findOne({ id: schoolId }, { country: 1 }).lean();
     const now = new Date().toISOString();
     let copied = 0;
 
     await Promise.all(source.map(async p => {
       const exists = await Payroll.findOne({ schoolId, staffId: p.staffId, payPeriod: targetPeriod }).lean();
       if (exists) return;
-      const gross = (p.basicSalary || 0) + (p.allowances || 0);
-      const net   = gross - (p.deductions || 0);
+
+      // Recomputed via the engine for the target period, not copied
+      // verbatim — same inputs (basic/allowances/deductions/country)
+      // produce the same statutory result today, but recomputing (rather
+      // than carrying the source record's stored breakdown forward)
+      // means a future statutory-rate change takes effect automatically
+      // for any period computed after it, without this route needing to
+      // know that happened.
+      const applyStatutory = p.applyStatutory !== false;
+      const { grossPay, statutory, totalDeductions, netPay } = computePayrollForPeriod({
+        basicSalary: p.basicSalary || 0, allowances: p.allowances || 0,
+        manualDeductions: p.deductions || 0,
+        applyStatutory, country: school?.country,
+      });
+
       await Payroll.create({
         id:          `pay_${uuidv4().slice(0, 8)}`,
         schoolId,
@@ -598,8 +632,11 @@ router.post('/payroll/copy', rbac('hr', 'create'), async (req, res) => {
         basicSalary: p.basicSalary || 0,
         allowances:  p.allowances  || 0,
         deductions:  p.deductions  || 0,
-        grossSalary: gross,
-        netSalary:   net,
+        applyStatutory,
+        statutoryDeductions: statutory,
+        totalDeductions,
+        grossSalary: grossPay,
+        netSalary:   netPay,
         currency:    p.currency || 'KES',
         notes:       p.notes ?? '',
         status:      'draft',
