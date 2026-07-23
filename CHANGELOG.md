@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.4.0] — 2026-07-23 — fix(hr): stabilize existing payroll — audit, notifications, currency, indexes
+
+Payroll Phase 1, Step 1 (see `docs/audits/HR_PAYROLL_ARCHITECTURAL_REVIEW.md`). Closes the concrete gaps the review identified in the *existing*, already-shipped `hr.js` payroll feature, before any engine refactor or Kenyan statutory work begins.
+
+### Fixed
+- `server/routes/hr.js` — `POST /payroll`, `PATCH /payroll/:id/status`, `POST /payroll/copy`, and `DELETE /payroll/:id` now call `AuditService.log()` (previously zero audit coverage on payroll — only leave actions were audited). Marking a record `'paid'`, or deleting a `confirmed`/`paid` record, logs at `severity: 'critical'` — the same bar `report_card.publish` uses — since both represent an admin's attestation that real money has moved or a real financial record is being removed.
+- `POST /payroll` now snapshots the school's `currency` onto new records (falls back to `'KES'`, mirrors `finance.js`'s invoice-creation pattern exactly) — previously payroll had no currency field at all. Stamped only at creation (`$setOnInsert`), never overwritten on a later edit, so a mid-year currency change can't silently reinterpret an already-created record's figures. `POST /payroll/copy` carries the source record's currency forward.
+- `server/utils/indexes.js` — added index blocks for `payroll`, `staff_documents`, and `leave_requests`, all three of which previously had none at all. `payroll` gets a unique compound index on `{schoolId, staffId, payPeriod}` — the exact key `POST /payroll`'s upsert already relies on, previously enforced only by application logic with no DB-level backstop (contrast with `billing_snapshots`, which already had this for its equivalent key).
+
+### Added
+- `server/utils/notify-dispatch.js` integration: a payroll record moving to `'confirmed'` or `'paid'` now notifies the staff member (in-app + email, respecting the school's own channel/frequency settings) via the existing central dispatch mechanism — not a new notification path. Reverting to `'draft'` is deliberately excluded (not a notify-worthy event for the employee). New `payroll_status_changed` entry in `notif-settings.js`'s `EVENT_REGISTRY` (new `hr` group), and `email.sendPayrollStatusEmail()` template.
+- `server/__tests__/routes/hr-payroll.test.js` — 11 tests covering currency stamping/carry-forward, audit severity (including the critical-path cases), and notification wiring (including that a notification failure never blocks the status change itself).
+
+### Note
+Full suite 73/73 suites, 661/661 tests; security-scan and tenant-coverage ratchet both clean (held at 36 — the new `_model('schools')` currency lookups are on a platform-exempt collection, not a new tenant-access site). No client changes — `HRPage.jsx` already formats money using the current session's school currency symbol, which will match the newly-stamped `payroll.currency` value in the overwhelming common case; the field's purpose here is data-integrity/audit-trail, not display.
+
+---
+
 ## [v5.3.4] — 2026-07-21 — fix(identity): orphan purge left stale identities that broke recreated superadmin logins
 
 **Second-order bug from the 2026-07-21 orphan-purge incident.** `DELETE /api/platform/orphans` only ever deleted `users` docs, never `identities` — so when a superadmin was recreated (via the new "Add Superadmin" flow shipped for that same incident) at a school where their `identities` doc from before the purge still existed, `provisionIdentityForUser`'s upsert matched that stale doc and, because `passwordHash` was only ever set via `$setOnInsert`, silently kept the OLD password hash instead of the newly generated one. Org-login (`POST /api/auth/org-login`) checks `identities.passwordHash` exclusively — so the freshly generated, correctly-displayed temp password was rejected with "Invalid email or password" even though the account itself was created correctly.

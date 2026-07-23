@@ -16,8 +16,11 @@ const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { _model } = require('../utils/model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const AuditService = require('../services/audit');
+const { dispatchNotification } = require('../utils/notify-dispatch');
+const email = require('../utils/email');
 const {
   getWorkflowConfig, saveWorkflowConfig, resolveStep, resolveAssigneeLabel,
 } = require('../utils/workflow-config');
@@ -439,6 +442,14 @@ router.post('/payroll', rbac('hr', 'create'), async (req, res) => {
     const netSalary   = grossSalary - data.deductions;
     const now         = new Date().toISOString();
 
+    // Snapshot the school's currency onto the record at creation time —
+    // same "stamp it once, never recompute" posture finance.js uses for
+    // invoices (finance.js's InvoiceCreateSchema). Only set on insert, not
+    // on later edits, so a mid-year currency change never silently
+    // reinterprets an already-created payroll record's figures.
+    const school = await _model('schools').findOne({ id: schoolId }, { currency: 1 }).lean();
+    const currency = school?.currency || 'KES';
+
     const doc = await tenantModel('payroll', tenantContext(req)).findOneAndUpdate(
       { schoolId, staffId: data.staffId, payPeriod: data.payPeriod },
       {
@@ -459,6 +470,7 @@ router.post('/payroll', rbac('hr', 'create'), async (req, res) => {
           schoolId,
           staffId:   data.staffId,
           payPeriod: data.payPeriod,
+          currency,
           status:    'draft',
           createdBy: userId,
           createdAt: now,
@@ -466,6 +478,13 @@ router.post('/payroll', rbac('hr', 'create'), async (req, res) => {
       },
       { upsert: true, new: true, runValidators: false }
     ).lean();
+
+    await AuditService.log({
+      action: 'payroll.record_saved', actor: { userId, role: req.jwtUser.role, email: req.jwtUser.email },
+      schoolId, target: { type: 'payroll', id: doc.id },
+      details: { staffId: doc.staffId, payPeriod: doc.payPeriod, netSalary: doc.netSalary }, req,
+    });
+
     return ok(res, doc);
   } catch (err) {
     console.error('[hr/payroll POST]', err);
@@ -495,6 +514,48 @@ router.patch('/payroll/:id/status', rbac('hr', 'update'), async (req, res) => {
       { new: true }
     ).lean();
     if (!doc) return E.notFound(res, 'Payroll record not found');
+
+    // 'paid' is the highest-stakes transition (money has actually moved,
+    // per the admin's own attestation) — same 'critical' treatment
+    // report_card.publish gets; everything else stays at the catalogue's
+    // 'warn' default.
+    await AuditService.log({
+      action: 'payroll.status_changed', actor: { userId, role, email: req.jwtUser.email },
+      schoolId, target: { type: 'payroll', id: doc.id },
+      details: { staffId: doc.staffId, payPeriod: doc.payPeriod, status },
+      ...(status === 'paid' ? { severity: 'critical' } : {}), req,
+    });
+
+    // Notify the staff member their payroll moved — only for the two
+    // states an employee actually cares about ("it's confirmed" / "you've
+    // been paid"). Reverting to 'draft' isn't a notify-worthy event and
+    // could read as alarming without context, so it's deliberately excluded.
+    if (status === 'confirmed' || status === 'paid') {
+      try {
+        const staffUser = await tenantModel('users', tenantContext(req))
+          .findOne({ id: doc.staffId, schoolId }).select('name email').lean();
+        if (staffUser?.email) {
+          const school = await _model('schools').findOne({ id: schoolId }, { name: 1, systemEmail: 1 }).lean();
+          const subject = `Payroll ${status === 'paid' ? 'payment processed' : 'confirmed'} — ${doc.payPeriod}`;
+          const body    = `Your payroll record for ${doc.payPeriod} has been marked as ${status}. Net pay: ${doc.currency || 'KES'} ${Number(doc.netSalary || 0).toLocaleString()}.`;
+          await dispatchNotification({
+            ctx: tenantContext(req), schoolId, eventKey: 'payroll_status_changed', actorUserId: userId,
+            recipients: [{ userId: doc.staffId, name: staffUser.name, email: staffUser.email }],
+            inAppSubject: subject, inAppBody: body,
+            emailDigestSubject: subject, emailDigestBody: body,
+            sendEmail: (recipient) => email.sendPayrollStatusEmail({
+              recipientName: recipient.name, recipientEmail: recipient.email,
+              payPeriod: doc.payPeriod, status, netSalary: doc.netSalary, currency: doc.currency,
+              schoolName: school?.name || '', schoolEmail: school?.systemEmail || '', schoolId,
+            }),
+          });
+        }
+      } catch (err) {
+        // Notification failure must never block the status change itself.
+        console.error('[hr/payroll PATCH status] notify failed:', err.message);
+      }
+    }
+
     return ok(res, doc);
   } catch (err) {
     console.error('[hr/payroll PATCH status]', err);
@@ -539,6 +600,7 @@ router.post('/payroll/copy', rbac('hr', 'create'), async (req, res) => {
         deductions:  p.deductions  || 0,
         grossSalary: gross,
         netSalary:   net,
+        currency:    p.currency || 'KES',
         notes:       p.notes ?? '',
         status:      'draft',
         createdBy:   userId,
@@ -547,6 +609,12 @@ router.post('/payroll/copy', rbac('hr', 'create'), async (req, res) => {
       });
       copied++;
     }));
+
+    await AuditService.log({
+      action: 'payroll.copied', actor: { userId, role: req.jwtUser.role, email: req.jwtUser.email },
+      schoolId, target: { type: 'payroll', id: null },
+      details: { sourcePeriod, targetPeriod, copied }, req,
+    });
 
     return ok(res, { copied, message: `${copied} record${copied !== 1 ? 's' : ''} copied to ${targetPeriod}` });
   } catch (err) {
@@ -558,17 +626,29 @@ router.post('/payroll/copy', rbac('hr', 'create'), async (req, res) => {
 /* DELETE /api/hr/payroll/:id — remove a payroll record by its ID */
 router.delete('/payroll/:id', rbac('hr', 'delete'), async (req, res) => {
   try {
-    const { schoolId, role } = req.jwtUser;
+    const { schoolId, userId, role } = req.jwtUser;
 
     const doc = await tenantModel('payroll', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!doc) return E.notFound(res, 'Payroll record not found');
 
     /* Only admins can delete confirmed/paid records */
-    if (['confirmed', 'paid'].includes(doc.status) && !ADMIN_ROLES.has(role)) {
+    const isLocked = ['confirmed', 'paid'].includes(doc.status);
+    if (isLocked && !ADMIN_ROLES.has(role)) {
       return E.forbidden(res, 'Only Admin can delete confirmed or paid payroll records');
     }
 
     await tenantModel('payroll', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
+
+    // Deleting a confirmed/paid record removes a financial record an admin
+    // already attested was real money — same 'critical' bar as marking one
+    // 'paid' in the first place. A still-draft record is routine cleanup.
+    await AuditService.log({
+      action: 'payroll.deleted', actor: { userId, role, email: req.jwtUser.email },
+      schoolId, target: { type: 'payroll', id: doc.id },
+      details: { staffId: doc.staffId, payPeriod: doc.payPeriod, status: doc.status, netSalary: doc.netSalary },
+      ...(isLocked ? { severity: 'critical' } : {}), req,
+    });
+
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) {
     console.error('[hr/payroll DELETE]', err);

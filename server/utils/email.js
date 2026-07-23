@@ -660,6 +660,30 @@ async function sendBehaviourIncidentAlert({
   return _sendAsSchool(recipientEmail, `${icon} Behaviour Incident — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
 }
 
+async function sendPayrollStatusEmail({
+  recipientName, recipientEmail, payPeriod, status, netSalary, currency,
+  schoolName, schoolEmail, schoolId = null, appUrl,
+}) {
+  const url   = appUrl || APP_URL;
+  const label = status === 'paid' ? 'Payment Processed' : 'Payroll Confirmed';
+  const icon  = status === 'paid' ? '💰' : '✅';
+  const html = _wrap(`
+    <h2>${icon} ${label}</h2>
+    <p>Dear ${recipientName || 'Colleague'},</p>
+    <p>Your payroll record for <strong>${payPeriod}</strong> at <strong>${schoolName}</strong>
+       has been marked as <strong>${status}</strong>.</p>
+    <div class="info">
+      <p><strong>Pay period:</strong> ${payPeriod}</p>
+      <p><strong>Net pay:</strong> ${currency || 'KES'} ${Number(netSalary || 0).toLocaleString()}</p>
+    </div>
+    <p style="text-align:center">
+      <a href="${url}" class="btn">View in ${schoolName} →</a>
+    </p>
+    <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a staff member at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
+  `, schoolName);
+  return _sendAsSchool(recipientEmail, `${icon} ${label} — ${payPeriod} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+}
+
 /* 17. Daily digest — batches every queued event for one recipient into one email */
 async function sendDigestSummary({
   recipientName, recipientEmail, items, schoolName, schoolEmail, schoolId = null, appUrl,
@@ -846,4 +870,5 @@ module.exports = {
   sendAbsenceAlert,
   sendInvoiceOverdueAlert,
   sendAttendanceSummaryAlert,
+  sendPayrollStatusEmail,
 };

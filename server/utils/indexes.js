@@ -732,6 +732,39 @@ const INDEXES = [
     ],
   },
 
+  /* ── payroll / staff_documents / leave_requests (HR & Payroll
+     Architectural Review, Payroll Phase 1 §1) ────────────────────
+     Previously had NO index blocks at all — found during the review.
+     `payroll`'s unique index backs the exact upsert key POST /payroll
+     already relies on ({schoolId,staffId,payPeriod}, hr.js) — that
+     upsert was previously enforced only by application logic, with no
+     DB-level backstop against a race creating two records for the same
+     staff member/period (contrast with billing_snapshots, which already
+     has this unique index for its equivalent key). */
+  {
+    col: 'payroll',
+    indexes: [
+      { key: { id: 1 },                                     name: 'pay_id',                 unique: true, sparse: true },
+      { key: { schoolId: 1, staffId: 1, payPeriod: 1 },      name: 'pay_school_staff_period', unique: true },
+      { key: { schoolId: 1, payPeriod: 1 },                  name: 'pay_school_period' },
+    ],
+  },
+  {
+    col: 'staff_documents',
+    indexes: [
+      { key: { id: 1 },                    name: 'sdoc_id',           unique: true, sparse: true },
+      { key: { schoolId: 1, staffId: 1 },  name: 'sdoc_school_staff' },
+    ],
+  },
+  {
+    col: 'leave_requests',
+    indexes: [
+      { key: { id: 1 },                    name: 'lr_id',             unique: true, sparse: true },
+      { key: { schoolId: 1, staffId: 1 },  name: 'lr_school_staff' },
+      { key: { schoolId: 1, status: 1 },   name: 'lr_school_status' },
+    ],
+  },
+
   /* ── behaviour_points_resets (Governance Spec §2) ──────────────
      One doc per manual reset. Never touches behaviour_incidents —
      /incidents/summary's live aggregation reads the most recent

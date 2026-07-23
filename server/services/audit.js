@@ -131,6 +131,16 @@ const ACTIONS = {
   'leave.step_rejected':     { severity: 'warn' },
   'leave.hr_confirmed':      { severity: 'info' },
   'leave.hr_rejected':       { severity: 'warn' },
+  // HR — Payroll (Payroll Phase 1, Step 1 — stabilizing the existing hr.js
+  // payroll feature per the HR & Payroll Architectural Review's §6/§10
+  // finding that payroll had zero audit coverage). Default severities
+  // below; call sites override to 'critical' for the specific
+  // higher-stakes cases (marking a record 'paid'; deleting a
+  // confirmed/paid record) — mirroring report_card.publish's treatment.
+  'payroll.record_saved':    { severity: 'info' },
+  'payroll.status_changed':  { severity: 'warn' },
+  'payroll.copied':          { severity: 'info' },
+  'payroll.deleted':         { severity: 'warn' },
   // Marks — unlock workflow (Governance Spec §3)
   'marks.unlock_requested':        { severity: 'info' },
   'marks.unlocked':                { severity: 'warn' },

@@ -122,6 +122,16 @@ const EVENT_REGISTRY = {
     implemented: true,
   },
 
+  /* ── HR & Payroll ────────────────────────────────────────── */
+  payroll_status_changed: {
+    label:       'Payroll Status Changed',
+    desc:        'Sent to a staff member when their payroll record for a period is confirmed or marked as paid',
+    group:       'hr',
+    audience:    ['staff'],
+    channels:    { email: true, inApp: true },
+    implemented: true,
+  },
+
   /* ── Account / Security ──────────────────────────────────── */
   welcome_user: {
     label:       'Welcome / Account Created',
@@ -171,6 +181,7 @@ const GROUPS = [
   { key: 'finance',       label: 'Finance'       },
   { key: 'attendance',    label: 'Attendance'    },
   { key: 'behaviour',     label: 'Behaviour'     },
+  { key: 'hr',            label: 'HR & Payroll'  },
   { key: 'account',       label: 'Account & Security' },
 ];
 
