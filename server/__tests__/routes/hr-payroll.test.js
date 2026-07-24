@@ -15,6 +15,7 @@ function chain(result) {
   return {
     select: () => chain(result),
     sort:   (spec) => chain(Array.isArray(result) ? _sortDocs(result, spec) : result),
+    skip:   (n)    => chain(Array.isArray(result) ? result.slice(n) : result),
     limit:  (n)    => chain(Array.isArray(result) ? result.slice(0, n) : result),
     lean:   () => Promise.resolve(result),
   };
@@ -100,6 +101,7 @@ beforeEach(() => {
     payroll_config: makeStore(),
     workflow_configs: makeStore(),
     custom_roles: makeStore(),
+    payroll_history: makeStore(),
     schools: makeStore([{ id: SCHOOL, name: 'Test School', currency: 'KES', systemEmail: 'ops@test.school' }]),
     users: makeStore([
       { id: 'u_staff_1', schoolId: SCHOOL, name: 'Staff One', email: 'staff1@x.io', role: 'teacher', isActive: true },
@@ -633,5 +635,136 @@ describe('POST /api/hr/payroll/copy — audit + currency carry-forward', () => {
       action: 'payroll.copied',
       details: expect.objectContaining({ sourcePeriod: '2026-07', targetPeriod: '2026-08', copied: 1 }),
     }));
+  });
+});
+
+describe('Payslips (Payroll Phase 1, Step 7)', () => {
+  async function createAndConfirm(app) {
+    const createRes = await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 50000,
+    });
+    const id = createRes.body.data.id;
+    mockCurrentUser = { ...mockCurrentUser, role: 'admin' };
+    await supertest(app).patch(`/api/hr/payroll/${id}/status`).send({ status: 'confirmed' });
+    mockCurrentUser = { userId: 'u_hr', schoolId: SCHOOL, role: 'hr', roles: [], name: 'HR Person', email: 'hr@x.io' };
+    return id;
+  }
+
+  test('confirming a record snapshots the school\'s current name onto it', async () => {
+    const app = buildApp();
+    const id = await createAndConfirm(app);
+    const doc = mockStores.payroll._docs().find(d => d.id === id);
+    expect(doc.schoolName).toBe('Test School');
+  });
+
+  test('a later school rename does not retroactively change an already-confirmed record\'s snapshot', async () => {
+    const app = buildApp();
+    const id = await createAndConfirm(app);
+    mockStores.schools._docs()[0].name = 'Renamed School';
+
+    mockCurrentUser = { ...mockCurrentUser, role: 'admin' };
+    await supertest(app).patch(`/api/hr/payroll/${id}/status`).send({ status: 'paid' });
+    const doc = mockStores.payroll._docs().find(d => d.id === id);
+    expect(doc.schoolName).toBe('Test School'); // unchanged — 'paid' isn't a (re)confirm transition
+  });
+
+  describe('GET /api/hr/payroll/:id/pdf', () => {
+    test('the staff member can download their own payslip', async () => {
+      const app = buildApp();
+      const id = await createAndConfirm(app);
+      mockCurrentUser = { userId: 'u_staff_1', schoolId: SCHOOL, role: 'teacher', roles: [], name: 'Staff One', email: 'staff1@x.io' };
+
+      const res = await supertest(app).get(`/api/hr/payroll/${id}/pdf`);
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toBe('application/pdf');
+    });
+
+    test('HR can download any staff member\'s payslip', async () => {
+      const app = buildApp();
+      const id = await createAndConfirm(app);
+      const res = await supertest(app).get(`/api/hr/payroll/${id}/pdf`);
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toBe('application/pdf');
+    });
+
+    test('a different, non-HR staff member cannot download someone else\'s payslip', async () => {
+      const app = buildApp();
+      const id = await createAndConfirm(app);
+      mockCurrentUser = { userId: 'u_other', schoolId: SCHOOL, role: 'teacher', roles: [], name: 'Other Teacher', email: 'other@x.io' };
+
+      const res = await supertest(app).get(`/api/hr/payroll/${id}/pdf`);
+      expect(res.status).toBe(403);
+    });
+
+    test('404s for an unknown record', async () => {
+      const app = buildApp();
+      const res = await supertest(app).get('/api/hr/payroll/pay_nonexistent/pdf');
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe('payroll_history — preserved snapshot on a locked-record edit', () => {
+    test('an admin editing a confirmed record writes a payroll_history snapshot BEFORE applying the edit', async () => {
+      const app = buildApp();
+      const id = await createAndConfirm(app);
+      mockCurrentUser = { ...mockCurrentUser, role: 'admin' };
+
+      await supertest(app).post('/api/hr/payroll').send({
+        staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 55000,
+      });
+
+      const history = mockStores.payroll_history._docs();
+      expect(history).toHaveLength(1);
+      expect(history[0].payrollId).toBe(id);
+      expect(history[0].reason).toBe('edited_while_locked');
+      expect(history[0].supersededBy).toBe('u_hr');
+      expect(history[0].snapshot.basicSalary).toBe(50000); // the PRE-edit figure, not 55000
+      expect(history[0].snapshot.status).toBe('confirmed');
+    });
+
+    test('an ordinary draft edit (never locked) writes no payroll_history entry', async () => {
+      const app = buildApp();
+      await supertest(app).post('/api/hr/payroll').send({
+        staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 50000,
+      });
+      await supertest(app).post('/api/hr/payroll').send({
+        staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 51000,
+      });
+      expect(mockStores.payroll_history._docs()).toHaveLength(0);
+    });
+
+    test('GET /api/hr/payroll-history lists the preserved snapshot for a staff member', async () => {
+      const app = buildApp();
+      const id = await createAndConfirm(app);
+      mockCurrentUser = { ...mockCurrentUser, role: 'admin' };
+      await supertest(app).post('/api/hr/payroll').send({
+        staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 55000,
+      });
+
+      const res = await supertest(app).get('/api/hr/payroll-history').query({ staffId: 'u_staff_1' });
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.data[0].payrollId).toBe(id);
+    });
+
+    test('GET /api/hr/payroll-history/:id/pdf regenerates from the preserved snapshot, not the current record', async () => {
+      const app = buildApp();
+      await createAndConfirm(app);
+      mockCurrentUser = { ...mockCurrentUser, role: 'admin' };
+      await supertest(app).post('/api/hr/payroll').send({
+        staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 55000, // current record now has 55000
+      });
+
+      const histId = mockStores.payroll_history._docs()[0].id;
+      const res = await supertest(app).get(`/api/hr/payroll-history/${histId}/pdf`);
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toBe('application/pdf');
+    });
+
+    test('GET /api/hr/payroll-history/:id/pdf 404s for an unknown snapshot', async () => {
+      const app = buildApp();
+      const res = await supertest(app).get('/api/hr/payroll-history/payh_nonexistent/pdf');
+      expect(res.status).toBe(404);
+    });
   });
 });

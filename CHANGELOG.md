@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.8.0] — 2026-07-24 — feat(hr): payslip generation + payroll history (Payroll Phase 1, Step 7)
+
+Payroll Phase 1, Step 7. Follows the same discipline Report Cards established (see `docs/audits/HR_PAYROLL_ARCHITECTURAL_REVIEW.md` §6): store immutable payroll records, generate payslips from those records, never re-derive a historical payslip from current employee/school data.
+
+`server/utils/payslip-engine.js` (new) is a direct port of `report-cards.js`'s proven IR/adapter split — `_computePayslipSections` (pure function, payroll doc → plain-data section description, zero pdfkit calls) + `_drawPayslipPage` (the one adapter that walks that data and makes the actual pdfkit calls) + `_buildPayslipPDF` (thin wrapper). Deliberately fetches nothing live — every value it needs must already be on the payroll doc passed in.
+
+### Added
+- `PATCH /api/hr/payroll/:id/status` — confirming a record now snapshots the school's *current* name onto it as `schoolName`, mirroring `report-cards.js`'s exact publish-time capture. A school rename after confirmation never silently rewrites an already-official payslip.
+- `payroll_history` collection (new) — when an admin edits a locked (`confirmed`/`paid`) record via `POST /payroll` (the Step 6 "revert to draft" path), the pre-edit record is snapshotted here *before* the edit applies — mirrors `report_card_snapshots`' supersede-never-delete discipline, scoped to the one case where Step 6's revert-to-draft would otherwise silently lose the pre-edit "official" figures.
+- `GET /api/hr/payroll/:id/pdf` — download a payslip PDF. Self-service for the staff member's own record (no HR role needed, same access model as `GET /payroll/mine`); `HR_ROLES` may download any record. A non-official (`draft`) record renders with a `DRAFT` watermark automatically.
+- `GET /api/hr/payroll-history` — list preserved pre-edit snapshots for a school (optionally filtered by `staffId`/`payrollId`). `HR_ROLES` only — an audit trail, not a self-service view.
+- `GET /api/hr/payroll-history/:id/pdf` — regenerate a payslip from a *preserved* snapshot, never the current (possibly since-re-edited) payroll record. Rendered with a distinct `HISTORICAL` watermark (not `DRAFT`) since the snapshot *was* official at the moment it was superseded.
+- `server/utils/indexes.js` — `payroll_history` index block (`id` unique, `{schoolId,payrollId}`, `{schoolId,staffId}`).
+- 16 new unit tests for `payslip-engine.js`'s pure IR function and adapter (watermark selection, itemized vs. flat rows, totals fallback), plus 11 new route tests in `hr-payroll.test.js` (schoolName snapshot on confirm, snapshot immutability across later renames, PDF access control, `payroll_history` write-before-edit and its list/regenerate routes).
+
+### Note
+Full suite 76/76 suites, 743/743 tests; security-scan and ratchet clean (36/36 ceiling, unchanged). Mutation-tested both the schoolName-snapshot condition and the `payroll_history` write condition — both new tests correctly fail when the logic is removed.
+
+---
+
 ## [v5.7.0] — 2026-07-23 — feat(hr): payroll approval workflow + record locking (Payroll Phase 1, Step 6)
 
 Payroll Phase 1, Step 6. Reuses `workflow-config.js` verbatim (per the architectural review's §8 finding, and per explicit instruction to "reuse the existing workflow, notification, and audit infrastructure") — zero new engine code, the same engine leave approval already uses, with a payroll-specific `workflowKey`.

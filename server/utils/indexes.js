@@ -774,6 +774,20 @@ const INDEXES = [
       { key: { schoolId: 1 }, name: 'pc_school', unique: true },
     ],
   },
+  /* ── payroll_history (Payroll Phase 1, Step 7) ───────────────────
+     Written only when an admin edits a locked confirmed/paid payroll
+     record — preserves the pre-edit snapshot (mirrors report_card_
+     snapshots' supersede-never-delete discipline, scoped to this one
+     case). {schoolId,payrollId} backs GET /payroll-history's filter;
+     {schoolId,staffId} backs the same list filtered per-employee. */
+  {
+    col: 'payroll_history',
+    indexes: [
+      { key: { id: 1 },                      name: 'payh_id',              unique: true, sparse: true },
+      { key: { schoolId: 1, payrollId: 1 },  name: 'payh_school_payroll' },
+      { key: { schoolId: 1, staffId: 1 },    name: 'payh_school_staff' },
+    ],
+  },
 
   /* ── behaviour_points_resets (Governance Spec §2) ──────────────
      One doc per manual reset. Never touches behaviour_incidents —

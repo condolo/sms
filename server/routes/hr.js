@@ -22,6 +22,7 @@ const AuditService = require('../services/audit');
 const { dispatchNotification } = require('../utils/notify-dispatch');
 const email = require('../utils/email');
 const { computePayrollForPeriod } = require('../utils/payroll-engine');
+const { _buildPayslipPDF } = require('../utils/payslip-engine');
 const {
   getWorkflowConfig, saveWorkflowConfig, resolveStep, resolveAssigneeLabel,
 } = require('../utils/workflow-config');
@@ -720,6 +721,30 @@ router.post('/payroll', rbac('hr', 'create'), async (req, res) => {
     // invalidates whatever was previously signed off.
     const wasLocked = existing && ['confirmed', 'paid'].includes(existing.status);
 
+    // Step 7 — preserve payroll history: an edit past the lock point would
+    // otherwise silently lose the pre-edit confirmed/paid figures (Step 6's
+    // revert-to-draft changes `status` but the OLD numbers are gone the
+    // moment $set below applies). Mirrors report-cards.js's supersede-
+    // never-delete discipline, scoped to the one case where data would
+    // otherwise be lost — a plain draft edit has no prior "official" state
+    // to preserve, so this only fires on the locked-edit path. Snapshot is
+    // a shallow copy, not a live reference — `existing` must never be
+    // mutated by anything that runs after this point.
+    if (wasLocked) {
+      await tenantModel('payroll_history', tenantContext(req)).create({
+        id:           `payh_${uuidv4().slice(0, 8)}`,
+        schoolId,
+        payrollId:    existing.id,
+        staffId:      existing.staffId,
+        payPeriod:    existing.payPeriod,
+        snapshot:     { ...existing },
+        supersededAt: now,
+        supersededBy: userId,
+        reason:       'edited_while_locked',
+        createdAt:    now,
+      });
+    }
+
     const doc = await tenantModel('payroll', tenantContext(req)).findOneAndUpdate(
       { schoolId, staffId: data.staffId, payPeriod: data.payPeriod },
       {
@@ -803,11 +828,24 @@ router.patch('/payroll/:id/status', rbac('hr', 'update'), async (req, res) => {
       }
     }
 
+    // Snapshot the school's current name onto the record the moment it
+    // becomes official (confirmed) — mirrors report-cards.js's exact
+    // publish-time schoolName capture (see payslip-engine.js's header
+    // comment). Fetched once here and reused below for the notification
+    // email, rather than re-fetched live at payslip-render time — a
+    // school rename after confirmation must never silently rewrite an
+    // already-official payslip.
+    let school = null;
+    if (status === 'confirmed' || status === 'paid') {
+      school = await _model('schools').findOne({ id: schoolId }, { name: 1, systemEmail: 1 }).lean();
+    }
+
     const doc = await Payroll.findOneAndUpdate(
       { id: req.params.id, schoolId },
       {
         $set: {
           status, updatedBy: userId, updatedAt: new Date().toISOString(),
+          ...(status === 'confirmed' ? { schoolName: school?.name || '' } : {}),
           // Reverting to draft restarts the chain from step 1, same as a
           // locked-record edit does in POST /payroll.
           ...(status === 'draft' ? { currentStepOrder: existing.currentStepOrder != null ? 1 : null } : {}),
@@ -836,7 +874,6 @@ router.patch('/payroll/:id/status', rbac('hr', 'update'), async (req, res) => {
         const staffUser = await tenantModel('users', tenantContext(req))
           .findOne({ id: doc.staffId, schoolId }).select('name email').lean();
         if (staffUser?.email) {
-          const school = await _model('schools').findOne({ id: schoolId }, { name: 1, systemEmail: 1 }).lean();
           const subject = `Payroll ${status === 'paid' ? 'payment processed' : 'confirmed'} — ${doc.payPeriod}`;
           const body    = `Your payroll record for ${doc.payPeriod} has been marked as ${status}. Net pay: ${doc.currency || 'KES'} ${Number(doc.netSalary || 0).toLocaleString()}.`;
           await dispatchNotification({
@@ -1056,6 +1093,107 @@ router.delete('/payroll/:id', rbac('hr', 'delete'), async (req, res) => {
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) {
     console.error('[hr/payroll DELETE]', err);
+    return E.serverError(res);
+  }
+});
+
+/* GET /api/hr/payroll/:id/pdf — download a payslip PDF (Payroll Phase 1,
+   Step 7). Self-service for the staff member's own record (no HR role
+   needed, mirrors GET /payroll/mine's access model); HR_ROLES may
+   download any record. payslip-engine.js applies the DRAFT watermark
+   automatically whenever status isn't confirmed/paid — no branch needed
+   here for that. */
+router.get('/payroll/:id/pdf', async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+
+    const doc = await tenantModel('payroll', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
+    if (!doc) return E.notFound(res, 'Payroll record not found');
+
+    if (doc.staffId !== userId && !HR_ROLES.has(role)) {
+      return E.forbidden(res, 'You are not authorised to download this payslip');
+    }
+
+    let PDFDocument;
+    try { PDFDocument = require('pdfkit'); }
+    catch { return res.status(501).json({ error: 'pdfkit not installed. Run: npm install pdfkit' }); }
+
+    const pdfDoc  = new PDFDocument({ margin: 40, size: 'A4' });
+    const buffers = [];
+    pdfDoc.on('data', chunk => buffers.push(chunk));
+    pdfDoc.on('end', () => {
+      const pdf = Buffer.concat(buffers);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="payslip-${doc.staffId}-${doc.payPeriod}.pdf"`);
+      res.setHeader('Content-Length', pdf.length);
+      res.send(pdf);
+    });
+
+    _buildPayslipPDF(pdfDoc, doc);
+    pdfDoc.end();
+  } catch (err) {
+    console.error('[hr/payroll/:id/pdf GET]', err);
+    return E.serverError(res);
+  }
+});
+
+/* GET /api/hr/payroll-history — list preserved pre-edit snapshots
+   (Step 7). Written only when an admin edits a locked confirmed/paid
+   record (see POST /payroll's wasLocked branch) — this is an audit
+   trail of overwritten "official" figures, not a general history feed. */
+router.get('/payroll-history', rbac('hr', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const { staffId, payrollId } = req.query;
+    const { page, limit, skip } = parsePagination(req.query);
+
+    const filter = { schoolId };
+    if (staffId)   filter.staffId   = staffId;
+    if (payrollId) filter.payrollId = payrollId;
+
+    const [docs, total] = await Promise.all([
+      tenantModel('payroll_history', tenantContext(req)).find(filter).sort({ supersededAt: -1 }).skip(skip).limit(limit).select('-__v -snapshot').lean(),
+      tenantModel('payroll_history', tenantContext(req)).countDocuments(filter),
+    ]);
+    return ok(res, docs, paginate(page, limit, total));
+  } catch (err) {
+    console.error('[hr/payroll-history GET]', err);
+    return E.serverError(res);
+  }
+});
+
+/* GET /api/hr/payroll-history/:id/pdf — regenerate a payslip from a
+   PRESERVED snapshot, never the current (possibly since-re-edited)
+   payroll record — this is the concrete mechanism behind "do not rely
+   on current employee data when regenerating historical payslips."
+   Rendered with a distinct HISTORICAL watermark (not DRAFT) since the
+   snapshot WAS official at the moment it was superseded. */
+router.get('/payroll-history/:id/pdf', rbac('hr', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+
+    const histDoc = await tenantModel('payroll_history', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
+    if (!histDoc) return E.notFound(res, 'Payroll history record not found');
+
+    let PDFDocument;
+    try { PDFDocument = require('pdfkit'); }
+    catch { return res.status(501).json({ error: 'pdfkit not installed. Run: npm install pdfkit' }); }
+
+    const pdfDoc  = new PDFDocument({ margin: 40, size: 'A4' });
+    const buffers = [];
+    pdfDoc.on('data', chunk => buffers.push(chunk));
+    pdfDoc.on('end', () => {
+      const pdf = Buffer.concat(buffers);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="payslip-history-${histDoc.staffId}-${histDoc.payPeriod}.pdf"`);
+      res.setHeader('Content-Length', pdf.length);
+      res.send(pdf);
+    });
+
+    _buildPayslipPDF(pdfDoc, { ...histDoc.snapshot, historical: true });
+    pdfDoc.end();
+  } catch (err) {
+    console.error('[hr/payroll-history/:id/pdf GET]', err);
     return E.serverError(res);
   }
 });
