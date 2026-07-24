@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.9.0] — 2026-07-24 — feat(hr): payroll CSV export + payslip download UI (Payroll Phase 1, Step 8 — module complete)
+
+Payroll Phase 1, Step 8, the final step of the 8-step plan (`docs/audits/HR_PAYROLL_ARCHITECTURAL_REVIEW.md`). Calculations (Steps 2/3), workflows (Step 6), notifications (Steps 1/6), and permissions (`rbac()` gates throughout) were already built and tested incrementally across Steps 1–7. Step 8's one concrete, pre-existing gap: `server/config/moduleRegistry.js` declared a `hr.payroll_export` permission key with **no implementing route** — flagged as a real gap in the original architectural review, not fixed until now.
+
+### Added
+- `GET /api/import-export/export/payroll` (new type on the existing generic CSV export route, `server/routes/import-export.js`) — reuses the established `toCSV`/`EXPORT_MODULE` pattern rather than a bespoke endpoint. Gated on the dedicated `hr.payroll_export` action (not the generic `hr.read` every other export type uses) — `EXPORT_MODULE` now supports a per-type `{module, action}` override alongside its existing plain-string shorthand, backward-compatible with the 5 existing types. Optional `?period=YYYY-MM` filter. Statutory columns (PAYE/NSSF/SHIF/Housing Levy) are flattened out of `statutoryDeductions` into their own CSV columns, left blank (not `"0"`) when statutory wasn't applied to a record.
+- `client/src/api/client.js` — `hr.payroll.pdf(id)` and `hr.payroll.history.{list,pdf}` — Step 7 built `GET /payroll/:id/pdf` and the `payroll-history` routes server-side with no client UI reaching them at all; this closes that gap. Extracted a shared `_downloadPdf()` blob-download helper (same fetch/blob/anchor-click pattern `timetable.substitutions.coverPdf` already used) and refactored `coverPdf` to use it too, rather than a third copy of the same 15 lines.
+- `client/src/pages/hr/HRPage.jsx` — a "Download Payslip (PDF)" button on the staff member's own Payslip card, and a per-row download icon-button in HR's payroll table (mirrors the existing Edit/Confirm/Delete row-action pattern).
+- 6 new tests (`import-export-payroll.test.js`) for the export route: CSV shape, blank-not-zero statutory columns when unapplied, period filtering, the dedicated-action RBAC gate (spied directly, not assumed), a denied-permission case, and a regression pin that the 5 existing export types are unaffected.
+
+### Note
+Full suite 77/77 suites, 749/749 tests; security-scan and ratchet clean (36/36 ceiling, unchanged). Client build (`npm run build`) verified clean. Mutation-tested the RBAC override mechanism (temporarily collapsed payroll's `{module,action}` override back to the plain-string/generic-`read` shorthand — the new test correctly failed). No live MongoDB in this sandbox, so the authenticated client flow (login → HR tab → click Download) could not be exercised end-to-end in-browser; verified via a clean production build plus the server-side route's own test coverage from Step 7/8.
+
+**Payroll Phase 1 is now complete** — all 8 steps of the original implementation direction shipped: stabilized flat-CRUD (1) → computation engine (2) → Kenyan statutory deductions (3) → school-level policy config (4) → basicSalary history default (5) → approval workflow + locking (6) → payslips + preserved history (7) → CSV export + UI integration (8).
+
+---
+
 ## [v5.8.0] — 2026-07-24 — feat(hr): payslip generation + payroll history (Payroll Phase 1, Step 7)
 
 Payroll Phase 1, Step 7. Follows the same discipline Report Cards established (see `docs/audits/HR_PAYROLL_ARCHITECTURAL_REVIEW.md` §6): store immutable payroll records, generate payslips from those records, never re-derive a historical payslip from current employee/school data.

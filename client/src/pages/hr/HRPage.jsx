@@ -533,6 +533,7 @@ export default function HRPage() {
   const [docStaffFilter, setDocStaff] = useState('');
   const [payrollModal, setPayrollModal]     = useState(null);  // null | { mode:'add'|'edit', record:null|{...} }
   const [deletingPayroll, setDeletingPayroll] = useState(null);  // null | { id }
+  const [downloadingPayslip, setDownloadingPayslip] = useState(null); // null | payroll record id
   const [staffModal, setStaffModal]           = useState(null);  // null | { mode:'add'|'edit' }
   const [selectedStaff, setSelectedStaff]     = useState(null);  // null | teacher doc (for detail panel)
   const [staffSearch, setStaffSearch]         = useState('');
@@ -873,6 +874,18 @@ export default function HRPage() {
     const el   = document.createElement('a');
     el.href = url; el.download = `payroll_${payPeriod}.csv`;
     el.click(); URL.revokeObjectURL(url);
+  }
+
+  /* ── Payslip PDF download (Payroll Phase 1, Step 7/8) ── */
+  async function downloadPayslip(id) {
+    setDownloadingPayslip(id);
+    try {
+      await hrApi.payroll.pdf(id);
+    } catch (err) {
+      toast.error(err?.message ?? 'Failed to download payslip.');
+    } finally {
+      setDownloadingPayslip(null);
+    }
   }
 
   return (
@@ -1420,6 +1433,14 @@ export default function HRPage() {
                                   {isSettingStatus ? <Loader2 size={13} className="animate-spin" /> : <CreditCard size={13} />}
                                 </button>
                               )}
+                              {/* Download payslip PDF */}
+                              <button
+                                disabled={downloadingPayslip === p.id}
+                                onClick={() => downloadPayslip(p.id)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 disabled:opacity-40 transition opacity-0 group-hover:opacity-100"
+                                title="Download payslip">
+                                {downloadingPayslip === p.id ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                              </button>
                               {/* Delete */}
                               <button
                                 disabled={isDeleting || deletePayroll.isPending}
@@ -1577,6 +1598,14 @@ export default function HRPage() {
               {myPayrollRec.notes && (
                 <p className="mt-3 text-xs text-slate-500 italic border-t border-slate-100 pt-2">{myPayrollRec.notes}</p>
               )}
+              <button onClick={() => downloadPayslip(myPayrollRec.id)}
+                      disabled={downloadingPayslip === myPayrollRec.id}
+                      className="mt-4 w-full flex items-center justify-center gap-1.5 text-sm font-medium text-violet-700 border border-violet-200 bg-violet-50 hover:bg-violet-100 rounded-lg py-2 disabled:opacity-50">
+                {downloadingPayslip === myPayrollRec.id
+                  ? <Loader2 size={14} className="animate-spin" />
+                  : <Download size={14} />}
+                Download Payslip (PDF)
+              </button>
             </div>
           )}
         </div>

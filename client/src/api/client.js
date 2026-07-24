@@ -106,6 +106,31 @@ const _put    = (path, body)         => _req('PUT',    path, body);
 const _patch  = (path, body)         => _req('PATCH',  path, body);
 const _delete = (path, body)         => _req('DELETE', path, body);
 
+// Shared blob-download helper for PDF-generating GET routes (report
+// cards, cover sheets, payslips) — fetches with the same school-slug
+// header / credentials _req() uses, then triggers a browser download.
+async function _downloadPdf(path, filename, params) {
+  const { slug } = detectSchool();
+  const headers = {};
+  if (slug) headers['X-School-Slug'] = slug;
+  const qs = params
+    ? new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))).toString()
+    : '';
+  const res = await fetch(`${BASE}${path}${qs ? `?${qs}` : ''}`, { headers, credentials: 'include' });
+  if (!res.ok) {
+    const json = await res.json().catch(() => null);
+    throw new APIError('PDF_FAILED', json?.error?.message ?? 'Failed to generate PDF', res.status);
+  }
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
 // Generic CRUD factory
 function _resource(base) {
   return {
@@ -301,27 +326,7 @@ export const timetable = {
     update:      (id, data) => _put(`/timetable/substitutions/${id}`, data),
     remove:      (id)       => _delete(`/timetable/substitutions/${id}`),
     autoAssign:  (data)     => _post('/timetable/substitutions/auto-assign', data),
-    coverPdf:    async (params = {}) => {
-      const { slug } = detectSchool();
-      const headers = {};
-      if (slug) headers['X-School-Slug'] = slug;
-      const qs = new URLSearchParams(
-        Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
-      ).toString();
-      const res = await fetch(`${BASE}/timetable/substitutions/cover-pdf${qs ? `?${qs}` : ''}`, { headers, credentials: 'include' });
-      if (!res.ok) {
-        const json = await res.json().catch(() => null);
-        throw new APIError('PDF_FAILED', json?.error?.message ?? 'Failed to generate cover sheet PDF', res.status);
-      }
-      const blob = await res.blob();
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `cover-sheet-${params.date ?? 'unknown'}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(a.href);
-    },
+    coverPdf:    (params = {}) => _downloadPdf('/timetable/substitutions/cover-pdf', `cover-sheet-${params.date ?? 'unknown'}.pdf`, params),
   },
   // Free teachers at a given period on a date (ranked for cover suggestions)
   availableTeachers: (params) => _get('/timetable/available-teachers', params),
@@ -517,6 +522,11 @@ export const hr = {
     remove:    (id)      => _delete(`/hr/payroll/${id}`),
     setStatus: (id, status) => _patch(`/hr/payroll/${id}/status`, { status }),
     copy:      (data)    => _post('/hr/payroll/copy', data),
+    pdf:       (id, filename) => _downloadPdf(`/hr/payroll/${id}/pdf`, filename ?? `payslip-${id}.pdf`),
+    history: {
+      list: (params)  => _get('/hr/payroll-history', params),
+      pdf:  (id, filename) => _downloadPdf(`/hr/payroll-history/${id}/pdf`, filename ?? `payslip-history-${id}.pdf`),
+    },
   },
   documents: {
     list:   (params)   => _get('/hr/documents', params),

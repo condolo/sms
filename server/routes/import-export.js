@@ -1258,18 +1258,33 @@ router.post('/:type', authMiddleware, rawText, /* rbac: dynamic — checked via 
    GET /api/import-export/export/:type
    Export all records as a downloadable CSV
    ──────────────────────────────────────────────────────────── */
-/* Module map for export rbac — export requires read permission on the entity's module */
-const EXPORT_MODULE = { students: 'students', teachers: 'teachers', classes: 'classes', timetable: 'timetable', finance: 'finance' };
+/* Module map for export rbac — export requires read permission on the
+   entity's module by default. payroll uses its own dedicated
+   moduleRegistry.js permission key (hr.payroll_export) rather than the
+   generic hr.read, since exporting payroll figures is a materially more
+   sensitive action than viewing them on-screen — a school may want HR
+   staff to see payroll but not bulk-download it. */
+const EXPORT_MODULE = {
+  students:  'students',
+  teachers:  'teachers',
+  classes:   'classes',
+  timetable: 'timetable',
+  finance:   'finance',
+  payroll:   { module: 'hr', action: 'payroll_export' },
+};
 
 router.get('/export/:type', authMiddleware, /* rbac: dynamic — checked via EXPORT_MODULE map inside handler */ async (req, res) => {
   const { type }     = req.params;
   const { schoolId } = req.jwtUser;
 
-  /* Check RBAC — export requires read permission on the module */
-  const exportMod = EXPORT_MODULE[type];
-  if (exportMod) {
+  /* Check RBAC — export requires read permission on the module (or the
+     type's own explicit {module,action} override, e.g. payroll above) */
+  const exportSpec = EXPORT_MODULE[type];
+  if (exportSpec) {
+    const { module: rbacModule, action: rbacAction } =
+      typeof exportSpec === 'string' ? { module: exportSpec, action: 'read' } : exportSpec;
     const rbacOk = await new Promise(resolve => {
-      rbac(exportMod, 'read')(req, res, () => resolve(true));
+      rbac(rbacModule, rbacAction)(req, res, () => resolve(true));
     }).catch(() => false);
     if (!rbacOk) return;
   }
@@ -1477,8 +1492,49 @@ router.get('/export/:type', authMiddleware, /* rbac: dynamic — checked via EXP
       csv = toCSV(headers, rows);
       res.setHeader('Content-Disposition', `attachment; filename="msingi_finance_${_dateStamp()}.csv"`);
 
+    } else if (type === 'payroll') {
+      const { strParam } = require('../utils/response');
+      const Payroll = tenantModel('payroll', tenantContext(req));
+
+      const filter = { schoolId };
+      const period = strParam(req.query.period);
+      if (period) filter.payPeriod = period;
+
+      const docs = await Payroll.find(filter).sort({ payPeriod: -1, staffName: 1 }).lean();
+
+      const headers = [
+        'staffId', 'staffName', 'payPeriod', 'basicSalary', 'allowances',
+        'deductions', 'paye', 'nssf', 'shif', 'housingLevy', 'totalDeductions',
+        'grossSalary', 'netSalary', 'currency', 'status', 'updatedAt',
+      ];
+      const rows = docs.map(d => ({
+        staffId:         d.staffId || '',
+        staffName:       d.staffName || '',
+        payPeriod:       d.payPeriod || '',
+        basicSalary:     d.basicSalary ?? '',
+        allowances:      d.allowances ?? '',
+        deductions:      d.deductions ?? '',
+        paye:            d.statutoryDeductions?.paye ?? '',
+        nssf:            d.statutoryDeductions?.nssf ?? '',
+        shif:            d.statutoryDeductions?.shif ?? '',
+        housingLevy:     d.statutoryDeductions?.housingLevy ?? '',
+        totalDeductions: d.totalDeductions ?? '',
+        grossSalary:     d.grossSalary ?? '',
+        netSalary:       d.netSalary ?? '',
+        currency:        d.currency || '',
+        status:          d.status || '',
+        updatedAt:       d.updatedAt ? new Date(d.updatedAt).toISOString().slice(0, 10) : '',
+      }));
+
+      const parts = ['msingi', 'payroll'];
+      if (period) parts.push(period);
+      parts.push(_dateStamp());
+
+      csv = toCSV(headers, rows);
+      res.setHeader('Content-Disposition', `attachment; filename="${parts.join('_')}.csv"`);
+
     } else {
-      return E.notFound(res, `Unsupported export type '${type}'. Valid types: students, teachers, classes, timetable, finance`);
+      return E.notFound(res, `Unsupported export type '${type}'. Valid types: students, teachers, classes, timetable, finance, payroll`);
     }
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
