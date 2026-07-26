@@ -447,7 +447,7 @@ td:last-child{font-weight:500}
               <BehaviourTab data={bpsData?.data} loading={bpsLoading} studentId={studentId} />
             )}
             {tab === 'grades' && (
-              <GradesTab data={gradesData?.data} loading={gradesLoading} />
+              <GradesTab data={gradesData?.data?.student?.subjects} loading={gradesLoading} />
             )}
             {tab === 'medical' && (
               <MedicalTab student={student} saving={saving} onSave={updateStudent} canEdit={can('students')} />
@@ -1015,7 +1015,7 @@ function GradesTab({ data, loading }) {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {subjects.map(row => (
-              <tr key={row.subject ?? row._id} className="hover:bg-slate-50 transition">
+              <tr key={row.subjectId ?? row.subject} className="hover:bg-slate-50 transition">
                 <td className="px-4 py-3 font-medium text-slate-800">{row.subject ?? row._id}</td>
                 <td className="px-4 py-3 text-right">
                   <span className={`font-semibold ${pctColor(row.avgPct)}`}>

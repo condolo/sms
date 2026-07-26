@@ -6,6 +6,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.12.0] — 2026-07-26 — fix(grades): retire grade-calc.js duplication, fix Student Profile Grades tab (RC4)
+
+`grade-calc.js` implemented a separate CA/HW/MT/ET term-blending calculation engine (half-term totals, cross-term ET-running-averages, a Template B annual summary) with zero test coverage anywhere in the codebase. Its only route (`GET /api/assessment/report`) had exactly one client consumer — `StudentProfile.jsx`'s Grades tab — and direct code reading found that consumer has been broken since inception: `GradesTab` does `Array.isArray(data) ? data : []` expecting a flat `{subject, avgPct, grade, examCount}` array, but the route always returned a nested `{config, students, student}` object, so the check was always false and the tab always rendered "No grade data available yet.", regardless of real data.
+
+### Fixed
+- `GET /api/assessment/report` now computes via `academic-calc.js`'s `aggregateAssessmentMarks`/`computeFinalScores` — the same single source of truth `report-cards.js` uses — instead of `grade-calc.js`'s separate engine, and shapes its response as a flat per-subject array matching what `GradesTab` actually needs (`{subjectId, subject, avgPct, grade, examCount}`, subject names resolved via the `subjects` collection). When called with `studentId` only (the only real call site), `classId` is now resolved from the student's own record first — `aggregateAssessmentMarks` requires it.
+- `StudentProfile.jsx` — `GradesTab` now reads `gradesData?.data?.student?.subjects` (the array the endpoint actually returns) instead of assuming the whole response envelope was itself an array; row keys use `subjectId` instead of the display name to avoid collisions.
+
+### Removed
+- `server/utils/grade-calc.js` — deleted. Its only unrelated-but-reusable piece, the `validateWeights` "sums to 100" helper (used by `assessment.js`'s `/config` and `/types` routes, nothing to do with the retired term-blending logic), was inlined directly into `assessment.js`.
+
+### Note
+Per-term breakdown (`terms: {1,2,3}`, half-term totals, ET running averages) is not carried forward — `GradesTab`, the only consumer, only ever needed a single current per-subject score, and none of that richer shape had any test coverage or working client to preserve. The `half` query param and its handling are dropped for the same reason (confirmed via grep: no client call site ever sent it). 9 new tests (`assessment-report.test.js`) are the first-ever coverage for this endpoint; full suite 79/79 suites, 791/791 tests; security-scan and ratchet clean (36/36 ceiling, unchanged); client production build clean. Mutation-tested the new `studentId`→`classId` resolution (temporarily hardcoded it to `null`, confirmed 3 tests failed as expected, restored via backup-copy per this session's mutation-test-safety rule, not `git checkout`). No live MongoDB or login in this sandbox, so the authenticated Grades tab could not be exercised end-to-end in-browser; verified via a clean production build plus full route-level test coverage asserting the exact response shape `GradesTab` consumes.
+
+---
+
 ## [v5.11.0] — 2026-07-26 — feat(report-cards): HTML adapter + client cutover, retire printCard() (RC3)
 
 Consolidation Plan Phase 4 step 3 (`docs/audits/REPORT_CARD_ARCHITECTURE_CONSOLIDATION_PLAN.md`): closes the "two renderers, two data sources" gap — the server PDF path (reads a persisted snapshot, draws pdfkit calls) and `StudentReportCard.jsx`'s `printCard()` (read live `/generate` data, hand-built its own HTML string, accreted its own content — Behaviour stats, term-over-term deviation — that never made it into the PDF) drifted independently because nothing forced them to stay in sync. `printCard()` is now retired; both PDF and print trace back to the same computation, `_computeReportSections`.

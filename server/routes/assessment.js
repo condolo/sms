@@ -25,11 +25,8 @@ const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 const email              = require('../utils/email');
-const {
-  validateWeights,
-  aggregateMarks,
-  buildSubjectReport,
-} = require('../utils/grade-calc');
+const { mergeConfig }    = require('./academic-config');
+const { aggregateAssessmentMarks, computeFinalScores } = require('../utils/academic-calc');
 const { isYearArchived, firstArchivedYear } = require('../utils/archival');
 
 const router = express.Router();
@@ -58,6 +55,12 @@ const DEFAULT_CUSTOM_TYPES = [
 
 function _ok(res, data, meta)    { return ok(res, data, meta); }
 function _err(res, msg, code=400){ return res.status(code).json({ error: msg }); }
+
+/** Validate that a weights object sums to 100. Returns { valid, total }. */
+function validateWeights(weights) {
+  const total = Object.values(weights).reduce((s, n) => s + Number(n), 0);
+  return { valid: Math.abs(total - 100) < 0.01, total: Math.round((total + Number.EPSILON) * 100) / 100 };
+}
 
 /** Fetch or create the assessment config doc for a school/year */
 async function _getConfig(schoolId, academicYearId) {
@@ -1112,105 +1115,112 @@ router.delete('/marks/:id', authMiddleware, PLAN, rbac('grades', 'delete'), asyn
 
 /**
  * GET /api/assessment/report
- * Compute a full structured report card for a student or an entire class.
+ * Compute each subject's current weighted score for a student or an entire
+ * class, via academic-calc.js's aggregateAssessmentMarks/computeFinalScores
+ * — the same single source of truth report-cards.js uses, so this endpoint
+ * can never drift from what a published report card actually shows.
  *
  * Query params (one required):
- *   studentId     — single student report
+ *   studentId     — single student report (classId resolved from the
+ *                    student's own record when omitted)
  *   classId       — class-wide report (all students in class)
  *   academicYearId — filter to academic year
- *   termNumber     — 1|2|3 → returns only that term's data
- *                    omit  → returns all 3 terms
- *   half           — 'true' → return half-term totals (CA+HW+MT only)
+ *   termNumber     — 1|2|3 → scores computed from that term's marks only
+ *                    omit  → marks from every term are averaged per type
  *
- * Response structure (per student, per subject):
- *   terms: {
- *     1: { typeAvgs, breakdown, halfTermTotal, termTotal, finalGrade, etRunningAvg, etRef }
- *     2: { ... etRef: { ET1 } }
- *     3: { ... etRef: { ET1, ET2 } }
- *   }
- *   summaryAverage: number  (Template B — avg of T1+T2+T3 totals)
+ * Response (per student):
+ *   subjects: [{ subjectId, subject, avgPct, grade, examCount }]
  */
 router.get('/report', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const { studentId, classId, academicYearId, termNumber, half } = req.query;
+    let { studentId, classId, academicYearId, termNumber } = req.query;
 
     if (!studentId && !classId) {
       return _err(res, 'studentId or classId is required');
     }
 
+    // aggregateAssessmentMarks requires classId; resolve it from the
+    // student's own record when the route was called with studentId only.
+    if (!classId && studentId) {
+      const studentDoc = await tenantModel('students', tenantContext(req))
+        .findOne({ schoolId, id: studentId }).select('classId').lean();
+      classId = studentDoc?.classId || null;
+    }
+
     // Load config (weights, template) + default grade scale in parallel
-    const [config, defaultScale] = await Promise.all([
+    const [config, defaultScale, academicCfg] = await Promise.all([
       _getConfig(schoolId, academicYearId || null),
       tenantModel('grade_boundaries', tenantContext(req)).findOne({ schoolId, isDefault: true }).lean(),
+      tenantModel('academic_config', tenantContext(req)).findOne({ schoolId }).lean(),
     ]);
-    // Derive weights from customTypes (new) or fall back to legacy weights map
-    const weights = config.customTypes && config.customTypes.length > 0
-      ? Object.fromEntries(config.customTypes.map(t => [t.key, t.weight]))
-      : (config.weights || DEFAULT_WEIGHTS);
 
-    // Fetch all published marks
-    const marksFilter = { schoolId, isPublished: true };
-    if (studentId)      marksFilter.studentId      = studentId;
-    if (classId)        marksFilter.classId        = classId;
-    if (academicYearId) marksFilter.academicYearId = academicYearId;
-    if (termNumber)     marksFilter.termNumber     = Number(termNumber);
+    const customTypes = (config.customTypes && config.customTypes.length > 0)
+      ? config.customTypes
+      : DEFAULT_CUSTOM_TYPES;
+    const assessmentWeights = customTypes.map(t => ({
+      assessmentType: t.key,
+      label:          t.label || t.key,
+      weight:         t.weight ?? 0,
+    }));
+    // Prefer grade_boundaries default scale over legacy academic_config.gradingSchema
+    const gradingSchema = defaultScale?.bands ?? mergeConfig(academicCfg).gradingSchema;
 
-    // Safety ceiling: 10,000 marks = ~50 students × 14 subjects × 4 types × 3-4 instances
-    // Bounded further by the classId/termNumber filters applied above
-    const allMarks = await tenantModel('assessment_marks', tenantContext(req)).find(marksFilter).limit(10000).lean();
-
-    // Group marks by studentId → subjectId
-    const byStudentSubject = {};
-    for (const m of allMarks) {
-      const key = `${m.studentId}__${m.subjectId}`;
-      byStudentSubject[key] = byStudentSubject[key] || {
-        studentId: m.studentId,
-        subjectId: m.subjectId,
-        classId:   m.classId,
-        marks:     [],
-      };
-      byStudentSubject[key].marks.push(m);
-    }
-
-    // Compute report per student per subject
-    const reportsByStudent = {};
-    for (const { studentId: sid, subjectId, classId: cid, marks } of Object.values(byStudentSubject)) {
-      reportsByStudent[sid] = reportsByStudent[sid] || { studentId: sid, classId: cid, subjects: {} };
-      reportsByStudent[sid].subjects[subjectId] = buildSubjectReport({ marks, weights });
-    }
-
-    // If half-term mode, strip ET from results and highlight halfTermTotal
-    const isHalf = half === 'true';
-    if (isHalf) {
-      for (const student of Object.values(reportsByStudent)) {
-        for (const subReport of Object.values(student.subjects)) {
-          for (const term of Object.values(subReport.terms)) {
-            delete term.finalGrade;
-            delete term.etRunningAvg;
-            // halfTermTotal is the key metric
-          }
-        }
+    let finalScores = {};
+    if (classId) {
+      const aggregated = await aggregateAssessmentMarks(
+        schoolId, classId,
+        termNumber ? Number(termNumber) : null,
+        academicYearId || null,
+        studentId || null,
+      );
+      if (Object.keys(aggregated).length > 0) {
+        finalScores = computeFinalScores(aggregated, {}, assessmentWeights, gradingSchema);
       }
     }
+
+    // Resolve subject display names for every subjectId referenced
+    const allSubjectIds = new Set();
+    for (const report of Object.values(finalScores)) {
+      for (const sub of Object.keys(report.subjects || {})) allSubjectIds.add(sub);
+    }
+    const subjectDocs = allSubjectIds.size
+      ? await tenantModel('subjects', tenantContext(req))
+          .find({ schoolId, id: { $in: [...allSubjectIds] } }).select('id name').lean()
+      : [];
+    const subjectNameMap = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
+
+    const _flattenSubjects = (subjectsObj) => Object.entries(subjectsObj || {}).map(([subjectId, data]) => ({
+      subjectId,
+      subject:   subjectNameMap[subjectId] ?? subjectId,
+      avgPct:    data.finalScore ?? null,
+      grade:     data.grade ?? null,
+      examCount: Object.keys(data.breakdown || {}).length,
+    }));
+
+    const students = Object.values(finalScores).map(r => ({
+      studentId: r.studentId,
+      classId,
+      subjects:  _flattenSubjects(r.subjects),
+    }));
 
     // Attach config so frontend knows template, weights, types, and grade scale used
     const result = {
       config: {
-        weights,
-        customTypes:    config.customTypes || DEFAULT_CUSTOM_TYPES,
+        weights:        Object.fromEntries(assessmentWeights.map(w => [w.assessmentType, w.weight])),
+        customTypes,
         reportTemplate: config.reportTemplate,
         instances:      config.instances || DEFAULT_INSTANCES,
         gradeScale:     defaultScale ? { id: defaultScale.id, name: defaultScale.name, bands: defaultScale.bands } : null,
       },
-      students: Object.values(reportsByStudent),
+      students,
     };
 
     // If single student, unwrap for convenience
     if (studentId) {
       return _ok(res, {
         ...result,
-        student: reportsByStudent[studentId] || { studentId, subjects: {} },
+        student: students.find(s => s.studentId === studentId) || { studentId, classId: classId || null, subjects: [] },
       });
     }
 
