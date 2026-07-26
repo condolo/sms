@@ -25,6 +25,7 @@ import {
   MessageSquare, UserCog, TrendingUp, Tag, HelpCircle,
   BookMarked, Bus, BedDouble, X, BookCheck, MonitorPlay,
   ChevronDown, BookMarked as ClassroomIcon, Video, Link2,
+  FileBarChart2,
 } from 'lucide-react';
 import clsx from 'clsx';
 import useAuthStore from '@/store/auth.js';
@@ -38,6 +39,7 @@ const CONFIGURABLE_MODULES = [
   { key: 'timetable',  to: '/timetable',  Icon: Calendar,       label: 'Timetable',           section: 'Academic'   },
   { key: 'attendance', to: '/attendance', Icon: CheckSquare,     label: 'Attendance',          section: 'Academic'   },
   { key: 'grades',     to: '/exams',      Icon: FileText,        label: 'Exams',               section: 'Academic'   },
+  { key: 'report_cards', to: '/report-cards', Icon: FileBarChart2, label: 'Report Cards',       section: 'Academic'   },
   { key: 'subjects',   to: '/subjects',   Icon: Library,         label: 'Subjects',            section: 'Academic'   },
   { key: 'admissions', to: '/admissions', Icon: ClipboardList,  label: 'Admissions',          section: 'Operations' },
   { key: 'behaviour',  to: '/behaviour',  Icon: Scale,          label: 'Behaviour',           section: 'Operations' },

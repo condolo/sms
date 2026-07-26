@@ -6,6 +6,39 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.23.0] — 2026-07-26 — feat(report-cards): Report Cards client module — nav, settings panel (RCE5)
+
+The final client-side milestone of the Report Card Template Engine: a
+new top-level "Report Cards" sidebar item, replacing the old, oddly
+mislabeled "Grade Report" tab buried inside Exams. Also builds the
+first client UI ever for four server capabilities that have existed
+since earlier RC milestones but were only ever reachable via direct
+API calls: RC7's subject-comments toggle relocation, RC8's approval
+chain, RC9's publication policy, and RC11's template registry.
+
+### Added
+- `client/src/pages/reportcards/ReportCardsPage.jsx` — new top-level page, two tabs: **Generate & Publish** (reuses the existing `ReportCardsTab.jsx`/`StudentReportCard.jsx` from `pages/grades/components` unchanged — not duplicated, not moved, just consumed from a second entry point, same cross-folder pattern `ExamsPage.jsx` already used) and **Settings** (admin/superadmin only).
+- `client/src/pages/reportcards/components/SettingsPanel.jsx` — five sub-tabs:
+  - **General** — the 9 RCE1 report-display toggles (ranking, rank-on-report, attendance summary, GPA, average, deviation, behaviour, class-teacher remark, principal comment), wired to `academicConfig.get/update` — previously server-side-only with zero client UI anywhere.
+  - **Comments** — the RC7 Subject Teacher Comments toggle, relocated (not duplicated) from `ExamsPage`'s Configuration tab, plus the Comment Bank CRUD section, relocated the same way.
+  - **Workflow** — the RC8 report-comment approval chain builder, structurally the same step/`AssigneePicker` pattern HR's leave-chain builder uses (same `workflow-config.js` engine underneath), adapted for report comments' own rules: minimum 1 step (not 2), no fixed trailing "final confirmation" step.
+  - **Publication Policy** — RC9's 3-checkbox completeness gate on `POST /publish`, wired to the route's `GET`/`PATCH /report-cards/publication-policy`.
+  - **Templates** — a default-picker + basic CRUD over RC11's `report_card_templates` registry, radio-choosing between `subject_paired`/`marks_then_comments` (both live), `legacy_tabular` shown disabled ("frozen, never a new default"), and `kindergarten` shown disabled ("coming soon" — matches the Template Engine plan's explicit decision to defer it).
+- `client/src/api/client.js`: `reportCards.workflowConfig` (get/save), `reportCards.publicationPolicy` (get/update), `reportCards.draftComments.advance` (RC8's sequential-advance route), and a new `reportCardTemplates` export (list/create/update/remove against `/report-card-templates` — RC11's registry). Deliberately a separate export from the pre-existing `rcTemplates` (a different, already-live Kindergarten competency-band feature at `/rc-templates`) so the two don't collide or read as the same thing.
+- Sidebar: new `report_cards` module entry (`/report-cards`, "Report Cards"). Its visibility already worked correctly with zero permission-default changes — `report_cards` has had real role defaults in `repairPermissions.js` since RC6/RC9's own routes started gating on `rbac('report_cards', ...)`, just never had a nav entry pointing at it.
+
+### Changed
+- `client/src/pages/exams/ExamsPage.jsx`: removed the "Grade Report" tab (it rendered `ReportCardsTab.jsx` under a mismatched label) — that capability now lives at its own `/report-cards` URL instead of a tab inside Exams.
+- `client/src/pages/grades/components/ConfigTab.jsx`: removed the Subject Teacher Comments toggle and the Comment Bank section (moved, not duplicated, to Report Cards → Settings → Comments); relabeled "Report Card Template" to **"Assessment Report Style"** — this picker sets `assessment_config.reportTemplate` ('detailed'/'summary'), an unrelated quick-report layout read only by `assessment.js`'s own `GET /report` endpoint, which was easy to mistake for a competing "report card template" choice now that a real one exists in Settings → Templates.
+
+### Removed (dead code)
+- `client/src/pages/grades/GradesPage.jsx` and its then-only consumers `MarkEntryTab.jsx`, `ExamsListTab.jsx`, `ExamResultsTab.jsx`, `CreateExamSlideOver.jsx` (all under `pages/grades/components/`) — confirmed via repo-wide grep to have zero importers anywhere (the shell was decomposed into `ExamsPage.jsx` directly years ago, per its own commit history referenced in `ChangelogPage.jsx`; the shell itself was never wired into any route).
+
+### Tests
+No client test framework exists in this repo (server-only Jest suite; confirmed no `*.test.jsx` anywhere) — verified via `vite build` (clean production build, new `ReportCardsPage` chunk emitted, zero errors) and a browser check of the running dev server (Sidebar/App boot with zero console errors; `/report-cards` correctly redirects unauthenticated, same as every other protected route; no MongoDB in this sandbox so the authenticated Settings UI itself could not be click-tested — noted honestly, not glossed over). Server suite unaffected (94/94 suites, 939/939 tests; security-scan and tenant-coverage ratchet held at 36) since this milestone touches no server code.
+
+---
+
 ## [v5.22.0] — 2026-07-26 — feat(report-cards): "Subjects First, Comments After" marks_then_comments renderer (RCE4)
 
 Third layout in the Report Card Template Engine, following the plan's RCE4 milestone. Where `subject_paired` (RCE3) interleaves each subject's own teacher comment directly under its marks row, `marks_then_comments` is for schools that want a clean, uninterrupted marks grid: all subjects graded together on one page, every teacher's comment together on a separate page afterward, followed by remarks and behaviour.

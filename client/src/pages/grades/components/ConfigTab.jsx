@@ -8,9 +8,9 @@ import { AnimatePresence } from 'framer-motion';
 import {
   AlertTriangle, CheckCircle2, Loader2, Save, Plus, Trash2,
   ClipboardList, TrendingUp, Info, Star, ChevronDown, ChevronUp,
-  GraduationCap, MessageSquare, Search, Tag, Lock, LockOpen,
+  GraduationCap, Lock, LockOpen,
 } from 'lucide-react';
-import { assessment as api, commentBanks as banksApi } from '@/api/client.js';
+import { assessment as api } from '@/api/client.js';
 import {
   DEFAULT_CUSTOM_TYPES, VALID_TYPE_COLORS, COLOR_PILL,
   DEFAULT_GRADE_SCALE, TERM_NUMBERS, _round,
@@ -589,11 +589,9 @@ export default function ConfigTab() {
   /* ── Draft state ────────────────────────────────────────── */
   const [draftTypes,    setDraftTypes]    = useState(null);   // null = use DB value
   const [draftTemplate, setDraftTemplate] = useState(null);
-  const [draftSubjectComments, setDraftSubjectComments] = useState(null);
 
   const activeTypes    = draftTypes    ?? cfg.customTypes ?? DEFAULT_CUSTOM_TYPES;
   const activeTemplate = draftTemplate ?? cfg.reportTemplate ?? 'detailed';
-  const activeSubjectComments = draftSubjectComments ?? cfg.subjectTeacherCommentsEnabled ?? true;
 
   const totalWeight = activeTypes.reduce((s, t) => s + Number(t.weight || 0), 0);
   const weightOk    = Math.abs(totalWeight - 100) < 0.01;
@@ -604,14 +602,13 @@ export default function ConfigTab() {
   const { mutate: saveAll, isPending: saving } = useMutation({
     mutationFn: () => Promise.all([
       api.saveTypes({ customTypes: activeTypes }),
-      api.updateConfig({ reportTemplate: activeTemplate, subjectTeacherCommentsEnabled: activeSubjectComments }),
+      api.updateConfig({ reportTemplate: activeTemplate }),
     ]),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['assessment', 'config'] });
       qc.invalidateQueries({ queryKey: ['assessment', 'report'] });
       setDraftTypes(null);
       setDraftTemplate(null);
-      setDraftSubjectComments(null);
       setToast({ msg: 'Configuration saved.', type: 'success' });
     },
     onError: err => setToast({ msg: err?.message ?? 'Failed to save configuration.', type: 'error' }),
@@ -794,9 +791,17 @@ export default function ConfigTab() {
         <AddTypeForm onAdd={handleAddType} adding={adding} />
       </div>
 
-      {/* ══ Report Card Template ══════════════════════════════ */}
+      {/* ══ Assessment Report Style ═══════════════════════════
+          Renamed from "Report Card Template" (RCE5) — this picks
+          assessment_config.reportTemplate ('detailed'/'summary'), the
+          quick-report layout read by assessment.js's own GET /report
+          endpoint. Unrelated to the report_card_templates layout
+          registry (subject_paired / marks_then_comments / etc.), which
+          now lives in the Report Cards module's own Settings > Templates
+          tab — kept here separately named to stop the two looking like
+          competing "report card template" choices. */}
       <div className="bg-white border border-slate-200 rounded-xl p-5">
-        <h3 className="text-sm font-semibold text-slate-800 mb-4">Report Card Template</h3>
+        <h3 className="text-sm font-semibold text-slate-800 mb-4">Assessment Report Style</h3>
         <div className="grid sm:grid-cols-2 gap-3">
           {TEMPLATE_OPTIONS.map(({ key, Icon, title, desc }) => (
             <button key={key} onClick={() => setDraftTemplate(key)}
@@ -808,32 +813,6 @@ export default function ConfigTab() {
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">{desc}</p>
             </button>
           ))}
-        </div>
-      </div>
-
-      {/* ══ Subject Teacher Comments (RC7 capability toggle) ══ */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-sm font-semibold text-slate-800 mb-1">Subject Teacher Comments</h3>
-            <p className="text-xs text-slate-500 leading-relaxed">
-              When enabled, teachers can write a per-subject comment during Mark Entry, and it appears on the report card.
-              Disabling it removes the field from Mark Entry entirely and hides the Subject Teacher Comments section from every report card — no placeholder, no trace.
-            </p>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={activeSubjectComments}
-            onClick={() => setDraftSubjectComments(!activeSubjectComments)}
-            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-slate-400 cursor-pointer
-              ${activeSubjectComments ? 'bg-slate-800' : 'bg-slate-200'}`}
-          >
-            <span
-              className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform
-                ${activeSubjectComments ? 'translate-x-4.5' : 'translate-x-0.5'}`}
-            />
-          </button>
         </div>
       </div>
 
@@ -997,188 +976,6 @@ export default function ConfigTab() {
         )}
       </div>
 
-      {/* ── Comment Banks ──────────────────────────────────────────── */}
-      <CommentBankSection />
-    </div>
-  );
-}
-
-/* ══════════════════════════════════════════════════════════════
-   Comment Bank — pre-written remark templates for report cards
-   ══════════════════════════════════════════════════════════════ */
-const COMMENT_CATEGORIES = [
-  { key: 'academic',   label: 'Academic' },
-  { key: 'behaviour',  label: 'Behaviour' },
-  { key: 'general',    label: 'General' },
-  { key: 'subject',    label: 'Subject-specific' },
-];
-
-function CommentBankSection() {
-  const qc = useQueryClient();
-  const [search,   setSearch]   = useState('');
-  const [catFilter,setCatFilter] = useState('');
-  const [newText,  setNewText]  = useState('');
-  const [newCat,   setNewCat]   = useState('general');
-  const [adding,   setAdding]   = useState(false);
-  const [toast,    setToast]    = useState(null);
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['comment-banks', { category: catFilter, q: search }],
-    queryFn:  () => banksApi.list({ category: catFilter || undefined, q: search || undefined }),
-    staleTime: 60_000,
-  });
-  const comments = data?.data ?? [];
-
-  const { mutate: createComment, isPending: creating } = useMutation({
-    mutationFn: () => banksApi.create({ text: newText.trim(), category: newCat }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['comment-banks'] });
-      setNewText('');
-      setAdding(false);
-      setToast({ msg: 'Comment added.', type: 'success' });
-    },
-    onError: err => setToast({ msg: err?.message ?? 'Failed to add comment.', type: 'error' }),
-  });
-
-  const { mutate: deleteComment } = useMutation({
-    mutationFn: (id) => banksApi.remove(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['comment-banks'] });
-      setToast({ msg: 'Comment deleted.', type: 'success' });
-    },
-    onError: err => setToast({ msg: err?.message ?? 'Failed to delete.', type: 'error' }),
-  });
-
-  const catColorMap = {
-    academic:  'bg-blue-50 text-blue-700 border-blue-200',
-    behaviour: 'bg-amber-50 text-amber-700 border-amber-200',
-    general:   'bg-slate-100 text-slate-600 border-slate-200',
-    subject:   'bg-emerald-50 text-emerald-700 border-emerald-200',
-  };
-
-  return (
-    <div className="bg-white border border-slate-200 rounded-xl p-5">
-      <AnimatePresence>
-        {toast && <Toast msg={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}
-      </AnimatePresence>
-
-      <div className="flex items-start justify-between mb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <MessageSquare size={15} className="text-slate-500" />
-            <p className="text-sm font-semibold text-slate-800">Comment Bank</p>
-          </div>
-          <p className="text-xs text-slate-400 mt-0.5">Pre-written remarks teachers can insert into report cards</p>
-        </div>
-        <button
-          onClick={() => setAdding(a => !a)}
-          className="flex items-center gap-1.5 border border-slate-200 hover:border-slate-400 text-slate-600 hover:text-slate-900 text-xs font-medium px-3 py-1.5 rounded-lg transition"
-        >
-          <Plus size={12} /> Add comment
-        </button>
-      </div>
-
-      {/* Add form */}
-      {adding && (
-        <div className="mb-4 p-4 rounded-xl bg-slate-50 border border-slate-100 space-y-3">
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <label className="text-xs font-medium text-slate-600 block mb-1">Comment text</label>
-              <textarea
-                value={newText}
-                onChange={e => setNewText(e.target.value)}
-                maxLength={500}
-                rows={3}
-                placeholder="e.g. shows excellent understanding of concepts and works diligently…"
-                className={`${iCls()} resize-none`}
-              />
-              <span className="text-[10px] text-slate-400">{newText.length}/500</span>
-            </div>
-            <div className="w-36">
-              <label className="text-xs font-medium text-slate-600 block mb-1">Category</label>
-              <select
-                value={newCat}
-                onChange={e => setNewCat(e.target.value)}
-                className={iCls()}
-              >
-                {COMMENT_CATEGORIES.map(c => (
-                  <option key={c.key} value={c.key}>{c.label}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="flex gap-2 justify-end">
-            <button onClick={() => { setAdding(false); setNewText(''); }}
-              className="text-xs text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg transition">
-              Cancel
-            </button>
-            <button
-              onClick={() => createComment()}
-              disabled={creating || !newText.trim()}
-              className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-medium px-4 py-1.5 rounded-lg transition"
-            >
-              {creating ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
-              {creating ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Filters */}
-      <div className="flex gap-2 mb-3">
-        <div className="relative flex-1">
-          <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-          <input
-            type="text"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search comments…"
-            className={`${iCls()} pl-8 text-xs`}
-          />
-        </div>
-        <select
-          value={catFilter}
-          onChange={e => setCatFilter(e.target.value)}
-          className={`${iCls()} w-40 text-xs`}
-        >
-          <option value="">All categories</option>
-          {COMMENT_CATEGORIES.map(c => (
-            <option key={c.key} value={c.key}>{c.label}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* List */}
-      {isLoading ? (
-        <div className="space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-10" />)}</div>
-      ) : comments.length === 0 ? (
-        <div className="py-8 text-center text-sm text-slate-400 flex flex-col items-center gap-2">
-          <MessageSquare size={20} className="text-slate-200" />
-          {search || catFilter ? 'No comments match your search.' : 'No comments yet — add one above.'}
-        </div>
-      ) : (
-        <div className="divide-y divide-slate-100">
-          {comments.map(c => (
-            <div key={c.id} className="flex items-start justify-between gap-3 py-2.5 group">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm text-slate-700 leading-snug">{c.text}</p>
-                <div className="flex items-center gap-1.5 mt-1">
-                  <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded border ${catColorMap[c.category] ?? catColorMap.general}`}>
-                    <Tag size={8} />{COMMENT_CATEGORIES.find(x => x.key === c.category)?.label ?? c.category}
-                  </span>
-                </div>
-              </div>
-              <button
-                onClick={() => deleteComment(c.id)}
-                className="shrink-0 p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition opacity-0 group-hover:opacity-100"
-                title="Delete"
-              >
-                <Trash2 size={13} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

@@ -808,19 +808,48 @@ export const reportCards = {
     list:         (params)                     => _get('/report-cards/draft-comments', params),
     upsert:       (studentId, data)            => _put(`/report-cards/draft-comments/${studentId}`, data),
     saveSubject:  (studentId, subjectId, data) => _put(`/report-cards/draft-comments/${studentId}/subject/${subjectId}`, data),
+    // RC8 — advances the school-configured report-comment approval chain
+    // one step (sequential enforcement server-side, mirrors hr.leave.advance).
+    advance:      (studentId, data)            => _patch(`/report-cards/draft-comments/${studentId}/advance`, data),
   },
   // RC3 — the HTML adapter's rendered output, replacing
   // StudentReportCard.jsx's old hand-built printCard() string.
   html:        (id)   => _get(`/report-cards/${id}/html`),
   previewHtml: (data) => _post('/report-cards/preview-html', data),
+  // RC8 — report-comment approval chain config (workflow_configs, keyed
+  // 'report_comment_approval'), same generic engine HR's leave chain uses.
+  workflowConfig: {
+    get:  ()     => _get('/report-cards/workflow-config'),
+    save: (data) => _put('/report-cards/workflow-config', data),
+  },
+  // RC9 — which completeness gates POST /publish enforces before a
+  // report card can be published (moderation / subject comments / remarks).
+  publicationPolicy: {
+    get:    ()     => _get('/report-cards/publication-policy'),
+    update: (data) => _patch('/report-cards/publication-policy', data),
+  },
 };
 
+// RC-Templates (Kindergarten competency-band templates) — an older,
+// separate, already-live feature. NOT to be confused with
+// reportCardTemplates below (RC11's layout-engine registry).
 export const rcTemplates = {
   list:   ()           => _get('/rc-templates'),
   get:    (id)         => _get(`/rc-templates/${id}`),
   create: (data)       => _post('/rc-templates', data),
   update: (id, data)   => _put(`/rc-templates/${id}`, data),
   remove: (id)         => _delete(`/rc-templates/${id}`),
+};
+
+// RC11 — Report Card Template Engine registry (/api/report-card-templates):
+// name/curriculum/section scoping + which layoutKey renders it
+// (legacy_tabular | subject_paired | marks_then_comments | kindergarten).
+export const reportCardTemplates = {
+  list:   (params)     => _get('/report-card-templates', params),
+  get:    (id)         => _get(`/report-card-templates/${id}`),
+  create: (data)       => _post('/report-card-templates', data),
+  update: (id, data)   => _put(`/report-card-templates/${id}`, data),
+  remove: (id)         => _delete(`/report-card-templates/${id}`),
 };
 
 // Default export — single object for convenience
@@ -864,6 +893,8 @@ const api = {
   examSeries,
   markSubmissions,
   reportCards,
+  rcTemplates,
+  reportCardTemplates,
   APIError,
 };
 

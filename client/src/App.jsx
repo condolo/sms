@@ -43,6 +43,7 @@ const AdmissionsPage = lazy(() => import('@/pages/admissions/AdmissionsPage.jsx'
 const TimetablePage  = lazy(() => import('@/pages/timetable/TimetablePage.jsx'));
 const SettingsPage      = lazy(() => import('@/pages/settings/SettingsPage.jsx'));
 const ExamsPage         = lazy(() => import('@/pages/exams/ExamsPage.jsx'));
+const ReportCardsPage   = lazy(() => import('@/pages/reportcards/ReportCardsPage.jsx'));
 // ImportExportPage dissolved into individual modules (v4.18.0)
 const SubjectsPage      = lazy(() => import('@/pages/subjects/SubjectsPage.jsx'));
 const MessagesPage      = lazy(() => import('@/pages/messages/MessagesPage.jsx'));
@@ -219,6 +220,10 @@ export const router = createBrowserRouter([
       // Formal Exams (scheduling, results, grade report) — ExamsPage v4.33.0
       { path: 'exams',                 element: <SuspenseWrapper><ExamsPage /></SuspenseWrapper> },
       { path: 'exams/:tab',            element: <SuspenseWrapper><ExamsPage /></SuspenseWrapper> },
+      // Report Card Template Engine (RCE5) — generate/publish + module settings,
+      // split out of Exams' old "Grade Report" tab into its own top-level module.
+      { path: 'report-cards',          element: <SuspenseWrapper><ReportCardsPage /></SuspenseWrapper> },
+      { path: 'report-cards/:tab',     element: <SuspenseWrapper><ReportCardsPage /></SuspenseWrapper> },
 
       // Admissions
       { path: 'admissions',            element: <SuspenseWrapper><AdmissionsPage /></SuspenseWrapper> },

@@ -9,7 +9,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  FileText, BarChart3, ClipboardList, Plus, X, Loader2,
+  FileText, ClipboardList, Plus, X, Loader2,
   CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight,
   Search, Save, Check, TrendingUp, PenLine, Bell,
   Award, Users2, GraduationCap, Filter, Percent, Settings,
@@ -25,7 +25,6 @@ import {
   teachingAssignments as taApi,
 } from '@/api/client.js';
 import RemindersTab   from '../grades/components/RemindersTab.jsx';
-import ReportCardsTab from '../grades/components/ReportCardsTab.jsx';
 import CAConfigTab    from '../grades/components/ConfigTab.jsx';
 import { TypePill, Toast } from '../grades/components/GradesPrimitives.jsx';
 import { DEFAULT_CUSTOM_TYPES, _pct, _scoreColor } from '../grades/constants.js';
@@ -43,7 +42,6 @@ export default function ExamsPage() {
   const TABS = [
     { id: 'exams',     label: 'Exams',         icon: FileText,    adminOnly: false },
     { id: 'markbook',  label: 'Markbook',       icon: BookMarked,  adminOnly: false },
-    { id: 'report',    label: 'Grade Report',   icon: BarChart3,   adminOnly: false },
     { id: 'reminders', label: 'Reminders',      icon: Bell,        adminOnly: false },
     { id: 'config',    label: 'Configuration',  icon: Settings,    adminOnly: true  },
   ].filter(t => !t.adminOnly || canCreate);
@@ -141,11 +139,6 @@ export default function ExamsPage() {
           )}
           {tab === 'markbook' && (
             <MarkbookTab key="markbook" years={years} />
-          )}
-          {tab === 'report' && (
-            <motion.div key="report" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
-              <ReportCardsTab />
-            </motion.div>
           )}
           {tab === 'reminders' && (
             <motion.div key="reminders" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
