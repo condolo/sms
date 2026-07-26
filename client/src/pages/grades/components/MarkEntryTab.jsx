@@ -6,8 +6,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence } from 'framer-motion';
-import { Loader2, Save, PenLine, BookOpen, ClipboardPaste, Lock, Send, MessageSquare } from 'lucide-react';
-import { assessment as api, classes as classesApi, markSubmissions as submissionsApi, reportCards as reportCardsApi } from '@/api/client.js';
+import { Loader2, Save, PenLine, BookOpen, ClipboardPaste, Lock, Send, MessageSquare, ListPlus } from 'lucide-react';
+import { assessment as api, classes as classesApi, markSubmissions as submissionsApi, reportCards as reportCardsApi, commentBanks as banksApi } from '@/api/client.js';
 import {
   TERM_NUMBERS, DEFAULT_CUSTOM_TYPES, _pct, _scoreColor,
 } from '../constants.js';
@@ -75,6 +75,52 @@ function GridCell({ value, rowIdx, colIdx, isLocked, onChange, onNavigate, cellR
         }`}
       placeholder="—"
     />
+  );
+}
+
+/* ─── Comment Bank picker (RC10) ─────────────────────────────────────
+   Small popover, opened per-row, listing the school's shared comment
+   bank (server/routes/comment-banks.js — the same picklist Report
+   Cards' own remark fields can read, no module-specific rbac gate).
+   Selecting an entry inserts its text into that row's comment field. */
+function CommentBankPicker({ comments, onPick, onClose }) {
+  const [q, setQ] = useState('');
+  const filtered = q.trim()
+    ? comments.filter(c => c.text.toLowerCase().includes(q.trim().toLowerCase()))
+    : comments;
+
+  return (
+    <>
+      <div className="fixed inset-0 z-10" onClick={onClose} />
+      <div className="absolute z-20 top-full left-0 mt-1 w-72 bg-white border border-slate-200 rounded-lg shadow-lg p-2">
+        <input
+          autoFocus
+          type="text"
+          value={q}
+          onChange={e => setQ(e.target.value)}
+          placeholder="Search comment bank…"
+          className="w-full rounded border border-slate-200 px-2 py-1 text-xs mb-2 focus:outline-none focus:border-indigo-400"
+        />
+        <div className="max-h-48 overflow-y-auto space-y-0.5">
+          {filtered.length === 0 ? (
+            <p className="text-xs text-slate-400 px-2 py-3 text-center">
+              {comments.length === 0 ? 'No comments in the bank yet.' : 'No matches.'}
+            </p>
+          ) : (
+            filtered.map(c => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => onPick(c.text)}
+                className="w-full text-left text-xs text-slate-700 hover:bg-indigo-50 rounded px-2 py-1.5 transition"
+              >
+                {c.text}
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -160,6 +206,7 @@ export default function MarkEntryTab() {
   // comments[studentId] = string
   const [comments,      setComments]      = useState({});
   const [commentsDirty, setCommentsDirty] = useState(false);
+  const [pickerOpenFor, setPickerOpenFor] = useState(null); // studentId, or null
 
   const cellRefs = useRef({});  // keyed by `${rowIdx}_${colIdx}`
 
@@ -180,6 +227,15 @@ export default function MarkEntryTab() {
   // RC7 — school-level capability toggle. Defaults true so schools that
   // never configured it keep today's always-on behavior.
   const subjectCommentsEnabled = configData?.data?.subjectTeacherCommentsEnabled !== false;
+
+  // RC10 — shared comment bank picklist (no module-specific rbac gate server-side)
+  const { data: banksData } = useQuery({
+    queryKey: ['comment-banks'],
+    queryFn:  () => banksApi.list(),
+    enabled:  subjectCommentsEnabled,
+    staleTime: 5 * 60_000,
+  });
+  const bankComments = banksData?.data ?? [];
 
   const { data: studentsData, isLoading: studentsLoading } = useQuery({
     queryKey: ['classes', classId, 'students'],
@@ -260,6 +316,16 @@ export default function MarkEntryTab() {
       [studentId]: { ...(prev[studentId] ?? {}), [colId]: value },
     }));
     setDirty(true);
+  }, []);
+
+  // RC10 — insert a comment-bank entry into a specific row's comment field
+  const insertBankComment = useCallback((sid, text) => {
+    setComments(prev => {
+      const existing = (prev[sid] ?? '').trim();
+      return { ...prev, [sid]: existing ? `${existing} ${text}` : text };
+    });
+    setCommentsDirty(true);
+    setPickerOpenFor(null);
   }, []);
 
   // Keyboard navigation between cells
@@ -507,17 +573,34 @@ export default function MarkEntryTab() {
                         </td>
                       ))}
                       {subjectCommentsEnabled && (
-                        <td className="px-2 py-1.5">
-                          <input
-                            type="text"
-                            value={comments[sid] ?? ''}
-                            onChange={e => {
-                              setComments(prev => ({ ...prev, [sid]: e.target.value }));
-                              setCommentsDirty(true);
-                            }}
-                            placeholder="Teacher comment…"
-                            className="w-full rounded border border-slate-200 px-2 py-1 text-sm text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400/20 bg-white placeholder-slate-300"
-                          />
+                        <td className="px-2 py-1.5 relative">
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="text"
+                              value={comments[sid] ?? ''}
+                              onChange={e => {
+                                setComments(prev => ({ ...prev, [sid]: e.target.value }));
+                                setCommentsDirty(true);
+                              }}
+                              placeholder="Teacher comment…"
+                              className="w-full rounded border border-slate-200 px-2 py-1 text-sm text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400/20 bg-white placeholder-slate-300"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setPickerOpenFor(p => p === sid ? null : sid)}
+                              title="Insert from comment bank"
+                              className="shrink-0 p-1.5 rounded border border-slate-200 text-slate-400 hover:text-indigo-600 hover:border-indigo-300 transition"
+                            >
+                              <ListPlus size={13} />
+                            </button>
+                          </div>
+                          {pickerOpenFor === sid && (
+                            <CommentBankPicker
+                              comments={bankComments}
+                              onPick={text => insertBankComment(sid, text)}
+                              onClose={() => setPickerOpenFor(null)}
+                            />
+                          )}
                         </td>
                       )}
                     </tr>

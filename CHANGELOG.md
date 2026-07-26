@@ -6,6 +6,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.17.0] — 2026-07-26 — feat(report-cards): Comment Banks → shared service + real picker wiring (RC10)
+
+`docs/audits/REPORT_CARD_COMMENT_LIFECYCLE_REVIEW.md`: "Comment Banks — should it be a shared service? Yes... `comment_banks`' existing `category` enum already gestures at exactly the cross-module reuse... letting Assessment (subject comments), Report Cards (class-teacher/principal/head-of-section remarks)... all call the same picklist API instead of one module claiming exclusive ownership." Direct code reading found two real gaps, not one: `GET /api/comment-banks` was gated on `rbac('grades', 'read')` — a real barrier for any Report Cards-only caller — and, more concretely, **nothing in the app ever actually used the bank to write a comment**. `ConfigTab.jsx`'s own UI copy says "Pre-written remarks teachers can insert into report cards," but grep across the whole client found zero consumers besides that same management screen — the bank existed, but no "insert" action existed anywhere.
+
+### Changed
+- `GET /api/comment-banks` no longer requires `grades:*` — any authenticated staff member can read the picklist (it's shared reference text, not sensitive data). `POST`/`PUT`/`DELETE` (managing the bank) are unchanged — still `grades:{create,update,delete}`, still configured from `ConfigTab.jsx`, since that's genuinely a Grades-settings concern.
+- `MarkEntryTab.jsx` — each row's subject-comment field gains a small picker button. Clicking it opens a searchable dropdown of the school's comment bank; selecting an entry inserts it into that row's comment (appending, with a space, if the field already has text). This is the first real "picker," not just a management CRUD screen.
+
+### Note
+"Relocating the route file" (the doc's literal suggestion) wasn't done — `server/routes/comment-banks.js` is already mounted at a shared top-level `/api/comment-banks` path unrelated to any one module's URL prefix, and Express routers live in `server/routes/` regardless of ownership, so moving the file wouldn't change anything functionally; the actual blocker was the RBAC gate, now fixed. The picker was wired into Mark Entry's subject-comment field only — the one real, existing UI surface for a report-card remark today (RC8's report-level remark chain has no client UI yet, so there's nothing to wire it into there). 6 new tests (first coverage for `comment-banks.js`), including a mutation-verified assertion that GET registers no module rbac gate at all. Full suite 87/87 suites, 860/860 tests; security-scan and ratchet clean. Client build clean; no live MongoDB/login in this sandbox for full browser E2E, same limitation as every prior RC phase.
+
+---
+
 ## [v5.16.0] — 2026-07-26 — feat(report-cards): Publication Policy object + enforcement in POST /publish (RC9)
 
 `docs/audits/REPORT_CARD_PLATFORM_FUNCTIONAL_ARCHITECTURE.md` §12: Publication Policy is "the operational rules governing whether a specific report may be published... owned by Report Cards, not the general platform Settings layer," stored as "discrete, independently-evaluated `{key, enabled}` entries" rather than one monolithic flag. Before this phase, the one real rule that existed (moderation-complete) was hardcoded with no per-school toggle, and the two comment-completeness rules RC6/RC7/RC8 made possible had no enforcement point at all — a school could configure a Subject Comments capability or a report-remark chain and still publish reports where nobody had actually used them.

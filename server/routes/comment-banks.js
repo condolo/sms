@@ -1,8 +1,19 @@
 /* ============================================================
    Msingi — /api/comment-banks
    Pre-written teacher comment templates for report card remarks.
+
+   RC10 (docs/audits/REPORT_CARD_COMMENT_LIFECYCLE_REVIEW.md,
+   "Comment Banks — should it be a shared service?"): reads are open to
+   any authenticated staff member, not gated on a single module's
+   permission — the same picklist is a real, live consumer from both
+   Assessment (subject comments, MarkEntryTab.jsx) and Report Cards
+   (class-teacher/report-level remarks), and neither of those callers
+   necessarily holds `grades:*`. Management (create/update/delete) stays
+   a Grades-settings concern — that's genuinely where the admin UI to
+   configure the bank lives (ConfigTab.jsx) — unchanged from before.
+
    Plan: grades (core)
-   RBAC: grades:{read,create,update,delete}
+   RBAC: read — any authenticated staff; write — grades:{create,update,delete}
    ============================================================ */
 'use strict';
 
@@ -33,8 +44,8 @@ function _validate(schema, data) {
   return { data: r.data };
 }
 
-/* ── GET /api/comment-banks ──────────────────────────────── */
-router.get('/', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
+/* ── GET /api/comment-banks — shared read, see file header ── */
+router.get('/', authMiddleware, PLAN, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId };
