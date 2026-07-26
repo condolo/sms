@@ -6,6 +6,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.14.1] — 2026-07-26 — fix(report-cards): GET /bulk-pdf and GET /draft-comments were completely unreachable
+
+Found by accident while scoping RC8, which needed to add a third single-segment `GET` route (`/workflow-config`) at this same path prefix. Express matches single-segment routes in registration order — `GET /:id` was registered at line 793, before `GET /bulk-pdf` (line 1765) and `GET /draft-comments` (line 1851). Every request to either route was captured by `GET /:id` first (`id='bulk-pdf'` / `id='draft-comments'`, no matching snapshot, 404 "Report card snapshot not found") — confirmed empirically before this fix, with zero existing test coverage to have caught it.
+
+**Real user-facing impact**: `MarkEntryTab.jsx`'s "load existing subject comments for this class" query (`reportCardsApi.draftComments.list`) has always failed silently to a 404, meaning a teacher's previously-saved subject comments never pre-filled in the Mark Entry grid. `GET /bulk-pdf` — the documented "class-wide merged PDF" feature — has never worked at all.
+
+### Fixed
+- `GET /bulk-pdf` and `GET /draft-comments` moved ahead of `GET /:id` in registration order (same place `/publish-batches` and `/verify/:reportId` already correctly sit). No handler logic changed — this is purely a route-registration-order fix.
+- 3 new regression tests (`report-cards-route-order.test.js`) lock in that both routes reach their own handlers, not `:id`'s not-found response.
+
+### Note
+Full suite 84/84 suites, 826/826 tests; security-scan and ratchet clean. This fix is a prerequisite for RC8 (which adds `GET /workflow-config` at the same prefix and would otherwise ship a third dead route) — shipped as its own commit first, per this session's standing rule of never bundling an unrelated real-bug fix into a feature milestone's diff.
+
+---
+
 ## [v5.14.0] — 2026-07-26 — feat(report-cards): Subject Teacher Comments capability toggle (RC7)
 
 `docs/audits/REPORT_CARD_PLATFORM_FUNCTIONAL_ARCHITECTURE.md` §11: "Subject Teacher Comments... is a capability toggle owned by Assessment... its completeness becomes an input to Publication Policy" — and states the render-time consequence precisely: "a disabled capability must produce zero trace in the output — no section header, no 'Comment not provided' placeholder, nothing." Before this phase, the field was always collected in Mark Entry and always rendered on every report card; no school could turn it off.

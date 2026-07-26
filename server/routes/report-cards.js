@@ -788,6 +788,117 @@ router.get('/verify/:reportId', async (req, res) => {
 });
 
 /* ══════════════════════════════════════════════════════════════
+   GET /bulk-pdf  — cursor-streamed class PDF (no giant buffer)
+
+   Registered here, before GET /:id, on purpose — Express matches
+   single-segment routes in registration order, and /:id would
+   otherwise swallow every request to /bulk-pdf (id='bulk-pdf', no
+   matching snapshot, 404) before this handler is ever reached. Same
+   reasoning applies to GET /draft-comments right below it. Found via
+   direct testing while scoping RC8 (which adds a third single-segment
+   GET route, /workflow-config, at this same prefix) — both were
+   completely unreachable before this fix, confirmed with no existing
+   test coverage to have caught it.
+   ══════════════════════════════════════════════════════════════ */
+router.get('/bulk-pdf', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
+  try {
+    const { schoolId, role } = req.jwtUser;
+    if (!req.query.classId) return E.badRequest(res, 'classId query parameter is required');
+
+    const filter = {
+      schoolId, classId: req.query.classId,
+      superseded: { $ne: true }, status: 'published',
+    };
+    if (req.query.termId)         filter.termId         = req.query.termId;
+    if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
+
+    const config = await _loadConfig(schoolId);
+
+    // Pre-fetch signature images once for the whole batch (same school for all snaps)
+    const firstSnap    = await tenantModel('report_card_snapshots', tenantContext(req)).findOne(filter).lean();
+    const bulkImages   = firstSnap ? await _fetchSignatureImages(firstSnap) : {};
+
+    let PDFDocument;
+    try { PDFDocument = require('pdfkit'); }
+    catch { return res.status(501).json({ error: 'pdfkit not installed. Run: npm install pdfkit' }); }
+
+    // Count first so we can return 404 before sending any headers
+    const total = await tenantModel('report_card_snapshots', tenantContext(req)).countDocuments(filter);
+    if (total === 0) return E.notFound(res, 'No published report cards found for this class/term');
+
+    // Start streaming response now — headers sent before cursor begins
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="report-cards-class-${req.query.classId}.pdf"`);
+    res.setHeader('Transfer-Encoding', 'chunked');
+
+    const pdfDoc  = new PDFDocument({ margin: 40, size: 'A4', autoFirstPage: false });
+    pdfDoc.pipe(res);  // stream directly to response — no giant buffer accumulation
+
+    // Use Mongoose cursor — loads CHUNK_SIZE documents at a time, not all at once
+    const CHUNK_SIZE = 10;
+    const cursor = tenantModel('report_card_snapshots', tenantContext(req))
+      .find(filter)
+      .sort({ studentName: 1 })
+      .batchSize(CHUNK_SIZE)
+      .cursor();
+
+    let isFirst  = true;
+    let chunkBuf = [];
+
+    const processChunk = async (chunk) => {
+      const [attResults, photoBuffers] = await Promise.all([
+        Promise.all(chunk.map(s => s.attendanceSummary
+          ? Promise.resolve(s.attendanceSummary)
+          : attendanceSummary(schoolId, s.studentId, s.classId, s.termId, s.academicYearId)
+        )),
+        // Fetch each student's photo individually — different per student
+        Promise.all(chunk.map(s => _fetchImageBuf(s.studentPhotoUrl).catch(() => null))),
+      ]);
+      chunk.forEach((snap, i) => {
+        const isAdmin = ['admin', 'superadmin'].includes(role);
+        if (snap.financialBlock && req.query.force !== '1' && !isAdmin) return; // skip blocked
+        pdfDoc.addPage();
+        _buildPDFPage(pdfDoc, snap, config, attResults[i], false,
+          { ...bulkImages, studentPhoto: photoBuffers[i] });
+        isFirst = false;
+      });
+    };
+
+    // Iterate cursor, accumulate chunks, process when chunk is full
+    for await (const snap of cursor) {
+      chunkBuf.push(snap);
+      if (chunkBuf.length >= CHUNK_SIZE) {
+        await processChunk(chunkBuf);
+        chunkBuf = [];
+      }
+    }
+    if (chunkBuf.length > 0) await processChunk(chunkBuf);
+
+    pdfDoc.end();
+  } catch (err) {
+    console.error('[report-cards/bulk-pdf]', err);
+    // Headers may already be sent — can't send JSON error; just end the response
+    if (!res.headersSent) return E.serverError(res);
+    res.end();
+  }
+});
+
+// GET /draft-comments?classId=&termNumber= — same registration-order reasoning as /bulk-pdf above
+router.get('/draft-comments', authMiddleware, PLAN, rbac('report_cards', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const filter = { schoolId };
+    if (req.query.classId)    filter.classId    = req.query.classId;
+    if (req.query.termNumber) filter.termNumber = Number(req.query.termNumber);
+    const docs = await tenantModel('report_card_draft_comments', tenantContext(req)).find(filter).lean();
+    return ok(res, docs);
+  } catch (err) {
+    console.error('[report-cards/draft-comments GET]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
    GET /:id  — full snapshot
    ══════════════════════════════════════════════════════════════ */
 router.get('/:id', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
@@ -1759,108 +1870,12 @@ router.post('/preview-html', authMiddleware, PLAN, rbac('grades', 'read'), async
   } catch (err) { console.error('[report-cards/preview-html]', err); return E.serverError(res); }
 });
 
-/* ══════════════════════════════════════════════════════════════
-   GET /bulk-pdf  — cursor-streamed class PDF (no giant buffer)
-   ══════════════════════════════════════════════════════════════ */
-router.get('/bulk-pdf', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
-  try {
-    const { schoolId, role } = req.jwtUser;
-    if (!req.query.classId) return E.badRequest(res, 'classId query parameter is required');
-
-    const filter = {
-      schoolId, classId: req.query.classId,
-      superseded: { $ne: true }, status: 'published',
-    };
-    if (req.query.termId)         filter.termId         = req.query.termId;
-    if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
-
-    const config = await _loadConfig(schoolId);
-
-    // Pre-fetch signature images once for the whole batch (same school for all snaps)
-    const firstSnap    = await tenantModel('report_card_snapshots', tenantContext(req)).findOne(filter).lean();
-    const bulkImages   = firstSnap ? await _fetchSignatureImages(firstSnap) : {};
-
-    let PDFDocument;
-    try { PDFDocument = require('pdfkit'); }
-    catch { return res.status(501).json({ error: 'pdfkit not installed. Run: npm install pdfkit' }); }
-
-    // Count first so we can return 404 before sending any headers
-    const total = await tenantModel('report_card_snapshots', tenantContext(req)).countDocuments(filter);
-    if (total === 0) return E.notFound(res, 'No published report cards found for this class/term');
-
-    // Start streaming response now — headers sent before cursor begins
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="report-cards-class-${req.query.classId}.pdf"`);
-    res.setHeader('Transfer-Encoding', 'chunked');
-
-    const pdfDoc  = new PDFDocument({ margin: 40, size: 'A4', autoFirstPage: false });
-    pdfDoc.pipe(res);  // stream directly to response — no giant buffer accumulation
-
-    // Use Mongoose cursor — loads CHUNK_SIZE documents at a time, not all at once
-    const CHUNK_SIZE = 10;
-    const cursor = tenantModel('report_card_snapshots', tenantContext(req))
-      .find(filter)
-      .sort({ studentName: 1 })
-      .batchSize(CHUNK_SIZE)
-      .cursor();
-
-    let isFirst  = true;
-    let chunkBuf = [];
-
-    const processChunk = async (chunk) => {
-      const [attResults, photoBuffers] = await Promise.all([
-        Promise.all(chunk.map(s => s.attendanceSummary
-          ? Promise.resolve(s.attendanceSummary)
-          : attendanceSummary(schoolId, s.studentId, s.classId, s.termId, s.academicYearId)
-        )),
-        // Fetch each student's photo individually — different per student
-        Promise.all(chunk.map(s => _fetchImageBuf(s.studentPhotoUrl).catch(() => null))),
-      ]);
-      chunk.forEach((snap, i) => {
-        const isAdmin = ['admin', 'superadmin'].includes(role);
-        if (snap.financialBlock && req.query.force !== '1' && !isAdmin) return; // skip blocked
-        pdfDoc.addPage();
-        _buildPDFPage(pdfDoc, snap, config, attResults[i], false,
-          { ...bulkImages, studentPhoto: photoBuffers[i] });
-        isFirst = false;
-      });
-    };
-
-    // Iterate cursor, accumulate chunks, process when chunk is full
-    for await (const snap of cursor) {
-      chunkBuf.push(snap);
-      if (chunkBuf.length >= CHUNK_SIZE) {
-        await processChunk(chunkBuf);
-        chunkBuf = [];
-      }
-    }
-    if (chunkBuf.length > 0) await processChunk(chunkBuf);
-
-    pdfDoc.end();
-  } catch (err) {
-    console.error('[report-cards/bulk-pdf]', err);
-    // Headers may already be sent — can't send JSON error; just end the response
-    if (!res.headersSent) return E.serverError(res);
-    res.end();
-  }
-});
-
-/* ── Draft Comments — pre-publish per-student comment store ─── */
-
-// GET /draft-comments?classId=&termNumber=
-router.get('/draft-comments', authMiddleware, PLAN, rbac('report_cards', 'read'), async (req, res) => {
-  try {
-    const { schoolId } = req.jwtUser;
-    const filter = { schoolId };
-    if (req.query.classId)    filter.classId    = req.query.classId;
-    if (req.query.termNumber) filter.termNumber = Number(req.query.termNumber);
-    const docs = await tenantModel('report_card_draft_comments', tenantContext(req)).find(filter).lean();
-    return ok(res, docs);
-  } catch (err) {
-    console.error('[report-cards/draft-comments GET]', err);
-    return E.serverError(res);
-  }
-});
+/* ── Draft Comments — pre-publish per-student comment store ───
+   GET /draft-comments is registered earlier in this file, alongside
+   GET /bulk-pdf, ahead of GET /:id (registration-order fix, see the
+   comment there) — the PUT routes below have no such conflict (Express
+   matches by method+path together, and neither of these path shapes
+   collides with any PUT route). */
 
 // PUT /draft-comments/:studentId — upsert comment record for a student
 // subjectComments: { [subjectId]: string } — merged per-key (each teacher only touches their own subject)
