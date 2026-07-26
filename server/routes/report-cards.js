@@ -34,7 +34,7 @@ const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { rankStudents, mergeRankings, bestPerSubject, computeRankingScore } = require('../utils/ranking');
-const { mergeConfig }    = require('./academic-config');
+const { mergeConfig, resolveGrade } = require('./academic-config');
 const { getConfig: _getAssessmentConfig } = require('./assessment');
 const { isYearArchived } = require('../utils/archival');
 const AuditService       = require('../services/audit');
@@ -47,7 +47,9 @@ const {
   aggregateAssessmentMarks,
   computeFinalScores,
   attendanceSummary,
+  behaviourSummary,
   attachDeviations,
+  computeTermDeviation,
 } = require('../utils/academic-calc');
 
 const router = express.Router();
@@ -907,8 +909,16 @@ async function _fetchSignatureImages(snap) {
    pass ships as a direct, behavior-preserving extraction — verified
    against a golden call-sequence fixture captured from the original
    monolithic function before this split (server/__tests__/report-cards-ir.test.js)
-   — not a redesign of what's shown or how. */
-function _computeReportSections(snap, config, attendance) {
+   — not a redesign of what's shown or how.
+
+   RC3 (Consolidation Plan Phase 4 step 3) added the optional 4th
+   `extra` param and several new output fields (cover/behaviour/
+   gradingKey/per-row deviationText) for the new HTML adapter below.
+   _drawReportPage only reads the specific keys it already read before
+   RC3 — it never enumerates all of `s`'s keys — so these additions
+   are inert to the PDF path and its golden fixture stays unchanged. */
+function _computeReportSections(snap, config, attendance, extra = {}) {
+  const { school = null, behaviour = null, deviations = null } = extra;
   const isDraft = snap.status !== 'published' || snap.superseded;
 
   const weights     = snap.assessmentWeights || [];
@@ -923,6 +933,7 @@ function _computeReportSections(snap, config, attendance) {
     const failed = sub.finalScore != null && sub.finalScore < passMark;
     const isBest = !!snap.subjectBest?.[subjectId];
     const isUsed = !!snap.rankingSubjectsUsed?.includes(subjectId);
+    const dev = deviations?.subjects ? (deviations.subjects[subjectId] ?? null) : null;
     return {
       subjectId,
       nameLine:    (isBest ? '★ ' : '') + subjectId + (isUsed && snap.rankingSubjectStrategy !== 'all' ? ' ●' : ''),
@@ -935,6 +946,11 @@ function _computeReportSections(snap, config, attendance) {
       hasGrade:    !!sub.grade,
       gradeText:   sub.grade || '—',
       remarksText: sub.remarks || sub.descriptor || '',
+      // Term-over-term (not class-average) deviation — resolved by the
+      // caller (I/O: needs the previous term's computed report), same
+      // "caller resolves, IR just formats" posture `attendance` already
+      // has. null when no comparable previous-term score exists.
+      deviationText: dev == null ? null : (dev >= 0 ? `+${dev.toFixed(1)}` : dev.toFixed(1)),
     };
   });
 
@@ -944,6 +960,12 @@ function _computeReportSections(snap, config, attendance) {
 
   const showRanking = !!(config.rankingEnabled && snap.rankings?.class);
   const showAttendance = !!(config.showAttendanceSummary && attendance);
+
+  // Whatever grading bands actually graded THIS report's subjects —
+  // never a client-local default (Audit §6.2, same discipline
+  // _normalizeGradeScaleBands already enforces elsewhere in this file).
+  const gradeBands = _normalizeGradeScaleBands(snap.gradingSchema).sort((a, b) => b.min - a.min);
+  const meanGrade  = snap.averageScore != null && gradeBands.length ? resolveGrade(snap.averageScore, snap.gradingSchema) : null;
 
   return {
     isDraft,
@@ -978,6 +1000,16 @@ function _computeReportSections(snap, config, attendance) {
     comments: {
       classTeacherRemark: sanitisePdfStr(snap.comments?.classTeacherRemark) || '— No remark entered —',
       principalRemark:    sanitisePdfStr(snap.comments?.principalRemark)    || '— No comment entered —',
+      // RC3-only fields (not read by the PDF adapter) — persisted by
+      // RC5's draft-to-published carry-forward fix.
+      sportsAndTalent: sanitisePdfStr(snap.comments?.sportsAndTalent) || '',
+      closingDate:     snap.comments?.closingDate   || '',
+      nextTermBegin:   snap.comments?.nextTermBegin || '',
+      classTeacherName: snap.comments?.classTeacherName || '',
+      principalName:    snap.comments?.principalName    || '',
+      subjectComments: Object.keys(snap.subjects || {}).map(subjectId => ({
+        subjectId, text: sanitisePdfStr(snap.comments?.subjectComments?.[subjectId]) || '',
+      })),
     },
     signatures: {
       classTeacherLabel: config.classTeacherSignatureLabel || 'Class Teacher',
@@ -988,6 +1020,34 @@ function _computeReportSections(snap, config, attendance) {
       genLine:    `Generated: ${new Date().toUTCString()}  |  v${snap.version || 1}  |  Batch: ${snap.batchId || '—'}`,
       reportId:   snap.reportId || null,
     },
+    // ── RC3-only sections below — read only by _computeReportHTML,
+    //    never by _drawReportPage (PDF stays pixel-for-pixel unchanged) ──
+    cover: {
+      logoUrl:  school?.logoUrl  || null,
+      tagline:  school?.tagline  || '',
+      subtitle: `ACADEMIC REPORT — TERM ${snap.termNumber ?? '—'} — ${snap.academicYear || ''}`,
+      rows: [
+        { label: 'Student Name',  value: snap.studentName || '—' },
+        { label: 'Admission No.', value: snap.admissionNo || '—' },
+        { label: 'Class',         value: snap.className   || '—' },
+        { label: 'Mean Mark',     value: `${snap.averageScore != null ? snap.averageScore.toFixed(1) + '%' : '—'}` +
+                                          (meanGrade?.grade ? ` — ${meanGrade.grade} (${meanGrade.descriptor || ''})` : '') },
+        { label: 'Class Rank',    value: showRanking ? `${snap.rankings.class.rank}/${snap.rankings.class.outOf}` : '—' },
+        { label: 'Class Teacher', value: snap.comments?.classTeacherName || '—' },
+      ],
+    },
+    gradingKey: gradeBands.map((b, i) => ({
+      grade:  b.grade,
+      range:  `${b.min}–${i === 0 ? 100 : gradeBands[i - 1].min - 1}%`,
+      points: b.points ?? '—',
+      label:  b.label  ?? '',
+    })),
+    behaviour: behaviour ? {
+      merits:   behaviour.merits   ?? 0,
+      demerits: behaviour.demerits ?? 0,
+      points:   behaviour.points   ?? 0,
+      total:    behaviour.total    ?? 0,
+    } : null,
   };
 }
 
@@ -1212,6 +1272,206 @@ function _drawReportPage(doc, s, images, isFirstPage) {
   }
 }
 
+/* ── HTML adapter (Consolidation Plan Phase 4 step 3 / RC3) ──────
+   The second adapter over the same IR `_drawReportPage` consumes —
+   walks `s` and emits an HTML string instead of pdfkit calls. This is
+   what retires StudentReportCard.jsx's printCard() (a hand-built
+   HTML-string generator reading live component props directly): the
+   client now fetches this server-rendered string instead of building
+   its own, so on-screen preview, print, and PDF all trace back to one
+   computation (_computeReportSections), not three. Four pages, matching
+   printCard()'s content — cover / marks (+ grading key) / comments /
+   behaviour — deliberately without per-instance mark columns (RC3
+   scoping decision: that needs a new raw-marks aggregation, tracked
+   separately as its own follow-up rather than bundled here). */
+function _esc(str) {
+  return String(str ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function _computeReportHTML(s) {
+  const pb = 'page-break-before:always';
+  const watermarkHtml = s.watermarkText
+    ? `<div style="position:fixed;top:45%;left:50%;transform:translate(-50%,-50%) rotate(-30deg);font-size:90px;font-weight:900;color:#cc0000;opacity:0.08;pointer-events:none;white-space:nowrap;z-index:999">${_esc(s.watermarkText)}</div>`
+    : '';
+
+  const logoHtml = s.cover.logoUrl
+    ? `<img src="${_esc(s.cover.logoUrl)}" style="height:96px;width:96px;object-fit:contain;border-radius:6px" />`
+    : `<div style="width:96px;height:96px;background:#e2e8f0;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:36px;font-weight:bold;color:#94a3b8">${_esc((s.header.schoolName?.[0] ?? 'S').toUpperCase())}</div>`;
+  const logoSmallHtml = s.cover.logoUrl
+    ? `<img src="${_esc(s.cover.logoUrl)}" style="height:56px;width:56px;object-fit:contain;border-radius:4px" />`
+    : `<div style="width:56px;height:56px;background:#e2e8f0;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:bold;color:#94a3b8">${_esc((s.header.schoolName?.[0] ?? 'S').toUpperCase())}</div>`;
+
+  const coverRows = s.cover.rows.map(r => `
+    <tr><td style="padding:8px 14px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;width:40%">${_esc(r.label)}</td>
+        <td style="padding:8px 14px;border:1px solid #e2e8f0;font-weight:700">${_esc(r.value)}</td></tr>`).join('');
+
+  const coverHtml = `
+<div style="min-height:277mm;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:32px;text-align:center">
+  ${logoHtml}
+  <div>
+    <h1 style="font-size:26px;font-weight:900;margin:0 0 4px;color:#0f172a">${_esc(s.header.schoolName)}</h1>
+    ${s.cover.tagline ? `<p style="font-size:13px;font-style:italic;color:#64748b;margin:0 0 16px">${_esc(s.cover.tagline)}</p>` : '<div style="margin-bottom:16px"></div>'}
+    <div style="display:inline-block;background:#1e293b;color:#fff;padding:10px 32px;border-radius:6px;font-size:15px;font-weight:700;letter-spacing:1.5px">
+      ${_esc(s.cover.subtitle)}
+    </div>
+  </div>
+  <table style="border-collapse:collapse;width:480px;font-size:13px">${coverRows}</table>
+  <p style="font-size:11px;color:#94a3b8;margin-top:auto">Generated by Msingi School Management System</p>
+</div>`;
+
+  const thS = 'border:1px solid #cbd5e1;padding:5px 8px;background:#1e293b;color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:.5px;text-align:center';
+  const tdS = 'border:1px solid #e2e8f0;padding:5px 8px';
+  const tdC = `${tdS};text-align:center`;
+
+  const colHeaders = s.resultsTable.typeEntries.map(t => `<th style="${thS}">${_esc(t.label)}</th>`).join('');
+  const subjectRows = s.resultsTable.rows.map(row => {
+    const markCells = row.typeValues.map(v => `<td style="${tdC}">${_esc(v)}</td>`).join('');
+    const devColor = row.deviationText == null ? '#94a3b8' : row.deviationText.startsWith('-') ? '#dc2626' : '#16a34a';
+    return `
+      <tr${row.failed ? ' style="color:#dc2626"' : ''}>
+        <td style="${tdS};font-weight:600;min-width:120px">${_esc(row.nameLine)}</td>
+        ${markCells}
+        <td style="${tdC};font-weight:700">${_esc(row.scoreText)}</td>
+        <td style="${tdC};font-weight:700">${_esc(row.gradeText)}</td>
+        <td style="${tdC};color:${devColor};font-weight:600">${row.deviationText == null ? '—' : _esc(row.deviationText)}</td>
+        <td style="${tdS};font-size:9px;color:#64748b">${_esc(row.remarksText)}</td>
+      </tr>`;
+  }).join('');
+
+  const gradingRows = s.gradingKey.map(b => `
+    <tr><td style="${tdC};font-weight:700">${_esc(b.grade)}</td><td style="${tdC}">${_esc(b.range)}</td>
+        <td style="${tdC}">${_esc(b.points)}</td><td style="${tdS}">${_esc(b.label)}</td></tr>`).join('');
+
+  const marksHtml = `
+<div style="${pb}">
+  <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:14px;border-bottom:2px solid #1e293b;padding-bottom:10px">
+    ${logoSmallHtml}
+    <div style="text-align:center">
+      <h2 style="margin:0 0 2px;font-size:16px;font-weight:800">${_esc(s.header.schoolName)}</h2>
+      <p style="margin:0;font-size:12px;font-weight:700;letter-spacing:1px">${_esc(s.header.subtitle)}</p>
+    </div>
+  </div>
+  <table style="width:100%;border-collapse:collapse;margin-bottom:10px;font-size:11px">
+    <tr>
+      <td style="${tdS}"><b>Name:</b> ${_esc(s.studentInfo.studentName)}</td>
+      <td style="${tdS}"><b>ADM:</b> ${_esc(s.studentInfo.admissionNo)}</td>
+      <td style="${tdS}"><b>Class:</b> ${_esc(s.studentInfo.className)}</td>
+      <td style="${tdS}"><b>${_esc(s.summary.totalText)}</b></td>
+      <td style="${tdS}"><b>${_esc(s.summary.averageText)}</b></td>
+      ${s.summary.showRanking ? `<td style="${tdS}">${_esc(s.summary.rankText)}</td>` : ''}
+    </tr>
+  </table>
+  <table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:11px">
+    <thead><tr>
+      <th style="${thS};text-align:left">Subject</th>${colHeaders}
+      <th style="${thS}">Score</th><th style="${thS}">Grade</th><th style="${thS}">Dev</th><th style="${thS};text-align:left">Remarks</th>
+    </tr></thead>
+    <tbody>${subjectRows}</tbody>
+  </table>
+  ${s.resultsTable.rankingNote ? `<p style="font-size:9px;color:#64748b;margin:0 0 14px">${_esc(s.resultsTable.rankingNote)}</p>` : ''}
+  ${s.attendance ? `<p style="font-size:11px;color:#475569;margin:0 0 14px"><b>Attendance:</b> ${_esc(s.attendance.text)}</p>` : ''}
+  <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Grading Key</p>
+  <table style="width:100%;border-collapse:collapse;font-size:10px;max-width:480px">
+    <thead><tr><th style="${thS}">Grade</th><th style="${thS}">Range</th><th style="${thS}">Points</th><th style="${thS};text-align:left">Description</th></tr></thead>
+    <tbody>${gradingRows}</tbody>
+  </table>
+</div>`;
+
+  const subjectCommentRows = s.comments.subjectComments.map(c => `
+    <tr><td style="${tdS};font-weight:600;width:160px;vertical-align:top">${_esc(c.subjectId)}</td>
+        <td style="${tdS};font-size:11px;color:#475569">${c.text ? _esc(c.text) : '<span style="color:#cbd5e1;font-style:italic">No comment entered</span>'}</td></tr>`).join('');
+
+  const commentsHtml = `
+<div style="${pb}">
+  <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:14px;border-bottom:2px solid #1e293b;padding-bottom:10px">
+    ${logoSmallHtml}
+    <div style="text-align:center">
+      <h2 style="margin:0 0 2px;font-size:16px;font-weight:800">${_esc(s.header.schoolName)}</h2>
+      <p style="margin:0;font-size:12px;font-weight:700;letter-spacing:1px">TEACHER COMMENTS — ${_esc(s.studentInfo.studentName)}</p>
+    </div>
+  </div>
+  <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 6px">Subject Teacher Comments</p>
+  <table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:11px">
+    ${subjectCommentRows || `<tr><td colspan="2" style="${tdS};color:#94a3b8;font-style:italic">No subjects on this report.</td></tr>`}
+  </table>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+    <div>
+      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">
+        ${_esc(s.signatures.classTeacherLabel)}: <span style="font-style:italic;font-weight:normal">${_esc(s.comments.classTeacherName) || '___________________'}</span>
+      </p>
+      <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:70px;font-size:11px;color:#475569">${_esc(s.comments.classTeacherRemark)}</div>
+      <div style="margin-top:24px;border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">${_esc(s.signatures.classTeacherLabel)} Signature</div>
+    </div>
+    <div>
+      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">
+        ${_esc(s.signatures.principalLabel)}: <span style="font-style:italic;font-weight:normal">${_esc(s.comments.principalName) || '___________________'}</span>
+      </p>
+      <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:70px;font-size:11px;color:#475569">${_esc(s.comments.principalRemark)}</div>
+      <div style="margin-top:24px;border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">${_esc(s.signatures.principalLabel)} Signature</div>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;border-top:1px solid #e2e8f0;padding-top:12px">
+    <div>
+      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Sports &amp; Talent</p>
+      <p style="margin:0;padding:6px 10px;border:1px solid #e2e8f0;border-radius:4px;min-height:28px;font-size:11px">${_esc(s.comments.sportsAndTalent)}</p>
+    </div>
+    <div>
+      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Closing Date</p>
+      <p style="margin:0;padding:6px 10px;border:1px solid #e2e8f0;border-radius:4px;min-height:28px;font-size:11px">${_esc(s.comments.closingDate)}</p>
+    </div>
+    <div>
+      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Next Term Begins</p>
+      <p style="margin:0;padding:6px 10px;border:1px solid #e2e8f0;border-radius:4px;min-height:28px;font-size:11px">${_esc(s.comments.nextTermBegin)}</p>
+    </div>
+  </div>
+</div>`;
+
+  const beh = s.behaviour;
+  const behHtml = `
+<div style="${pb}">
+  <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:14px;border-bottom:2px solid #1e293b;padding-bottom:10px">
+    ${logoSmallHtml}
+    <div style="text-align:center">
+      <h2 style="margin:0 0 2px;font-size:16px;font-weight:800">${_esc(s.header.schoolName)}</h2>
+      <p style="margin:0;font-size:12px;font-weight:700;letter-spacing:1px">BEHAVIOUR REPORT — ${_esc(s.studentInfo.studentName)}</p>
+    </div>
+  </div>
+  ${beh ? `
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px">
+    ${[
+      { label: 'Merits', value: beh.merits, color: '#16a34a' },
+      { label: 'Demerits', value: beh.demerits, color: '#dc2626' },
+      { label: 'Net Points', value: beh.points, color: beh.points >= 0 ? '#16a34a' : '#dc2626' },
+      { label: 'Total Incidents', value: beh.total, color: '#475569' },
+    ].map(m => `
+      <div style="border:1px solid #e2e8f0;border-radius:8px;padding:16px;text-align:center">
+        <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#94a3b8;margin:0 0 4px">${_esc(m.label)}</p>
+        <p style="font-size:28px;font-weight:900;color:${m.color};margin:0">${_esc(m.value)}</p>
+      </div>`).join('')}
+  </div>` : `
+  <p style="color:#94a3b8;font-style:italic;font-size:12px;text-align:center;padding:40px 0">No behaviour records found for this term.</p>`}
+</div>`;
+
+  const footerHtml = `<p style="text-align:center;font-size:9px;color:#94a3b8;margin-top:16px">${_esc(s.footer.footerNote)} — ${_esc(s.footer.genLine)}${s.footer.reportId ? ` — Report ID: ${_esc(s.footer.reportId)}` : ''}</p>`;
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<title>Report Card — ${_esc(s.studentInfo.studentName)}</title>
+<style>
+  *{box-sizing:border-box}
+  body{font-family:Arial,Helvetica,sans-serif;max-width:1050px;margin:20px auto;color:#0f172a;padding:0 16px}
+  @media print{@page{margin:1.5cm;size:A4}button{display:none!important}}
+</style>
+</head><body>
+${watermarkHtml}
+${coverHtml}
+${marksHtml}
+${commentsHtml}
+${behHtml}
+${footerHtml}
+</body></html>`;
+}
+
 function _buildPDFPage(doc, snap, config, attendance, isFirstPage, images = {}) {
   const sections = _computeReportSections(snap, config, attendance);
   _drawReportPage(doc, sections, images, isFirstPage);
@@ -1223,74 +1483,88 @@ function _pdfAccess(req, res, next) {
   return rbac('grades', 'read')(req, res, next);
 }
 
+/* Shared ownership + ­fee-clearance gate for a single snapshot — used by
+   both GET /:id/pdf and GET /:id/html so the two output formats can never
+   drift on who's allowed to see a given report card. Sends the
+   appropriate error response itself and returns false when access is
+   denied; the caller's route handler should `return` immediately on
+   false, exactly the same "guard clause decides, caller trusts it"
+   shape _pdfAccess already established one level up (RBAC vs. ownership). */
+async function _checkSnapshotAccess(req, res, snap) {
+  const { schoolId, role, guardianOf, studentId: jwtStudentId, userId } = req.jwtUser;
+
+  if (snap.superseded && RESTRICTED_ROLES.includes(role)) {
+    E.forbidden(res, 'This report card has been superseded. Please download the latest version.');
+    return false;
+  }
+
+  if (role === 'student' && snap.studentId !== jwtStudentId) {
+    E.forbidden(res, 'You are not authorised to download this report card.');
+    return false;
+  }
+
+  if (['parent', 'guardian'].includes(role)) {
+    const linkedStudents = Array.isArray(guardianOf) ? guardianOf : [];
+    if (!linkedStudents.includes(snap.studentId)) {
+      tenantModel('mark_audit_log', tenantContext(req)).create({
+        action:       'GUARDIAN_ACCESS_DENIED',
+        schoolId,
+        requestedBy:  userId,
+        requestedRole: role,
+        targetStudentId: snap.studentId,
+        snapshotId:   snap.id,
+        route:        req.method + ' ' + req.baseUrl + req.path,
+        timestamp:    new Date().toISOString(),
+      }).catch(e => console.error('[report-cards] guardian audit log failed:', e.message));
+      E.forbidden(res, 'You are not authorised to download this student\'s report card.');
+      return false;
+    }
+  }
+
+  // Fee clearance check — uses school-configurable threshold (default 100 = fully paid).
+  // Admins and force=1 always bypass. Threshold 0 means always accessible.
+  if (req.query.force !== '1' && !['admin', 'superadmin'].includes(role)) {
+    try {
+      const school    = await _model('schools').findOne({ id: schoolId }, { 'portalConfig.reportCardFeeThreshold': 1 }).lean();
+      const threshold = school?.portalConfig?.reportCardFeeThreshold ?? 100;
+      if (threshold > 0) {
+        const invoices    = await tenantModel('invoices', tenantContext(req)).find({ schoolId, studentId: snap.studentId }, { total: 1, balance: 1 }).lean();
+        const totalBilled = invoices.reduce((s, i) => s + (i.total || 0), 0);
+        const totalOwed   = invoices.reduce((s, i) => s + (i.balance || 0), 0);
+        const clearancePct = totalBilled > 0
+          ? Math.round(((totalBilled - totalOwed) / totalBilled) * 100)
+          : 100;
+        if (clearancePct < threshold) {
+          res.status(403).json({
+            error: `Report card access blocked — ${clearancePct}% of fees cleared (${threshold}% required).`,
+            financialBlock: true, clearancePct, threshold,
+          });
+          return false;
+        }
+      }
+    } catch (_) {
+      // Non-fatal — fall back to the snapshot's stored flag
+      if (snap.financialBlock) {
+        res.status(403).json({ error: 'Download blocked — outstanding fee balance.', financialBlock: true });
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
 /* ══════════════════════════════════════════════════════════════
    GET /:id/pdf  — single student PDF
    ══════════════════════════════════════════════════════════════ */
 router.get('/:id/pdf', authMiddleware, PLAN, _pdfAccess, async (req, res) => {
   try {
-    const { schoolId, role, guardianOf, studentId: jwtStudentId, userId } = req.jwtUser;
+    const { schoolId } = req.jwtUser;
 
     const snap = await tenantModel('report_card_snapshots', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!snap) return E.notFound(res, 'Report card snapshot not found');
 
-    if (snap.superseded && RESTRICTED_ROLES.includes(role)) {
-      return E.forbidden(res, 'This report card has been superseded. Please download the latest version.');
-    }
-
-    // Student: can only download their own report card
-    if (role === 'student') {
-      if (snap.studentId !== jwtStudentId) {
-        return E.forbidden(res, 'You are not authorised to download this report card.');
-      }
-    }
-
-    // Guardian/parent: can only download their own linked children's PDFs
-    if (['parent', 'guardian'].includes(role)) {
-      const linkedStudents = Array.isArray(guardianOf) ? guardianOf : [];
-      if (!linkedStudents.includes(snap.studentId)) {
-        tenantModel('mark_audit_log', tenantContext(req)).create({
-          action:       'GUARDIAN_ACCESS_DENIED',
-          schoolId,
-          requestedBy:  userId,
-          requestedRole: role,
-          targetStudentId: snap.studentId,
-          snapshotId:   req.params.id,
-          route:        'GET /api/report-cards/:id/pdf',
-          timestamp:    new Date().toISOString(),
-        }).catch(e => console.error('[report-cards/pdf] guardian audit log failed:', e.message));
-        return E.forbidden(res, 'You are not authorised to download this student\'s report card.');
-      }
-    }
-
-    // Fee clearance check — uses school-configurable threshold (default 100 = fully paid).
-    // Admins and force=1 always bypass. Threshold 0 means always accessible.
-    if (req.query.force !== '1' && !['admin', 'superadmin'].includes(role)) {
-      try {
-        const school    = await _model('schools').findOne({ id: schoolId }, { 'portalConfig.reportCardFeeThreshold': 1 }).lean();
-        const threshold = school?.portalConfig?.reportCardFeeThreshold ?? 100;
-        if (threshold > 0) {
-          const invoices    = await tenantModel('invoices', tenantContext(req)).find({ schoolId, studentId: snap.studentId }, { total: 1, balance: 1 }).lean();
-          const totalBilled = invoices.reduce((s, i) => s + (i.total || 0), 0);
-          const totalOwed   = invoices.reduce((s, i) => s + (i.balance || 0), 0);
-          const clearancePct = totalBilled > 0
-            ? Math.round(((totalBilled - totalOwed) / totalBilled) * 100)
-            : 100;
-          if (clearancePct < threshold) {
-            return res.status(403).json({
-              error: `Report card access blocked — ${clearancePct}% of fees cleared (${threshold}% required).`,
-              financialBlock: true,
-              clearancePct,
-              threshold,
-            });
-          }
-        }
-      } catch (_) {
-        // Non-fatal — fall back to the snapshot's stored flag
-        if (snap.financialBlock) {
-          return res.status(403).json({ error: 'Download blocked — outstanding fee balance.', financialBlock: true });
-        }
-      }
-    }
+    if (!(await _checkSnapshotAccess(req, res, snap))) return;
 
     let attData = snap.attendanceSummary;
     if (!attData) {
@@ -1318,6 +1592,146 @@ router.get('/:id/pdf', authMiddleware, PLAN, _pdfAccess, async (req, res) => {
     _buildPDFPage(doc, snap, config, attData, true, pdfImages);
     doc.end();
   } catch (err) { console.error('[report-cards/:id/pdf]', err); return E.serverError(res); }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   GET /:id/html  — the HTML adapter's output for a PUBLISHED (or
+   superseded) snapshot. RC3: this is what retires printCard() for
+   the "download/print an already-published report card" case — same
+   access gate as GET /:id/pdf (_checkSnapshotAccess), same IR
+   (_computeReportSections), different adapter. Behaviour/deviation
+   are never snapshotted (same "resolve live if not on the frozen
+   snapshot" posture attendance already has here) — a school renaming
+   its logo after publish is fine to show on a re-render (branding,
+   not scored content); the actual marks/grades/rankings are frozen.
+   ══════════════════════════════════════════════════════════════ */
+router.get('/:id/html', authMiddleware, PLAN, _pdfAccess, async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+
+    const snap = await tenantModel('report_card_snapshots', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
+    if (!snap) return E.notFound(res, 'Report card snapshot not found');
+
+    if (!(await _checkSnapshotAccess(req, res, snap))) return;
+
+    let attData = snap.attendanceSummary;
+    if (!attData) {
+      attData = await attendanceSummary(schoolId, snap.studentId, snap.classId, snap.termId, snap.academicYearId);
+    }
+    const config = await _loadConfig(schoolId);
+
+    const [school, behaviour, prevSnap] = await Promise.all([
+      _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1 }).lean().catch(() => null),
+      behaviourSummary(schoolId, snap.studentId).catch(() => null),
+      snap.termNumber > 1
+        ? tenantModel('report_card_snapshots', tenantContext(req)).findOne({
+            schoolId, studentId: snap.studentId, academicYearId: snap.academicYearId,
+            termNumber: snap.termNumber - 1, superseded: { $ne: true },
+          }).lean().catch(() => null)
+        : Promise.resolve(null),
+    ]);
+    const deviations = computeTermDeviation(snap.subjects, prevSnap?.subjects);
+
+    const sections = _computeReportSections(snap, config, attData, { school, behaviour, deviations });
+    const html = _computeReportHTML(sections);
+    return ok(res, { html });
+  } catch (err) { console.error('[report-cards/:id/html]', err); return E.serverError(res); }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   POST /preview-html  — the HTML adapter's output for a live,
+   unpublished draft — the second half of what retires printCard().
+
+   Deliberately does NOT re-run POST /generate's aggregation pipeline
+   for one student. Two real reasons, not just convenience:
+     1. A single-student re-aggregation can't reproduce a real class
+        rank (rankStudents() needs the whole class's scores) — the
+        client already HAS the real one, computed once for the whole
+        class by the /generate call ReportCardsTab.jsx already made to
+        render this exact student on screen.
+     2. StudentReportCard.jsx's on-screen preview already receives
+        every piece of data this needs as props (student, studentInfo,
+        className, school, academicYear, draftComment,
+        studentDeviations [term-over-term, computed client-side from
+        two /generate calls], behaviourSummary [already fetched]) —
+        printCard() today builds its HTML straight from those props,
+        entirely client-side, with no server round trip at all. This
+        route accepts that exact same already-computed data and
+        denormalises + renders it through the shared IR/HTML adapter
+        instead — replacing WHERE the HTML is built, not what's
+        trusted: the client already had 100% control over printCard()'s
+        output; nothing here is newly persisted, newly authoritative,
+        or newly exposed to any other party — the response goes back to
+        the same authenticated user who submitted it.
+   ══════════════════════════════════════════════════════════════ */
+const PreviewHtmlSchema = z.object({
+  student: z.object({
+    studentId: z.string().min(1),
+    subjects: z.record(z.any()).default({}),
+    totalScore: z.number().nullable().optional(),
+    averageScore: z.number().nullable().optional(),
+    gpa: z.number().nullable().optional(),
+    subjectCount: z.number().nullable().optional(),
+    rankings: z.record(z.any()).optional(),
+    classTeacherName: z.string().nullable().optional(),
+  }),
+  studentInfo: z.object({
+    firstName: z.string().optional(), lastName: z.string().optional(),
+    admissionNumber: z.string().optional(), photo: z.string().nullable().optional(),
+  }).optional(),
+  className: z.string().optional(),
+  termNum: z.number().int().min(1).max(3).optional(),
+  academicYear: z.string().optional(),
+  school: z.object({ name: z.string().optional(), logoUrl: z.string().nullable().optional(), tagline: z.string().optional() }).optional(),
+  draftComment: z.record(z.any()).nullable().optional(),
+  studentDeviations: z.object({ subjects: z.record(z.number().nullable()).optional() }).nullable().optional(),
+  behaviourSummary: z.object({ merits: z.number(), demerits: z.number(), points: z.number(), total: z.number() }).nullable().optional(),
+  config: z.object({
+    gradeScale: z.object({ bands: z.array(z.any()).optional() }).nullable().optional(),
+    // customTypes ({key,label,instances,weight}[]) is converted to the
+    // {assessmentType,label,weight}[] shape _computeReportSections
+    // expects via _convertCustomTypesToWeights — the same conversion
+    // POST /generate and POST /publish already apply, single source of
+    // truth for what that shape-change means.
+    customTypes: z.array(z.any()).nullable().optional(),
+    passMark: z.number().optional(), rankingEnabled: z.boolean().optional(), showGPA: z.boolean().optional(),
+  }).optional(),
+});
+
+router.post('/preview-html', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
+  try {
+    const { data, error } = _validate(PreviewHtmlSchema, req.body);
+    if (error) return E.validation(res, error);
+    const { student, studentInfo, className, termNum, academicYear, school, draftComment, studentDeviations, behaviourSummary: beh, config: clientConfig } = data;
+
+    const gradingSchema = clientConfig?.gradeScale?.bands ?? [];
+
+    // Denormalise into the exact snap-shape _computeReportSections
+    // expects — status:'draft' so the IR's isDraft/watermark logic
+    // applies unchanged.
+    const snap = {
+      status: 'draft', superseded: false, version: 1,
+      studentId: student.studentId,
+      studentName: [studentInfo?.firstName, studentInfo?.lastName].filter(Boolean).join(' ') || student.studentId,
+      admissionNo: studentInfo?.admissionNumber || '',
+      studentPhotoUrl: studentInfo?.photo || null,
+      className: className || '',
+      termNumber: termNum ?? null, academicYear: academicYear || '',
+      schoolName: school?.name || '',
+      gradingSchema,
+      assessmentWeights: _convertCustomTypesToWeights(clientConfig?.customTypes ?? []),
+      passMark: clientConfig?.passMark, rankingSubjectStrategy: null,
+      subjects: student.subjects, totalScore: student.totalScore, averageScore: student.averageScore,
+      gpa: student.gpa, subjectCount: student.subjectCount,
+      rankings: student.rankings ?? {},
+      comments: _resolveSnapComments(null, { ...draftComment, classTeacherName: draftComment?.classTeacherName || student.classTeacherName || '' }),
+    };
+    const config = { rankingEnabled: !!clientConfig?.rankingEnabled, showGPA: !!clientConfig?.showGPA, showAttendanceSummary: false };
+
+    const sections = _computeReportSections(snap, config, null, { school, behaviour: beh ?? null, deviations: studentDeviations ?? null });
+    const html = _computeReportHTML(sections);
+    return ok(res, { html });
+  } catch (err) { console.error('[report-cards/preview-html]', err); return E.serverError(res); }
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -1507,5 +1921,6 @@ router._normalizeGradeScaleBands = _normalizeGradeScaleBands;
 router._buildPDFPage = _buildPDFPage;
 router._computeReportSections = _computeReportSections;
 router._resolveSnapComments = _resolveSnapComments;
+router._computeReportHTML = _computeReportHTML;
 
 module.exports = router;

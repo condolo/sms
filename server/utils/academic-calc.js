@@ -323,6 +323,42 @@ async function attendanceSummary(schoolId, studentId, classId, termId, academicY
 }
 
 /* ══════════════════════════════════════════════════════════════
+   BEHAVIOUR (single-student summary, for report cards)
+   ══════════════════════════════════════════════════════════════ */
+
+/**
+ * Fetch a single student's behaviour incident summary — same
+ * merits/demerits/points/total shape and "since last points reset"
+ * default window as behaviour.js's GET /incidents/summary (class-wide,
+ * grouped by studentId), scoped here to one student instead. A
+ * separate function rather than a refactor of that route: the two are
+ * genuinely different query shapes (class-wide group-by vs one
+ * student), the same coexistence attendanceSummary above already has
+ * with attendance.js's own class-wide endpoint.
+ * Returns: { merits, demerits, points, total }
+ */
+async function behaviourSummary(schoolId, studentId) {
+  const filter = { schoolId, studentId };
+  const lastReset = await _model('behaviour_points_resets')
+    .find({ schoolId }).sort({ resetAt: -1 }).limit(1).lean();
+  if (lastReset[0]) filter.date = { $gte: lastReset[0].resetAt.slice(0, 10) };
+
+  const [summary] = await _model('behaviour_incidents').aggregate([
+    { $match: filter },
+    { $group: {
+      _id:      '$studentId',
+      merits:   { $sum: { $cond: [{ $eq: ['$type', 'merit'] }, 1, 0] } },
+      demerits: { $sum: { $cond: [{ $eq: ['$type', 'demerit'] }, 1, 0] } },
+      points:   { $sum: '$points' },
+      total:    { $sum: 1 },
+    }},
+  ]);
+  return summary
+    ? { merits: summary.merits, demerits: summary.demerits, points: summary.points, total: summary.total }
+    : { merits: 0, demerits: 0, points: 0, total: 0 };
+}
+
+/* ══════════════════════════════════════════════════════════════
    DEVIATION (class average deviation per student per subject)
    ══════════════════════════════════════════════════════════════ */
 
@@ -364,11 +400,38 @@ function attachDeviations(studentReports) {
   return { studentReports, classAverages: classAvg };
 }
 
+/**
+ * Term-over-term deviation per subject — a student's current finalScore
+ * minus their OWN finalScore in the same subject the previous term.
+ * Deliberately separate from attachDeviations() above (class-AVERAGE
+ * deviation, a different comparison entirely) — this is what
+ * StudentReportCard.jsx's report-card preview already computed
+ * client-side (comparing two /generate calls); moved here as the single
+ * source of truth now that report-cards.js's RC3 HTML adapter needs the
+ * exact same figure server-side, for both a live draft preview and a
+ * published snapshot's re-render.
+ *
+ * @param {Object} currentSubjects — one student's `subjects` map (finalScore per subjectId)
+ * @param {Object} prevSubjects    — same student's `subjects` map from the previous term, or null/undefined
+ * @returns {{subjects: Object<string, number|null>}}
+ */
+function computeTermDeviation(currentSubjects, prevSubjects) {
+  const subjects = {};
+  for (const [subjectId, data] of Object.entries(currentSubjects || {})) {
+    const curr = data?.finalScore ?? null;
+    const prev = prevSubjects?.[subjectId]?.finalScore ?? null;
+    subjects[subjectId] = (curr != null && prev != null) ? _round(curr - prev) : null;
+  }
+  return { subjects };
+}
+
 module.exports = {
   aggregateGrades,
   aggregateExamResults,
   aggregateAssessmentMarks,
   computeFinalScores,
   attendanceSummary,
+  behaviourSummary,
   attachDeviations,
+  computeTermDeviation,
 };

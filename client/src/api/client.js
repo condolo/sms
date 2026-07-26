@@ -809,6 +809,10 @@ export const reportCards = {
     upsert:       (studentId, data)            => _put(`/report-cards/draft-comments/${studentId}`, data),
     saveSubject:  (studentId, subjectId, data) => _put(`/report-cards/draft-comments/${studentId}/subject/${subjectId}`, data),
   },
+  // RC3 — the HTML adapter's rendered output, replacing
+  // StudentReportCard.jsx's old hand-built printCard() string.
+  html:        (id)   => _get(`/report-cards/${id}/html`),
+  previewHtml: (data) => _post('/report-cards/preview-html', data),
 };
 
 export const rcTemplates = {

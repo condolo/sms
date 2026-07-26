@@ -1,7 +1,12 @@
 /* ============================================================
    StudentReportCard — multi-page report card
-   On-screen: three sections (Marks / Comments / Behaviour)
-   Print:     Cover → Marks → Comments → Behaviour (page-break)
+   On-screen: three editable/interactive sections (Marks / Comments /
+              Behaviour), rendered directly in React — unchanged by RC3.
+   Print:     fetches server-rendered HTML (the shared IR + HTML
+              adapter in report-cards.js — Consolidation Plan Phase 4)
+              and opens it in a new window for the browser to print.
+              A published snapshot fetches its persisted render; a
+              draft sends exactly what's already on screen.
 
    Props:
      student          — generate output: { studentId, subjects, totalScore, averageScore,
@@ -23,8 +28,9 @@
      behaviourSummary — { merits, demerits, points, total } | null
    ============================================================ */
 import { Fragment, useState, useCallback, useEffect } from 'react';
-import { Printer, Save, Check, BarChart2, MessageSquare, Award, CheckCircle } from 'lucide-react';
+import { Printer, Save, Check, BarChart2, MessageSquare, Award, CheckCircle, Loader2 } from 'lucide-react';
 import { DEFAULT_CUSTOM_TYPES, _gradeFromScale } from '../constants.js';
+import { reportCards as reportCardsApi } from '@/api/client.js';
 
 /* ── Helpers ─────────────────────────────────────────────── */
 function buildColumns(types) {
@@ -38,11 +44,6 @@ function buildColumns(types) {
   return cols;
 }
 
-function bandRange(sortedBands, idx) {
-  const lo = sortedBands[idx].min;
-  const hi = idx === 0 ? 100 : sortedBands[idx - 1].min - 1;
-  return `${lo}–${hi}`;
-}
 
 function fmtDev(dev) {
   if (dev == null) return '—';
@@ -158,227 +159,39 @@ export default function StudentReportCard({
     }
   }, [comment, onSaveComment]);
 
-  /* ── Print ──────────────────────────────────────────────── */
-  function printCard() {
-    const thS  = 'border:1px solid #cbd5e1;padding:5px 8px;background:#1e293b;color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:.5px;text-align:center';
-    const tdS  = 'border:1px solid #e2e8f0;padding:5px 8px';
-    const tdC  = `${tdS};text-align:center`;
-    const pb   = 'page-break-before:always';
+  /* ── Print (RC3) — renders through the shared server-side IR +
+     HTML adapter instead of hand-building its own document (see
+     docs/audits/REPORT_CARD_ARCHITECTURE_CONSOLIDATION_PLAN.md
+     Phase 4). A published snapshot (snapshot?.id present) fetches the
+     already-persisted, versioned render; otherwise this sends exactly
+     the data already on screen — the same trust level printCard()
+     already had when it built this document entirely client-side. ── */
+  const [printing, setPrinting] = useState(false);
 
-    const logoHtml = school?.logoUrl
-      ? `<img src="${school.logoUrl}" style="height:72px;width:72px;object-fit:contain;border-radius:4px" />`
-      : `<div style="width:72px;height:72px;background:#e2e8f0;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:bold;color:#94a3b8">${(school?.name?.[0] ?? 'S').toUpperCase()}</div>`;
+  async function printCard() {
+    setPrinting(true);
+    try {
+      const { data } = snapshot?.id
+        ? await reportCardsApi.html(snapshot.id)
+        : await reportCardsApi.previewHtml({
+            student, studentInfo, className, termNum, academicYear, school,
+            draftComment: comment,
+            studentDeviations, behaviourSummary,
+            config: { gradeScale, customTypes: types },
+          });
 
-    /* ── Page 1: Cover ── */
-    const coverHtml = `
-<div style="min-height:297mm;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:32px;text-align:center">
-  ${logoHtml.replace('height:72px;width:72px', 'height:110px;width:110px')}
-  <div>
-    <h1 style="font-size:26px;font-weight:900;margin:0 0 4px;color:#0f172a">${school?.name ?? 'School Name'}</h1>
-    ${school?.tagline ? `<p style="font-size:13px;font-style:italic;color:#64748b;margin:0 0 16px">${school.tagline}</p>` : '<div style="margin-bottom:16px"></div>'}
-    <div style="display:inline-block;background:#1e293b;color:#fff;padding:10px 32px;border-radius:6px;font-size:15px;font-weight:700;letter-spacing:1.5px">
-      ACADEMIC REPORT — TERM ${termNum ?? '—'} — ${academicYear ?? ''}
-    </div>
-  </div>
-  <table style="border-collapse:collapse;width:480px;font-size:13px">
-    <tr><td style="padding:8px 14px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;width:40%">Student Name</td><td style="padding:8px 14px;border:1px solid #e2e8f0;font-weight:700">${name}</td></tr>
-    <tr><td style="padding:8px 14px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc">Admission No.</td><td style="padding:8px 14px;border:1px solid #e2e8f0">${admNo || '—'}</td></tr>
-    <tr><td style="padding:8px 14px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc">Class</td><td style="padding:8px 14px;border:1px solid #e2e8f0">${className ?? '—'}</td></tr>
-    <tr><td style="padding:8px 14px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc">Mean Mark</td><td style="padding:8px 14px;border:1px solid #e2e8f0;font-weight:700">${student.averageScore != null ? Number(student.averageScore).toFixed(1) + '%' : '—'} — ${meanGrade?.grade ?? '—'} (${meanGrade?.label ?? ''})</td></tr>
-    <tr><td style="padding:8px 14px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc">Class Rank</td><td style="padding:8px 14px;border:1px solid #e2e8f0">${classRank}</td></tr>
-    <tr><td style="padding:8px 14px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc">Class Teacher</td><td style="padding:8px 14px;border:1px solid #e2e8f0">${autoClassTeacherName || comment.classTeacherName || '—'}</td></tr>
-  </table>
-  <p style="font-size:11px;color:#94a3b8;margin-top:auto">Generated by Msingi School Management System</p>
-</div>`;
-
-    /* ── Page 2: Marks ── */
-    const colHeaders = columns.map(c => `<th style="${thS}">${c.label}</th>`).join('');
-    const subjectRows = subjectEntries.map(({ subId, data, name: sName }) => {
-      const marks = instanceMarks?.[subId] ?? {};
-      const markCells = columns.map(c => {
-        const raw = marks[`${c.typeKey}_${c.instance}`];
-        return `<td style="${tdC}">${raw != null ? raw : '<span style="color:#cbd5e1">—</span>'}</td>`;
-      }).join('');
-      const rawDev  = studentDeviations?.subjects?.[subId] ?? null;
-      const devStr  = fmtDev(rawDev);
-      const devColor = rawDev == null ? '#94a3b8' : rawDev >= 0 ? '#16a34a' : '#dc2626';
-      return `
-        <tr>
-          <td style="${tdS};font-weight:600;min-width:120px">${sName}</td>
-          ${markCells}
-          <td style="${tdC};font-weight:700">${data.finalScore != null ? Number(data.finalScore).toFixed(1) : '—'}</td>
-          <td style="${tdC};font-weight:700">${data.grade ?? '—'}</td>
-          <td style="${tdC}">${classRank}</td>
-          <td style="${tdC};color:${devColor};font-weight:600">${devStr}</td>
-        </tr>`;
-    }).join('');
-
-    const gradingRows = bands.map((b, i) => `
-      <tr>
-        <td style="${tdC};font-weight:700">${b.grade}</td>
-        <td style="${tdC}">${bandRange(bands, i)}%</td>
-        <td style="${tdC}">${b.points ?? '—'}</td>
-        <td style="${tdS}">${b.label ?? ''}</td>
-      </tr>`).join('');
-
-    const marksHtml = `
-<div style="${pb}">
-  <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:14px;border-bottom:2px solid #1e293b;padding-bottom:10px">
-    ${logoHtml}
-    <div style="text-align:center">
-      <h2 style="margin:0 0 2px;font-size:16px;font-weight:800">${school?.name ?? ''}</h2>
-      <p style="margin:0;font-size:12px;font-weight:700;letter-spacing:1px">TERM ${termNum ?? '—'} ACADEMIC PERFORMANCE — ${academicYear ?? ''}</p>
-    </div>
-  </div>
-  <table style="width:100%;border-collapse:collapse;margin-bottom:10px;font-size:11px">
-    <tr>
-      <td style="${tdS}"><b>Name:</b> ${name}</td>
-      <td style="${tdS}"><b>ADM:</b> ${admNo || '—'}</td>
-      <td style="${tdS}"><b>Class:</b> ${className ?? '—'}</td>
-      <td style="${tdS}"><b>Mean:</b> <b>${student.averageScore != null ? Number(student.averageScore).toFixed(1) + '%' : '—'}</b></td>
-      <td style="${tdS}"><b>Grade:</b> <b>${meanGrade?.grade ?? '—'}</b></td>
-      <td style="${tdS}"><b>Rank:</b> ${classRank}</td>
-      <td style="${tdS}"><b>Dev:</b> <span style="color:${meanDev == null ? '#94a3b8' : meanDev >= 0 ? '#16a34a' : '#dc2626'}">${fmtDev(meanDev)}</span></td>
-    </tr>
-  </table>
-  <table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:11px">
-    <thead>
-      <tr>
-        <th style="${thS};text-align:left">Subject</th>
-        ${colHeaders}
-        <th style="${thS}">Avg %</th>
-        <th style="${thS}">Grade</th>
-        <th style="${thS}">Rank</th>
-        <th style="${thS}">Dev</th>
-      </tr>
-    </thead>
-    <tbody>${subjectRows}</tbody>
-  </table>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-    <div>
-      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Grading Key</p>
-      <table style="width:100%;border-collapse:collapse;font-size:10px">
-        <thead><tr>
-          <th style="${thS}">Grade</th><th style="${thS}">Range</th><th style="${thS}">Points</th><th style="${thS};text-align:left">Description</th>
-        </tr></thead>
-        <tbody>${gradingRows}</tbody>
-      </table>
-    </div>
-    <div>
-      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Sports &amp; Talent / Co-Curricular</p>
-      <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:80px;font-size:11px;color:#475569">${comment.sportsAndTalent || ''}</div>
-    </div>
-  </div>
-</div>`;
-
-    /* ── Page 3: Comments ── */
-    const subjectCommentRows = subjectEntries.map(({ subId, name: sName }) => {
-      const c = comment.subjectComments?.[subId] ?? '';
-      return `
-        <tr>
-          <td style="${tdS};font-weight:600;width:160px;vertical-align:top">${sName}</td>
-          <td style="${tdS};font-size:11px;color:#475569;min-height:28px">${c || '<span style="color:#cbd5e1;font-style:italic">No comment entered</span>'}</td>
-        </tr>`;
-    }).join('');
-
-    const commentsHtml = `
-<div style="${pb}">
-  <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:14px;border-bottom:2px solid #1e293b;padding-bottom:10px">
-    ${logoHtml}
-    <div style="text-align:center">
-      <h2 style="margin:0 0 2px;font-size:16px;font-weight:800">${school?.name ?? ''}</h2>
-      <p style="margin:0;font-size:12px;font-weight:700;letter-spacing:1px">TERM ${termNum ?? '—'} TEACHER COMMENTS — ${name}</p>
-    </div>
-  </div>
-  <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 6px">Subject Teacher Comments</p>
-  <table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:11px">
-    ${subjectCommentRows || `<tr><td colspan="2" style="${tdS};color:#94a3b8;font-style:italic">No subject comments entered yet.</td></tr>`}
-  </table>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-    <div>
-      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">
-        Class Teacher: <span style="font-style:italic;font-weight:normal">${autoClassTeacherName || comment.classTeacherName || '___________________'}</span>
-      </p>
-      <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:70px;font-size:11px;color:#475569">${comment.classTeacherRemark || ''}</div>
-      <div style="margin-top:24px;border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">Class Teacher Signature</div>
-    </div>
-    <div>
-      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">
-        Principal / Section Head: <span style="font-style:italic;font-weight:normal">${comment.principalName || '___________________'}</span>
-      </p>
-      <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:70px;font-size:11px;color:#475569">${comment.principalRemark || ''}</div>
-      <div style="margin-top:24px;border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">Principal Signature</div>
-    </div>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;border-top:1px solid #e2e8f0;padding-top:12px">
-    <div>
-      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Closing Date</p>
-      <p style="margin:0;padding:6px 10px;border:1px solid #e2e8f0;border-radius:4px;min-height:28px;font-size:11px">${comment.closingDate || ''}</p>
-    </div>
-    <div>
-      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Next Term Begins</p>
-      <p style="margin:0;padding:6px 10px;border:1px solid #e2e8f0;border-radius:4px;min-height:28px;font-size:11px">${comment.nextTermBegin || ''}</p>
-    </div>
-    <div>
-      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Official Stamp</p>
-      <div style="height:60px;border:1px dashed #cbd5e1;border-radius:4px"></div>
-    </div>
-  </div>
-</div>`;
-
-    /* ── Page 4: Behaviour ── */
-    const beh = behaviourSummary;
-    const behHtml = `
-<div style="${pb}">
-  <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:14px;border-bottom:2px solid #1e293b;padding-bottom:10px">
-    ${logoHtml}
-    <div style="text-align:center">
-      <h2 style="margin:0 0 2px;font-size:16px;font-weight:800">${school?.name ?? ''}</h2>
-      <p style="margin:0;font-size:12px;font-weight:700;letter-spacing:1px">TERM ${termNum ?? '—'} BEHAVIOUR REPORT — ${name}</p>
-    </div>
-  </div>
-  ${beh ? `
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px">
-    ${[
-      { label: 'Merits', value: beh.merits ?? 0, color: '#16a34a' },
-      { label: 'Demerits', value: beh.demerits ?? 0, color: '#dc2626' },
-      { label: 'Net Points', value: beh.points ?? 0, color: (beh.points ?? 0) >= 0 ? '#16a34a' : '#dc2626' },
-      { label: 'Total Incidents', value: beh.total ?? 0, color: '#475569' },
-    ].map(s => `
-      <div style="border:1px solid #e2e8f0;border-radius:8px;padding:16px;text-align:center">
-        <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#94a3b8;margin:0 0 4px">${s.label}</p>
-        <p style="font-size:28px;font-weight:900;color:${s.color};margin:0">${s.value}</p>
-      </div>`).join('')}
-  </div>
-  ` : `
-  <p style="color:#94a3b8;font-style:italic;font-size:12px;text-align:center;padding:40px 0">No behaviour records found for this term.</p>
-  `}
-  <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 8px">Pastoral Notes</p>
-  <div style="border:1px solid #e2e8f0;border-radius:4px;padding:12px;min-height:100px"></div>
-</div>`;
-
-    const html = `<!DOCTYPE html>
-<html><head><meta charset="UTF-8">
-<title>Report Card — ${name}</title>
-<style>
-  *{box-sizing:border-box}
-  body{font-family:Arial,Helvetica,sans-serif;max-width:1050px;margin:20px auto;color:#0f172a;padding:0 16px}
-  @media print{@page{margin:1.5cm;size:A4}button{display:none!important}}
-</style>
-</head><body>
-${coverHtml}
-${marksHtml}
-${commentsHtml}
-${behHtml}
-<p style="text-align:center;font-size:9px;color:#94a3b8;margin-top:16px">Generated by Msingi School Management System</p>
-</body></html>`;
-
-    const w = window.open('', '_blank', 'width=1200,height=900');
-    if (!w) return;
-    w.document.write(html);
-    w.document.close();
-    w.focus();
-    setTimeout(() => w.print(), 600);
+      const w = window.open('', '_blank', 'width=1200,height=900');
+      if (!w) return;
+      w.document.write(data.html);
+      w.document.close();
+      w.focus();
+      setTimeout(() => w.print(), 600);
+    } catch (err) {
+      console.error('[StudentReportCard] print failed', err);
+      window.alert('Failed to generate the report card for printing. Please try again.');
+    } finally {
+      setPrinting(false);
+    }
   }
 
   /* ── On-screen render ───────────────────────────────────── */
@@ -409,9 +222,9 @@ ${behHtml}
               <span className="ml-1.5 text-indigo-600">{meanGrade?.grade ?? ''}</span>
             </p>
           </div>
-          <button onClick={printCard} title="Print / Save PDF"
-            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition">
-            <Printer size={13} /> Print
+          <button onClick={printCard} disabled={printing} title="Print / Save PDF"
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition">
+            {printing ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />} Print
           </button>
         </div>
       </div>

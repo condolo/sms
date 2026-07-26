@@ -6,6 +6,31 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.11.0] — 2026-07-26 — feat(report-cards): HTML adapter + client cutover, retire printCard() (RC3)
+
+Consolidation Plan Phase 4 step 3 (`docs/audits/REPORT_CARD_ARCHITECTURE_CONSOLIDATION_PLAN.md`): closes the "two renderers, two data sources" gap — the server PDF path (reads a persisted snapshot, draws pdfkit calls) and `StudentReportCard.jsx`'s `printCard()` (read live `/generate` data, hand-built its own HTML string, accreted its own content — Behaviour stats, term-over-term deviation — that never made it into the PDF) drifted independently because nothing forced them to stay in sync. `printCard()` is now retired; both PDF and print trace back to the same computation, `_computeReportSections`.
+
+**Scope decision, made explicit rather than silently assumed:** extending the IR to match `printCard()`'s full content surfaced two genuinely new pieces of work, not just IR plumbing — mid-implementation, both were scoped deliberately rather than folded in blind:
+- **Term-over-term deviation** (a student's own score vs. their own score last term — distinct from the class-average deviation `attachDeviations` already computes) needed a small new `computeTermDeviation()` function (`academic-calc.js`) — built now, in scope.
+- **Per-instance mark columns** (e.g. "CAT 1: 72, CAT 2: 68" as separate columns) need a genuinely new raw-marks aggregation that doesn't exist anywhere server-side today (`computeFinalScores()` only produces per-assessment-*type* averages) — deliberately deferred as its own follow-up, tracked separately, not silently dropped.
+
+Also discovered and fixed first, before this shipped (see v5.10.0/RC5): the Comments/Cover page content depends on `report_card_draft_comments` reliably carrying forward to a published snapshot — RC5 closed that gap first, so RC3's IR extension is correct for published reports from day one.
+
+### Added
+- `_computeReportSections` (report-cards.js) gains an optional 4th `extra` param (`{school, behaviour, deviations}`) and new output fields: `cover` (branding + student/class/mean/rank/class-teacher summary), `gradingKey` (the exact normalized bands used to grade this report), `behaviour`, and a per-row `deviationText`. All additive — `_drawReportPage` (the PDF adapter) never reads any of these new fields, so RC2's byte-for-byte golden-fixture test needed zero changes.
+- `_computeReportHTML(sections)` — the second adapter over the same IR, returning a 4-page HTML document (Cover / Marks + Grading Key / Comments / Behaviour) matching `printCard()`'s content, minus per-instance columns (see scope decision above).
+- `computeTermDeviation(currentSubjects, prevSubjects)` and `behaviourSummary(schoolId, studentId)` (`academic-calc.js`) — the latter reuses `behaviour.js`'s exact "since last points reset" aggregation logic, scoped to one student instead of a whole class.
+- `GET /api/report-cards/:id/html` — the HTML adapter's output for a published/superseded snapshot, same access gate as `GET /:id/pdf` (extracted into a shared `_checkSnapshotAccess()` helper so the two output formats can never drift on who's allowed to see a given report card — this route's own access-control logic had zero prior test coverage; now covered for the first time).
+- `POST /api/report-cards/preview-html` — the HTML adapter's output for a live, unpublished draft. Deliberately does **not** re-run `/generate`'s aggregation for one student (that can't reproduce a real class rank, and the client already has everything computed): the client sends the exact data `StudentReportCard.jsx` already has as props (the same trust level `printCard()` already had, building 100% client-side with no server round trip at all).
+- `client/src/api/client.js` — `reportCards.html(id)` / `.previewHtml(data)`.
+- `StudentReportCard.jsx`'s `printCard()` — now an async function calling the appropriate new endpoint and opening the returned HTML in a print window. The on-screen editable tabs (Marks/Comments/Behaviour) are unchanged React UI — only the hand-built document generator was retired, per the Consolidation Plan's own scoping ("the client Print button stops hand-building its own document").
+- 13 new route tests (`report-cards-html.test.js`), 8 new IR-extension tests, 7 new `academic-calc.js` unit tests (`behaviourSummary`, `computeTermDeviation`).
+
+### Note
+Full suite 78/78 suites, 782/782 tests; security-scan and ratchet clean (36/36 ceiling, unchanged). Client build verified clean. Mutation-tested the student-ownership access check on the new `:id/html` route (a real bug — a missing `computeTermDeviation` import — was itself caught by these new tests during development, not found by inspection). No live MongoDB or login in this sandbox, so the authenticated client Print flow could not be exercised end-to-end in-browser; verified via a clean production build plus full server-side route/IR/adapter test coverage.
+
+---
+
 ## [v5.10.0] — 2026-07-26 — fix(report-cards): draft-to-published comment carry-forward gap (RC5)
 
 Discovered while scoping RC3 (HTML adapter + client cutover): the IR extension RC3 needs for its Cover/Comments content reads fields that, per `docs/audits/REPORT_CARD_COMMENT_LIFECYCLE_REVIEW.md`'s "Recommendation 1," were never actually reliable on a published snapshot. Traced precisely in `POST /publish`: `comments: prev?.comments || { subjectComments: {}, classTeacherRemark: '', principalRemark: '' }` — a student's **first-ever** publish for a term has no `prev` snapshot to carry comments forward from, so every comment field started completely blank regardless of what a teacher had already typed into `report_card_draft_comments`. The only way draft content ever reached a published document was a second, manual, easy-to-forget step: `PUT /:id/comments`, called *after* publish.

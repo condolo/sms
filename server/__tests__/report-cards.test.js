@@ -49,6 +49,10 @@ jest.mock('../routes/academic-config', () => ({
 /* ── Mock _model — controlled per-collection ─────────────────── */
 const mockSnapshotsFindOne = jest.fn();
 const mockCountersUpdate   = jest.fn();
+let mockSchoolDoc        = { name: 'Test School', logoUrl: null, tagline: '' };
+let mockIncidentsAgg     = [];
+let mockLastPointsReset  = [];
+const mockAuditLogCreate = jest.fn().mockResolvedValue({});
 
 jest.mock('../utils/model', () => ({
   _model: jest.fn((col) => {
@@ -70,6 +74,18 @@ jest.mock('../utils/model', () => ({
         countDocuments:   jest.fn().mockResolvedValue(0),
         findOneAndUpdate: jest.fn().mockResolvedValue({ _id: 'b1', status: 'running' }),
       };
+    }
+    if (col === 'schools') {
+      return { findOne: jest.fn().mockReturnValue({ lean: jest.fn(() => Promise.resolve(mockSchoolDoc)) }) };
+    }
+    if (col === 'behaviour_incidents') {
+      return { aggregate: jest.fn(() => Promise.resolve(mockIncidentsAgg)) };
+    }
+    if (col === 'behaviour_points_resets') {
+      return { find: jest.fn().mockReturnValue({ sort: jest.fn().mockReturnValue({ limit: jest.fn().mockReturnValue({ lean: jest.fn(() => Promise.resolve(mockLastPointsReset)) }) }) }) };
+    }
+    if (col === 'mark_audit_log') {
+      return { create: mockAuditLogCreate };
     }
     return {
       findOne:          jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }),
@@ -445,5 +461,118 @@ describe('_resolveSnapComments', () => {
     const draft = { classTeacherRemark: 'From draft' };
     const out = resolve({ id: 'prev_1' }, draft); // prev.comments is undefined
     expect(out.classTeacherRemark).toBe('From draft');
+  });
+});
+
+/* ─────────────────────────────────────────────────────────────── */
+/*  _computeReportSections — RC3 IR extension                      */
+/*  (cover / gradingKey / behaviour / per-row deviationText)        */
+/*                                                                   */
+/*  These new fields are read only by the new _computeReportHTML     */
+/*  adapter, never by _drawReportPage — confirmed by the golden-     */
+/*  fixture test in report-cards-ir.test.js staying green unchanged  */
+/*  after this extension shipped.                                    */
+/* ─────────────────────────────────────────────────────────────── */
+describe('_computeReportSections — RC3 IR extension', () => {
+  const compute = reportCardsRouter._computeReportSections;
+
+  function baseSnap(overrides = {}) {
+    return {
+      status: 'published', superseded: false,
+      studentName: 'Jane Doe', admissionNo: 'ADM001', className: 'Grade 7',
+      termName: 'Term 2', academicYear: '2026', termNumber: 2,
+      schoolName: 'Test School',
+      assessmentWeights: [{ assessmentType: 'cat', label: 'CAT', weight: 40 }, { assessmentType: 'exam', label: 'Exam', weight: 60 }],
+      gradingSchema: [
+        { min: 80, grade: 'A', points: 12, label: 'Excellent' },
+        { min: 60, grade: 'B', points: 9,  label: 'Good' },
+        { min: 0,  grade: 'C', points: 6,  label: 'Average' },
+      ],
+      subjects: {
+        math: { finalScore: 85, grade: 'A', breakdown: { cat: 80, exam: 88 } },
+        english: { finalScore: 55, grade: 'C', breakdown: { cat: 50, exam: 58 } },
+      },
+      totalScore: 140, averageScore: 70, gpa: 3.2,
+      rankings: { class: { rank: 2, outOf: 30 } },
+      comments: { classTeacherName: 'Mrs. Otieno', principalName: 'Dr. Kariuki' },
+      version: 1, ...overrides,
+    };
+  }
+  const config = { rankingEnabled: true };
+
+  test('cover section pulls student/class/mean/rank/class-teacher from the snapshot', () => {
+    const s = compute(baseSnap(), config, null);
+    expect(s.cover.subtitle).toBe('ACADEMIC REPORT — TERM 2 — 2026');
+    const row = (label) => s.cover.rows.find(r => r.label === label)?.value;
+    expect(row('Student Name')).toBe('Jane Doe');
+    expect(row('Admission No.')).toBe('ADM001');
+    expect(row('Class')).toBe('Grade 7');
+    expect(row('Class Rank')).toBe('2/30');
+    expect(row('Class Teacher')).toBe('Mrs. Otieno');
+    expect(row('Mean Mark')).toContain('70.0%');
+    // resolveGrade is mocked file-wide (see jest.mock('../routes/academic-config') above) —
+    // this only proves the IR correctly plumbs whatever resolveGrade returns into the cover
+    // row, not real grade-threshold behavior (that's academic-config.js's own concern).
+    expect(row('Mean Mark')).toContain('A (Excellent)');
+  });
+
+  test('cover section pulls logo/tagline from the optional school param, blank when absent', () => {
+    const withSchool = compute(baseSnap(), config, null, { school: { logoUrl: 'https://x/logo.png', tagline: 'Excellence in all things' } });
+    expect(withSchool.cover.logoUrl).toBe('https://x/logo.png');
+    expect(withSchool.cover.tagline).toBe('Excellence in all things');
+
+    const withoutSchool = compute(baseSnap(), config, null);
+    expect(withoutSchool.cover.logoUrl).toBeNull();
+    expect(withoutSchool.cover.tagline).toBe('');
+  });
+
+  test('gradingKey is the exact normalized bands used to grade this report, sorted descending with computed ranges', () => {
+    const s = compute(baseSnap(), config, null);
+    expect(s.gradingKey).toEqual([
+      { grade: 'A', range: '80–100%', points: 12, label: 'Excellent' },
+      { grade: 'B', range: '60–79%',  points: 9,  label: 'Good' },
+      { grade: 'C', range: '0–59%',   points: 6,  label: 'Average' },
+    ]);
+  });
+
+  test('behaviour section passes through the optional behaviour param, null when absent', () => {
+    const withBehaviour = compute(baseSnap(), config, null, { behaviour: { merits: 5, demerits: 1, points: 4, total: 6 } });
+    expect(withBehaviour.behaviour).toEqual({ merits: 5, demerits: 1, points: 4, total: 6 });
+
+    const withoutBehaviour = compute(baseSnap(), config, null);
+    expect(withoutBehaviour.behaviour).toBeNull();
+  });
+
+  test('per-row deviationText reflects the optional term-over-term deviations param, formatted with a sign', () => {
+    const s = compute(baseSnap(), config, null, { deviations: { subjects: { math: 3.4, english: -2.1 } } });
+    const mathRow = s.resultsTable.rows.find(r => r.subjectId === 'math');
+    const engRow  = s.resultsTable.rows.find(r => r.subjectId === 'english');
+    expect(mathRow.deviationText).toBe('+3.4');
+    expect(engRow.deviationText).toBe('-2.1');
+  });
+
+  test('a subject with no comparable previous-term score gets a null deviationText, not a crash', () => {
+    const s = compute(baseSnap(), config, null, { deviations: { subjects: { math: 3.4 } } }); // english absent
+    const engRow = s.resultsTable.rows.find(r => r.subjectId === 'english');
+    expect(engRow.deviationText).toBeNull();
+  });
+
+  test('omitting the extra param entirely (existing PDF call-site shape) leaves every new field safely null/empty, never throws', () => {
+    const s = compute(baseSnap(), config, null); // 3-arg call, exactly what _buildPDFPage still does
+    expect(s.behaviour).toBeNull();
+    expect(s.cover.logoUrl).toBeNull();
+    expect(s.resultsTable.rows.every(r => r.deviationText === null)).toBe(true);
+    expect(s.gradingKey.length).toBe(3);
+  });
+
+  test('comments section carries RC5-seeded sportsAndTalent/closingDate/nextTermBegin through, blank when absent', () => {
+    const withExtras = compute(baseSnap({ comments: { sportsAndTalent: 'School football captain', closingDate: '2026-11-28', nextTermBegin: '2027-01-12', classTeacherName: 'Mrs. Otieno', principalName: 'Dr. Kariuki' } }), config, null);
+    expect(withExtras.comments.sportsAndTalent).toBe('School football captain');
+    expect(withExtras.comments.closingDate).toBe('2026-11-28');
+    expect(withExtras.comments.nextTermBegin).toBe('2027-01-12');
+
+    const withoutExtras = compute(baseSnap({ comments: {} }), config, null);
+    expect(withoutExtras.comments.sportsAndTalent).toBe('');
+    expect(withoutExtras.comments.closingDate).toBe('');
   });
 });
