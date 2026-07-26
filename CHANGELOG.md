@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.16.0] — 2026-07-26 — feat(report-cards): Publication Policy object + enforcement in POST /publish (RC9)
+
+`docs/audits/REPORT_CARD_PLATFORM_FUNCTIONAL_ARCHITECTURE.md` §12: Publication Policy is "the operational rules governing whether a specific report may be published... owned by Report Cards, not the general platform Settings layer," stored as "discrete, independently-evaluated `{key, enabled}` entries" rather than one monolithic flag. Before this phase, the one real rule that existed (moderation-complete) was hardcoded with no per-school toggle, and the two comment-completeness rules RC6/RC7/RC8 made possible had no enforcement point at all — a school could configure a Subject Comments capability or a report-remark chain and still publish reports where nobody had actually used them.
+
+### Added
+- `GET`/`PATCH /api/report-cards/publication-policy` — `{require_moderation_complete, require_subject_comments_complete, require_report_remarks_complete}`, stored on `academic_config.publicationPolicy`. Defaults exactly match today's behavior for every school (`require_moderation_complete: true`; the two new completeness rules default `false` — no school has ever had them).
+- `POST /publish`'s moderation guard is now policy-driven: a school can explicitly turn `require_moderation_complete` off; every school that doesn't is unaffected.
+- Two new per-student gates in `POST /publish`, evaluated the same way every other per-student failure already is (caught by the existing try/catch, reported in `publish_batches.failedStudents` — one student missing a comment doesn't block the rest of the class): `require_subject_comments_complete` (only applies when RC7's `subjectTeacherCommentsEnabled` is on; checks every subject the student was graded in has a non-empty comment) and `require_report_remarks_complete` (only applies when an RC8 `report_comment_approval` chain is configured; checks the chain has fully advanced for that student).
+- `_missingSubjectComments`/`_isReportCommentChainComplete` — pure decision functions, exported (like `_resolveSnapComments`) for direct unit testing without exercising the transaction-wrapped full `/publish` route.
+- `docs/DEVELOPER_GUIDE.md`'s report-cards endpoint table brought up to date (RC3/RC6/RC8/RC9 routes were missing) and annotated with the `GET /:id` registration-order rule from the v5.14.1 fix.
+- 20 new tests (pure decision functions, config route, IR/HTML from earlier phases unaffected).
+
+### Note
+`allow_draft_downloads` and `allow_republish` (also named in §12) are deliberately not part of this phase — the former is a viewing concern spanning 3 different GET routes, the latter touches publish's versioning semantics and deserves its own careful pass; both are real, scoped follow-ups, not silently dropped. No client UI to configure the policy yet, matching RC8's own precedent. Full suite 86/86 suites, 854/854 tests; security-scan and ratchet clean. Mutation-tested `_isReportCommentChainComplete` (forced it to always return true, confirmed 2 tests fail, restored via backup-copy). No live MongoDB/login in this sandbox — verified via pure-function and route-level tests; the full `/publish` route itself has never had HTTP-level test coverage in this codebase (transaction-wrapped, tested via its extracted pure functions instead, same precedent RC5's `_resolveSnapComments` established).
+
+---
+
 ## [v5.15.0] — 2026-07-26 — feat(report-cards): report-level remark approval chain (RC8)
 
 `docs/audits/REPORT_CARD_PLATFORM_FUNCTIONAL_ARCHITECTURE.md` §11: report-level remarks (Class Teacher, and whatever else a school configures — Head of Section, Deputy Principal, Principal) should "collapse into one mechanism: a school-configured, ordered list of report-level remark steps... executed by `workflow-config.js`" — the same reusable approval-chain engine already proven across HR's leave approval, marks-unlock, and payroll approval. Before this phase, `classTeacherRemark`/`principalRemark` were the only two report-level remark fields that could ever exist, hardcoded, with no approval step, no ordering, no notification.

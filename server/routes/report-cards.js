@@ -73,6 +73,43 @@ async function _loadConfig(schoolId) {
   return mergeConfig(saved);
 }
 
+/* RC9 — Publication Policy (docs/audits/REPORT_CARD_PLATFORM_FUNCTIONAL_ARCHITECTURE.md
+   §12): the rules governing whether a specific report may be published,
+   owned by Report Cards (not the general platform Settings layer) since
+   nothing outside this module's own publish logic could enforce them.
+   Stored as discrete, independently-evaluated {key: enabled} entries —
+   not one monolithic flag — so a future {key, condition, enabled} shape
+   (curriculum/section-conditional rules) can be introduced later without
+   restructuring storage. Defaults match today's exact hardcoded behavior
+   for the one pre-existing rule (moderation); the two new completeness
+   rules default OFF — no school has ever had them, and per §12's own
+   "needs a verified runtime consumer before it ships as a toggle" bar,
+   they're additive capabilities, never a silent new restriction. */
+const PUBLICATION_POLICY_DEFAULTS = {
+  require_moderation_complete:       true,
+  require_subject_comments_complete: false,
+  require_report_remarks_complete:   false,
+};
+const PUBLICATION_POLICY_KEYS = Object.keys(PUBLICATION_POLICY_DEFAULTS);
+
+async function _loadPublicationPolicy(schoolId) {
+  const saved = await tenantModel('academic_config', { schoolId }).findOne({ schoolId }).select('publicationPolicy').lean();
+  return { ...PUBLICATION_POLICY_DEFAULTS, ...(saved?.publicationPolicy || {}) };
+}
+
+/* RC9 — pure decision functions, exported (like _resolveSnapComments) for
+   direct unit testing without exercising the transaction-wrapped full
+   /publish route. */
+function _missingSubjectComments(subjects, draft) {
+  return Object.keys(subjects || {}).filter(subId => !draft?.subjectComments?.[subId]?.trim());
+}
+
+function _isReportCommentChainComplete(draft, reportCommentConfig) {
+  if (!reportCommentConfig) return true; // no chain configured — nothing to require
+  const stepOrder = draft?.currentStepOrder ?? 1;
+  return stepOrder > reportCommentConfig.steps.length;
+}
+
 /* ── Report ID generator — RC-YYYY-TN-XXXXXX ───────────────── */
 async function _nextReportId(schoolId, termNumber, academicYear) {
   const year = academicYear ? String(academicYear).slice(0, 4) : String(new Date().getFullYear());
@@ -394,9 +431,10 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
       return E.badRequest(res, `Academic year "${academicYearId}" has been archived — report card publishing is not permitted for closed years.`);
     }
 
-    const [config, caConfig] = await Promise.all([
+    const [config, caConfig, policy] = await Promise.all([
       _loadConfig(schoolId),
       _loadCaConfig(schoolId),
+      _loadPublicationPolicy(schoolId),
     ]);
 
     const activeWeights = _convertCustomTypesToWeights(caConfig.customTypes);
@@ -404,6 +442,8 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
     const activeSchema  = caConfig.gradeScale?.bands ?? config.gradingSchema;
 
     // ── Step 2: Moderation guard ─────────────────────────────
+    // RC9 — enforcement is now policy-driven, default true (today's exact
+    // hardcoded behavior for every school that hasn't opted out).
     const { data: examData, examStatuses } = await aggregateExamResults(schoolId, classId, termId, academicYearId);
 
     if (skipModerationCheck) {
@@ -419,7 +459,7 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
         examStatusAtBypass: examStatuses.map(e => ({ id: e.id, title: e.title, status: e.status })),
       });
       console.warn(`[REPORT-CARDS] ⚠️  Moderation check BYPASSED — batch ${batchId} by ${userId}: "${skipReason}"`);
-    } else {
+    } else if (policy.require_moderation_complete) {
       const APPROVED_STATES = ['approved', 'locked', 'published', 'archived'];
       const unmoderated = examStatuses.filter(e => !APPROVED_STATES.includes(e.status));
       if (unmoderated.length > 0) {
@@ -481,15 +521,26 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
     const studentMap = Object.fromEntries(students.map(s => [s.id || s._id.toString(), s]));
 
     // ── Step 6a: Batch-load draft comments for first-ever publishes (RC5) ──
-    // Only students with no `prev` snapshot need this — a re-publish keeps
-    // carrying prev.comments forward, unchanged.
-    const studentIdsNeedingDraft = studentIds.filter(sid => !existingMap[sid]);
+    // Only students with no `prev` snapshot need this for comment
+    // carry-forward — a re-publish keeps carrying prev.comments forward,
+    // unchanged. RC9's completeness gates below are a different question
+    // ("did the draft get filled in") and need every student's draft doc
+    // regardless of prev, so the load widens to all studentIds whenever
+    // either completeness rule is active.
+    const needsCompletenessCheck = policy.require_subject_comments_complete || policy.require_report_remarks_complete;
+    const draftLoadIds = needsCompletenessCheck ? studentIds : studentIds.filter(sid => !existingMap[sid]);
     const draftCommentsMap = {};
-    if (studentIdsNeedingDraft.length && termNum != null) {
+    if (draftLoadIds.length && termNum != null) {
       const draftDocs = await tenantModel('report_card_draft_comments', tenantContext(req))
-        .find({ schoolId, studentId: { $in: studentIdsNeedingDraft }, termNumber: termNum }).lean();
+        .find({ schoolId, studentId: { $in: draftLoadIds }, termNumber: termNum }).lean();
       for (const d of draftDocs) draftCommentsMap[d.studentId] = d;
     }
+
+    // ── Step 6d: Load the report-comment approval chain config, if RC9's
+    // "require complete" rule for it is on — a single lookup, not per-student.
+    const reportCommentConfig = policy.require_report_remarks_complete
+      ? await getWorkflowConfig(tenantContext(req), schoolId, REPORT_COMMENT_WORKFLOW_KEY)
+      : null;
 
     // ── Step 6b: Batch-load outstanding fee balances ─────────
     // Best-effort: finance may not be used by this school. Any DB error leaves all flags false.
@@ -521,6 +572,22 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
       try {
         const stu  = studentMap[r.studentId] || {};
         const prev = existingMap[r.studentId];
+        const draft = draftCommentsMap[r.studentId];
+
+        // RC9 — Publication Policy completeness gates. Per-student, not
+        // batch-wide: one student missing a comment doesn't block the
+        // rest of the class (matches this loop's existing per-student
+        // try/catch → partialFails pattern for every other failure mode).
+        if (policy.require_subject_comments_complete && caConfig.subjectTeacherCommentsEnabled !== false) {
+          const missing = _missingSubjectComments(r.subjects, draft);
+          if (missing.length > 0) {
+            throw new Error(`Subject comments incomplete — missing for: ${missing.join(', ')}`);
+          }
+        }
+        if (policy.require_report_remarks_complete && !_isReportCommentChainComplete(draft, reportCommentConfig)) {
+          throw new Error('Report-level remark approval chain has not been completed for this student');
+        }
+
         const newId = uuidv4();
 
         const { rankingScore, subjectsUsed } = computeRankingScore(
@@ -569,7 +636,7 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
 
           // Carry forward comments from the previous version, or — for a
           // first-ever publish — seed from the draft comments doc (RC5).
-          comments: _resolveSnapComments(prev, draftCommentsMap[r.studentId]),
+          comments: _resolveSnapComments(prev, draft),
 
           // Snapshot school signature/stamp URLs at publish time (stays valid even if URLs change later)
           principalSignatureUrl,
@@ -937,6 +1004,46 @@ router.put('/workflow-config', authMiddleware, PLAN, rbac('report_cards', 'updat
   } catch (err) {
     if (err.statusCode === 400) return E.badRequest(res, err.message);
     console.error('[report-cards/workflow-config PUT]', err);
+    return E.serverError(res);
+  }
+});
+
+/* GET/PATCH /publication-policy — RC9. Same registration-order reasoning
+   as /bulk-pdf, /draft-comments, /workflow-config above — a fourth
+   single-segment GET route that would otherwise be shadowed by GET /:id. */
+router.get('/publication-policy', authMiddleware, PLAN, rbac('report_cards', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    return ok(res, await _loadPublicationPolicy(schoolId));
+  } catch (err) {
+    console.error('[report-cards/publication-policy GET]', err);
+    return E.serverError(res);
+  }
+});
+
+router.patch('/publication-policy', authMiddleware, PLAN, rbac('report_cards', 'update'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const updates = req.body || {};
+    const invalidKeys = Object.keys(updates).filter(k => !PUBLICATION_POLICY_KEYS.includes(k));
+    if (invalidKeys.length > 0) {
+      return E.badRequest(res, `Unknown publication policy key(s): ${invalidKeys.join(', ')}`);
+    }
+    for (const [key, value] of Object.entries(updates)) {
+      if (typeof value !== 'boolean') return E.badRequest(res, `${key} must be a boolean`);
+    }
+
+    const Config  = tenantModel('academic_config', tenantContext(req));
+    const current = await Config.findOne({ schoolId }).select('publicationPolicy').lean();
+    const merged  = { ...PUBLICATION_POLICY_DEFAULTS, ...(current?.publicationPolicy || {}), ...updates };
+    await Config.findOneAndUpdate(
+      { schoolId },
+      { $set: { schoolId, publicationPolicy: merged } },
+      { upsert: true, new: true }
+    ).lean();
+    return ok(res, merged);
+  } catch (err) {
+    console.error('[report-cards/publication-policy PATCH]', err);
     return E.serverError(res);
   }
 });
@@ -2124,5 +2231,9 @@ router._buildPDFPage = _buildPDFPage;
 router._computeReportSections = _computeReportSections;
 router._resolveSnapComments = _resolveSnapComments;
 router._computeReportHTML = _computeReportHTML;
+router._loadPublicationPolicy = _loadPublicationPolicy;
+router._missingSubjectComments = _missingSubjectComments;
+router._isReportCommentChainComplete = _isReportCommentChainComplete;
+router.PUBLICATION_POLICY_DEFAULTS = PUBLICATION_POLICY_DEFAULTS;
 
 module.exports = router;

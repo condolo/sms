@@ -704,3 +704,54 @@ describe('_computeReportSections / _computeReportHTML — RC8 report-level remar
     expect(html).not.toContain('Class Teacher Signature');
   });
 });
+
+describe('RC9 — Publication Policy pure decision functions', () => {
+  const missingSubjectComments      = reportCardsRouter._missingSubjectComments;
+  const isReportCommentChainComplete = reportCardsRouter._isReportCommentChainComplete;
+
+  describe('_missingSubjectComments', () => {
+    test('every subject has a non-empty comment → nothing missing', () => {
+      const subjects = { math: {}, english: {} };
+      const draft = { subjectComments: { math: 'Good progress', english: 'Needs work' } };
+      expect(missingSubjectComments(subjects, draft)).toEqual([]);
+    });
+
+    test('a subject with no entry at all is reported missing', () => {
+      const subjects = { math: {}, english: {} };
+      const draft = { subjectComments: { math: 'Good progress' } };
+      expect(missingSubjectComments(subjects, draft)).toEqual(['english']);
+    });
+
+    test('a whitespace-only comment counts as missing, not present', () => {
+      const subjects = { math: {} };
+      const draft = { subjectComments: { math: '   ' } };
+      expect(missingSubjectComments(subjects, draft)).toEqual(['math']);
+    });
+
+    test('no draft doc at all → every subject is missing', () => {
+      const subjects = { math: {}, english: {} };
+      expect(missingSubjectComments(subjects, undefined).sort()).toEqual(['english', 'math']);
+    });
+  });
+
+  describe('_isReportCommentChainComplete', () => {
+    test('no chain configured → always complete (nothing to require)', () => {
+      expect(isReportCommentChainComplete(undefined, null)).toBe(true);
+    });
+
+    test('chain configured, no draft doc yet (never started) → not complete', () => {
+      const config = { steps: [{ order: 1 }, { order: 2 }] };
+      expect(isReportCommentChainComplete(undefined, config)).toBe(false);
+    });
+
+    test('chain configured, currentStepOrder still within range → not complete', () => {
+      const config = { steps: [{ order: 1 }, { order: 2 }] };
+      expect(isReportCommentChainComplete({ currentStepOrder: 2 }, config)).toBe(false);
+    });
+
+    test('chain configured, currentStepOrder past the last step → complete', () => {
+      const config = { steps: [{ order: 1 }, { order: 2 }] };
+      expect(isReportCommentChainComplete({ currentStepOrder: 3 }, config)).toBe(true);
+    });
+  });
+});

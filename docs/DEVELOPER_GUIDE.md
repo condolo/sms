@@ -2122,13 +2122,23 @@ Both `student-portal.js` and `parent-portal.js` now query `report_card_snapshots
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | POST | `/api/report-cards/generate` | grades:read | Live preview — not persisted |
-| POST | `/api/report-cards/publish` | grades:create + admin | Batch snapshot with versioning |
+| POST | `/api/report-cards/publish` | grades:create + admin | Batch snapshot with versioning; enforces Publication Policy (RC9) |
 | GET | `/api/report-cards` | grades:read | List current snapshots |
 | GET | `/api/report-cards/publish-batches` | grades:read | Audit trail of publish runs |
+| GET | `/api/report-cards/bulk-pdf` | grades:read | Class-wide merged PDF (registered ahead of `/:id`, see RC-fix note below) |
+| GET | `/api/report-cards/draft-comments` | report_cards:read | List draft comment docs for a class/term |
+| PUT | `/api/report-cards/draft-comments/:studentId` | report_cards:update | Upsert a student's draft comments (legacy fixed fields) |
+| PUT | `/api/report-cards/draft-comments/:studentId/subject/:subjectId` | report_cards:update | Update one subject comment (RC6-scoped) |
+| PATCH | `/api/report-cards/draft-comments/:studentId/advance` | report_cards:update | Write + advance a report-level remark chain step (RC8) |
+| GET/PUT | `/api/report-cards/workflow-config` | report_cards:{read,update} | School-configured `report_comment_approval` chain (RC8) |
+| GET/PATCH | `/api/report-cards/publication-policy` | report_cards:{read,update} | Publish gating rules — moderation/comment-completeness (RC9) |
 | GET | `/api/report-cards/:id` | grades:read | Full snapshot detail |
-| PUT | `/api/report-cards/:id/comments` | grades:update | Save teacher/principal comments |
+| PUT | `/api/report-cards/:id/comments` | grades:update | Save teacher/principal comments (post-publish edit, legacy fields) |
 | GET | `/api/report-cards/:id/pdf` | grades:read | Single-student A4 PDF |
-| GET | `/api/report-cards/bulk-pdf` | grades:read | Class-wide merged PDF |
+| GET | `/api/report-cards/:id/html` | grades:read | Single-student HTML (RC3, replaces client-side `printCard()`) |
+| POST | `/api/report-cards/preview-html` | grades:read | HTML for an unpublished draft, client-supplied data (RC3) |
+
+`GET /:id`, `GET /:id/pdf`, and `GET /:id/html` use an Express param route (`/:id`) — every other single-segment `GET` route above (`/bulk-pdf`, `/draft-comments`, `/workflow-config`, `/publication-policy`) is registered in the source file *before* `GET /:id`, since Express matches single-segment routes in registration order and a param route would otherwise swallow them. This was a real, previously-unnoticed bug for `/bulk-pdf` and `/draft-comments` (see CHANGELOG v5.14.1) — keep new single-segment `GET` routes on this router above `GET /:id`.
 
 ### Report Card Snapshot Schema
 
