@@ -988,6 +988,387 @@ ${academicHtml}
 </body></html>`;
 }
 
+/* ── marks_then_comments (RCE4) — "Subjects First, Comments After":
+   shared cover -> one dense marks table for every subject at once (plus
+   grading key) -> then every subject's teacher comment together on its
+   own page, followed by remarks/behaviour. Distinct from subject_paired,
+   which interleaves a comment directly beneath each subject's row —
+   this layout is for schools that want a clean, scan-friendly marks
+   grid uninterrupted by prose, with feedback read separately after. ── */
+function _renderMarksThenCommentsPdf(doc, s, images, isFirstPage) {
+  if (!isFirstPage) doc.addPage();
+  _drawCoverPdf(doc, s, images);
+  doc.addPage();
+
+  const DARK = '#1a1a2e', ACCENT = '#2563eb', GRAY = '#555555', LIGHT_GRAY = '#f3f4f6', BORDER = '#d1d5db';
+  const PAGE_WIDTH = doc.page.width - 80;
+  const BOTTOM     = doc.page.height - 55;
+
+  function drawTitleHeader(title) {
+    doc.rect(40, 40, PAGE_WIDTH, 40).fill(DARK);
+    doc.fillColor('white').fontSize(12).font('Helvetica-Bold')
+       .text(s.header.schoolName, 50, 49, { width: PAGE_WIDTH - 20 });
+    doc.fontSize(8).font('Helvetica')
+       .text(`${s.studentInfo.studentName} — ${s.studentInfo.className} — ${s.studentInfo.termLine}`, 50, 66, { width: PAGE_WIDTH - 20 });
+    doc.fillColor(GRAY).fontSize(9).font('Helvetica-Bold').text(title, 40, 88);
+    return 104;
+  }
+
+  /* ── MARKS TABLE PAGE(S) — same column convention as subject_paired
+     (RCE3c: type KEYs not labels, 'AVG' not 'Score'), but every subject
+     drawn back-to-back with no comment box between rows. ── */
+  const typeEntries = s.resultsTable.typeEntries;
+  const showDev = s.resultsTable.showDeviation;
+  const W_SUBJECT = 150, W_SCORE = 42, W_GRADE = 42, W_DEV = showDev ? 40 : 0;
+  const fixedTotal = W_SUBJECT + W_SCORE + W_GRADE + W_DEV;
+  const totalGaps  = (typeEntries.length + (showDev ? 3 : 2)) * 5;
+  const W_TYPE = typeEntries.length > 0
+    ? Math.max(34, Math.floor((PAGE_WIDTH - fixedTotal - totalGaps) / typeEntries.length))
+    : 0;
+  const colDefs = [
+    { label: 'Subject', width: W_SUBJECT },
+    ...typeEntries.map(t => ({ label: t.key, width: W_TYPE })),
+    { label: 'AVG', width: W_SCORE },
+    { label: 'Grade', width: W_GRADE },
+    ...(showDev ? [{ label: 'Dev', width: W_DEV }] : []),
+  ];
+  const colWidths = colDefs.map(c => c.width);
+  const colX = []; let cx = 40;
+  for (const w of colWidths) { colX.push(cx); cx += w + 5; }
+
+  let rowY;
+  function drawMarksHeader() {
+    rowY = drawTitleHeader('ACADEMIC RESULTS');
+    doc.rect(40, rowY, PAGE_WIDTH, 16).fill(ACCENT);
+    doc.fillColor('white').fontSize(7).font('Helvetica-Bold');
+    colDefs.forEach((col, i) => {
+      doc.text(col.label, colX[i] + 3, rowY + 4, { width: colWidths[i] - 3, align: 'center' });
+    });
+    rowY += 16;
+  }
+  function ensureMarksSpace(h) {
+    if (rowY + h > BOTTOM) { doc.addPage(); drawMarksHeader(); }
+  }
+  drawMarksHeader();
+
+  s.resultsTable.rows.forEach((row, idx) => {
+    ensureMarksSpace(18);
+    doc.rect(40, rowY, PAGE_WIDTH, 18).fill(row.failed ? '#fef2f2' : (idx % 2 === 0 ? 'white' : LIGHT_GRAY));
+    doc.fillColor(row.failed ? '#dc2626' : DARK).fontSize(8.5).font('Helvetica-Bold')
+       .text(row.nameLine, colX[0] + 3, rowY + 5, { width: colWidths[0] - 3 });
+    row.typeValues.forEach((val, ti) => {
+      const ci = 1 + ti;
+      doc.fillColor(DARK).fontSize(8.5).font('Helvetica')
+         .text(val, colX[ci] + 3, rowY + 5, { width: colWidths[ci] - 3, align: 'center' });
+    });
+    const scoreIdx = 1 + typeEntries.length, gradeIdx = scoreIdx + 1, devIdx = gradeIdx + 1;
+    doc.fillColor(DARK).fontSize(8.5).font('Helvetica')
+       .text(row.scoreText, colX[scoreIdx] + 3, rowY + 5, { width: colWidths[scoreIdx] - 3, align: 'center' });
+    doc.font('Helvetica-Bold').fillColor(row.hasGrade ? (row.failed ? '#dc2626' : ACCENT) : GRAY)
+       .text(row.gradeText, colX[gradeIdx] + 3, rowY + 5, { width: colWidths[gradeIdx] - 3, align: 'center' });
+    if (showDev) {
+      const devColor = row.deviationText == null ? GRAY : (row.deviationText.startsWith('-') ? '#dc2626' : '#16a34a');
+      doc.font('Helvetica').fontSize(8).fillColor(devColor)
+         .text(row.deviationText ?? '—', colX[devIdx] + 3, rowY + 5, { width: colWidths[devIdx] - 3, align: 'center' });
+    }
+    rowY += 18;
+  });
+
+  if (s.resultsTable.rankingNote) {
+    ensureMarksSpace(14);
+    doc.fillColor(GRAY).fontSize(7).font('Helvetica').text(s.resultsTable.rankingNote, 40, rowY, { width: PAGE_WIDTH });
+    rowY += 14;
+  }
+
+  ensureMarksSpace(32);
+  rowY += 4;
+  doc.rect(40, rowY, PAGE_WIDTH, 28).fill('#eff6ff').stroke(BORDER);
+  doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text(s.summary.totalText, 50, rowY + 5);
+  if (s.summary.showAverage) doc.text(s.summary.averageText, 160, rowY + 5);
+  if (s.summary.showGPA)     doc.text(s.summary.gpaText, 265, rowY + 5);
+  if (s.summary.showRanking) doc.fillColor(ACCENT).text(s.summary.rankText, 355, rowY + 5);
+  rowY += 32;
+
+  if (s.attendance) {
+    ensureMarksSpace(30);
+    doc.rect(40, rowY, PAGE_WIDTH, 26).fill(LIGHT_GRAY).stroke(BORDER);
+    doc.fillColor(GRAY).fontSize(8).font('Helvetica').text('ATTENDANCE', 50, rowY + 4);
+    doc.fillColor(DARK).fontSize(9).font('Helvetica').text(s.attendance.text, 50, rowY + 14, { width: PAGE_WIDTH - 20 });
+    rowY += 30;
+  }
+
+  if (s.gradingKey.length) {
+    ensureMarksSpace(16 + s.gradingKey.length * 14);
+    doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text('GRADING KEY', 40, rowY);
+    rowY += 14;
+    s.gradingKey.forEach(b => {
+      doc.fillColor(GRAY).fontSize(8).font('Helvetica')
+         .text(`${b.grade}   ${b.range}   ${b.points}pts   ${b.label}`, 40, rowY, { width: PAGE_WIDTH });
+      rowY += 13;
+    });
+  }
+
+  /* ── COMMENTS PAGE — every subject's teacher comment together, then
+     remarks/behaviour/signatures. Comments are prefixed "{Subject} —
+     {Teacher}:" since they're no longer sitting directly under that
+     subject's own marks row (subject_paired's row context is gone here,
+     so the subject name has to be restated). ── */
+  doc.addPage();
+  rowY = drawTitleHeader('TEACHER COMMENTS');
+  function ensureCommentsSpace(h) {
+    if (rowY + h > BOTTOM) { doc.addPage(); rowY = drawTitleHeader('TEACHER COMMENTS (cont.)'); }
+  }
+
+  if (s.comments.subjectTeacherCommentsEnabled) {
+    if (s.comments.subjectComments.length === 0) {
+      doc.fillColor(GRAY).fontSize(9).font('Helvetica-Oblique').text('No subjects on this report.', 40, rowY);
+      rowY += 16;
+    }
+    s.comments.subjectComments.forEach(c => {
+      const label = c.teacherName ? `${c.subjectId} — ${c.teacherName}:` : `${c.subjectId} — Subject Teacher:`;
+      const blocks = [
+        { text: label, font: 'Helvetica-Bold', fontSize: 8, color: DARK, gapAfter: 2 },
+        { text: c.text || '— No comment entered —', font: 'Helvetica', fontSize: 8.5, color: GRAY },
+      ];
+      const h = _measureFlowBox(doc, PAGE_WIDTH, blocks);
+      ensureCommentsSpace(h + 6);
+      _drawFlowBox(doc, 40, rowY, PAGE_WIDTH, blocks);
+      rowY += h + 6;
+    });
+  }
+
+  /* REMARKS — RC8 chain if configured, else classic class-teacher/
+     principal boxes, each independently gated by RCE1's toggles. */
+  if (s.comments.reportRemarks.length > 0) {
+    s.comments.reportRemarks.forEach(r => {
+      const blocks = [{ text: r.text, font: 'Helvetica', fontSize: 9, color: DARK }];
+      const h = _measureFlowBox(doc, PAGE_WIDTH, blocks);
+      ensureCommentsSpace(12 + h + 6);
+      doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text(r.label.toUpperCase() + ':', 40, rowY);
+      rowY += 12;
+      _drawFlowBox(doc, 40, rowY, PAGE_WIDTH, blocks);
+      rowY += h + 6;
+    });
+  } else {
+    if (s.comments.showClassTeacherRemark) {
+      const blocks = [{ text: s.comments.classTeacherRemark, font: 'Helvetica', fontSize: 9, color: DARK }];
+      const h = _measureFlowBox(doc, PAGE_WIDTH, blocks);
+      ensureCommentsSpace(12 + h + 6);
+      doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text(`${s.signatures.classTeacherLabel.toUpperCase()}'S REMARK:`, 40, rowY);
+      rowY += 12;
+      _drawFlowBox(doc, 40, rowY, PAGE_WIDTH, blocks);
+      rowY += h + 6;
+    }
+    if (s.comments.showPrincipalRemark) {
+      const blocks = [{ text: s.comments.principalRemark, font: 'Helvetica', fontSize: 9, color: DARK }];
+      const h = _measureFlowBox(doc, PAGE_WIDTH, blocks);
+      ensureCommentsSpace(12 + h + 6);
+      doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text(`${s.signatures.principalLabel.toUpperCase()}'S COMMENT:`, 40, rowY);
+      rowY += 12;
+      _drawFlowBox(doc, 40, rowY, PAGE_WIDTH, blocks);
+      rowY += h + 6;
+    }
+  }
+
+  /* BEHAVIOUR */
+  if (s.behaviour) {
+    ensureCommentsSpace(60);
+    doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text('BEHAVIOUR', 40, rowY);
+    rowY += 14;
+    const tiles = [
+      { label: 'Merits', value: s.behaviour.merits, color: '#16a34a' },
+      { label: 'Demerits', value: s.behaviour.demerits, color: '#dc2626' },
+      { label: 'Net Points', value: s.behaviour.points, color: s.behaviour.points >= 0 ? '#16a34a' : '#dc2626' },
+      { label: 'Total', value: s.behaviour.total, color: GRAY },
+    ];
+    const tileW = (PAGE_WIDTH - 30) / 4;
+    tiles.forEach((t, i) => {
+      const tx = 40 + i * (tileW + 10);
+      doc.rect(tx, rowY, tileW, 34).stroke(BORDER);
+      doc.fillColor(GRAY).fontSize(6.5).font('Helvetica').text(t.label.toUpperCase(), tx + 6, rowY + 5, { width: tileW - 12, align: 'center' });
+      doc.fillColor(t.color).fontSize(14).font('Helvetica-Bold').text(String(t.value), tx, rowY + 15, { width: tileW, align: 'center' });
+    });
+    rowY += 44;
+  }
+
+  /* SIGNATURES */
+  ensureCommentsSpace(56);
+  const sigY = rowY + 6;
+  const sigW = (PAGE_WIDTH - 20) / 2;
+  if (images.principalSignature) {
+    try { doc.image(images.principalSignature, 40 + sigW + 10, sigY - 26, { height: 26, fit: [sigW - 10, 26] }); } catch (_) { /* non-fatal */ }
+  }
+  if (images.schoolStamp) {
+    try { doc.image(images.schoolStamp, 40 + PAGE_WIDTH - 56, sigY - 34, { height: 34, fit: [50, 34] }); } catch (_) { /* non-fatal */ }
+  }
+  doc.moveTo(40, sigY + 18).lineTo(40 + sigW - 10, sigY + 18).stroke(DARK);
+  doc.moveTo(40 + sigW + 10, sigY + 18).lineTo(40 + PAGE_WIDTH, sigY + 18).stroke(DARK);
+  doc.fillColor(GRAY).fontSize(8).font('Helvetica')
+     .text(s.signatures.classTeacherLabel, 40, sigY + 22, { width: sigW })
+     .text(s.signatures.principalLabel, 40 + sigW + 10, sigY + 22, { width: sigW });
+
+  /* FOOTER */
+  const footerY = doc.page.height - 40;
+  doc.fillColor(GRAY).fontSize(7).font('Helvetica')
+     .text(s.footer.footerNote, 40, footerY, { width: PAGE_WIDTH, align: 'center' });
+  if (s.footer.reportId) {
+    doc.fillColor(GRAY).fontSize(6.5).font('Helvetica')
+       .text(`Report ID: ${s.footer.reportId}  |  ${s.footer.genLine}`, 40, footerY + 12, { width: PAGE_WIDTH, align: 'center' });
+  }
+}
+
+function _renderMarksThenCommentsHtml(s) {
+  const watermarkHtml = s.watermarkText
+    ? `<div style="position:fixed;top:45%;left:50%;transform:translate(-50%,-50%) rotate(-30deg);font-size:90px;font-weight:900;color:#cc0000;opacity:0.08;pointer-events:none;white-space:nowrap;z-index:999">${_esc(s.watermarkText)}</div>`
+    : '';
+  const coverHtml = _renderCoverHtml(s);
+
+  const thS = 'border:1px solid #cbd5e1;padding:5px 8px;background:#1e293b;color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:.5px;text-align:center';
+  const tdS = 'border:1px solid #e2e8f0;padding:5px 8px';
+  const tdC = `${tdS};text-align:center`;
+
+  const pageHeaderHtml = (title) => `
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;border-bottom:2px solid #1e293b;padding-bottom:8px">
+    <h2 style="margin:0;font-size:15px;font-weight:800">${_esc(s.header.schoolName)}</h2>
+    <p style="margin:0;font-size:10px;color:#64748b">${_esc(s.studentInfo.studentName)} — ${_esc(s.studentInfo.className)} — ${_esc(s.studentInfo.termLine)}</p>
+  </div>
+  <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#1e293b;margin:0 0 10px">${_esc(title)}</p>`;
+
+  const colHeaders = s.resultsTable.typeEntries.map(t => `<th style="${thS}">${_esc(t.key)}</th>`).join('');
+  const devHeader = s.resultsTable.showDeviation ? `<th style="${thS}">Dev</th>` : '';
+  const subjectRows = s.resultsTable.rows.map(row => {
+    const markCells = row.typeValues.map(v => `<td style="${tdC}">${_esc(v)}</td>`).join('');
+    const devCell = s.resultsTable.showDeviation
+      ? (() => {
+          const devColor = row.deviationText == null ? '#94a3b8' : row.deviationText.startsWith('-') ? '#dc2626' : '#16a34a';
+          return `<td style="${tdC};color:${devColor};font-weight:600">${row.deviationText == null ? '—' : _esc(row.deviationText)}</td>`;
+        })()
+      : '';
+    return `
+      <tr${row.failed ? ' style="color:#dc2626"' : ''}>
+        <td style="${tdS};font-weight:600;min-width:120px">${_esc(row.nameLine)}</td>
+        ${markCells}
+        <td style="${tdC};font-weight:700">${_esc(row.scoreText)}</td>
+        <td style="${tdC};font-weight:700">${_esc(row.gradeText)}</td>
+        ${devCell}
+      </tr>`;
+  }).join('');
+
+  const gradingRows = s.gradingKey.map(b => `
+    <tr><td style="${tdC};font-weight:700">${_esc(b.grade)}</td><td style="${tdC}">${_esc(b.range)}</td>
+        <td style="${tdC}">${_esc(b.points)}</td><td style="${tdS}">${_esc(b.label)}</td></tr>`).join('');
+
+  const marksHtml = `
+<div style="page-break-before:always">
+  ${pageHeaderHtml('Academic Results')}
+  <table style="width:100%;border-collapse:collapse;margin-bottom:10px;font-size:11px">
+    <tr>
+      <td style="${tdS}"><b>${_esc(s.summary.totalText)}</b></td>
+      ${s.summary.showAverage ? `<td style="${tdS}"><b>${_esc(s.summary.averageText)}</b></td>` : ''}
+      ${s.summary.showGPA ? `<td style="${tdS}">${_esc(s.summary.gpaText)}</td>` : ''}
+      ${s.summary.showRanking ? `<td style="${tdS}">${_esc(s.summary.rankText)}</td>` : ''}
+    </tr>
+  </table>
+  <table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:11px">
+    <thead><tr>
+      <th style="${thS};text-align:left">Subject</th>${colHeaders}
+      <th style="${thS}">AVG</th><th style="${thS}">Grade</th>${devHeader}
+    </tr></thead>
+    <tbody>${subjectRows}</tbody>
+  </table>
+  ${s.resultsTable.rankingNote ? `<p style="font-size:9px;color:#64748b;margin:0 0 14px">${_esc(s.resultsTable.rankingNote)}</p>` : ''}
+  ${s.attendance ? `<p style="font-size:11px;color:#475569;margin:0 0 14px"><b>Attendance:</b> ${_esc(s.attendance.text)}</p>` : ''}
+  ${s.gradingKey.length ? `
+  <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Grading Key</p>
+  <table style="width:100%;border-collapse:collapse;font-size:10px;max-width:480px">
+    <thead><tr><th style="${thS}">Grade</th><th style="${thS}">Range</th><th style="${thS}">Points</th><th style="${thS};text-align:left">Description</th></tr></thead>
+    <tbody>${gradingRows}</tbody>
+  </table>` : ''}
+</div>`;
+
+  // RCE4 — comments shown as a Subject | Teacher | Comment table (not
+  // subject_paired's inline pairing) since these sit on their own page,
+  // detached from each subject's marks row — the subject name and
+  // teacher both need restating here rather than being implied by context.
+  const subjectCommentRows = s.comments.subjectComments.map(c => `
+    <tr><td style="${tdS};font-weight:600;width:150px;vertical-align:top">${_esc(c.subjectId)}</td>
+        <td style="${tdS};font-weight:600;width:130px;vertical-align:top;color:#475569">${c.teacherName ? _esc(c.teacherName) : '<span style="color:#cbd5e1;font-style:italic">Unassigned</span>'}</td>
+        <td style="${tdS};font-size:11px;color:#475569">${c.text ? _esc(c.text) : '<span style="color:#cbd5e1;font-style:italic">No comment entered</span>'}</td></tr>`).join('');
+
+  const subjectCommentsSectionHtml = s.comments.subjectTeacherCommentsEnabled ? `
+  <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 6px">Subject Teacher Comments</p>
+  <table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:11px">
+    <thead><tr><th style="${thS};text-align:left">Subject</th><th style="${thS};text-align:left">Teacher</th><th style="${thS};text-align:left">Comment</th></tr></thead>
+    <tbody>${subjectCommentRows || `<tr><td colspan="3" style="${tdS};color:#94a3b8;font-style:italic">No subjects on this report.</td></tr>`}</tbody>
+  </table>` : '';
+
+  const remarksSectionHtml = s.comments.reportRemarks.length > 0 ? `
+  <div style="margin-bottom:16px">
+    ${s.comments.reportRemarks.map(r => `
+    <div style="margin-bottom:12px">
+      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">${_esc(r.label)}</p>
+      <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:50px;font-size:11px;color:#475569">${_esc(r.text)}</div>
+    </div>`).join('')}
+  </div>` : `
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+    ${s.comments.showClassTeacherRemark ? `
+    <div>
+      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">
+        ${_esc(s.signatures.classTeacherLabel)}: <span style="font-style:italic;font-weight:normal">${_esc(s.comments.classTeacherName) || '___________________'}</span>
+      </p>
+      <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:70px;font-size:11px;color:#475569">${_esc(s.comments.classTeacherRemark)}</div>
+      <div style="margin-top:24px;border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">${_esc(s.signatures.classTeacherLabel)} Signature</div>
+    </div>` : ''}
+    ${s.comments.showPrincipalRemark ? `
+    <div>
+      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">
+        ${_esc(s.signatures.principalLabel)}: <span style="font-style:italic;font-weight:normal">${_esc(s.comments.principalName) || '___________________'}</span>
+      </p>
+      <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:70px;font-size:11px;color:#475569">${_esc(s.comments.principalRemark)}</div>
+      <div style="margin-top:24px;border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">${_esc(s.signatures.principalLabel)} Signature</div>
+    </div>` : ''}
+  </div>`;
+
+  const beh = s.behaviour;
+  const behHtml = beh ? `
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px">
+    ${[
+      { label: 'Merits', value: beh.merits, color: '#16a34a' },
+      { label: 'Demerits', value: beh.demerits, color: '#dc2626' },
+      { label: 'Net Points', value: beh.points, color: beh.points >= 0 ? '#16a34a' : '#dc2626' },
+      { label: 'Total Incidents', value: beh.total, color: '#475569' },
+    ].map(m => `
+    <div style="border:1px solid #e2e8f0;border-radius:8px;padding:16px;text-align:center">
+      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#94a3b8;margin:0 0 4px">${_esc(m.label)}</p>
+      <p style="font-size:28px;font-weight:900;color:${m.color};margin:0">${_esc(m.value)}</p>
+    </div>`).join('')}
+  </div>` : '';
+
+  const commentsHtml = `
+<div style="page-break-before:always">
+  ${pageHeaderHtml('Teacher Comments')}
+  ${subjectCommentsSectionHtml}
+  ${remarksSectionHtml}
+  ${behHtml}
+  <p style="text-align:center;font-size:9px;color:#94a3b8;margin-top:16px">${_esc(s.footer.footerNote)} — ${_esc(s.footer.genLine)}${s.footer.reportId ? ` — Report ID: ${_esc(s.footer.reportId)}` : ''}</p>
+</div>`;
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<title>Report Card — ${_esc(s.studentInfo.studentName)}</title>
+<style>
+  *{box-sizing:border-box}
+  body{font-family:Arial,Helvetica,sans-serif;max-width:1050px;margin:20px auto;color:#0f172a;padding:0 16px}
+  @media print{@page{margin:1.5cm;size:A4}button{display:none!important}}
+</style>
+</head><body>
+${watermarkHtml}
+${coverHtml}
+${marksHtml}
+${commentsHtml}
+</body></html>`;
+}
+
 const LAYOUTS = {
   legacy_tabular: {
     label: 'Legacy Tabular',
@@ -999,9 +1380,11 @@ const LAYOUTS = {
     renderPdf:  _renderSubjectPairedPdf,
     renderHtml: _renderSubjectPairedHtml,
   },
-  // marks_then_comments (RCE4) is added here as a sibling entry —
-  // report-cards.js always dispatches through LAYOUTS[key], never
-  // branches on the key itself.
+  marks_then_comments: {
+    label: 'Subjects First, Comments After',
+    renderPdf:  _renderMarksThenCommentsPdf,
+    renderHtml: _renderMarksThenCommentsHtml,
+  },
 };
 
 /**

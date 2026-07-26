@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.22.0] — 2026-07-26 — feat(report-cards): "Subjects First, Comments After" marks_then_comments renderer (RCE4)
+
+Third layout in the Report Card Template Engine, following the plan's RCE4 milestone. Where `subject_paired` (RCE3) interleaves each subject's own teacher comment directly under its marks row, `marks_then_comments` is for schools that want a clean, uninterrupted marks grid: all subjects graded together on one page, every teacher's comment together on a separate page afterward, followed by remarks and behaviour.
+
+No route or dispatch changes were needed — `report-cards.js`'s `GET /:id/pdf`/`GET /:id/html`/`POST /publish` already dispatch generically through `getLayout(layoutKey)` (RCE2), and `layoutKey`'s enum + `LAYOUT_KEYS` already reserved `marks_then_comments` since RCE2. This milestone is purely two new renderer functions registered as a `LAYOUTS` entry.
+
+### Added
+- `server/utils/report-layouts.js`: `_renderMarksThenCommentsPdf`/`_renderMarksThenCommentsHtml`, registered as `LAYOUTS.marks_then_comments` ("Subjects First, Comments After").
+  - Shares the same cover-page builder (`_drawCoverPdf`/`_renderCoverHtml`) as `subject_paired` — stream/house/class-teacher/principal/school-contact fields, same dynamic-box-sizing (`_measureFlowBox`/`_drawFlowBox`, RCE3b) and RCE3c column-header conventions (assessment type **key**, not the split-derived full-word label; `AVG` not `Score`).
+  - PDF: 3 pages — cover, then a dense all-subjects marks table (+ ranking note/summary/attendance/grading key) with its own repeating page-header band, then a comments page (subject comments, remarks, behaviour, signatures/footer), each independently paginating via its own `ensureSpace`.
+  - HTML: same 3-section split (cover / marks+grading-key / comments+remarks+behaviour), each its own print page (`page-break-before:always`).
+  - Because comments now sit on a page detached from each subject's marks row, they're labeled `"{Subject} — {Teacher}:"` (PDF) or shown in a `Subject | Teacher | Comment` table (HTML) — restating the subject, unlike `subject_paired`'s row-adjacent comments where the subject is already implied by context.
+  - Respects every RCE1 toggle (`showDeviation`, `showClassAverage`, `showBehaviour`, `showClassTeacherRemark`, `showPrincipalRemark`) and RC8's report-remark chain, same as `subject_paired` — `legacy_tabular` remains the only renderer that ignores them by design.
+
+### Tests
+19 new tests in `server/__tests__/report-layouts-marks-then-comments.test.js`: page-count structure (cover→marks→comments, 2 `addPage()`s), the defining guarantee that no per-subject comment text appears on the marks page (only after the second page break), the Dev-column/remark-toggle/behaviour-tile assertions mirrored from `subject_paired`'s suite, the `"{Subject} — {Teacher}:"` label convention, and dynamic comment-box sizing. Mutation-tested the "no comment leaks onto the marks page" guarantee (a one-line injected leak was caught by the new test, then reverted via `cp` backup/restore, never `git checkout`). Full suite 94/94 suites, 939/939 tests; security-scan and tenant-coverage ratchet (held at 36) clean. Browser-verified: rendered realistic Light International School sample data through the new HTML renderer — cover, marks table with type-key headers, grading key, and a Subject/Teacher/Comment table showing real teacher names, all with no overlap or truncation.
+
+---
+
 ## [v5.21.2] — 2026-07-26 — feat(report-cards): subject teacher names + column-header abbreviations (RCE3c)
 
 Second fix-forward addendum to RCE3, prompted by two direct asks: label a subject's comment with the actual teacher's name (e.g. "Collins Ndolo," not "Teacher Comment") pulled from the same module that already governs subject-teacher mark-entry access, and show real column headings (CA/HW/MT/ET/AVG) on the marks table.
