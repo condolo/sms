@@ -619,10 +619,10 @@ function _drawFlowBox(doc, x, y, width, blocks) {
   return h;
 }
 
-/* ── subject_paired (RCE3) — "Light International style": every
-   subject's marks row is immediately followed by that subject's own
-   teacher comment row, so a parent reads feedback right next to the
-   score it's about, instead of scanning a separate comments page. ── */
+/* ── subject_paired (RCE3): every subject's marks row is immediately
+   followed by that subject's own teacher comment row, so a parent
+   reads feedback right next to the score it's about, instead of
+   scanning a separate comments page. ── */
 function _renderSubjectPairedPdf(doc, s, images, isFirstPage) {
   if (!isFirstPage) doc.addPage();
   _drawCoverPdf(doc, s, images);
@@ -1376,7 +1376,7 @@ const LAYOUTS = {
     renderHtml: _renderLegacyTabularHtml,
   },
   subject_paired: {
-    label: 'Subject + Comment Together (Light International style)',
+    label: 'Subject + Comment Together',
     renderPdf:  _renderSubjectPairedPdf,
     renderHtml: _renderSubjectPairedHtml,
   },

@@ -165,7 +165,7 @@ describe('subject_paired.renderHtml — content', () => {
     expect(html).toContain('Red House'); // houseName
   });
 
-  test('each subject comment appears immediately after that subject\'s own marks row (Light International pairing)', () => {
+  test('each subject comment appears immediately after that subject\'s own marks row (subject-adjacent pairing)', () => {
     const html = LAYOUTS.subject_paired.renderHtml(computeSections());
     const mathIdx    = html.indexOf('math');
     const mathComment = html.indexOf('Strong grasp of algebra');

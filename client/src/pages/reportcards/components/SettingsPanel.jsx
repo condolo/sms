@@ -609,15 +609,18 @@ function PublicationPolicySection() {
 
 /* ══════════════════════════════════════════════════════════════
    Templates — RC11 report_card_templates registry. A radio-style
-   default picker + basic CRUD over the 3 built layouts; Kindergarten
-   is shown disabled ("coming soon") per the Template Engine plan's
-   explicit decision to ship the two data-only layouts first.
+   default picker + basic CRUD over the 3 built layouts; kindergarten
+   is shown disabled because no PDF/HTML renderer exists for it yet
+   (per the Template Engine plan's explicit decision to ship the two
+   data-only layouts first) — its band/subject/indicator definitions
+   already live in the adjacent Kindergarten tab, this disabled entry
+   is only about the missing rendering layout, not missing templates.
    ══════════════════════════════════════════════════════════════ */
 const LAYOUT_OPTIONS = [
   { key: 'legacy_tabular',       label: 'Legacy Tabular',                    disabled: true,  hint: 'Frozen — never offered for a new default.' },
-  { key: 'subject_paired',       label: 'Subject + Comment Together',        disabled: false, hint: '"Light International" style.' },
+  { key: 'subject_paired',       label: 'Subject + Comment Together',        disabled: false, hint: "Each subject's comment sits directly beneath its marks row." },
   { key: 'marks_then_comments',  label: 'Subjects First, Comments After',    disabled: false, hint: 'A clean marks grid, comments together afterward.' },
-  { key: 'kindergarten',         label: 'Kindergarten (competency bands)',   disabled: true,  hint: 'Coming soon.' },
+  { key: 'kindergarten',         label: 'Kindergarten (competency bands)',   disabled: true,  hint: 'Templates are already managed in the Kindergarten tab — matching PDF/HTML rendering is still in development.' },
 ];
 
 function TemplatesSection() {

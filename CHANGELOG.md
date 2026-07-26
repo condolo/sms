@@ -6,6 +6,41 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.24.2] — 2026-07-26 — fix(report-cards): remove real school name from product text; clarify Kindergarten layout status
+
+Two fixes prompted directly by the user reviewing the Templates tab UI.
+
+### Changed
+- Removed every reference to a real school's name ("Light International
+  School") that had leaked into product-facing labels and internal
+  comments during earlier RCE milestones — a data-protection issue, not
+  a cosmetic one. Fixed in `server/utils/report-layouts.js` (the
+  `subject_paired` registry label and its module comment),
+  `client/src/pages/reportcards/components/SettingsPanel.jsx` (the
+  layout-picker hint text, now describing the layout structurally:
+  "Each subject's comment sits directly beneath its marks row"),
+  `server/__tests__/report-layouts-subject-paired.test.js` (a test
+  description), `CHANGELOG.md`, and `docs/DEVELOPER_GUIDE.md`. No
+  behavior change — `subject_paired` is still the same renderer, just
+  never named after the real school whose report card originally
+  informed its design.
+- Clarified the disabled "Kindergarten (competency bands)" layout
+  option in the Templates tab, which previously just said "Coming
+  soon" — misleading now that a full Kindergarten Templates tab
+  (band/subject/indicator definitions) already exists right next to it
+  in the same Settings panel. The hint now reads "Templates are already
+  managed in the Kindergarten tab — matching PDF/HTML rendering is
+  still in development," so it's clear only the *rendering layout* is
+  unbuilt, not the feature itself.
+
+### Tests
+Verified via `vite build` (clean, zero errors) and the existing/
+updated test suite (94/94 suites, 939/939 tests, including the
+relabeled `report-layouts-subject-paired.test.js` assertion). No
+server API, data model, or rendering behavior changed — text-only fix.
+
+---
+
 ## [v5.24.1] — 2026-07-26 — fix(report-cards): consolidate Kindergarten templates into the Report Cards module
 
 Follow-up to RCE5, prompted directly by the user spotting that Settings
@@ -82,8 +117,8 @@ passed individually.
   `report_card_templates` gained a real `layoutKey` and started actually
   affecting rendering for the first time (previously snapshotted but
   never read back).
-- **RCE3 / RCE3b / RCE3c** — `subject_paired` ("Light International
-  style") renderer: per-subject comment paired directly under its marks
+- **RCE3 / RCE3b / RCE3c** — `subject_paired` (Subject + Comment
+  Together) renderer: per-subject comment paired directly under its marks
   row, dynamic PDF text-box sizing (closing a real overflow bug),
   school contact fields on the cover, real subject-teacher names on
   comments (`teaching_assignments`), and real column-header abbreviations
@@ -153,7 +188,7 @@ No route or dispatch changes were needed — `report-cards.js`'s `GET /:id/pdf`/
   - Respects every RCE1 toggle (`showDeviation`, `showClassAverage`, `showBehaviour`, `showClassTeacherRemark`, `showPrincipalRemark`) and RC8's report-remark chain, same as `subject_paired` — `legacy_tabular` remains the only renderer that ignores them by design.
 
 ### Tests
-19 new tests in `server/__tests__/report-layouts-marks-then-comments.test.js`: page-count structure (cover→marks→comments, 2 `addPage()`s), the defining guarantee that no per-subject comment text appears on the marks page (only after the second page break), the Dev-column/remark-toggle/behaviour-tile assertions mirrored from `subject_paired`'s suite, the `"{Subject} — {Teacher}:"` label convention, and dynamic comment-box sizing. Mutation-tested the "no comment leaks onto the marks page" guarantee (a one-line injected leak was caught by the new test, then reverted via `cp` backup/restore, never `git checkout`). Full suite 94/94 suites, 939/939 tests; security-scan and tenant-coverage ratchet (held at 36) clean. Browser-verified: rendered realistic Light International School sample data through the new HTML renderer — cover, marks table with type-key headers, grading key, and a Subject/Teacher/Comment table showing real teacher names, all with no overlap or truncation.
+19 new tests in `server/__tests__/report-layouts-marks-then-comments.test.js`: page-count structure (cover→marks→comments, 2 `addPage()`s), the defining guarantee that no per-subject comment text appears on the marks page (only after the second page break), the Dev-column/remark-toggle/behaviour-tile assertions mirrored from `subject_paired`'s suite, the `"{Subject} — {Teacher}:"` label convention, and dynamic comment-box sizing. Mutation-tested the "no comment leaks onto the marks page" guarantee (a one-line injected leak was caught by the new test, then reverted via `cp` backup/restore, never `git checkout`). Full suite 94/94 suites, 939/939 tests; security-scan and tenant-coverage ratchet (held at 36) clean. Browser-verified: rendered realistic sample school data through the new HTML renderer — cover, marks table with type-key headers, grading key, and a Subject/Teacher/Comment table showing real teacher names, all with no overlap or truncation.
 
 ---
 
@@ -194,9 +229,9 @@ Fix-forward addendum to RCE3, prompted by three direct questions before continui
 
 ---
 
-## [v5.21.0] — 2026-07-26 — feat(report-cards): Report Card Engine — "Light International style" subject_paired renderer (RCE3)
+## [v5.21.0] — 2026-07-26 — feat(report-cards): Report Card Engine — Subject + Comment Together (subject_paired) renderer (RCE3)
 
-Third milestone of the Report Card Template Engine: the first genuinely new layout. Built directly from a real school's report card the user shared — every subject's marks row is immediately followed by that subject's own teacher comment, so a parent reads feedback right next to the score it's about, instead of scanning a separate comments page. This is the new default (`report-card-templates.js`'s `DEFAULT_LAYOUT_KEY`), shipped in RCE2 ahead of this renderer existing.
+Third milestone of the Report Card Template Engine: the first genuinely new layout — every subject's marks row is immediately followed by that subject's own teacher comment, so a parent reads feedback right next to the score it's about, instead of scanning a separate comments page. This is the new default (`report-card-templates.js`'s `DEFAULT_LAYOUT_KEY`), shipped in RCE2 ahead of this renderer existing.
 
 ### Added
 - `server/utils/report-layouts.js`: `subject_paired` entry, plus a shared cover-page builder (`_renderCoverHtml`/`_drawCoverPdf`) that both this and the upcoming `marks_then_comments` (RCE4) layout consume — built from RCE1's named `cover` fields (school name/tagline/logo, "REPORT CARD" title, academic year/term, student photo, student name/admission no/class/stream/house/class teacher/principal), not the generic label/value `rows` list `legacy_tabular` uses.
@@ -223,7 +258,7 @@ Second milestone of the Report Card Template Engine: RC11's `report_card_templat
 
 ## [v5.19.0] — 2026-07-26 — feat(report-cards): Report Card Engine — cover extension + dead-toggle wiring (RCE1)
 
-First milestone of the Report Card Template Engine effort: real pluggable layout renderers ("Light International style" subject+comment layout, plus a marks-then-comments layout) driven by RC11's previously-inert `report_card_templates` registry, and a dedicated Report Cards settings module replacing the scattered RC6/RC8/RC9/RC11 config with no UI. This phase is the IR/data foundation only — zero adapter or UI changes yet, by design (verified: the full pre-existing report-cards test suite passes byte-for-byte unchanged).
+First milestone of the Report Card Template Engine effort: real pluggable layout renderers (a subject+comment layout, plus a marks-then-comments layout) driven by RC11's previously-inert `report_card_templates` registry, and a dedicated Report Cards settings module replacing the scattered RC6/RC8/RC9/RC11 config with no UI. This phase is the IR/data foundation only — zero adapter or UI changes yet, by design (verified: the full pre-existing report-cards test suite passes byte-for-byte unchanged).
 
 Investigation (3 parallel research passes) found RC11's registry has zero rendering effect anywhere — `templateId`/`templateVersion` are snapshotted at publish but never read back — and that `academic_config.showDeviation`/`showClassAverage` have existed in the schema/defaults since the original report-card config work but were never read by any adapter (dead code). Also found the "Kindergarten" competency-band template (`rc_templates`) is real, tested settings CRUD with **zero rendering consumers and no data-entry path anywhere** — no teacher-facing UI exists to score a student against a band/indicator. Presented to the user; they chose to ship the two data-only templates first and defer Kindergarten (which needs a whole new scoring UI, not just a layout) to a later phase.
 
