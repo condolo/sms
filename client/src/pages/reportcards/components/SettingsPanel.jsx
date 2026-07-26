@@ -1,10 +1,11 @@
 /* ============================================================
    Report Cards — Settings panel (RCE5)
 
-   Five sub-tabs, each wrapping a server capability that already
+   Six sub-tabs, each wrapping a server capability that already
    existed (RCE1 toggles, RC7 subject-comments toggle, RC8 approval
-   chain, RC9 publication policy, RC11 template registry) but had no
-   client UI until now:
+   chain, RC9 publication policy, RC11 template registry, the older
+   Kindergarten competency-band templates) but had no client UI here
+   until now:
      General            -> academicConfig (RCE1 report toggles)
      Comments            -> assessment_config.subjectTeacherCommentsEnabled
                              (RC7) + Comment Bank CRUD (moved from
@@ -12,13 +13,20 @@
      Workflow             -> report-cards workflow-config (RC8)
      Publication Policy   -> report-cards publication-policy (RC9)
      Templates             -> report-card-templates registry (RC11)
+     Kindergarten           -> rc-templates (competency bands, a separate,
+                                already-live, pre-RCE feature — moved here
+                                from the generic Settings page, not
+                                duplicated, so all report-card-shaped
+                                settings live under one module; kept
+                                distinctly named/tabbed from "Templates"
+                                above since the two are unrelated APIs)
    ============================================================ */
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence } from 'framer-motion';
 import {
   Loader2, Save, Plus, Trash2, MessageSquare, Search, Tag,
-  ListChecks, ShieldCheck, LayoutTemplate, SlidersHorizontal, X, Star,
+  ListChecks, ShieldCheck, LayoutTemplate, SlidersHorizontal, X, Star, Baby,
 } from 'lucide-react';
 import {
   academicConfig as academicConfigApi,
@@ -30,13 +38,15 @@ import {
   settings as settingsApi,
 } from '@/api/client.js';
 import { Skeleton, Toast } from '../../grades/components/GradesPrimitives.jsx';
+import RCTemplatesSection from './RCTemplatesSection.jsx';
 
 const SUB_TABS = [
-  { id: 'general',  label: 'General',            icon: SlidersHorizontal },
-  { id: 'comments', label: 'Comments',            icon: MessageSquare },
-  { id: 'workflow', label: 'Workflow',            icon: ListChecks },
-  { id: 'policy',   label: 'Publication Policy',  icon: ShieldCheck },
-  { id: 'templates',label: 'Templates',           icon: LayoutTemplate },
+  { id: 'general',      label: 'General',            icon: SlidersHorizontal },
+  { id: 'comments',     label: 'Comments',            icon: MessageSquare },
+  { id: 'workflow',     label: 'Workflow',            icon: ListChecks },
+  { id: 'policy',       label: 'Publication Policy',  icon: ShieldCheck },
+  { id: 'templates',    label: 'Templates',           icon: LayoutTemplate },
+  { id: 'kindergarten', label: 'Kindergarten',        icon: Baby },
 ];
 
 export default function SettingsPanel() {
@@ -62,11 +72,12 @@ export default function SettingsPanel() {
         })}
       </div>
 
-      {subTab === 'general'   && <GeneralSection />}
-      {subTab === 'comments'  && <CommentsSection />}
-      {subTab === 'workflow'  && <WorkflowSection />}
-      {subTab === 'policy'    && <PublicationPolicySection />}
-      {subTab === 'templates' && <TemplatesSection />}
+      {subTab === 'general'      && <GeneralSection />}
+      {subTab === 'comments'     && <CommentsSection />}
+      {subTab === 'workflow'     && <WorkflowSection />}
+      {subTab === 'policy'       && <PublicationPolicySection />}
+      {subTab === 'templates'    && <TemplatesSection />}
+      {subTab === 'kindergarten' && <RCTemplatesSection />}
     </div>
   );
 }

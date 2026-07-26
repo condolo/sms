@@ -6,6 +6,44 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.24.1] — 2026-07-26 — fix(report-cards): consolidate Kindergarten templates into the Report Cards module
+
+Follow-up to RCE5, prompted directly by the user spotting that Settings
+still had a standalone "Report Templates" tab (Kindergarten competency
+bands, `rc-templates.js`) sitting outside the new Report Cards module —
+two differently-scoped "template" screens in two different places was
+confusing, even though it was a deliberate scope boundary at the time
+(RCE1's plan explicitly deferred building a Kindergarten renderer/
+scoring UI, so that screen was left untouched in Settings rather than
+folded into RCE5). Resolved by moving it, not touching its behavior.
+
+### Changed
+- `client/src/pages/settings/RCTemplatesSection.jsx` → moved (not
+  duplicated — it had no relative imports into the rest of `pages/settings/`,
+  so the move is a clean file relocation) to
+  `client/src/pages/reportcards/components/RCTemplatesSection.jsx`.
+- `client/src/pages/reportcards/components/SettingsPanel.jsx`: gained a
+  6th sub-tab, **Kindergarten**, rendering the moved section.
+- `client/src/pages/settings/SettingsPage.jsx`: removed the `rc_templates`
+  tab, its import, and its unused `LayoutTemplate` icon import — the
+  generic Settings page no longer has a "Report Templates" entry.
+- Relabeled the moved section's own header text from "Report Card
+  Templates" to **"Kindergarten Templates"** (and its "New Report Card
+  Template" slide-over title to "New Kindergarten Template") so it
+  reads as clearly distinct from the RC11 layout-registry "Templates"
+  tab now sitting right next to it in the same Settings panel — same
+  API (`/rc-templates`), same data, purely a label change to reduce
+  confusion between the two now-adjacent "template" concepts.
+
+### Tests
+Verified via `vite build` (clean, `ReportCardsPage` chunk grew and
+`SettingsPage` chunk shrank by roughly the moved file's size, confirming
+the relocation — zero errors) and a running dev server (zero console
+errors on boot). Server suite unaffected (94/94 suites, 939/939 tests)
+since this change touches no server code, no API contract, and no data.
+
+---
+
 ## [v5.24.0] — 2026-07-26 — chore(report-cards): Report Card Template Engine — final verification, arc close-out (RCE6)
 
 Closes the RCE1–RCE5 arc (Report Card Template Engine plan). No behavior

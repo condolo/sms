@@ -17,9 +17,8 @@ import {
   Bell, MessageSquare, BookOpen, Calendar, CalendarDays, Clock,
   Upload, ImageIcon, KeyRound, Copy,
   PlusCircle, ChevronRight, AlertCircle, Archive,
-  MonitorPlay, WifiOff, LayoutTemplate, ClipboardList,
+  MonitorPlay, WifiOff, ClipboardList,
 } from 'lucide-react';
-import RCTemplatesSection from './RCTemplatesSection.jsx';
 import { sections as sectionsApi, teachers as teachersApi } from '@/api/client.js';
 import { settings as settingsApi } from '@/api/client.js';
 import { academicConfig as academicConfigApi } from '@/api/client.js';
@@ -33,7 +32,6 @@ const TABS = [
   { id: 'users',          label: 'Users',               Icon: Users,          adminOnly: true  },
   { id: 'roles',          label: 'Roles & Permissions', Icon: ShieldCheck,    adminOnly: true  },
   { id: 'modules',        label: 'Modules',             Icon: Layers,         adminOnly: true  },
-  { id: 'rc_templates',   label: 'Report Templates',    Icon: LayoutTemplate, adminOnly: true  },
   { id: 'notifications',  label: 'Notifications',       Icon: Bell,           adminOnly: true  },
   { id: 'system',         label: 'System',              Icon: Database,       adminOnly: true  },
   { id: 'audit_log',      label: 'Audit Log',           Icon: ClipboardList,  adminOnly: true  },
@@ -5041,7 +5039,6 @@ export default function SettingsPage() {
             {tab === 'users'          && <UsersTab />}
             {tab === 'roles'          && <RolesTab />}
             {tab === 'modules'        && <ModulesTab />}
-            {tab === 'rc_templates'   && <RCTemplatesSection />}
             {tab === 'notifications'  && <NotificationsTab />}
             {tab === 'system'         && <SystemTab />}
             {tab === 'audit_log'      && <AuditLogTab />}

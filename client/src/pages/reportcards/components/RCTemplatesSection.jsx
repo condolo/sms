@@ -1,6 +1,10 @@
 /* ============================================================
-   RCTemplatesSection — competency-based report card templates
-   Admin-only. Accessed from Settings → Report Templates tab.
+   RCTemplatesSection — competency-based report card templates for
+   Kindergarten / early-childhood classes. Admin-only. Accessed from
+   Report Cards → Settings → Kindergarten (moved here from the generic
+   Settings page, not duplicated — see the Report Card Template
+   Engine plan's explicit decision to defer a real Kindergarten
+   renderer/scoring UI; this pre-existing screen is otherwise untouched).
    ============================================================ */
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -373,7 +377,7 @@ function TemplateSlideOver({ initial, classes, onSave, onClose, saving }) {
           <div className="flex items-center gap-2">
             <LayoutTemplate size={16} className="text-indigo-600" />
             <h2 className="text-base font-semibold text-slate-900">
-              {isNew ? 'New Report Card Template' : `Edit: ${initial.name}`}
+              {isNew ? 'New Kindergarten Template' : `Edit: ${initial.name}`}
             </h2>
           </div>
           <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition">
@@ -752,7 +756,7 @@ export default function RCTemplatesSection() {
       <div className="bg-white border border-slate-200 rounded-xl p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="text-sm font-semibold text-slate-800">Report Card Templates</h3>
+            <h3 className="text-sm font-semibold text-slate-800">Kindergarten Templates</h3>
             <p className="text-xs text-slate-400 mt-0.5">
               Define competency-based report card templates for early-childhood and KG classes.
               Each template specifies the performance bands, subjects, and learning indicators teachers assess.
