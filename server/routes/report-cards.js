@@ -161,6 +161,38 @@ function _mergeGradeData(gradesData, caData) {
   return merged;
 }
 
+/**
+ * RC5 — closes the draft-to-published comment carry-forward gap
+ * (docs/audits/REPORT_CARD_COMMENT_LIFECYCLE_REVIEW.md, "Recommendation 1").
+ * On a student's first-ever publish for a term, there is no `prev` snapshot
+ * to carry `comments` forward from, so it used to start completely blank —
+ * regardless of what a teacher had already typed into
+ * `report_card_draft_comments`. When there's no `prev`, this seeds the new
+ * snapshot's `comments` from that draft doc instead; a re-publish keeps
+ * carrying `prev.comments` forward exactly as before (this fix does not
+ * decide draft-vs-published precedence once a report has been published
+ * once — that's the approval-workflow question, out of scope here).
+ * Carries every comment-shaped field the draft doc has, not just the three
+ * `CommentSchema`/`PUT /:id/comments` already covers, since Sports &
+ * Talent / Closing Date / Next Term / the two signer names are genuine
+ * report content a school already collects pre-publish. Exported (like
+ * `_hashSnapshot`/`_normalizeGradeScaleBands`) for direct unit testing
+ * without exercising the transaction-wrapped full /publish route.
+ */
+function _resolveSnapComments(prev, draft) {
+  if (prev?.comments) return prev.comments;
+  return {
+    subjectComments:    draft?.subjectComments    ?? {},
+    classTeacherRemark: draft?.classTeacherRemark  ?? '',
+    principalRemark:    draft?.principalRemark     ?? '',
+    sportsAndTalent:    draft?.sportsAndTalent     ?? '',
+    closingDate:        draft?.closingDate         ?? '',
+    nextTermBegin:      draft?.nextTermBegin       ?? '',
+    classTeacherName:   draft?.classTeacherName    ?? '',
+    principalName:      draft?.principalName       ?? '',
+  };
+}
+
 /* ── Restricted roles (parents/students see only current versions) ── */
 const RESTRICTED_ROLES = ['parent', 'student', 'guardian'];
 
@@ -430,6 +462,17 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
     }).lean();
     const studentMap = Object.fromEntries(students.map(s => [s.id || s._id.toString(), s]));
 
+    // ── Step 6a: Batch-load draft comments for first-ever publishes (RC5) ──
+    // Only students with no `prev` snapshot need this — a re-publish keeps
+    // carrying prev.comments forward, unchanged.
+    const studentIdsNeedingDraft = studentIds.filter(sid => !existingMap[sid]);
+    const draftCommentsMap = {};
+    if (studentIdsNeedingDraft.length && termNum != null) {
+      const draftDocs = await tenantModel('report_card_draft_comments', tenantContext(req))
+        .find({ schoolId, studentId: { $in: studentIdsNeedingDraft }, termNumber: termNum }).lean();
+      for (const d of draftDocs) draftCommentsMap[d.studentId] = d;
+    }
+
     // ── Step 6b: Batch-load outstanding fee balances ─────────
     // Best-effort: finance may not be used by this school. Any DB error leaves all flags false.
     const blockedStudentIds = new Set();
@@ -506,8 +549,9 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
             Object.entries(subjectBest).map(([sub, winnerId]) => [sub, winnerId === r.studentId])
           ),
 
-          // Carry forward comments from previous version
-          comments: prev?.comments || { subjectComments: {}, classTeacherRemark: '', principalRemark: '' },
+          // Carry forward comments from the previous version, or — for a
+          // first-ever publish — seed from the draft comments doc (RC5).
+          comments: _resolveSnapComments(prev, draftCommentsMap[r.studentId]),
 
           // Snapshot school signature/stamp URLs at publish time (stays valid even if URLs change later)
           principalSignatureUrl,
@@ -1462,5 +1506,6 @@ router._notifyReportCardsPublished = _notifyReportCardsPublished;
 router._normalizeGradeScaleBands = _normalizeGradeScaleBands;
 router._buildPDFPage = _buildPDFPage;
 router._computeReportSections = _computeReportSections;
+router._resolveSnapComments = _resolveSnapComments;
 
 module.exports = router;

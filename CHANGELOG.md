@@ -6,6 +6,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.10.0] — 2026-07-26 — fix(report-cards): draft-to-published comment carry-forward gap (RC5)
+
+Discovered while scoping RC3 (HTML adapter + client cutover): the IR extension RC3 needs for its Cover/Comments content reads fields that, per `docs/audits/REPORT_CARD_COMMENT_LIFECYCLE_REVIEW.md`'s "Recommendation 1," were never actually reliable on a published snapshot. Traced precisely in `POST /publish`: `comments: prev?.comments || { subjectComments: {}, classTeacherRemark: '', principalRemark: '' }` — a student's **first-ever** publish for a term has no `prev` snapshot to carry comments forward from, so every comment field started completely blank regardless of what a teacher had already typed into `report_card_draft_comments`. The only way draft content ever reached a published document was a second, manual, easy-to-forget step: `PUT /:id/comments`, called *after* publish.
+
+### Fixed
+- `POST /publish` — when a student has no prior snapshot version, the new snapshot's `comments` are now seeded from `report_card_draft_comments` instead of an empty default. Carries every comment-shaped field the draft doc has — `subjectComments`, `classTeacherRemark`, `principalRemark`, plus `sportsAndTalent`, `closingDate`, `nextTermBegin`, `classTeacherName`, `principalName` (not just the three `CommentSchema`/`PUT /:id/comments` already covers) — since those are genuine report content a school already collects pre-publish, not presentation. A re-publish (a `prev` snapshot exists) is completely unaffected — it keeps carrying `prev.comments` forward exactly as before; this fix does not decide draft-vs-published precedence once a report has already been published once (that's the separate approval-workflow question tracked elsewhere in the same review doc).
+- Extracted the decision into `_resolveSnapComments(prev, draft)`, exported for direct unit testing (same convention as `_hashSnapshot`/`_normalizeGradeScaleBands`) rather than only reachable through the transaction-wrapped full `/publish` route.
+- `server/utils/indexes.js` — added `report_card_draft_comments`'s first-ever index block (`{schoolId,studentId,termNumber}` unique — the collection's own existing upsert key, and the new batch-read key `POST /publish` uses).
+
+### Note
+Full suite 77/77 suites, 754/754 tests; security-scan and ratchet clean (36/36 ceiling, unchanged). Mutation-tested `_resolveSnapComments`'s prev-vs-draft branch (temporarily disabled the `prev.comments` short-circuit — the new test correctly failed). Sequenced ahead of RC3 deliberately: RC3's IR extension for Cover/Comments content would otherwise have been correct for draft previews but silently blank on every real published report card.
+
+---
+
 ## [v5.9.0] — 2026-07-24 — feat(hr): payroll CSV export + payslip download UI (Payroll Phase 1, Step 8 — module complete)
 
 Payroll Phase 1, Step 8, the final step of the 8-step plan (`docs/audits/HR_PAYROLL_ARCHITECTURAL_REVIEW.md`). Calculations (Steps 2/3), workflows (Step 6), notifications (Steps 1/6), and permissions (`rbac()` gates throughout) were already built and tested incrementally across Steps 1–7. Step 8's one concrete, pre-existing gap: `server/config/moduleRegistry.js` declared a `hr.payroll_export` permission key with **no implementing route** — flagged as a real gap in the original architectural review, not fixed until now.

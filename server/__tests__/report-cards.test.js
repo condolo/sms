@@ -383,3 +383,67 @@ describe('_normalizeGradeScaleBands', () => {
     expect(out.find(b => b.grade === 'A').points).toBe(4.0); // NOT 12 (the old client default's scale)
   });
 });
+
+/* ─────────────────────────────────────────────────────────────── */
+/*  _resolveSnapComments (RC5 — draft-to-published carry-forward)  */
+/*                                                                  */
+/*  docs/audits/REPORT_CARD_COMMENT_LIFECYCLE_REVIEW.md's           */
+/*  "Recommendation 1": a first-ever publish (no `prev` snapshot)   */
+/*  used to start with completely blank comments, regardless of     */
+/*  what a teacher had already typed into                           */
+/*  report_card_draft_comments. Tested directly (like               */
+/*  _hashSnapshot/_normalizeGradeScaleBands above) rather than       */
+/*  through the transaction-wrapped full /publish route.            */
+/* ─────────────────────────────────────────────────────────────── */
+describe('_resolveSnapComments', () => {
+  const resolve = reportCardsRouter._resolveSnapComments;
+
+  test('a re-publish (prev exists) carries prev.comments forward untouched, ignoring the draft', () => {
+    const prev = { comments: { subjectComments: { math: 'Great work' }, classTeacherRemark: 'Well done', principalRemark: '' } };
+    const draft = { subjectComments: { math: 'A DIFFERENT draft comment' }, sportsAndTalent: 'Captain of football' };
+    const out = resolve(prev, draft);
+    expect(out).toBe(prev.comments); // same reference — untouched
+    expect(out.subjectComments.math).toBe('Great work');
+  });
+
+  test('a first-ever publish (no prev) seeds every field from the draft doc', () => {
+    const draft = {
+      subjectComments:    { math: 'Good progress', english: 'Needs improvement' },
+      classTeacherRemark: 'A solid term overall.',
+      principalRemark:    'Keep it up.',
+      sportsAndTalent:    'Represents the school in athletics.',
+      closingDate:        '2026-11-28',
+      nextTermBegin:      '2027-01-12',
+      classTeacherName:   'Mrs. Otieno',
+      principalName:      'Dr. Kariuki',
+    };
+    const out = resolve(undefined, draft);
+    expect(out).toEqual(draft);
+  });
+
+  test('a first-ever publish with NO draft doc at all still produces the same blank-default shape as before this fix', () => {
+    const out = resolve(undefined, undefined);
+    expect(out).toEqual({
+      subjectComments: {}, classTeacherRemark: '', principalRemark: '',
+      sportsAndTalent: '', closingDate: '', nextTermBegin: '',
+      classTeacherName: '', principalName: '',
+    });
+  });
+
+  test('a first-ever publish with a PARTIAL draft doc defaults only the missing fields', () => {
+    const draft = { subjectComments: { math: 'Good' }, classTeacherRemark: 'Nice term.' };
+    const out = resolve(undefined, draft);
+    expect(out.subjectComments).toEqual({ math: 'Good' });
+    expect(out.classTeacherRemark).toBe('Nice term.');
+    expect(out.principalRemark).toBe('');
+    expect(out.sportsAndTalent).toBe('');
+    expect(out.closingDate).toBe('');
+    expect(out.nextTermBegin).toBe('');
+  });
+
+  test('prev present but with no comments field (edge case) falls through to the draft, not to prev.comments === undefined', () => {
+    const draft = { classTeacherRemark: 'From draft' };
+    const out = resolve({ id: 'prev_1' }, draft); // prev.comments is undefined
+    expect(out.classTeacherRemark).toBe('From draft');
+  });
+});

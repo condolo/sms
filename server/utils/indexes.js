@@ -38,6 +38,18 @@ const INDEXES = [
       { key: { key: 1 }, name: 'rcc_key', unique: true },
     ],
   },
+  /* ── report_card_draft_comments (RC5) ────────────────────────
+     One doc per student/term — PUT /draft-comments/:studentId's own
+     upsert key ({schoolId,studentId,termNumber}), now also the batch-
+     read key POST /publish uses to seed a first-ever snapshot's
+     comments (docs/audits/REPORT_CARD_COMMENT_LIFECYCLE_REVIEW.md
+     "Recommendation 1"). Had no index block at all before this. */
+  {
+    col: 'report_card_draft_comments',
+    indexes: [
+      { key: { schoolId: 1, studentId: 1, termNumber: 1 }, name: 'rcdc_student_term', unique: true },
+    ],
+  },
 
   /* ── audit_logs ─────────────────────────────────────────────
      Append-only. Primary query: school + date desc.
