@@ -577,6 +577,88 @@ describe('_computeReportSections — RC3 IR extension', () => {
   });
 });
 
+/* ─────────────────────────────────────────────────────────────── */
+/*  _computeReportSections — RCE1 cover extension + dead-toggle     */
+/*  wiring (Report Card Template Engine, foundation phase)          */
+/* ─────────────────────────────────────────────────────────────── */
+describe('_computeReportSections — RCE1 cover extension + toggle wiring', () => {
+  const compute = reportCardsRouter._computeReportSections;
+
+  function baseSnap(overrides = {}) {
+    return {
+      status: 'published', superseded: false,
+      studentName: 'Jane Doe', admissionNo: 'ADM001', className: 'Grade 7',
+      streamName: 'East', houseName: 'Red House',
+      termName: 'Term 2', academicYear: '2026', termNumber: 2,
+      schoolName: 'Test School', studentPhotoUrl: 'https://x/photo.jpg',
+      assessmentWeights: [{ assessmentType: 'cat', label: 'CAT', weight: 40 }, { assessmentType: 'exam', label: 'Exam', weight: 60 }],
+      gradingSchema: [{ min: 0, grade: 'A', points: 12, label: 'Excellent' }],
+      subjects: { math: { finalScore: 85, grade: 'A', breakdown: { cat: 80, exam: 88 } } },
+      totalScore: 85, averageScore: 85, gpa: 3.9,
+      rankings: { class: { rank: 1, outOf: 30 } },
+      comments: { classTeacherName: 'Mrs. Otieno', principalName: 'Dr. Kariuki' },
+      version: 1, ...overrides,
+    };
+  }
+
+  test('cover gains named fields (stream/house/academicYear/termNumber/principal/photo/title), rows unchanged', () => {
+    const s = compute(baseSnap(), { rankingEnabled: true }, null, { school: { logoUrl: 'https://x/logo.png', tagline: 'Excellence' } });
+    expect(s.cover.title).toBe('REPORT CARD');
+    expect(s.cover.schoolName).toBe('Test School');
+    expect(s.cover.studentName).toBe('Jane Doe');
+    expect(s.cover.admissionNo).toBe('ADM001');
+    expect(s.cover.className).toBe('Grade 7');
+    expect(s.cover.streamName).toBe('East');
+    expect(s.cover.houseName).toBe('Red House');
+    expect(s.cover.academicYear).toBe('2026');
+    expect(s.cover.termNumber).toBe(2);
+    expect(s.cover.classTeacherName).toBe('Mrs. Otieno');
+    expect(s.cover.principalName).toBe('Dr. Kariuki');
+    expect(s.cover.studentPhotoUrl).toBe('https://x/photo.jpg');
+    // Existing rows-based cover (legacy_tabular's HTML renderer) is untouched.
+    expect(s.cover.rows.find(r => r.label === 'Student Name').value).toBe('Jane Doe');
+  });
+
+  test('cover named fields default to blank/null, never throw, when the snap has none of them', () => {
+    const s = compute(baseSnap({ streamName: undefined, houseName: undefined, studentPhotoUrl: undefined, comments: {} }), { rankingEnabled: true }, null);
+    expect(s.cover.streamName).toBe('');
+    expect(s.cover.houseName).toBe('');
+    expect(s.cover.studentPhotoUrl).toBeNull();
+    expect(s.cover.classTeacherName).toBe('');
+    expect(s.cover.principalName).toBe('');
+  });
+
+  test('resultsTable.showDeviation reflects academic_config.showDeviation, defaults true', () => {
+    expect(compute(baseSnap(), {}, null).resultsTable.showDeviation).toBe(true);
+    expect(compute(baseSnap(), { showDeviation: false }, null).resultsTable.showDeviation).toBe(false);
+  });
+
+  test('summary.showAverage reflects academic_config.showClassAverage, defaults true', () => {
+    expect(compute(baseSnap(), {}, null).summary.showAverage).toBe(true);
+    expect(compute(baseSnap(), { showClassAverage: false }, null).summary.showAverage).toBe(false);
+  });
+
+  test('comments.showClassTeacherRemark/showPrincipalRemark reflect config, default true', () => {
+    const s = compute(baseSnap(), { showClassTeacherRemark: false, showPrincipalRemark: false }, null);
+    expect(s.comments.showClassTeacherRemark).toBe(false);
+    expect(s.comments.showPrincipalRemark).toBe(false);
+    const defaults = compute(baseSnap(), {}, null);
+    expect(defaults.comments.showClassTeacherRemark).toBe(true);
+    expect(defaults.comments.showPrincipalRemark).toBe(true);
+  });
+
+  test('behaviour is suppressed when showBehaviour is explicitly false, even with real behaviour data', () => {
+    const behaviour = { merits: 5, demerits: 1, points: 4, total: 6 };
+    expect(compute(baseSnap(), {}, null, { behaviour }).behaviour).toEqual(behaviour);
+    expect(compute(baseSnap(), { showBehaviour: false }, null, { behaviour }).behaviour).toBeNull();
+  });
+
+  test('showRanking is suppressed when showRankOnReport is explicitly false, even with rankingEnabled true', () => {
+    expect(compute(baseSnap(), { rankingEnabled: true }, null).summary.showRanking).toBe(true);
+    expect(compute(baseSnap(), { rankingEnabled: true, showRankOnReport: false }, null).summary.showRanking).toBe(false);
+  });
+});
+
 describe('_computeReportSections — RC7 subject-teacher-comments capability toggle', () => {
   const compute = reportCardsRouter._computeReportSections;
   const config = { rankingEnabled: true };

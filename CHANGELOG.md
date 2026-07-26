@@ -6,6 +6,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.19.0] — 2026-07-26 — feat(report-cards): Report Card Engine — cover extension + dead-toggle wiring (RCE1)
+
+First milestone of the Report Card Template Engine effort: real pluggable layout renderers ("Light International style" subject+comment layout, plus a marks-then-comments layout) driven by RC11's previously-inert `report_card_templates` registry, and a dedicated Report Cards settings module replacing the scattered RC6/RC8/RC9/RC11 config with no UI. This phase is the IR/data foundation only — zero adapter or UI changes yet, by design (verified: the full pre-existing report-cards test suite passes byte-for-byte unchanged).
+
+Investigation (3 parallel research passes) found RC11's registry has zero rendering effect anywhere — `templateId`/`templateVersion` are snapshotted at publish but never read back — and that `academic_config.showDeviation`/`showClassAverage` have existed in the schema/defaults since the original report-card config work but were never read by any adapter (dead code). Also found the "Kindergarten" competency-band template (`rc_templates`) is real, tested settings CRUD with **zero rendering consumers and no data-entry path anywhere** — no teacher-facing UI exists to score a student against a band/indicator. Presented to the user; they chose to ship the two data-only templates first and defer Kindergarten (which needs a whole new scoring UI, not just a layout) to a later phase.
+
+### Changed
+- `server/routes/report-cards.js`'s `_computeReportSections` (the shared IR both the PDF and HTML adapters consume):
+  - `cover` gains named fields (`title`, `schoolName`, `studentName`, `admissionNo`, `className`, `streamName`, `houseName`, `academicYear`, `termNumber`, `classTeacherName`, `principalName`, `studentPhotoUrl`) for the upcoming layout renderers' own cover-page components. The existing `rows` list is untouched — still what the current HTML adapter's cover renders from.
+  - `resultsTable.showDeviation` and `summary.showAverage` wire `academic_config.showDeviation`/`showClassAverage` live for the first time — both default `true`, so every school's current output is byte-for-byte unchanged unless a school explicitly opts out.
+  - `comments.showClassTeacherRemark`/`showPrincipalRemark` — new, default `true`, independent of whether a remark was actually entered.
+  - `behaviour` is now also gated by `academic_config.showBehaviour` (new, default `true`) alongside the existing behaviour-data-present check; `summary.showRanking` is now also gated by `showRankOnReport` (existed in schema, was previously unread).
+  - None of these new flags are consulted by `_drawReportPage`/`_computeReportHTML` yet — that's the next milestone (RCE2).
+- `POST /publish` resolves stream/house names once per distinct id present in the class (same batching convention as RC11's per-section template resolution) and snapshots `streamName`/`houseName` onto each `report_card_snapshots` document.
+- `server/routes/academic-config.js`: `showBehaviour`/`showClassTeacherRemark`/`showPrincipalRemark` added to `ConfigSchema`, `DEFAULT_REPORT_CONFIG`, and `_mergeConfig` — same shape/defaulting convention as the existing `showDeviation`/`showClassAverage` fields.
+
+### Tests
+`server/__tests__/report-cards.test.js` — new `describe('_computeReportSections — RCE1 cover extension + toggle wiring')` block (9 tests: named cover fields present/blank-safe, each new/wired toggle defaults true and is respected when explicitly false). `server/__tests__/academic-config-report-toggles.test.js` (new) — `_mergeConfig` defaults + a PUT/GET round-trip proving the 3 new fields are actually PATCH-able, not silently stripped by the Zod schema. Mutation-verified the `showBehaviour` gate (temporarily reverted it to ignore config, confirmed the new test failed, restored). Full suite 89/89 suites, 887/887 tests; security-scan and tenant-coverage ratchet (held at 36) clean.
+
+### Outstanding (this milestone only)
+No renderer or client changes yet — see RCE2 (layout registry + `legacy_tabular` extraction) onward for wiring these fields into actual output, and the new "Report Cards" settings module.
+
+---
+
 ## [v5.18.0] — 2026-07-26 — feat(report-cards): Template Engine registry + resolution chain (RC11)
 
 `docs/audits/REPORT_CARD_ARCHITECTURE_CONSOLIDATION_PLAN.md` Phase 3 describes a full Template Engine: configurable section layout, page geometry, per-template branding, multiple starter templates, `rc_templates` absorbed into it. Building all of that in one pass would be disproportionate to every other RC milestone in this series, and the plan's own header gates it behind separate explicit acceptance — the same posture every other Kernel-tier item in this codebase has required. Presented as a scoped choice (full engine / minimal registry+resolution / skip); the user chose **minimal**: build the `report_card_templates` registry and the resolution chain now, with `templateId`/`templateVersion` snapshotted at publish time, but no new rendering engine — every school still renders through today's exact PDF/HTML layout, reported as `"legacy_tabular"`. Mid-investigation, also discovered `rc_templates` (competency-band templates) is not dead code as the plan's framing implied — it has a full, live 821-line Settings UI (`RCTemplatesSection.jsx`) — so "retire/absorb `rc_templates`" was explicitly ruled out too, confirmed by the user's choice: it stays untouched, since nothing replaces its competency-band feature yet.

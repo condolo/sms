@@ -521,6 +521,17 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
     }).lean();
     const studentMap = Object.fromEntries(students.map(s => [s.id || s._id.toString(), s]));
 
+    // ── Step 6f: Resolve stream names once per distinct id present in this
+    // class (RCE1 cover field) — same batching convention as Step 6e's
+    // per-section template resolution, not a lookup per student.
+    const distinctStreamIds = [...new Set(students.map(s => s.streamId).filter(Boolean))];
+    const streamNameById = {};
+    if (distinctStreamIds.length) {
+      const streamDocs = await tenantModel('streams', tenantContext(req))
+        .find({ schoolId, id: { $in: distinctStreamIds } }).select('id name').lean();
+      for (const s of streamDocs) streamNameById[s.id] = s.name;
+    }
+
     // ── Step 6a: Batch-load draft comments for first-ever publishes (RC5) ──
     // Only students with no `prev` snapshot need this for comment
     // carry-forward — a re-publish keeps carrying prev.comments forward,
@@ -569,10 +580,19 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
     // ── Step 6c: Load school signature/stamp URLs for snapshotting ────────
     let principalSignatureUrl = null;
     let schoolStampUrl        = null;
+    let houseNameById         = {};
     try {
-      const schoolDoc = await _model('schools').findOne({ id: schoolId }).select('principalSignatureUrl schoolStampUrl').lean();
+      const schoolDoc = await _model('schools').findOne({ id: schoolId }).select('principalSignatureUrl schoolStampUrl houses').lean();
       principalSignatureUrl = schoolDoc?.principalSignatureUrl || null;
       schoolStampUrl        = schoolDoc?.schoolStampUrl        || null;
+      // RCE1 — house names for the cover page; houses are a freeform
+      // array on the school doc (no dedicated collection), keyed by
+      // `id` when present else `name` itself (matches how the Settings
+      // UI already keys deletions: `(h.id ?? h.name)`).
+      houseNameById = Object.fromEntries(
+        (Array.isArray(schoolDoc?.houses) ? schoolDoc.houses : [])
+          .map(h => [h.id ?? h.name, h.name]).filter(([id]) => id)
+      );
     } catch (_) { /* non-fatal */ }
 
     // ── Step 7: Build new snapshots ──────────────────────────
@@ -616,6 +636,9 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
           studentName:    [stu.firstName, stu.lastName].filter(Boolean).join(' ') || r.studentId,
           admissionNo:    stu.admissionNumber || stu.admissionNo || '',
           studentPhotoUrl: stu.photo || null,
+          // RCE1 — cover-page fields, resolved once per distinct id above.
+          streamName:     stu.streamId ? (streamNameById[stu.streamId] || '') : '',
+          houseName:      stu.houseId  ? (houseNameById[stu.houseId]   || '') : '',
           classId,        className:   className   || '',
           termId:         termId         || null,  termName:    termName    || '',
           termNumber:     termNum        ?? null,
@@ -1241,8 +1264,9 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
     ? `● Subjects counted toward rank (${snap.rankingSubjectStrategy === 'best_n' ? `Best ${snap.rankingN}` : 'Compulsory only'})`
     : null;
 
-  const showRanking = !!(config.rankingEnabled && snap.rankings?.class);
+  const showRanking = !!(config.rankingEnabled && config.showRankOnReport !== false && snap.rankings?.class);
   const showAttendance = !!(config.showAttendanceSummary && attendance);
+  const showBehaviourSection = config.showBehaviour !== false && !!behaviour;
 
   // Whatever grading bands actually graded THIS report's subjects —
   // never a client-local default (Audit §6.2, same discipline
@@ -1267,10 +1291,20 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
         : null,
       moderationBypassed: !!snap.moderationBypassed,
     },
-    resultsTable: { typeEntries, rows, rankingNote },
+    resultsTable: {
+      typeEntries, rows, rankingNote,
+      // RCE1 — wires academic_config.showDeviation live (previously
+      // defined in the schema/merge but never read anywhere). Kept as
+      // its own flag rather than nulling out deviationText per-row so
+      // "no comparable prior score" and "config says hide" stay distinct
+      // reasons a renderer can tell apart.
+      showDeviation: config.showDeviation !== false,
+    },
     summary: {
       totalText:   `Total Score: ${snap.totalScore?.toFixed(1) ?? '—'}`,
       averageText: `Average: ${snap.averageScore?.toFixed(1) ?? '—'}%`,
+      // RCE1 — wires academic_config.showClassAverage live (previously dead).
+      showAverage: config.showClassAverage !== false,
       showGPA:     !!config.showGPA,
       gpaText:     `GPA: ${snap.gpa?.toFixed(2) ?? '—'}`,
       showRanking,
@@ -1283,6 +1317,11 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
     comments: {
       classTeacherRemark: sanitisePdfStr(snap.comments?.classTeacherRemark) || '— No remark entered —',
       principalRemark:    sanitisePdfStr(snap.comments?.principalRemark)    || '— No comment entered —',
+      // RCE1 — new toggles, independent of whether a remark was actually
+      // entered. Consumed starting with the RCE3/4 layout renderers;
+      // legacy_tabular ignores them and keeps always showing both blocks.
+      showClassTeacherRemark: config.showClassTeacherRemark !== false,
+      showPrincipalRemark:    config.showPrincipalRemark    !== false,
       // RC3-only fields (not read by the PDF adapter) — persisted by
       // RC5's draft-to-published carry-forward fix.
       sportsAndTalent: sanitisePdfStr(snap.comments?.sportsAndTalent) || '',
@@ -1332,6 +1371,23 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
         { label: 'Class Rank',    value: showRanking ? `${snap.rankings.class.rank}/${snap.rankings.class.outOf}` : '—' },
         { label: 'Class Teacher', value: snap.comments?.classTeacherName || '—' },
       ],
+      // RCE1 — named fields for the RCE3/4 layout renderers' own
+      // cover-page components (a fixed label/value list doesn't let
+      // those layouts control their own visual arrangement). `rows`
+      // above is unchanged and still what legacy_tabular's HTML cover
+      // renders from.
+      title:            'REPORT CARD',
+      schoolName:       snap.schoolName    || '',
+      studentName:      snap.studentName   || '—',
+      admissionNo:      snap.admissionNo   || '—',
+      className:        snap.className    || '—',
+      streamName:       snap.streamName   || '',
+      houseName:        snap.houseName    || '',
+      academicYear:     snap.academicYear || '',
+      termNumber:       snap.termNumber   ?? null,
+      classTeacherName: snap.comments?.classTeacherName || '',
+      principalName:    snap.comments?.principalName    || '',
+      studentPhotoUrl:  snap.studentPhotoUrl || null,
     },
     gradingKey: gradeBands.map((b, i) => ({
       grade:  b.grade,
@@ -1339,7 +1395,7 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
       points: b.points ?? '—',
       label:  b.label  ?? '',
     })),
-    behaviour: behaviour ? {
+    behaviour: showBehaviourSection ? {
       merits:   behaviour.merits   ?? 0,
       demerits: behaviour.demerits ?? 0,
       points:   behaviour.points   ?? 0,
