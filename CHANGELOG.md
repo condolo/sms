@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.15.0] — 2026-07-26 — feat(report-cards): report-level remark approval chain (RC8)
+
+`docs/audits/REPORT_CARD_PLATFORM_FUNCTIONAL_ARCHITECTURE.md` §11: report-level remarks (Class Teacher, and whatever else a school configures — Head of Section, Deputy Principal, Principal) should "collapse into one mechanism: a school-configured, ordered list of report-level remark steps... executed by `workflow-config.js`" — the same reusable approval-chain engine already proven across HR's leave approval, marks-unlock, and payroll approval. Before this phase, `classTeacherRemark`/`principalRemark` were the only two report-level remark fields that could ever exist, hardcoded, with no approval step, no ordering, no notification.
+
+### Added
+- `GET`/`PUT /api/report-cards/workflow-config` — school-configured chain under the new `report_comment_approval` workflow key (`minSteps: 1`, more permissive than leave's 2-step floor — a school may configure "Principal only").
+- `PATCH /api/report-cards/draft-comments/:studentId/advance` — the current step's eligible assignee writes their remark and the chain advances, mirroring `hr.js`'s `PATCH /leave/:id/advance` exactly (sequential enforcement, 403 if not the current step's assignee, audit-logged, notifies the next step's assignees). Schools with no chain configured never reach this route's logic at all — they keep writing `classTeacherRemark`/`principalRemark` directly via the pre-existing `PUT /draft-comments/:studentId`, completely unaffected.
+- `report_card_draft_comments` gains `currentStepOrder` and `reportRemarks` (array of `{stepOrder, label, remark, writtenBy, writtenAt}`) — additive fields, absent/empty for every school until the chain is configured.
+- `_resolveSnapComments`/`_computeReportSections` carry `reportRemarks` through to a published snapshot (empty array for non-chain schools, same posture as `subjectComments` already had). `_computeReportHTML` renders a dynamic, variable-length remark list when `reportRemarks` is non-empty; falls back to the original fixed Class-Teacher/Principal two-column layout byte-for-byte when it's empty.
+- `notif-settings.js` gains a `report_comment_step` event (in-app by default) — the next step's assignees are notified via the existing `notify-dispatch.js` central dispatcher, not a bespoke notification path.
+- 12 new tests across the config/advance routes and the IR/HTML adapter.
+
+### Fixed (found while scoping this phase, shipped as its own prior commit — see v5.14.1)
+`GET /bulk-pdf` and `GET /draft-comments` were completely unreachable, shadowed by `GET /:id`'s registration-order position — a real, previously-unnoticed bug this phase's own new `GET /workflow-config` route would otherwise have repeated a third time at the same prefix.
+
+### Note
+No client UI to configure the chain or use the advance flow yet — this phase is the backend primitive, matching how RC6 shipped enforcement-only first. A builder UI (mirroring HR's leave-chain settings page) is a natural, small follow-up, not silently dropped. Full suite 85/85 suites, 840/840 tests; security-scan and ratchet clean. Mutation-tested the step-eligibility check (temporarily disabled it, confirmed the ineligible-user test fails, restored via backup-copy). No live MongoDB/login in this sandbox — verified via route-level and IR/HTML-adapter tests asserting the exact chain state transitions and rendered output for both the legacy and chain-configured cases.
+
+---
+
 ## [v5.14.1] — 2026-07-26 — fix(report-cards): GET /bulk-pdf and GET /draft-comments were completely unreachable
 
 Found by accident while scoping RC8, which needed to add a third single-segment `GET` route (`/workflow-config`) at this same path prefix. Express matches single-segment routes in registration order — `GET /:id` was registered at line 793, before `GET /bulk-pdf` (line 1765) and `GET /draft-comments` (line 1851). Every request to either route was captured by `GET /:id` first (`id='bulk-pdf'` / `id='draft-comments'`, no matching snapshot, 404 "Report card snapshot not found") — confirmed empirically before this fix, with zero existing test coverage to have caught it.

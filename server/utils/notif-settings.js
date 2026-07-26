@@ -67,6 +67,14 @@ const EVENT_REGISTRY = {
     channels:    { email: true, inApp: true },
     implemented: true,
   },
+  report_comment_step: {
+    label:       'Report Comment Ready For You',
+    desc:        'Sent to the next approver in a school\'s report-level remark chain (RC8) once the previous step writes their remark',
+    group:       'academic',
+    audience:    ['staff'],
+    channels:    { email: false, inApp: true },
+    implemented: true,
+  },
 
   /* ── Finance ─────────────────────────────────────────────── */
   invoice_created: {

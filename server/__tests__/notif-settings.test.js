@@ -28,6 +28,20 @@ describe('behaviour_incident event registration', () => {
   });
 });
 
+describe('report_comment_step event registration (RC8)', () => {
+  test('is registered, implemented, in-app by default, grouped under academic', () => {
+    expect(EVENT_REGISTRY.report_comment_step).toBeDefined();
+    expect(EVENT_REGISTRY.report_comment_step.implemented).toBe(true);
+    expect(EVENT_REGISTRY.report_comment_step.group).toBe('academic');
+    expect(EVENT_REGISTRY.report_comment_step.channels).toEqual({ email: false, inApp: true });
+  });
+
+  test('a school with no saved settings gets the default (in-app enabled)', async () => {
+    mockSchoolDoc = null;
+    expect(await isEnabled(SCHOOL, 'report_comment_step', 'inApp')).toBe(true);
+  });
+});
+
 describe('getFrequency', () => {
   test('defaults to immediate when the school has no saved setting', async () => {
     mockSchoolDoc = { notificationSettings: {} };

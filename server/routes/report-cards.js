@@ -41,6 +41,8 @@ const AuditService       = require('../services/audit');
 const { sanitisePdfStr } = require('../utils/sanitisePdf');
 const { notifyGuardiansForStudents } = require('../utils/notify-students');
 const { canWriteSubject, unassignedPairs } = require('../utils/subject-scope');
+const { getWorkflowConfig, saveWorkflowConfig, resolveStep, resolveAssigneeLabel } = require('../utils/workflow-config');
+const { dispatchNotification } = require('../utils/notify-dispatch');
 const email = require('../utils/email');
 const {
   aggregateGrades,
@@ -55,6 +57,15 @@ const {
 
 const router = express.Router();
 const PLAN   = planGate('grades');
+
+/* RC8 — report-level remark approval chain, reusing the same
+   workflow-config.js engine leave_approval/marks_unlock/payroll already
+   proved reusable across HR. Opt-in per school: a school that never
+   configures this key keeps writing classTeacherRemark/principalRemark
+   directly via PUT /draft-comments/:studentId, completely unaffected —
+   see docs/audits/REPORT_CARD_PLATFORM_FUNCTIONAL_ARCHITECTURE.md §11. */
+const REPORT_COMMENT_WORKFLOW_KEY = 'report_comment_approval';
+const REPORT_COMMENT_MIN_STEPS = 1;
 
 /* ── Config loader (legacy academic_config) ─────────────────── */
 async function _loadConfig(schoolId) {
@@ -193,6 +204,10 @@ function _resolveSnapComments(prev, draft) {
     nextTermBegin:      draft?.nextTermBegin       ?? '',
     classTeacherName:   draft?.classTeacherName    ?? '',
     principalName:      draft?.principalName       ?? '',
+    // RC8 — populated only for schools using the report_comment_approval
+    // chain (PATCH /draft-comments/:studentId/advance); empty for every
+    // other school, same as subjectComments defaulting to {}.
+    reportRemarks:      draft?.reportRemarks       ?? [],
   };
 }
 
@@ -898,6 +913,34 @@ router.get('/draft-comments', authMiddleware, PLAN, rbac('report_cards', 'read')
   }
 });
 
+/* GET/PUT /workflow-config — school-configured report-level remark chain
+   (RC8). Registered here for the same registration-order reason as
+   /bulk-pdf and /draft-comments above — a third single-segment GET
+   route that would otherwise be shadowed by GET /:id. */
+router.get('/workflow-config', authMiddleware, PLAN, rbac('report_cards', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const config = await getWorkflowConfig(tenantContext(req), schoolId, REPORT_COMMENT_WORKFLOW_KEY);
+    return ok(res, config || { schoolId, workflowKey: REPORT_COMMENT_WORKFLOW_KEY, steps: [], notifyOnly: [] });
+  } catch (err) {
+    console.error('[report-cards/workflow-config GET]', err);
+    return E.serverError(res);
+  }
+});
+
+router.put('/workflow-config', authMiddleware, PLAN, rbac('report_cards', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { steps, notifyOnly } = req.body;
+    const doc = await saveWorkflowConfig(tenantContext(req), schoolId, REPORT_COMMENT_WORKFLOW_KEY, { steps, notifyOnly }, userId, REPORT_COMMENT_MIN_STEPS);
+    return ok(res, doc);
+  } catch (err) {
+    if (err.statusCode === 400) return E.badRequest(res, err.message);
+    console.error('[report-cards/workflow-config PUT]', err);
+    return E.serverError(res);
+  }
+});
+
 /* ══════════════════════════════════════════════════════════════
    GET /:id  — full snapshot
    ══════════════════════════════════════════════════════════════ */
@@ -1132,6 +1175,13 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
             subjectId, text: sanitisePdfStr(snap.comments?.subjectComments?.[subjectId]) || '',
           }))
         : [],
+      // RC8 — populated only for schools using the report_comment_approval
+      // chain; empty array for every school that still writes
+      // classTeacherRemark/principalRemark directly (the two fields
+      // above stay correct and rendered as before in that case).
+      reportRemarks: (snap.comments?.reportRemarks || []).map(r => ({
+        label: r.label || 'Remark', text: sanitisePdfStr(r.remark) || '',
+      })),
     },
     signatures: {
       classTeacherLabel: config.classTeacherSignatureLabel || 'Class Teacher',
@@ -1512,16 +1562,18 @@ function _computeReportHTML(s) {
     ${subjectCommentRows || `<tr><td colspan="2" style="${tdS};color:#94a3b8;font-style:italic">No subjects on this report.</td></tr>`}
   </table>` : '';
 
-  const commentsHtml = `
-<div style="${pb}">
-  <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:14px;border-bottom:2px solid #1e293b;padding-bottom:10px">
-    ${logoSmallHtml}
-    <div style="text-align:center">
-      <h2 style="margin:0 0 2px;font-size:16px;font-weight:800">${_esc(s.header.schoolName)}</h2>
-      <p style="margin:0;font-size:12px;font-weight:700;letter-spacing:1px">TEACHER COMMENTS — ${_esc(s.studentInfo.studentName)}</p>
-    </div>
-  </div>
-  ${subjectCommentsSectionHtml}
+  // RC8 — a school using the report_comment_approval chain renders its
+  // configured, variable-length remark list here instead; a school that
+  // never configured it (reportRemarks always []) keeps the original
+  // fixed Class Teacher / Principal two-column layout, byte-for-byte.
+  const reportRemarksSectionHtml = s.comments.reportRemarks.length > 0 ? `
+  <div style="margin-bottom:16px">
+    ${s.comments.reportRemarks.map(r => `
+    <div style="margin-bottom:12px">
+      <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">${_esc(r.label)}</p>
+      <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:50px;font-size:11px;color:#475569">${_esc(r.text)}</div>
+    </div>`).join('')}
+  </div>` : `
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
     <div>
       <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">
@@ -1537,7 +1589,19 @@ function _computeReportHTML(s) {
       <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-height:70px;font-size:11px;color:#475569">${_esc(s.comments.principalRemark)}</div>
       <div style="margin-top:24px;border-top:1px solid #1e293b;width:180px;padding-top:4px;font-size:10px;color:#475569">${_esc(s.signatures.principalLabel)} Signature</div>
     </div>
+  </div>`;
+
+  const commentsHtml = `
+<div style="${pb}">
+  <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:14px;border-bottom:2px solid #1e293b;padding-bottom:10px">
+    ${logoSmallHtml}
+    <div style="text-align:center">
+      <h2 style="margin:0 0 2px;font-size:16px;font-weight:800">${_esc(s.header.schoolName)}</h2>
+      <p style="margin:0;font-size:12px;font-weight:700;letter-spacing:1px">TEACHER COMMENTS — ${_esc(s.studentInfo.studentName)}</p>
+    </div>
   </div>
+  ${subjectCommentsSectionHtml}
+  ${reportRemarksSectionHtml}
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;border-top:1px solid #e2e8f0;padding-top:12px">
     <div>
       <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">Sports &amp; Talent</p>
@@ -1966,6 +2030,87 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
     return ok(res, doc);
   } catch (err) {
     console.error('[report-cards/draft-comments/subject PUT]', err);
+    return E.serverError(res);
+  }
+});
+
+/* PATCH /draft-comments/:studentId/advance — write the current step's
+   report-level remark and advance the school-configured chain (RC8).
+   Mirrors hr.js's PATCH /leave/:id/advance exactly: sequential
+   enforcement (only the current step's eligible assignee may write),
+   404/400 posture, resolveAssigneeLabel for audit richness, notify the
+   next step. Schools with no report_comment_approval config never reach
+   a state where this route applies — use the legacy PUT
+   /draft-comments/:studentId (classTeacherRemark/principalRemark)
+   instead, completely unaffected by this route's existence. */
+router.patch('/draft-comments/:studentId/advance', authMiddleware, PLAN, rbac('report_cards', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId, name, role } = req.jwtUser;
+    const { studentId } = req.params;
+    const { classId, termNumber, remark } = req.body;
+    if (!termNumber) return E.badRequest(res, 'termNumber is required');
+    if (typeof remark !== 'string' || !remark.trim()) return E.badRequest(res, 'remark is required');
+
+    const ctx = tenantContext(req);
+    const config = await getWorkflowConfig(ctx, schoolId, REPORT_COMMENT_WORKFLOW_KEY);
+    if (!config) return E.badRequest(res, 'No report-comment approval chain is configured for this school');
+
+    const Draft = tenantModel('report_card_draft_comments', ctx);
+    const existing = await Draft.findOne({ schoolId, studentId, termNumber: Number(termNumber) }).lean();
+    const stepOrder = existing?.currentStepOrder ?? 1;
+
+    if (stepOrder > config.steps.length) {
+      return E.badRequest(res, 'This report has already completed its remark chain');
+    }
+    const step = config.steps.find(s => s.order === stepOrder);
+    if (!step) return E.serverError(res);
+
+    const eligible = await resolveStep(ctx, schoolId, step);
+    if (!eligible.some(u => u.id === userId)) {
+      return E.forbidden(res, 'You are not an approver at this step');
+    }
+
+    const resolvedRoleLabel = await resolveAssigneeLabel(ctx, schoolId, step.assigneeType, step.assigneeValue);
+    const nextStepOrder = stepOrder + 1;
+    const priorRemarks = (existing?.reportRemarks || []).filter(r => r.stepOrder !== stepOrder);
+    const reportRemarks = [...priorRemarks, {
+      stepOrder, label: step.label || resolvedRoleLabel,
+      assigneeType: step.assigneeType, assigneeValue: step.assigneeValue,
+      remark: remark.trim(), writtenBy: userId, writtenByName: name || resolvedRoleLabel,
+      writtenAt: new Date().toISOString(),
+    }].sort((a, b) => a.stepOrder - b.stepOrder);
+
+    const doc = await Draft.findOneAndUpdate(
+      { schoolId, studentId, termNumber: Number(termNumber) },
+      { $set: { schoolId, studentId, classId: classId ?? existing?.classId, termNumber: Number(termNumber), reportRemarks, currentStepOrder: nextStepOrder, updatedBy: userId, updatedAt: new Date() } },
+      { upsert: true, new: true }
+    ).lean();
+
+    await AuditService.log({
+      action: 'report_comment.step_written',
+      actor: { userId, role, name },
+      schoolId,
+      target: { type: 'report_card_draft_comments', id: `${studentId}_${termNumber}` },
+      details: { stepOrder, resolvedRoleLabel, complete: nextStepOrder > config.steps.length },
+      req,
+    });
+
+    if (nextStepOrder <= config.steps.length) {
+      const nextStep = config.steps.find(s => s.order === nextStepOrder);
+      if (nextStep) {
+        const nextEligible = await resolveStep(ctx, schoolId, nextStep);
+        await dispatchNotification({
+          ctx, schoolId, eventKey: 'report_comment_step', actorUserId: userId,
+          recipients: nextEligible.map(u => ({ userId: u.id, name: u.name, email: u.email })),
+          inAppSubject: 'Report comment ready for your review',
+          inAppBody: `A report-level remark is ready for you to review for a student's report card (Term ${termNumber}).`,
+        });
+      }
+    }
+
+    return ok(res, doc);
+  } catch (err) {
+    console.error('[report-cards/draft-comments/advance PATCH]', err);
     return E.serverError(res);
   }
 });

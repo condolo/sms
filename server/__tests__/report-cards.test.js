@@ -434,7 +434,7 @@ describe('_resolveSnapComments', () => {
       principalName:      'Dr. Kariuki',
     };
     const out = resolve(undefined, draft);
-    expect(out).toEqual(draft);
+    expect(out).toEqual({ ...draft, reportRemarks: [] });
   });
 
   test('a first-ever publish with NO draft doc at all still produces the same blank-default shape as before this fix', () => {
@@ -442,7 +442,7 @@ describe('_resolveSnapComments', () => {
     expect(out).toEqual({
       subjectComments: {}, classTeacherRemark: '', principalRemark: '',
       sportsAndTalent: '', closingDate: '', nextTermBegin: '',
-      classTeacherName: '', principalName: '',
+      classTeacherName: '', principalName: '', reportRemarks: [],
     });
   });
 
@@ -627,5 +627,80 @@ describe('_computeReportSections — RC7 subject-teacher-comments capability tog
     expect(html).not.toContain('Subject Teacher Comments');
     expect(html).not.toContain('Excellent effort this term');
     expect(html).not.toContain('No subjects on this report');
+  });
+});
+
+describe('_computeReportSections / _computeReportHTML — RC8 report-level remark chain', () => {
+  const compute = reportCardsRouter._computeReportSections;
+  const config = { classTeacherSignatureLabel: 'Class Teacher', principalSignatureLabel: 'Principal' };
+
+  function baseSnap(overrides = {}) {
+    return {
+      status: 'published', superseded: false,
+      studentName: 'Jane Doe', admissionNo: 'ADM001', className: 'Grade 7',
+      termName: 'Term 2', academicYear: '2026', termNumber: 2,
+      schoolName: 'Test School',
+      assessmentWeights: [{ assessmentType: 'cat', label: 'CAT', weight: 100 }],
+      gradingSchema: [{ min: 0, grade: 'C', points: 6, label: 'Average' }],
+      subjects: { math: { finalScore: 85, grade: 'A', breakdown: { cat: 85 } } },
+      totalScore: 85, averageScore: 85, gpa: 4.0,
+      comments: { classTeacherRemark: 'Legacy remark', principalRemark: 'Legacy principal remark' },
+      version: 1, ...overrides,
+    };
+  }
+
+  test('a school with no chain (reportRemarks absent) gets an empty array — legacy fields untouched', () => {
+    const s = compute(baseSnap(), config, null);
+    expect(s.comments.reportRemarks).toEqual([]);
+    expect(s.comments.classTeacherRemark).toBe('Legacy remark');
+  });
+
+  test('a school using the chain gets its configured remarks mapped to {label, text}', () => {
+    const snap = baseSnap({
+      comments: {
+        reportRemarks: [
+          { stepOrder: 1, label: 'Class Teacher', remark: 'Solid term.' },
+          { stepOrder: 2, label: 'Principal', remark: 'Approved.' },
+        ],
+      },
+    });
+    const s = compute(snap, config, null);
+    expect(s.comments.reportRemarks).toEqual([
+      { label: 'Class Teacher', text: 'Solid term.' },
+      { label: 'Principal', text: 'Approved.' },
+    ]);
+  });
+
+  test('HTML adapter: no chain (legacy) renders the original fixed two-column layout', () => {
+    const s = compute(baseSnap(), config, null);
+    const html = reportCardsRouter._computeReportHTML(s);
+    expect(html).toContain('Legacy remark');
+    expect(html).toContain('Legacy principal remark');
+    expect(html).toContain('Class Teacher Signature');
+  });
+
+  test('HTML adapter: chain configured renders the dynamic remark list, not the fixed layout', () => {
+    const snap = baseSnap({
+      comments: {
+        classTeacherRemark: 'Legacy remark', principalRemark: 'Legacy principal remark',
+        reportRemarks: [
+          { stepOrder: 1, label: 'Class Teacher', remark: 'Solid term.' },
+          { stepOrder: 2, label: 'Head of Section', remark: 'Reviewed and endorsed.' },
+          { stepOrder: 3, label: 'Principal', remark: 'Approved.' },
+        ],
+      },
+    });
+    const s = compute(snap, config, null);
+    const html = reportCardsRouter._computeReportHTML(s);
+    expect(html).toContain('Head of Section');
+    expect(html).toContain('Reviewed and endorsed.');
+    expect(html).toContain('Solid term.');
+    expect(html).toContain('Approved.');
+    // The legacy fixed layout must not also render — 'Legacy remark' text
+    // (verbatim from the untouched classTeacherRemark field) proves the
+    // old block was skipped, not just that new content was added alongside it.
+    expect(html).not.toContain('Legacy remark');
+    expect(html).not.toContain('Legacy principal remark');
+    expect(html).not.toContain('Class Teacher Signature');
   });
 });
