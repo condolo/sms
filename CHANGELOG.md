@@ -6,6 +6,67 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.24.0] — 2026-07-26 — chore(report-cards): Report Card Template Engine — final verification, arc close-out (RCE6)
+
+Closes the RCE1–RCE5 arc (Report Card Template Engine plan). No behavior
+changes — this milestone is verification-only, run once across the
+whole arc rather than repeating per-milestone checks that already
+passed individually.
+
+### Verified
+- Mutation-tested the layout-dispatch logic specifically flagged in the
+  plan's RCE6 scope as the single place a bug could silently rewrite
+  history: `_buildPDFPage`'s `getLayout(snap.layoutKey)` call was
+  hardcoded to `'subject_paired'` (via `cp` backup/mutate/restore, never
+  `git checkout`) — `report-cards-layout-dispatch.test.js`'s "no
+  layoutKey passes undefined through, not a hardcoded key" assertion
+  caught it immediately, confirming a published snapshot's own frozen
+  layout can never silently drift to a school's later-changed default.
+- The RCE1 toggle wiring, already covered from three independent angles
+  (`academic-config-report-toggles.test.js` at the IR level,
+  `report-layouts-subject-paired.test.js` and
+  `report-layouts-marks-then-comments.test.js` at each renderer level),
+  needed no further mutation testing on top of what RCE3/RCE3c/RCE4
+  already ran individually.
+- Full suite: 94/94 suites, 939/939 tests. Security-scan clean.
+  Tenant-coverage ratchet held at 36 (this arc added zero direct
+  `_model()` tenant sites — every new collection access in `report-cards.js`
+  and `report-card-templates.js` already went through `tenantModel()`).
+
+### Summary of the arc (RCE1–RCE5, each already its own commit)
+- **RCE1** — cover IR extension (stream/house/class-teacher/principal/
+  school-contact fields) + wiring five previously-dead `academic_config`
+  toggles live (`showDeviation`, `showClassAverage`, `showBehaviour`,
+  `showClassTeacherRemark`, `showPrincipalRemark`).
+- **RCE2** — `server/utils/report-layouts.js` layout registry;
+  `legacy_tabular` extracted verbatim (byte-for-byte, proven by a golden
+  fixture) as the permanent renderer for pre-engine snapshots; RC11's
+  `report_card_templates` gained a real `layoutKey` and started actually
+  affecting rendering for the first time (previously snapshotted but
+  never read back).
+- **RCE3 / RCE3b / RCE3c** — `subject_paired` ("Light International
+  style") renderer: per-subject comment paired directly under its marks
+  row, dynamic PDF text-box sizing (closing a real overflow bug),
+  school contact fields on the cover, real subject-teacher names on
+  comments (`teaching_assignments`), and real column-header abbreviations
+  (assessment type key, `AVG` not `Score`) — plus a real pre-existing
+  bug fix along the way: `GET /:id/pdf`/`GET /bulk-pdf` never loaded
+  presentation extras at all before RCE3c, only `GET /:id/html` did.
+- **RCE4** — `marks_then_comments` ("Subjects First, Comments After")
+  renderer: all subjects' marks together, all comments together on a
+  separate page afterward — the opposite pairing choice from `subject_paired`.
+- **RCE5** — the first client UI ever for RC7/RC8/RC9/RC11 (previously
+  API-only capabilities): a new top-level Report Cards module replacing
+  the old, mislabeled "Grade Report" tab buried inside Exams, with a
+  five-section Settings panel (General / Comments / Workflow /
+  Publication Policy / Templates).
+- Kindergarten (competency-band reports) remains explicitly deferred —
+  `rc_templates`' existing settings screen stays untouched, and no
+  scoring UI exists yet for a teacher to grade a student against a
+  band/indicator, a materially larger job than either shipped layout.
+
+---
+
 ## [v5.23.0] — 2026-07-26 — feat(report-cards): Report Cards client module — nav, settings panel (RCE5)
 
 The final client-side milestone of the Report Card Template Engine: a
