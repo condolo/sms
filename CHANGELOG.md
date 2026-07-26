@@ -6,6 +6,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.13.0] — 2026-07-26 — feat(report-cards): subject-teacher-scoped mark/comment enforcement (RC6)
+
+`docs/audits/REPORT_CARD_COMMENT_LIFECYCLE_REVIEW.md` traced the Subject Teacher Comment lifecycle and found `PUT /draft-comments/:studentId/subject/:subjectId`'s own code comment says "teacher-safe merge... each teacher only touches their own subject" — but nothing ever verified that. Direct code reading found the matching gap on the marks side too: `academic_config.subjectAssignmentEnforced` ("if true, only assigned teacher can enter marks") has existed since it was added to `academic-config.js`'s schema — validated, persisted, returned by `GET /api/academic-config` — but was never read anywhere else in the codebase. Any user with `grades:create`/`report_cards:update` could write marks or the Subject Teacher Comment for any subject in any class, not just their own.
+
+### Added
+- `server/utils/subject-scope.js` — `canWriteSubject(req, classId, subjectId)` / `unassignedPairs(req, pairs)`: when a school has turned on `subjectAssignmentEnforced`, a teacher may only write for a `{classId, subjectId}` pair they hold a `teaching_assignments` record for. Management-tier roles (admin/superadmin/principal/deputy/hod) are always exempt. Deliberately does not reuse `scopeMiddleware`/`scopeEngine.js` — that system scopes by two independent flat lists (`classIds`, `subjectIds`); a teacher assigned Math-in-4A and English-in-4B would pass a flat-list check for English-in-4A too, exactly the wrong pairing this closes.
+- Wired into `POST /api/assessment/marks`, `POST /api/assessment/marks/bulk` (one query for every distinct pair in the batch, not one per mark), `PUT /api/report-cards/draft-comments/:studentId/subject/:subjectId`, and the `subjectComments` branch of `PUT /api/report-cards/draft-comments/:studentId`.
+- 23 new tests (`subject-scope.test.js`, `assessment-subject-scope.test.js`, `report-cards-subject-scope.test.js`) — first-ever coverage for this flag and these write paths' authorization.
+
+### Note
+`subjectAssignmentEnforced` still has no dedicated Settings UI toggle anywhere in the client — a school can only turn it on today via a direct `PATCH /api/academic-config` call. Adding that control is out of scope here (this milestone is the enforcement primitive, not a new settings surface) and is a natural, small follow-up. Full suite 82/82 suites, 814/814 tests; security-scan and ratchet clean (36/36 ceiling, unchanged — the new util calls `tenantModel()`, not `_model()`). Mutation-tested the core assignment check (temporarily hardcoded it to always allow, confirmed all 3 new test files fail as expected across both route surfaces, restored via backup-copy per this session's mutation-test-safety rule). No client changes, so no browser verification needed for this milestone.
+
+---
+
 ## [v5.12.0] — 2026-07-26 — fix(grades): retire grade-calc.js duplication, fix Student Profile Grades tab (RC4)
 
 `grade-calc.js` implemented a separate CA/HW/MT/ET term-blending calculation engine (half-term totals, cross-term ET-running-averages, a Template B annual summary) with zero test coverage anywhere in the codebase. Its only route (`GET /api/assessment/report`) had exactly one client consumer — `StudentProfile.jsx`'s Grades tab — and direct code reading found that consumer has been broken since inception: `GradesTab` does `Array.isArray(data) ? data : []` expecting a flat `{subject, avgPct, grade, examCount}` array, but the route always returned a nested `{config, students, student}` object, so the check was always false and the tab always rendered "No grade data available yet.", regardless of real data.

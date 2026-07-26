@@ -28,6 +28,7 @@ const email              = require('../utils/email');
 const { mergeConfig }    = require('./academic-config');
 const { aggregateAssessmentMarks, computeFinalScores } = require('../utils/academic-calc');
 const { isYearArchived, firstArchivedYear } = require('../utils/archival');
+const { canWriteSubject, unassignedPairs } = require('../utils/subject-scope');
 
 const router = express.Router();
 const PLAN   = planGate('grades');
@@ -873,6 +874,12 @@ router.post('/marks', authMiddleware, PLAN, rbac('grades', 'create'), async (req
       return _err(res, 'This academic year is locked — marks cannot be added or modified.', 403);
     }
 
+    // Guard: subject-teacher scoping (RC6) — only enforced when the school
+    // has turned on academic_config.subjectAssignmentEnforced
+    if (!(await canWriteSubject(req, d.classId, d.subjectId))) {
+      return _err(res, 'You are not assigned to teach this subject in this class.', 403);
+    }
+
     // Load config once (shared for type validation + permission check)
     const markConfig = await _getConfig(schoolId, d.academicYearId || null);
 
@@ -950,6 +957,17 @@ router.post('/marks/bulk', authMiddleware, PLAN, rbac('grades', 'create'), async
       if (lockedYid) {
         return _err(res, `Academic year "${lockedYid}" is locked — marks cannot be added or modified.`, 403);
       }
+    }
+
+    // Guard: subject-teacher scoping (RC6) — one query for every distinct
+    // {classId, subjectId} pair in the batch, only enforced when the school
+    // has turned on academic_config.subjectAssignmentEnforced
+    const distinctPairs = [...new Map(
+      marks.map(d => [`${d.classId}::${d.subjectId}`, { classId: d.classId, subjectId: d.subjectId }])
+    ).values()];
+    const denied = await unassignedPairs(req, distinctPairs);
+    if (denied.length > 0) {
+      return _err(res, `You are not assigned to teach: ${denied.map(p => p.subjectId).join(', ')}`, 403);
     }
 
     // Load config once for type validation + permission check

@@ -40,6 +40,7 @@ const { isYearArchived } = require('../utils/archival');
 const AuditService       = require('../services/audit');
 const { sanitisePdfStr } = require('../utils/sanitisePdf');
 const { notifyGuardiansForStudents } = require('../utils/notify-students');
+const { canWriteSubject, unassignedPairs } = require('../utils/subject-scope');
 const email = require('../utils/email');
 const {
   aggregateGrades,
@@ -1848,6 +1849,17 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, rbac('report_card
             subjectComments } = req.body;
     if (!termNumber) return E.badRequest(res, 'termNumber is required');
 
+    // Guard: subject-teacher scoping (RC6) — every subject key this caller
+    // is writing must be one they're assigned to teach in this class, only
+    // enforced when the school has turned on subjectAssignmentEnforced
+    if (subjectComments && typeof subjectComments === 'object' && classId) {
+      const pairs = Object.keys(subjectComments).map(subjectId => ({ classId, subjectId }));
+      const denied = await unassignedPairs(req, pairs);
+      if (denied.length > 0) {
+        return E.forbidden(res, `You are not assigned to teach: ${denied.map(p => p.subjectId).join(', ')}`);
+      }
+    }
+
     // Base fields always updated together
     const setFields = {
       schoolId, studentId, classId,
@@ -1893,6 +1905,12 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
     const { classId, termNumber, comment } = req.body;
     if (!termNumber) return E.badRequest(res, 'termNumber is required');
     if (typeof comment !== 'string') return E.badRequest(res, 'comment must be a string');
+
+    // Guard: subject-teacher scoping (RC6) — only enforced when the school
+    // has turned on academic_config.subjectAssignmentEnforced
+    if (!(await canWriteSubject(req, classId, subjectId))) {
+      return E.forbidden(res, 'You are not assigned to teach this subject in this class.');
+    }
 
     const doc = await tenantModel('report_card_draft_comments', tenantContext(req)).findOneAndUpdate(
       { schoolId, studentId, termNumber: Number(termNumber) },
