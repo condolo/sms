@@ -95,7 +95,7 @@ describe('resolveTemplate — the resolution chain', () => {
       { id: 'tpl_school', schoolId: SCHOOL, sectionId: null, isDefault: true, revision: 3 },
     ]);
     const result = await resolveTemplate({}, SCHOOL, null);
-    expect(result).toEqual({ templateId: 'tpl_school', templateVersion: 3, builtIn: false });
+    expect(result).toEqual({ templateId: 'tpl_school', templateVersion: 3, layoutKey: 'subject_paired', builtIn: false });
   });
 
   test('section-scoped default takes priority over the school-wide default for that section', async () => {
@@ -104,7 +104,7 @@ describe('resolveTemplate — the resolution chain', () => {
       { id: 'tpl_section', schoolId: SCHOOL, sectionId: 'sec_a', isDefault: true, revision: 5 },
     ]);
     const result = await resolveTemplate({}, SCHOOL, 'sec_a');
-    expect(result).toEqual({ templateId: 'tpl_section', templateVersion: 5, builtIn: false });
+    expect(result).toEqual({ templateId: 'tpl_section', templateVersion: 5, layoutKey: 'subject_paired', builtIn: false });
   });
 
   test('a section with no section-specific default falls back to the school-wide default', async () => {
@@ -113,7 +113,7 @@ describe('resolveTemplate — the resolution chain', () => {
       { id: 'tpl_section', schoolId: SCHOOL, sectionId: 'sec_a', isDefault: true, revision: 5 },
     ]);
     const result = await resolveTemplate({}, SCHOOL, 'sec_b'); // different section
-    expect(result).toEqual({ templateId: 'tpl_school', templateVersion: 1, builtIn: false });
+    expect(result).toEqual({ templateId: 'tpl_school', templateVersion: 1, layoutKey: 'subject_paired', builtIn: false });
   });
 
   test('templates exist but none is marked default → Legacy Tabular, not an error', async () => {
@@ -132,6 +132,26 @@ describe('resolveTemplate — the resolution chain', () => {
     expect(resolved.builtIn).toBe(false);
     const fallback = await resolveTemplate({}, 'school_other', null);
     expect(fallback.builtIn).toBe(true);
+  });
+
+  test('a default template saved before layoutKey existed falls back to the schema default, not undefined', async () => {
+    mockStore = makeStore([
+      { id: 'tpl_old', schoolId: SCHOOL, sectionId: null, isDefault: true, revision: 1 }, // no layoutKey field at all
+    ]);
+    const result = await resolveTemplate({}, SCHOOL, null);
+    expect(result.layoutKey).toBe('subject_paired');
+  });
+
+  test('a template with an explicit layoutKey resolves with it', async () => {
+    mockStore = makeStore([
+      { id: 'tpl_mc', schoolId: SCHOOL, sectionId: null, isDefault: true, revision: 1, layoutKey: 'marks_then_comments' },
+    ]);
+    const result = await resolveTemplate({}, SCHOOL, null);
+    expect(result.layoutKey).toBe('marks_then_comments');
+  });
+
+  test('the Legacy Tabular fallback always reports layoutKey legacy_tabular', () => {
+    expect(LEGACY_TABULAR.layoutKey).toBe('legacy_tabular');
   });
 });
 

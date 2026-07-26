@@ -6,6 +6,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.20.0] — 2026-07-26 — feat(report-cards): Report Card Engine — layout registry + legacy_tabular extraction (RCE2)
+
+Second milestone of the Report Card Template Engine: RC11's `report_card_templates` registry actually drives rendering for the first time. Previously `resolveTemplate()`'s result was only snapshotted and never read back — every school's PDF/HTML output was identical regardless of which template resolved. A pluggable layout registry now exists, and `legacy_tabular` (today's exact original output) is the first entry in it — moved verbatim, not rewritten, so this ships with zero visual change for every existing school and snapshot.
+
+### Changed
+- New `server/utils/report-layouts.js`: `LAYOUTS[key] = { label, renderPdf, renderHtml }`. `legacy_tabular`'s `renderPdf`/`renderHtml` are the original `_drawReportPage`/`_computeReportHTML` function bodies moved here byte-for-byte (confirmed by the existing golden-fixture PDF test passing unchanged). `getLayout(key)` falls back to `legacy_tabular` for any unknown/missing key.
+- `server/routes/report-card-templates.js`: `TemplateSchema` gains `layoutKey` (enum `legacy_tabular | subject_paired | marks_then_comments | kindergarten`, default `subject_paired`); `resolveTemplate()`'s return gains `layoutKey`; the `LEGACY_TABULAR` sentinel gains `layoutKey: 'legacy_tabular'`. `kindergarten` is a reserved enum value only — no renderer exists for it yet (see RCE1's Kindergarten scope decision) and it's never returned as a live default.
+- `server/routes/report-cards.js`: `POST /publish` snapshots `layoutKey` onto each `report_card_snapshots` document alongside `templateId`/`templateVersion`. `_buildPDFPage`, `GET /:id/html`, and `GET /bulk-pdf` now dispatch through `getLayout(snap.layoutKey)` — **the published snapshot's own frozen key**, not the school's current default, so re-theming a school's default template can never change how an already-published report renders. `POST /preview-html` (an unpublished draft, with no frozen key yet) dispatches on the school's live-resolved default instead.
+
+### Tests
+`server/__tests__/report-layouts.test.js` (new) — registry fallback behavior. `server/__tests__/report-cards-layout-dispatch.test.js` (new) — mocks the registry to prove `_buildPDFPage` passes the snapshot's own `layoutKey` through untouched, not a hardcoded value (the one thing a rendering-output comparison can't yet distinguish, since only one real renderer exists until RCE3/4 ship). `report-card-templates.test.js` extended for `layoutKey` resolution/fallback. Mutation-verified the dispatch wiring (temporarily hardcoded `_buildPDFPage` to always use `legacy_tabular`, confirmed the new test failed, restored). Full suite 91/91 suites, 897/897 tests — including the pre-existing golden-fixture PDF byte comparison passing completely unchanged, proving this refactor altered zero output. Security-scan and tenant-coverage ratchet (held at 36) clean.
+
+---
+
 ## [v5.19.0] — 2026-07-26 — feat(report-cards): Report Card Engine — cover extension + dead-toggle wiring (RCE1)
 
 First milestone of the Report Card Template Engine effort: real pluggable layout renderers ("Light International style" subject+comment layout, plus a marks-then-comments layout) driven by RC11's previously-inert `report_card_templates` registry, and a dedicated Report Cards settings module replacing the scattered RC6/RC8/RC9/RC11 config with no UI. This phase is the IR/data foundation only — zero adapter or UI changes yet, by design (verified: the full pre-existing report-cards test suite passes byte-for-byte unchanged).

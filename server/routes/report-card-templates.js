@@ -44,17 +44,27 @@ const router = express.Router();
 
 const CURRICULUM_TAGS = ['kcse', 'cambridge', 'ib', 'cbc', 'american', 'custom'];
 
+/* RCE2 — which built-in renderer (server/utils/report-layouts.js)
+   this template resolves to. 'kindergarten' is reserved but not yet
+   built (no rendering entry exists for it, and it is never selectable
+   as a new default) — see the Report Card Template Engine plan's
+   explicit decision to ship the two data-only layouts first. */
+const LAYOUT_KEYS = ['legacy_tabular', 'subject_paired', 'marks_then_comments', 'kindergarten'];
+const DEFAULT_LAYOUT_KEY = 'subject_paired';
+
 /* Always resolvable, always present, never a real document — the
    Consolidation Plan's "platform built-in, never deletable" fallback.
-   No rendering logic differs for it today; every school's PDF/HTML
-   output IS this layout regardless of which template resolves. */
-const LEGACY_TABULAR = { templateId: 'legacy_tabular', templateVersion: 1, builtIn: true };
+   Its layoutKey ('legacy_tabular') is the ONLY renderer never offered
+   as a choice for a new default — it exists purely so snapshots
+   published before this engine existed keep rendering unchanged. */
+const LEGACY_TABULAR = { templateId: 'legacy_tabular', templateVersion: 1, layoutKey: 'legacy_tabular', builtIn: true };
 
 const TemplateSchema = z.object({
   name:          z.string().min(1).max(150).trim(),
   curriculumTag: z.enum(CURRICULUM_TAGS).optional().nullable(),
   sectionId:     z.string().optional().nullable(),
   isDefault:     z.boolean().optional().default(false),
+  layoutKey:     z.enum(LAYOUT_KEYS).optional().default(DEFAULT_LAYOUT_KEY),
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -104,6 +114,7 @@ router.post('/', authMiddleware, rbac('settings', 'update'), async (req, res) =>
       curriculumTag: d.curriculumTag ?? null,
       sectionId:     d.sectionId ?? null,
       isDefault:     d.isDefault,
+      layoutKey:     d.layoutKey,
       revision:      1,
       createdBy:     userId,
       updatedBy:     userId,
@@ -144,6 +155,7 @@ router.put('/:id', authMiddleware, rbac('settings', 'update'), async (req, res) 
     if (d.curriculumTag !== undefined) setFields.curriculumTag = d.curriculumTag ?? null;
     if (d.sectionId     !== undefined) setFields.sectionId     = d.sectionId ?? null;
     if (d.isDefault     !== undefined) setFields.isDefault     = d.isDefault;
+    if (d.layoutKey     !== undefined) setFields.layoutKey     = d.layoutKey;
 
     const doc = await Templates.findOneAndUpdate(
       { id: req.params.id, schoolId },
@@ -194,17 +206,23 @@ router.delete('/:id', authMiddleware, rbac('settings', 'update'), async (req, re
 async function resolveTemplate(ctx, schoolId, sectionId) {
   const Templates = tenantModel('report_card_templates', ctx);
   if (sectionId) {
-    const sectionDefault = await Templates.findOne({ schoolId, sectionId, isDefault: true }).select('id revision').lean();
-    if (sectionDefault) return { templateId: sectionDefault.id, templateVersion: sectionDefault.revision, builtIn: false };
+    const sectionDefault = await Templates.findOne({ schoolId, sectionId, isDefault: true }).select('id revision layoutKey').lean();
+    if (sectionDefault) {
+      return { templateId: sectionDefault.id, templateVersion: sectionDefault.revision, layoutKey: sectionDefault.layoutKey || DEFAULT_LAYOUT_KEY, builtIn: false };
+    }
   }
   const schoolDefault = await Templates.findOne({
     schoolId, isDefault: true, $or: [{ sectionId: null }, { sectionId: { $exists: false } }],
-  }).select('id revision').lean();
-  if (schoolDefault) return { templateId: schoolDefault.id, templateVersion: schoolDefault.revision, builtIn: false };
+  }).select('id revision layoutKey').lean();
+  if (schoolDefault) {
+    return { templateId: schoolDefault.id, templateVersion: schoolDefault.revision, layoutKey: schoolDefault.layoutKey || DEFAULT_LAYOUT_KEY, builtIn: false };
+  }
 
   return { ...LEGACY_TABULAR };
 }
 
 module.exports = router;
-module.exports.resolveTemplate = resolveTemplate;
-module.exports.LEGACY_TABULAR  = LEGACY_TABULAR;
+module.exports.resolveTemplate    = resolveTemplate;
+module.exports.LEGACY_TABULAR     = LEGACY_TABULAR;
+module.exports.LAYOUT_KEYS        = LAYOUT_KEYS;
+module.exports.DEFAULT_LAYOUT_KEY = DEFAULT_LAYOUT_KEY;
