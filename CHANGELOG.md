@@ -6,6 +6,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.21.0] — 2026-07-26 — feat(report-cards): Report Card Engine — "Light International style" subject_paired renderer (RCE3)
+
+Third milestone of the Report Card Template Engine: the first genuinely new layout. Built directly from a real school's report card the user shared — every subject's marks row is immediately followed by that subject's own teacher comment, so a parent reads feedback right next to the score it's about, instead of scanning a separate comments page. This is the new default (`report-card-templates.js`'s `DEFAULT_LAYOUT_KEY`), shipped in RCE2 ahead of this renderer existing.
+
+### Added
+- `server/utils/report-layouts.js`: `subject_paired` entry, plus a shared cover-page builder (`_renderCoverHtml`/`_drawCoverPdf`) that both this and the upcoming `marks_then_comments` (RCE4) layout consume — built from RCE1's named `cover` fields (school name/tagline/logo, "REPORT CARD" title, academic year/term, student photo, student name/admission no/class/stream/house/class teacher/principal), not the generic label/value `rows` list `legacy_tabular` uses.
+- Academic page (both PDF and HTML): one table row per subject with marks, immediately followed by a comment row showing the grade-band remark (if any) and the subject teacher's free-text comment — the layout's whole reason for existing. Every RCE1 toggle actually changes this renderer's output (unlike `legacy_tabular`, which ignores them by design): `showDeviation` (Dev column), `showAverage`/`showGPA`/`showRanking` (summary bar), `showClassTeacherRemark`/`showPrincipalRemark` (independently gated remark blocks), `subjectTeacherCommentsEnabled` (comment rows vanish entirely, zero trace, same posture as RC7). The PDF renderer paginates dynamically (`ensureSpace()`) since comment rows make per-student content length variable, unlike the fixed single-page legacy layout.
+
+### Tests
+`server/__tests__/report-layouts-subject-paired.test.js` (new, 10 tests) — built via real `_computeReportSections` output (not a hand-built fixture, to avoid IR-shape drift), covering the two-page PDF structure (cover → `addPage()` → academic content), the comment-row pairing, and every toggle's effect on output. Mutation-verified the `subjectTeacherCommentsEnabled` gate. Full suite 92/92 suites, 907/907 tests; security-scan and tenant-coverage ratchet (held at 36) clean. Browser-verified: rendered the new HTML template with realistic sample data and visually confirmed both the cover page and the subject/comment pairing match the shared reference report card (no live MongoDB/login in this sandbox, so this was a direct-render check, not a full app walkthrough — same limitation as every prior RC phase, but a step further given the visual nature of this change).
+
+---
+
 ## [v5.20.0] — 2026-07-26 — feat(report-cards): Report Card Engine — layout registry + legacy_tabular extraction (RCE2)
 
 Second milestone of the Report Card Template Engine: RC11's `report_card_templates` registry actually drives rendering for the first time. Previously `resolveTemplate()`'s result was only snapshotted and never read back — every school's PDF/HTML output was identical regardless of which template resolved. A pluggable layout registry now exists, and `legacy_tabular` (today's exact original output) is the first entry in it — moved verbatim, not rewritten, so this ships with zero visual change for every existing school and snapshot.
