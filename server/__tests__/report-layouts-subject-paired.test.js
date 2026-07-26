@@ -128,7 +128,30 @@ describe('subject_paired.renderPdf — structure', () => {
     const { spy, calls } = makeSpyDoc();
     LAYOUTS.subject_paired.renderPdf(spy, sections, {}, true);
     expect(calls.some(c => c.method === 'text' && String(c.args[0]).includes('Strong grasp of algebra'))).toBe(false);
-    expect(calls.some(c => c.method === 'text' && c.args[0] === 'Teacher comment:')).toBe(false);
+    expect(calls.some(c => c.method === 'text' && c.args[0] === 'Subject Teacher:')).toBe(false);
+  });
+
+  test('RCE3c: draws a column-header row using the assessment type KEY (not the full-word label), headed AVG not Score', () => {
+    const sections = computeSections();
+    const { spy, calls } = makeSpyDoc();
+    LAYOUTS.subject_paired.renderPdf(spy, sections, {}, true);
+    // baseSnap's assessmentWeights use keys 'cat'/'exam'.
+    expect(calls.some(c => c.method === 'text' && c.args[0] === 'cat')).toBe(true);
+    expect(calls.some(c => c.method === 'text' && c.args[0] === 'exam')).toBe(true);
+    expect(calls.some(c => c.method === 'text' && c.args[0] === 'AVG')).toBe(true);
+    expect(calls.some(c => c.method === 'text' && c.args[0] === 'Score')).toBe(false);
+  });
+
+  test('RCE3c: labels each subject\'s comment with the real subject teacher\'s name when known, a generic fallback otherwise', () => {
+    const withTeacher = computeSections({}, {}, { subjectTeacherNames: { math: 'Collins Ndolo' } });
+    const { spy: spy1, calls: calls1 } = makeSpyDoc();
+    LAYOUTS.subject_paired.renderPdf(spy1, withTeacher, {}, true);
+    expect(calls1.some(c => c.method === 'text' && c.args[0] === 'Collins Ndolo:')).toBe(true);
+
+    const withoutTeacher = computeSections(); // no subjectTeacherNames passed
+    const { spy: spy2, calls: calls2 } = makeSpyDoc();
+    LAYOUTS.subject_paired.renderPdf(spy2, withoutTeacher, {}, true);
+    expect(calls2.some(c => c.method === 'text' && c.args[0] === 'Subject Teacher:')).toBe(true);
   });
 });
 
@@ -153,8 +176,24 @@ describe('subject_paired.renderHtml — content', () => {
 
   test('subject comments section is entirely absent when subjectTeacherCommentsEnabled is false', () => {
     const html = LAYOUTS.subject_paired.renderHtml(computeSections({}, {}, { subjectTeacherCommentsEnabled: false }));
-    expect(html).not.toContain('Teacher Comment');
+    expect(html).not.toContain('Subject Teacher');
     expect(html).not.toContain('Strong grasp of algebra');
+  });
+
+  test('RCE3c: renders a column-header row with the assessment type KEY and AVG, not the full-word label or "Score"', () => {
+    const html = LAYOUTS.subject_paired.renderHtml(computeSections());
+    expect(html).toContain('>cat<');
+    expect(html).toContain('>exam<');
+    expect(html).toContain('>AVG<');
+    expect(html).not.toContain('>Score<');
+  });
+
+  test('RCE3c: labels each subject\'s comment with the real subject teacher\'s name when known, a generic fallback otherwise', () => {
+    const withTeacher = LAYOUTS.subject_paired.renderHtml(computeSections({}, {}, { subjectTeacherNames: { math: 'Collins Ndolo' } }));
+    expect(withTeacher).toContain('Collins Ndolo:');
+
+    const withoutTeacher = LAYOUTS.subject_paired.renderHtml(computeSections());
+    expect(withoutTeacher).toContain('Subject Teacher:');
   });
 
   test('remark blocks respect showClassTeacherRemark/showPrincipalRemark independently', () => {
@@ -199,10 +238,11 @@ describe('subject_paired.renderPdf — RCE3b dynamic box sizing', () => {
     }
     const rects1 = academicRects(calls1);
     const rects2 = academicRects(calls2);
-    // rect #0 is the header band (fixed 40px); #1 is math's marks row
-    // (fixed 18px); #2 is math's comment box — the one that should differ.
-    expect(rects1[1].args[3]).toBe(18); // sanity: this really is the marks row
-    expect(rects2[2].args[3]).toBeGreaterThan(rects1[2].args[3]);
+    // rect #0 is the page header band (fixed 40px); #1 is the RCE3c
+    // column-header band (fixed 16px); #2 is math's marks row (fixed
+    // 18px); #3 is math's comment box — the one that should differ.
+    expect(rects1[2].args[3]).toBe(18); // sanity: this really is the marks row
+    expect(rects2[3].args[3]).toBeGreaterThan(rects1[3].args[3]);
   });
 
   test('the class-teacher remark box grows to fit a long remark instead of a fixed 28px height', () => {

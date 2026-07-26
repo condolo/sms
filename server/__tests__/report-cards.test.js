@@ -681,19 +681,27 @@ describe('_computeReportSections — RC7 subject-teacher-comments capability tog
   test('defaults to enabled when the extra param omits it (existing PDF call-site shape)', () => {
     const s = compute(baseSnap(), config, null);
     expect(s.comments.subjectTeacherCommentsEnabled).toBe(true);
-    expect(s.comments.subjectComments).toEqual([{ subjectId: 'math', text: 'Excellent effort this term' }]);
+    expect(s.comments.subjectComments).toEqual([{ subjectId: 'math', text: 'Excellent effort this term', teacherName: '' }]);
   });
 
   test('enabled explicitly: builds one row per subject, using real comment text', () => {
     const s = compute(baseSnap(), config, null, { subjectTeacherCommentsEnabled: true });
     expect(s.comments.subjectTeacherCommentsEnabled).toBe(true);
-    expect(s.comments.subjectComments).toEqual([{ subjectId: 'math', text: 'Excellent effort this term' }]);
+    expect(s.comments.subjectComments).toEqual([{ subjectId: 'math', text: 'Excellent effort this term', teacherName: '' }]);
   });
 
   test('disabled: zero trace — subjectComments is empty even though real comment data exists on the snapshot', () => {
     const s = compute(baseSnap(), config, null, { subjectTeacherCommentsEnabled: false });
     expect(s.comments.subjectTeacherCommentsEnabled).toBe(false);
     expect(s.comments.subjectComments).toEqual([]);
+  });
+
+  test('RCE3c: subjectTeacherNames resolves each subject comment\'s teacherName, blank when no assignment is known', () => {
+    const withTeacher = compute(baseSnap(), config, null, { subjectTeacherNames: { math: 'Collins Ndolo' } });
+    expect(withTeacher.comments.subjectComments[0].teacherName).toBe('Collins Ndolo');
+
+    const withoutTeacher = compute(baseSnap(), config, null);
+    expect(withoutTeacher.comments.subjectComments[0].teacherName).toBe('');
   });
 
   test('HTML adapter: enabled renders the "Subject Teacher Comments" header and the real comment text', () => {

@@ -632,21 +632,11 @@ function _renderSubjectPairedPdf(doc, s, images, isFirstPage) {
   const PAGE_WIDTH = doc.page.width - 80;
   const BOTTOM     = doc.page.height - 55;
 
-  let rowY;
-  function drawHeader() {
-    doc.rect(40, 40, PAGE_WIDTH, 40).fill(DARK);
-    doc.fillColor('white').fontSize(12).font('Helvetica-Bold')
-       .text(s.header.schoolName, 50, 49, { width: PAGE_WIDTH - 20 });
-    doc.fontSize(8).font('Helvetica')
-       .text(`${s.studentInfo.studentName} — ${s.studentInfo.className} — ${s.studentInfo.termLine}`, 50, 66, { width: PAGE_WIDTH - 20 });
-    rowY = 92;
-  }
-  function ensureSpace(h) {
-    if (rowY + h > BOTTOM) { doc.addPage(); drawHeader(); }
-  }
-  drawHeader();
-
-  /* SUBJECT ROWS — marks row + comment row directly beneath each */
+  /* SUBJECT ROWS — marks row + comment row directly beneath each.
+     Column layout computed before drawHeader() so the repeating
+     per-page header band below can draw a real column-header row
+     (CA/HW/MT/ET/AVG/Grade[/Dev]) — every mark on the page must be
+     legible without cross-referencing another page. */
   const typeEntries = s.resultsTable.typeEntries;
   const showDev = s.resultsTable.showDeviation;
   const W_SUBJECT = 150, W_SCORE = 42, W_GRADE = 42, W_DEV = showDev ? 40 : 0;
@@ -655,10 +645,17 @@ function _renderSubjectPairedPdf(doc, s, images, isFirstPage) {
   const W_TYPE = typeEntries.length > 0
     ? Math.max(34, Math.floor((PAGE_WIDTH - fixedTotal - totalGaps) / typeEntries.length))
     : 0;
+  // RCE3c — column headers use the assessment type's short KEY (CA/HW/
+  // MT/ET, exactly what the school configured, e.g. server/routes/
+  // assessment.js's DEFAULT_CUSTOM_TYPES) rather than typeEntries[i].label
+  // (derived from the full-word label via whitespace/slash splitting —
+  // "Continuous Assessment" -> "Continuous", never "CA"). The final
+  // per-subject computed score is headed "AVG", not "Score" — it is a
+  // weighted average across the type columns, not a single mark.
   const colDefs = [
     { label: 'Subject', width: W_SUBJECT },
-    ...typeEntries.map(t => ({ label: t.label, width: W_TYPE })),
-    { label: 'Score', width: W_SCORE },
+    ...typeEntries.map(t => ({ label: t.key, width: W_TYPE })),
+    { label: 'AVG', width: W_SCORE },
     { label: 'Grade', width: W_GRADE },
     ...(showDev ? [{ label: 'Dev', width: W_DEV }] : []),
   ];
@@ -666,13 +663,40 @@ function _renderSubjectPairedPdf(doc, s, images, isFirstPage) {
   const colX = []; let cx = 40;
   for (const w of colWidths) { colX.push(cx); cx += w + 5; }
 
+  let rowY;
+  function drawHeader() {
+    doc.rect(40, 40, PAGE_WIDTH, 40).fill(DARK);
+    doc.fillColor('white').fontSize(12).font('Helvetica-Bold')
+       .text(s.header.schoolName, 50, 49, { width: PAGE_WIDTH - 20 });
+    doc.fontSize(8).font('Helvetica')
+       .text(`${s.studentInfo.studentName} — ${s.studentInfo.className} — ${s.studentInfo.termLine}`, 50, 66, { width: PAGE_WIDTH - 20 });
+    // Column-header band — repeats on every page (including after a
+    // page break mid-list), same ACCENT band style legacy_tabular uses.
+    doc.rect(40, 84, PAGE_WIDTH, 16).fill(ACCENT);
+    doc.fillColor('white').fontSize(7).font('Helvetica-Bold');
+    colDefs.forEach((col, i) => {
+      doc.text(col.label, colX[i] + 3, 88, { width: colWidths[i] - 3, align: 'center' });
+    });
+    rowY = 105;
+  }
+  function ensureSpace(h) {
+    if (rowY + h > BOTTOM) { doc.addPage(); drawHeader(); }
+  }
+  drawHeader();
+
   s.resultsTable.rows.forEach(row => {
     const commentEnabled = s.comments.subjectTeacherCommentsEnabled;
     const commentEntry   = s.comments.subjectComments.find(c => c.subjectId === row.subjectId);
     const commentText    = commentEntry?.text || '';
+    // RCE3c — labels the comment with the actual subject teacher's name
+    // (resolved from teaching_assignments by the caller) when known,
+    // falling back to a generic label when no assignment exists (e.g.
+    // subjectAssignmentEnforced is off, or no teaching_assignments doc
+    // was ever created for this class+subject).
+    const commentLabel   = commentEntry?.teacherName ? `${commentEntry.teacherName}:` : 'Subject Teacher:';
     const commentBlocks  = commentEnabled ? [
       ...(row.remarksText ? [{ text: `Grade remark: ${row.remarksText}`, font: 'Helvetica-Oblique', fontSize: 7, color: GRAY }] : []),
-      { text: 'Teacher comment:', font: 'Helvetica-Bold', fontSize: 7, color: GRAY, gapAfter: 2 },
+      { text: commentLabel, font: 'Helvetica-Bold', fontSize: 7, color: GRAY, gapAfter: 2 },
       { text: commentText || '— No comment entered —', font: 'Helvetica', fontSize: 8, color: DARK },
     ] : [];
     const commentH = commentEnabled ? _measureFlowBox(doc, PAGE_WIDTH, commentBlocks) : 0;
@@ -834,8 +858,18 @@ function _renderSubjectPairedHtml(s) {
   const tdS = 'border:1px solid #e2e8f0;padding:5px 8px';
   const tdC = `${tdS};text-align:center`;
 
-  const colHeaders = s.resultsTable.typeEntries.map(t => `<th style="${thS}">${_esc(t.label)}</th>`).join('');
+  // RCE3c — short assessment-type KEY (CA/HW/MT/ET), not the split-derived
+  // full-word label; see the identical note in the PDF renderer above.
+  const colHeaders = s.resultsTable.typeEntries.map(t => `<th style="${thS}">${_esc(t.key)}</th>`).join('');
   const devHeader   = s.resultsTable.showDeviation ? `<th style="${thS}">Dev</th>` : '';
+  // A single header row shown once above the whole subject list — each
+  // subject still gets its own small table below (so its comment row can
+  // sit directly under it), but a reader needs the column headings
+  // visible somewhere, not repeated N times.
+  const headerRowHtml = `
+    <table style="width:100%;border-collapse:collapse;margin-bottom:4px;font-size:11px">
+      <tr><th style="${thS};text-align:left">Subject</th>${colHeaders}<th style="${thS}">AVG</th><th style="${thS}">Grade</th>${devHeader}</tr>
+    </table>`;
 
   const subjectBlocks = s.resultsTable.rows.map(row => {
     const markCells = row.typeValues.map(v => `<td style="${tdC}">${_esc(v)}</td>`).join('');
@@ -846,7 +880,11 @@ function _renderSubjectPairedHtml(s) {
         })()
       : '';
     const commentEnabled = s.comments.subjectTeacherCommentsEnabled;
-    const commentText    = s.comments.subjectComments.find(c => c.subjectId === row.subjectId)?.text || '';
+    const commentEntry   = s.comments.subjectComments.find(c => c.subjectId === row.subjectId);
+    const commentText    = commentEntry?.text || '';
+    // RCE3c — actual subject teacher's name when known (resolved from
+    // teaching_assignments by the caller), else a generic fallback.
+    const commentLabel   = commentEntry?.teacherName ? _esc(commentEntry.teacherName) + ':' : 'Subject Teacher:';
     return `
     <table style="width:100%;border-collapse:collapse;margin-bottom:8px;font-size:11px">
       <tr${row.failed ? ' style="color:#dc2626"' : ''}>
@@ -860,7 +898,7 @@ function _renderSubjectPairedHtml(s) {
       <tr>
         <td colspan="99" style="border:1px solid #e2e8f0;border-top:none;padding:6px 10px;font-size:10px;color:#475569;background:#fafafa">
           ${row.remarksText ? `<div style="font-style:italic;color:#94a3b8;margin-bottom:2px">Grade remark: ${_esc(row.remarksText)}</div>` : ''}
-          <b style="text-transform:uppercase;letter-spacing:.4px;font-size:9px;color:#94a3b8">Teacher Comment:</b>
+          <b style="text-transform:uppercase;letter-spacing:.4px;font-size:9px;color:#94a3b8">${commentLabel}</b>
           ${commentText ? _esc(commentText) : '<span style="font-style:italic;color:#cbd5e1"> No comment entered</span>'}
         </td>
       </tr>` : ''}
@@ -912,6 +950,7 @@ function _renderSubjectPairedHtml(s) {
     <h2 style="margin:0;font-size:15px;font-weight:800">${_esc(s.header.schoolName)}</h2>
     <p style="margin:0;font-size:10px;color:#64748b">${_esc(s.studentInfo.studentName)} — ${_esc(s.studentInfo.className)} — ${_esc(s.studentInfo.termLine)}</p>
   </div>
+  ${headerRowHtml}
   ${subjectBlocks}
   ${s.resultsTable.rankingNote ? `<p style="font-size:9px;color:#64748b;margin:0 0 10px">${_esc(s.resultsTable.rankingNote)}</p>` : ''}
   <table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-size:11px">

@@ -954,6 +954,30 @@ router.get('/bulk-pdf', authMiddleware, PLAN, rbac('grades', 'read'), async (req
     const total = await tenantModel('report_card_snapshots', tenantContext(req)).countDocuments(filter);
     if (total === 0) return E.notFound(res, 'No published report cards found for this class/term');
 
+    // RCE3c — class-wide extras resolved ONCE for the whole batch, not
+    // per student (this is a bulk export — an extra query per student
+    // would multiply real cost). school/subjectTeacherNames/comments-
+    // capability are the same for every student in one class; behaviour
+    // and term-over-term deviation stay unresolved here (genuinely
+    // per-student, and neither layout shipped so far needs them in the
+    // bulk-export path) — a documented scope boundary, not an oversight.
+    // Resolved AFTER the zero-match 404 check above — no point paying
+    // for 3 extra queries on a request that's about to 404 anyway.
+    const [bulkSchool, bulkCaConfig, bulkAssignments] = await Promise.all([
+      _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1 }).lean().catch(() => null),
+      _getAssessmentConfig(schoolId, req.query.academicYearId || null),
+      tenantModel('teaching_assignments', tenantContext(req))
+        .find({ schoolId, classId: req.query.classId }).select('subjectId teacherName').lean().catch(() => []),
+    ]);
+    const bulkSubjectTeacherNames = {};
+    for (const a of bulkAssignments) {
+      if (!bulkSubjectTeacherNames[a.subjectId]) bulkSubjectTeacherNames[a.subjectId] = a.teacherName || '';
+    }
+    const bulkExtra = {
+      school: bulkSchool, subjectTeacherNames: bulkSubjectTeacherNames,
+      subjectTeacherCommentsEnabled: bulkCaConfig.subjectTeacherCommentsEnabled !== false,
+    };
+
     // Start streaming response now — headers sent before cursor begins
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="report-cards-class-${req.query.classId}.pdf"`);
@@ -987,7 +1011,7 @@ router.get('/bulk-pdf', authMiddleware, PLAN, rbac('grades', 'read'), async (req
         if (snap.financialBlock && req.query.force !== '1' && !isAdmin) return; // skip blocked
         pdfDoc.addPage();
         _buildPDFPage(pdfDoc, snap, config, attResults[i], false,
-          { ...bulkImages, studentPhoto: photoBuffers[i] });
+          { ...bulkImages, studentPhoto: photoBuffers[i] }, bulkExtra);
         isFirst = false;
       });
     };
@@ -1205,6 +1229,45 @@ async function _fetchSignatureImages(snap) {
   return { principalSignature, schoolStamp };
 }
 
+/* RCE3c — resolves every "presentation, not scored content" extra
+   _computeReportSections's 4th param accepts (school branding/contact,
+   behaviour, term-over-term deviations, subject-teacher-comments
+   capability, subject-teacher names) for a SINGLE snapshot. Was
+   previously inlined in GET /:id/html only — GET /:id/pdf never called
+   any of this, which was invisible while legacy_tabular's PDF renderer
+   ignored these fields entirely, but became a real gap once a layout
+   (subject_paired) started reading them: a school with subject-teacher
+   comments disabled would still see them in a downloaded PDF. One
+   helper now, used by both, so they can never drift apart again. */
+async function _loadRenderExtras(req, schoolId, snap) {
+  const [school, behaviour, prevSnap, caConfig, assignments] = await Promise.all([
+    _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1 }).lean().catch(() => null),
+    behaviourSummary(schoolId, snap.studentId).catch(() => null),
+    snap.termNumber > 1
+      ? tenantModel('report_card_snapshots', tenantContext(req)).findOne({
+          schoolId, studentId: snap.studentId, academicYearId: snap.academicYearId,
+          termNumber: snap.termNumber - 1, superseded: { $ne: true },
+        }).lean().catch(() => null)
+      : Promise.resolve(null),
+    _getAssessmentConfig(schoolId, snap.academicYearId ?? null),
+    tenantModel('teaching_assignments', tenantContext(req))
+      .find({ schoolId, classId: snap.classId, subjectId: { $in: Object.keys(snap.subjects || {}) } })
+      .select('subjectId teacherName').lean().catch(() => []),
+  ]);
+  const deviations = computeTermDeviation(snap.subjects, prevSnap?.subjects);
+  // First assignment found per subject wins — a subject could in theory
+  // have more than one teaching_assignments doc (co-teaching); the
+  // report shows one name, not a list.
+  const subjectTeacherNames = {};
+  for (const a of assignments) {
+    if (!subjectTeacherNames[a.subjectId]) subjectTeacherNames[a.subjectId] = a.teacherName || '';
+  }
+  return {
+    school, behaviour, deviations, subjectTeacherNames,
+    subjectTeacherCommentsEnabled: caConfig.subjectTeacherCommentsEnabled !== false,
+  };
+}
+
 /* ── Report Card IR (Consolidation Plan §4) ──────────────────────
    _computeReportSections is a PURE function: given a snapshot +
    config + attendance, it decides WHAT the report contains — every
@@ -1227,9 +1290,16 @@ async function _fetchSignatureImages(snap) {
    are inert to the PDF path and its golden fixture stays unchanged. */
 function _computeReportSections(snap, config, attendance, extra = {}) {
   // subjectTeacherCommentsEnabled defaults true — every existing caller
-  // that doesn't pass it (e.g. _buildPDFPage, which never reads
-  // comments.subjectComments in the first place) keeps today's behavior.
-  const { school = null, behaviour = null, deviations = null, subjectTeacherCommentsEnabled = true } = extra;
+  // that doesn't pass it (e.g. legacy_tabular's PDF renderer, which
+  // never reads comments.subjectComments at all) keeps today's behavior.
+  const {
+    school = null, behaviour = null, deviations = null, subjectTeacherCommentsEnabled = true,
+    // RCE3c — {subjectId: teacherName}, resolved by the caller from
+    // teaching_assignments (same "caller resolves, IR formats" posture
+    // as deviations/behaviour/school above). Presentation-only — who
+    // currently teaches a subject is never frozen at publish time.
+    subjectTeacherNames = {},
+  } = extra;
   const isDraft = snap.status !== 'published' || snap.superseded;
 
   const weights     = snap.assessmentWeights || [];
@@ -1342,6 +1412,10 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
       subjectComments: subjectTeacherCommentsEnabled
         ? Object.keys(snap.subjects || {}).map(subjectId => ({
             subjectId, text: sanitisePdfStr(snap.comments?.subjectComments?.[subjectId]) || '',
+            // RCE3c — the actual subject teacher's name, when known, so
+            // a layout can label the comment with who wrote it instead
+            // of a generic "Teacher Comment" heading.
+            teacherName: subjectTeacherNames[subjectId] || '',
           }))
         : [],
       // RC8 — populated only for schools using the report_comment_approval
@@ -1425,8 +1499,8 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
    already protects) — snapshots published before this engine existed
    simply have no layoutKey, which getLayout() maps to 'legacy_tabular',
    today's exact pre-existing output. */
-function _buildPDFPage(doc, snap, config, attendance, isFirstPage, images = {}) {
-  const sections = _computeReportSections(snap, config, attendance);
+function _buildPDFPage(doc, snap, config, attendance, isFirstPage, images = {}, extra = {}) {
+  const sections = _computeReportSections(snap, config, attendance, extra);
   getLayout(snap.layoutKey).renderPdf(doc, sections, images, isFirstPage);
 }
 
@@ -1524,6 +1598,11 @@ router.get('/:id/pdf', authMiddleware, PLAN, _pdfAccess, async (req, res) => {
       attData = await attendanceSummary(schoolId, snap.studentId, snap.classId, snap.termId, snap.academicYearId);
     }
     const config = await _loadConfig(schoolId);
+    // RCE3c — single-student download, so the full extras set (same as
+    // GET /:id/html) is cheap; a downloaded PDF must not silently ignore
+    // a school's subject-teacher-comments toggle or lose the subject
+    // teacher's name just because it came from the PDF route.
+    const extra = await _loadRenderExtras(req, schoolId, snap);
 
     let PDFDocument;
     try { PDFDocument = require('pdfkit'); }
@@ -1542,7 +1621,7 @@ router.get('/:id/pdf', authMiddleware, PLAN, _pdfAccess, async (req, res) => {
 
     const pdfImages = await _fetchSignatureImages(snap);
     pdfImages.studentPhoto = await _fetchImageBuf(snap.studentPhotoUrl).catch(() => null);
-    _buildPDFPage(doc, snap, config, attData, true, pdfImages);
+    _buildPDFPage(doc, snap, config, attData, true, pdfImages, extra);
     doc.end();
   } catch (err) { console.error('[report-cards/:id/pdf]', err); return E.serverError(res); }
 });
@@ -1572,24 +1651,9 @@ router.get('/:id/html', authMiddleware, PLAN, _pdfAccess, async (req, res) => {
       attData = await attendanceSummary(schoolId, snap.studentId, snap.classId, snap.termId, snap.academicYearId);
     }
     const config = await _loadConfig(schoolId);
+    const extra  = await _loadRenderExtras(req, schoolId, snap);
 
-    const [school, behaviour, prevSnap, caConfig] = await Promise.all([
-      _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1 }).lean().catch(() => null),
-      behaviourSummary(schoolId, snap.studentId).catch(() => null),
-      snap.termNumber > 1
-        ? tenantModel('report_card_snapshots', tenantContext(req)).findOne({
-            schoolId, studentId: snap.studentId, academicYearId: snap.academicYearId,
-            termNumber: snap.termNumber - 1, superseded: { $ne: true },
-          }).lean().catch(() => null)
-        : Promise.resolve(null),
-      _getAssessmentConfig(schoolId, snap.academicYearId ?? null),
-    ]);
-    const deviations = computeTermDeviation(snap.subjects, prevSnap?.subjects);
-
-    const sections = _computeReportSections(snap, config, attData, {
-      school, behaviour, deviations,
-      subjectTeacherCommentsEnabled: caConfig.subjectTeacherCommentsEnabled !== false,
-    });
+    const sections = _computeReportSections(snap, config, attData, extra);
     // RCE2 — dispatch on the SNAPSHOT'S OWN frozen layoutKey, same
     // immutability guarantee as _buildPDFPage's PDF path.
     const html = getLayout(snap.layoutKey).renderHtml(sections);
@@ -1892,6 +1956,7 @@ router.patch('/draft-comments/:studentId/advance', authMiddleware, PLAN, rbac('r
 router._notifyReportCardsPublished = _notifyReportCardsPublished;
 router._normalizeGradeScaleBands = _normalizeGradeScaleBands;
 router._buildPDFPage = _buildPDFPage;
+router._loadRenderExtras = _loadRenderExtras;
 router._computeReportSections = _computeReportSections;
 router._resolveSnapComments = _resolveSnapComments;
 // RCE2 — _computeReportHTML moved to server/utils/report-layouts.js as

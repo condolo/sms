@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.21.2] — 2026-07-26 — feat(report-cards): subject teacher names + column-header abbreviations (RCE3c)
+
+Second fix-forward addendum to RCE3, prompted by two direct asks: label a subject's comment with the actual teacher's name (e.g. "Collins Ndolo," not "Teacher Comment") pulled from the same module that already governs subject-teacher mark-entry access, and show real column headings (CA/HW/MT/ET/AVG) on the marks table.
+
+Investigating both surfaced a real pre-existing bug: `GET /:id/pdf` and `GET /bulk-pdf` never loaded `school`/`behaviour`/`deviations`/`subjectTeacherCommentsEnabled` at all — only `GET /:id/html` did. This was invisible while `legacy_tabular`'s PDF renderer ignored all of them, but became a real correctness gap once `subject_paired` started reading them: a school that disabled subject-teacher comments would still see them in a downloaded PDF. Fixed as part of this milestone, not deferred.
+
+### Changed
+- `server/routes/report-cards.js`:
+  - New `_loadRenderExtras(req, schoolId, snap)` — the single resolver for every "presentation, not scored content" extra a report needs, used identically by `GET /:id/pdf` and `GET /:id/html` (previously only inlined in the HTML route). Includes the new `subjectTeacherNames` map, resolved from `teaching_assignments` (`{schoolId, classId, subjectId}` — the same collection `server/utils/subject-scope.js` already checks for write access), first assignment found per subject wins.
+  - `GET /bulk-pdf` resolves the class-wide subset (`school`/`subjectTeacherNames`/`subjectTeacherCommentsEnabled`) once for the whole batch, placed *after* the zero-match 404 check (no point paying for 3 extra queries on a request about to 404). `behaviour`/`deviations` deliberately stay unresolved there — genuinely per-student, a documented scope boundary for bulk export, not an oversight.
+  - `_computeReportSections`'s `comments.subjectComments[i]` gains `teacherName`, resolved live at render time (branding-adjacent, not frozen at publish — a school reassigning a subject later is fine to show on a re-render of an old report, same posture as `logoUrl`/`address`).
+- `server/utils/report-layouts.js` (`subject_paired` only — `legacy_tabular` untouched):
+  - Comment label shows the real subject teacher's name (`"Collins Ndolo:"`) when known, falling back to `"Subject Teacher:"` otherwise — replacing the generic `"Teacher comment:"`/`"Teacher Comment:"` label both renderers previously always used.
+  - Column headers use the assessment type's short **key** (`CA`/`HW`/`MT`/`ET`, exactly what the school configured) instead of the full-word label split on whitespace/slash (`"Continuous Assessment"` → `"Continuous"`, never `"CA"`); the computed score column is headed `AVG`, not `Score`.
+  - Both renderers previously computed a column-header row but never actually drew it — a real gap, fixed alongside the label change: the PDF renderer now draws a repeating header band on every page (`subject_paired` is genuinely multi-page, unlike the single-page `legacy_tabular`); the HTML renderer adds one header row above the stack of per-subject tables.
+
+### Tests
+5 new tests for `_loadRenderExtras` (school/behaviour/deviations/comments-toggle/teacher-names resolution, including the "first assignment wins" dedup and "no assignment → absent from map, not an error" cases), plus new PDF/HTML assertions for the header-row content and teacher-name label in `report-layouts-subject-paired.test.js`. A route-order regression surfaced and was fixed during this work: the class-wide bulk-pdf extras were initially resolved *before* the zero-match 404 check, breaking `report-cards-route-order.test.js`'s "returns its own 404" case — moved to after the check. Mutation-verified the teacher-name fallback and the "first assignment wins" dedup logic. Full suite 93/93 suites, 920/920 tests; security-scan and tenant-coverage ratchet (held at 36) clean. Browser-verified: rendered the HTML with realistic subject-teacher-name and assessment-type data, confirmed the column headers (CAT/MIDTERM/EXAM/AVG/GRADE/DEV) and the "COLLINS NDOLO:" label both render exactly as intended.
+
+---
+
 ## [v5.21.1] — 2026-07-26 — fix(report-cards): dynamic PDF text-box sizing + school contact fields on the report cover (RCE3b)
 
 Fix-forward addendum to RCE3, prompted by three direct questions before continuing: (1) is the Grading Key really pulled from the school's configured Grade Scale — confirmed yes, already correct, no change needed; (2) does the report reflect all of a school's identity/contact details — confirmed no, only `logoUrl`/`tagline` reached the report despite `address`/`phone`/`email`/`website` existing in Settings; (3) is PDF text guaranteed not to overlap or get cut off — confirmed no, every remark/comment box in the PDF adapter (including `subject_paired`, RCE3's own new renderer) used a hardcoded fixed height while pdfkit's `.text()` wraps but never clips, so long text simply printed past the box's bottom edge into whatever came next.
