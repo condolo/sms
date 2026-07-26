@@ -1390,6 +1390,14 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
       houseName:        snap.houseName    || '',
       academicYear:     snap.academicYear || '',
       termNumber:       snap.termNumber   ?? null,
+      // RCE3b — school identity/contact, resolved live at render time
+      // (branding, not scored content — same non-frozen posture logoUrl/
+      // tagline already have; a school updating its address later is
+      // fine to show on a re-render of an old report).
+      schoolAddress:    school?.address || '',
+      schoolPhone:      school?.phone   || '',
+      schoolEmail:      school?.email   || '',
+      schoolWebsite:    school?.website || '',
       classTeacherName: snap.comments?.classTeacherName || '',
       principalName:    snap.comments?.principalName    || '',
       studentPhotoUrl:  snap.studentPhotoUrl || null,
@@ -1566,7 +1574,7 @@ router.get('/:id/html', authMiddleware, PLAN, _pdfAccess, async (req, res) => {
     const config = await _loadConfig(schoolId);
 
     const [school, behaviour, prevSnap, caConfig] = await Promise.all([
-      _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1 }).lean().catch(() => null),
+      _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1, address: 1, phone: 1, email: 1, website: 1 }).lean().catch(() => null),
       behaviourSummary(schoolId, snap.studentId).catch(() => null),
       snap.termNumber > 1
         ? tenantModel('report_card_snapshots', tenantContext(req)).findOne({
@@ -1633,7 +1641,10 @@ const PreviewHtmlSchema = z.object({
   className: z.string().optional(),
   termNum: z.number().int().min(1).max(3).optional(),
   academicYear: z.string().optional(),
-  school: z.object({ name: z.string().optional(), logoUrl: z.string().nullable().optional(), tagline: z.string().optional() }).optional(),
+  school: z.object({
+    name: z.string().optional(), logoUrl: z.string().nullable().optional(), tagline: z.string().optional(),
+    address: z.string().optional(), phone: z.string().optional(), email: z.string().optional(), website: z.string().optional(),
+  }).optional(),
   draftComment: z.record(z.any()).nullable().optional(),
   studentDeviations: z.object({ subjects: z.record(z.number().nullable()).optional() }).nullable().optional(),
   behaviourSummary: z.object({ merits: z.number(), demerits: z.number(), points: z.number(), total: z.number() }).nullable().optional(),

@@ -29,6 +29,15 @@ function makeSpyDoc() {
   for (const m of methods) {
     spy[m] = (...args) => { calls.push({ method: m, args }); return spy; };
   }
+  // RCE3b — _measureFlowBox/_drawFlowBox call doc.heightOfString() to size
+  // boxes dynamically; a rough chars-per-line estimate is enough for a
+  // structural test (exact pixel height isn't asserted anywhere here).
+  spy.heightOfString = (text, opts = {}) => {
+    const width = opts.width || 400;
+    const charsPerLine = Math.max(10, Math.floor(width / 5));
+    const lines = Math.max(1, Math.ceil(String(text ?? '').length / charsPerLine));
+    return lines * 12;
+  };
   return { spy, calls };
 }
 
@@ -153,5 +162,66 @@ describe('subject_paired.renderHtml — content', () => {
     const html = LAYOUTS.subject_paired.renderHtml(onlyPrincipal);
     expect(html).not.toContain('Good progress this term.');
     expect(html).toContain('Keep it up.');
+  });
+
+  test('school contact details render on the cover when present, are omitted when absent (RCE3b)', () => {
+    const withContact = LAYOUTS.subject_paired.renderHtml(
+      computeSections({}, {}, { school: { logoUrl: null, tagline: 'Excellence', address: '123 Main St', phone: '0700-000000', email: 'info@school.ac.ke', website: 'school.ac.ke' } })
+    );
+    expect(withContact).toContain('123 Main St');
+    expect(withContact).toContain('0700-000000');
+    expect(withContact).toContain('info@school.ac.ke');
+
+    const withoutContact = LAYOUTS.subject_paired.renderHtml(computeSections());
+    expect(withoutContact).not.toContain('undefined');
+  });
+});
+
+describe('subject_paired.renderPdf — RCE3b dynamic box sizing', () => {
+  test('a longer teacher comment produces a taller comment box than a short one', () => {
+    const short = computeSections({ comments: { classTeacherName: 'Mrs. Otieno', principalName: 'Dr. Kariuki', subjectComments: { math: 'Good.', english: 'OK.' } } });
+    const long  = computeSections({ comments: { classTeacherName: 'Mrs. Otieno', principalName: 'Dr. Kariuki', subjectComments: {
+      math: 'This is a much longer comment that should wrap across several lines and therefore require a visibly taller comment box than a one-word remark would need, proving the box height is measured from the actual text rather than a fixed constant.',
+      english: 'OK.',
+    } } });
+
+    const { spy: spy1, calls: calls1 } = makeSpyDoc();
+    LAYOUTS.subject_paired.renderPdf(spy1, short, {}, true);
+    const { spy: spy2, calls: calls2 } = makeSpyDoc();
+    LAYOUTS.subject_paired.renderPdf(spy2, long, {}, true);
+
+    // Everything before the (single, isFirstPage=true) addPage() call is
+    // the cover page — skip it. On the academic page, rect #0 is math's
+    // marks row (fixed 18px), rect #1 is math's comment box.
+    function academicRects(calls) {
+      const addPageIdx = calls.findIndex(c => c.method === 'addPage');
+      return calls.slice(addPageIdx + 1).filter(c => c.method === 'rect');
+    }
+    const rects1 = academicRects(calls1);
+    const rects2 = academicRects(calls2);
+    // rect #0 is the header band (fixed 40px); #1 is math's marks row
+    // (fixed 18px); #2 is math's comment box — the one that should differ.
+    expect(rects1[1].args[3]).toBe(18); // sanity: this really is the marks row
+    expect(rects2[2].args[3]).toBeGreaterThan(rects1[2].args[3]);
+  });
+
+  test('the class-teacher remark box grows to fit a long remark instead of a fixed 28px height', () => {
+    const sections = computeSections({
+      comments: {
+        classTeacherName: 'Mrs. Otieno', principalName: 'Dr. Kariuki',
+        classTeacherRemark: 'A very long class teacher remark spanning multiple sentences to force text wrapping across several lines inside the remark box, which must grow to accommodate it rather than clipping or overflowing past a fixed height.',
+        principalRemark: 'Fine.',
+      },
+    });
+    const { spy, calls } = makeSpyDoc();
+    LAYOUTS.subject_paired.renderPdf(spy, sections, {}, true);
+    // Skip the cover page (its photo placeholder is >100px tall, which
+    // would trivially satisfy a loose ">28" check on the whole document).
+    const addPageIdx = calls.findIndex(c => c.method === 'addPage');
+    const academicRectHeights = calls.slice(addPageIdx + 1).filter(c => c.method === 'rect').map(c => c.args[3]);
+    // Fixed heights already present on this page: 18 (marks rows), 32
+    // (summary bar) — a genuinely measured long-remark box must clear
+    // both by a real margin, not just "bigger than a small constant".
+    expect(academicRectHeights.some(h => h > 40)).toBe(true);
   });
 });

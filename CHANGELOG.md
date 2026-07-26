@@ -6,6 +6,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.21.1] — 2026-07-26 — fix(report-cards): dynamic PDF text-box sizing + school contact fields on the report cover (RCE3b)
+
+Fix-forward addendum to RCE3, prompted by three direct questions before continuing: (1) is the Grading Key really pulled from the school's configured Grade Scale — confirmed yes, already correct, no change needed; (2) does the report reflect all of a school's identity/contact details — confirmed no, only `logoUrl`/`tagline` reached the report despite `address`/`phone`/`email`/`website` existing in Settings; (3) is PDF text guaranteed not to overlap or get cut off — confirmed no, every remark/comment box in the PDF adapter (including `subject_paired`, RCE3's own new renderer) used a hardcoded fixed height while pdfkit's `.text()` wraps but never clips, so long text simply printed past the box's bottom edge into whatever came next.
+
+### Changed
+- `server/routes/report-cards.js`: `_computeReportSections`'s `cover` gains `schoolAddress`/`schoolPhone`/`schoolEmail`/`schoolWebsite`, resolved live at render time (same non-frozen posture as `logoUrl`/`tagline` — branding, not scored content). `GET /:id/html`'s school lookup and `POST /preview-html`'s `PreviewHtmlSchema.school` widened to carry the 4 new fields through.
+- `server/utils/report-layouts.js`:
+  - New `_schoolContactLine()` shared helper, consumed by both the HTML and PDF cover renderers — joins whichever of the 4 fields a school has configured, omitted entirely (not shown as blank) when none are set.
+  - New `_measureFlowBox()`/`_drawFlowBox()` — sizes a text box from `doc.heightOfString()` *before* drawing it and before the pagination `ensureSpace()` check, so a box's real height (not a guessed constant) decides both how tall it's drawn and whether a page break is needed first. Retrofitted into every remark/comment box in `subject_paired`'s PDF renderer: the per-subject teacher-comment box, and the class-teacher/principal/report-remark boxes.
+  - **`legacy_tabular` is deliberately NOT retrofitted** — it must stay byte-for-byte frozen for snapshots published before this engine existed (confirmed unchanged: the pre-existing golden-fixture PDF test still passes byte-for-byte). The same fixed-height-box limitation legacy_tabular has always had is a pre-existing characteristic of that specific, frozen layout, not something this fix silently changes underneath old reports.
+
+### Tests
+3 new tests in `report-layouts-subject-paired.test.js`: school contact line present/omitted on the cover, a long teacher comment producing a measurably taller box than a short one, and a long class-teacher remark clearing the fixed-height boxes already on the page. Mutation-verified `_measureFlowBox`'s real-height computation (temporarily hardcoded it to always return the 24px floor, confirmed both new box-height tests failed, restored). Full suite 92/92 suites, 910/910 tests; security-scan and tenant-coverage ratchet (held at 36) clean. Browser-verified by direct-rendering the HTML with a deliberately long subject comment and school contact block — confirmed the contact line renders correctly under the tagline and the long comment wraps across multiple lines inside a box that visibly grows to fit it, with no overlap into the next subject's row.
+
+---
+
 ## [v5.21.0] — 2026-07-26 — feat(report-cards): Report Card Engine — "Light International style" subject_paired renderer (RCE3)
 
 Third milestone of the Report Card Template Engine: the first genuinely new layout. Built directly from a real school's report card the user shared — every subject's marks row is immediately followed by that subject's own teacher comment, so a parent reads feedback right next to the score it's about, instead of scanning a separate comments page. This is the new default (`report-card-templates.js`'s `DEFAULT_LAYOUT_KEY`), shipped in RCE2 ahead of this renderer existing.

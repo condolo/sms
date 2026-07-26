@@ -462,8 +462,13 @@ ${footerHtml}
    `cover` fields RCE1 added, not the generic `rows` list — a real
    cover page controls its own visual arrangement of stream/house/
    class teacher/principal rather than a fixed label/value table. */
+function _schoolContactLine(cover) {
+  return [cover.schoolAddress, cover.schoolPhone, cover.schoolEmail, cover.schoolWebsite].filter(Boolean).join('  •  ');
+}
+
 function _renderCoverHtml(s) {
   const cover = s.cover;
+  const contactLine = _schoolContactLine(cover);
   const logoHtml = cover.logoUrl
     ? `<img src="${_esc(cover.logoUrl)}" style="height:100px;width:100px;object-fit:contain;border-radius:8px" />`
     : `<div style="width:100px;height:100px;background:#e2e8f0;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:38px;font-weight:bold;color:#94a3b8">${_esc((cover.schoolName?.[0] ?? 'S').toUpperCase())}</div>`;
@@ -484,7 +489,8 @@ function _renderCoverHtml(s) {
   ${logoHtml}
   <div>
     <h1 style="font-size:24px;font-weight:900;margin:0 0 4px;color:#0f172a">${_esc(cover.schoolName)}</h1>
-    ${cover.tagline ? `<p style="font-size:12px;font-style:italic;color:#64748b;margin:0 0 14px">${_esc(cover.tagline)}</p>` : '<div style="margin-bottom:14px"></div>'}
+    ${cover.tagline ? `<p style="font-size:12px;font-style:italic;color:#64748b;margin:0 0 6px">${_esc(cover.tagline)}</p>` : ''}
+    ${contactLine ? `<p style="font-size:10px;color:#94a3b8;margin:0 0 14px">${_esc(contactLine)}</p>` : '<div style="margin-bottom:14px"></div>'}
     <div style="display:inline-block;background:#1e293b;color:#fff;padding:8px 28px;border-radius:6px;font-size:14px;font-weight:700;letter-spacing:1.5px">
       ${_esc(cover.title)}
     </div>
@@ -526,7 +532,13 @@ function _drawCoverPdf(doc, s, images) {
   if (cover.tagline) {
     doc.fillColor(GRAY).fontSize(10).font('Helvetica-Oblique')
        .text(cover.tagline, 40, y, { width: PAGE_WIDTH - 80, align: 'center' });
-    y += 20;
+    y += 16;
+  }
+  const contactLine = _schoolContactLine(cover);
+  if (contactLine) {
+    doc.fillColor('#94a3b8').fontSize(8).font('Helvetica')
+       .text(contactLine, 40, y, { width: PAGE_WIDTH - 80, align: 'center' });
+    y += 18;
   } else {
     y += 8;
   }
@@ -570,6 +582,41 @@ function _drawCoverPdf(doc, s, images) {
     doc.fillColor(GRAY).fontSize(9).font('Helvetica-Bold').text(label, tableX + 10, ry + 6, { width: tableW * 0.42 });
     doc.fillColor(DARK).fontSize(9).font('Helvetica').text(String(value), tableX + tableW * 0.46, ry + 6, { width: tableW * 0.5 });
   });
+}
+
+/* ── Dynamic PDF text boxes (RCE3b) ──────────────────────────────
+   Fixed-height rects drawn independently of `.text()` calls will let
+   long text visually overflow past the box (pdfkit's `.text()` wraps
+   at `width` but never clips or truncates, and a rect drawn beforehand
+   at a hardcoded height has no relationship to how much text actually
+   follows). `_measureFlowBox`/`_drawFlowBox` size the box from the
+   real content via `doc.heightOfString()` first — call the measure
+   function before `ensureSpace()` so pagination decisions also use the
+   real height, not a guess. */
+function _measureFlowBox(doc, width, blocks) {
+  const PAD_TOP = 6, PAD_BOTTOM = 6, PAD_X = 6;
+  let h = PAD_TOP;
+  blocks.forEach((b, i) => {
+    doc.font(b.font || 'Helvetica').fontSize(b.fontSize || 8);
+    const bh = doc.heightOfString(b.text, { width: width - PAD_X * 2 });
+    h += bh + (i < blocks.length - 1 ? (b.gapAfter ?? 3) : 0);
+  });
+  h += PAD_BOTTOM;
+  return Math.max(h, 24);
+}
+
+function _drawFlowBox(doc, x, y, width, blocks) {
+  const PAD_TOP = 6, PAD_X = 6;
+  const h = _measureFlowBox(doc, width, blocks);
+  doc.rect(x, y, width, h).fill('white').stroke('#d1d5db');
+  let ty = y + PAD_TOP;
+  blocks.forEach((b, i) => {
+    doc.fillColor(b.color || '#1a1a2e').font(b.font || 'Helvetica').fontSize(b.fontSize || 8)
+       .text(b.text, x + PAD_X, ty, { width: width - PAD_X * 2 });
+    const bh = doc.heightOfString(b.text, { width: width - PAD_X * 2 });
+    ty += bh + (i < blocks.length - 1 ? (b.gapAfter ?? 3) : 0);
+  });
+  return h;
 }
 
 /* ── subject_paired (RCE3) — "Light International style": every
@@ -623,8 +670,12 @@ function _renderSubjectPairedPdf(doc, s, images, isFirstPage) {
     const commentEnabled = s.comments.subjectTeacherCommentsEnabled;
     const commentEntry   = s.comments.subjectComments.find(c => c.subjectId === row.subjectId);
     const commentText    = commentEntry?.text || '';
-    const extraLine      = row.remarksText ? 10 : 0;
-    const commentH       = commentEnabled ? 24 + extraLine : 0;
+    const commentBlocks  = commentEnabled ? [
+      ...(row.remarksText ? [{ text: `Grade remark: ${row.remarksText}`, font: 'Helvetica-Oblique', fontSize: 7, color: GRAY }] : []),
+      { text: 'Teacher comment:', font: 'Helvetica-Bold', fontSize: 7, color: GRAY, gapAfter: 2 },
+      { text: commentText || '— No comment entered —', font: 'Helvetica', fontSize: 8, color: DARK },
+    ] : [];
+    const commentH = commentEnabled ? _measureFlowBox(doc, PAGE_WIDTH, commentBlocks) : 0;
     ensureSpace(18 + commentH + 4);
 
     doc.rect(40, rowY, PAGE_WIDTH, 18).fill(row.failed ? '#fef2f2' : LIGHT_GRAY);
@@ -648,16 +699,7 @@ function _renderSubjectPairedPdf(doc, s, images, isFirstPage) {
     rowY += 18;
 
     if (commentEnabled) {
-      doc.rect(40, rowY, PAGE_WIDTH, commentH).fill('white').stroke(BORDER);
-      let ty = rowY + 4;
-      if (row.remarksText) {
-        doc.fillColor(GRAY).fontSize(7).font('Helvetica-Oblique')
-           .text(`Grade remark: ${row.remarksText}`, 46, ty, { width: PAGE_WIDTH - 12 });
-        ty += 10;
-      }
-      doc.fillColor(GRAY).fontSize(7).font('Helvetica-Bold').text('Teacher comment:', 46, ty);
-      doc.fillColor(DARK).fontSize(8).font('Helvetica')
-         .text(commentText || '— No comment entered —', 46, ty + 9, { width: PAGE_WIDTH - 12 });
+      _drawFlowBox(doc, 40, rowY, PAGE_WIDTH, commentBlocks);
       rowY += commentH;
     }
     rowY += 5;
@@ -706,29 +748,32 @@ function _renderSubjectPairedPdf(doc, s, images, isFirstPage) {
      by RCE1's showClassTeacherRemark/showPrincipalRemark). */
   if (s.comments.reportRemarks.length > 0) {
     s.comments.reportRemarks.forEach(r => {
-      ensureSpace(46);
+      const blocks = [{ text: r.text, font: 'Helvetica', fontSize: 9, color: DARK }];
+      const h = _measureFlowBox(doc, PAGE_WIDTH, blocks);
+      ensureSpace(12 + h + 6);
       doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text(r.label.toUpperCase() + ':', 40, rowY);
       rowY += 12;
-      doc.rect(40, rowY, PAGE_WIDTH, 28).fill('white').stroke(BORDER);
-      doc.fillColor(DARK).fontSize(9).font('Helvetica').text(r.text, 46, rowY + 8, { width: PAGE_WIDTH - 12 });
-      rowY += 34;
+      _drawFlowBox(doc, 40, rowY, PAGE_WIDTH, blocks);
+      rowY += h + 6;
     });
   } else {
     if (s.comments.showClassTeacherRemark) {
-      ensureSpace(46);
+      const blocks = [{ text: s.comments.classTeacherRemark, font: 'Helvetica', fontSize: 9, color: DARK }];
+      const h = _measureFlowBox(doc, PAGE_WIDTH, blocks);
+      ensureSpace(12 + h + 6);
       doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text(`${s.signatures.classTeacherLabel.toUpperCase()}'S REMARK:`, 40, rowY);
       rowY += 12;
-      doc.rect(40, rowY, PAGE_WIDTH, 28).fill('white').stroke(BORDER);
-      doc.fillColor(DARK).fontSize(9).font('Helvetica').text(s.comments.classTeacherRemark, 46, rowY + 8, { width: PAGE_WIDTH - 12 });
-      rowY += 34;
+      _drawFlowBox(doc, 40, rowY, PAGE_WIDTH, blocks);
+      rowY += h + 6;
     }
     if (s.comments.showPrincipalRemark) {
-      ensureSpace(46);
+      const blocks = [{ text: s.comments.principalRemark, font: 'Helvetica', fontSize: 9, color: DARK }];
+      const h = _measureFlowBox(doc, PAGE_WIDTH, blocks);
+      ensureSpace(12 + h + 6);
       doc.fillColor(DARK).fontSize(9).font('Helvetica-Bold').text(`${s.signatures.principalLabel.toUpperCase()}'S COMMENT:`, 40, rowY);
       rowY += 12;
-      doc.rect(40, rowY, PAGE_WIDTH, 28).fill('white').stroke(BORDER);
-      doc.fillColor(DARK).fontSize(9).font('Helvetica').text(s.comments.principalRemark, 46, rowY + 8, { width: PAGE_WIDTH - 12 });
-      rowY += 34;
+      _drawFlowBox(doc, 40, rowY, PAGE_WIDTH, blocks);
+      rowY += h + 6;
     }
   }
 
