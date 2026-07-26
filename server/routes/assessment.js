@@ -76,9 +76,11 @@ async function _getConfig(schoolId, academicYearId) {
       instances:      { ...DEFAULT_INSTANCES },
       reportTemplate: 'detailed',
       customTypes:    DEFAULT_CUSTOM_TYPES.map(t => ({ ...t })),
+      subjectTeacherCommentsEnabled: true,
     };
     await Config.create(doc);
   }
+  if (doc.subjectTeacherCommentsEnabled === undefined) doc.subjectTeacherCommentsEnabled = true;
   // Migrate: synthesize customTypes from legacy weights/instances if field is missing
   if (!doc.customTypes || doc.customTypes.length === 0) {
     const w    = doc.weights   || DEFAULT_WEIGHTS;
@@ -143,12 +145,16 @@ router.get('/config', authMiddleware, PLAN, rbac('settings', 'read'), async (req
  *   weights:        { CA, HW, MT, ET }  — must sum to 100
  *   reportTemplate: 'detailed' | 'summary'
  *   instances:      { CA: number, HW: number }  — min 1, max 10
+ *   subjectTeacherCommentsEnabled: boolean — RC7 capability toggle; when
+ *     false, Mark Entry stops collecting the field and Report Cards'
+ *     Subject Teacher Comments section renders zero trace (no header, no
+ *     placeholder rows) rather than an empty section
  *   academicYearId: string
  */
 router.patch('/config', authMiddleware, PLAN, rbac('settings', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const { academicYearId, weights, reportTemplate, instances } = req.body;
+    const { academicYearId, weights, reportTemplate, instances, subjectTeacherCommentsEnabled } = req.body;
 
     const update = {};
 
@@ -192,6 +198,14 @@ router.patch('/config', authMiddleware, PLAN, rbac('settings', 'update'), async 
         }
       }
       update.instances = inst;
+    }
+
+    // ── Validate subjectTeacherCommentsEnabled ──
+    if (subjectTeacherCommentsEnabled !== undefined) {
+      if (typeof subjectTeacherCommentsEnabled !== 'boolean') {
+        return _err(res, 'subjectTeacherCommentsEnabled must be a boolean');
+      }
+      update.subjectTeacherCommentsEnabled = subjectTeacherCommentsEnabled;
     }
 
     if (Object.keys(update).length === 0) {

@@ -589,9 +589,11 @@ export default function ConfigTab() {
   /* ── Draft state ────────────────────────────────────────── */
   const [draftTypes,    setDraftTypes]    = useState(null);   // null = use DB value
   const [draftTemplate, setDraftTemplate] = useState(null);
+  const [draftSubjectComments, setDraftSubjectComments] = useState(null);
 
   const activeTypes    = draftTypes    ?? cfg.customTypes ?? DEFAULT_CUSTOM_TYPES;
   const activeTemplate = draftTemplate ?? cfg.reportTemplate ?? 'detailed';
+  const activeSubjectComments = draftSubjectComments ?? cfg.subjectTeacherCommentsEnabled ?? true;
 
   const totalWeight = activeTypes.reduce((s, t) => s + Number(t.weight || 0), 0);
   const weightOk    = Math.abs(totalWeight - 100) < 0.01;
@@ -602,13 +604,14 @@ export default function ConfigTab() {
   const { mutate: saveAll, isPending: saving } = useMutation({
     mutationFn: () => Promise.all([
       api.saveTypes({ customTypes: activeTypes }),
-      api.updateConfig({ reportTemplate: activeTemplate }),
+      api.updateConfig({ reportTemplate: activeTemplate, subjectTeacherCommentsEnabled: activeSubjectComments }),
     ]),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['assessment', 'config'] });
       qc.invalidateQueries({ queryKey: ['assessment', 'report'] });
       setDraftTypes(null);
       setDraftTemplate(null);
+      setDraftSubjectComments(null);
       setToast({ msg: 'Configuration saved.', type: 'success' });
     },
     onError: err => setToast({ msg: err?.message ?? 'Failed to save configuration.', type: 'error' }),
@@ -805,6 +808,32 @@ export default function ConfigTab() {
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">{desc}</p>
             </button>
           ))}
+        </div>
+      </div>
+
+      {/* ══ Subject Teacher Comments (RC7 capability toggle) ══ */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800 mb-1">Subject Teacher Comments</h3>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              When enabled, teachers can write a per-subject comment during Mark Entry, and it appears on the report card.
+              Disabling it removes the field from Mark Entry entirely and hides the Subject Teacher Comments section from every report card — no placeholder, no trace.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={activeSubjectComments}
+            onClick={() => setDraftSubjectComments(!activeSubjectComments)}
+            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-slate-400 cursor-pointer
+              ${activeSubjectComments ? 'bg-slate-800' : 'bg-slate-200'}`}
+          >
+            <span
+              className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform
+                ${activeSubjectComments ? 'translate-x-4.5' : 'translate-x-0.5'}`}
+            />
+          </button>
         </div>
       </div>
 

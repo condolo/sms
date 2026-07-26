@@ -576,3 +576,56 @@ describe('_computeReportSections — RC3 IR extension', () => {
     expect(withoutExtras.comments.closingDate).toBe('');
   });
 });
+
+describe('_computeReportSections — RC7 subject-teacher-comments capability toggle', () => {
+  const compute = reportCardsRouter._computeReportSections;
+  const config = { rankingEnabled: true };
+
+  function baseSnap(overrides = {}) {
+    return {
+      status: 'published', superseded: false,
+      studentName: 'Jane Doe', admissionNo: 'ADM001', className: 'Grade 7',
+      termName: 'Term 2', academicYear: '2026', termNumber: 2,
+      schoolName: 'Test School',
+      assessmentWeights: [{ assessmentType: 'cat', label: 'CAT', weight: 100 }],
+      gradingSchema: [{ min: 0, grade: 'C', points: 6, label: 'Average' }],
+      subjects: { math: { finalScore: 85, grade: 'A', breakdown: { cat: 85 } } },
+      totalScore: 85, averageScore: 85, gpa: 4.0,
+      comments: { subjectComments: { math: 'Excellent effort this term' } },
+      version: 1, ...overrides,
+    };
+  }
+
+  test('defaults to enabled when the extra param omits it (existing PDF call-site shape)', () => {
+    const s = compute(baseSnap(), config, null);
+    expect(s.comments.subjectTeacherCommentsEnabled).toBe(true);
+    expect(s.comments.subjectComments).toEqual([{ subjectId: 'math', text: 'Excellent effort this term' }]);
+  });
+
+  test('enabled explicitly: builds one row per subject, using real comment text', () => {
+    const s = compute(baseSnap(), config, null, { subjectTeacherCommentsEnabled: true });
+    expect(s.comments.subjectTeacherCommentsEnabled).toBe(true);
+    expect(s.comments.subjectComments).toEqual([{ subjectId: 'math', text: 'Excellent effort this term' }]);
+  });
+
+  test('disabled: zero trace — subjectComments is empty even though real comment data exists on the snapshot', () => {
+    const s = compute(baseSnap(), config, null, { subjectTeacherCommentsEnabled: false });
+    expect(s.comments.subjectTeacherCommentsEnabled).toBe(false);
+    expect(s.comments.subjectComments).toEqual([]);
+  });
+
+  test('HTML adapter: enabled renders the "Subject Teacher Comments" header and the real comment text', () => {
+    const s = compute(baseSnap(), config, null, { subjectTeacherCommentsEnabled: true });
+    const html = reportCardsRouter._computeReportHTML(s);
+    expect(html).toContain('Subject Teacher Comments');
+    expect(html).toContain('Excellent effort this term');
+  });
+
+  test('HTML adapter: disabled renders zero trace — no header, no placeholder, no comment text', () => {
+    const s = compute(baseSnap(), config, null, { subjectTeacherCommentsEnabled: false });
+    const html = reportCardsRouter._computeReportHTML(s);
+    expect(html).not.toContain('Subject Teacher Comments');
+    expect(html).not.toContain('Excellent effort this term');
+    expect(html).not.toContain('No subjects on this report');
+  });
+});

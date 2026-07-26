@@ -23,6 +23,7 @@ let mockPrevSnapshot;
 let mockSchoolDoc;
 let mockIncidentsAgg;
 let mockLastPointsReset;
+let mockAssessmentConfig = { customTypes: [], subjectTeacherCommentsEnabled: true };
 const mockAuditLogCreate = jest.fn().mockResolvedValue({});
 
 jest.mock('../../middleware/auth', () => ({
@@ -67,6 +68,7 @@ jest.mock('../../utils/tenant-model', () => ({
     }
     if (col === 'invoices') return { find: jest.fn(() => mockChain([])) };
     if (col === 'mark_audit_log') return { create: mockAuditLogCreate };
+    if (col === 'assessment_config') return { findOne: jest.fn(() => mockChain(mockAssessmentConfig)) };
     return { findOne: jest.fn(() => mockChain(null)), find: jest.fn(() => mockChain([])) };
   }),
   tenantContext: jest.fn((req) => ({ schoolId: req?.jwtUser?.schoolId ?? null })),
@@ -135,6 +137,7 @@ beforeEach(() => {
   mockSchoolDoc = { name: 'Test School', logoUrl: null, tagline: '', portalConfig: {} };
   mockIncidentsAgg = [];
   mockLastPointsReset = [];
+  mockAssessmentConfig = { customTypes: [], subjectTeacherCommentsEnabled: true };
 });
 
 describe('GET /api/report-cards/:id/html', () => {

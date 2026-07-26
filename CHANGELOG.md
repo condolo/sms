@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.14.0] — 2026-07-26 — feat(report-cards): Subject Teacher Comments capability toggle (RC7)
+
+`docs/audits/REPORT_CARD_PLATFORM_FUNCTIONAL_ARCHITECTURE.md` §11: "Subject Teacher Comments... is a capability toggle owned by Assessment... its completeness becomes an input to Publication Policy" — and states the render-time consequence precisely: "a disabled capability must produce zero trace in the output — no section header, no 'Comment not provided' placeholder, nothing." Before this phase, the field was always collected in Mark Entry and always rendered on every report card; no school could turn it off.
+
+### Added
+- `assessment_config.subjectTeacherCommentsEnabled` (boolean, default `true` — preserves every school's current always-on behavior) — `GET`/`PATCH /api/assessment/config`.
+- `_computeReportSections`'s `extra` param gains `subjectTeacherCommentsEnabled` (default `true`, so the PDF call site — which never reads `comments.subjectComments` at all — is unaffected). When `false`, `comments.subjectComments` is built as `[]`, not filtered-but-present.
+- `_computeReportHTML` renders the entire "Subject Teacher Comments" header + table only when the flag is true — a disabled school's report card shows literally nothing where that section would be, not an empty placeholder.
+- `GET /:id/html` (published/superseded) and `POST /preview-html` (live draft) both now load/thread this flag through to the IR.
+- Client: `MarkEntryTab.jsx`'s comment column and "Save comments" button disappear entirely when disabled. `ConfigTab.jsx` gets a toggle switch (Subject Teacher Comments card) — the first UI control for this setting.
+- 11 new tests (IR-level, HTML-adapter-level, and the config route) — first coverage for the config route.
+
+### Note
+Full suite 83/83 suites, 823/823 tests; security-scan and ratchet clean. Client build clean. Mutation-tested the HTML adapter's conditional (temporarily forced the section to always render, confirmed the "disabled → zero trace" test fails, restored via backup-copy). No live MongoDB or login in this sandbox, so the ConfigTab toggle and Mark Entry hide/show could not be exercised end-to-end in-browser; verified via a clean production build plus IR/HTML-adapter test coverage asserting the exact rendered output for both states.
+
+---
+
 ## [v5.13.0] — 2026-07-26 — feat(report-cards): subject-teacher-scoped mark/comment enforcement (RC6)
 
 `docs/audits/REPORT_CARD_COMMENT_LIFECYCLE_REVIEW.md` traced the Subject Teacher Comment lifecycle and found `PUT /draft-comments/:studentId/subject/:subjectId`'s own code comment says "teacher-safe merge... each teacher only touches their own subject" — but nothing ever verified that. Direct code reading found the matching gap on the marks side too: `academic_config.subjectAssignmentEnforced` ("if true, only assigned teacher can enter marks") has existed since it was added to `academic-config.js`'s schema — validated, persisted, returned by `GET /api/academic-config` — but was never read anywhere else in the codebase. Any user with `grades:create`/`report_cards:update` could write marks or the Subject Teacher Comment for any subject in any class, not just their own.

@@ -177,6 +177,9 @@ export default function MarkEntryTab() {
   });
   const customTypes = configData?.data?.customTypes ?? DEFAULT_CUSTOM_TYPES;
   const cols = useMemo(() => buildCols(customTypes), [customTypes]);
+  // RC7 — school-level capability toggle. Defaults true so schools that
+  // never configured it keep today's always-on behavior.
+  const subjectCommentsEnabled = configData?.data?.subjectTeacherCommentsEnabled !== false;
 
   const { data: studentsData, isLoading: studentsLoading } = useQuery({
     queryKey: ['classes', classId, 'students'],
@@ -435,14 +438,16 @@ export default function MarkEntryTab() {
                 termNumber={termNumber}
                 customTypes={customTypes}
               />
-              <button
-                onClick={() => saveComments()}
-                disabled={savingComments || !commentsDirty}
-                className="flex items-center gap-1.5 border border-indigo-200 hover:border-indigo-400 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-40 text-indigo-700 text-sm font-medium px-4 py-2 rounded-lg transition"
-              >
-                {savingComments ? <Loader2 size={13} className="animate-spin" /> : <MessageSquare size={13} />}
-                {savingComments ? 'Saving…' : commentsDirty ? 'Save comments' : 'Comments saved'}
-              </button>
+              {subjectCommentsEnabled && (
+                <button
+                  onClick={() => saveComments()}
+                  disabled={savingComments || !commentsDirty}
+                  className="flex items-center gap-1.5 border border-indigo-200 hover:border-indigo-400 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-40 text-indigo-700 text-sm font-medium px-4 py-2 rounded-lg transition"
+                >
+                  {savingComments ? <Loader2 size={13} className="animate-spin" /> : <MessageSquare size={13} />}
+                  {savingComments ? 'Saving…' : commentsDirty ? 'Save comments' : 'Comments saved'}
+                </button>
+              )}
               <button
                 onClick={() => saveAll()}
                 disabled={saving || !dirty}
@@ -469,9 +474,11 @@ export default function MarkEntryTab() {
                       )}
                     </th>
                   ))}
-                  <th className="text-left text-xs font-medium text-slate-500 px-3 py-2.5 min-w-[220px]">
-                    <span className="flex items-center gap-1"><MessageSquare size={10} className="text-indigo-400" /> Comment</span>
-                  </th>
+                  {subjectCommentsEnabled && (
+                    <th className="text-left text-xs font-medium text-slate-500 px-3 py-2.5 min-w-[220px]">
+                      <span className="flex items-center gap-1"><MessageSquare size={10} className="text-indigo-400" /> Comment</span>
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -499,18 +506,20 @@ export default function MarkEntryTab() {
                           />
                         </td>
                       ))}
-                      <td className="px-2 py-1.5">
-                        <input
-                          type="text"
-                          value={comments[sid] ?? ''}
-                          onChange={e => {
-                            setComments(prev => ({ ...prev, [sid]: e.target.value }));
-                            setCommentsDirty(true);
-                          }}
-                          placeholder="Teacher comment…"
-                          className="w-full rounded border border-slate-200 px-2 py-1 text-sm text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400/20 bg-white placeholder-slate-300"
-                        />
-                      </td>
+                      {subjectCommentsEnabled && (
+                        <td className="px-2 py-1.5">
+                          <input
+                            type="text"
+                            value={comments[sid] ?? ''}
+                            onChange={e => {
+                              setComments(prev => ({ ...prev, [sid]: e.target.value }));
+                              setCommentsDirty(true);
+                            }}
+                            placeholder="Teacher comment…"
+                            className="w-full rounded border border-slate-200 px-2 py-1 text-sm text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400/20 bg-white placeholder-slate-300"
+                          />
+                        </td>
+                      )}
                     </tr>
                   );
                 })}

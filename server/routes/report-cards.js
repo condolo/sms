@@ -919,7 +919,10 @@ async function _fetchSignatureImages(snap) {
    RC3 — it never enumerates all of `s`'s keys — so these additions
    are inert to the PDF path and its golden fixture stays unchanged. */
 function _computeReportSections(snap, config, attendance, extra = {}) {
-  const { school = null, behaviour = null, deviations = null } = extra;
+  // subjectTeacherCommentsEnabled defaults true — every existing caller
+  // that doesn't pass it (e.g. _buildPDFPage, which never reads
+  // comments.subjectComments in the first place) keeps today's behavior.
+  const { school = null, behaviour = null, deviations = null, subjectTeacherCommentsEnabled = true } = extra;
   const isDraft = snap.status !== 'published' || snap.superseded;
 
   const weights     = snap.assessmentWeights || [];
@@ -1008,9 +1011,16 @@ function _computeReportSections(snap, config, attendance, extra = {}) {
       nextTermBegin:   snap.comments?.nextTermBegin || '',
       classTeacherName: snap.comments?.classTeacherName || '',
       principalName:    snap.comments?.principalName    || '',
-      subjectComments: Object.keys(snap.subjects || {}).map(subjectId => ({
-        subjectId, text: sanitisePdfStr(snap.comments?.subjectComments?.[subjectId]) || '',
-      })),
+      // RC7 — a disabled capability produces zero trace in the output
+      // (Functional Architecture §11): no rows built at all, and the HTML
+      // adapter uses this same flag to skip the section header/table too,
+      // rather than rendering an empty "No comment entered" list.
+      subjectTeacherCommentsEnabled,
+      subjectComments: subjectTeacherCommentsEnabled
+        ? Object.keys(snap.subjects || {}).map(subjectId => ({
+            subjectId, text: sanitisePdfStr(snap.comments?.subjectComments?.[subjectId]) || '',
+          }))
+        : [],
     },
     signatures: {
       classTeacherLabel: config.classTeacherSignatureLabel || 'Class Teacher',
@@ -1382,6 +1392,15 @@ function _computeReportHTML(s) {
     <tr><td style="${tdS};font-weight:600;width:160px;vertical-align:top">${_esc(c.subjectId)}</td>
         <td style="${tdS};font-size:11px;color:#475569">${c.text ? _esc(c.text) : '<span style="color:#cbd5e1;font-style:italic">No comment entered</span>'}</td></tr>`).join('');
 
+  // RC7 — a disabled capability leaves zero trace: no section header, no
+  // table, no placeholder. Genuinely-empty-but-enabled (a report with no
+  // subjects) keeps the existing "No subjects on this report" placeholder.
+  const subjectCommentsSectionHtml = s.comments.subjectTeacherCommentsEnabled ? `
+  <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 6px">Subject Teacher Comments</p>
+  <table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:11px">
+    ${subjectCommentRows || `<tr><td colspan="2" style="${tdS};color:#94a3b8;font-style:italic">No subjects on this report.</td></tr>`}
+  </table>` : '';
+
   const commentsHtml = `
 <div style="${pb}">
   <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:14px;border-bottom:2px solid #1e293b;padding-bottom:10px">
@@ -1391,10 +1410,7 @@ function _computeReportHTML(s) {
       <p style="margin:0;font-size:12px;font-weight:700;letter-spacing:1px">TEACHER COMMENTS — ${_esc(s.studentInfo.studentName)}</p>
     </div>
   </div>
-  <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 6px">Subject Teacher Comments</p>
-  <table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:11px">
-    ${subjectCommentRows || `<tr><td colspan="2" style="${tdS};color:#94a3b8;font-style:italic">No subjects on this report.</td></tr>`}
-  </table>
+  ${subjectCommentsSectionHtml}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
     <div>
       <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#475569;margin:0 0 4px">
@@ -1621,7 +1637,7 @@ router.get('/:id/html', authMiddleware, PLAN, _pdfAccess, async (req, res) => {
     }
     const config = await _loadConfig(schoolId);
 
-    const [school, behaviour, prevSnap] = await Promise.all([
+    const [school, behaviour, prevSnap, caConfig] = await Promise.all([
       _model('schools').findOne({ id: schoolId }, { logoUrl: 1, tagline: 1 }).lean().catch(() => null),
       behaviourSummary(schoolId, snap.studentId).catch(() => null),
       snap.termNumber > 1
@@ -1630,10 +1646,14 @@ router.get('/:id/html', authMiddleware, PLAN, _pdfAccess, async (req, res) => {
             termNumber: snap.termNumber - 1, superseded: { $ne: true },
           }).lean().catch(() => null)
         : Promise.resolve(null),
+      _getAssessmentConfig(schoolId, snap.academicYearId ?? null),
     ]);
     const deviations = computeTermDeviation(snap.subjects, prevSnap?.subjects);
 
-    const sections = _computeReportSections(snap, config, attData, { school, behaviour, deviations });
+    const sections = _computeReportSections(snap, config, attData, {
+      school, behaviour, deviations,
+      subjectTeacherCommentsEnabled: caConfig.subjectTeacherCommentsEnabled !== false,
+    });
     const html = _computeReportHTML(sections);
     return ok(res, { html });
   } catch (err) { console.error('[report-cards/:id/html]', err); return E.serverError(res); }
@@ -1696,6 +1716,7 @@ const PreviewHtmlSchema = z.object({
     // truth for what that shape-change means.
     customTypes: z.array(z.any()).nullable().optional(),
     passMark: z.number().optional(), rankingEnabled: z.boolean().optional(), showGPA: z.boolean().optional(),
+    subjectTeacherCommentsEnabled: z.boolean().optional(),
   }).optional(),
 });
 
@@ -1729,7 +1750,10 @@ router.post('/preview-html', authMiddleware, PLAN, rbac('grades', 'read'), async
     };
     const config = { rankingEnabled: !!clientConfig?.rankingEnabled, showGPA: !!clientConfig?.showGPA, showAttendanceSummary: false };
 
-    const sections = _computeReportSections(snap, config, null, { school, behaviour: beh ?? null, deviations: studentDeviations ?? null });
+    const sections = _computeReportSections(snap, config, null, {
+      school, behaviour: beh ?? null, deviations: studentDeviations ?? null,
+      subjectTeacherCommentsEnabled: clientConfig?.subjectTeacherCommentsEnabled !== false,
+    });
     const html = _computeReportHTML(sections);
     return ok(res, { html });
   } catch (err) { console.error('[report-cards/preview-html]', err); return E.serverError(res); }
