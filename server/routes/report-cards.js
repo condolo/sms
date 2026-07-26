@@ -36,6 +36,7 @@ const { ok, created, paginate, parsePagination, E } = require('../utils/response
 const { rankStudents, mergeRankings, bestPerSubject, computeRankingScore } = require('../utils/ranking');
 const { mergeConfig, resolveGrade } = require('./academic-config');
 const { getConfig: _getAssessmentConfig } = require('./assessment');
+const { resolveTemplate } = require('./report-card-templates');
 const { isYearArchived } = require('../utils/archival');
 const AuditService       = require('../services/audit');
 const { sanitisePdfStr } = require('../utils/sanitisePdf');
@@ -542,6 +543,17 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
       ? await getWorkflowConfig(tenantContext(req), schoolId, REPORT_COMMENT_WORKFLOW_KEY)
       : null;
 
+    // ── Step 6e: Resolve report-card template per distinct sectionId
+    // present in this class, once each (RC11) — not one resolveTemplate()
+    // call per student. resolveTemplate() itself already falls through
+    // section-default → school-default → Legacy Tabular, so a student
+    // with no sectionId just resolves against the `null` bucket.
+    const distinctSectionIds = [...new Set(Object.values(studentMap).map(s => s.sectionId || null))];
+    const templateBySection = {};
+    for (const secId of distinctSectionIds) {
+      templateBySection[secId ?? '__none__'] = await resolveTemplate(tenantContext(req), schoolId, secId);
+    }
+
     // ── Step 6b: Batch-load outstanding fee balances ─────────
     // Best-effort: finance may not be used by this school. Any DB error leaves all flags false.
     const blockedStudentIds = new Set();
@@ -573,6 +585,7 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
         const stu  = studentMap[r.studentId] || {};
         const prev = existingMap[r.studentId];
         const draft = draftCommentsMap[r.studentId];
+        const template = templateBySection[stu.sectionId || '__none__'];
 
         // RC9 — Publication Policy completeness gates. Per-student, not
         // batch-wide: one student missing a comment doesn't block the
@@ -644,6 +657,11 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
 
           attendanceSummary: null,
           financialBlock:    blockedStudentIds.has(r.studentId),
+          // RC11 — presentation-only, deliberately outside _hashSnapshot's
+          // payload (Consolidation Plan §2.3): a school re-theming its
+          // templates later must never invalidate an old report's hash.
+          templateId:        template.templateId,
+          templateVersion:   template.templateVersion,
           status:            'published',
           publishedAt:       now,
           publishedBy:       userId,

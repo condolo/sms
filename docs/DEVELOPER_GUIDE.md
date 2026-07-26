@@ -2140,6 +2140,19 @@ Both `student-portal.js` and `parent-portal.js` now query `report_card_snapshots
 
 `GET /:id`, `GET /:id/pdf`, and `GET /:id/html` use an Express param route (`/:id`) — every other single-segment `GET` route above (`/bulk-pdf`, `/draft-comments`, `/workflow-config`, `/publication-policy`) is registered in the source file *before* `GET /:id`, since Express matches single-segment routes in registration order and a param route would otherwise swallow them. This was a real, previously-unnoticed bug for `/bulk-pdf` and `/draft-comments` (see CHANGELOG v5.14.1) — keep new single-segment `GET` routes on this router above `GET /:id`.
 
+### Report Card Templates (RC11) — `report_card_templates`
+
+A separate, small registry router (`server/routes/report-card-templates.js`, mounted at `/api/report-card-templates`) holding **metadata only** — name, curriculum tag, section scoping, `isDefault` flag, a `revision` counter. It describes *which* template a report should use, not *how* that template renders; there is no rendering-engine content here (see the route file's header comment for the scope decision). Not to be confused with `rc-templates.js` (`/api/rc-templates`), a separate, already-complete, already-live feature for competency-band templates — untouched by RC11.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/report-card-templates` | settings:read | List templates for the school (optional `?sectionId=`) |
+| POST | `/api/report-card-templates` | settings:update | Create; `isDefault:true` clears other defaults in the same scope |
+| PUT | `/api/report-card-templates/:id` | settings:update | Update; bumps `revision`; re-scopes `isDefault` clearing if `sectionId` changes |
+| DELETE | `/api/report-card-templates/:id` | settings:update | Blocked while the template is the scope's default |
+
+`resolveTemplate(ctx, schoolId, sectionId)` (exported off the router) is the resolution chain `report-cards.js`'s `POST /publish` calls: section-scoped default → school-wide default → `"legacy_tabular"` (a platform built-in sentinel, never a real document). Resolved once per distinct `sectionId` in the class being published, and `templateId`/`templateVersion` are snapshotted onto each `report_cards` document — presentation-only fields, deliberately excluded from `_hashSnapshot`'s fixed payload list so re-theming never invalidates an old report's hash.
+
 ### Report Card Snapshot Schema
 
 ```js

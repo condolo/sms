@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.18.0] — 2026-07-26 — feat(report-cards): Template Engine registry + resolution chain (RC11)
+
+`docs/audits/REPORT_CARD_ARCHITECTURE_CONSOLIDATION_PLAN.md` Phase 3 describes a full Template Engine: configurable section layout, page geometry, per-template branding, multiple starter templates, `rc_templates` absorbed into it. Building all of that in one pass would be disproportionate to every other RC milestone in this series, and the plan's own header gates it behind separate explicit acceptance — the same posture every other Kernel-tier item in this codebase has required. Presented as a scoped choice (full engine / minimal registry+resolution / skip); the user chose **minimal**: build the `report_card_templates` registry and the resolution chain now, with `templateId`/`templateVersion` snapshotted at publish time, but no new rendering engine — every school still renders through today's exact PDF/HTML layout, reported as `"legacy_tabular"`. Mid-investigation, also discovered `rc_templates` (competency-band templates) is not dead code as the plan's framing implied — it has a full, live 821-line Settings UI (`RCTemplatesSection.jsx`) — so "retire/absorb `rc_templates`" was explicitly ruled out too, confirmed by the user's choice: it stays untouched, since nothing replaces its competency-band feature yet.
+
+### Added
+- `report_card_templates` collection + `server/routes/report-card-templates.js` (new, mounted at `/api/report-card-templates`, `rbac('settings', {read,update})`): CRUD (`GET`/`POST`/`PUT`/`DELETE`) for template metadata only — name, curriculum tag (discovery-only, no behavior), section scoping, `isDefault` flag, a `revision` counter. Setting `isDefault:true` clears any other default in the same scope (section-scoped, or school-wide when unset) — same convention as `assessment.js`'s grade-scales `isDefault` handling. Deleting a scope's current default is blocked until another is promoted first.
+- `resolveTemplate(ctx, schoolId, sectionId)` — the resolution chain: section-scoped default → school-wide default → `"Legacy Tabular"` (a platform built-in sentinel, never a real document — every school's PDF/HTML output is this layout today regardless of which template resolves). Exported for `report-cards.js` to call directly.
+- `report-cards.js`'s `POST /publish` resolves a template once per distinct `sectionId` present in the class (not per student), and snapshots `templateId`/`templateVersion` onto each published `report_cards` document — presentation-only fields, deliberately outside `_hashSnapshot`'s fixed payload list, so a school re-theming its templates later never invalidates an old report's content-authenticity hash.
+- `server/utils/indexes.js`: `report_card_templates` index block (`{schoolId,sectionId,isDefault}`, `{schoolId,isDefault}`, unique `{id}`).
+
+### Not done (deliberate, per the user's scope choice)
+- No new rendering engine — no configurable section layout, page geometry, or per-template branding. `templateId`/`templateVersion` are recorded now so a future engine has real history to attach to, but nothing reads them to change output yet.
+- `rc_templates` / `RCTemplatesSection.jsx` (competency-band templates) — untouched, not retired, not absorbed.
+- No client UI for managing `report_card_templates` — this phase is server-only (registry + resolution + snapshot fields).
+
+### Tests
+`server/__tests__/routes/report-card-templates.test.js` (new, 17 tests): CRUD routes (create/update/delete, `isDefault` re-scoping including a mid-request `sectionId` change, revision bump on every update, delete-blocked-while-default, 404s), and `resolveTemplate`'s full chain (section-default found; falls through to school-default; falls through to Legacy Tabular; `builtIn` flag correctness). Mutation-verified: temporarily swapped the chain's priority order (school-default checked before section-default) — the priority test caught it; temporarily disabled the delete-blocked guard — the guard test caught it. Both reverted. Full suite 88/88 suites, 877/877 tests; `security-scan.js` and `verify-tenant-coverage.js` (ratchet held at 36) clean. No live MongoDB/login in this sandbox for browser E2E — server-only phase, same limitation as every prior RC phase.
+
+---
+
 ## [v5.17.0] — 2026-07-26 — feat(report-cards): Comment Banks → shared service + real picker wiring (RC10)
 
 `docs/audits/REPORT_CARD_COMMENT_LIFECYCLE_REVIEW.md`: "Comment Banks — should it be a shared service? Yes... `comment_banks`' existing `category` enum already gestures at exactly the cross-module reuse... letting Assessment (subject comments), Report Cards (class-teacher/principal/head-of-section remarks)... all call the same picklist API instead of one module claiming exclusive ownership." Direct code reading found two real gaps, not one: `GET /api/comment-banks` was gated on `rbac('grades', 'read')` — a real barrier for any Report Cards-only caller — and, more concretely, **nothing in the app ever actually used the bank to write a comment**. `ConfigTab.jsx`'s own UI copy says "Pre-written remarks teachers can insert into report cards," but grep across the whole client found zero consumers besides that same management screen — the bank existed, but no "insert" action existed anywhere.

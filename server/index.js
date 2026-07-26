@@ -263,6 +263,9 @@ app.use('/api/mark-submissions',  require('./routes/mark-submissions'));
 /* ── Competency report card templates ── */
 app.use('/api/rc-templates', require('./routes/rc-templates'));
 
+/* ── Report Card Template Engine registry (RC11) ── */
+app.use('/api/report-card-templates', require('./routes/report-card-templates'));
+
 /* ── eLearning — Google Classroom integration ── */
 app.use('/api/elearning', require('./routes/elearning'));
 

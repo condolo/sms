@@ -497,6 +497,20 @@ const INDEXES = [
     ],
   },
 
+  /* ── report_card_templates (RC11) ─────────────────────────────
+     Registry + resolution chain metadata only (no layout content —
+     see server/routes/report-card-templates.js header). Same shape
+     as grade_boundaries' own indexes: primary lookup is resolveTemplate()'s
+     {schoolId, sectionId, isDefault} / {schoolId, isDefault} pair. */
+  {
+    col: 'report_card_templates',
+    indexes: [
+      { key: { schoolId: 1, sectionId: 1, isDefault: 1 }, name: 'rct_school_section_default', sparse: true },
+      { key: { schoolId: 1, isDefault: 1 },               name: 'rct_school_default', sparse: true },
+      { key: { id: 1 },                                   name: 'rct_id', unique: true, sparse: true },
+    ],
+  },
+
   /* ── mark_submissions ───────────────────────────────────────
      Approval workflow. Unique composite = one submission per
      class/subject/term/type/instance combination.
