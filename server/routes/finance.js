@@ -356,18 +356,282 @@ router.post('/payments', authMiddleware, PLAN, rbac('finance', 'create'), async 
 });
 
 /* ══════════════════════════════════════════════════════════════
-   FEE STRUCTURES — define standard fees per class/term
+   FEE TYPES — school-configurable catalogue for invoice line items'
+   `feeType` (Tuition/Transport/Lunch/Library/Online Subscription/…).
+   Mirrors hr.js's payroll_config allowance/deduction type catalogue
+   pattern exactly: one doc per school, merged over hardcoded
+   defaults, upsert-on-save. LineItemSchema.feeType stays a free string
+   (an invoice predates this catalogue existing, and a one-off line
+   item shouldn't be blocked by it) — this is the picker source for
+   the UI, not a hard FK constraint.
+   ══════════════════════════════════════════════════════════════ */
+const DEFAULT_FEE_TYPES = [
+  { key: 'tuition',      label: 'Tuition Fees' },
+  { key: 'transport',    label: 'Transport' },
+  { key: 'lunch',        label: 'Lunch' },
+  { key: 'library',      label: 'Library' },
+  { key: 'online_subscription', label: 'Online Subscription' },
+  { key: 'uniform',      label: 'Uniform' },
+  { key: 'trip',         label: 'Trip / Excursion' },
+  { key: 'other',        label: 'Other' },
+];
+
+const FeeTypeSchema = z.object({
+  key:   z.string().min(1).max(50).regex(/^[a-z][a-z0-9_]*$/, 'key must be lowercase, start with a letter'),
+  label: z.string().min(1).max(100),
+});
+const FeeConfigSchema = z.object({
+  feeTypes: z.array(FeeTypeSchema).max(40).optional(),
+});
+function _mergeFeeConfig(saved) {
+  return { feeTypes: saved?.feeTypes ?? DEFAULT_FEE_TYPES };
+}
+
+/* GET /api/finance/fee-config */
+router.get('/fee-config', authMiddleware, PLAN, rbac('finance', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const saved = await tenantModel('fee_config', tenantContext(req)).findOne({ schoolId }).lean();
+    return ok(res, _mergeFeeConfig(saved));
+  } catch (err) {
+    console.error('[finance GET /fee-config]', err);
+    return E.serverError(res);
+  }
+});
+
+/* PUT /api/finance/fee-config */
+router.put('/fee-config', authMiddleware, PLAN, rbac('finance', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { data, error } = _validate(FeeConfigSchema, req.body);
+    if (error) return E.validation(res, error);
+
+    if (data.feeTypes) {
+      const keys = data.feeTypes.map(t => t.key);
+      if (new Set(keys).size !== keys.length) return E.badRequest(res, 'feeTypes contains duplicate keys');
+    }
+
+    const doc = await tenantModel('fee_config', tenantContext(req)).findOneAndUpdate(
+      { schoolId },
+      { $set: { ...data, schoolId, updatedBy: userId, updatedAt: new Date().toISOString() } },
+      { new: true, upsert: true, runValidators: false }
+    ).lean();
+    return ok(res, _mergeFeeConfig(doc));
+  } catch (err) {
+    console.error('[finance PUT /fee-config]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   FEE STRUCTURES — define standard fees per class/section/students
    ══════════════════════════════════════════════════════════════ */
 const FeeStructureSchema = z.object({
   name:        z.string().min(1).max(200),
   description: z.string().max(500).optional(),
   academicYear:z.string().max(20).optional(),
   term:        z.number().int().min(1).max(4).optional(),
-  classIds:    z.array(z.string()).optional(),   // empty = all classes
+  // scopeType selects which of the id lists below actually targets
+  // students; omitted defaults to 'classes' when classIds is present
+  // (pre-existing structures created before scopeType existed) or
+  // 'all' otherwise — see _resolveScopeStudents().
+  scopeType:   z.enum(['all', 'classes', 'sections', 'students']).optional(),
+  classIds:    z.array(z.string()).optional(),
+  sectionIds:  z.array(z.string()).optional(),
+  studentIds:  z.array(z.string()).optional(),
   lineItems:   z.array(LineItemSchema).min(1),
   dueDate:     z.string().optional(),
   notes:       z.string().max(500).optional(),
 });
+
+/* Resolves which students a fee structure's scope actually targets —
+   the single place this logic lives, so /generate (and any future
+   caller, e.g. a "how many students would this apply to" preview)
+   never re-derive it differently. */
+async function _resolveScopeStudents(Students, schoolId, fs) {
+  const scopeType = fs.scopeType || (fs.classIds?.length ? 'classes' : 'all');
+  const filter = { schoolId, status: 'active' };
+  if (scopeType === 'classes'  && fs.classIds?.length)   filter.classId   = { $in: fs.classIds };
+  if (scopeType === 'sections' && fs.sectionIds?.length) filter.sectionId = { $in: fs.sectionIds };
+  if (scopeType === 'students' && fs.studentIds?.length) {
+    return Students.find({ schoolId, status: 'active', id: { $in: fs.studentIds } }).lean();
+  }
+  return Students.find(filter).lean();
+}
+
+/* ══════════════════════════════════════════════════════════════
+   DISCOUNT POLICIES — sibling-discount tiers, applied at bulk
+   invoice generation time. One school can have several policies
+   (e.g. draft vs. active, or a policy retired for next year) but
+   only ONE 'sibling' policy may be `active` at a time — that is
+   the one _resolveSiblingDiscounts() looks up.
+   ══════════════════════════════════════════════════════════════ */
+const DiscountTierSchema = z.object({
+  // 1st-enrolled child in a family never appears in a tier (pays full
+  // price); tiers start at the 2nd child.
+  nthChild:    z.number().int().min(2).max(10),
+  discountPct: z.number().min(0).max(100),
+});
+const DiscountPolicySchema = z.object({
+  name:   z.string().min(1).max(200),
+  type:   z.literal('sibling').default('sibling'),
+  active: z.boolean().default(false),
+  tiers:  z.array(DiscountTierSchema).min(1),
+});
+function _validateTiers(tiers) {
+  const nths = tiers.map(t => t.nthChild);
+  if (new Set(nths).size !== nths.length) return 'tiers contains duplicate nthChild values';
+  return null;
+}
+
+/* ── GET /api/finance/discount-policies ──────────────────────── */
+router.get('/discount-policies', authMiddleware, PLAN, rbac('finance', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const DiscountPolicies = tenantModel('discount_policies', tenantContext(req));
+    const docs = await DiscountPolicies.find({ schoolId }).sort({ createdAt: -1 }).lean();
+    return ok(res, docs);
+  } catch (err) {
+    console.error('[finance GET /discount-policies]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── POST /api/finance/discount-policies ─────────────────────── */
+router.post('/discount-policies', authMiddleware, PLAN, rbac('finance', 'create'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { data, error } = _validate(DiscountPolicySchema, req.body);
+    if (error) return E.validation(res, error);
+    const tierErr = _validateTiers(data.tiers);
+    if (tierErr) return E.badRequest(res, tierErr);
+
+    const DiscountPolicies = tenantModel('discount_policies', tenantContext(req));
+    if (data.active) {
+      await DiscountPolicies.updateMany({ schoolId, type: data.type, active: true }, { $set: { active: false } });
+    }
+    const doc = await DiscountPolicies.create({ id: uuidv4(), schoolId, createdBy: userId, ...data });
+    AuditService.log({ action: 'finance.discount_policy_created', actor: req.jwtUser, schoolId, target: { type: 'discount_policy', id: doc.id, label: data.name }, req });
+    return created(res, doc.toObject ? doc.toObject() : doc);
+  } catch (err) {
+    console.error('[finance POST /discount-policies]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── PUT /api/finance/discount-policies/:id ──────────────────── */
+router.put('/discount-policies/:id', authMiddleware, PLAN, rbac('finance', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { data, error } = _validate(DiscountPolicySchema.partial(), req.body);
+    if (error) return E.validation(res, error);
+    if (data.tiers) {
+      const tierErr = _validateTiers(data.tiers);
+      if (tierErr) return E.badRequest(res, tierErr);
+    }
+
+    const DiscountPolicies = tenantModel('discount_policies', tenantContext(req));
+    if (data.active) {
+      const existing = await DiscountPolicies.findOne({ id: req.params.id, schoolId }).lean();
+      if (!existing) return E.notFound(res, 'Discount policy not found');
+      await DiscountPolicies.updateMany({ schoolId, type: existing.type, active: true, id: { $ne: req.params.id } }, { $set: { active: false } });
+    }
+    const doc = await DiscountPolicies.findOneAndUpdate(
+      { id: req.params.id, schoolId },
+      { ...data, updatedBy: userId },
+      { new: true }
+    ).lean();
+    if (!doc) return E.notFound(res, 'Discount policy not found');
+    AuditService.log({ action: 'finance.discount_policy_updated', actor: req.jwtUser, schoolId, target: { type: 'discount_policy', id: req.params.id, label: doc.name }, req });
+    return ok(res, doc);
+  } catch (err) {
+    console.error('[finance PUT /discount-policies/:id]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── DELETE /api/finance/discount-policies/:id ───────────────── */
+router.delete('/discount-policies/:id', authMiddleware, PLAN, rbac('finance', 'delete'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const DiscountPolicies = tenantModel('discount_policies', tenantContext(req));
+    const doc = await DiscountPolicies.findOneAndDelete({ id: req.params.id, schoolId });
+    if (!doc) return E.notFound(res, 'Discount policy not found');
+    AuditService.log({ action: 'finance.discount_policy_deleted', actor: req.jwtUser, schoolId, target: { type: 'discount_policy', id: req.params.id, label: doc.name }, req });
+    return ok(res, { deleted: true });
+  } catch (err) {
+    console.error('[finance DELETE /discount-policies/:id]', err);
+    return E.serverError(res);
+  }
+});
+
+/* Resolves per-student sibling-discount percentages for a batch of
+   target students, keyed by studentId — the single place this logic
+   lives, called once per /generate run (never per-student: ranking a
+   family's children requires each guardian's FULL child list, not
+   just whichever of their kids are in this batch).
+
+   Family grouping: `users` docs with role 'parent' carry a
+   `studentIds` array (the reverse of the Link Parent relationship —
+   see notify-students.js). A student can have >1 guardian, and two
+   guardians of the same family may not list identical studentIds
+   (e.g. one parent linked before a younger sibling enrolled), so
+   families are merged via union-find over shared studentIds rather
+   than assumed to match one guardian's list exactly.
+
+   Ranking: within a merged family, children are ordered by
+   enrollmentDate (earliest = 1st child, pays full price); a tier's
+   discount applies from the matching nthChild onward using the
+   highest tier for any child beyond the last defined tier. */
+async function _resolveSiblingDiscounts(schoolId, ctx, studentIds) {
+  const result = new Map();
+  if (!studentIds?.length) return result;
+
+  const DiscountPolicies = tenantModel('discount_policies', ctx);
+  const policy = await DiscountPolicies.findOne({ schoolId, type: 'sibling', active: true }).lean();
+  if (!policy?.tiers?.length) return result;
+
+  const Users = tenantModel('users', ctx);
+  const guardians = await Users.find({ schoolId, role: 'parent', studentIds: { $in: studentIds }, isActive: { $ne: false } })
+    .select('studentIds').lean();
+  if (!guardians.length) return result;
+
+  // Union-find: merge every guardian's children into one family group.
+  const parentOf = new Map();
+  function find(x) { while (parentOf.get(x) !== x) x = parentOf.get(x); return x; }
+  function union(a, b) { const ra = find(a), rb = find(b); if (ra !== rb) parentOf.set(ra, rb); }
+  for (const g of guardians) {
+    const kids = (g.studentIds || []).filter(Boolean);
+    for (const k of kids) if (!parentOf.has(k)) parentOf.set(k, k);
+    for (let i = 1; i < kids.length; i++) union(kids[0], kids[i]);
+  }
+  if (parentOf.size === 0) return result;
+
+  const families = new Map(); // root id -> [studentId, ...]
+  for (const sid of parentOf.keys()) {
+    const root = find(sid);
+    if (!families.has(root)) families.set(root, []);
+    families.get(root).push(sid);
+  }
+
+  const tierByNth = new Map(policy.tiers.map(t => [t.nthChild, t.discountPct]));
+  const maxTierNth = Math.max(...policy.tiers.map(t => t.nthChild));
+  const maxTierPct = tierByNth.get(maxTierNth);
+
+  const Students = tenantModel('students', ctx);
+  for (const familyIds of families.values()) {
+    if (familyIds.length < 2) continue; // only child — no sibling discount
+    const siblings = await Students.find({ schoolId, id: { $in: familyIds } }).select('id enrollmentDate createdAt').lean();
+    siblings.sort((a, b) => new Date(a.enrollmentDate || a.createdAt || 0) - new Date(b.enrollmentDate || b.createdAt || 0));
+    siblings.forEach((s, idx) => {
+      const nth = idx + 1;
+      if (nth === 1 || !studentIds.includes(s.id)) return;
+      const pct = tierByNth.get(nth) ?? (nth > maxTierNth ? maxTierPct : 0);
+      if (pct > 0) result.set(s.id, pct);
+    });
+  }
+  return result;
+}
 
 /* ── GET /api/finance/fee-structures ─────────────────────────── */
 router.get('/fee-structures', authMiddleware, PLAN, rbac('finance', 'read'), async (req, res) => {
@@ -455,11 +719,9 @@ router.post('/fee-structures/:id/generate', authMiddleware, PLAN, rbac('finance'
     const fs = await FeeStructures.findOne({ id: req.params.id, schoolId }).lean();
     if (!fs) return E.notFound(res, 'Fee structure not found');
 
-    // Resolve target students
-    const studentFilter = { schoolId, status: 'active' };
-    if (fs.classIds && fs.classIds.length > 0) studentFilter.classId = { $in: fs.classIds };
-
-    const students = await Students.find(studentFilter).lean();
+    // Resolve target students — class/section/individual-student scope,
+    // single source of truth (see _resolveScopeStudents above).
+    const students = await _resolveScopeStudents(Students, schoolId, fs);
     if (students.length === 0) return ok(res, { created: 0, message: 'No active students found for the given criteria' });
 
     // Skip students who already have an invoice from this structure (idempotent)
@@ -469,14 +731,23 @@ router.post('/fee-structures/:id/generate', authMiddleware, PLAN, rbac('finance'
 
     if (targets.length === 0) return ok(res, { created: 0, message: 'Invoices already generated for all students in this structure' });
 
-    const totals  = _calcInvoiceTotals(fs.lineItems);
+    // Sibling discount (if an active policy exists) — resolved once for
+    // every target student, not per-student, since it needs each
+    // guardian's FULL child list to rank correctly.
+    const targetStudentIds = targets.map(s => s.id ?? s._id?.toString());
+    const siblingDiscounts = await _resolveSiblingDiscounts(schoolId, tenantContext(req), targetStudentIds);
+
     const created_docs = [];
 
     for (const student of targets) {
+      const sid = student.id ?? student._id?.toString();
+      const discountPct = siblingDiscounts.get(sid) ?? 0;
+      const totals = _calcInvoiceTotals(fs.lineItems, discountPct);
       const invNum = await nextInvoiceNumber(schoolId);
       const inv = await Invoices.create({
         id:             uuidv4(),
         schoolId,
+        discountPct,
         invoiceNumber:  invNum,
         studentId:      student.id ?? student._id?.toString(),
         studentName:    `${student.firstName} ${student.lastName}`,
