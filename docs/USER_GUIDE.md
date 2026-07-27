@@ -554,6 +554,7 @@ Set up fee structures in **Finance → Fee Structures → New Fee Structure** (a
 Click **Fee Settings** on the Fee Structures tab to configure:
 - **Fee Types** — the catalogue of line-item types (Tuition, Transport, Lunch, …) offered when building a fee structure or invoice
 - **Sibling Discount Policies** — discount tiers by enrollment order (e.g. 2nd child 10% off, 3rd child 20% off). Only one policy can be active at a time; it's applied automatically the next time you generate invoices, ranking each family's children by how long they've been enrolled
+- **Overdue Invoice Reminders** — the reminder schedule: a reminder N days before an invoice's due date, one on the due date itself, then recurring every N days for as long as it's unpaid. Turn the whole schedule off, or adjust the day counts, at any time — changes apply the next time the daily reminder check runs. Whether reminders go out by email, in-app, or both is set per-event in **Settings → Notifications** ("Fee Due Soon Reminder" and "Overdue Invoice Reminder")
 
 ### Invoices
 - Invoices are generated automatically when a new term starts (if configured).

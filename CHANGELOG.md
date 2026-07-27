@@ -6,6 +6,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.28.0] — 2026-07-27 — feat(finance): configurable overdue-invoice reminder schedule
+
+`invoice-overdue-cron.js` re-fired every single day an invoice stayed overdue,
+had no pre-due warning, and gave a school no way to change any of it. Replaced
+with a per-school configurable schedule.
+
+### Added
+- `GET/PUT /api/finance/invoice-reminder-config` — singleton per-school
+  schedule: `enabled`, `beforeDueDays` (default 3), `onDueDate` (default true),
+  `afterDueIntervalDays` (default 4). Same shape as `fee_config`.
+- `invoice_due_soon` notification event (pre-due reminder) — rides the
+  existing generic Notification Settings UI, no client changes needed there.
+- `FeeSettingsModal`: new "Overdue Invoice Reminders" section for the schedule.
+
+### Changed
+- `invoice-overdue-cron.js` now classifies each candidate invoice against
+  today + the school's schedule (before-due / on-due / on-cadence-after-due /
+  no-op) instead of notifying every overdue invoice every day.
+- `invoice_overdue` event now defaults to `{email: true, inApp: true}`
+  (previously email-only).
+
+---
+
 ## [v5.27.0] — 2026-07-27 — feat(finance): fee types, scoped fee structures, sibling discount policies
 
 Finance's fee structures could only target "all classes" or a hardcoded list of

@@ -1578,6 +1578,7 @@ The InnoLearn International School demo seed has students, teachers, and classes
 | `GET/PUT /api/finance/fee-config` | premium | School-configurable fee-type catalogue (`fee_config`), mirrors `payroll_config` |
 | `GET/POST/PUT/DELETE /api/finance/fee-structures` | premium | `scopeType` (all/classes/sections/students); `POST .../:id/generate` bulk-creates invoices via `_resolveScopeStudents()` + sibling discounts |
 | `GET/POST/PUT/DELETE /api/finance/discount-policies` | premium | Sibling-discount tiers (`discount_policies`), one active `sibling` policy per school; applied by `_resolveSiblingDiscounts()` inside `/fee-structures/:id/generate` |
+| `GET/PUT /api/finance/invoice-reminder-config` | premium | Per-school overdue-reminder schedule (`invoice_reminder_config`) read by `invoice-overdue-cron.js` — before-due/on-due/recurring-after-due days |
 | `GET/POST /api/behaviour/incidents` | standard | `GET .../summary` merits/demerits per student |
 | `GET/POST /api/behaviour/appeals` | standard | `PATCH .../resolve` updates incident status atomically |
 | `GET/POST /api/exams` | standard | `GET /api/exams/:id/results` with class stats, `POST /api/exams/:id/results` bulk-upsert |
