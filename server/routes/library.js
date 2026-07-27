@@ -72,18 +72,41 @@ const BookSchema = z.object({
 });
 
 const LoanSchema = z.object({
-  bookId:        z.string().min(1),
-  borrowerId:    z.string().min(1),
-  borrowerType:  z.enum(['student', 'staff']).default('student'),
-  borrowerName:  z.string().max(200).trim().optional().default(''),
-  borrowerClass: z.string().max(100).trim().optional().default(''),
-  dueDate:       z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Due date must be YYYY-MM-DD'),
+  bookId:               z.string().min(1),
+  borrowerId:           z.string().min(1),
+  borrowerType:         z.enum(['student', 'staff']).default('student'),
+  borrowerName:         z.string().max(200).trim().optional().default(''),
+  borrowerClass:        z.string().max(100).trim().optional().default(''),
+  borrowerAdmissionNo:  z.string().max(50).trim().optional().default(''),
+  dueDate:              z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Due date must be YYYY-MM-DD'),
 });
 
 function _validate(schema, data) {
   const r = schema.safeParse(data);
   if (!r.success) return { error: r.error.issues.map(i => ({ field: i.path.join('.'), message: i.message })) };
   return { data: r.data };
+}
+
+/* Validates a loan's borrower actually exists for this school before
+   issuing — same FK-validation posture as exams.js's _checkExamFKs.
+   Matters more here than cosmetically: GET /loans self-scopes a
+   non-manage-role viewer to `borrowerId === their own userId`
+   (see below), so a librarian free-typing the wrong id would silently
+   make that loan invisible to the very person who borrowed it.
+   Staff match against EITHER teachers.id or teachers.userId — the
+   client picker prefers userId (the actual login id GET /loans
+   filters against) but falls back to a teacher's own id when they
+   have no linked login account. */
+async function _checkBorrowerFK(schoolId, ctx, { borrowerType, borrowerId }) {
+  if (borrowerType === 'student') {
+    const exists = await tenantModel('students', ctx).findOne({ id: borrowerId, schoolId }).select('id').lean();
+    if (!exists) return `borrowerId "${borrowerId}" does not match any student for this school`;
+  } else if (borrowerType === 'staff') {
+    const exists = await tenantModel('teachers', ctx)
+      .findOne({ schoolId, $or: [{ id: borrowerId }, { userId: borrowerId }] }).select('id').lean();
+    if (!exists) return `borrowerId "${borrowerId}" does not match any staff member for this school`;
+  }
+  return null;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -288,6 +311,9 @@ router.post('/loans', async (req, res) => {
     const { data, error } = _validate(LoanSchema, req.body);
     if (error) return E.validation(res, error);
 
+    const borrowerFkError = await _checkBorrowerFK(schoolId, tenantContext(req), data);
+    if (borrowerFkError) return E.badRequest(res, borrowerFkError);
+
     const book = await tenantModel('library_books', tenantContext(req)).findOne({ id: data.bookId, schoolId }).lean();
     if (!book) return E.notFound(res, 'Book not found in catalogue');
     if ((book.available ?? 0) < 1) return E.badRequest(res, 'No copies available for this book');
@@ -311,6 +337,7 @@ router.post('/loans', async (req, res) => {
         borrowerType:  data.borrowerType,
         borrowerName:  data.borrowerName,
         borrowerClass: data.borrowerClass,
+        borrowerAdmissionNo: data.borrowerAdmissionNo,
         issuedAt:      now,
         dueDate:       data.dueDate,
         status:        'active',
