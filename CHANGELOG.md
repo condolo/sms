@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.25.2] — 2026-07-27 — fix(exams): validate subjectId/classId exist before creating an exam
+
+Part of the same end-to-end flow verification as v5.25.1. `POST/PUT /api/exams`
+accepted `subjectId`/`classId` as free-text strings with no existence check —
+a typo'd or stale id would silently create an exam that never matches any
+`aggregateExamResults()`/`report-cards.js` filter downstream, with no error
+surfaced at write time. Added `_checkExamFKs()`, validating both ids against
+the `subjects`/`classes` collections for the school when provided (both
+remain optional — an exam can still be created before its subject/class is
+finalised). `server/__tests__/routes/exams-fk-validation.test.js` (new, 4
+tests) covers unknown subjectId, unknown classId, valid ids, and omitted ids.
+
 ## [v5.25.1] — 2026-07-27 — fix(report-cards): resolve academic year/term before aggregating exam & grade data (RCE7)
 
 Continuing the end-to-end flow verification requested after v5.25.0: traced

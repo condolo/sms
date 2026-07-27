@@ -367,16 +367,38 @@ router.get('/:id', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res)
   } catch (err) { console.error('[exams GET/:id]', err); return E.serverError(res); }
 });
 
+/* subjectId/classId are free-text FK strings on ExamSchema (no Mongoose
+   ref) — a typo or stale id would silently create an exam that never
+   matches any aggregateExamResults()/report-cards.js filter, with no
+   error at write time. Checked here, not in the schema, since both
+   fields stay optional (an exam can legitimately be created before its
+   subject/class is finalised). */
+async function _checkExamFKs(schoolId, ctx, { subjectId, classId }) {
+  if (subjectId) {
+    const exists = await tenantModel('subjects', ctx).findOne({ id: subjectId, schoolId }).select('id').lean();
+    if (!exists) return `subjectId "${subjectId}" does not match any subject for this school`;
+  }
+  if (classId) {
+    const exists = await tenantModel('classes', ctx).findOne({ id: classId, schoolId }).select('id').lean();
+    if (!exists) return `classId "${classId}" does not match any class for this school`;
+  }
+  return null;
+}
+
 router.post('/', authMiddleware, PLAN, rbac('exams', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(ExamSchema, req.body);
     if (error) return E.validation(res, error);
 
+    const ctx = tenantContext(req);
+    const fkError = await _checkExamFKs(schoolId, ctx, data);
+    if (fkError) return E.badRequest(res, fkError);
+
     const typeError = await _resolveAssessmentType(schoolId, data);
     if (typeError) return E.badRequest(res, typeError);
 
-    const doc = await tenantModel('exams', tenantContext(req)).create({ ...data, id: uuidv4(), schoolId, createdBy: userId, updatedBy: userId });
+    const doc = await tenantModel('exams', ctx).create({ ...data, id: uuidv4(), schoolId, createdBy: userId, updatedBy: userId });
     return created(res, doc.toObject ? doc.toObject() : doc);
   } catch (err) { console.error('[exams POST]', err); return E.serverError(res); }
 });
@@ -387,6 +409,9 @@ router.put('/:id', authMiddleware, PLAN, rbac('exams', 'update'), async (req, re
     const { data, error } = _validate(ExamSchema.partial(), req.body);
     if (error) return E.validation(res, error);
     delete data.schoolId; delete data.id;
+
+    const fkError = await _checkExamFKs(schoolId, tenantContext(req), data);
+    if (fkError) return E.badRequest(res, fkError);
 
     const typeError = await _resolveAssessmentType(schoolId, data);
     if (typeError) return E.badRequest(res, typeError);
