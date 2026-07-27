@@ -366,7 +366,13 @@ router.patch('/loans/:id/return', async (req, res) => {
 
     const loan = await tenantModel('library_loans', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!loan) return E.notFound(res, 'Loan record not found');
-    if (loan.status !== 'active') return E.badRequest(res, 'This book has already been returned');
+    // Bug fix: this previously required status === 'active' exactly, which
+    // meant a loan flipped to 'overdue' by /sync-overdue could never be
+    // returned again (blocked with a wrong "already returned" message).
+    // Both active and overdue are "still out" states a return can close.
+    if (loan.status !== 'active' && loan.status !== 'overdue') {
+      return E.badRequest(res, loan.status === 'lost' ? 'This book was marked lost, not returned' : 'This book has already been returned');
+    }
 
     const returnedAt  = new Date().toISOString();
     const today       = new Date();
@@ -397,6 +403,42 @@ router.patch('/loans/:id/return', async (req, res) => {
     return ok(res, updated);
   } catch (err) {
     console.error('[library/loans PATCH return]', err);
+    return E.serverError(res);
+  }
+});
+
+/* PATCH /api/library/loans/:id/lost — mark a book lost (permanent, unlike a return) */
+router.patch('/loans/:id/lost', async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Library staff or Admin access required');
+
+    const loan = await tenantModel('library_loans', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
+    if (!loan) return E.notFound(res, 'Loan record not found');
+    if (loan.status !== 'active' && loan.status !== 'overdue') {
+      return E.badRequest(res, 'Only a currently-out loan can be marked lost');
+    }
+
+    const lostAt = new Date().toISOString();
+
+    /* Unlike a return, `available` is never restored — the copy that
+       left the shelf is gone. `copies` is also decremented so the
+       book's total inventory count reflects the permanent loss,
+       rather than only ever looking "checked out" forever. */
+    const [updated] = await Promise.all([
+      tenantModel('library_loans', tenantContext(req)).findOneAndUpdate(
+        { id: req.params.id, schoolId },
+        { $set: { status: 'lost', lostAt, updatedBy: userId, updatedAt: lostAt } },
+        { new: true }
+      ).lean(),
+      tenantModel('library_books', tenantContext(req)).updateOne(
+        { id: loan.bookId, schoolId, copies: { $gt: 0 } },
+        { $inc: { copies: -1 } }
+      ),
+    ]);
+    return ok(res, updated);
+  } catch (err) {
+    console.error('[library/loans PATCH lost]', err);
     return E.serverError(res);
   }
 });

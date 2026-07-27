@@ -722,6 +722,7 @@ export const library = {
     list:        (params) => _get('/library/loans', params),
     issue:       (data)   => _post('/library/loans', data),
     return:      (id, body) => _patch(`/library/loans/${id}/return`, body ?? {}),
+    markLost:    (id)     => _patch(`/library/loans/${id}/lost`, {}),
     syncOverdue: ()       => _post('/library/loans/sync-overdue', {}),
   },
 };

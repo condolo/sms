@@ -428,6 +428,16 @@ export default function LibraryPage() {
     },
     onError: err => toast.error(err?.message ?? 'Failed to record return.'),
   });
+  const markLost = useMutation({
+    mutationFn: (id) => libApi.loans.markLost(id),
+    onSuccess:  () => {
+      qc.invalidateQueries({ queryKey: ['library-loans'] });
+      qc.invalidateQueries({ queryKey: ['library-books'] });
+      qc.invalidateQueries({ queryKey: ['library-summary'] });
+      toast.success('Book marked lost.');
+    },
+    onError: err => toast.error(err?.message ?? 'Failed to mark book lost.'),
+  });
   const syncOverdue = useMutation({
     mutationFn: () => libApi.loans.syncOverdue(),
     onSuccess:  () => {
@@ -459,6 +469,7 @@ export default function LibraryPage() {
       active:   'bg-blue-100 text-blue-700',
       overdue:  'bg-red-100 text-red-700',
       returned: 'bg-emerald-100 text-emerald-700',
+      lost:     'bg-slate-800 text-white',
     };
     return s[status] ?? 'bg-slate-100 text-slate-600';
   };
@@ -635,13 +646,20 @@ export default function LibraryPage() {
                       </td>
                       {canEdit && (
                         <td className="px-4 py-3">
-                          {loan.status === 'active' || loan.status === 'overdue' ? (
-                            <button onClick={() => returnBook.mutate(loan.id ?? loan._id)}
-                              disabled={returnBook.isPending}
-                              className="text-xs px-3 py-1 rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
-                              Return
-                            </button>
-                          ) : null}
+                          {(loan.status === 'active' || loan.status === 'overdue') && (
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button onClick={() => returnBook.mutate(loan.id ?? loan._id)}
+                                disabled={returnBook.isPending || markLost.isPending}
+                                className="text-xs px-3 py-1 rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
+                                Return
+                              </button>
+                              <button onClick={() => confirm(`Mark "${loan.bookTitle}" as lost? This permanently removes a copy from the catalogue.`) && markLost.mutate(loan.id ?? loan._id)}
+                                disabled={returnBook.isPending || markLost.isPending}
+                                className="text-xs px-3 py-1 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+                                Mark Lost
+                              </button>
+                            </div>
+                          )}
                         </td>
                       )}
                     </tr>
