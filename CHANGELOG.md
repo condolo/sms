@@ -6,6 +6,54 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.25.1] — 2026-07-27 — fix(report-cards): resolve academic year/term before aggregating exam & grade data (RCE7)
+
+Continuing the end-to-end flow verification requested after v5.25.0: traced
+config → schedule → results entry → publish → report-card output and found a
+third bug in the same dependency chain, more dangerous than the first two
+now that exam results entry is live.
+
+### Fixed
+- **`server/routes/report-cards.js`'s `POST /generate` and `POST /publish`**
+  never received `termId`/`academicYearId` from their only client caller
+  (`ReportCardsTab.jsx` sends only `{classId, termNumber}` — there is no year
+  picker anywhere in that UI). Since `classes` documents are NOT year-scoped
+  (the same `classId` persists across every academic year via student
+  promotion), and `aggregateGrades`/`aggregateExamResults` only apply their
+  `termId`/`academicYearId` filter when truthy, every report-card generation
+  or publish silently pulled exam results and legacy `grades` across **every
+  academic year the class has ever existed in** — previously inert (no exam
+  results existed before this session's Exam-results UI), now live and
+  capable of mixing a closed year's results into the new year's report card
+  as schools transition 2025/2026 → 2026/2027.
+- Added `_resolveTermScope(schoolId, ctx, {academicYearId, termId, termNumber})`
+  — live-resolves the school's current academic year (same algorithm as
+  `resolveCurrentPeriod()`: prefer the `isCurrent`-flagged year, then a
+  date-range match, then most-recent-started) and finds that year's Nth term
+  by array position, mirroring the client's existing
+  `useCurrentAcademicPeriod` behavior server-side. An explicit
+  `termId`/`academicYearId` in the request always wins.
+- Deliberately **NOT** applied to `aggregateAssessmentMarks` — Markbook
+  writes never tag `academicYearId` (confirmed: every existing CA mark has
+  `academicYearId: null`), so resolving a real year id there would match
+  zero marks and silently delete every student's CA scores from every report
+  card. That gap is a separate, larger, pre-existing issue in the Markbook
+  write path — out of scope here, left for a future fix.
+- `POST /publish`'s batch record, snapshot `termId`/`academicYearId`,
+  archived-year guard, and audit-log entries now all use the resolved scope
+  too — previously the archived-year check (`if (academicYearId && …)`) was
+  silently skipped on every request since the client never sent that field,
+  meaning a school could publish into an archived year without ever being
+  blocked.
+
+### Tests
+- `server/__tests__/routes/report-cards-term-scope.test.js` (new, 3 tests) —
+  proves a request with no explicit year/term resolves to the
+  `isCurrent`-flagged year and excludes the other year's exam result;
+  proves an explicit `academicYearId`/`termId` still wins; proves
+  single-year schools resolve correctly. Mutation-tested (reverted the
+  `/generate` fix, confirmed the scoping test fails as expected, restored).
+
 ## [v5.25.0] — 2026-07-27 — feat(exams): exam results-entry UI + two report-card dependency bug fixes
 
 The Exams tab could create and schedule an exam, with a full status

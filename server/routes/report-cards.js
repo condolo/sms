@@ -34,7 +34,7 @@ const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { rankStudents, mergeRankings, bestPerSubject, computeRankingScore } = require('../utils/ranking');
-const { mergeConfig, resolveGrade } = require('./academic-config');
+const { mergeConfig, resolveGrade, resolveCurrentPeriod } = require('./academic-config');
 const { getConfig: _getAssessmentConfig } = require('./assessment');
 const { resolveTemplate } = require('./report-card-templates');
 const { getLayout }       = require('../utils/report-layouts');
@@ -288,6 +288,55 @@ function _validate(schema, data) {
   return { data: r.data };
 }
 
+/* ── Resolve academicYearId/termId before aggregating exam/legacy-grade
+   data ────────────────────────────────────────────────────────────
+   `classes` documents are NOT year-scoped (the same classId — e.g.
+   "Grade 7" — persists across every academic year; students are
+   promoted in/out, the class itself is never re-created). classId +
+   termNumber alone can't disambiguate "Term 2 of which year" once a
+   school has been through POST /transition-year more than once.
+
+   Neither ReportCardsTab.jsx (no year picker at all — Generate &
+   Publish only exposes class + term number) nor the exams-results UI's
+   caller ever sends academicYearId/termId explicitly, so this resolves
+   them the exact same way exam creation already does client-side
+   (useCurrentAcademicPeriod → resolveCurrentPeriod): live-resolve the
+   school's current academic year, then find that year's Nth term by
+   position (termNumber is 1-based index into year.terms[], same
+   convention _resolveCurrentPeriod itself uses). An explicit
+   termId/academicYearId in the request always wins over this
+   resolution — a future admin UI that adds a real year picker doesn't
+   need any server change.
+
+   Deliberately NOT used for aggregateAssessmentMarks: assessment_marks
+   documents are written by Markbook, which never sends academicYearId
+   (confirmed by reading MarkbookTab's save payload) — every existing
+   mark has academicYearId: null. Passing a resolved non-null year id
+   into that aggregation would filter every mark out (null ≠ a real
+   id), silently zeroing every report card's CA marks. That's a
+   separate, pre-existing gap in the CA-marks write path, out of scope
+   here — fixing it means touching live Markbook writes and historical
+   data, not just report-cards.js's read side. */
+async function _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNumber }) {
+  if (termId && academicYearId) return { academicYearId, termId };
+
+  const years = await tenantModel('academic_years', ctx).find({ schoolId }).lean();
+  let year = academicYearId
+    ? years.find(y => (y.id || y._id?.toString()) === academicYearId)
+    : null;
+  if (!year) {
+    const resolved = resolveCurrentPeriod(years);
+    year = resolved.year;
+  }
+  if (!year) return { academicYearId: academicYearId || null, termId: termId || null };
+
+  const resolvedYearId = year.id || year._id?.toString();
+  const terms = Array.isArray(year.terms) ? year.terms : [];
+  const resolvedTermId = termId || (termNumber ? (terms[termNumber - 1]?.id ?? null) : null);
+
+  return { academicYearId: resolvedYearId, termId: resolvedTermId };
+}
+
 /* ══════════════════════════════════════════════════════════════
    POST /generate  — live preview (not persisted)
    ══════════════════════════════════════════════════════════════ */
@@ -298,6 +347,11 @@ router.post('/generate', authMiddleware, PLAN, rbac('grades', 'read'), async (re
     if (error) return E.validation(res, error);
 
     const { classId, termId, termNumber: termNum, academicYearId, studentId } = data;
+    const ctx = tenantContext(req);
+    // classId alone can't disambiguate which academic year — resolve the
+    // real year/term before aggregating exam/legacy-grade data (see
+    // _resolveTermScope's own comment for why assessment_marks is exempt).
+    const scope = await _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNumber: termNum });
 
     const [config, caConfig] = await Promise.all([
       _loadConfig(schoolId),
@@ -305,8 +359,8 @@ router.post('/generate', authMiddleware, PLAN, rbac('grades', 'read'), async (re
     ]);
 
     const [gradesData, { data: examData }, caMarksData] = await Promise.all([
-      aggregateGrades(schoolId, classId, termId, academicYearId, studentId),
-      aggregateExamResults(schoolId, classId, termId, academicYearId, studentId),
+      aggregateGrades(schoolId, classId, scope.termId, scope.academicYearId, studentId),
+      aggregateExamResults(schoolId, classId, scope.termId, scope.academicYearId, studentId),
       aggregateAssessmentMarks(schoolId, classId, termNum ?? null, academicYearId, studentId),
     ]);
 
@@ -410,12 +464,19 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
   const { classId, termId, termNumber: termNum, academicYearId, className, termName, academicYear, schoolName, skipModerationCheck, skipReason } = data;
   const now     = new Date().toISOString();
   const batchId = uuidv4();
+  const ctx     = tenantContext(req);
+
+  // Same live-resolution as /generate — the client only ever sends
+  // {classId, termNumber}, never termId/academicYearId, so without this
+  // every aggregation below would silently pull data across ALL years for
+  // the class (classes are not year-scoped — see _resolveTermScope above).
+  const scope = await _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNumber: termNum });
 
   // ── Step 1: Create batch record (interrupt-safe anchor) ──────
-  const Batches = tenantModel('publish_batches', tenantContext(req));
+  const Batches = tenantModel('publish_batches', ctx);
   await Batches.create({
     id: batchId, schoolId, classId,
-    termId: termId || null, academicYearId: academicYearId || null,
+    termId: scope.termId, academicYearId: scope.academicYearId,
     status: 'running', startedBy: userId, startedAt: now,
     studentCount: 0, successCount: 0, failedStudents: [],
     moderationBypassed: skipModerationCheck,
@@ -424,13 +485,13 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
 
   try {
     // ── Step 1b: Block publish for archived academic years ───
-    if (academicYearId && await isYearArchived(schoolId, academicYearId)) {
+    if (scope.academicYearId && await isYearArchived(schoolId, scope.academicYearId)) {
       await Batches.updateOne({ id: batchId }, {
         status: 'failed',
-        failureReason: `Academic year "${academicYearId}" is archived — publishing is not permitted for closed years.`,
+        failureReason: `Academic year "${scope.academicYearId}" is archived — publishing is not permitted for closed years.`,
         completedAt: now,
       });
-      return E.badRequest(res, `Academic year "${academicYearId}" has been archived — report card publishing is not permitted for closed years.`);
+      return E.badRequest(res, `Academic year "${scope.academicYearId}" has been archived — report card publishing is not permitted for closed years.`);
     }
 
     const [config, caConfig, policy] = await Promise.all([
@@ -446,15 +507,15 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
     // ── Step 2: Moderation guard ─────────────────────────────
     // RC9 — enforcement is now policy-driven, default true (today's exact
     // hardcoded behavior for every school that hasn't opted out).
-    const { data: examData, examStatuses } = await aggregateExamResults(schoolId, classId, termId, academicYearId);
+    const { data: examData, examStatuses } = await aggregateExamResults(schoolId, classId, scope.termId, scope.academicYearId);
 
     if (skipModerationCheck) {
       // Write audit entry for the bypass — this is mandatory, non-negotiable
-      await tenantModel('mark_audit_log', tenantContext(req)).create({
+      await tenantModel('mark_audit_log', ctx).create({
         action:    'MODERATION_BYPASS',
         batchId,
         schoolId,  classId,
-        termId:    termId || null,
+        termId:    scope.termId,
         editedBy:  userId,
         reason:    skipReason,
         timestamp: now,
@@ -481,7 +542,10 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
 
     // ── Step 3: Aggregate grades + CA marks, then compute scores ──
     const [gradesData, caMarksData] = await Promise.all([
-      aggregateGrades(schoolId, classId, termId, academicYearId),
+      aggregateGrades(schoolId, classId, scope.termId, scope.academicYearId),
+      // NOT scope.academicYearId — Markbook writes never tag academicYearId
+      // (always null in practice), so resolving a real year here would match
+      // zero CA-mark documents and silently drop them from every report card.
       aggregateAssessmentMarks(schoolId, classId, termNum ?? null, academicYearId),
     ]);
     // Merge old gradebook data with CA marks — CA marks win on per-type conflict
@@ -507,7 +571,7 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
     // ── Step 5: Load existing live snapshots (for versioning) ─
     const existingSnaps = await tenantModel('report_card_snapshots', tenantContext(req)).find({
       schoolId, classId,
-      termId: termId || null, academicYearId: academicYearId || null,
+      termId: scope.termId, academicYearId: scope.academicYearId,
       superseded: { $ne: true },
     }).lean();
     const existingMap = Object.fromEntries(existingSnaps.map(s => [s.studentId, s]));
@@ -641,9 +705,9 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
           streamName:     stu.streamId ? (streamNameById[stu.streamId] || '') : '',
           houseName:      stu.houseId  ? (houseNameById[stu.houseId]   || '') : '',
           classId,        className:   className   || '',
-          termId:         termId         || null,  termName:    termName    || '',
+          termId:         scope.termId,  termName:    termName    || '',
           termNumber:     termNum        ?? null,
-          academicYearId: academicYearId || null,  academicYear: academicYear || '',
+          academicYearId: scope.academicYearId,  academicYear: academicYear || '',
           schoolName:     schoolName || '',
 
           // Immutable config snapshot — use active (CA-system-aware) weights and schema
@@ -765,7 +829,7 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
       published:   newSnaps.length,
       versioned:   supersedeOps.length,
       failed:      partialFails.length,
-      classId,     termId,
+      classId,     termId: scope.termId,
       publishedAt: now,
     };
 
@@ -779,7 +843,7 @@ router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (r
     }
 
     console.log(`[REPORT-CARDS] Batch ${batchId}: ${newSnaps.length} published (${finalStatus}) by ${userId}`);
-    AuditService.log({ action: 'report_card.publish', actor: req.jwtUser, schoolId, target: { type: 'class', id: classId, label: className }, details: { batchId, termId, studentCount: newSnaps.length, status: finalStatus }, req });
+    AuditService.log({ action: 'report_card.publish', actor: req.jwtUser, schoolId, target: { type: 'class', id: classId, label: className }, details: { batchId, termId: scope.termId, studentCount: newSnaps.length, status: finalStatus }, req });
 
     _notifyReportCardsPublished(req, newSnaps).catch(err => console.error('[report-cards/publish notify]', err));
 
