@@ -12,7 +12,7 @@ import {
   Activity, AlertCircle, Award, Bell, BookCheck, Calendar,
   CheckCircle, Clock, Download, FileText, GraduationCap,
   Lock, LogOut, MessageSquare, Receipt, Star, Wallet,
-  ChevronDown, MonitorPlay, MapPin,
+  ChevronDown, MonitorPlay, MapPin, BookOpen,
 } from 'lucide-react';
 
 /* ── API helpers ────────────────────────────────────────────────── */
@@ -1064,6 +1064,49 @@ export default function ParentDashboard() {
                                 {_weekday(ex.date)}, {_fmtDate(ex.date)}
                                 {ex.startTime ? ` · ${ex.startTime}` : ''}
                                 {ex.type ? ` · ${ex.type}` : ''}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Borrowed library books ────────────────────────── */}
+                {d.borrowedBooks?.length > 0 && (
+                  <div id="section-library" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <BookOpen size={14} className="text-blue-500" />
+                        <h2 className="text-[13px] font-bold text-slate-900">Borrowed Books</h2>
+                      </div>
+                      <span className="text-[11px] font-semibold text-blue-600 bg-blue-50 px-2.5 py-[5px] rounded-full">
+                        {d.borrowedBooks.length} out
+                      </span>
+                    </div>
+                    <div id="library-loans-list" className="divide-y divide-slate-50">
+                      {d.borrowedBooks.map((loan, i) => {
+                        const days = _daysUntil(loan.dueDate);
+                        const isLost = loan.status === 'lost';
+                        const isOverdue = !isLost && days != null && days < 0;
+                        const urg = isLost ? 'text-slate-600 bg-slate-100' : isOverdue ? 'text-red-600 bg-red-50' : days != null && days <= 3 ? 'text-amber-600 bg-amber-50' : 'text-emerald-600 bg-emerald-50';
+                        return (
+                          <div key={loan.id ?? i} className="flex items-center gap-3 px-[18px] py-3">
+                            <div className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center text-center flex-shrink-0 ${urg}`}>
+                              <p className="text-sm font-bold leading-none">{isLost ? '!' : isOverdue ? '!' : (days ?? '?')}</p>
+                              {!isLost && days != null && days > 0 && <p className="text-[9px]">day{days !== 1 ? 's' : ''}</p>}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[13px] font-semibold text-slate-800 truncate">{loan.bookTitle}</p>
+                              <p className="text-[11px] text-slate-400">
+                                {isLost
+                                  ? 'Reported lost — see the library for next steps'
+                                  : isOverdue
+                                  ? `Overdue by ${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'}`
+                                  : days === 0
+                                  ? 'Due today'
+                                  : `Due ${_fmtDate(loan.dueDate)}`}
                               </p>
                             </div>
                           </div>

@@ -135,6 +135,7 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
     const Classes       = tenantModel('classes', tenantContext(req));
     const Teachers      = tenantModel('teachers', tenantContext(req));
     const Timetable     = tenantModel('timetable_slots', tenantContext(req));
+    const LibraryLoans  = tenantModel('library_loans', tenantContext(req));
 
     const todayISO = new Date().toISOString().slice(0, 10);
     const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -231,6 +232,7 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
       classDoc,
       timetableSlots,
       nextDueInvoice,
+      borrowedBooksDocs,
     ] = await Promise.all([
       Behaviour.find({ schoolId, studentId: childId })
         .sort({ date: -1, createdAt: -1 }).limit(50)
@@ -264,6 +266,10 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
         : [],
       FeeInvoices.findOne({ schoolId, studentId: childId, balance: { $gt: 0 }, dueDate: { $gte: todayISO } })
         .sort({ dueDate: 1 }).select('dueDate').lean().catch(() => null),
+      LibraryLoans.find({ schoolId, borrowerId: childId, status: { $in: ['active', 'overdue', 'lost'] } })
+        .sort({ dueDate: 1 })
+        .select('id bookId bookTitle status dueDate lostAt')
+        .lean().catch(() => []),
     ]);
 
     // Behaviour summary
@@ -308,6 +314,7 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
       upcomingExams:      upcomingExamsDocs,
       announcements:      announcementsDocs,
       upcomingEvents:     upcomingEventsDocs,
+      borrowedBooks:      borrowedBooksDocs,
     });
   } catch (err) {
     console.error('[parent-portal GET /dashboard/:childId]', err);
