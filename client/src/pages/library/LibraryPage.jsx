@@ -5,7 +5,7 @@ import {
   BookOpen, Plus, Search, BookMarked, Users, AlertTriangle,
   ChevronRight, X, Check, RefreshCw, Trash2, Edit2, ArrowLeft,
 } from 'lucide-react';
-import { library as libApi } from '@/api/client.js';
+import { library as libApi, classes as classesApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { useToast } from '@/hooks/useToast.jsx';
 
@@ -30,6 +30,7 @@ function BookModal({ book, onClose, onSave }) {
     author:      book?.author      ?? '',
     isbn:        book?.isbn        ?? '',
     category:    book?.category    ?? 'General',
+    classIds:    book?.classIds    ?? [],
     publisher:   book?.publisher   ?? '',
     publishYear: book?.publishYear ?? '',
     copies:      book?.copies      ?? 1,
@@ -41,6 +42,19 @@ function BookModal({ book, onClose, onSave }) {
   const [error,  setError]  = useState('');
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  function toggleClass(id) { set('classIds', form.classIds.includes(id) ? form.classIds.filter(x => x !== id) : [...form.classIds, id]); }
+
+  const { data: cfgData } = useQuery({
+    queryKey: ['library', 'config'],
+    queryFn:  () => libApi.config.get(),
+  });
+  const categoryOptions = cfgData?.data?.categories ?? [];
+
+  const { data: classesData } = useQuery({
+    queryKey: ['classes', 'for-library'],
+    queryFn:  () => classesApi.list({ limit: 200 }),
+  });
+  const classList = classesData?.data ?? classesData?.classes ?? [];
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -82,13 +96,27 @@ function BookModal({ book, onClose, onSave }) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Category</label>
-              <input value={form.category} onChange={e => set('category', e.target.value)}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <select value={form.category} onChange={e => set('category', e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                {categoryOptions.map(c => <option key={c.key} value={c.label}>{c.label}</option>)}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Copies *</label>
               <input type="number" min={1} value={form.copies} onChange={e => set('copies', e.target.value)} required
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">Class(es) — for records only, not a borrowing restriction</label>
+            <div className="flex flex-wrap gap-1.5">
+              {classList.length === 0 && <p className="text-xs text-slate-400">No classes found.</p>}
+              {classList.map(c => (
+                <button key={c.id} type="button" onClick={() => toggleClass(c.id)}
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-semibold border ${form.classIds.includes(c.id) ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500'}`}>
+                  {c.name}
+                </button>
+              ))}
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
