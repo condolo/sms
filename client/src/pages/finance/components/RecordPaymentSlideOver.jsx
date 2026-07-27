@@ -47,7 +47,7 @@ export default function RecordPaymentSlideOver({ fmtCurrency, onClose, onCreated
 
   const { data: invData } = useQuery({
     queryKey: ['finance', 'invoices', 'search-pay', invoiceSearch],
-    queryFn:  () => financeApi.invoices.list({ search: invoiceSearch, limit: 10, status: 'unpaid' }),
+    queryFn:  () => financeApi.invoices.list({ search: invoiceSearch, limit: 10, status: 'unpaid,partial' }),
     enabled:  invoiceSearch.length > 1,
   });
   const invResults = invData?.data ?? [];

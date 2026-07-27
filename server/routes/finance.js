@@ -102,13 +102,13 @@ router.get('/invoices', authMiddleware, PLAN, rbac('finance', 'read'), async (re
     const _ay  = strParam(req.query.academicYearId);
     const _tid = strParam(req.query.termId);
     if (_sid) filter.studentId    = _sid;
-    if (_st)  filter.status       = _st;
+    if (_st)  filter.status       = _st.includes(',') ? { $in: _st.split(',').filter(Boolean) } : _st;
     if (_ay)  filter.academicYearId = _ay;
     if (_tid) filter.termId       = _tid;
 
     if (req.query.search) {
       const rx = new RegExp(req.query.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      filter.$or = [{ invoiceNumber: rx }, { title: rx }];
+      filter.$or = [{ invoiceNumber: rx }, { title: rx }, { studentName: rx }];
     }
 
     const Invoices = tenantModel('invoices', tenantContext(req));
