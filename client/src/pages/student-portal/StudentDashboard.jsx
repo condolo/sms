@@ -188,6 +188,7 @@ export default function StudentDashboard() {
     student, school, attendance, feeBalance, feeClearancePct, nextFeeDueDate,
     lessonsCoverage, timetableToday, reportCards,
     classTeacher, behaviourSummary, upcomingExams, announcements, upcomingEvents,
+    borrowedBooks,
   } = data;
 
   /* ── Derived values ── */
@@ -684,6 +685,49 @@ export default function StudentDashboard() {
                                   ? ` · ${days} days left`
                                   : ''}
                                 {ex.type ? ` · ${ex.type}` : ''}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Borrowed Books */}
+              <div id="section-library" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
+                <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center justify-between">
+                  <h2 className="text-[13px] font-bold text-slate-900">Borrowed Books</h2>
+                  {borrowedBooks?.length > 0 && (
+                    <span className="text-[11px] font-semibold text-blue-600 bg-blue-50 px-2.5 py-[5px] rounded-full">
+                      {borrowedBooks.length} out
+                    </span>
+                  )}
+                </div>
+                <div className="px-[18px] py-3.5">
+                  {!borrowedBooks?.length ? (
+                    <p className="text-[12px] text-slate-400 text-center py-4">No books currently borrowed</p>
+                  ) : (
+                    <div className="space-y-3.5">
+                      {borrowedBooks.map((loan, i) => {
+                        const days = _daysUntil(loan.dueDate);
+                        const isLost = loan.status === 'lost';
+                        const isOverdue = !isLost && days != null && days < 0;
+                        const dotColor = isLost ? '#64748b' : isOverdue ? '#ef4444' : days != null && days <= 3 ? '#f59e0b' : '#22c55e';
+                        return (
+                          <div key={loan.id ?? i} className="flex items-start gap-3">
+                            <div className="w-2 h-2 rounded-full mt-[5px] flex-shrink-0" style={{ background: dotColor }} />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[12px] font-semibold text-slate-800 truncate">{loan.bookTitle}</p>
+                              <p className="text-[11px] text-slate-400 mt-0.5">
+                                {isLost
+                                  ? 'Reported lost — see the library for next steps'
+                                  : isOverdue
+                                  ? `Overdue by ${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'} — return as soon as possible`
+                                  : days === 0
+                                  ? 'Due today'
+                                  : `Due ${_fmtDate(loan.dueDate)} · ${days} day${days === 1 ? '' : 's'} left`}
                               </p>
                             </div>
                           </div>

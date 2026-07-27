@@ -53,6 +53,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     const Events        = tenantModel('events', tenantContext(req));
     const Classes       = tenantModel('classes', tenantContext(req));
     const Teachers      = tenantModel('teachers', tenantContext(req));
+    const LibraryLoans  = tenantModel('library_loans', tenantContext(req));
 
     const todayISO = new Date().toISOString().slice(0, 10);
 
@@ -174,6 +175,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       upcomingEventsDocs,
       classDoc,
       nextDueInvoice,
+      borrowedBooksDocs,
     ] = await Promise.all([
       Behaviour.find({ schoolId, studentId })
         .sort({ date: -1, createdAt: -1 }).limit(50)
@@ -201,6 +203,10 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
         : null,
       FeeInvoices.findOne({ schoolId, studentId, balance: { $gt: 0 }, dueDate: { $gte: todayISO } })
         .sort({ dueDate: 1 }).select('dueDate').lean().catch(() => null),
+      LibraryLoans.find({ schoolId, borrowerId: studentId, status: { $in: ['active', 'overdue', 'lost'] } })
+        .sort({ dueDate: 1 })
+        .select('id bookId bookTitle status dueDate lostAt')
+        .lean().catch(() => []),
     ]);
 
     // Behaviour summary
@@ -247,6 +253,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       upcomingExams:    upcomingExamsDocs,
       announcements:    announcementsDocs,
       upcomingEvents:   upcomingEventsDocs,
+      borrowedBooks:    borrowedBooksDocs,
     });
   } catch (err) {
     console.error('[student-portal GET /dashboard]', err);
