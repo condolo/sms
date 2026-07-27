@@ -157,11 +157,17 @@ export default function FeeStructureTab({ fmtCurrency, canCreate }) {
                         Due date: {new Date(fs.dueDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
                       </p>
                     )}
-                    {fs.classIds?.length > 0 && (
-                      <p className="text-xs text-slate-400 mt-1">
-                        Applies to {fs.classIds.length} class{fs.classIds.length !== 1 ? 'es' : ''}
-                      </p>
-                    )}
+                    <p className="text-xs text-slate-400 mt-1">
+                      {fs.scopeType === 'classes' && fs.classIds?.length > 0
+                        ? `Applies to ${fs.classIds.length} class${fs.classIds.length !== 1 ? 'es' : ''}`
+                        : fs.scopeType === 'sections' && fs.sectionIds?.length > 0
+                        ? `Applies to ${fs.sectionIds.length} section${fs.sectionIds.length !== 1 ? 's' : ''}`
+                        : fs.scopeType === 'students' && fs.studentIds?.length > 0
+                        ? `Applies to ${fs.studentIds.length} student${fs.studentIds.length !== 1 ? 's' : ''}`
+                        : fs.classIds?.length > 0
+                        ? `Applies to ${fs.classIds.length} class${fs.classIds.length !== 1 ? 'es' : ''}` // pre-scopeType structures
+                        : 'Applies to all active students'}
+                    </p>
                   </div>
                 )}
               </div>

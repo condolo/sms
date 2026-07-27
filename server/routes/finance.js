@@ -448,11 +448,24 @@ const FeeStructureSchema = z.object({
    the single place this logic lives, so /generate (and any future
    caller, e.g. a "how many students would this apply to" preview)
    never re-derive it differently. */
-async function _resolveScopeStudents(Students, schoolId, fs) {
+async function _resolveScopeStudents(Students, schoolId, fs, ctx) {
   const scopeType = fs.scopeType || (fs.classIds?.length ? 'classes' : 'all');
   const filter = { schoolId, status: 'active' };
-  if (scopeType === 'classes'  && fs.classIds?.length)   filter.classId   = { $in: fs.classIds };
-  if (scopeType === 'sections' && fs.sectionIds?.length) filter.sectionId = { $in: fs.sectionIds };
+  if (scopeType === 'classes' && fs.classIds?.length) {
+    filter.classId = { $in: fs.classIds };
+  }
+  if (scopeType === 'sections' && fs.sectionIds?.length) {
+    // Students carry no direct section field — section membership is always
+    // derived via their class's `sectionKey` (same as students.js's own
+    // ?sectionKey filter). fs.sectionIds holds section `key`s, not section
+    // doc ids.
+    const sectionClassIds = await tenantModel('classes', ctx)
+      .find({ schoolId, sectionKey: { $in: fs.sectionIds } })
+      .select('id').lean()
+      .then(docs => docs.flatMap(d => [d.id, String(d._id)].filter(Boolean)));
+    if (sectionClassIds.length === 0) return [];
+    filter.classId = { $in: sectionClassIds };
+  }
   if (scopeType === 'students' && fs.studentIds?.length) {
     return Students.find({ schoolId, status: 'active', id: { $in: fs.studentIds } }).lean();
   }
@@ -721,7 +734,7 @@ router.post('/fee-structures/:id/generate', authMiddleware, PLAN, rbac('finance'
 
     // Resolve target students — class/section/individual-student scope,
     // single source of truth (see _resolveScopeStudents above).
-    const students = await _resolveScopeStudents(Students, schoolId, fs);
+    const students = await _resolveScopeStudents(Students, schoolId, fs, tenantContext(req));
     if (students.length === 0) return ok(res, { created: 0, message: 'No active students found for the given criteria' });
 
     // Skip students who already have an invoice from this structure (idempotent)

@@ -229,6 +229,16 @@ export const finance = {
     remove:   (id)         => _delete(`/finance/fee-structures/${id}`),
     generate: (id)         => _post(`/finance/fee-structures/${id}/generate`),
   },
+  feeConfig: {
+    get:  ()     => _get('/finance/fee-config'),
+    save: (data) => _put('/finance/fee-config', data),
+  },
+  discountPolicies: {
+    list:   ()          => _get('/finance/discount-policies'),
+    create: (data)       => _post('/finance/discount-policies', data),
+    update: (id, data)   => _put(`/finance/discount-policies/${id}`, data),
+    remove: (id)         => _delete(`/finance/discount-policies/${id}`),
+  },
   summary: (params) => _get('/finance/summary', params),
 };
 

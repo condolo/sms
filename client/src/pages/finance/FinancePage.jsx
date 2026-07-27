@@ -6,6 +6,7 @@
    RecordPaymentSlideOver · FeeStructureSlideOver
    ============================================================ */
 import { useState } from 'react';
+import { Settings } from 'lucide-react';
 import useAuthStore from '@/store/auth.js';
 import { TABS, makeFmtCurrency } from './constants.js';
 import SummaryTab              from './components/SummaryTab.jsx';
@@ -13,6 +14,7 @@ import OverdueTab              from './components/OverdueTab.jsx';
 import InvoicesTab             from './components/InvoicesTab.jsx';
 import PaymentsTab             from './components/PaymentsTab.jsx';
 import FeeStructureTab         from './components/FeeStructureTab.jsx';
+import FeeSettingsModal        from './components/FeeSettingsModal.jsx';
 import { CreateInvoiceButton }      from './components/CreateInvoiceSlideOver.jsx';
 import { RecordPaymentButton }      from './components/RecordPaymentSlideOver.jsx';
 import { CreateFeeStructureButton } from './components/FeeStructureSlideOver.jsx';
@@ -20,6 +22,7 @@ import { CreateFeeStructureButton } from './components/FeeStructureSlideOver.jsx
 export default function FinancePage() {
   const [tab,  setTab]  = useState('summary');
   const [page, setPage] = useState(1);
+  const [showFeeSettings, setShowFeeSettings] = useState(false);
 
   const school = useAuthStore(s => s.session?.school);
   const role   = useAuthStore(s => s.session?.user?.role ?? '');
@@ -42,7 +45,17 @@ export default function FinancePage() {
           </div>
           {canCreate && tab === 'invoices' && <CreateInvoiceButton      fmtCurrency={fmtCurrency} currency={currency} />}
           {canCreate && tab === 'payments' && <RecordPaymentButton      fmtCurrency={fmtCurrency} currency={currency} />}
-          {canCreate && tab === 'feestr'   && <CreateFeeStructureButton fmtCurrency={fmtCurrency} />}
+          {canCreate && tab === 'feestr'   && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowFeeSettings(true)}
+                className="flex items-center gap-1.5 border border-slate-200 hover:bg-slate-50 text-slate-600 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+              >
+                <Settings size={14} /> Fee Settings
+              </button>
+              <CreateFeeStructureButton fmtCurrency={fmtCurrency} />
+            </div>
+          )}
         </div>
 
         {/* Tab nav */}
@@ -72,6 +85,8 @@ export default function FinancePage() {
         {tab === 'payments' && <PaymentsTab     fmtCurrency={fmtCurrency} page={page} onPage={setPage} school={school} />}
         {tab === 'feestr'   && <FeeStructureTab fmtCurrency={fmtCurrency} canCreate={canCreate} />}
       </div>
+
+      {showFeeSettings && <FeeSettingsModal onClose={() => setShowFeeSettings(false)} />}
     </div>
   );
 }
