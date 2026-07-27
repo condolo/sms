@@ -368,6 +368,7 @@ export default function LibraryPage() {
     queryKey: ['library-summary'],
     queryFn:  () => libApi.summary(),
     staleTime: 60_000,
+    enabled:  canEdit, // GET /summary is librarian/admin-only server-side
   });
 
   const { data: booksRaw, isLoading: booksLoading } = useQuery({
@@ -501,20 +502,22 @@ export default function LibraryPage() {
         )}
       </div>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <KpiCard icon={<BookOpen size={18} />}      label="Total Books"   value={summary.totalBooks}   colorIndex={0} />
-        <KpiCard icon={<BookMarked size={18} />}    label="Total Copies"  value={summary.totalCopies}  colorIndex={1} />
-        <KpiCard icon={<Check size={18} />}         label="Available"     value={summary.available}    colorIndex={2} />
-        <KpiCard icon={<AlertTriangle size={18} />} label="Overdue Loans" value={summary.overdueLoans} colorIndex={3} />
-      </div>
+      {/* KPIs — librarian/admin only (GET /summary is gated server-side) */}
+      {canEdit && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <KpiCard icon={<BookOpen size={18} />}      label="Total Books"   value={summary.totalBooks}   colorIndex={0} />
+          <KpiCard icon={<BookMarked size={18} />}    label="Total Copies"  value={summary.totalCopies}  colorIndex={1} />
+          <KpiCard icon={<Check size={18} />}         label="Available"     value={summary.available}    colorIndex={2} />
+          <KpiCard icon={<AlertTriangle size={18} />} label="Overdue Loans" value={summary.overdueLoans} colorIndex={3} />
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 p-1 bg-slate-100 rounded-xl w-fit">
-        {['books', 'loans'].map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-1.5 text-sm rounded-lg capitalize transition ${tab === t ? 'bg-white text-slate-800 shadow-sm font-medium' : 'text-slate-500 hover:text-slate-700'}`}>
-            {t}
+        {[{ id: 'books', label: 'Books' }, { id: 'loans', label: canEdit ? 'Loans' : 'My Loans' }].map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            className={`px-4 py-1.5 text-sm rounded-lg transition ${tab === t.id ? 'bg-white text-slate-800 shadow-sm font-medium' : 'text-slate-500 hover:text-slate-700'}`}>
+            {t.label}
           </button>
         ))}
       </div>
@@ -591,7 +594,7 @@ export default function LibraryPage() {
       {/* ── Loans tab ── */}
       {tab === 'loans' && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          {canEdit && (
+          {canEdit ? (
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
               <span className="text-sm text-slate-500">{loans.length} loan record{loans.length !== 1 ? 's' : ''}</span>
               <button onClick={() => syncOverdue.mutate()}
@@ -600,6 +603,10 @@ export default function LibraryPage() {
                 <RefreshCw size={12} className={syncOverdue.isPending ? 'animate-spin' : ''} />
                 Sync Overdue
               </button>
+            </div>
+          ) : (
+            <div className="px-4 py-3 border-b border-slate-100">
+              <span className="text-sm text-slate-500">Books you currently have on loan from the library</span>
             </div>
           )}
           {loansLoading ? (
