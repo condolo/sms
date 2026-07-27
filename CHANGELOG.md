@@ -6,6 +6,46 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.24.3] — 2026-07-27 — chore(assessment): remove dead "Assessment Report Style" feature
+
+Prompted by the user spotting the "Assessment Report Style" card in Exams
+→ Configuration and asking why it wasn't moved to the new Report Cards
+module. Investigation (not assumption) found it isn't misplaced — it's
+genuinely dead code with zero consumers anywhere: it wrote
+`assessment_config.reportTemplate` ('detailed'/'summary'), whose only
+reader was `GET /api/assessment/report`'s response echo — an endpoint
+that itself has **zero call sites** in the entire client (confirmed by
+grep across `client/src`; the only callers anywhere were its own unit
+tests). Unrelated to the Report Card Template Engine's real
+`report_card_templates` registry (already in Report Cards → Settings →
+Templates) — this was always a separate, never-wired-up "quick
+assessment report" concept, independently flagged as orphaned in prior
+audit docs (`docs/audits/REPORT_CARD_ENGINE_AUDIT.md`,
+`REPORT_CARD_ARCHITECTURE_CONSOLIDATION_PLAN.md`).
+
+### Removed
+- `client/src/pages/grades/components/ConfigTab.jsx`: the "Assessment
+  Report Style" card, `TEMPLATE_OPTIONS`, `draftTemplate`/`activeTemplate`
+  state, and the `reportTemplate` field from `saveAll`'s config-update
+  call. Unused `ClipboardList`/`TrendingUp` icon imports dropped too.
+- `server/routes/assessment.js`: the `reportTemplate` field from
+  `_getConfig()`'s default doc, `PATCH /assessment/config`'s validation
+  (and its `TEMPLATES` constant), and the dead echo line in
+  `GET /assessment/report`'s response. The `GET /assessment/report`
+  endpoint itself is kept — it computes real weighted-average report
+  data (`aggregateAssessmentMarks`/`computeFinalScores`), independent of
+  the removed template field, and deleting a whole API surface is a
+  separate, larger decision than removing a config field with a single,
+  confirmed-dead consumer.
+
+### Tests
+Full suite unaffected: 94/94 suites, 939/939 tests (including
+`assessment-report.test.js`, whose fixture happened to include a now-
+irrelevant `reportTemplate` field that was never asserted on). Verified
+via `vite build` (clean) and a running dev server (zero console errors).
+
+---
+
 ## [v5.24.2] — 2026-07-26 — fix(report-cards): remove real school name from product text; clarify Kindergarten layout status
 
 Two fixes prompted directly by the user reviewing the Templates tab UI.

@@ -1,5 +1,5 @@
 /* ============================================================
-   ConfigTab — assessment types (full CRUD), grade scales, template, schedule
+   ConfigTab — assessment types (full CRUD), grade scales, schedule
    Admin only.
    ============================================================ */
 import { useState } from 'react';
@@ -7,7 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence } from 'framer-motion';
 import {
   AlertTriangle, CheckCircle2, Loader2, Save, Plus, Trash2,
-  ClipboardList, TrendingUp, Info, Star, ChevronDown, ChevronUp,
+  Info, Star, ChevronDown, ChevronUp,
   GraduationCap, Lock, LockOpen,
 } from 'lucide-react';
 import { assessment as api } from '@/api/client.js';
@@ -587,28 +587,21 @@ export default function ConfigTab() {
   const cfg = configData?.data ?? {};
 
   /* ── Draft state ────────────────────────────────────────── */
-  const [draftTypes,    setDraftTypes]    = useState(null);   // null = use DB value
-  const [draftTemplate, setDraftTemplate] = useState(null);
+  const [draftTypes, setDraftTypes] = useState(null);   // null = use DB value
 
-  const activeTypes    = draftTypes    ?? cfg.customTypes ?? DEFAULT_CUSTOM_TYPES;
-  const activeTemplate = draftTemplate ?? cfg.reportTemplate ?? 'detailed';
+  const activeTypes = draftTypes ?? cfg.customTypes ?? DEFAULT_CUSTOM_TYPES;
 
   const totalWeight = activeTypes.reduce((s, t) => s + Number(t.weight || 0), 0);
   const weightOk    = Math.abs(totalWeight - 100) < 0.01;
 
   /* ── Mutations ──────────────────────────────────────────── */
 
-  /** Save all edits (labels, weights, instances, colors) + template in one go */
+  /** Save all edits (labels, weights, instances, colors) */
   const { mutate: saveAll, isPending: saving } = useMutation({
-    mutationFn: () => Promise.all([
-      api.saveTypes({ customTypes: activeTypes }),
-      api.updateConfig({ reportTemplate: activeTemplate }),
-    ]),
+    mutationFn: () => api.saveTypes({ customTypes: activeTypes }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['assessment', 'config'] });
-      qc.invalidateQueries({ queryKey: ['assessment', 'report'] });
       setDraftTypes(null);
-      setDraftTemplate(null);
       setToast({ msg: 'Configuration saved.', type: 'success' });
     },
     onError: err => setToast({ msg: err?.message ?? 'Failed to save configuration.', type: 'error' }),
@@ -721,11 +714,6 @@ export default function ConfigTab() {
     </div>
   );
 
-  const TEMPLATE_OPTIONS = [
-    { key: 'detailed', Icon: ClipboardList, title: 'Template A — Detailed', desc: 'Shows all assessment scores per term with ET reference columns and blended final grade.' },
-    { key: 'summary',  Icon: TrendingUp,    title: 'Template B — Summary',  desc: 'Shows term averages only (T1, T2, T3) with equal-weight final average.' },
-  ];
-
   return (
     <div className="space-y-4">
       <div className="h-8 flex items-center">
@@ -789,31 +777,6 @@ export default function ConfigTab() {
 
         {/* Add form */}
         <AddTypeForm onAdd={handleAddType} adding={adding} />
-      </div>
-
-      {/* ══ Assessment Report Style ═══════════════════════════
-          Renamed from "Report Card Template" (RCE5) — this picks
-          assessment_config.reportTemplate ('detailed'/'summary'), the
-          quick-report layout read by assessment.js's own GET /report
-          endpoint. Unrelated to the report_card_templates layout
-          registry (subject_paired / marks_then_comments / etc.), which
-          now lives in the Report Cards module's own Settings > Templates
-          tab — kept here separately named to stop the two looking like
-          competing "report card template" choices. */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5">
-        <h3 className="text-sm font-semibold text-slate-800 mb-4">Assessment Report Style</h3>
-        <div className="grid sm:grid-cols-2 gap-3">
-          {TEMPLATE_OPTIONS.map(({ key, Icon, title, desc }) => (
-            <button key={key} onClick={() => setDraftTemplate(key)}
-              className={`text-left rounded-xl border-2 p-4 transition ${
-                activeTemplate === key ? 'border-slate-900 bg-slate-50' : 'border-slate-200 hover:border-slate-300'
-              }`}>
-              <Icon size={18} className={`mb-2 ${activeTemplate === key ? 'text-slate-800' : 'text-slate-400'}`} />
-              <p className="text-sm font-semibold text-slate-800">{title}</p>
-              <p className="text-xs text-slate-500 mt-1 leading-relaxed">{desc}</p>
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* ══ Save button ══════════════════════════════════════ */}

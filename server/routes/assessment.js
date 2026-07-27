@@ -37,7 +37,6 @@ const PLAN   = planGate('grades');
 
 const DEFAULT_ASSESSMENT_TYPES = ['CA', 'HW', 'MT', 'ET'];  // kept for migration
 const TERM_NUMBERS             = [1, 2, 3];
-const TEMPLATES                = ['detailed', 'summary'];
 
 const DEFAULT_WEIGHTS   = { CA: 20, HW: 10, MT: 30, ET: 40 };
 const DEFAULT_INSTANCES = { CA: 2, HW: 2 };
@@ -74,7 +73,6 @@ async function _getConfig(schoolId, academicYearId) {
       academicYearId,
       weights:        { ...DEFAULT_WEIGHTS },
       instances:      { ...DEFAULT_INSTANCES },
-      reportTemplate: 'detailed',
       customTypes:    DEFAULT_CUSTOM_TYPES.map(t => ({ ...t })),
       subjectTeacherCommentsEnabled: true,
     };
@@ -139,11 +137,10 @@ router.get('/config', authMiddleware, PLAN, rbac('settings', 'read'), async (req
 
 /**
  * PATCH /api/assessment/config
- * Update weights, template, and/or instance counts.
+ * Update weights and/or instance counts.
  *
  * Body (all optional):
  *   weights:        { CA, HW, MT, ET }  — must sum to 100
- *   reportTemplate: 'detailed' | 'summary'
  *   instances:      { CA: number, HW: number }  — min 1, max 10
  *   subjectTeacherCommentsEnabled: boolean — RC7 capability toggle; when
  *     false, Mark Entry stops collecting the field and Report Cards'
@@ -154,7 +151,7 @@ router.get('/config', authMiddleware, PLAN, rbac('settings', 'read'), async (req
 router.patch('/config', authMiddleware, PLAN, rbac('settings', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const { academicYearId, weights, reportTemplate, instances, subjectTeacherCommentsEnabled } = req.body;
+    const { academicYearId, weights, instances, subjectTeacherCommentsEnabled } = req.body;
 
     const update = {};
 
@@ -175,14 +172,6 @@ router.patch('/config', authMiddleware, PLAN, rbac('settings', 'update'), async 
         return _err(res, `Assessment weights must sum to 100%. Current total: ${total}%`);
       }
       update.weights = w;
-    }
-
-    // ── Validate template ──
-    if (reportTemplate !== undefined) {
-      if (!TEMPLATES.includes(reportTemplate)) {
-        return _err(res, `reportTemplate must be one of: ${TEMPLATES.join(', ')}`);
-      }
-      update.reportTemplate = reportTemplate;
     }
 
     // ── Validate instances (CA/HW only) ──
@@ -1236,12 +1225,11 @@ router.get('/report', authMiddleware, PLAN, rbac('grades', 'read'), async (req, 
       subjects:  _flattenSubjects(r.subjects),
     }));
 
-    // Attach config so frontend knows template, weights, types, and grade scale used
+    // Attach config so frontend knows weights, types, and grade scale used
     const result = {
       config: {
         weights:        Object.fromEntries(assessmentWeights.map(w => [w.assessmentType, w.weight])),
         customTypes,
-        reportTemplate: config.reportTemplate,
         instances:      config.instances || DEFAULT_INSTANCES,
         gradeScale:     defaultScale ? { id: defaultScale.id, name: defaultScale.name, bands: defaultScale.bands } : null,
       },
