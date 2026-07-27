@@ -545,9 +545,15 @@ Class rankings are computed at publish time and frozen in the snapshot. If your 
 ## 10. Finance
 
 ### Fee Structures
-Set up fee structures in **Finance → Settings** (admin only):
-- Term-based fees by class or section
-- Optional extras (transport, lunch, uniform)
+Set up fee structures in **Finance → Fee Structures → New Fee Structure** (admin/finance only):
+- Term-based fees, scoped to all active students, specific classes, specific sections, or a hand-picked list of students
+- Optional extras (transport, lunch, uniform) — each line item can be tagged with a fee type from your school's catalogue
+- Click **Generate Invoices** on a saved structure to bulk-create invoices for every student in scope (already-invoiced students are skipped, so it's safe to run again)
+
+### Fee Settings
+Click **Fee Settings** on the Fee Structures tab to configure:
+- **Fee Types** — the catalogue of line-item types (Tuition, Transport, Lunch, …) offered when building a fee structure or invoice
+- **Sibling Discount Policies** — discount tiers by enrollment order (e.g. 2nd child 10% off, 3rd child 20% off). Only one policy can be active at a time; it's applied automatically the next time you generate invoices, ranking each family's children by how long they've been enrolled
 
 ### Invoices
 - Invoices are generated automatically when a new term starts (if configured).

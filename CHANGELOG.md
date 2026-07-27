@@ -6,6 +6,43 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.27.0] — 2026-07-27 — feat(finance): fee types, scoped fee structures, sibling discount policies
+
+Finance's fee structures could only target "all classes" or a hardcoded list of
+class ids, had no configurable fee-type catalogue for line items, and had no
+way to discount siblings — every family paid full price per child regardless
+of how many kids they had enrolled.
+
+### Added
+- `fee_config` — school-configurable fee-type catalogue for invoice/fee-structure
+  line items (Tuition/Transport/Lunch/…), mirroring `payroll_config`'s
+  allowance/deduction type catalogue pattern. `GET/PUT /api/finance/fee-config`.
+- Fee structures gain `scopeType` (`all`/`classes`/`sections`/`students`) —
+  `_resolveScopeStudents()` is the single source of truth for resolving which
+  students a structure targets, used by both list display and
+  `POST /fee-structures/:id/generate`.
+- `discount_policies` — sibling-discount tiers by enrollment order (2nd child,
+  3rd child, …), one active `sibling` policy per school.
+  `GET/POST/PUT/DELETE /api/finance/discount-policies`.
+  `_resolveSiblingDiscounts()` groups target students into families via
+  union-find over guardians' `users.studentIds`, ranks by `enrollmentDate`,
+  and is applied automatically inside `/fee-structures/:id/generate` — the
+  eldest-enrolled child pays full price, later children get the matching tier.
+- Client: `FeeSettingsModal` (Fee Types catalogue + Discount Policies manager,
+  opened from a "Fee Settings" button on the Fee Structures tab);
+  `FeeStructureSlideOver` gained an "Applies To" scope picker (class/section/
+  student pill-toggles and search) and a per-line-item fee-type dropdown.
+
+### Fixed
+- `_resolveScopeStudents()`'s `sections` branch filtered a `Students.sectionId`
+  field that is never populated anywhere — real section membership is only
+  derivable via a student's class (`classes.sectionKey`), same as
+  `students.js`'s own `?sectionKey` filter. Left as originally written, the
+  new "sections" scope option would have silently matched zero students on
+  every generate; found and fixed before it shipped in the UI.
+
+---
+
 ## [v5.26.1] — 2026-07-27 — fix(hr): connect Payroll entry form to Payroll Settings' catalogues
 
 v5.26.0 built the Payroll Settings catalogue editor and the read-only statutory
