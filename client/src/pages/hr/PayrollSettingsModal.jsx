@@ -162,7 +162,7 @@ function StatutorySection({ statutory, defaultApplyStatutory, onToggle }) {
           </div>
           <div className="p-3 space-y-2 text-xs">
             <div className="flex justify-between"><span className="text-slate-500">NSSF (employee)</span><span className="font-medium text-slate-800">{fmtPct(statutory.nssf.employeeRate)} up to KES {statutory.nssf.upperEarningsLimit.toLocaleString()}</span></div>
-            <div className="flex justify-between"><span className="text-slate-500">SHIF</span><span className="font-medium text-slate-800">{fmtPct(statutory.shif.rate)} (min KES {statutory.shif.minimumMonthly})</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">SHIF (SHA)</span><span className="font-medium text-slate-800">{fmtPct(statutory.shif.rate)} (min KES {statutory.shif.minimumMonthly})</span></div>
             <div className="flex justify-between"><span className="text-slate-500">Housing Levy (employee)</span><span className="font-medium text-slate-800">{fmtPct(statutory.housingLevy.employeeRate)}</span></div>
             <div className="flex justify-between"><span className="text-slate-500">PAYE personal relief</span><span className="font-medium text-slate-800">KES {statutory.paye.personalReliefMonthly.toLocaleString()}/mo</span></div>
             <div className="pt-1.5 border-t border-slate-100">

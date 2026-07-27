@@ -2,7 +2,7 @@
    HR & Staff — leave management, payroll overview, staff list
    Builds on /api/teachers + /api/hr for HR-specific data.
    ============================================================ */
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -321,20 +321,98 @@ function DocForm({ teachers, onClose, onSubmit, saving }) {
   );
 }
 
+/* ── Itemized allowance/deduction row editor — sourced from Payroll
+   Settings' catalogue (hrApi.payroll.config), not a hardcoded list, so
+   the entry form always reflects whatever a school has actually
+   configured. ── */
+function ItemizedRows({ label, types, items, onChange }) {
+  function updateItem(i, patch) { onChange(items.map((it, idx) => idx === i ? { ...it, ...patch } : it)); }
+  function removeItem(i) { onChange(items.filter((_, idx) => idx !== i)); }
+  function addItem() {
+    const used = new Set(items.map(it => it.type));
+    const next = types.find(t => !used.has(t.key)) ?? types[0];
+    onChange([...items, { type: next?.key ?? '', amount: '' }]);
+  }
+  const total = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+  const selCls = 'flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400/40';
+  const numCls = 'w-24 rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-right focus:outline-none focus:ring-2 focus:ring-violet-400/40';
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <label className="text-xs font-semibold text-slate-600">{label}</label>
+        <span className="text-xs font-semibold text-slate-500">{total.toLocaleString()}</span>
+      </div>
+      {items.length === 0 ? (
+        <p className="text-[11px] text-slate-400 italic mb-1.5">None added</p>
+      ) : (
+        <div className="space-y-1.5 mb-1.5">
+          {items.map((it, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              <select value={it.type} onChange={e => updateItem(i, { type: e.target.value })} className={selCls}>
+                {types.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+              </select>
+              <input type="number" min="0" step="any" value={it.amount}
+                onChange={e => updateItem(i, { amount: e.target.value })} className={numCls} placeholder="0" />
+              <button type="button" onClick={() => removeItem(i)} className="text-slate-400 hover:text-red-600 p-1 shrink-0"><Trash2 size={12} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      <button type="button" onClick={addItem} disabled={!types.length}
+        className="text-xs font-semibold text-violet-600 hover:underline flex items-center gap-1 disabled:opacity-40 disabled:no-underline">
+        <Plus size={11} /> Add {label.toLowerCase().replace(/s$/, '')}
+      </button>
+    </div>
+  );
+}
+
 /* ── Payroll entry form ──────────────────────────────────── */
 function PayrollForm({ teachers, defaultPeriod, record, sym, onClose, onSave, saving }) {
   const isEdit = !!record;
+
+  // Itemized types + the school's statutory policy come from Payroll
+  // Settings (hrApi.payroll.config) — the same source the Settings
+  // screen edits, so a type added there is immediately usable here.
+  const { data: cfgData } = useQuery({
+    queryKey: ['hr', 'payroll', 'config'],
+    queryFn:  () => hrApi.payroll.config.get(),
+  });
+  const cfg = cfgData?.data;
+  const allowanceTypes = cfg?.allowanceTypes ?? [];
+  const deductionTypes = cfg?.deductionTypes ?? [];
+
   const [form, setForm] = useState({
     staffId:     record?.staffId     ?? '',
     staffName:   record?.staffName   ?? '',
     payPeriod:   record?.payPeriod   ?? defaultPeriod,
     basicSalary: record?.basicSalary ?? '',
-    allowances:  record?.allowances  ?? 0,
-    deductions:  record?.deductions  ?? 0,
   });
+  // Backward-compatible seed: a record saved before itemization existed
+  // has a flat `allowances`/`deductions` number and no items array —
+  // shown here as a single "Other" row rather than silently dropped.
+  const [allowanceItems, setAllowanceItems] = useState(() =>
+    record?.allowanceItems?.length ? record.allowanceItems.map(i => ({ ...i }))
+      : record?.allowances ? [{ type: 'other', amount: record.allowances }] : []
+  );
+  const [deductionItems, setDeductionItems] = useState(() =>
+    record?.deductionItems?.length ? record.deductionItems.map(i => ({ ...i }))
+      : record?.deductions ? [{ type: 'other', amount: record.deductions }] : []
+  );
 
-  const gross = (Number(form.basicSalary) || 0) + (Number(form.allowances) || 0);
-  const net   = gross - (Number(form.deductions) || 0);
+  const [applyStatutory, setApplyStatutory] = useState(record?.applyStatutory ?? true);
+  const statutoryDefaultSet = useRef(isEdit); // edit: record's own value always wins, never overwritten
+  useEffect(() => {
+    if (!statutoryDefaultSet.current && cfg) {
+      setApplyStatutory(cfg.defaultApplyStatutory);
+      statutoryDefaultSet.current = true;
+    }
+  }, [cfg]);
+
+  const allowancesTotal = allowanceItems.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+  const deductionsTotal = deductionItems.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+  const gross = (Number(form.basicSalary) || 0) + allowancesTotal;
+  const netBeforeStatutory = gross - deductionsTotal;
+  const statutoryWillApply = applyStatutory && cfg?.statutory?.supported;
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
   function pickStaff(id) {
@@ -342,18 +420,27 @@ function PayrollForm({ teachers, defaultPeriod, record, sym, onClose, onSave, sa
     set('staffId',   id);
     set('staffName', t ? (t.name ?? `${t.firstName} ${t.lastName}`) : '');
   }
+  function submit(e) {
+    e.preventDefault();
+    onSave({
+      ...form,
+      basicSalary: Number(form.basicSalary),
+      allowanceItems: allowanceItems.filter(it => it.type && Number(it.amount) > 0),
+      deductionItems: deductionItems.filter(it => it.type && Number(it.amount) > 0),
+      applyStatutory,
+    });
+  }
 
   const fCls = 'w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-100">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-100 sticky top-0 bg-white">
           <h2 className="font-bold text-slate-900">{isEdit ? 'Edit Payroll Entry' : 'Add Payroll Entry'}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-1"><X size={16} /></button>
         </div>
-        <form onSubmit={e => { e.preventDefault(); onSave({ ...form, basicSalary: Number(form.basicSalary), allowances: Number(form.allowances || 0), deductions: Number(form.deductions || 0) }); }}
-          className="p-5 space-y-4">
+        <form onSubmit={submit} className="p-5 space-y-4">
 
           {/* Staff */}
           {isEdit ? (
@@ -387,24 +474,23 @@ function PayrollForm({ teachers, defaultPeriod, record, sym, onClose, onSave, sa
             </div>
           )}
 
-          {/* Salary fields */}
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Basic Salary *</label>
-              <input required type="number" min="0" step="any" value={form.basicSalary}
-                onChange={e => set('basicSalary', e.target.value)} className={fCls} placeholder="0" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Allowances</label>
-              <input type="number" min="0" step="any" value={form.allowances}
-                onChange={e => set('allowances', e.target.value)} className={fCls} placeholder="0" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Deductions</label>
-              <input type="number" min="0" step="any" value={form.deductions}
-                onChange={e => set('deductions', e.target.value)} className={fCls} placeholder="0" />
-            </div>
+          {/* Basic salary */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Basic Salary *</label>
+            <input required type="number" min="0" step="any" value={form.basicSalary}
+              onChange={e => set('basicSalary', e.target.value)} className={fCls} placeholder="0" />
           </div>
+
+          {/* Itemized allowances/deductions — types come from Payroll Settings */}
+          <ItemizedRows label="Allowances" types={allowanceTypes} items={allowanceItems} onChange={setAllowanceItems} />
+          <ItemizedRows label="Deductions" types={deductionTypes} items={deductionItems} onChange={setDeductionItems} />
+
+          {/* Statutory toggle */}
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            <input type="checkbox" checked={applyStatutory} onChange={e => setApplyStatutory(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-400" />
+            Apply statutory deductions (PAYE/NSSF/SHIF/Housing Levy)
+          </label>
 
           {/* Live summary */}
           <div className="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3 grid grid-cols-3 gap-2 text-center">
@@ -414,13 +500,18 @@ function PayrollForm({ teachers, defaultPeriod, record, sym, onClose, onSave, sa
             </div>
             <div className="border-x border-slate-200">
               <p className="text-[10px] text-slate-500 font-medium uppercase tracking-wide">Deductions</p>
-              <p className="text-sm font-bold text-red-600 mt-0.5">− {sym} {(Number(form.deductions) || 0).toLocaleString()}</p>
+              <p className="text-sm font-bold text-red-600 mt-0.5">− {sym} {deductionsTotal.toLocaleString()}</p>
             </div>
             <div>
-              <p className="text-[10px] text-slate-500 font-medium uppercase tracking-wide">Net Pay</p>
-              <p className="text-sm font-bold text-emerald-700 mt-0.5">{sym} {net.toLocaleString()}</p>
+              <p className="text-[10px] text-slate-500 font-medium uppercase tracking-wide">Net {statutoryWillApply ? '(before statutory)' : 'Pay'}</p>
+              <p className="text-sm font-bold text-emerald-700 mt-0.5">{sym} {netBeforeStatutory.toLocaleString()}</p>
             </div>
           </div>
+          {statutoryWillApply && (
+            <p className="text-[11px] text-slate-400 -mt-2">
+              Statutory deductions are computed on save from gross pay — final net pay will be lower than shown above.
+            </p>
+          )}
 
           <div className="flex justify-end gap-2 pt-1">
             <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>

@@ -6,6 +6,42 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.26.1] — 2026-07-27 — fix(hr): connect Payroll entry form to Payroll Settings' catalogues
+
+v5.26.0 built the Payroll Settings catalogue editor and the read-only statutory
+view, but the actual "Add/Edit Payroll Entry" form (`PayrollForm` in
+`HRPage.jsx`) still had flat `Allowances`/`Deductions` number inputs with no
+connection to either — exactly the "surface-level, not deep" gap flagged:
+the server has supported itemized `allowanceItems`/`deductionItems` and
+`applyStatutory` since v5.5.0/v5.6.0, but no client screen ever produced them.
+
+### Fixed
+- `PayrollForm` now itemizes allowances and deductions as `{type, amount}`
+  rows, with `type` picked from the school's own `payroll_config.allowanceTypes`/
+  `deductionTypes` catalogue (`hrApi.payroll.config.get()`) — the exact same
+  source Payroll Settings edits, so a type added there is immediately
+  selectable here. Totals are computed client-side for the live summary;
+  `POST /payroll` (unchanged) sums and validates the items server-side.
+- Added an "Apply statutory deductions" checkbox, defaulting from the
+  school's `payroll_config.defaultApplyStatutory` (new record) or the
+  record's own stored value (edit) — the field `PayrollSchema.applyStatutory`
+  already accepted but the form never sent.
+- A record saved before itemization existed (flat `allowances`/`deductions`,
+  no items array) is shown as a single "Other" row on edit rather than
+  silently dropped.
+- The live pre-save summary now labels net pay "(before statutory)" and adds
+  a note when statutory will be computed on save, instead of implying the
+  flat client-side subtraction is the final number — the actual PAYE/NSSF/
+  SHIF/Housing-Levy math stays server-only (`payroll-engine.js`), never
+  duplicated client-side.
+- `PayrollSettingsModal.jsx`: labelled the SHIF rate "SHIF (SHA)" for
+  clarity — SHIF is the levy, SHA (Social Health Authority) is the
+  government body most people actually refer to it by.
+
+Client production build clean; `hr-payroll.test.js` (56 tests, server-side,
+unaffected by this client-only change) still green. No live MongoDB in this
+sandbox — same click-through limitation as v5.9.0/v5.26.0.
+
 ## [v5.26.0] — 2026-07-27 — feat(hr): Payroll Settings UI (Payroll Phase 1, Step 4 completion)
 
 `GET/PUT /api/hr/payroll-config` and `GET/PUT /api/hr/payroll/workflow-config`
