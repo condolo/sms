@@ -2,8 +2,14 @@
    FinancePage — tab-routing shell (was 1355 lines)
    Decomposed into: constants.js + FinancePrimitives.jsx +
    SummaryTab · OverdueTab · InvoicesTab · PaymentsTab ·
-   FeeStructureTab · CreateInvoiceSlideOver ·
-   RecordPaymentSlideOver · FeeStructureSlideOver
+   FeeStructureTab · RecordPaymentSlideOver · FeeStructureSlideOver
+
+   No manual "New Invoice" entry point on purpose — every invoice is
+   expected to come from a Fee Structure's Generate Invoices (handles
+   class/section/student scope + sibling discounts consistently).
+   Ad-hoc one-off invoices, if ever needed again, go through a Fee
+   Structure scoped to a single student rather than a separate
+   free-form creation flow.
    ============================================================ */
 import { useState } from 'react';
 import { Settings } from 'lucide-react';
@@ -15,7 +21,6 @@ import InvoicesTab             from './components/InvoicesTab.jsx';
 import PaymentsTab             from './components/PaymentsTab.jsx';
 import FeeStructureTab         from './components/FeeStructureTab.jsx';
 import FeeSettingsModal        from './components/FeeSettingsModal.jsx';
-import { CreateInvoiceButton }      from './components/CreateInvoiceSlideOver.jsx';
 import { RecordPaymentButton }      from './components/RecordPaymentSlideOver.jsx';
 import { CreateFeeStructureButton } from './components/FeeStructureSlideOver.jsx';
 
@@ -43,7 +48,6 @@ export default function FinancePage() {
             <h1 className="text-xl font-semibold text-slate-900 tracking-tight">Finance</h1>
             <p className="text-sm text-slate-500 mt-0.5">Invoices, payments, and financial overview</p>
           </div>
-          {canCreate && tab === 'invoices' && <CreateInvoiceButton      fmtCurrency={fmtCurrency} currency={currency} />}
           {canCreate && tab === 'payments' && <RecordPaymentButton      fmtCurrency={fmtCurrency} currency={currency} />}
           {canCreate && tab === 'feestr'   && (
             <div className="flex items-center gap-2">
