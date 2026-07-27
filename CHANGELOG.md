@@ -6,6 +6,79 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.25.0] — 2026-07-27 — feat(exams): exam results-entry UI + two report-card dependency bug fixes
+
+The Exams tab could create and schedule an exam, with a full status
+workflow (moderation, approval, lock, publish-with-guardian-notify)
+already built server-side — but no client screen anywhere could
+actually record a result against one. Investigated before building
+anything (per the user's explicit ask to check whether this was a
+Markbook "reconnection" instead of a missing feature): confirmed
+Markbook (`assessment_marks`) and Exams (`exam_results`) are genuinely
+separate systems for separate purposes — Markbook is day-to-day CA/quiz
+entry, `exam_results` is formal exam administration with its own
+moderation/audit/publish machinery. Nothing to reconnect; the results
+screen itself needed building.
+
+Building it surfaced two real bugs in the report-card dependency chain
+that would have made entering results silently useless — both fixed
+before writing any UI code.
+
+### Fixed (report-card dependency — found while checking how exam_results
+   actually reaches a report card)
+- **`server/utils/academic-calc.js`'s `aggregateExamResults`** grouped
+  scores by `exam.type` (`'test'`/`'mock'`/`'terminal'`/etc. — a purely
+  descriptive category) instead of `exam.assessmentType` (the school's
+  real `customTypes` key, e.g. `'MT'`/`'ET'`, set by `_resolveAssessmentType()`
+  at exam-create time). Since no school configures an assessment type
+  literally keyed `'test'`, `computeFinalScores`'s `weightMap[type] ?? 0`
+  always evaluated to 0 for every exam result, silently zero-weighting
+  every exam out of every student's final report-card score —
+  deterministically, for every exam ever created through the existing
+  "Create Exam" form. Now groups by `exam.assessmentType`, falling back
+  to `exam.type` only for exams that predate the field.
+- **`server/routes/exams.js`'s `POST /:id/results`** computed grade/
+  percentage from a per-exam `exam.gradeScale` field that no route
+  anywhere ever set — grade and percentage were silently `null` on
+  every exam result ever entered. Now resolves the school's live
+  grading scale (`grade_boundaries` default, falling back to
+  `academic_config.gradingSchema`) via the shared `resolveGrade()` —
+  same resolution order `assessment.js`/`report-cards.js` already use,
+  no per-route reimplementation.
+
+### Added
+- `client/src/pages/exams/ExamsPage.jsx`: a "Results" action per exam
+  row opens `ResultsSlideOver` — a student roster grid (score/mark-state
+  per student, `Present`/`Absent`/`Missing`/`Exempted`/`Incomplete`),
+  wired to the exam's existing `GET`/`POST /:id/results` (bulk upsert,
+  optimistic-concurrency conflict reporting — already built, never
+  called), plus the exam's status-transition workflow (Start → Complete
+  → Moderate → Approve → Lock → Publish → Archive, each gated to the
+  server's own transition table and admin-only where the server
+  requires it). Lock/Unlock route through the dedicated `POST /:id/lock`
+  `/unlock` endpoints (not a raw status PUT) since only those set
+  `lockedBy`/`lockedAt` and, for unlock, enforce the mandatory-reason
+  business rule. Publishing prompts for confirmation since it notifies
+  every sitting student's guardians immediately.
+- `client/src/api/client.js`: `exams.lock`/`.unlock`/`.statusHistory` —
+  the only pieces of the exams results workflow that had no wrapper yet.
+
+### Tests
+`server/__tests__/academic-calc.test.js`: 3 new tests for
+`aggregateExamResults`'s grouping key (mutation-tested — reverting the
+fix to group by `exam.type` again was caught immediately by 2 of the 3).
+New `server/__tests__/routes/exams-results-grade-scale.test.js` (4
+tests): grade_boundaries default scale used when present, fallback to
+academic_config, a present result always gets a non-null grade
+(regression guard for the original bug), absent results get no score/
+grade. Full suite 95/95 suites, 946/946 tests; security-scan and
+tenant-coverage ratchet (36) unchanged. Verified via `vite build`
+(clean, `ExamsPage` chunk grew as expected) and a running dev server
+(zero console errors) — no live MongoDB in this sandbox, so the
+results-entry grid itself could not be click-tested end-to-end.
+
+---
+
 ## [v5.24.3] — 2026-07-27 — chore(assessment): remove dead "Assessment Report Style" feature
 
 Prompted by the user spotting the "Assessment Report Style" card in Exams

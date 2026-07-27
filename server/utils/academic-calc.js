@@ -112,11 +112,21 @@ async function aggregateExamResults(schoolId, classId, termId, academicYearId, s
     const pct = exam.maxScore > 0 ? _round((r.score / exam.maxScore) * 100) : null;
     if (pct === null) continue;
 
+    // Group by exam.assessmentType (the school's real customTypes key, e.g.
+    // 'MT'/'ET' — set on the exam via _resolveAssessmentType() at create
+    // time) so this bucket lines up with assessmentWeights' keys in
+    // computeFinalScores(). exam.type ('test'/'mock'/'terminal'/etc.) is a
+    // separate, purely descriptive category — it never matches a school's
+    // configured weight keys, so grouping by it here silently zero-weighted
+    // every exam result out of the final score (weightMap[type] ?? 0 → 0,
+    // computeFinalScores skips w === 0). Falls back to exam.type only for
+    // exams that predate the assessmentType field ever being set.
+    const weightKey = exam.assessmentType || exam.type;
     const sid = r.studentId;
     grouped[sid]              ??= {};
     grouped[sid][exam.subjectId] ??= {};
-    grouped[sid][exam.subjectId][exam.type] ??= [];
-    grouped[sid][exam.subjectId][exam.type].push(pct);
+    grouped[sid][exam.subjectId][weightKey] ??= [];
+    grouped[sid][exam.subjectId][weightKey].push(pct);
   }
 
   const data = {};

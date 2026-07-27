@@ -11,6 +11,8 @@
 /* ── Mock the DB layer so tests never touch MongoDB ─────────── */
 let mockLastReset      = [];   // behaviour_points_resets.find().sort().limit().lean() result
 let mockIncidentsAgg   = [];   // behaviour_incidents.aggregate() result
+let mockExams          = [];   // exams.find().lean() result
+let mockExamResults    = [];   // exam_results.find().lean() result
 
 jest.mock('../utils/model', () => ({
   _model: jest.fn((col) => {
@@ -19,6 +21,12 @@ jest.mock('../utils/model', () => ({
     }
     if (col === 'behaviour_incidents') {
       return { aggregate: jest.fn(() => Promise.resolve(mockIncidentsAgg)) };
+    }
+    if (col === 'exams') {
+      return { find: jest.fn().mockReturnValue({ lean: jest.fn(() => Promise.resolve(mockExams)) }) };
+    }
+    if (col === 'exam_results') {
+      return { find: jest.fn().mockReturnValue({ lean: jest.fn(() => Promise.resolve(mockExamResults)) }) };
     }
     return {
       find:           jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }),
@@ -39,11 +47,13 @@ jest.mock('../routes/academic-config', () => ({
   }),
 }));
 
-const { computeFinalScores, attachDeviations, behaviourSummary, computeTermDeviation } = require('../utils/academic-calc');
+const { computeFinalScores, attachDeviations, behaviourSummary, computeTermDeviation, aggregateExamResults } = require('../utils/academic-calc');
 
 beforeEach(() => {
   mockLastReset    = [];
   mockIncidentsAgg = [];
+  mockExams        = [];
+  mockExamResults  = [];
 });
 
 /* ── Fixtures ───────────────────────────────────────────────── */
@@ -203,6 +213,54 @@ describe('computeFinalScores', () => {
     };
     const result = computeFinalScores(gradesData, {}, WEIGHTS, SCHEMA);
     expect(result.stu1.gpa).toBe(3.5);   // (4.0 + 3.0) / 2
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════
+   aggregateExamResults
+   ══════════════════════════════════════════════════════════════ */
+describe('aggregateExamResults', () => {
+  test('groups by exam.assessmentType (the school-configured weight key), not exam.type', async () => {
+    // exam.type ('terminal') never matches a school's customTypes key
+    // (CA/HW/MT/ET etc.) — grouping by it silently zero-weights every
+    // exam result out of computeFinalScores. assessmentType ('ET') is
+    // the real link, set by _resolveAssessmentType() at exam create time.
+    mockExams = [{
+      id: 'ex1', schoolId: 'sch1', classId: 'c1', subjectId: 'math',
+      type: 'terminal', assessmentType: 'ET', maxScore: 100, status: 'completed',
+    }];
+    mockExamResults = [{ examId: 'ex1', studentId: 's1', score: 80, markState: 'present', absent: false }];
+
+    const { data } = await aggregateExamResults('sch1', 'c1', null, null);
+    expect(data.s1.math).toEqual({ ET: 80 });
+    expect(data.s1.math.terminal).toBeUndefined();
+  });
+
+  test('falls back to exam.type when assessmentType was never set (pre-fix / legacy exam)', async () => {
+    mockExams = [{
+      id: 'ex2', schoolId: 'sch1', classId: 'c1', subjectId: 'sci',
+      type: 'mock', maxScore: 50, status: 'completed',
+    }];
+    mockExamResults = [{ examId: 'ex2', studentId: 's1', score: 40, markState: 'present', absent: false }];
+
+    const { data } = await aggregateExamResults('sch1', 'c1', null, null);
+    expect(data.s1.sci).toEqual({ mock: 80 }); // 40/50 = 80%
+  });
+
+  test('excludes absent/no-score results and returns exam status metadata', async () => {
+    mockExams = [{
+      id: 'ex3', schoolId: 'sch1', classId: 'c1', subjectId: 'eng',
+      type: 'terminal', assessmentType: 'ET', title: 'End Term English', maxScore: 100, status: 'moderated',
+    }];
+    mockExamResults = [
+      { examId: 'ex3', studentId: 's1', score: 70, markState: 'present', absent: false },
+      { examId: 'ex3', studentId: 's2', markState: 'ABS', absent: true },
+    ];
+
+    const { data, examStatuses } = await aggregateExamResults('sch1', 'c1', null, null);
+    expect(data.s1.eng).toEqual({ ET: 70 });
+    expect(data.s2).toBeUndefined();
+    expect(examStatuses).toEqual([{ id: 'ex3', status: 'moderated', title: 'End Term English', subjectId: 'eng' }]);
   });
 });
 

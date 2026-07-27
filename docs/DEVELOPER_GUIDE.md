@@ -2094,6 +2094,12 @@ assessment_marks (isPublished:true)   grades collection (isPublished:true)   exa
                — stores termNumber, activeWeights, activeSchema
 ```
 
+**`aggregateExamResults()`'s "type" (v5.25.0 fix):** groups by `exam.assessmentType` — the school's real `customTypes` key (e.g. `'MT'`/`'ET'`), set on the exam by `_resolveAssessmentType()` at create time — not `exam.type` (`'test'`/`'mock'`/`'terminal'`/etc., a purely descriptive category no school's weight config ever keys by). Grouping by `exam.type` meant `computeFinalScores`'s `weightMap[type] ?? 0` was always 0 for every exam result, silently zero-weighting every exam out of every report card. Falls back to `exam.type` only for exams that predate the `assessmentType` field.
+
+**Exam results entry UI (v5.25.0):** `server/routes/exams.js`'s full results workflow (`GET`/`POST /:id/results`, `/lock`, `/unlock`, status transitions, moderation, publish-with-guardian-notify) existed since earlier RC-series work but had no client screen calling any of it — an exam could be created and scheduled with no way to actually record a result. `client/src/pages/exams/ExamsPage.jsx`'s `ResultsSlideOver` (opened via a "Results" button per exam row in `ExamsTab`) is that screen: a student roster grid plus the status-transition buttons, gated to the server's own `EXAM_TRANSITIONS` table. This is a deliberately separate system from Markbook (`assessment_marks`, day-to-day CA/quiz entry) — both ultimately feed the same report-card score via `aggregateAssessmentMarks`/`aggregateExamResults` merged in `computeFinalScores`, but an Exam's own moderation/audit/publish workflow has no Markbook equivalent.
+
+**Exam result grading (v5.25.0 fix):** `exams.js`'s `POST /:id/results` previously computed grade/percentage from a per-exam `exam.gradeScale` field that no route ever set — always `null`. Now resolves the school's live grading scale the same way as everywhere else in this section (`grade_boundaries` default → `academic_config.gradingSchema` fallback) via the shared `resolveGrade()`.
+
 #### Priority rule (weights + grade schema)
 
 | Setting | Primary (preferred) | Fallback |

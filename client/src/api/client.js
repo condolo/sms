@@ -251,7 +251,14 @@ export const exams = {
     list:       (examId, params) => _get(`/exams/${examId}/results`, params),
     bulkUpsert: (examId, data)   => _post(`/exams/${examId}/results`, data),
   },
-  announceSitting: (data) => _post('/exams/announce', data),
+  announceSitting: (data)        => _post('/exams/announce', data),
+  // Dedicated status-transition endpoints — set lockedBy/lockedAt and
+  // enforce the mandatory-reason business rule on unlock; the generic
+  // `update(id, {status})` PUT can't do either, so these are always used
+  // for lock/unlock instead of a raw status PUT.
+  lock:          (id, data) => _post(`/exams/${id}/lock`, data ?? {}),
+  unlock:        (id, data) => _post(`/exams/${id}/unlock`, data ?? {}),
+  statusHistory: (id)       => _get(`/exams/${id}/status-history`),
 };
 
 export const grades = {

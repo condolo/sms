@@ -17,6 +17,7 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { isYearArchived } = require('../utils/archival');
 const { getConfig: _getAssessmentConfig } = require('./assessment');
+const { mergeConfig, resolveGrade } = require('./academic-config');
 const { _model } = require('../utils/model');
 const { notifyGuardiansForStudents } = require('../utils/notify-students');
 const email = require('../utils/email');
@@ -27,14 +28,18 @@ const PLAN   = planGate('exams');
 /* ── Helpers ────────────────────────────────────────────────── */
 function _round(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
 
-/** Convert raw score to grade letter based on school's grading scale */
-function _calcGrade(score, maxScore, gradeScale = []) {
+/** Convert raw score to grade/percentage via the school's live grading
+ *  scale — grade_boundaries' default scale, falling back to
+ *  academic_config.gradingSchema (same resolution order assessment.js's
+ *  GET /report and report-cards.js use — resolveGrade() is the single
+ *  shared band-lookup, never duplicated per-route). Previously this read
+ *  a per-exam `exam.gradeScale` field that no route ever set, so grade/
+ *  percentage were silently null on every exam result ever entered. */
+function _calcGrade(score, maxScore, gradingSchema) {
   if (!maxScore || maxScore === 0) return null;
   const pct = _round((score / maxScore) * 100);
-  if (!gradeScale.length) return null;
-  const sorted = [...gradeScale].sort((a, b) => b.min - a.min);
-  const band   = sorted.find(g => pct >= g.min);
-  return { percentage: pct, grade: band?.grade || null, points: band?.points || null };
+  const { grade, points } = resolveGrade(pct, gradingSchema);
+  return { percentage: pct, grade, points };
 }
 
 /* ── Validation ─────────────────────────────────────────────── */
@@ -636,12 +641,19 @@ router.post('/:id/results', authMiddleware, PLAN, rbac('exams', 'create'), async
       return E.badRequest(res, `${overscored.length} result(s) exceed the exam maximum score of ${exam.maxScore}`);
     }
 
-    // Fetch existing results for audit trail
-    const existingResults = await tenantModel('exam_results', tenantContext(req)).find({
-      schoolId, examId: req.params.id,
-      studentId: { $in: data.results.map(r => r.studentId) }
-    }).lean();
-    const existingMap = Object.fromEntries(existingResults.map(r => [r.studentId, r]));
+    // Fetch existing results for audit trail + the school's live grading
+    // scale (grade_boundaries default, falling back to academic_config) —
+    // same resolution order as assessment.js/report-cards.js.
+    const [existingResults, defaultScale, academicCfg] = await Promise.all([
+      tenantModel('exam_results', tenantContext(req)).find({
+        schoolId, examId: req.params.id,
+        studentId: { $in: data.results.map(r => r.studentId) }
+      }).lean(),
+      tenantModel('grade_boundaries', tenantContext(req)).findOne({ schoolId, isDefault: true }).lean(),
+      tenantModel('academic_config', tenantContext(req)).findOne({ schoolId }).lean(),
+    ]);
+    const existingMap   = Object.fromEntries(existingResults.map(r => [r.studentId, r]));
+    const gradingSchema = defaultScale?.bands ?? mergeConfig(academicCfg).gradingSchema;
 
     // Optimistic concurrency — split off any result whose client-supplied _v
     // doesn't match the current DB value (two teachers editing the same
@@ -675,7 +687,7 @@ router.post('/:id/results', authMiddleware, PLAN, rbac('exams', 'create'), async
     const ops = writableResults.map(r => {
       const resolved  = _resolveMarkState(r);
       const gradeInfo = resolved.markState === 'present' && resolved.score != null
-        ? _calcGrade(resolved.score, exam.maxScore, exam.gradeScale || [])
+        ? _calcGrade(resolved.score, exam.maxScore, gradingSchema)
         : null;
 
       // Build audit entry if score changed
