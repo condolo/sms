@@ -5,7 +5,7 @@ import {
   BookOpen, Plus, Search, BookMarked, Users, AlertTriangle,
   ChevronRight, X, Check, RefreshCw, Trash2, Edit2, ArrowLeft,
 } from 'lucide-react';
-import { library as libApi, classes as classesApi } from '@/api/client.js';
+import { library as libApi, classes as classesApi, students as studentsApi, teachers as teachersApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { useToast } from '@/hooks/useToast.jsx';
 
@@ -161,11 +161,72 @@ function LoanModal({ onClose, onSave }) {
 
   const [form, setForm] = useState({
     bookId: '', borrowerId: '', borrowerType: 'student',
-    borrowerName: '', borrowerClass: '', dueDate: defaultDue,
+    borrowerName: '', borrowerClass: '', borrowerAdmissionNo: '', dueDate: defaultDue,
   });
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState('');
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const [bookSearch,     setBookSearch]     = useState('');
+  const [selectedBook,   setSelectedBook]   = useState(null);
+  const [borrowerSearch, setBorrowerSearch] = useState('');
+  const [selectedBorrower, setSelectedBorrower] = useState(null);
+
+  const { data: bookResults } = useQuery({
+    queryKey: ['library-books', 'issue-search', bookSearch],
+    queryFn:  () => libApi.books.list({ q: bookSearch, limit: 10 }),
+    enabled:  bookSearch.length > 1,
+  });
+  const bookOptions = (bookResults?.data ?? []).filter(b => (b.available ?? 0) > 0);
+
+  const { data: studentResults } = useQuery({
+    queryKey: ['students', 'library-issue-search', borrowerSearch],
+    queryFn:  () => studentsApi.list({ search: borrowerSearch, limit: 10, status: 'active' }),
+    enabled:  form.borrowerType === 'student' && borrowerSearch.length > 1,
+  });
+  const { data: staffResults } = useQuery({
+    queryKey: ['teachers', 'library-issue-search', borrowerSearch],
+    queryFn:  () => teachersApi.list({ search: borrowerSearch, limit: 10 }),
+    enabled:  form.borrowerType === 'staff' && borrowerSearch.length > 1,
+  });
+  const borrowerOptions = form.borrowerType === 'student'
+    ? (studentResults?.data ?? [])
+    : (staffResults?.data ?? staffResults?.teachers ?? []);
+
+  function pickBook(b) {
+    setSelectedBook(b);
+    setBookSearch('');
+    set('bookId', b.id ?? b._id);
+  }
+  function pickBorrower(p) {
+    setSelectedBorrower(p);
+    setBorrowerSearch('');
+    if (form.borrowerType === 'student') {
+      setForm(f => ({
+        ...f,
+        borrowerId: p.id ?? p._id,
+        borrowerName: `${p.firstName} ${p.lastName}`,
+        borrowerClass: p.className ?? '',
+        borrowerAdmissionNo: p.admissionNumber ?? '',
+      }));
+    } else {
+      // Prefer the linked login id — GET /loans' "my own loans" filter
+      // matches borrowerId against the viewer's userId, so a teacher
+      // with no linked account falls back to their own staff id.
+      setForm(f => ({
+        ...f,
+        borrowerId: p.userId ?? p.id ?? p._id,
+        borrowerName: `${p.firstName} ${p.lastName}`,
+        borrowerClass: '',
+        borrowerAdmissionNo: '',
+      }));
+    }
+  }
+  function changeBorrowerType(type) {
+    set('borrowerType', type);
+    setSelectedBorrower(null);
+    setForm(f => ({ ...f, borrowerId: '', borrowerName: '', borrowerClass: '', borrowerAdmissionNo: '' }));
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -187,46 +248,96 @@ function LoanModal({ onClose, onSave }) {
         </div>
         <form onSubmit={handleSubmit} className="p-5 space-y-3">
           {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
+
+          {/* Book picker */}
           <div>
-            <label className="block text-xs font-medium text-slate-700 mb-1">Book ID *</label>
-            <input value={form.bookId} onChange={e => set('bookId', e.target.value)} required placeholder="Paste book ID"
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono" />
+            <label className="block text-xs font-medium text-slate-700 mb-1">Book *</label>
+            {selectedBook ? (
+              <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                <span className="text-sm font-medium text-emerald-800 truncate">{selectedBook.title}</span>
+                <button type="button" onClick={() => { setSelectedBook(null); set('bookId', ''); }} className="text-emerald-500 hover:text-emerald-700"><X size={14} /></button>
+              </div>
+            ) : (
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input value={bookSearch} onChange={e => setBookSearch(e.target.value)} placeholder="Search title, author, or ISBN…"
+                  className="w-full pl-9 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                {bookOptions.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 bg-white border border-slate-200 rounded-xl shadow-xl z-10 mt-1 max-h-48 overflow-y-auto">
+                    {bookOptions.map(b => (
+                      <button key={b.id ?? b._id} type="button" onClick={() => pickBook(b)}
+                        className="w-full text-left px-3 py-2 hover:bg-slate-50 text-sm flex items-center justify-between gap-2">
+                        <span className="font-medium text-slate-800 truncate">{b.title}</span>
+                        <span className="text-xs text-slate-400 shrink-0">{b.available} available</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Borrower type + picker */}
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">Borrower Type</label>
+            <select value={form.borrowerType} onChange={e => changeBorrowerType(e.target.value)}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="student">Student</option>
+              <option value="staff">Staff</option>
+            </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-700 mb-1">Borrower ID *</label>
-            <input value={form.borrowerId} onChange={e => set('borrowerId', e.target.value)} required placeholder="Student or staff ID"
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono" />
+            <label className="block text-xs font-medium text-slate-700 mb-1">
+              {form.borrowerType === 'student' ? 'Student' : 'Staff Member'} *
+            </label>
+            {selectedBorrower ? (
+              <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                <div>
+                  <span className="text-sm font-medium text-emerald-800">{form.borrowerName}</span>
+                  {form.borrowerType === 'student' && (
+                    <span className="text-xs text-emerald-600 ml-2">{form.borrowerClass}{form.borrowerAdmissionNo ? ` · ${form.borrowerAdmissionNo}` : ''}</span>
+                  )}
+                </div>
+                <button type="button" onClick={() => { setSelectedBorrower(null); setForm(f => ({ ...f, borrowerId: '', borrowerName: '', borrowerClass: '', borrowerAdmissionNo: '' })); }}
+                  className="text-emerald-500 hover:text-emerald-700"><X size={14} /></button>
+              </div>
+            ) : (
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input value={borrowerSearch} onChange={e => setBorrowerSearch(e.target.value)}
+                  placeholder={form.borrowerType === 'student' ? 'Search student name…' : 'Search staff name…'}
+                  className="w-full pl-9 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                {borrowerOptions.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 bg-white border border-slate-200 rounded-xl shadow-xl z-10 mt-1 max-h-48 overflow-y-auto">
+                    {borrowerOptions.map(p => (
+                      <button key={p.id ?? p._id} type="button" onClick={() => pickBorrower(p)}
+                        className="w-full text-left px-3 py-2 hover:bg-slate-50 text-sm flex items-center gap-2">
+                        <span className="font-medium text-slate-800">{p.firstName} {p.lastName}</span>
+                        {form.borrowerType === 'student'
+                          ? <span className="text-slate-400 text-xs">{p.className}{p.admissionNumber ? ` · ${p.admissionNumber}` : ''}</span>
+                          : <span className="text-slate-400 text-xs">{p.role ?? ''}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <p className="text-[11px] text-slate-400 mt-1">
+              {form.borrowerType === 'student'
+                ? 'Class and admission number are captured automatically to disambiguate same-name students in different classes.'
+                : 'Staff are matched to their own account so borrowed books appear under their Library view.'}
+            </p>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Name</label>
-              <input value={form.borrowerName} onChange={e => set('borrowerName', e.target.value)}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Type</label>
-              <select value={form.borrowerType} onChange={e => set('borrowerType', e.target.value)}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <option value="student">Student</option>
-                <option value="staff">Staff</option>
-              </select>
-            </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">Due Date *</label>
+            <input type="date" value={form.dueDate} onChange={e => set('dueDate', e.target.value)} required
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Class</label>
-              <input value={form.borrowerClass} onChange={e => set('borrowerClass', e.target.value)}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Due Date *</label>
-              <input type="date" value={form.dueDate} onChange={e => set('dueDate', e.target.value)} required
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-          </div>
+
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-slate-200 hover:bg-slate-50">Cancel</button>
-            <button type="submit" disabled={saving}
+            <button type="submit" disabled={saving || !form.bookId || !form.borrowerId}
               className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
               {saving ? 'Issuing…' : 'Issue Book'}
             </button>
