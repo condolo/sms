@@ -8,7 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle, ListChecks, Loader2, Zap, ChevronDown, Trash2,
 } from 'lucide-react';
-import { finance as financeApi } from '@/api/client.js';
+import { finance as financeApi, academicConfig as academicConfigApi } from '@/api/client.js';
 import { EmptyOrError } from './FinancePrimitives.jsx';
 
 export default function FeeStructureTab({ fmtCurrency, canCreate }) {
@@ -23,6 +23,21 @@ export default function FeeStructureTab({ fmtCurrency, canCreate }) {
     staleTime: 5 * 60_000,
   });
   const structures = data?.data ?? [];
+
+  // Resolves academicYearId/termId to a display label — fee structures only
+  // store the ids (see finance.js's _resolveAcademicPeriod).
+  const { data: yearsData } = useQuery({
+    queryKey: ['academic-config', 'years'],
+    queryFn:  academicConfigApi.years.list,
+    staleTime: 10 * 60_000,
+  });
+  const years = yearsData?.data ?? yearsData ?? [];
+  function periodLabel(fs) {
+    const year = years.find(y => (y.id ?? y._id?.toString()) === fs.academicYearId);
+    if (!year) return null;
+    const term = year.terms?.find(t => t.id === fs.termId);
+    return { yearName: year.name, termName: term?.name ?? null };
+  }
 
   const removeMut = useMutation({
     mutationFn: id => financeApi.feeStructures.remove(id),
@@ -65,6 +80,7 @@ export default function FeeStructureTab({ fmtCurrency, canCreate }) {
           {structures.map(fs => {
             const isExpanded = expanded === fs.id;
             const result     = genResult?.id === fs.id ? genResult : null;
+            const period     = periodLabel(fs);
             return (
               <div key={fs.id ?? fs._id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                 {/* Header row */}
@@ -72,8 +88,8 @@ export default function FeeStructureTab({ fmtCurrency, canCreate }) {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-semibold text-slate-800">{fs.name}</p>
-                      {fs.academicYear && <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{fs.academicYear}</span>}
-                      {fs.term && <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">Term {fs.term}</span>}
+                      {period?.yearName && <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{period.yearName}</span>}
+                      {period?.termName && <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">{period.termName}</span>}
                     </div>
                     <p className="text-xs text-slate-400 mt-0.5">
                       {fs.lineItems?.length ?? 0} line item{(fs.lineItems?.length ?? 0) !== 1 ? 's' : ''} · Total: {fmtCurrency(fs.total)}

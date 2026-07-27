@@ -19,6 +19,7 @@ const { applyOptimisticLock } = require('../utils/optimistic-lock');
 const AuditService = require('../services/audit');
 const { notifyGuardiansForStudents } = require('../utils/notify-students');
 const email = require('../utils/email');
+const { resolveCurrentPeriod } = require('./academic-config');
 
 const router = express.Router();
 const PLAN   = planGate('finance');
@@ -86,6 +87,46 @@ function _validate(schema, data) {
   return { data: r.data };
 }
 
+/* Resolves + validates {academicYearId, termId} against the school's real
+   academic_years records — mirrors report-cards.js's _resolveTermScope
+   (same resolveCurrentPeriod fallback-to-current-period behavior when
+   nothing is given), but errors on an explicitly-given id that doesn't
+   exist for this school (matching exams.js's FK-validation style) instead
+   of silently discarding it — a typo'd id should surface, not vanish.
+   An academicYearId with no termId is valid (a fee structure/invoice can
+   cover the whole year). Neither given → live-resolves the current
+   year+term together, same as useCurrentAcademicPeriod client-side. */
+async function _resolveAcademicPeriod(schoolId, ctx, { academicYearId, termId }) {
+  const years = await tenantModel('academic_years', ctx).find({ schoolId }).lean();
+  if (!years.length) return { academicYearId: null, termId: null };
+
+  const current = resolveCurrentPeriod(years);
+
+  let year = null;
+  if (academicYearId) {
+    year = years.find(y => (y.id || y._id?.toString()) === academicYearId);
+    if (!year) return { error: `academicYearId "${academicYearId}" does not match any academic year for this school` };
+  } else {
+    year = current.year;
+  }
+  if (!year) return { academicYearId: null, termId: null };
+
+  const resolvedYearId = year.id || year._id?.toString();
+  const terms = Array.isArray(year.terms) ? year.terms : [];
+
+  let resolvedTermId = null;
+  if (termId) {
+    const term = terms.find(t => t.id === termId);
+    if (!term) return { error: `termId "${termId}" does not match any term in academic year "${year.name}"` };
+    resolvedTermId = term.id;
+  } else if (!academicYearId) {
+    resolvedTermId = current.term?.id ?? null;
+  }
+  // else: explicit academicYearId with no termId → year-wide scope, term left unset
+
+  return { academicYearId: resolvedYearId, termId: resolvedTermId };
+}
+
 /* ══════════════════════════════════════════════════════════════
    INVOICES
    ══════════════════════════════════════════════════════════════ */
@@ -145,6 +186,11 @@ router.post('/invoices', authMiddleware, PLAN, rbac('finance', 'create'), async 
     const { data, error } = _validate(InvoiceCreateSchema, req.body);
     if (error) return E.validation(res, error);
 
+    const period = await _resolveAcademicPeriod(schoolId, tenantContext(req), { academicYearId: data.academicYearId, termId: data.termId });
+    if (period.error) return E.badRequest(res, period.error);
+    data.academicYearId = period.academicYearId;
+    data.termId          = period.termId;
+
     // Server-side financial calculations — client totals are ignored
     const totals        = _calcInvoiceTotals(data.lineItems, data.discountPct, data.taxPct);
     const invoiceNumber = await nextInvoiceNumber(schoolId);
@@ -192,6 +238,16 @@ router.put('/invoices/:id', authMiddleware, PLAN, rbac('finance', 'update'), asy
 
     if (existing.status === 'paid') {
       return E.badRequest(res, 'Cannot edit a fully paid invoice');
+    }
+
+    if (data.academicYearId !== undefined || data.termId !== undefined) {
+      const period = await _resolveAcademicPeriod(schoolId, tenantContext(req), {
+        academicYearId: data.academicYearId !== undefined ? data.academicYearId : existing.academicYearId,
+        termId:         data.termId         !== undefined ? data.termId         : existing.termId,
+      });
+      if (period.error) return E.badRequest(res, period.error);
+      data.academicYearId = period.academicYearId;
+      data.termId          = period.termId;
     }
 
     const lineItems  = data.lineItems  || existing.lineItems;
@@ -487,8 +543,8 @@ router.put('/invoice-reminder-config', authMiddleware, PLAN, rbac('finance', 'up
 const FeeStructureSchema = z.object({
   name:        z.string().min(1).max(200),
   description: z.string().max(500).optional(),
-  academicYear:z.string().max(20).optional(),
-  term:        z.number().int().min(1).max(4).optional(),
+  academicYearId: z.string().optional(),
+  termId:      z.string().optional(),
   // scopeType selects which of the id lists below actually targets
   // students; omitted defaults to 'classes' when classIds is present
   // (pre-existing structures created before scopeType existed) or
@@ -724,6 +780,11 @@ router.post('/fee-structures', authMiddleware, PLAN, rbac('finance', 'create'), 
     const { data, error } = _validate(FeeStructureSchema, req.body);
     if (error) return E.validation(res, error);
 
+    const period = await _resolveAcademicPeriod(schoolId, tenantContext(req), { academicYearId: data.academicYearId, termId: data.termId });
+    if (period.error) return E.badRequest(res, period.error);
+    data.academicYearId = period.academicYearId;
+    data.termId          = period.termId;
+
     const totals = _calcInvoiceTotals(data.lineItems);
     const FeeStructures = tenantModel('fee_structures', tenantContext(req));
     const doc = await FeeStructures.create({
@@ -748,8 +809,21 @@ router.put('/fee-structures/:id', authMiddleware, PLAN, rbac('finance', 'update'
     const { data, error } = _validate(FeeStructureSchema.partial(), req.body);
     if (error) return E.validation(res, error);
 
-    const totals = data.lineItems ? _calcInvoiceTotals(data.lineItems) : {};
     const FeeStructures = tenantModel('fee_structures', tenantContext(req));
+
+    if (data.academicYearId !== undefined || data.termId !== undefined) {
+      const existing = await FeeStructures.findOne({ id: req.params.id, schoolId }).lean();
+      if (!existing) return E.notFound(res, 'Fee structure not found');
+      const period = await _resolveAcademicPeriod(schoolId, tenantContext(req), {
+        academicYearId: data.academicYearId !== undefined ? data.academicYearId : existing.academicYearId,
+        termId:         data.termId         !== undefined ? data.termId         : existing.termId,
+      });
+      if (period.error) return E.badRequest(res, period.error);
+      data.academicYearId = period.academicYearId;
+      data.termId          = period.termId;
+    }
+
+    const totals = data.lineItems ? _calcInvoiceTotals(data.lineItems) : {};
     const doc = await FeeStructures.findOneAndUpdate(
       { id: req.params.id, schoolId },
       { ...data, ...(totals.total != null ? { total: totals.total } : {}), updatedBy: userId },
@@ -825,8 +899,8 @@ router.post('/fee-structures/:id/generate', authMiddleware, PLAN, rbac('finance'
         title:          fs.name,
         lineItems:      fs.lineItems,
         dueDate:        fs.dueDate,
-        academicYear:   fs.academicYear,
-        term:           fs.term,
+        academicYearId: fs.academicYearId,
+        termId:         fs.termId,
         feeStructureId: fs.id,
         ...totals,
         amountPaid: 0,

@@ -3,11 +3,13 @@
    Default export: CreateInvoiceSlideOver (the slide-over)
    Named export:   CreateInvoiceButton  (header button + portal)
    ============================================================ */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, X, Search, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { finance as financeApi, students as studentsApi } from '@/api/client.js';
+import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
+import AcademicPeriodPicker from './AcademicPeriodPicker.jsx';
 
 /* ── Header button ─────────────────────────────────────────── */
 export function CreateInvoiceButton({ fmtCurrency, currency }) {
@@ -37,12 +39,24 @@ export function CreateInvoiceButton({ fmtCurrency, currency }) {
 
 /* ── Slide-over ────────────────────────────────────────────── */
 export default function CreateInvoiceSlideOver({ fmtCurrency, onClose, onCreated }) {
+  const currentPeriod = useCurrentAcademicPeriod();
+
   const [studentSearch,   setStudentSearch]   = useState('');
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [title,   setTitle]   = useState('School Fee Invoice');
   const [dueDate, setDueDate] = useState('');
+  const [academicYearId, setAcademicYearId] = useState('');
+  const [termId,          setTermId]        = useState('');
   const [items,   setItems]   = useState([{ description: '', quantity: 1, unitPrice: 0 }]);
   const [errors,  setErrors]  = useState({});
+
+  // Prefill from the live-resolved current period — still fully
+  // overridable via the picker (e.g. a retroactive invoice).
+  useEffect(() => {
+    if (!currentPeriod.academicYearId || academicYearId) return;
+    setAcademicYearId(currentPeriod.academicYearId);
+    setTermId(currentPeriod.termId ?? '');
+  }, [currentPeriod.academicYearId, currentPeriod.termId, academicYearId]);
 
   const { data: stuData } = useQuery({
     queryKey: ['students', 'search-fin', studentSearch],
@@ -76,6 +90,8 @@ export default function CreateInvoiceSlideOver({ fmtCurrency, onClose, onCreated
       studentId: selectedStudent.id ?? selectedStudent._id,
       title,
       dueDate: dueDate || undefined,
+      academicYearId: academicYearId || undefined,
+      termId:         termId || undefined,
       lineItems: items,
     });
   }
@@ -161,6 +177,12 @@ export default function CreateInvoiceSlideOver({ fmtCurrency, onClose, onCreated
               />
             </div>
           </div>
+
+          <AcademicPeriodPicker
+            academicYearId={academicYearId}
+            termId={termId}
+            onChange={({ academicYearId: ay, termId: t }) => { setAcademicYearId(ay); setTermId(t); }}
+          />
 
           {/* Line items */}
           <div>

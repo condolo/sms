@@ -12,12 +12,15 @@ import { Pagination } from '@/components/ui/Pagination.jsx';
 import { RowSkeleton, EmptyOrError } from './FinancePrimitives.jsx';
 import { LIMIT, INV_STATUS_BADGE } from '../constants.js';
 import BulkImportSlideOver from '@/components/import/BulkImportSlideOver.jsx';
+import AcademicPeriodPicker from './AcademicPeriodPicker.jsx';
 
 export default function InvoicesTab({ fmtCurrency, page, onPage, canCreate, school }) {
   const qc = useQueryClient();
   const [search,       setSearch]       = useState('');
   const [debSearch,    setDebSearch]    = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [academicYearId, setAcademicYearId] = useState('');
+  const [termId,          setTermId]        = useState('');
   const [showImport,   setShowImport]   = useState(false);
   const timer = useState(null);
 
@@ -75,12 +78,14 @@ ${itemRows ? `<table><thead><tr><th>Description</th><th style="text-align:center
   }
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['finance', 'invoices', { page, search: debSearch, status: statusFilter }],
+    queryKey: ['finance', 'invoices', { page, search: debSearch, status: statusFilter, academicYearId, termId }],
     queryFn:  () => financeApi.invoices.list({
       page,
       limit: LIMIT,
-      ...(debSearch    && { search: debSearch }),
-      ...(statusFilter && { status: statusFilter }),
+      ...(debSearch      && { search: debSearch }),
+      ...(statusFilter   && { status: statusFilter }),
+      ...(academicYearId && { academicYearId }),
+      ...(termId         && { termId }),
     }),
     placeholderData: prev => prev,
   });
@@ -128,6 +133,13 @@ ${itemRows ? `<table><thead><tr><th>Description</th><th style="text-align:center
           <option value="overdue">Overdue</option>
           <option value="void">Void</option>
         </select>
+        <AcademicPeriodPicker
+          academicYearId={academicYearId}
+          termId={termId}
+          onChange={({ academicYearId: ay, termId: t }) => { setAcademicYearId(ay); setTermId(t); onPage(1); }}
+          includeAllOption
+          compact
+        />
         {canCreate && (
           <button
             onClick={() => setShowImport(true)}

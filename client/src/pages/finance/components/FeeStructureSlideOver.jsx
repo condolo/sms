@@ -3,13 +3,14 @@
    Default export: FeeStructureSlideOver    (the slide-over)
    Named export:   CreateFeeStructureButton (header button + portal)
    ============================================================ */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, X, Loader2, CheckCircle2, AlertTriangle, Search } from 'lucide-react';
 import { finance as financeApi, classes as classesApi, students as studentsApi } from '@/api/client.js';
 import { useSections } from '@/hooks/useSections.js';
-import useAuthStore from '@/store/auth.js';
+import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
+import AcademicPeriodPicker from './AcademicPeriodPicker.jsx';
 
 const SCOPE_OPTIONS = [
   { id: 'all',      label: 'All active students' },
@@ -45,14 +46,12 @@ export function CreateFeeStructureButton({ fmtCurrency }) {
 
 /* ── Slide-over ────────────────────────────────────────────── */
 export default function FeeStructureSlideOver({ fmtCurrency, onClose, onCreated }) {
-  const school       = useAuthStore(s => s.session?.school);
-  const schoolYear   = school?.academicYear ?? new Date().getFullYear().toString();
-  const termsPerYear = school?.termsPerYear ?? 3;
+  const currentPeriod = useCurrentAcademicPeriod();
 
   const [name,    setName]    = useState('');
   const [desc,    setDesc]    = useState('');
-  const [year,    setYear]    = useState(schoolYear);
-  const [term,    setTerm]    = useState('');
+  const [academicYearId, setAcademicYearId] = useState('');
+  const [termId,          setTermId]        = useState('');
   const [dueDate, setDueDate] = useState('');
   const [items,   setItems]   = useState([{ description: 'Tuition Fee', quantity: 1, unitPrice: 0, feeType: '' }]);
   const [errors,  setErrors]  = useState({});
@@ -77,6 +76,14 @@ export default function FeeStructureSlideOver({ fmtCurrency, onClose, onCreated 
   const classList = classesData?.data ?? classesData?.classes ?? [];
 
   const { sections } = useSections();
+
+  // Prefill from the live-resolved current period once it loads — still
+  // fully overridable via the picker (e.g. a retroactive fee structure).
+  useEffect(() => {
+    if (!currentPeriod.academicYearId || academicYearId) return;
+    setAcademicYearId(currentPeriod.academicYearId);
+    setTermId(currentPeriod.termId ?? '');
+  }, [currentPeriod.academicYearId, currentPeriod.termId, academicYearId]);
 
   const { data: stuData } = useQuery({
     queryKey: ['students', 'search-feestr', studentSearch],
@@ -117,8 +124,8 @@ export default function FeeStructureSlideOver({ fmtCurrency, onClose, onCreated 
     mutation.mutate({
       name: name.trim(),
       description: desc.trim() || undefined,
-      academicYear: year || undefined,
-      term: term ? Number(term) : undefined,
+      academicYearId: academicYearId || undefined,
+      termId:         termId || undefined,
       dueDate: dueDate || undefined,
       lineItems: items.map(i => ({ ...i, feeType: i.feeType || undefined })),
       scopeType,
@@ -179,28 +186,12 @@ export default function FeeStructureSlideOver({ fmtCurrency, onClose, onCreated 
           </div>
 
           <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1.5">Academic Year</label>
-              <input
-                value={year}
-                onChange={e => setYear(e.target.value)}
-                placeholder="2025"
-                className="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1.5">Term</label>
-              <select
-                value={term}
-                onChange={e => setTerm(e.target.value)}
-                className="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10"
-              >
-                <option value="">All terms</option>
-                {Array.from({ length: termsPerYear }, (_, i) => (
-                  <option key={i + 1} value={i + 1}>Term {i + 1}</option>
-                ))}
-              </select>
-            </div>
+            <AcademicPeriodPicker
+              academicYearId={academicYearId}
+              termId={termId}
+              onChange={({ academicYearId: ay, termId: t }) => { setAcademicYearId(ay); setTermId(t); }}
+              className="col-span-2"
+            />
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1.5">Due Date</label>
               <input
