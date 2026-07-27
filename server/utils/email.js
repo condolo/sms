@@ -818,6 +818,24 @@ async function sendInvoiceOverdueAlert({
   return _sendAsSchool(recipientEmail, `⏰ Overdue Invoice — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
 }
 
+/* 23b. Fee due soon reminder — parent/guardian, before the due date */
+async function sendInvoiceDueSoonAlert({
+  recipientName, recipientEmail, studentName, invoiceNumber, balance, currency, dueDate, daysRemaining,
+  schoolName, schoolEmail, schoolId = null, appUrl,
+}) {
+  const url = appUrl || APP_URL;
+  const html = _wrap(`
+    <h2>📅 Fee Due Soon</h2>
+    <p>Dear ${recipientName || 'Parent/Guardian'},</p>
+    <p>Invoice <strong>${invoiceNumber}</strong> for <strong>${studentName}</strong> at <strong>${schoolName}</strong> is due in <strong>${daysRemaining} day${daysRemaining === 1 ? '' : 's'}</strong> (${dueDate}), with an outstanding balance of <strong>${currency} ${balance}</strong>.</p>
+    <p style="text-align:center">
+      <a href="${url}" class="btn">Pay Now →</a>
+    </p>
+    <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
+  `, schoolName);
+  return _sendAsSchool(recipientEmail, `📅 Fee Due Soon — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+}
+
 /* 24. Daily attendance summary — admin/principal staff */
 async function sendAttendanceSummaryAlert({
   recipientName, recipientEmail, date, total, present, absent, late,
@@ -867,6 +885,7 @@ module.exports = {
   sendExamResultsAlert,
   sendFeeInvoiceCreatedAlert,
   sendFeePaymentReceivedAlert,
+  sendInvoiceDueSoonAlert,
   sendAbsenceAlert,
   sendInvoiceOverdueAlert,
   sendAttendanceSummaryAlert,

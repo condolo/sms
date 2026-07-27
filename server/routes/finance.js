@@ -424,6 +424,64 @@ router.put('/fee-config', authMiddleware, PLAN, rbac('finance', 'update'), async
 });
 
 /* ══════════════════════════════════════════════════════════════
+   INVOICE REMINDER CONFIG — school-configurable schedule for
+   invoice-overdue-cron.js: a reminder N days before the due date,
+   one on the due date itself, then recurring every N days after.
+   Same one-doc-per-school / merged-over-defaults shape as fee_config.
+   ══════════════════════════════════════════════════════════════ */
+const DEFAULT_INVOICE_REMINDER_CONFIG = {
+  enabled:              true,
+  beforeDueDays:        3,     // 0 disables the pre-due reminder
+  onDueDate:            true,
+  afterDueIntervalDays: 4,     // 0 disables recurring post-due reminders
+};
+const InvoiceReminderConfigSchema = z.object({
+  enabled:              z.boolean().optional(),
+  beforeDueDays:        z.number().int().min(0).max(30).optional(),
+  onDueDate:            z.boolean().optional(),
+  afterDueIntervalDays: z.number().int().min(0).max(30).optional(),
+});
+function _mergeInvoiceReminderConfig(saved) {
+  return {
+    enabled:              saved?.enabled              ?? DEFAULT_INVOICE_REMINDER_CONFIG.enabled,
+    beforeDueDays:        saved?.beforeDueDays         ?? DEFAULT_INVOICE_REMINDER_CONFIG.beforeDueDays,
+    onDueDate:            saved?.onDueDate             ?? DEFAULT_INVOICE_REMINDER_CONFIG.onDueDate,
+    afterDueIntervalDays: saved?.afterDueIntervalDays  ?? DEFAULT_INVOICE_REMINDER_CONFIG.afterDueIntervalDays,
+  };
+}
+
+/* GET /api/finance/invoice-reminder-config */
+router.get('/invoice-reminder-config', authMiddleware, PLAN, rbac('finance', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const saved = await tenantModel('invoice_reminder_config', tenantContext(req)).findOne({ schoolId }).lean();
+    return ok(res, _mergeInvoiceReminderConfig(saved));
+  } catch (err) {
+    console.error('[finance GET /invoice-reminder-config]', err);
+    return E.serverError(res);
+  }
+});
+
+/* PUT /api/finance/invoice-reminder-config */
+router.put('/invoice-reminder-config', authMiddleware, PLAN, rbac('finance', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { data, error } = _validate(InvoiceReminderConfigSchema, req.body);
+    if (error) return E.validation(res, error);
+
+    const doc = await tenantModel('invoice_reminder_config', tenantContext(req)).findOneAndUpdate(
+      { schoolId },
+      { $set: { ...data, schoolId, updatedBy: userId, updatedAt: new Date().toISOString() } },
+      { new: true, upsert: true, runValidators: false }
+    ).lean();
+    return ok(res, _mergeInvoiceReminderConfig(doc));
+  } catch (err) {
+    console.error('[finance PUT /invoice-reminder-config]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
    FEE STRUCTURES — define standard fees per class/section/students
    ══════════════════════════════════════════════════════════════ */
 const FeeStructureSchema = z.object({

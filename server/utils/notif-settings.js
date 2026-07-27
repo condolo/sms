@@ -93,12 +93,20 @@ const EVENT_REGISTRY = {
     channels:    { email: true, inApp: true },
     implemented: true,
   },
-  invoice_overdue: {
-    label:       'Overdue Invoice Reminder',
-    desc:        'Reminder for unpaid invoices past their due date',
+  invoice_due_soon: {
+    label:       'Fee Due Soon Reminder',
+    desc:        'Reminder sent before a fee invoice\'s due date (schedule set in Finance → Fee Settings)',
     group:       'finance',
     audience:    ['parents'],
-    channels:    { email: true, inApp: false },
+    channels:    { email: true, inApp: true },
+    implemented: true,
+  },
+  invoice_overdue: {
+    label:       'Overdue Invoice Reminder',
+    desc:        'Reminder for unpaid invoices due today or past due (schedule set in Finance → Fee Settings)',
+    group:       'finance',
+    audience:    ['parents'],
+    channels:    { email: true, inApp: true },
     implemented: true,
   },
 

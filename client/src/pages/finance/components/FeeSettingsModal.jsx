@@ -8,7 +8,7 @@
    ============================================================ */
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, Plus, Trash2, Save, Loader2, Percent, CheckCircle2 } from 'lucide-react';
+import { X, Plus, Trash2, Save, Loader2, Percent, CheckCircle2, Bell } from 'lucide-react';
 import { finance as financeApi } from '@/api/client.js';
 import { useToast } from '@/hooks/useToast.jsx';
 
@@ -229,6 +229,95 @@ function DiscountPoliciesSection() {
   );
 }
 
+/* ── Overdue-invoice reminder schedule ─────────────────────────
+   Drives invoice-overdue-cron.js: a reminder N days before the due
+   date, one on the due date, then every N days after. Channel
+   on/off (email/in-app) lives in the generic Notification Settings
+   page (invoice_due_soon / invoice_overdue events) — this section is
+   only the WHEN, not the WHERE. */
+function ReminderScheduleSection() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const { data, isLoading } = useQuery({
+    queryKey: ['finance', 'invoice-reminder-config'],
+    queryFn:  () => financeApi.invoiceReminderConfig.get(),
+  });
+  const cfg = data?.data;
+
+  const [form, setForm] = useState(null);
+  useEffect(() => {
+    if (!cfg || form !== null) return;
+    setForm({ ...cfg });
+  }, [cfg, form]);
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
+  const { mutate: save, isPending: saving } = useMutation({
+    mutationFn: () => financeApi.invoiceReminderConfig.save(form),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['finance', 'invoice-reminder-config'] });
+      setForm({ ...(res?.data ?? form) });
+      toast.success('Reminder schedule saved.');
+    },
+    onError: err => toast.error(err?.message ?? 'Failed to save reminder schedule.'),
+  });
+
+  const fCls = 'w-16 rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-right focus:outline-none focus:ring-2 focus:ring-violet-400/40';
+
+  if (isLoading || !form) {
+    return (
+      <div className="flex items-center gap-2 text-slate-400 text-xs py-3"><Loader2 size={13} className="animate-spin" /> Loading…</div>
+    );
+  }
+
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Bell size={14} /> Overdue Invoice Reminders</h4>
+      <p className="text-xs text-slate-500 mt-0.5 mb-2.5">
+        Guardians are reminded on this schedule — a reminder before the due date, one on the due date, then
+        recurring after. Whether reminders send by email and/or in-app is set per event in Notification Settings.
+      </p>
+
+      <label className="flex items-center gap-2.5 rounded-lg border border-slate-200 p-3 cursor-pointer hover:bg-slate-50 mb-2.5">
+        <input type="checkbox" checked={form.enabled} onChange={e => set('enabled', e.target.checked)}
+          className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-400" />
+        <span className="text-sm font-medium text-slate-800">Send overdue-invoice reminders</span>
+      </label>
+
+      {form.enabled && (
+        <div className="space-y-2.5 pl-1">
+          <div className="flex items-center gap-2 text-sm text-slate-700">
+            <span>Remind</span>
+            <input type="number" min="0" max="30" value={form.beforeDueDays}
+              onChange={e => set('beforeDueDays', Number(e.target.value))} className={fCls} />
+            <span>day{form.beforeDueDays === 1 ? '' : 's'} before the due date (0 to disable)</span>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" checked={form.onDueDate} onChange={e => set('onDueDate', e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-400" />
+            Remind on the due date
+          </label>
+
+          <div className="flex items-center gap-2 text-sm text-slate-700">
+            <span>Then repeat every</span>
+            <input type="number" min="0" max="30" value={form.afterDueIntervalDays}
+              onChange={e => set('afterDueIntervalDays', Number(e.target.value))} className={fCls} />
+            <span>day{form.afterDueIntervalDays === 1 ? '' : 's'} while still unpaid (0 to disable)</span>
+          </div>
+        </div>
+      )}
+
+      <div className="flex justify-end mt-3">
+        <button onClick={() => save()} disabled={saving}
+          className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50">
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+          {saving ? 'Saving…' : 'Save Reminder Schedule'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function FeeSettingsModal({ onClose }) {
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -285,6 +374,10 @@ export default function FeeSettingsModal({ onClose }) {
             <div className="pt-1 border-t border-slate-100" />
 
             <DiscountPoliciesSection />
+
+            <div className="pt-1 border-t border-slate-100" />
+
+            <ReminderScheduleSection />
           </div>
         )}
       </div>

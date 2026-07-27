@@ -233,6 +233,10 @@ export const finance = {
     get:  ()     => _get('/finance/fee-config'),
     save: (data) => _put('/finance/fee-config', data),
   },
+  invoiceReminderConfig: {
+    get:  ()     => _get('/finance/invoice-reminder-config'),
+    save: (data) => _put('/finance/invoice-reminder-config', data),
+  },
   discountPolicies: {
     list:   ()          => _get('/finance/discount-policies'),
     create: (data)       => _post('/finance/discount-policies', data),
