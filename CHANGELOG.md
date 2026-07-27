@@ -6,6 +6,60 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.26.0] — 2026-07-27 — feat(hr): Payroll Settings UI (Payroll Phase 1, Step 4 completion)
+
+`GET/PUT /api/hr/payroll-config` and `GET/PUT /api/hr/payroll/workflow-config`
+(the allowance/deduction type catalogue, `defaultApplyStatutory` policy, and
+payroll approval chain) have been fully built server-side since v5.6.0/v5.7.0
+— but `client/src/api/client.js`'s `hr.payroll` object never exposed them,
+so nothing in the app could reach them. This closes that gap with a real
+"Payroll Settings" screen, per `docs/audits/HR_PAYROLL_ARCHITECTURAL_REVIEW.md`
+§4's explicit recommendation: **inside** the existing Payroll tab in
+`HRPage.jsx`, not a new top-level nav item, same page as the leave-chain
+builder pattern it mirrors.
+
+### Added
+- `client/src/api/client.js` — `hr.payroll.config.{get,save}` and
+  `hr.payroll.workflowConfig.{get,save}`.
+- `client/src/pages/hr/PayrollSettingsModal.jsx` (new) — Allowance Types and
+  Deduction Types catalogue editors, a Statutory Deductions section, and a
+  Payroll Approval Chain builder (mirrors the Report Cards Settings panel's
+  `WorkflowSection` pattern — 1+ steps, no fixed trailing step, unlike
+  Leave's 2-step-minimum-plus-fixed-HR-step rule). Opened via a new
+  "Payroll Settings" button in the Payroll tab's toolbar.
+- `server/routes/hr.js` — `GET /payroll-config` now also returns a read-only
+  `statutory` block (`_resolveStatutoryInfo()`): the actual PAYE/NSSF/SHIF/
+  Housing-Levy rates in effect for the school's real country, resolved live
+  from `statutory/kenya.js` via `getStatutoryCalculator()`. **Deliberately
+  not editable** — per the architectural review §3/§9, those rates are
+  platform/country-level law, never a per-school setting; `PayrollConfigSchema`
+  has no `statutory` field, so nothing sent through `PUT` can touch them. A
+  school in an unregistered country gets `{supported:false, supportedCountries}`
+  instead of a crash or fabricated numbers.
+
+### Fixed (dependency-awareness — found while building the catalogue editor)
+- `PUT /api/hr/payroll-config` now blocks removing an allowance/deduction
+  type still itemized on an existing `payroll` record (`allowanceItems[].type`/
+  `deductionItems[].type`) — previously a school could delete a type out from
+  under records that reference it with zero warning. Renaming a type's label
+  is unaffected (the client keeps `key` immutable once created — auto-derived
+  from the label only at creation — so a rename can never accidentally
+  re-point an existing itemized entry at a different meaning).
+
+### Tests
+- 7 new tests in `server/__tests__/routes/hr-payroll.test.js`: live statutory
+  info for a supported/unsupported/unset country, proof that `PUT` cannot
+  smuggle a rate override through, and the removal guard (blocks in-use
+  allowance/deduction keys, allows unused ones, allows label-only renames).
+  Mutation-tested the removal guard (disabled it, confirmed both new guard
+  tests fail as expected, restored).
+
+Full suite 97/97 suites, 960/960 tests; tenant ratchet held at 36/36. Client
+production build clean. No live MongoDB in this sandbox, so the authenticated
+click-through (Payroll tab → Payroll Settings) could not be exercised
+end-to-end in-browser — verified via the clean build plus full server-side
+route coverage, same limitation noted in v5.9.0.
+
 ## [v5.25.2] — 2026-07-27 — fix(exams): validate subjectId/classId exist before creating an exam
 
 Part of the same end-to-end flow verification as v5.25.1. `POST/PUT /api/exams`

@@ -22,6 +22,7 @@ const AuditService = require('../services/audit');
 const { dispatchNotification } = require('../utils/notify-dispatch');
 const email = require('../utils/email');
 const { computePayrollForPeriod } = require('../utils/payroll-engine');
+const { getStatutoryCalculator, supportedCountries } = require('../utils/statutory');
 const { _buildPayslipPDF } = require('../utils/payslip-engine');
 const {
   getWorkflowConfig, saveWorkflowConfig, resolveStep, resolveAssigneeLabel,
@@ -542,12 +543,34 @@ router.put('/payroll/workflow-config', rbac('hr', 'manage_workflow'), async (req
   }
 });
 
+/* Read-only view of the statutory calculator actually in effect for this
+   school's country — per docs/audits/HR_PAYROLL_ARCHITECTURAL_REVIEW.md
+   §3/§9, PAYE/NSSF/SHIF/Housing-Levy rates are platform/country-level
+   truth, never a per-school setting, so this is deliberately NOT part of
+   PayrollConfigSchema/PUT below — nothing here is ever saved by a school.
+   It exists so Payroll Settings can show admins what's actually being
+   applied (live from statutory/kenya.js, the single file real rate
+   corrections touch) instead of leaving "statutory deductions" as an
+   opaque on/off toggle with no visibility into the numbers behind it. */
+async function _resolveStatutoryInfo(schoolId) {
+  const school  = await _model('schools').findOne({ id: schoolId }).select('country').lean();
+  const country = school?.country || null;
+  const calculator = country ? getStatutoryCalculator(country) : null;
+  if (!calculator) {
+    return { supported: false, country, supportedCountries: supportedCountries() };
+  }
+  return { supported: true, country, ...calculator.RATES };
+}
+
 /* GET /api/hr/payroll-config — fetch this school's payroll policy (with defaults) */
 router.get('/payroll-config', rbac('hr', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const saved = await tenantModel('payroll_config', tenantContext(req)).findOne({ schoolId }).lean();
-    return ok(res, _mergePayrollConfig(saved));
+    const [saved, statutory] = await Promise.all([
+      tenantModel('payroll_config', tenantContext(req)).findOne({ schoolId }).lean(),
+      _resolveStatutoryInfo(schoolId),
+    ]);
+    return ok(res, { ..._mergePayrollConfig(saved), statutory });
   } catch (err) {
     console.error('[hr/payroll-config GET]', err);
     return E.serverError(res);
@@ -569,6 +592,34 @@ router.put('/payroll-config', rbac('hr', 'update'), async (req, res) => {
       const keys = items.map(i => i.key);
       if (new Set(keys).size !== keys.length) {
         return E.badRequest(res, `${field} contains duplicate keys`);
+      }
+    }
+
+    // Dependency check: a key being REMOVED from a catalogue (present in
+    // the currently-saved config, absent from this save) must not be
+    // silently orphaned if a real payroll record still itemizes against
+    // it — the record's allowanceItems/deductionItems array is the one
+    // place a catalogue key is actually consumed. Renames are safe (key
+    // is immutable client-side — see PayrollSettingsModal.jsx — this
+    // guard is the server-side backstop for any other caller).
+    const existingConfig = await tenantModel('payroll_config', tenantContext(req)).findOne({ schoolId }).lean();
+    const Payroll = tenantModel('payroll', tenantContext(req));
+    for (const [field, itemField, items] of [
+      ['allowanceTypes', 'allowanceItems', data.allowanceTypes],
+      ['deductionTypes', 'deductionItems', data.deductionTypes],
+    ]) {
+      if (!items) continue;
+      const oldKeys = new Set((existingConfig?.[field] ?? _mergePayrollConfig(null)[field]).map(t => t.key));
+      const newKeys = new Set(items.map(t => t.key));
+      const removedKeys = [...oldKeys].filter(k => !newKeys.has(k));
+      if (!removedKeys.length) continue;
+
+      const inUseCount = await Payroll.countDocuments({ schoolId, [`${itemField}.type`]: { $in: removedKeys } });
+      if (inUseCount > 0) {
+        return E.badRequest(res,
+          `Cannot remove ${field === 'allowanceTypes' ? 'allowance' : 'deduction'} type(s) [${removedKeys.join(', ')}] — ` +
+          `${inUseCount} existing payroll record(s) still itemize against them. Remove or edit those records first.`
+        );
       }
     }
 

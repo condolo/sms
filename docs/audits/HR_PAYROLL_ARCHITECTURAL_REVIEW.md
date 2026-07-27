@@ -297,6 +297,11 @@ setting surface, and none of them is "inside a generic HR Settings screen":**
    academic-config.js's exact pattern. Recommend surfacing this as a "Payroll Settings"
    tab **inside** the existing `HRPage.jsx`, alongside the leave-chain builder that
    already lives there — same page, same permission key, not a new top-level nav item.
+   **Built (v5.26.0):** `PayrollSettingsModal.jsx`, opened via a "Payroll Settings"
+   button in the Payroll tab toolbar, exactly per this recommendation — including a
+   read-only view of the platform/country statutory rates (item 2 below) so "statutory
+   deductions" is visible, not just an opaque toggle, without ever becoming per-school
+   editable.
 2. A platform-level statutory-bands collection, editable only by platform admins,
    **not** exposed as a school-facing settings page at all (same posture as plan
    pricing).

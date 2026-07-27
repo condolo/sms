@@ -534,6 +534,14 @@ export const hr = {
       list: (params)  => _get('/hr/payroll-history', params),
       pdf:  (id, filename) => _downloadPdf(`/hr/payroll-history/${id}/pdf`, filename ?? `payslip-history-${id}.pdf`),
     },
+    config: {
+      get:  ()      => _get('/hr/payroll-config'),
+      save: (data)  => _put('/hr/payroll-config', data),
+    },
+    workflowConfig: {
+      get:  ()      => _get('/hr/payroll/workflow-config'),
+      save: (data)  => _put('/hr/payroll/workflow-config', data),
+    },
   },
   documents: {
     list:   (params)   => _get('/hr/documents', params),

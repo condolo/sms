@@ -9,12 +9,13 @@ import {
   Users, UserCheck, Clock, Wallet, Plus, Check, X,
   AlertCircle, Calendar, FolderOpen, Trash2, Edit2, Save,
   Download, Upload, ExternalLink, Loader2, Copy, Search, ChevronRight,
-  ShieldCheck, CreditCard, UserPlus, KeyRound, ShieldAlert, UserMinus,
+  ShieldCheck, CreditCard, UserPlus, KeyRound, ShieldAlert, UserMinus, Settings,
 } from 'lucide-react';
 import { hr as hrApi, teachers as teachersApi, departments as deptsApi, subjects as subjectsApi, settings as settingsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import StaffFormModal   from './StaffFormModal.jsx';
 import StaffDetailPanel from './StaffDetailPanel.jsx';
+import PayrollSettingsModal from './PayrollSettingsModal.jsx';
 import BulkImportSlideOver from '@/components/import/BulkImportSlideOver.jsx';
 import { useToast } from '@/hooks/useToast.jsx';
 
@@ -543,6 +544,7 @@ export default function HRPage() {
   const [bulkInviteResult, setBulkInviteResult] = useState(null); // { created, skipped, errors }
   const [bulkInviting, setBulkInviting]         = useState(false);
   const [showWorkflowConfig, setShowWorkflowConfig] = useState(false);
+  const [showPayrollSettings, setShowPayrollSettings] = useState(false);
   const [rejectPrompt, setRejectPrompt] = useState(null); // null | { id, kind: 'advance'|'resolve' }
 
   /* ── Queries ── */
@@ -1308,8 +1310,12 @@ export default function HRPage() {
               )}
             </div>
 
-            {/* Right: add + export */}
+            {/* Right: settings + add + export */}
             <div className="flex items-center gap-2">
+              <button onClick={() => setShowPayrollSettings(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition">
+                <Settings size={13} /> Payroll Settings
+              </button>
               <button onClick={() => setPayrollModal({ mode:'add', record: null })}
                 className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-violet-700 transition">
                 <Plus size={13} /> Add Entry
@@ -1637,6 +1643,14 @@ export default function HRPage() {
           onClose={() => setPayrollModal(null)}
           onSave={data => savePayroll.mutate(data)}
           saving={savePayroll.isPending}
+        />
+      )}
+
+      {showPayrollSettings && (
+        <PayrollSettingsModal
+          teachers={teachers}
+          customRoles={customRolesList}
+          onClose={() => setShowPayrollSettings(false)}
         />
       )}
 

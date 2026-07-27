@@ -27,11 +27,23 @@ function _sortDocs(docs, spec) {
 
 function makeStore(seed = []) {
   const docs = seed.map(d => ({ ...d }));
+  function fieldValue(doc, dottedKey) {
+    // Supports one level of array-of-subdocuments dot-notation, e.g.
+    // 'allowanceItems.type' — mirrors real Mongo's array-element match
+    // semantics (matches if ANY element has that field equal/in-set).
+    const [head, ...rest] = dottedKey.split('.');
+    const base = doc[head];
+    if (!rest.length) return [base];
+    if (Array.isArray(base)) return base.map(item => item?.[rest.join('.')]);
+    return [base?.[rest.join('.')]];
+  }
   function matches(doc, filter) {
     return Object.entries(filter).every(([k, v]) => {
       if (k === '$or') return v.some(sub => matches(doc, sub));
-      if (v && typeof v === 'object' && '$ne' in v) return doc[k] !== v.$ne;
-      return doc[k] === v;
+      const values = fieldValue(doc, k);
+      if (v && typeof v === 'object' && '$ne' in v) return values.every(x => x !== v.$ne);
+      if (v && typeof v === 'object' && '$in' in v) return values.some(x => v.$in.includes(x));
+      return values.includes(v);
     });
   }
   return {
@@ -344,6 +356,101 @@ describe('GET/PUT /api/hr/payroll-config — school policy (Payroll Phase 1, Ste
     });
     expect(res.body.data.statutoryDeductions).toBeNull();
     expect(res.body.data.applyStatutory).toBe(false);
+  });
+});
+
+describe('GET /api/hr/payroll-config — read-only statutory info (Payroll Settings)', () => {
+  test('a Kenyan school (country: KE) gets the live Kenyan rate table, never editable via this route', async () => {
+    mockStores.schools = makeStore([{ id: SCHOOL, name: 'Test School', currency: 'KES', country: 'KE' }]);
+    const app = buildApp();
+    const res = await supertest(app).get('/api/hr/payroll-config');
+    expect(res.status).toBe(200);
+    expect(res.body.data.statutory.supported).toBe(true);
+    expect(res.body.data.statutory.country).toBe('KE');
+    expect(res.body.data.statutory.nssf.employeeRate).toBe(0.06);
+    expect(res.body.data.statutory.shif.rate).toBe(0.0275);
+    expect(res.body.data.statutory.paye.bands.length).toBeGreaterThan(0);
+
+    // Attempting to smuggle a rate override through PUT must have no
+    // effect — PayrollConfigSchema doesn't even have a `statutory` field,
+    // so it's silently dropped, not saved or reflected back.
+    await supertest(app).put('/api/hr/payroll-config').send({ statutory: { nssf: { employeeRate: 0.99 } } });
+    const after = await supertest(app).get('/api/hr/payroll-config');
+    expect(after.body.data.statutory.nssf.employeeRate).toBe(0.06);
+  });
+
+  test('a school in an unregistered country gets supported:false, not a crash or fabricated rates', async () => {
+    mockStores.schools = makeStore([{ id: SCHOOL, name: 'Test School', currency: 'USD', country: 'ZZ' }]);
+    const app = buildApp();
+    const res = await supertest(app).get('/api/hr/payroll-config');
+    expect(res.status).toBe(200);
+    expect(res.body.data.statutory.supported).toBe(false);
+    expect(res.body.data.statutory.country).toBe('ZZ');
+    expect(res.body.data.statutory.supportedCountries).toContain('KE');
+  });
+
+  test('a school with no country set at all still responds cleanly', async () => {
+    mockStores.schools = makeStore([{ id: SCHOOL, name: 'Test School', currency: 'KES' }]);
+    const app = buildApp();
+    const res = await supertest(app).get('/api/hr/payroll-config');
+    expect(res.status).toBe(200);
+    expect(res.body.data.statutory.supported).toBe(false);
+    expect(res.body.data.statutory.country).toBeNull();
+  });
+});
+
+describe('PUT /api/hr/payroll-config — removing a type in use by existing payroll records', () => {
+  test('blocks removing an allowance type still itemized on a payroll record', async () => {
+    const app = buildApp();
+    // housing is a DEFAULT_ALLOWANCE_TYPES key — no prior PUT needed for it to be "in the saved catalogue"
+    await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 50000,
+      allowanceItems: [{ type: 'housing', amount: 10000 }],
+    });
+    const res = await supertest(app).put('/api/hr/payroll-config').send({
+      allowanceTypes: [{ key: 'transport', label: 'Transport Allowance' }],  // drops 'housing'
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error?.message ?? res.body.error).toMatch(/housing/);
+
+    // Config must be unchanged — the rejected save never applied
+    const getRes = await supertest(app).get('/api/hr/payroll-config');
+    expect(getRes.body.data.allowanceTypes.map(t => t.key)).toContain('housing');
+  });
+
+  test('blocks removing a deduction type still itemized on a payroll record', async () => {
+    const app = buildApp();
+    await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 50000,
+      deductionItems: [{ type: 'loan', amount: 2000 }],
+    });
+    const res = await supertest(app).put('/api/hr/payroll-config').send({
+      deductionTypes: [{ key: 'advance', label: 'Salary Advance' }],  // drops 'loan'
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error?.message ?? res.body.error).toMatch(/loan/);
+  });
+
+  test('allows removing a type with zero existing references', async () => {
+    const app = buildApp();
+    const res = await supertest(app).put('/api/hr/payroll-config').send({
+      allowanceTypes: [{ key: 'transport', label: 'Transport Allowance' }],  // drops 'housing', never used
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.allowanceTypes).toEqual([{ key: 'transport', label: 'Transport Allowance' }]);
+  });
+
+  test('renaming a type\'s label while keeping its key is unaffected by the guard', async () => {
+    const app = buildApp();
+    await supertest(app).post('/api/hr/payroll').send({
+      staffId: 'u_staff_1', payPeriod: '2026-07', basicSalary: 50000,
+      allowanceItems: [{ type: 'housing', amount: 10000 }],
+    });
+    const res = await supertest(app).put('/api/hr/payroll-config').send({
+      allowanceTypes: [{ key: 'housing', label: 'House Allowance (Renamed)' }],
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.allowanceTypes).toEqual([{ key: 'housing', label: 'House Allowance (Renamed)' }]);
   });
 });
 
