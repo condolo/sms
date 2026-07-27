@@ -29,12 +29,40 @@ router.use(authMiddleware, PLAN);
 /* ── Roles allowed to manage the library ───────────────────── */
 const MANAGE_ROLES = new Set(['superadmin', 'admin', 'librarian']);
 
+/* ── Library config — school-configurable category catalogue ──
+   Same one-doc-per-school / merged-over-defaults shape as
+   finance.js's fee_config. `category` on a book stays a free string
+   (a book predates this catalogue existing, and importing/legacy
+   data shouldn't be blocked by it) — this is the picker source for
+   the UI, not a hard FK constraint. */
+const DEFAULT_LIBRARY_CATEGORIES = [
+  { key: 'general',    label: 'General' },
+  { key: 'textbook',   label: 'Textbook' },
+  { key: 'fiction',    label: 'Fiction' },
+  { key: 'reference',  label: 'Reference' },
+  { key: 'periodical', label: 'Periodical / Magazine' },
+];
+const LibraryCategorySchema = z.object({
+  key:   z.string().min(1).max(50).regex(/^[a-z][a-z0-9_]*$/, 'key must be lowercase, start with a letter'),
+  label: z.string().min(1).max(100),
+});
+const LibraryConfigSchema = z.object({
+  categories: z.array(LibraryCategorySchema).max(40).optional(),
+});
+function _mergeLibraryConfig(saved) {
+  return { categories: saved?.categories ?? DEFAULT_LIBRARY_CATEGORIES };
+}
+
 /* ── Validation schemas ──────────────────────────────────────── */
 const BookSchema = z.object({
   title:        z.string().min(1).max(300).trim(),
   author:       z.string().max(200).trim().optional().default(''),
   isbn:         z.string().max(30).trim().optional().default(''),
   category:     z.string().max(100).trim().optional().default('General'),
+  // Which class(es) a book is associated with — a cataloguing/record-
+  // keeping tag only (e.g. "Science Textbook Year 7"), never a
+  // restriction on who may borrow it. See GET /books' classId filter.
+  classIds:     z.array(z.string()).max(50).optional().default([]),
   publisher:    z.string().max(200).trim().optional().default(''),
   publishYear:  z.coerce.number().int().min(1000).max(new Date().getFullYear() + 1).optional().nullable(),
   copies:       z.coerce.number().int().min(1).default(1),
@@ -59,6 +87,48 @@ function _validate(schema, data) {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   CONFIG — book category catalogue
+   ══════════════════════════════════════════════════════════════ */
+
+/* GET /api/library/config */
+router.get('/config', async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const saved = await tenantModel('library_config', tenantContext(req)).findOne({ schoolId }).lean();
+    return ok(res, _mergeLibraryConfig(saved));
+  } catch (err) {
+    console.error('[library GET /config]', err);
+    return E.serverError(res);
+  }
+});
+
+/* PUT /api/library/config */
+router.put('/config', async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Library staff or Admin access required');
+
+    const { data, error } = _validate(LibraryConfigSchema, req.body);
+    if (error) return E.validation(res, error);
+
+    if (data.categories) {
+      const keys = data.categories.map(c => c.key);
+      if (new Set(keys).size !== keys.length) return E.badRequest(res, 'categories contains duplicate keys');
+    }
+
+    const doc = await tenantModel('library_config', tenantContext(req)).findOneAndUpdate(
+      { schoolId },
+      { $set: { ...data, schoolId, updatedBy: userId, updatedAt: new Date().toISOString() } },
+      { new: true, upsert: true, runValidators: false }
+    ).lean();
+    return ok(res, _mergeLibraryConfig(doc));
+  } catch (err) {
+    console.error('[library PUT /config]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
    BOOKS — catalogue
    ══════════════════════════════════════════════════════════════ */
 
@@ -67,10 +137,11 @@ router.get('/books', async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
-    const { q, category } = req.query;
+    const { q, category, classId } = req.query;
 
     const filter = { schoolId };
     if (category) filter.category = category;
+    if (classId)  filter.classIds = classId;
     if (q) {
       const re = new RegExp(q.trim(), 'i');
       filter.$or = [{ title: re }, { author: re }, { isbn: re }];

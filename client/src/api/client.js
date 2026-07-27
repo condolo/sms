@@ -707,6 +707,10 @@ export const bellSchedule = {
 
 export const library = {
   summary: () => _get('/library/summary'),
+  config: {
+    get:  ()     => _get('/library/config'),
+    save: (data) => _put('/library/config', data),
+  },
   books: {
     list:   (params)     => _get('/library/books', params),
     get:    (id)         => _get(`/library/books/${id}`),
