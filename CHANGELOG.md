@@ -6,6 +6,45 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.30.0] — 2026-07-27 — feat(library): configurable categories, live search, lost-book flow, portal visibility
+
+Issue Book was two "paste an ID" text boxes with no validation, categories
+were free text, there was no way to record a book lost, and nothing surfaced
+a borrower's loans anywhere outside the librarian's own view.
+
+### Added
+- `library_config` — school-configurable book category catalogue (same
+  singleton pattern as `fee_config`). `GET/PUT /api/library/config`.
+- `BookSchema.classIds` — tags a book to class(es) for cataloguing/filtering
+  only (e.g. "Science Textbook Year 7"); explicitly **not** a borrowing
+  restriction. `GET /books?classId=` filters by it.
+- Issue Book: live search for both the book (title/author/ISBN, filtered to
+  available copies) and the borrower (student or staff, by name via the
+  existing Students/Teachers modules). Selecting a student auto-fills class
+  and admission number from their record. Selecting a staff member prefers
+  their linked login id so their own loans are correctly attributed.
+- `_checkBorrowerFK()` — validates a loan's borrower actually exists
+  (student or staff) before issuing, mirroring exams.js's FK-validation
+  style. `LoanSchema` gains `borrowerAdmissionNo`.
+- `PATCH /api/library/loans/:id/lost` — marks a currently-out loan lost.
+  Unlike a return, `available` is never restored and `copies` is
+  decremented, reflecting a permanent inventory loss. Client "Mark Lost"
+  action alongside Return.
+- Student portal, parent portal (per child), and the Library module's own
+  Loans tab (relabelled "My Loans" for non-manage-role staff) now surface
+  a borrower's active/overdue/lost loans with a due-date countdown.
+
+### Fixed
+- `PATCH /loans/:id/return` required `status === 'active'` exactly, so a
+  loan flipped to `'overdue'` by `/sync-overdue` could never be returned
+  again (rejected with a wrong "already returned" message). Now accepts
+  active or overdue.
+- The Library module's KPI summary query fired unconditionally even though
+  `GET /summary` is librarian/admin-only server-side — a regular staff
+  member visiting the module got a silent 403 and a blank KPI row.
+
+---
+
 ## [v5.29.0] — 2026-07-27 — fix(finance): real invoice search, real academic-year/term linkage
 
 Two gaps found while verifying the Finance module end-to-end: Record Payment's
