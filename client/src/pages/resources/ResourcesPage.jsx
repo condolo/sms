@@ -4,10 +4,10 @@
    visibility (whole school, specific roles, a specific class,
    individual people, or a custom group).
    ============================================================ */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { Link2, Plus, ExternalLink, Trash2, Edit2, X, Save, Clock, Users2 } from 'lucide-react';
+import { Link2, Plus, ExternalLink, Trash2, Edit2, X, Save, Clock, Users2, Settings, Loader2 } from 'lucide-react';
 import { resources as resourcesApi, classes as classesApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { useToast } from '@/hooks/useToast.jsx';
@@ -42,6 +42,12 @@ function ResourceForm({ classes, record, onClose, onSave, saving }) {
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
   function toggleRole(r) { setForm(f => ({ ...f, roles: f.roles.includes(r) ? f.roles.filter(x => x !== r) : [...f.roles, r] })); }
   function toggleClass(id) { setForm(f => ({ ...f, classIds: f.classIds.includes(id) ? f.classIds.filter(x => x !== id) : [...f.classIds, id] })); }
+
+  const { data: cfgData } = useQuery({
+    queryKey: ['resources', 'config'],
+    queryFn:  () => resourcesApi.config.get(),
+  });
+  const categoryOptions = cfgData?.data?.categories ?? [];
 
   const fCls = 'w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40';
 
@@ -82,7 +88,10 @@ function ResourceForm({ classes, record, onClose, onSave, saving }) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">Category</label>
-              <input value={form.category} onChange={e => set('category', e.target.value)} placeholder="e.g. Forms" className={fCls} />
+              <select value={form.category} onChange={e => set('category', e.target.value)} className={fCls}>
+                <option value="">No category</option>
+                {categoryOptions.map(c => <option key={c.key} value={c.label}>{c.label}</option>)}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">Expires (optional)</label>
@@ -145,17 +154,118 @@ function ResourceForm({ classes, record, onClose, onSave, saving }) {
   );
 }
 
+/* ── Category catalogue settings modal ─────────────────────────
+   `key` is immutable once a row exists — a resource's `category`
+   field stores the label as free text (no hard FK), so renaming a
+   label here doesn't retroactively relabel existing resources. */
+function slugifyKey(label) {
+  const base = label.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return (/^[a-z]/.test(base) ? base : `c_${base}`) || 'category';
+}
+function uniqueKey(label, existingKeys) {
+  const base = slugifyKey(label);
+  if (!existingKeys.has(base)) return base;
+  let n = 2;
+  while (existingKeys.has(`${base}_${n}`)) n++;
+  return `${base}_${n}`;
+}
+
+function CategorySettingsModal({ onClose }) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const { data: cfgData, isLoading } = useQuery({
+    queryKey: ['resources', 'config'],
+    queryFn:  () => resourcesApi.config.get(),
+  });
+  const [categories, setCategories] = useState(null);
+  useEffect(() => {
+    if (!cfgData?.data || categories !== null) return;
+    setCategories(cfgData.data.categories.map(c => ({ ...c })));
+  }, [cfgData, categories]);
+
+  const { mutate: save, isPending: saving } = useMutation({
+    mutationFn: () => resourcesApi.config.save({ categories }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['resources', 'config'] });
+      setCategories(res?.data?.categories?.map(c => ({ ...c })) ?? categories);
+      toast.success('Categories saved.');
+    },
+    onError: err => toast.error(err?.message ?? 'Failed to save categories.'),
+  });
+
+  function updateLabel(i, label) { setCategories(cs => cs.map((c, idx) => idx === i ? { ...c, label } : c)); }
+  function removeCategory(i) { setCategories(cs => cs.filter((_, idx) => idx !== i)); }
+  function addCategory() {
+    const existingKeys = new Set(categories.map(c => c.key));
+    setCategories(cs => [...cs, { key: uniqueKey('New Category', existingKeys), label: 'New Category' }]);
+  }
+
+  const fCls = 'flex-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-100">
+          <div>
+            <h2 className="font-bold text-slate-900">Resource Categories</h2>
+            <p className="text-xs text-slate-500 mt-0.5">Picker options shown when sharing a resource.</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-1"><X size={16} /></button>
+        </div>
+
+        {isLoading || !categories ? (
+          <div className="flex items-center justify-center gap-2 text-slate-400 text-sm py-12">
+            <Loader2 size={16} className="animate-spin" /> Loading…
+          </div>
+        ) : (
+          <div className="p-5 space-y-3">
+            <div className="space-y-1.5">
+              {categories.map((c, i) => (
+                <div key={c.key} className="flex items-center gap-2">
+                  <input value={c.label} onChange={e => updateLabel(i, e.target.value)} className={fCls} />
+                  <span className="shrink-0 rounded-md bg-slate-100 px-2 py-1 text-[10px] font-mono text-slate-400">{c.key}</span>
+                  <button onClick={() => removeCategory(i)} className="shrink-0 text-slate-400 hover:text-red-600 p-1"><Trash2 size={13} /></button>
+                </div>
+              ))}
+            </div>
+            <button onClick={addCategory} className="text-xs font-semibold text-violet-600 hover:underline flex items-center gap-1">
+              <Plus size={12} /> Add category
+            </button>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Close</button>
+              <button onClick={() => save()} disabled={saving}
+                className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50">
+                {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                {saving ? 'Saving…' : 'Save Categories'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ResourcesPage() {
   const qc   = useQueryClient();
   const user = useAuthStore(s => s.session?.user);
   const { toast } = useToast();
   const [showForm, setShowForm] = useState(null); // null | { mode:'add' } | { mode:'edit', record }
+  const [showCategorySettings, setShowCategorySettings] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState('');
 
   const { data: resourcesData, isLoading } = useQuery({
-    queryKey: ['resources'],
-    queryFn:  () => resourcesApi.list({}),
+    queryKey: ['resources', { category: categoryFilter }],
+    queryFn:  () => resourcesApi.list({ category: categoryFilter || undefined }),
   });
   const items = resourcesData?.data ?? [];
+
+  const { data: cfgData } = useQuery({
+    queryKey: ['resources', 'config'],
+    queryFn:  () => resourcesApi.config.get(),
+  });
+  const categoryOptions = cfgData?.data?.categories ?? [];
 
   const { data: classesData } = useQuery({
     queryKey: ['classes'],
@@ -193,11 +303,29 @@ export default function ResourcesPage() {
           <h1 className="text-xl font-bold text-slate-900">Resources</h1>
           <p className="text-slate-500 text-sm mt-0.5">Shared links visible to the whole school or a targeted audience.</p>
         </div>
-        <button onClick={() => setShowForm({ mode: 'add' })}
-          className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700">
-          <Plus size={14} /> Share a Resource
-        </button>
+        <div className="flex items-center gap-2">
+          {FULL_ACCESS_ROLES.has(user?.role) && (
+            <button onClick={() => setShowCategorySettings(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+              <Settings size={14} /> Categories
+            </button>
+          )}
+          <button onClick={() => setShowForm({ mode: 'add' })}
+            className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700">
+            <Plus size={14} /> Share a Resource
+          </button>
+        </div>
       </div>
+
+      {categoryOptions.length > 0 && (
+        <div className="mb-4">
+          <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}
+            className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40 text-slate-600">
+            <option value="">All categories</option>
+            {categoryOptions.map(c => <option key={c.key} value={c.label}>{c.label}</option>)}
+          </select>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="text-center py-16 text-slate-400 text-sm">Loading…</div>
@@ -245,6 +373,10 @@ export default function ResourcesPage() {
           onClose={() => setShowForm(null)}
           onSave={data => saveResource.mutate(data)}
         />
+      )}
+
+      {showCategorySettings && (
+        <CategorySettingsModal onClose={() => setShowCategorySettings(false)} />
       )}
     </div>
   );

@@ -732,6 +732,10 @@ export const resources = {
   create: (data)        => _post('/resources', data),
   update: (id, data)    => _put(`/resources/${id}`, data),
   remove: (id)           => _delete(`/resources/${id}`),
+  config: {
+    get:  ()     => _get('/resources/config'),
+    save: (data) => _put('/resources/config', data),
+  },
   groups: {
     list:   ()           => _get('/resources/groups/list'),
     create: (data)        => _post('/resources/groups', data),

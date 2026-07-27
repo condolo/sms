@@ -61,6 +61,31 @@ function _validate(schema, data) {
   return { data: r.data };
 }
 
+/* ── Config — school-configurable category catalogue ───────────
+   Same one-doc-per-school / merged-over-defaults shape as
+   finance.js's fee_config and library.js's library_config.
+   `category` on a resource stays a free string — a resource
+   predates this catalogue existing, and import/legacy data
+   shouldn't be blocked by it — this is the picker source for the
+   UI, not a hard FK constraint. */
+const DEFAULT_RESOURCE_CATEGORIES = [
+  { key: 'forms',       label: 'Forms' },
+  { key: 'past_papers', label: 'Past Papers' },
+  { key: 'policy',      label: 'Policy Document' },
+  { key: 'guide',       label: 'Guide / How-To' },
+  { key: 'other',       label: 'Other' },
+];
+const ResourceCategorySchema = z.object({
+  key:   z.string().min(1).max(50).regex(/^[a-z][a-z0-9_]*$/, 'key must be lowercase, start with a letter'),
+  label: z.string().min(1).max(100),
+});
+const ResourceConfigSchema = z.object({
+  categories: z.array(ResourceCategorySchema).max(40).optional(),
+});
+function _mergeResourceConfig(saved) {
+  return { categories: saved?.categories ?? DEFAULT_RESOURCE_CATEGORIES };
+}
+
 /* ── Visibility resolution ────────────────────────────────────
    Everyone in FULL_ACCESS_ROLES sees everything. Everyone else's
    reads are filtered by whichever visibility dimension matches them. */
@@ -98,6 +123,40 @@ async function _visibleFilter(req) {
 
   return { schoolId, $and: [{ $or: or }, notExpired] };
 }
+
+/* ══════════════════════════════════════════════════════════════
+   CONFIG — resource category catalogue
+   ══════════════════════════════════════════════════════════════ */
+
+router.get('/config', authMiddleware, PLAN, rbac('resources', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const saved = await tenantModel('resources_config', tenantContext(req)).findOne({ schoolId }).lean();
+    return ok(res, _mergeResourceConfig(saved));
+  } catch (err) { console.error('[resources GET /config]', err); return E.serverError(res); }
+});
+
+router.put('/config', authMiddleware, PLAN, async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    if (!FULL_ACCESS_ROLES.has(role)) return E.forbidden(res, 'Admin access required to manage resource categories');
+
+    const { data, error } = _validate(ResourceConfigSchema, req.body);
+    if (error) return E.validation(res, error);
+
+    if (data.categories) {
+      const keys = data.categories.map(c => c.key);
+      if (new Set(keys).size !== keys.length) return E.badRequest(res, 'categories contains duplicate keys');
+    }
+
+    const doc = await tenantModel('resources_config', tenantContext(req)).findOneAndUpdate(
+      { schoolId },
+      { $set: { ...data, schoolId, updatedBy: userId, updatedAt: new Date().toISOString() } },
+      { new: true, upsert: true, runValidators: false }
+    ).lean();
+    return ok(res, _mergeResourceConfig(doc));
+  } catch (err) { console.error('[resources PUT /config]', err); return E.serverError(res); }
+});
 
 /* ══════════════════════════════════════════════════════════════
    RESOURCES
