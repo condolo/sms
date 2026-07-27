@@ -47,8 +47,14 @@ export default function CreateInvoiceSlideOver({ fmtCurrency, onClose, onCreated
   const [dueDate, setDueDate] = useState('');
   const [academicYearId, setAcademicYearId] = useState('');
   const [termId,          setTermId]        = useState('');
-  const [items,   setItems]   = useState([{ description: '', quantity: 1, unitPrice: 0 }]);
+  const [items,   setItems]   = useState([{ description: '', quantity: 1, unitPrice: 0, feeType: '' }]);
   const [errors,  setErrors]  = useState({});
+
+  const { data: feeCfgData } = useQuery({
+    queryKey: ['finance', 'fee-config'],
+    queryFn:  () => financeApi.feeConfig.get(),
+  });
+  const feeTypeOptions = feeCfgData?.data?.feeTypes ?? [];
 
   // Prefill from the live-resolved current period — still fully
   // overridable via the picker (e.g. a retroactive invoice).
@@ -74,11 +80,19 @@ export default function CreateInvoiceSlideOver({ fmtCurrency, onClose, onCreated
   });
 
   function updateItem(i, field, val) {
-    setItems(prev => prev.map((item, idx) =>
-      idx === i ? { ...item, [field]: field === 'description' ? val : Number(val) } : item
-    ));
+    setItems(prev => prev.map((item, idx) => {
+      if (idx !== i) return item;
+      if (field === 'feeType') {
+        // Picking a fee type is the "pick and add" shortcut — prefills the
+        // description from its label so the item doesn't show up blank,
+        // but never overwrites a description the user already typed.
+        const label = feeTypeOptions.find(t => t.key === val)?.label;
+        return { ...item, feeType: val, description: item.description.trim() ? item.description : (label ?? item.description) };
+      }
+      return { ...item, [field]: field === 'description' ? val : Number(val) };
+    }));
   }
-  function addItem()     { setItems(prev => [...prev, { description: '', quantity: 1, unitPrice: 0 }]); }
+  function addItem()     { setItems(prev => [...prev, { description: '', quantity: 1, unitPrice: 0, feeType: '' }]); }
   function removeItem(i) { setItems(prev => prev.filter((_, idx) => idx !== i)); }
 
   function submit() {
@@ -92,7 +106,7 @@ export default function CreateInvoiceSlideOver({ fmtCurrency, onClose, onCreated
       dueDate: dueDate || undefined,
       academicYearId: academicYearId || undefined,
       termId:         termId || undefined,
-      lineItems: items,
+      lineItems: items.map(i => ({ ...i, feeType: i.feeType || undefined })),
     });
   }
 
@@ -196,6 +210,16 @@ export default function CreateInvoiceSlideOver({ fmtCurrency, onClose, onCreated
             <div className="space-y-2">
               {items.map((item, i) => (
                 <div key={i} className="flex items-center gap-2">
+                  {feeTypeOptions.length > 0 && (
+                    <select
+                      value={item.feeType}
+                      onChange={e => updateItem(i, 'feeType', e.target.value)}
+                      className="w-32 text-sm px-2 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-600"
+                    >
+                      <option value="">Fee type…</option>
+                      {feeTypeOptions.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+                    </select>
+                  )}
                   <input
                     value={item.description}
                     onChange={e => updateItem(i, 'description', e.target.value)}
