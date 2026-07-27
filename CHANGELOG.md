@@ -6,6 +6,34 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.29.0] — 2026-07-27 — fix(finance): real invoice search, real academic-year/term linkage
+
+Two gaps found while verifying the Finance module end-to-end: Record Payment's
+invoice search silently never matched a typed student name or a partially-paid
+invoice, and invoices/fee-structures disagreed on how they stored academic
+year/term — so year/term filtering on the Invoices list never actually worked.
+
+### Fixed
+- `GET /api/finance/invoices?search=` now also matches `studentName` (was
+  `invoiceNumber`/`title` only, despite the UI's "Search invoice or student…"
+  placeholder). `?status=` now accepts a comma-separated list via `$in`, and
+  Record Payment searches `unpaid,partial` instead of `unpaid` only.
+- Invoices stored `academicYearId`/`termId`; fee structures stored
+  `academicYear`/`term` as free text, and `/generate` copied the latter onto
+  created invoices — so `?academicYearId=` never matched a bulk-generated
+  invoice. `FeeStructureSchema` renamed to `academicYearId`/`termId`, and a
+  new `_resolveAcademicPeriod()` (mirrors report-cards.js's
+  `_resolveTermScope`) validates both against the school's real
+  `academic_years` records on every invoice/fee-structure write, defaulting
+  to the live-resolved current period when omitted.
+
+### Added
+- `AcademicPeriodPicker` (dependent year→term selects) replaces
+  FeeStructureSlideOver's free-text year field; added to CreateInvoiceSlideOver
+  (previously had no year/term fields) and as an Invoices-tab filter.
+
+---
+
 ## [v5.28.0] — 2026-07-27 — feat(finance): configurable overdue-invoice reminder schedule
 
 `invoice-overdue-cron.js` re-fired every single day an invoice stayed overdue,
