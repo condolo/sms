@@ -9,8 +9,6 @@ import { KpiCard } from '@/components/ui/KpiCard.jsx';
 import useAuthStore from '@/store/auth.js';
 import { useToast } from '@/hooks/useToast.jsx';
 
-const MANAGE_ROLES = new Set(['superadmin', 'admin', 'transport_officer']);
-
 /* KpiCard — shared themed component (see @/components/ui/KpiCard.jsx) */
 
 function EmptyState({ icon: Icon, message }) {
@@ -247,8 +245,13 @@ function AssignModal({ routes, onClose, onSave }) {
 export default function TransportPage() {
   const qc      = useQueryClient();
   const { toast } = useToast();
-  const role    = useAuthStore(s => s.session?.user?.role ?? 'student');
-  const canEdit = MANAGE_ROLES.has(role);
+  const role = useAuthStore(s => s.session?.user?.role ?? 'student');
+  const can  = useAuthStore(s => s.can.bind(s));
+  // transport:read is granted broadly by default (everyone can browse
+  // routes) — check 'create' specifically so read-only roles don't see
+  // manage controls they'd just get a 403 clicking. The real enforcement
+  // boundary is the server's rbac('transport', action, subKey) checks.
+  const canEdit = can('transport', 'create') || role === 'admin' || role === 'superadmin';
 
   const [tab,         setTab]         = useState('routes');
   const [search,      setSearch]      = useState('');

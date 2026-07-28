@@ -529,6 +529,7 @@ function _defaultPerms(role) {
         attendance:   RCU,  grades:       RCU,  assessment:   RCU,
         timetable:    R,    messages:     RCU,  report_cards: R,
         exams:        R,    lessons:      RCUD, library:      R,
+        hostel:       R,    transport:    R,
       };
 
     case 'finance':
@@ -537,6 +538,8 @@ function _defaultPerms(role) {
         finance:      RCUD,
         report_cards: R,
         library:      R,
+        hostel:       R,
+        transport:    R,
       };
 
     case 'hr':
@@ -545,6 +548,8 @@ function _defaultPerms(role) {
         teachers:     RCUD,
         students:     R,
         library:      R,
+        hostel:       R,
+        transport:    R,
       };
 
     case 'admissions_officer':
@@ -553,6 +558,8 @@ function _defaultPerms(role) {
         students:     RCU,
         classes:      R,
         library:      R,
+        hostel:       R,
+        transport:    R,
       };
 
     case 'exams_officer':
@@ -564,6 +571,8 @@ function _defaultPerms(role) {
         classes:      R,
         report_cards: R,
         library:      R,
+        hostel:       R,
+        transport:    R,
       };
 
     case 'timetabler':
@@ -572,6 +581,8 @@ function _defaultPerms(role) {
         classes:      RCU,
         teachers:     R,
         library:      R,
+        hostel:       R,
+        transport:    R,
       };
 
     case 'section_head':
@@ -580,7 +591,7 @@ function _defaultPerms(role) {
         attendance:   R,   grades:       R,   assessment:   R,
         exams:        R,   timetable:    R,   report_cards: R,
         admissions:   R,   lessons:      RCU, analytics:    R,
-        library:      R,
+        library:      R,   hostel:       R,   transport:    R,
       };
 
     case 'principal':
@@ -591,6 +602,7 @@ function _defaultPerms(role) {
         exams:        RCUD, behaviour:    RCUD, timetable:    RCUD,
         messages:     RCUD, report_cards: RCU,  admissions:   RCU,
         lessons:      RCUD, analytics:    R,    library:      R,
+        hostel:       R,    transport:    R,
       };
 
     case 'discipline_committee':
@@ -598,6 +610,8 @@ function _defaultPerms(role) {
         behaviour:    RCUD,
         students:     R,
         library:      R,
+        hostel:       R,
+        transport:    R,
       };
 
     case 'parent':
@@ -612,6 +626,8 @@ function _defaultPerms(role) {
         messages:     R,
         lessons:      R,   // view curriculum coverage for their class
         library:      R,
+        hostel:       R,
+        transport:    R,
       };
 
     default:

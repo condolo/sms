@@ -3339,7 +3339,7 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='settings'   && s==='permissions') return N;
       if (m==='analytics') return V;
       if (['exams','assessment'].includes(m)) return T;   // matches RCUD already seeded server-side
-      if (m==='library') return V;   // matches R already seeded server-side
+      if (['library','hostel','transport'].includes(m)) return V;   // matches R already seeded server-side
       return E;
     },
     principal: (m, s) => DEFS.deputy_principal(m, s),  // same defaults as deputy_principal; admin can adjust
@@ -3352,8 +3352,7 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='timetable' && ['rooms','bell_schedule','assignments'].includes(s)) return V;
       if (m==='behaviour' && ['delete'].includes(s)) return N;
       if (m==='growth_profile' && ['delete_records','aspirations'].includes(s)) return N;
-      if (m==='library')                        return V;   // view catalogue, not manage
-      if (['transport','hostel'].includes(m))   return N;   // operational, not academic scope
+      if (['library','transport','hostel'].includes(m)) return V;   // matches R already seeded server-side
       if (s==='import') return N;
       if (['exams','assessment','report_cards'].includes(m)) return V;   // matches R already seeded server-side
       return E;
@@ -3373,8 +3372,7 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       }
       if (m==='lessons')                        { if (s==='delete') return N; return E; }   // teachers write plans, not delete others'
       if (m==='elearning')                      { if (s==='delete') return N; return E; }   // teachers upload content, not delete
-      if (m==='library')                        return V;   // view catalogue only
-      if (['transport','hostel'].includes(m))   return N;   // not their domain
+      if (['library','transport','hostel'].includes(m))   return V;   // matches R already seeded server-side
       if (s==='import') return N;
       if (m==='classes'   && ['section','delete'].includes(s)) return N;
       if (m==='timetable' && ['rooms','bell_schedule','assignments'].includes(s)) return V;
@@ -3392,7 +3390,7 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='subjects') return V;
       if (m==='reports')  return E;
       if (m==='growth_profile') return V;
-      if (m==='library')  return V;   // matches R already seeded server-side
+      if (['library','hostel','transport'].includes(m)) return V;   // matches R already seeded server-side
       return N;
     },
 
@@ -3404,7 +3402,7 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='classes')   return V;
       if (m==='students')  return V;
       if (m==='lessons')   return V;   // see lesson plans to schedule accurately
-      if (m==='library')   return V;   // matches R already seeded server-side
+      if (['library','hostel','transport'].includes(m)) return V;   // matches R already seeded server-side
       return N;
     },
 
@@ -3416,8 +3414,7 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='classes')    return V;
       if (m==='events')     return V;
       if (m==='messages')   return s==='delete' ? N : E;
-      if (m==='hostel')     return V;   // see room availability when processing boarding students
-      if (m==='library')    return V;   // matches R already seeded server-side
+      if (['library','hostel','transport'].includes(m)) return V;   // matches R already seeded server-side
       return N;
     },
 
@@ -3427,9 +3424,8 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='finance')  return T;
       if (m==='students') return V;
       if (m==='reports')  return V;
-      if (m==='hostel')   return V;   // hostel assignments drive boarding fee invoicing
       if (m==='report_cards') return V;   // matches R already seeded server-side
-      if (m==='library')  return V;   // matches R already seeded server-side
+      if (['library','hostel','transport'].includes(m)) return V;   // matches R already seeded server-side
       return N;
     },
 
@@ -3439,7 +3435,7 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='hr')      return T;
       if (m==='students') return V;
       if (m==='reports')  return V;
-      if (m==='library')  return V;   // matches R already seeded server-side
+      if (['library','hostel','transport'].includes(m)) return V;   // matches R already seeded server-side
       return N;
     },
 
@@ -3452,7 +3448,7 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='attendance') return V;
       if (m==='messages')  return s==='delete' ? N : E;
       if (m==='growth_profile') return V;
-      if (m==='library')   return V;   // matches R already seeded server-side
+      if (['library','hostel','transport'].includes(m)) return V;   // matches R already seeded server-side
       return N;
     },
 

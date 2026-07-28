@@ -8,8 +8,11 @@
                            which is owned by timetable/scheduling)
      hostel_assignments  — student ↔ room assignments
 
-   Plan:  premium | RBAC: MANAGE_ROLES for write; all auth
-          users can read hostels/rooms and their own assignment.
+   Plan:  premium | RBAC: rbac('hostel', action, subKey) — 'manage' for
+          hostel/room writes, 'assign' for assignment writes, 'delete' for
+          deletes. Every role with hostel:read (the school-wide default)
+          can browse hostels/rooms and their own assignment; only a role
+          with assignment-management access sees every student's assignment.
    ============================================================ */
 const express        = require('express');
 const { z }          = require('zod');
@@ -18,6 +21,7 @@ const { v4: uuidv4 } = require('uuid');
 const { authMiddleware } = require('../middleware/auth');
 const { planGate }       = require('../middleware/plan');
 const { moduleGate }     = require('../middleware/module-gate');
+const { rbac, hasPermission } = require('../middleware/rbac');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 
@@ -25,9 +29,6 @@ const router = express.Router();
 const PLAN   = planGate('hostel');
 
 router.use(authMiddleware, PLAN, moduleGate('hostel'));
-
-/* ── Roles allowed to manage the hostel ────────────────────── */
-const MANAGE_ROLES = new Set(['superadmin', 'admin', 'hostel_master']);
 
 /* ── Validation schemas ──────────────────────────────────────── */
 const HostelSchema = z.object({
@@ -75,7 +76,7 @@ function _validate(schema, data) {
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/hostel/hostels */
-router.get('/hostels', async (req, res) => {
+router.get('/hostels', rbac('hostel', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -96,7 +97,7 @@ router.get('/hostels', async (req, res) => {
 });
 
 /* GET /api/hostel/hostels/:id */
-router.get('/hostels/:id', async (req, res) => {
+router.get('/hostels/:id', rbac('hostel', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('hostels', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
@@ -109,10 +110,9 @@ router.get('/hostels/:id', async (req, res) => {
 });
 
 /* POST /api/hostel/hostels */
-router.post('/hostels', async (req, res) => {
+router.post('/hostels', rbac('hostel', 'create', 'manage'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Hostel staff or Admin access required');
+    const { schoolId, userId } = req.jwtUser;
 
     const { data, error } = _validate(HostelSchema, req.body);
     if (error) return E.validation(res, error);
@@ -133,10 +133,9 @@ router.post('/hostels', async (req, res) => {
 });
 
 /* PUT /api/hostel/hostels/:id */
-router.put('/hostels/:id', async (req, res) => {
+router.put('/hostels/:id', rbac('hostel', 'update', 'manage'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Hostel staff or Admin access required');
+    const { schoolId, userId } = req.jwtUser;
 
     const existing = await tenantModel('hostels', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Hostel not found');
@@ -157,10 +156,9 @@ router.put('/hostels/:id', async (req, res) => {
 });
 
 /* DELETE /api/hostel/hostels/:id */
-router.delete('/hostels/:id', async (req, res) => {
+router.delete('/hostels/:id', rbac('hostel', 'delete', 'delete'), async (req, res) => {
   try {
-    const { schoolId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Hostel staff or Admin access required');
+    const { schoolId } = req.jwtUser;
 
     /* Block if rooms or active assignments exist */
     const [roomCount, assignCount] = await Promise.all([
@@ -184,7 +182,7 @@ router.delete('/hostels/:id', async (req, res) => {
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/hostel/rooms */
-router.get('/rooms', async (req, res) => {
+router.get('/rooms', rbac('hostel', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -207,7 +205,7 @@ router.get('/rooms', async (req, res) => {
 });
 
 /* GET /api/hostel/rooms/:id */
-router.get('/rooms/:id', async (req, res) => {
+router.get('/rooms/:id', rbac('hostel', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('hostel_rooms', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
@@ -220,10 +218,9 @@ router.get('/rooms/:id', async (req, res) => {
 });
 
 /* POST /api/hostel/rooms */
-router.post('/rooms', async (req, res) => {
+router.post('/rooms', rbac('hostel', 'create', 'manage'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Hostel staff or Admin access required');
+    const { schoolId, userId } = req.jwtUser;
 
     const { data, error } = _validate(RoomSchema, req.body);
     if (error) return E.validation(res, error);
@@ -255,10 +252,9 @@ router.post('/rooms', async (req, res) => {
 });
 
 /* PUT /api/hostel/rooms/:id */
-router.put('/rooms/:id', async (req, res) => {
+router.put('/rooms/:id', rbac('hostel', 'update', 'manage'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Hostel staff or Admin access required');
+    const { schoolId, userId } = req.jwtUser;
 
     const existing = await tenantModel('hostel_rooms', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Room not found');
@@ -288,10 +284,9 @@ router.put('/rooms/:id', async (req, res) => {
 });
 
 /* DELETE /api/hostel/rooms/:id */
-router.delete('/rooms/:id', async (req, res) => {
+router.delete('/rooms/:id', rbac('hostel', 'delete', 'delete'), async (req, res) => {
   try {
-    const { schoolId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Hostel staff or Admin access required');
+    const { schoolId } = req.jwtUser;
 
     const activeOccupants = await tenantModel('hostel_assignments', tenantContext(req)).countDocuments({
       schoolId, roomId: req.params.id, status: 'active',
@@ -314,14 +309,18 @@ router.delete('/rooms/:id', async (req, res) => {
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/hostel/assignments */
-router.get('/assignments', async (req, res) => {
+router.get('/assignments', rbac('hostel', 'read'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
+    const { schoolId, userId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
     const { hostelId, roomId, studentId, status } = req.query;
 
     const filter = { schoolId };
-    if (!MANAGE_ROLES.has(role)) {
+    /* Only callers with assignment-management access see everyone's
+       assignment; everyone else is scoped to their own (a narrowing, not
+       a gate — rbac() above already establishes baseline hostel:read). */
+    const canManage = await hasPermission(req, 'hostel', 'update', 'assign');
+    if (!canManage) {
       filter.studentId = userId;
     } else {
       if (studentId) filter.studentId = studentId;
@@ -342,10 +341,9 @@ router.get('/assignments', async (req, res) => {
 });
 
 /* POST /api/hostel/assignments — assign student to room */
-router.post('/assignments', async (req, res) => {
+router.post('/assignments', rbac('hostel', 'create', 'assign'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Hostel staff or Admin access required');
+    const { schoolId, userId } = req.jwtUser;
 
     const { data, error } = _validate(AssignmentSchema, req.body);
     if (error) return E.validation(res, error);
@@ -405,10 +403,9 @@ router.post('/assignments', async (req, res) => {
 });
 
 /* PATCH /api/hostel/assignments/:id/discharge — move student out */
-router.patch('/assignments/:id/discharge', async (req, res) => {
+router.patch('/assignments/:id/discharge', rbac('hostel', 'update', 'assign'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Hostel staff or Admin access required');
+    const { schoolId, userId } = req.jwtUser;
 
     const assignment = await tenantModel('hostel_assignments', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!assignment) return E.notFound(res, 'Assignment not found');
@@ -443,10 +440,9 @@ router.patch('/assignments/:id/discharge', async (req, res) => {
 });
 
 /* ── Summary ─────────────────────────────────────────────────── */
-router.get('/summary', async (req, res) => {
+router.get('/summary', rbac('hostel', 'read'), async (req, res) => {
   try {
-    const { schoolId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Hostel staff or Admin access required');
+    const { schoolId } = req.jwtUser;
 
     const [hostelCount, roomAgg, assignAgg] = await Promise.all([
       tenantModel('hostels', tenantContext(req)).countDocuments({ schoolId }),

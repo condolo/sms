@@ -9,8 +9,6 @@ import { KpiCard } from '@/components/ui/KpiCard.jsx';
 import useAuthStore from '@/store/auth.js';
 import { useToast } from '@/hooks/useToast.jsx';
 
-const MANAGE_ROLES = new Set(['superadmin', 'admin', 'hostel_master']);
-
 /* KpiCard — shared themed component (see @/components/ui/KpiCard.jsx) */
 
 function EmptyState({ icon: Icon, message }) {
@@ -314,8 +312,13 @@ function AssignModal({ hostels, rooms, onClose, onSave }) {
 export default function HostelPage() {
   const qc      = useQueryClient();
   const { toast } = useToast();
-  const role    = useAuthStore(s => s.session?.user?.role ?? 'student');
-  const canEdit = MANAGE_ROLES.has(role);
+  const role = useAuthStore(s => s.session?.user?.role ?? 'student');
+  const can  = useAuthStore(s => s.can.bind(s));
+  // hostel:read is granted broadly by default (everyone can browse hostels/
+  // rooms) — check 'create' specifically so read-only roles don't see
+  // manage controls they'd just get a 403 clicking. The real enforcement
+  // boundary is the server's rbac('hostel', action, subKey) checks.
+  const canEdit = can('hostel', 'create') || role === 'admin' || role === 'superadmin';
 
   const [tab,          setTab]          = useState('hostels');
   const [hostelModal,  setHostelModal]  = useState(null);

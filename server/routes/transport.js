@@ -6,8 +6,11 @@
      transport_routes      — route definitions (bus runs)
      transport_assignments — student ↔ route assignments
 
-   Plan:  standard | RBAC: MANAGE_ROLES for write; all auth
-          users can read routes and their own assignments.
+   Plan:  standard | RBAC: rbac('transport', action, subKey) — 'manage' for
+          route writes, 'assign' for assignment writes, 'delete' for route
+          deletes. Every role with transport:read (the school-wide default)
+          can browse routes and their own assignment; only a role with
+          assignment-management access sees every student's assignment.
    ============================================================ */
 const express        = require('express');
 const { z }          = require('zod');
@@ -16,6 +19,7 @@ const { v4: uuidv4 } = require('uuid');
 const { authMiddleware } = require('../middleware/auth');
 const { planGate }       = require('../middleware/plan');
 const { moduleGate }     = require('../middleware/module-gate');
+const { rbac, hasPermission } = require('../middleware/rbac');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 
@@ -23,9 +27,6 @@ const router = express.Router();
 const PLAN   = planGate('transport');
 
 router.use(authMiddleware, PLAN, moduleGate('transport'));
-
-/* ── Roles allowed to manage transport ─────────────────────── */
-const MANAGE_ROLES = new Set(['superadmin', 'admin', 'transport_officer']);
 
 /* ── Validation schemas ──────────────────────────────────────── */
 const RouteSchema = z.object({
@@ -67,7 +68,7 @@ function _validate(schema, data) {
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/transport/routes */
-router.get('/routes', async (req, res) => {
+router.get('/routes', rbac('transport', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -91,7 +92,7 @@ router.get('/routes', async (req, res) => {
 });
 
 /* GET /api/transport/routes/:id */
-router.get('/routes/:id', async (req, res) => {
+router.get('/routes/:id', rbac('transport', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('transport_routes', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
@@ -104,10 +105,9 @@ router.get('/routes/:id', async (req, res) => {
 });
 
 /* POST /api/transport/routes */
-router.post('/routes', async (req, res) => {
+router.post('/routes', rbac('transport', 'create', 'manage'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Transport staff or Admin access required');
+    const { schoolId, userId } = req.jwtUser;
 
     const { data, error } = _validate(RouteSchema, req.body);
     if (error) return E.validation(res, error);
@@ -128,10 +128,9 @@ router.post('/routes', async (req, res) => {
 });
 
 /* PUT /api/transport/routes/:id */
-router.put('/routes/:id', async (req, res) => {
+router.put('/routes/:id', rbac('transport', 'update', 'manage'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Transport staff or Admin access required');
+    const { schoolId, userId } = req.jwtUser;
 
     const existing = await tenantModel('transport_routes', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Route not found');
@@ -152,10 +151,9 @@ router.put('/routes/:id', async (req, res) => {
 });
 
 /* DELETE /api/transport/routes/:id */
-router.delete('/routes/:id', async (req, res) => {
+router.delete('/routes/:id', rbac('transport', 'delete', 'delete'), async (req, res) => {
   try {
-    const { schoolId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Transport staff or Admin access required');
+    const { schoolId } = req.jwtUser;
 
     /* Block deletion if active assignments reference this route */
     const activeAssignments = await tenantModel('transport_assignments', tenantContext(req)).countDocuments({
@@ -179,15 +177,18 @@ router.delete('/routes/:id', async (req, res) => {
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/transport/assignments */
-router.get('/assignments', async (req, res) => {
+router.get('/assignments', rbac('transport', 'read'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
+    const { schoolId, userId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
     const { routeId, studentId, status } = req.query;
 
     const filter = { schoolId };
-    /* Non-managers only see their own child's assignments (studentId = userId for parent portal) */
-    if (!MANAGE_ROLES.has(role)) {
+    /* Only callers with assignment-management access see everyone's
+       assignment; everyone else is scoped to their own (a narrowing, not
+       a gate — rbac() above already establishes baseline transport:read). */
+    const canManage = await hasPermission(req, 'transport', 'update', 'assign');
+    if (!canManage) {
       filter.studentId = userId;
     } else {
       if (studentId) filter.studentId = studentId;
@@ -207,10 +208,9 @@ router.get('/assignments', async (req, res) => {
 });
 
 /* POST /api/transport/assignments — assign student to route */
-router.post('/assignments', async (req, res) => {
+router.post('/assignments', rbac('transport', 'create', 'assign'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Transport staff or Admin access required');
+    const { schoolId, userId } = req.jwtUser;
 
     const { data, error } = _validate(AssignmentSchema, req.body);
     if (error) return E.validation(res, error);
@@ -262,10 +262,9 @@ router.post('/assignments', async (req, res) => {
 });
 
 /* PATCH /api/transport/assignments/:id — update or deactivate */
-router.patch('/assignments/:id', async (req, res) => {
+router.patch('/assignments/:id', rbac('transport', 'update', 'assign'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Transport staff or Admin access required');
+    const { schoolId, userId } = req.jwtUser;
 
     const existing = await tenantModel('transport_assignments', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Assignment not found');
@@ -291,10 +290,9 @@ router.patch('/assignments/:id', async (req, res) => {
 });
 
 /* DELETE /api/transport/assignments/:id */
-router.delete('/assignments/:id', async (req, res) => {
+router.delete('/assignments/:id', rbac('transport', 'delete', 'assign'), async (req, res) => {
   try {
-    const { schoolId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Transport staff or Admin access required');
+    const { schoolId } = req.jwtUser;
 
     const doc = await tenantModel('transport_assignments', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId }).lean();
     if (!doc) return E.notFound(res, 'Assignment not found');
@@ -306,10 +304,9 @@ router.delete('/assignments/:id', async (req, res) => {
 });
 
 /* ── Summary ─────────────────────────────────────────────────── */
-router.get('/summary', async (req, res) => {
+router.get('/summary', rbac('transport', 'read'), async (req, res) => {
   try {
-    const { schoolId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Transport staff or Admin access required');
+    const { schoolId } = req.jwtUser;
 
     const [routeCount, assignmentAgg] = await Promise.all([
       tenantModel('transport_routes', tenantContext(req)).countDocuments({ schoolId }),
