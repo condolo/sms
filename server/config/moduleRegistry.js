@@ -80,12 +80,28 @@ const MODULE_REGISTRY = [
     { key: 'delete',   label: 'Delete Lesson Plan' },
     { key: 'coverage', label: 'Mark Lesson Coverage' },
   ]},
-  { key: 'grades', label: 'Grades & Exams', section: 'Academic', subs: [
-    { key: 'view_grades',  label: 'View Grades' },
-    { key: 'enter_marks',  label: 'Enter / Edit Marks' },
-    { key: 'view_exams',   label: 'View Exams' },
-    { key: 'create_exam',  label: 'Create / Edit Exam' },
-    { key: 'export',       label: 'Export Grades (CSV)' },
+  { key: 'grades', label: 'Grades & Marks', section: 'Academic', subs: [
+    { key: 'view_grades',      label: 'View Grades & Marks' },
+    { key: 'enter_marks',      label: 'Enter / Edit Marks' },
+    { key: 'mark_submissions', label: 'Review / Approve Mark Submissions' },
+    { key: 'comment_banks',    label: 'Manage Comment Banks' },
+    { key: 'report_generate',  label: 'Generate / Publish Report Cards' },
+    { key: 'export',           label: 'Export Grades (CSV)' },
+  ]},
+  { key: 'exams', label: 'Exams', section: 'Academic', subs: [
+    { key: 'view',    label: 'View Exams & Results' },
+    { key: 'create',  label: 'Create / Edit Exam' },
+    { key: 'lock',    label: 'Lock / Unlock Exam' },
+    { key: 'results', label: 'Enter Exam Results' },
+    { key: 'delete',  label: 'Delete Exam' },
+  ]},
+  { key: 'assessment', label: 'Assessment Scheduling', section: 'Academic', subs: [
+    { key: 'lock', label: 'Lock / Unlock Assessment Schedule' },
+  ]},
+  { key: 'report_cards', label: 'Report Card Settings', section: 'Academic', subs: [
+    { key: 'draft_comments',      label: 'Manage Draft Comments' },
+    { key: 'workflow',            label: 'Configure Approval Workflow' },
+    { key: 'publication_policy',  label: 'Configure Publication Policy' },
   ]},
   { key: 'elearning', label: 'eLearning', section: 'Academic', subs: [
     { key: 'view',   label: 'View Courses & Resources' },

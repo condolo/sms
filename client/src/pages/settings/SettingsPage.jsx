@@ -3136,6 +3136,10 @@ function EditCustomRoleModal({ role, onClose, onSaved }) {
    ROLES & PERMISSIONS TAB — editable sub-module RBAC matrix
    ══════════════════════════════════════════════════════════════ */
 
+/* Fallback only, used for the brief window before GET /settings/modules
+   resolves (or if it errors). server/config/moduleRegistry.js is the real
+   source of truth — keep this mirrored to it so the fallback never
+   silently shows an incomplete module list. */
 const PERM_MODULES = [
   { key: 'students',   label: 'Students', subs: [
     { key: 'list',    label: 'View Student List' },
@@ -3187,12 +3191,28 @@ const PERM_MODULES = [
     { key: 'edit',   label: 'Edit Records' },
     { key: 'delete', label: 'Delete Records' },
   ]},
-  { key: 'grades',     label: 'Grades & Exams', subs: [
-    { key: 'view_grades',  label: 'View Grades' },
-    { key: 'enter_marks',  label: 'Enter / Edit Marks' },
-    { key: 'view_exams',   label: 'View Exams' },
-    { key: 'create_exam',  label: 'Create / Edit Exam' },
-    { key: 'export',       label: 'Export Grades (CSV)' },
+  { key: 'grades',     label: 'Grades & Marks', subs: [
+    { key: 'view_grades',      label: 'View Grades & Marks' },
+    { key: 'enter_marks',      label: 'Enter / Edit Marks' },
+    { key: 'mark_submissions', label: 'Review / Approve Mark Submissions' },
+    { key: 'comment_banks',    label: 'Manage Comment Banks' },
+    { key: 'report_generate',  label: 'Generate / Publish Report Cards' },
+    { key: 'export',           label: 'Export Grades (CSV)' },
+  ]},
+  { key: 'exams', label: 'Exams', subs: [
+    { key: 'view',    label: 'View Exams & Results' },
+    { key: 'create',  label: 'Create / Edit Exam' },
+    { key: 'lock',    label: 'Lock / Unlock Exam' },
+    { key: 'results', label: 'Enter Exam Results' },
+    { key: 'delete',  label: 'Delete Exam' },
+  ]},
+  { key: 'assessment', label: 'Assessment Scheduling', subs: [
+    { key: 'lock', label: 'Lock / Unlock Assessment Schedule' },
+  ]},
+  { key: 'report_cards', label: 'Report Card Settings', subs: [
+    { key: 'draft_comments',     label: 'Manage Draft Comments' },
+    { key: 'workflow',           label: 'Configure Approval Workflow' },
+    { key: 'publication_policy', label: 'Configure Publication Policy' },
   ]},
   { key: 'admissions', label: 'Admissions', subs: [
     { key: 'view',   label: 'View Pipeline' },
@@ -3241,6 +3261,45 @@ const PERM_MODULES = [
     { key: 'edit',   label: 'Edit Subject' },
     { key: 'delete', label: 'Delete Subject' },
   ]},
+  { key: 'lessons', label: 'Lessons', subs: [
+    { key: 'view',     label: 'View Lesson Plans' },
+    { key: 'create',   label: 'Create Lesson Plan' },
+    { key: 'edit',     label: 'Edit Lesson Plan' },
+    { key: 'delete',   label: 'Delete Lesson Plan' },
+    { key: 'coverage', label: 'Mark Lesson Coverage' },
+  ]},
+  { key: 'elearning', label: 'eLearning', subs: [
+    { key: 'view',   label: 'View Courses & Resources' },
+    { key: 'create', label: 'Create / Upload Content' },
+    { key: 'edit',   label: 'Edit Content' },
+    { key: 'delete', label: 'Delete Content' },
+    { key: 'enroll', label: 'Enroll Students' },
+  ]},
+  { key: 'resources', label: 'Resources', subs: [
+    { key: 'read',   label: 'View Resources' },
+    { key: 'create', label: 'Share a Resource' },
+    { key: 'update', label: 'Edit a Resource' },
+    { key: 'delete', label: 'Delete a Resource' },
+  ]},
+  { key: 'library', label: 'Library', subs: [
+    { key: 'view',    label: 'View Catalogue & Records' },
+    { key: 'issue',   label: 'Issue / Return Books' },
+    { key: 'manage',  label: 'Add / Edit Catalogue Items' },
+    { key: 'delete',  label: 'Delete Catalogue Items' },
+    { key: 'reports', label: 'View Library Reports' },
+  ]},
+  { key: 'transport', label: 'Transport', subs: [
+    { key: 'view',   label: 'View Routes & Vehicles' },
+    { key: 'manage', label: 'Add / Edit Routes & Stops' },
+    { key: 'assign', label: 'Assign Students to Routes' },
+    { key: 'delete', label: 'Delete Routes / Vehicles' },
+  ]},
+  { key: 'hostel', label: 'Hostel', subs: [
+    { key: 'view',   label: 'View Rooms & Allocations' },
+    { key: 'manage', label: 'Add / Edit Rooms & Blocks' },
+    { key: 'assign', label: 'Assign Students to Rooms' },
+    { key: 'delete', label: 'Delete Rooms / Blocks' },
+  ]},
   { key: 'growth_profile', label: 'Growth Profile', subs: [
     { key: 'view',             label: 'View Growth Profiles' },
     { key: 'add_records',      label: 'Add Records (Leadership / Activities / Service / Awards)' },
@@ -3278,6 +3337,7 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='hr'         && ['payroll_view','payroll_export','documents'].includes(s)) return N;
       if (m==='settings'   && s==='permissions') return N;
       if (m==='analytics') return V;
+      if (['exams','assessment'].includes(m)) return T;   // matches RCUD already seeded server-side
       return E;
     },
     principal: (m, s) => DEFS.deputy_principal(m, s),  // same defaults as deputy_principal; admin can adjust
@@ -3293,13 +3353,15 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='library')                        return V;   // view catalogue, not manage
       if (['transport','hostel'].includes(m))   return N;   // operational, not academic scope
       if (s==='import') return N;
+      if (['exams','assessment','report_cards'].includes(m)) return V;   // matches R already seeded server-side
       return E;
     },
 
     teacher: (m, s) => {
       if (['finance','admissions','hr','settings'].includes(m)) return N;
       if (m==='attendance') return s==='edit' ? N : s==='export' ? V : E;
-      if (m==='grades')     return ['enter_marks','create_exam'].includes(s) ? E : V;
+      if (m==='grades')     return s==='enter_marks' ? E : V;
+      if (m==='assessment') return E;   // matches RCU already seeded server-side
       if (m==='behaviour')  return s==='create' ? E : V;
       if (m==='messages')   return s==='delete' ? N : E;
       if (m==='growth_profile') {
@@ -3321,6 +3383,8 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (['finance','hr','admissions'].includes(m)) return N;
       if (m==='settings') return N;
       if (m==='grades')   return T;
+      if (['exams','assessment'].includes(m)) return T;   // matches RCUD already seeded server-side
+      if (m==='report_cards') return V;                   // matches R already seeded server-side
       if (m==='students') return V;
       if (m==='classes')  return V;
       if (m==='subjects') return V;
@@ -3359,6 +3423,7 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='students') return V;
       if (m==='reports')  return V;
       if (m==='hostel')   return V;   // hostel assignments drive boarding fee invoicing
+      if (m==='report_cards') return V;   // matches R already seeded server-side
       return N;
     },
 
@@ -3385,10 +3450,10 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
 
     parent: (m, s) => {
       if (!['students','finance','attendance','grades','behaviour','events','messages','growth_profile',
-            'elearning','transport','hostel'].includes(m)) return N;
+            'elearning','transport','hostel','report_cards'].includes(m)) return N;
       if (m==='finance' && ['fee_structure','mpesa','import','create_invoice','void_invoice','record_payment'].includes(s)) return N;
       if (m==='growth_profile' && s !== 'view') return N;
-      return V;
+      return V;   // report_cards: read their own child's report cards, matches R already seeded server-side
     },
 
     student: (m, s) => {
