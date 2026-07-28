@@ -77,6 +77,8 @@ const IncidentSchema = z.object({
   reportedBy:   z.string().optional(),          // userId of reporter; overridden by JWT
   categoryId:   z.string().optional(),
   category:     z.string().max(100).optional(), // denormalized category name for display, same convention as library loans' bookTitle
+  itemId:       z.string().optional(),           // the specific item within the category that was awarded
+  itemLabel:    z.string().max(200).optional(),   // denormalized item label, same convention as category above
   academicYearId: z.string().optional(),
   termId:       z.string().optional(),
   type:         z.enum(['merit', 'demerit', 'neutral']).default('demerit'),
@@ -106,55 +108,233 @@ const AppealSchema = z.object({
   reviewedAt:   z.string().optional(),
 });
 
-/* Flat, fully school-editable category — replaces the old
-   {type, defaultPoints} shape (single direction, single value) with
-   independent merit/demerit point values so one category (e.g.
-   "Classroom & Academic") can support both, while a merit-only
-   category (e.g. "Leadership & Community Service") simply omits
-   demeritPoints. Both stored as positive magnitudes — the sign is
-   applied by whichever direction is awarded, not baked into the
-   category itself. */
-const CategorySchema = z.object({
-  name:          z.string().min(1).max(100).trim(),
-  meritPoints:   z.number().int().min(0).max(100).optional().nullable(),
-  demeritPoints: z.number().int().min(0).max(100).optional().nullable(),
-  description:   z.string().max(500).optional(),
-  colour:        z.string().optional(),
-  isActive:      z.boolean().default(true),
-}).refine(d => d.meritPoints != null || d.demeritPoints != null, {
-  message: 'A category must support at least one of meritPoints or demeritPoints',
+/* A category is a named grouping (e.g. "Classroom & Academic") that
+   holds its own list of items — each item is a specific, individually
+   named behaviour with its own points value and its own merit/demerit
+   direction (a category is not itself "merit" or "demerit"; its items
+   are, one at a time). Fully school-editable at both levels: schools
+   add/edit/delete items within a category, and add/edit/delete whole
+   categories. Points are stored as positive magnitudes on the item —
+   the sign is applied by the item's own direction. */
+const CategoryItemSchema = z.object({
+  id:          z.string().optional(), // assigned server-side for new items
+  label:       z.string().min(1).max(200).trim(),
+  direction:   z.enum(['merit', 'demerit']),
+  points:      z.number().int().min(0).max(100),
+  description: z.string().max(500).optional(),
 });
 
-/* Seed set — collapses the old hardcoded ~150-item BPS matrix
-   (client/src/pages/behaviour/bpsConstants.js) down to its 8 group
-   names as a starting point; schools fully customize from here
-   (add/remove/rename/repoint). "Leadership & Community Service" is
-   merit-only in the matrix (no demerit items exist for it), so it's
-   seeded that way. */
+const CategorySchema = z.object({
+  name:        z.string().min(1).max(150).trim(),
+  description: z.string().max(500).optional(),
+  colour:      z.string().optional(),
+  isActive:    z.boolean().default(true),
+  items:       z.array(CategoryItemSchema).max(80).default([]),
+});
+
+/* Seed data — the full St. Austin's Academy Behaviour Point System v2
+   item set (Sections 5–12), restored verbatim with its original point
+   values as the default a new school starts from. Every item remains
+   fully editable/deletable per school, and schools may add further
+   items or entire categories on top of this default set. */
+const _mi = (label, points) => ({ label, direction: 'merit', points });
+const _di = (label, points) => ({ label, direction: 'demerit', points });
+
 const DEFAULT_CATEGORIES = [
-  { name: 'Classroom & Academic',             meritPoints: 2, demeritPoints: 2 },
-  { name: 'Corridors & Common Areas',         meritPoints: 2, demeritPoints: 1 },
-  { name: 'Sports, PE & Extracurricular',     meritPoints: 2, demeritPoints: 2 },
-  { name: 'Interpersonal Relationships',      meritPoints: 3, demeritPoints: 3 },
-  { name: 'School Rules, Safety & Property',  meritPoints: 2, demeritPoints: 2 },
-  { name: 'Dining Hall & Shared Spaces',      meritPoints: 1, demeritPoints: 1 },
-  { name: 'Digital Citizenship & Technology', meritPoints: 2, demeritPoints: 3 },
-  { name: 'Leadership & Community Service',   meritPoints: 5, demeritPoints: null },
+  {
+    name: 'Classroom & Academic',
+    description: 'Academic engagement, homework, and classroom conduct.',
+    items: [
+      _mi('Outstanding contribution to class discussion', 2),
+      _mi('Full and focused engagement throughout the lesson', 1),
+      _mi('Exceptional quality of written or practical work', 3),
+      _mi('Consistent homework completion over a full week', 2),
+      _mi('Helping a peer understand a concept without being asked', 2),
+      _mi('Creative or innovative approach to a task or project', 3),
+      _mi('Taking intellectual risk — answering a challenge question', 2),
+      _mi('Outstanding Global Perspectives research or presentation', 4),
+      _mi('Achieving a personal best in a class assessment', 3),
+      _mi('Demonstrating Cambridge learner attributes in project work', 2),
+      _mi('Submitting work ahead of deadline, well-presented', 1),
+      _mi('Asking a deep, enquiry-based question in class', 1),
+      _di('Arriving late to class without a valid reason', 1),
+      _di('Unprepared for lesson (no books, equipment)', 1),
+      _di('Off-task, disengaged, or disrupting others', 2),
+      _di('Eating or drinking in class without permission', 1),
+      _di('Leaving class without permission', 2),
+      _di('Incomplete homework (first instance)', 1),
+      _di('Persistent refusal to engage in learning', 3),
+      _di('Writing on or defacing school materials', 2),
+      _di('Academic dishonesty (copying, plagiarism)', 5),
+      _di('Cheating in a formal test or exam', 8),
+    ],
+  },
+  {
+    name: 'Corridors, Common Areas & Transitions',
+    description: 'Movement between lessons and behaviour in shared building spaces.',
+    items: [
+      _mi('Holding door open or assisting a staff member without being asked', 2),
+      _mi('Picking up litter without being asked', 2),
+      _mi('Representing SAA with pride and courtesy to a visitor', 3),
+      _mi('Maintaining calm, purposeful movement between lessons', 1),
+      _mi('Supporting a peer who appears upset or lost', 3),
+      _mi('Reporting a safety hazard or concern to a staff member', 2),
+      _di('Running in corridors or stairwells', 1),
+      _di('Shouting, excessive noise in corridors', 1),
+      _di('Pushing, jostling, or rough play in corridors', 2),
+      _di('Loitering in restricted areas without permission', 1),
+      _di('Littering in corridors, stairwells or open areas', 2),
+      _di('Defacing walls, doors or noticeboards', 4),
+      _di('Vandalism of school property', 8),
+      _di('Entering out-of-bounds or restricted areas', 2),
+    ],
+  },
+  {
+    name: 'Sports, PE & Extracurricular',
+    description: 'Sports field, PE lessons, and extracurricular club activity.',
+    items: [
+      _mi('Demonstrating sportsmanship, fair play and encouragement to teammates', 3),
+      _mi('Outstanding effort in PE — showing determination beyond ability level', 2),
+      _mi('Representing the school in a sports competition', 5),
+      _mi('Scoring a notable achievement in inter-school competition', 4),
+      _mi('Leading a warm-up, team activity, or drill when invited', 2),
+      _mi('Consistently attending and contributing to an extracurricular club', 2),
+      _mi('Organising or helping to run a school event or club activity', 4),
+      _mi('Supporting a teammate who is struggling during activity', 2),
+      _mi('Mentoring a junior student in a sport or activity (KS5)', 4),
+      _di('Repeated failure to bring PE kit without valid reason', 2),
+      _di('Unsportsmanlike conduct — taunting, mocking peers', 3),
+      _di('Dangerous play — deliberately fouling or rough play', 4),
+      _di('Refusing to follow coach or teacher instructions during activity', 3),
+      _di('Causing deliberate injury to another student during activity', 8),
+      _di('Leaving the school premises during an extracurricular activity without permission', 5),
+      _di('Using a sports field or equipment dangerously without supervision', 2),
+      _di('Abusing or damaging sports equipment', 4),
+    ],
+  },
+  {
+    name: 'Interpersonal Relationships',
+    description: 'Conduct and character in relationships with peers and staff.',
+    items: [
+      _mi('Resolving a disagreement calmly and respectfully without staff intervention', 3),
+      _mi('Standing up for a peer who is being excluded or treated unfairly', 4),
+      _mi('Welcoming and supporting a new student', 3),
+      _mi('Showing consistent kindness and consideration across the week', 2),
+      _mi('Proactively reporting a safeguarding or welfare concern for a peer', 3),
+      _mi('Acting as peer mentor or tutor for a younger or struggling student', 4),
+      _mi('Treating all members of staff and visitors with consistent courtesy', 2),
+      _mi('Contributing positively to a group project, supporting all team members', 2),
+      _mi('Demonstrating empathy during a personal or community difficulty', 3),
+      _di('Rude, dismissive or disrespectful language to a peer', 2),
+      _di('Rude, dismissive or disrespectful language to a staff member', 4),
+      _di('Deliberate exclusion or social isolation of a peer', 3),
+      _di('Low-level verbal bullying (name-calling, mockery)', 4),
+      _di('Sustained or repeated bullying (verbal, social, relational)', 10),
+      _di('Physical aggression (pushing, shoving — not causing injury)', 5),
+      _di('Physical assault causing injury', 15),
+      _di('Threatening behaviour or intimidation', 10),
+      _di('Cyberbullying or online harassment of a peer', 10),
+      _di('Public display of romantic affection', 2),
+      _di('Discrimination based on race, gender, religion, or background', 15),
+      _di('Theft from a peer or the school', 10),
+    ],
+  },
+  {
+    name: 'School Rules, Safety & Property',
+    description: 'Attendance, punctuality, uniform, and school property.',
+    items: [
+      _mi('Full term of 100% punctuality (no late arrivals)', 5),
+      _mi('Consistent, exemplary uniform standard over a full term', 3),
+      _mi('Reporting a safety hazard or damaged property immediately', 2),
+      _mi('Looking after and returning borrowed school equipment in excellent condition', 2),
+      _mi('Perfect attendance for a full term', 5),
+      _mi('Representing SAA with outstanding conduct on an off-site trip', 4),
+      _mi('Showing care for shared spaces — clearing tables, returning chairs', 1),
+      _mi('Helping to set up or clear away for a school event', 3),
+      _di('Arriving late to school without valid reason or communication', 1),
+      _di('Unauthorised absence from school', 3),
+      _di('Uniform non-compliance (minor — untucked shirt, wrong shoes)', 1),
+      _di('Persistent uniform non-compliance after prior warnings', 3),
+      _di('Chewing gum on school premises', 1),
+      _di('Littering on school grounds', 2),
+      _di('Using a mobile phone during class time (KS3/4)', 2),
+      _di('Using a mobile phone during class (KS5 — after warning)', 1),
+      _di('Bringing a prohibited item to school', 4),
+      _di('Misuse of school digital platforms or school internet', 4),
+      _di('Leaving school premises without an authorised exit slip', 3),
+      _di('Running in or around the school building', 1),
+      _di('Playing in wet or hazardous conditions on the field', 2),
+      _di('Substance use (alcohol, cigarettes, vaping) on premises', 15),
+      _di('Possession of dangerous items or weapons', 15),
+    ],
+  },
+  {
+    name: 'Dining Hall & Shared Spaces',
+    description: 'Dining hall, tuck shop, and other shared spaces.',
+    items: [
+      _mi('Queuing patiently and allowing younger students to go first', 2),
+      _mi('Clearing table, returning tray and leaving area tidy without being asked', 2),
+      _mi('Polite and patient when speaking to dining staff', 1),
+      _mi('Assisting a student who has difficulty carrying food or accessing the queue', 2),
+      _di('Queue jumping or aggressive queuing behaviour', 2),
+      _di('Eating or drinking in class or corridors', 1),
+      _di('Leaving dining area untidy deliberately', 2),
+      _di('Wasting food deliberately', 1),
+      _di('Ordering food from outside school without SLT permission', 2),
+      _di('Talking to or soliciting from strangers or visitors at the gate', 3),
+    ],
+  },
+  {
+    name: 'Digital Citizenship & Technology',
+    description: 'Responsible and irresponsible use of school and personal technology.',
+    items: [
+      _mi('Using school platforms responsibly and helping a peer navigate them', 2),
+      _mi('Citing AI tools or online sources correctly and transparently in work', 2),
+      _mi('Reporting inappropriate digital content or cyberbullying to a staff member', 3),
+      _mi('Producing a creative digital project beyond minimum requirements', 3),
+      _mi('Demonstrating responsible use of technology during a class project', 2),
+      _di('Using personal device for non-academic purposes during lessons', 2),
+      _di('Accessing inappropriate websites on school network', 4),
+      _di('Recording staff or students without consent on personal device', 5),
+      _di("Sharing another student's image or video without consent (online)", 8),
+      _di('Cyberbullying (also listed under Interpersonal Relationships)', 10),
+      _di("Intentionally bypassing the school's internet filter or firewall", 5),
+      _di('Using AI tools dishonestly to submit unacknowledged AI-generated work', 5),
+    ],
+  },
+  {
+    name: 'Leadership & Community Service',
+    description: 'Merit-only — the highest expressions of school and community contribution. There is no demerit side; a voluntary role simply goes unearned if not fulfilled.',
+    items: [
+      _mi('Elected or appointed to a school leadership role (Head Boy/Girl, House Captain, Council)', 10),
+      _mi('Organising or leading a successful school event or charity initiative', 6),
+      _mi('Completing a structured community service project', 8),
+      _mi('Leading a presentation at assembly or school event', 4),
+      _mi('Serving as a Student Ambassador or school tour guide for visitors', 4),
+      _mi('Contributing to the school newsletter, magazine or social media responsibly', 3),
+      _mi('Achieving a notable result in a national or international competition', 8),
+      _mi('Completing the term as a Sixth Form Peer Mentor (KS5)', 6),
+      _mi('Initiating an environmental or sustainability project', 6),
+    ],
+  },
 ];
 
-/* Auto-provisions the default category set the first time a school
-   has none — idempotent (only inserts when the count is genuinely
-   zero), same "seed once, then fully hands-off" posture as demo data
-   $setOnInsert patterns elsewhere. A school that deletes down to zero
-   categories on purpose will get them reseeded on next read; that's
-   an acceptable edge case for a picker catalogue, not a data-loss risk
-   since categories carry no incident history themselves. */
+/* Auto-provisions the default category+item set the first time a
+   school has none — idempotent (only inserts when the count is
+   genuinely zero), same "seed once, then fully hands-off" posture as
+   demo data $setOnInsert patterns elsewhere. A school that deletes
+   down to zero categories on purpose will get them reseeded on next
+   read; that's an acceptable edge case for a picker catalogue, not a
+   data-loss risk since categories/items carry no incident history
+   themselves (incidents copy the label/points they used at the time). */
 async function _ensureDefaultCategories(schoolId, ctx, userId) {
   const Categories = tenantModel('behaviour_categories', ctx);
   const count = await Categories.countDocuments({ schoolId });
   if (count > 0) return;
   await Categories.insertMany(DEFAULT_CATEGORIES.map(c => ({
-    ...c, id: uuidv4(), schoolId, isActive: true, createdBy: userId || 'system', updatedBy: userId || 'system',
+    ...c,
+    items: c.items.map(it => ({ ...it, id: uuidv4() })),
+    id: uuidv4(), schoolId, isActive: true, createdBy: userId || 'system', updatedBy: userId || 'system',
   })));
 }
 
@@ -466,10 +646,13 @@ router.get('/categories', authMiddleware, PLAN, behaviourAccess('read'), async (
 
     const filter = { schoolId };
     if (req.query.isActive) filter.isActive = req.query.isActive === 'true';
-    // ?direction=merit|demerit — only categories that support that
-    // direction (used by the Award Points picker once a direction is chosen).
-    if (req.query.direction === 'merit')   filter.meritPoints   = { $ne: null };
-    if (req.query.direction === 'demerit') filter.demeritPoints = { $ne: null };
+    // ?direction=merit|demerit — only categories that contain at least
+    // one item of that direction (used by the Award Points picker once
+    // a direction is chosen); the client still filters each category's
+    // own items down to that direction before showing the item list.
+    if (req.query.direction === 'merit' || req.query.direction === 'demerit') {
+      filter['items.direction'] = req.query.direction;
+    }
 
     const docs = await tenantModel('behaviour_categories', tenantContext(req)).find(filter).sort({ name: 1 }).limit(200).select('-__v').lean();
     return ok(res, docs);
@@ -485,6 +668,7 @@ router.post('/categories', authMiddleware, PLAN, behaviourAccess('create'), asyn
     const dup = await tenantModel('behaviour_categories', tenantContext(req)).findOne({ schoolId, name: data.name }).lean();
     if (dup) return E.conflict(res, `Category '${data.name}' already exists`);
 
+    data.items = (data.items || []).map(it => ({ ...it, id: it.id || uuidv4() }));
     const doc = await tenantModel('behaviour_categories', tenantContext(req)).create({ ...data, id: uuidv4(), schoolId, createdBy: userId, updatedBy: userId });
     return created(res, doc.toObject ? doc.toObject() : doc);
   } catch (err) { console.error('[behaviour/categories POST]', err); return E.serverError(res); }
@@ -496,6 +680,10 @@ router.put('/categories/:id', authMiddleware, PLAN, behaviourAccess('update'), a
     const { data, error } = _validate(CategorySchema.partial(), req.body);
     if (error) return E.validation(res, error);
     delete data.schoolId; delete data.id;
+    // PUT replaces the whole items array when provided (client sends the
+    // full edited list back) — assign ids to any newly-added items that
+    // don't have one yet; existing items keep the id the client sent.
+    if (data.items) data.items = data.items.map(it => ({ ...it, id: it.id || uuidv4() }));
 
     const doc = await tenantModel('behaviour_categories', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },

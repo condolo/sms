@@ -18,13 +18,16 @@ per-item granularity; house points resetting yearly vs. staying perpetual;
 officer assignment granting real access vs. being a display-only label).
 
 ### Added
-- `behaviour_categories` redesigned to `{meritPoints, demeritPoints}` (either
-  independently nullable) — fully school add/edit/delete/repoint. Auto-seeded
-  with the old matrix's 8 group names on first use.
+- `behaviour_categories` redesigned to a school-editable **category → items**
+  structure — a category (e.g. "Classroom & Academic") holds its own list of
+  individually named items, each with its own points value and its own
+  merit/demerit direction. Both levels are fully add/edit/delete per school.
+  Auto-seeded with the complete SAA Behaviour Point System v2 default set on
+  first use (8 categories, 128 items, original point values preserved).
 - Award Points now reads live categories via `?direction=merit|demerit`
-  instead of the hardcoded matrix; category picking collapses from
-  "category → item within it" to "category" directly, with an optional
-  free-text detail field.
+  instead of the hardcoded matrix, keeping the original two-level picker
+  ("category" → the specific item within it) rather than collapsing to
+  category-only — points come from the chosen item, not the category.
 - `academicYearId`/`termId` on incidents, resolved via a shared
   `resolveAcademicPeriod()` (extracted from finance.js into
   `server/utils/academic-period.js` — the exact same helper, now used by two

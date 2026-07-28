@@ -25,13 +25,17 @@ export default function AwardTab() {
   const [sid,  setSid]          = useState('');
   const [sName, setSName]       = useState('');
   const [type, setType]         = useState('');
-  const [category, setCategory] = useState(null);
+  const [category, setCategory] = useState(null); // whole category object once picked
+  const [item, setItem]         = useState(null);  // the specific item within it once picked
   const [description, setDescription] = useState('');
   const [note, setNote]         = useState('');
   const [stuSearch, setStuSearch] = useState('');
   const [toast, setToast]       = useState(null);
 
-  /* School's configurable categories, filtered to the chosen direction */
+  /* School's configurable categories — each returned category still
+     carries ALL its items; only categories containing at least one item
+     of the chosen direction come back, and the item list itself is
+     filtered to that direction client-side once a category is picked. */
   const { data: catData } = useQuery({
     queryKey: ['behaviour', 'categories', type],
     queryFn:  () => behaviourApi.categories.list({ direction: type, isActive: true }),
@@ -39,6 +43,7 @@ export default function AwardTab() {
     staleTime: 60_000,
   });
   const categories = catData?.data ?? [];
+  const categoryItems = (category?.items ?? []).filter(i => i.direction === type);
 
   /* Student search */
   const { data: stuData } = useQuery({
@@ -63,8 +68,8 @@ export default function AwardTab() {
   const currentDemerit = demeritTotal(stuLogs, sid);
   const currentStage   = studentStage(stuLogs, sid);
   const currentMs      = studentMilestone(stuLogs, sid);
-  const pts            = category
-    ? (type === 'merit' ? category.meritPoints : -Math.abs(category.demeritPoints))
+  const pts            = item
+    ? (type === 'merit' ? item.points : -Math.abs(item.points))
     : null;
   const newMerits      = type === 'merit'  && pts ? currentMerits  + pts         : currentMerits;
   const newDemerit     = type === 'demerit' && pts ? currentDemerit + Math.abs(pts) : currentDemerit;
@@ -84,7 +89,7 @@ export default function AwardTab() {
   const nextMs    = nextMilestone(stuLogs, sid);
 
   const needsNote  = isSerious(pts);
-  const canSubmit  = !!sid && !!type && !!category && pts !== null && (!needsNote || note.trim().length >= 10);
+  const canSubmit  = !!sid && !!type && !!category && !!item && pts !== null && (!needsNote || note.trim().length >= 10);
 
   const mutation = useMutation({
     mutationFn: data => behaviourApi.incidents.create(data),
@@ -99,7 +104,7 @@ export default function AwardTab() {
 
   function reset() {
     setStep(1); setSid(''); setSName(''); setType('');
-    setCategory(null); setDescription(''); setNote(''); setStuSearch('');
+    setCategory(null); setItem(null); setDescription(''); setNote(''); setStuSearch('');
   }
 
   function submit() {
@@ -107,10 +112,12 @@ export default function AwardTab() {
     mutation.mutate({
       studentId:    sid,
       type,
-      title:        category.name,
+      title:        item.label,
       category:     category.name,
       categoryId:   category.id ?? category._id,
-      description:  description.trim() || category.name,
+      itemId:       item.id,
+      itemLabel:    item.label,
+      description:  description.trim() || item.label,
       points:       pts,
       severity:     Math.abs(pts) >= 10 ? 'critical' : Math.abs(pts) >= 5 ? 'high' : Math.abs(pts) >= 3 ? 'medium' : 'low',
       note:         note.trim() || undefined,
@@ -240,7 +247,7 @@ export default function AwardTab() {
           )}
           <div className="grid grid-cols-2 gap-3">
             <button
-              onClick={() => { setType('merit'); setCategory(null); setStep(3); }}
+              onClick={() => { setType('merit'); setCategory(null); setItem(null); setStep(3); }}
               className="flex flex-col items-center gap-2 p-5 rounded-xl border-2 border-emerald-300 bg-emerald-50 hover:bg-emerald-100 transition cursor-pointer"
             >
               <TrendingUp size={28} className="text-emerald-600" />
@@ -248,7 +255,7 @@ export default function AwardTab() {
               <span className="text-xs text-emerald-600">Reward positive behaviour</span>
             </button>
             <button
-              onClick={() => { setType('demerit'); setCategory(null); setStep(3); }}
+              onClick={() => { setType('demerit'); setCategory(null); setItem(null); setStep(3); }}
               className="flex flex-col items-center gap-2 p-5 rounded-xl border-2 border-red-300 bg-red-50 hover:bg-red-100 transition cursor-pointer"
             >
               <TrendingDown size={28} className="text-red-600" />
@@ -259,7 +266,7 @@ export default function AwardTab() {
         </div>
       )}
 
-      {/* ─── Step 3: Choose category ─── */}
+      {/* ─── Step 3: Choose category, then the specific item within it ─── */}
       {step === 3 && (
         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
           <div className="flex items-center gap-2">
@@ -267,40 +274,67 @@ export default function AwardTab() {
             <span className="text-sm text-slate-500">→ <strong className="text-slate-800">{sName}</strong></span>
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-slate-700 mb-1.5">Category</label>
-            <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
-              {categories.map(c => {
-                const p      = type === 'merit' ? c.meritPoints : -Math.abs(c.demeritPoints);
-                const active = (category?.id ?? category?._id) === (c.id ?? c._id);
-                return (
-                  <button
-                    key={c.id ?? c._id}
-                    onClick={() => { setCategory(c); setDescription(''); setNote(''); setStep(4); }}
-                    className={`w-full flex items-center justify-between gap-3 p-3 rounded-lg border-2 text-left transition-all ${
-                      active ? 'border-slate-800 bg-slate-50' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <span className="text-sm text-slate-700">{c.name}</span>
-                      {c.description && <p className="text-xs text-slate-400 truncate">{c.description}</p>}
-                    </div>
-                    <span className={`font-bold text-sm shrink-0 ${p >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                      {p > 0 ? '+' : ''}{p}
-                    </span>
-                  </button>
-                );
-              })}
-              {categories.length === 0 && (
-                <p className="text-center text-sm text-slate-400 py-6">No {type} categories configured — add one under Categories</p>
-              )}
+          {!category ? (
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1.5">Category</label>
+              <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                {categories.map(c => {
+                  const count = (c.items ?? []).filter(i => i.direction === type).length;
+                  return (
+                    <button
+                      key={c.id ?? c._id}
+                      onClick={() => { setCategory(c); setItem(null); }}
+                      className="w-full flex items-center justify-between gap-3 p-3 rounded-lg border-2 border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-left transition-all"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm text-slate-700">{c.name}</span>
+                        {c.description && <p className="text-xs text-slate-400 truncate">{c.description}</p>}
+                      </div>
+                      <span className="text-xs text-slate-400 shrink-0">{count} item{count !== 1 ? 's' : ''}</span>
+                    </button>
+                  );
+                })}
+                {categories.length === 0 && (
+                  <p className="text-center text-sm text-slate-400 py-6">No {type} categories configured — add one under Categories</p>
+                )}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-medium text-slate-700">{category.name}</label>
+                <button onClick={() => { setCategory(null); setItem(null); }} className="text-xs font-semibold text-violet-600 hover:underline">Change category</button>
+              </div>
+              <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                {categoryItems.map(it => {
+                  const p      = type === 'merit' ? it.points : -Math.abs(it.points);
+                  const active = item?.id === it.id;
+                  return (
+                    <button
+                      key={it.id}
+                      onClick={() => { setItem(it); setDescription(''); setNote(''); setStep(4); }}
+                      className={`w-full flex items-center justify-between gap-3 p-3 rounded-lg border-2 text-left transition-all ${
+                        active ? 'border-slate-800 bg-slate-50' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className="flex-1 min-w-0 text-sm text-slate-700">{it.label}</span>
+                      <span className={`font-bold text-sm shrink-0 ${p >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {p > 0 ? '+' : ''}{p}
+                      </span>
+                    </button>
+                  );
+                })}
+                {categoryItems.length === 0 && (
+                  <p className="text-center text-sm text-slate-400 py-6">No {type} items in this category — add one under Categories</p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {/* ─── Step 4: Confirm ─── */}
-      {step === 4 && category && (
+      {step === 4 && category && item && (
         <div className={`bg-white rounded-xl border-2 p-5 space-y-4 ${type === 'merit' ? 'border-emerald-300' : 'border-red-300'}`}>
           <div className="flex items-center gap-2">
             <TypeBadge type={type} />
@@ -311,6 +345,7 @@ export default function AwardTab() {
             {[
               ['Student',  sName],
               ['Category', category.name],
+              ['Item',     item.label],
             ].map(([label, value]) => (
               <div key={label} className="flex gap-3 py-1.5 border-b border-slate-100">
                 <span className="text-slate-400 w-24 shrink-0">{label}</span>
@@ -321,7 +356,7 @@ export default function AwardTab() {
               <span className="text-slate-400 w-24 shrink-0">Points</span>
               <span className={`font-bold text-lg ${pts >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                 {pts > 0 ? '+' : ''}{pts}
-                <span className="text-xs text-slate-400 font-normal ml-2">(from category — edit in Categories to change)</span>
+                <span className="text-xs text-slate-400 font-normal ml-2">(from item — edit in Categories to change)</span>
               </span>
             </div>
           </div>
