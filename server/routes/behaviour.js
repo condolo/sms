@@ -56,14 +56,57 @@ const AppealSchema = z.object({
   reviewedAt:   z.string().optional(),
 });
 
+/* Flat, fully school-editable category — replaces the old
+   {type, defaultPoints} shape (single direction, single value) with
+   independent merit/demerit point values so one category (e.g.
+   "Classroom & Academic") can support both, while a merit-only
+   category (e.g. "Leadership & Community Service") simply omits
+   demeritPoints. Both stored as positive magnitudes — the sign is
+   applied by whichever direction is awarded, not baked into the
+   category itself. */
 const CategorySchema = z.object({
-  name:         z.string().min(1).max(100).trim(),
-  type:         z.enum(['merit', 'demerit', 'neutral']).default('demerit'),
-  defaultPoints: z.number().int().min(-100).max(100).default(0),
-  description:  z.string().max(500).optional(),
-  colour:       z.string().optional(),
-  isActive:     z.boolean().default(true),
+  name:          z.string().min(1).max(100).trim(),
+  meritPoints:   z.number().int().min(0).max(100).optional().nullable(),
+  demeritPoints: z.number().int().min(0).max(100).optional().nullable(),
+  description:   z.string().max(500).optional(),
+  colour:        z.string().optional(),
+  isActive:      z.boolean().default(true),
+}).refine(d => d.meritPoints != null || d.demeritPoints != null, {
+  message: 'A category must support at least one of meritPoints or demeritPoints',
 });
+
+/* Seed set — collapses the old hardcoded ~150-item BPS matrix
+   (client/src/pages/behaviour/bpsConstants.js) down to its 8 group
+   names as a starting point; schools fully customize from here
+   (add/remove/rename/repoint). "Leadership & Community Service" is
+   merit-only in the matrix (no demerit items exist for it), so it's
+   seeded that way. */
+const DEFAULT_CATEGORIES = [
+  { name: 'Classroom & Academic',             meritPoints: 2, demeritPoints: 2 },
+  { name: 'Corridors & Common Areas',         meritPoints: 2, demeritPoints: 1 },
+  { name: 'Sports, PE & Extracurricular',     meritPoints: 2, demeritPoints: 2 },
+  { name: 'Interpersonal Relationships',      meritPoints: 3, demeritPoints: 3 },
+  { name: 'School Rules, Safety & Property',  meritPoints: 2, demeritPoints: 2 },
+  { name: 'Dining Hall & Shared Spaces',      meritPoints: 1, demeritPoints: 1 },
+  { name: 'Digital Citizenship & Technology', meritPoints: 2, demeritPoints: 3 },
+  { name: 'Leadership & Community Service',   meritPoints: 5, demeritPoints: null },
+];
+
+/* Auto-provisions the default category set the first time a school
+   has none — idempotent (only inserts when the count is genuinely
+   zero), same "seed once, then fully hands-off" posture as demo data
+   $setOnInsert patterns elsewhere. A school that deletes down to zero
+   categories on purpose will get them reseeded on next read; that's
+   an acceptable edge case for a picker catalogue, not a data-loss risk
+   since categories carry no incident history themselves. */
+async function _ensureDefaultCategories(schoolId, ctx, userId) {
+  const Categories = tenantModel('behaviour_categories', ctx);
+  const count = await Categories.countDocuments({ schoolId });
+  if (count > 0) return;
+  await Categories.insertMany(DEFAULT_CATEGORIES.map(c => ({
+    ...c, id: uuidv4(), schoolId, isActive: true, createdBy: userId || 'system', updatedBy: userId || 'system',
+  })));
+}
 
 function _validate(schema, data) {
   const r = schema.safeParse(data);
@@ -331,12 +374,17 @@ router.put('/appeals/:id', authMiddleware, PLAN, rbac('behaviour', 'update'), as
 
 router.get('/categories', authMiddleware, PLAN, rbac('behaviour', 'read'), async (req, res) => {
   try {
-    const { schoolId } = req.jwtUser;
-    const filter = { schoolId };
-    if (req.query.type)     filter.type     = req.query.type;
-    if (req.query.isActive) filter.isActive = req.query.isActive === 'true';
+    const { schoolId, userId } = req.jwtUser;
+    await _ensureDefaultCategories(schoolId, tenantContext(req), userId);
 
-    const docs = await tenantModel('behaviour_categories', tenantContext(req)).find(filter).sort({ type: 1, name: 1 }).limit(200).select('-__v').lean();
+    const filter = { schoolId };
+    if (req.query.isActive) filter.isActive = req.query.isActive === 'true';
+    // ?direction=merit|demerit — only categories that support that
+    // direction (used by the Award Points picker once a direction is chosen).
+    if (req.query.direction === 'merit')   filter.meritPoints   = { $ne: null };
+    if (req.query.direction === 'demerit') filter.demeritPoints = { $ne: null };
+
+    const docs = await tenantModel('behaviour_categories', tenantContext(req)).find(filter).sort({ name: 1 }).limit(200).select('-__v').lean();
     return ok(res, docs);
   } catch (err) { console.error('[behaviour/categories GET]', err); return E.serverError(res); }
 });

@@ -1,14 +1,18 @@
 /* ============================================================
-   CategoriesTab — custom behaviour categories CRUD (admin only)
+   CategoriesTab — school-editable behaviour categories (admin only).
+   Auto-seeded with 8 defaults on first load; each category's
+   merit/demerit point values feed Award Points directly, so editing
+   here changes what awarding produces immediately (no separate
+   "publish" step).
    ============================================================ */
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Tag, Plus, X, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { behaviour as behaviourApi } from '@/api/client.js';
-import { TypeBadge, EmptyMsg, ErrState, FField, iCls } from './BehaviourPrimitives.jsx';
+import { EmptyMsg, ErrState, FField, iCls } from './BehaviourPrimitives.jsx';
 
-const EMPTY_FORM = { name: '', type: 'demerit', defaultPoints: '', description: '' };
+const EMPTY_FORM = { name: '', meritPoints: '', demeritPoints: '', description: '' };
 
 export default function CategoriesTab() {
   const qc                    = useQueryClient();
@@ -25,8 +29,10 @@ export default function CategoriesTab() {
 
   const createMut = useMutation({
     mutationFn: d => behaviourApi.categories.create({
-      ...d,
-      defaultPoints: d.defaultPoints ? Number(d.defaultPoints) : undefined,
+      name: d.name,
+      description: d.description || undefined,
+      meritPoints:   d.meritPoints   !== '' ? Number(d.meritPoints)   : undefined,
+      demeritPoints: d.demeritPoints !== '' ? Number(d.demeritPoints) : undefined,
     }),
     onSuccess: () => {
       setShowAdd(false);
@@ -45,6 +51,7 @@ export default function CategoriesTab() {
     ev.preventDefault();
     const e = {};
     if (!form.name.trim()) e.name = 'Name is required';
+    if (form.meritPoints === '' && form.demeritPoints === '') e.points = 'Set at least a merit or demerit point value';
     if (Object.keys(e).length) { setErrors(e); return; }
     createMut.mutate(form);
   }
@@ -52,7 +59,7 @@ export default function CategoriesTab() {
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-500">{rows.length} custom categor{rows.length !== 1 ? 'ies' : 'y'}</p>
+        <p className="text-sm text-slate-500">{rows.length} categor{rows.length !== 1 ? 'ies' : 'y'}</p>
         <button
           onClick={() => setShowAdd(s => !s)}
           className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
@@ -80,22 +87,6 @@ export default function CategoriesTab() {
                     className={iCls(errors.name)}
                   />
                 </FField>
-                <FField label="Type">
-                  <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} className={iCls()}>
-                    <option value="merit">Merit</option>
-                    <option value="demerit">Demerit</option>
-                    <option value="both">Both</option>
-                  </select>
-                </FField>
-                <FField label="Default Points">
-                  <input
-                    type="number"
-                    value={form.defaultPoints}
-                    onChange={e => setForm(f => ({ ...f, defaultPoints: e.target.value }))}
-                    placeholder="-5"
-                    className={iCls()}
-                  />
-                </FField>
                 <FField label="Description">
                   <input
                     value={form.description}
@@ -104,7 +95,28 @@ export default function CategoriesTab() {
                     className={iCls()}
                   />
                 </FField>
+                <FField label="Merit Points" error={errors.points}>
+                  <input
+                    type="number" min="0"
+                    value={form.meritPoints}
+                    onChange={e => { setForm(f => ({ ...f, meritPoints: e.target.value })); setErrors({}); }}
+                    placeholder="Leave blank if not applicable"
+                    className={iCls(errors.points)}
+                  />
+                </FField>
+                <FField label="Demerit Points">
+                  <input
+                    type="number" min="0"
+                    value={form.demeritPoints}
+                    onChange={e => { setForm(f => ({ ...f, demeritPoints: e.target.value })); setErrors({}); }}
+                    placeholder="Leave blank if not applicable"
+                    className={iCls()}
+                  />
+                </FField>
               </div>
+              <p className="text-[11px] text-slate-400 -mt-2">
+                Set only Merit Points for a merit-only category (e.g. Leadership), only Demerit Points for a demerit-only one, or both.
+              </p>
               <div className="flex gap-2 justify-end">
                 <button type="button" onClick={() => setShowAdd(false)} className="text-sm font-medium text-slate-600 px-4 py-2">Cancel</button>
                 <button
@@ -130,8 +142,8 @@ export default function CategoriesTab() {
       ) : rows.length === 0 ? (
         <EmptyMsg
           icon={<Tag size={36} />}
-          title="No custom categories"
-          subtitle="Built-in BPS matrix categories are always available. Add custom ones here."
+          title="No categories"
+          subtitle="Add a category to get started — categories are fully editable, including their point values."
         />
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -139,16 +151,16 @@ export default function CategoriesTab() {
             <div key={c._id ?? c.id} className="group bg-white rounded-xl border border-slate-200 p-4 hover:shadow-sm hover:border-slate-300 transition-all">
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-slate-800">{c.name}</span>
-                    <TypeBadge type={c.type} />
-                  </div>
+                  <span className="text-sm font-semibold text-slate-800">{c.name}</span>
                   {c.description && <p className="text-xs text-slate-500 mt-1">{c.description}</p>}
-                  {c.defaultPoints != null && (
-                    <p className={`text-xs font-bold mt-2 ${Number(c.defaultPoints) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                      {Number(c.defaultPoints) > 0 ? '+' : ''}{c.defaultPoints} pts default
-                    </p>
-                  )}
+                  <div className="flex items-center gap-2 mt-2">
+                    {c.meritPoints != null && (
+                      <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">+{c.meritPoints}</span>
+                    )}
+                    {c.demeritPoints != null && (
+                      <span className="inline-flex items-center gap-1 text-xs font-bold text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">-{c.demeritPoints}</span>
+                    )}
+                  </div>
                 </div>
                 <button
                   onClick={() => { if (confirm(`Delete "${c.name}"?`)) removeMut.mutate(c.id ?? c._id); }}
