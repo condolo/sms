@@ -6,6 +6,54 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.31.0] — 2026-07-28 — feat(behaviour): fully school-editable categories, yearly reset cycle, assignable officer role
+
+Categories were a flat {type, defaultPoints} shape that nothing in the module
+actually read — Award Points and Incident logging both drew exclusively from
+a hardcoded ~150-item matrix in bpsConstants.js, and there was no year-end
+reset hook, no permanent cross-year record, and no way to delegate module
+control to a configurable role. Confirmed scope with the requester on three
+open questions before building (flat categories vs. preserving the matrix's
+per-item granularity; house points resetting yearly vs. staying perpetual;
+officer assignment granting real access vs. being a display-only label).
+
+### Added
+- `behaviour_categories` redesigned to `{meritPoints, demeritPoints}` (either
+  independently nullable) — fully school add/edit/delete/repoint. Auto-seeded
+  with the old matrix's 8 group names on first use.
+- Award Points now reads live categories via `?direction=merit|demerit`
+  instead of the hardcoded matrix; category picking collapses from
+  "category → item within it" to "category" directly, with an optional
+  free-text detail field.
+- `academicYearId`/`termId` on incidents, resolved via a shared
+  `resolveAcademicPeriod()` (extracted from finance.js into
+  `server/utils/academic-period.js` — the exact same helper, now used by two
+  modules instead of duplicated).
+- Auto-reset: `POST /academic-config/transition-year` now fires the same
+  `resetBehaviourPoints()` the manual "Reset Points" action uses — the hook
+  behaviour.js's own code previously said outright didn't exist yet.
+- House points (`HousesTab.jsx`) now window to since-the-last-reset instead
+  of summing all-time, via a new `GET /behaviour/points-reset/latest`.
+- `GET /growth-profile/:studentId/behaviour` — the permanent record: all-time
+  incidents grouped by academic year, no reset-window applied, since raw
+  incidents are never touched by a reset. New "Behaviour" section on the
+  Growth Profile page.
+- Assignable "Behaviour Officer": `GET/PUT /api/behaviour/officer-config`,
+  reusing the same `{assigneeType:'role'|'user', assigneeValue}` +
+  `resolveStep()` primitive HR/payroll/report-card approval chains already
+  use (`server/utils/workflow-config.js`) — not the hardcoded `exams_officer`
+  pattern, which turned out not to be school-configurable at all. Assignment
+  grants full Behaviour access regardless of the assignee's base role, via a
+  `behaviourAccess()` wrapper in front of every route's existing rbac check.
+
+### Verified unchanged
+- Report Cards' existing `behaviourSummary()` integration (academic-calc.js)
+  reads only `behaviour_points_resets` + `behaviour_incidents.{type,points,
+  date}` — no shared contract touched by any of the above. Confirmed by
+  reading the code and running its dedicated test suite, not assumed.
+
+---
+
 ## [v5.30.0] — 2026-07-27 — feat(library): configurable categories, live search, lost-book flow, portal visibility
 
 Issue Book was two "paste an ID" text boxes with no validation, categories

@@ -1579,8 +1579,12 @@ The InnoLearn International School demo seed has students, teachers, and classes
 | `GET/POST/PUT/DELETE /api/finance/fee-structures` | premium | `scopeType` (all/classes/sections/students); `academicYearId`/`termId` resolved+validated by `_resolveAcademicPeriod()` (mirrors report-cards.js's `_resolveTermScope`); `POST .../:id/generate` bulk-creates invoices via `_resolveScopeStudents()` + sibling discounts |
 | `GET/POST/PUT/DELETE /api/finance/discount-policies` | premium | Sibling-discount tiers (`discount_policies`), one active `sibling` policy per school; applied by `_resolveSiblingDiscounts()` inside `/fee-structures/:id/generate` |
 | `GET/PUT /api/finance/invoice-reminder-config` | premium | Per-school overdue-reminder schedule (`invoice_reminder_config`) read by `invoice-overdue-cron.js` — before-due/on-due/recurring-after-due days |
-| `GET/POST /api/behaviour/incidents` | standard | `GET .../summary` merits/demerits per student |
+| `GET/POST /api/behaviour/incidents` | standard | `GET .../summary` merits/demerits per student, floored at the most recent `behaviour_points_resets` entry; `academicYearId`/`termId` resolved via `resolveAcademicPeriod()` |
 | `GET/POST /api/behaviour/appeals` | standard | `PATCH .../resolve` updates incident status atomically |
+| `GET/POST/PUT/DELETE /api/behaviour/categories` | standard | Flat `{meritPoints, demeritPoints}` per category, fully school-editable; auto-seeded (8 defaults) on first read via `_ensureDefaultCategories()`. Feeds Award Points directly — no separate hardcoded matrix |
+| `POST /api/behaviour/points-reset`, `GET .../points-reset/latest` | standard | Manual reset (also auto-fired by `POST /academic-config/transition-year` via exported `resetBehaviourPoints()`); `/latest` exposes the floor date for client-side windowing (e.g. house points) |
+| `GET/PUT /api/behaviour/officer-config` | standard | Assignable "Behaviour Officer" (`workflow_configs`, `{assigneeType,assigneeValue}`) — grants full `behaviour` access regardless of the assignee's base role, via `behaviourAccess()` wrapping every route's rbac check. PUT is admin/superadmin only |
+| `GET /api/growth-profile/:studentId/behaviour` | standard | All-time behaviour history grouped by academic year — no reset-window applied, the permanent record |
 | `GET/POST /api/exams` | standard | `GET /api/exams/:id/results` with class stats, `POST /api/exams/:id/results` bulk-upsert |
 | `GET /api/grades/report` | standard | Weighted average per student per subject via aggregation |
 | `GET/POST /api/admissions` | premium | `applicationRef` auto-generated, `stageHistory` append-only, `PATCH .../stage`, `GET .../stats` funnel |
