@@ -41,6 +41,19 @@ export default function HousesTab() {
   });
   const allLogs = incData?.data ?? [];
 
+  /* Most recent points-reset — house totals follow the same yearly
+     cycle as individual student totals (Governance Spec §2), so this
+     floors the window the same way /incidents/summary does server-side. */
+  const { data: resetData } = useQuery({
+    queryKey: ['behaviour', 'points-reset', 'latest'],
+    queryFn:  () => behaviourApi.pointsReset.latest(),
+    staleTime: 2 * 60_000,
+  });
+  const lastResetAt = resetData?.data?.resetAt ?? null;
+  const windowedLogs = useMemo(() => (
+    lastResetAt ? allLogs.filter(l => l.date && l.date >= lastResetAt.slice(0, 10)) : allLogs
+  ), [allLogs, lastResetAt]);
+
   /* House standings */
   const standings = useMemo(() => (
     houses.map(h => {
@@ -48,13 +61,13 @@ export default function HousesTab() {
       // records saved before the house field-name cleanup.
       const members   = allStudents.filter(s => (s.houseId ?? s.house) === (h.id ?? h.name));
       const memberIds = new Set(members.map(s => s.id ?? s._id));
-      const hLogs     = allLogs.filter(l => memberIds.has(l.studentId));
+      const hLogs     = windowedLogs.filter(l => memberIds.has(l.studentId));
       const merits    = hLogs.filter(l => l.type === 'merit').reduce((sum, l) => sum + (l.points ?? 0), 0);
       const demerits  = Math.abs(hLogs.filter(l => l.type === 'demerit').reduce((sum, l) => sum + (l.points ?? 0), 0));
       const net       = merits - demerits;
       return { ...h, members: members.length, merits, demerits, net, events: hLogs.length };
     }).sort((a, b) => b.net - a.net)
-  ), [houses, allStudents, allLogs]);
+  ), [houses, allStudents, windowedLogs]);
 
   /* Add / remove house */
   const [newName, setNewName]   = useState('');
@@ -104,7 +117,9 @@ export default function HousesTab() {
           <div className="flex items-center gap-2 mb-1">
             <Trophy size={15} className="text-amber-500" />
             <h3 className="text-sm font-semibold text-slate-800">House Standings</h3>
-            <span className="ml-auto text-xs text-slate-400">Based on all-time behaviour points</span>
+            <span className="ml-auto text-xs text-slate-400">
+              {lastResetAt ? `Since points reset (${new Date(lastResetAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })})` : 'Since the start of this academic year'}
+            </span>
           </div>
           {standings.map((h, i) => {
             const maxNet = Math.max(...standings.map(x => Math.abs(x.net)), 1);
@@ -225,7 +240,7 @@ export default function HousesTab() {
       <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-start gap-3">
         <Home size={15} className="text-blue-500 mt-0.5 shrink-0" />
         <p className="text-xs text-blue-700">
-          Students are assigned to a house in their individual profile. House points are computed automatically from all behaviour logs associated with students in that house.
+          Students are assigned to a house in their individual profile. House points are computed automatically from behaviour logs for students in that house, and reset on the same yearly cycle as individual student points.
         </p>
       </div>
     </motion.div>

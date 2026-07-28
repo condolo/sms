@@ -110,3 +110,20 @@ test('an explicit dateFrom query still overrides the reset floor', async () => {
   const stu1 = res.body.data.find(s => s._id === 'stu_1');
   expect(stu1.points).toBe(-2); // both incidents counted — explicit range wins
 });
+
+describe('GET /points-reset/latest — the floor HousesTab windows its all-time totals against', () => {
+  test('returns null when the school has never reset', async () => {
+    const res = await supertest(buildApp()).get('/api/behaviour/points-reset/latest');
+    expect(res.status).toBe(200);
+    expect(res.body.data.resetAt).toBeNull();
+  });
+
+  test('returns the most recent reset\'s timestamp', async () => {
+    await mockStores.behaviour_points_resets.create({ id: 'r_1', schoolId: SCHOOL, resetAt: '2026-01-01T00:00:00.000Z', resetBy: 'u_admin' });
+    await mockStores.behaviour_points_resets.create({ id: 'r_2', schoolId: SCHOOL, resetAt: '2026-06-01T00:00:00.000Z', resetBy: 'u_admin' });
+
+    const res = await supertest(buildApp()).get('/api/behaviour/points-reset/latest');
+    expect(res.status).toBe(200);
+    expect(res.body.data.resetAt).toBe('2026-06-01T00:00:00.000Z');
+  });
+});

@@ -257,6 +257,10 @@ export const behaviour = {
     resolve: (id, data)     => _patch(`/behaviour/appeals/${id}/resolve`, data),
   },
   categories: _resource('behaviour/categories'),
+  pointsReset: {
+    create: (data) => _post('/behaviour/points-reset', data ?? {}),
+    latest: ()     => _get('/behaviour/points-reset/latest'),
+  },
 };
 
 export const exams = {

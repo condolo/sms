@@ -165,6 +165,28 @@ router.get('/incidents', authMiddleware, PLAN, rbac('behaviour', 'read'), async 
   } catch (err) { console.error('[behaviour/incidents GET]', err); return E.serverError(res); }
 });
 
+/* Governance Spec §2 — a points reset never touches incident history;
+   it just moves the floor the running total is computed from. Shared
+   by /incidents/summary and /points-reset/latest so both surfaces
+   (student totals, house totals) agree on the same floor. */
+async function _lastResetDate(schoolId, ctx) {
+  const lastReset = await tenantModel('behaviour_points_resets', ctx)
+    .find({ schoolId }).sort({ resetAt: -1 }).limit(1).lean();
+  return lastReset[0]?.resetAt ?? null;
+}
+
+/* GET /api/behaviour/points-reset/latest — the date HousesTab and any
+   other all-time client-side aggregation should filter from, so house
+   points follow the same yearly cycle as individual student totals
+   instead of accumulating forever. */
+router.get('/points-reset/latest', authMiddleware, PLAN, rbac('behaviour', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const resetAt = await _lastResetDate(schoolId, tenantContext(req));
+    return ok(res, { resetAt });
+  } catch (err) { console.error('[behaviour/points-reset/latest GET]', err); return E.serverError(res); }
+});
+
 router.get('/incidents/summary', authMiddleware, PLAN, rbac('behaviour', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
@@ -176,12 +198,8 @@ router.get('/incidents/summary', authMiddleware, PLAN, rbac('behaviour', 'read')
       if (req.query.dateFrom) filter.date.$gte = req.query.dateFrom;
       if (req.query.dateTo)   filter.date.$lte = req.query.dateTo;
     } else {
-      // Governance Spec §2 — a points reset never touches incident history;
-      // it just moves the floor the running total is computed from. Only
-      // applies when the caller hasn't already asked for an explicit range.
-      const lastReset = await tenantModel('behaviour_points_resets', tenantContext(req))
-        .find({ schoolId }).sort({ resetAt: -1 }).limit(1).lean();
-      if (lastReset[0]) filter.date = { $gte: lastReset[0].resetAt.slice(0, 10) };
+      const resetAt = await _lastResetDate(schoolId, tenantContext(req));
+      if (resetAt) filter.date = { $gte: resetAt.slice(0, 10) };
     }
 
     const Incidents = tenantModel('behaviour_incidents', tenantContext(req));
