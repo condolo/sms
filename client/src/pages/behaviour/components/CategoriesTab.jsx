@@ -8,11 +8,152 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Tag, Plus, X, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { behaviour as behaviourApi } from '@/api/client.js';
+import { Tag, Plus, X, Loader2, CheckCircle2, AlertTriangle, ShieldCheck, Save } from 'lucide-react';
+import { behaviour as behaviourApi, teachers as teachersApi, settings as settingsApi } from '@/api/client.js';
 import { EmptyMsg, ErrState, FField, iCls } from './BehaviourPrimitives.jsx';
+import { useToast } from '@/hooks/useToast.jsx';
 
 const EMPTY_FORM = { name: '', meritPoints: '', demeritPoints: '', description: '' };
+
+// Mirrors hr/PayrollSettingsModal.jsx's own local copy — same built-in
+// role set, kept local rather than shared since each caller only needs
+// {key,label}, not the module-specific extras the HR copy carries.
+const BUILT_IN_STAFF_ROLES = [
+  { key: 'admin',                label: 'Admin' },
+  { key: 'deputy_principal',     label: 'Deputy Principal' },
+  { key: 'section_head',         label: 'Section Head' },
+  { key: 'teacher',              label: 'Teacher' },
+  { key: 'discipline_committee', label: 'Discipline Committee / Pastoral Office' },
+  { key: 'front_office',         label: 'Front Office' },
+];
+
+/* ── Behaviour Officer assignment (admin/superadmin only) ────────
+   Reuses the same {assigneeType:'role'|'user', assigneeValue}
+   primitive HR/payroll/report-card approval chains already use
+   (server/utils/workflow-config.js) — a role or a specific person,
+   never hardcoded. Whoever is assigned gets full Behaviour access
+   regardless of their base role's own permissions. */
+function OfficerAssignmentSection() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+
+  const { data: cfgData, isLoading } = useQuery({
+    queryKey: ['behaviour', 'officer-config'],
+    queryFn:  () => behaviourApi.officerConfig.get(),
+  });
+  const currentStep = cfgData?.data?.steps?.[0] ?? null;
+
+  const { data: teachersData } = useQuery({
+    queryKey: ['teachers', 'for-behaviour-officer'],
+    queryFn:  () => teachersApi.list({ limit: 200 }),
+  });
+  const teachers = teachersData?.teachers ?? teachersData?.data ?? [];
+
+  const { data: customRolesData } = useQuery({
+    queryKey: ['settings', 'custom-roles', 'for-behaviour-officer'],
+    queryFn:  () => settingsApi.customRoles.list(),
+  });
+  const customRoles = customRolesData ?? [];
+
+  const [assigneeType, setAssigneeType]   = useState(currentStep?.assigneeType ?? 'role');
+  const [assigneeValue, setAssigneeValue] = useState(currentStep?.assigneeValue ?? '');
+  const [editing, setEditing] = useState(false);
+
+  function startEditing() {
+    setAssigneeType(currentStep?.assigneeType ?? 'role');
+    setAssigneeValue(currentStep?.assigneeValue ?? '');
+    setEditing(true);
+  }
+
+  const { mutate: save, isPending: saving } = useMutation({
+    mutationFn: (steps) => behaviourApi.officerConfig.save({ steps }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['behaviour', 'officer-config'] });
+      setEditing(false);
+      toast.success('Behaviour Officer updated.');
+    },
+    onError: err => toast.error(err?.message ?? 'Failed to save.'),
+  });
+
+  function currentLabel() {
+    if (!currentStep) return null;
+    if (currentStep.assigneeType === 'role') {
+      return BUILT_IN_STAFF_ROLES.find(r => r.key === currentStep.assigneeValue)?.label
+        ?? customRoles.find(r => r.key === currentStep.assigneeValue)?.label
+        ?? currentStep.assigneeValue;
+    }
+    const t = teachers.find(t => (t.userId ?? t.id ?? t._id) === currentStep.assigneeValue);
+    return t ? (t.name ?? `${t.firstName} ${t.lastName}`) : 'Unknown person';
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+      <div className="flex items-center gap-2">
+        <ShieldCheck size={14} className="text-slate-500" />
+        <h3 className="text-sm font-semibold text-slate-800">Behaviour Officer</h3>
+      </div>
+      <p className="text-xs text-slate-500">
+        Assign a role or a specific person to oversee this module. They get full Behaviour access
+        (categories, incidents, resets) regardless of their own role's normal permissions.
+      </p>
+
+      {isLoading ? (
+        <div className="flex items-center gap-2 text-slate-400 text-xs py-2"><Loader2 size={13} className="animate-spin" /> Loading…</div>
+      ) : !editing ? (
+        <div className="flex items-center justify-between gap-3">
+          {currentStep ? (
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-violet-50 text-violet-700 border border-violet-200 rounded-full px-2.5 py-1">
+              {currentLabel()}{currentStep.assigneeType === 'role' ? ' (role)' : ''}
+            </span>
+          ) : (
+            <span className="text-xs text-slate-400">No Behaviour Officer assigned — normal role permissions apply to everyone.</span>
+          )}
+          <button onClick={startEditing} className="shrink-0 text-xs font-semibold text-violet-600 hover:underline">
+            {currentStep ? 'Change' : 'Assign'}
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <select value={assigneeType} onChange={e => { setAssigneeType(e.target.value); setAssigneeValue(''); }} className={iCls()}>
+              <option value="role">Role</option>
+              <option value="user">Specific person</option>
+            </select>
+            {assigneeType === 'role' ? (
+              <select value={assigneeValue} onChange={e => setAssigneeValue(e.target.value)} className={`${iCls()} flex-1`}>
+                <option value="">Select a role…</option>
+                {BUILT_IN_STAFF_ROLES.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
+                {customRoles.map(r => <option key={r.key} value={r.key}>{r.label} (custom)</option>)}
+              </select>
+            ) : (
+              <select value={assigneeValue} onChange={e => setAssigneeValue(e.target.value)} className={`${iCls()} flex-1`}>
+                <option value="">Select a person…</option>
+                {teachers.map(t => {
+                  const id = t.userId ?? t.id ?? t._id;
+                  return <option key={id} value={id}>{t.name ?? `${t.firstName} ${t.lastName}`}</option>;
+                })}
+              </select>
+            )}
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setEditing(false)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">Cancel</button>
+            {currentStep && (
+              <button onClick={() => save([])} disabled={saving}
+                className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50">
+                Remove assignment
+              </button>
+            )}
+            <button onClick={() => save([{ assigneeType, assigneeValue }])} disabled={saving || !assigneeValue}
+              className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-50">
+              {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function CategoriesTab() {
   const qc                    = useQueryClient();
@@ -173,6 +314,8 @@ export default function CategoriesTab() {
           ))}
         </div>
       )}
+
+      <OfficerAssignmentSection />
     </motion.div>
   );
 }

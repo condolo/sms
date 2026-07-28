@@ -1,10 +1,13 @@
 /* ============================================================
    Msingi — /api/behaviour  (Behaviour & Pastoral)
    Sub-routes:
-     /api/behaviour/incidents   — incident log
-     /api/behaviour/appeals     — appeal log
-     /api/behaviour/categories  — school behaviour categories (CRUD)
-   Plan: standard | RBAC: behaviour:{read,create,update,delete}
+     /api/behaviour/incidents      — incident log
+     /api/behaviour/appeals        — appeal log
+     /api/behaviour/categories     — school behaviour categories (CRUD)
+     /api/behaviour/officer-config — assignable "Behaviour Officer" role
+   Plan: standard | RBAC: behaviour:{read,create,update,delete}, OR the
+   assigned Behaviour Officer (see behaviourAccess() below) — being
+   assigned grants full access regardless of the assignee's base role.
    ============================================================ */
 const express = require('express');
 const { z }   = require('zod');
@@ -20,9 +23,52 @@ const { notifyGuardiansForStudents } = require('../utils/notify-students');
 const email = require('../utils/email');
 const { _model } = require('../utils/model');
 const { resolveAcademicPeriod } = require('../utils/academic-period');
+const { getWorkflowConfig, saveWorkflowConfig, resolveStep } = require('../utils/workflow-config');
 
 const router = express.Router();
 const PLAN   = planGate('behaviour');
+
+const OFFICER_WORKFLOW_KEY = 'behaviour_officer';
+
+/* Is this user the currently-assigned Behaviour Officer? Reuses the
+   same {assigneeType:'role'|'user', assigneeValue} + resolveStep()
+   primitive HR/payroll/report-card approval chains already use
+   (server/utils/workflow-config.js), rather than the hardcoded
+   exams_officer pattern — that one is baked into RBAC checks/arrays
+   throughout the codebase and isn't actually school-configurable. */
+async function _isBehaviourOfficer(schoolId, ctx, userId) {
+  if (!userId) return false;
+  const cfg = await getWorkflowConfig(ctx, schoolId, OFFICER_WORKFLOW_KEY);
+  const steps = cfg?.steps ?? [];
+  for (const step of steps) {
+    const candidates = await resolveStep(ctx, schoolId, step);
+    if (candidates.some(u => u.id === userId)) return true;
+  }
+  return false;
+}
+
+/* Drop-in replacement for rbac('behaviour', action): the assigned
+   Behaviour Officer passes through unconditionally (confirmed with
+   the requester — assignment itself grants full access, not just a
+   label); everyone else falls through to the normal role_permissions
+   check exactly as before. A failure resolving the officer config
+   never blocks access — it just skips the bypass and defers to the
+   existing rbac check, same fail-safe posture as every other
+   best-effort lookup in this codebase. */
+function behaviourAccess(action) {
+  const fallback = rbac('behaviour', action);
+  return async (req, res, next) => {
+    try {
+      const { schoolId, userId } = req.jwtUser || {};
+      if (schoolId && userId && await _isBehaviourOfficer(schoolId, tenantContext(req), userId)) {
+        return next();
+      }
+    } catch (err) {
+      console.error('[behaviour] officer-access check failed, falling back to role_permissions:', err.message);
+    }
+    return fallback(req, res, next);
+  };
+}
 
 /* ── Validation schemas ─────────────────────────────────────── */
 const IncidentSchema = z.object({
@@ -122,7 +168,7 @@ function _validate(schema, data) {
    INCIDENTS
    ══════════════════════════════════════════════════════════════ */
 
-router.get('/incidents', authMiddleware, PLAN, rbac('behaviour', 'read'), async (req, res) => {
+router.get('/incidents', authMiddleware, PLAN, behaviourAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -179,7 +225,7 @@ async function _lastResetDate(schoolId, ctx) {
    other all-time client-side aggregation should filter from, so house
    points follow the same yearly cycle as individual student totals
    instead of accumulating forever. */
-router.get('/points-reset/latest', authMiddleware, PLAN, rbac('behaviour', 'read'), async (req, res) => {
+router.get('/points-reset/latest', authMiddleware, PLAN, behaviourAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const resetAt = await _lastResetDate(schoolId, tenantContext(req));
@@ -187,7 +233,7 @@ router.get('/points-reset/latest', authMiddleware, PLAN, rbac('behaviour', 'read
   } catch (err) { console.error('[behaviour/points-reset/latest GET]', err); return E.serverError(res); }
 });
 
-router.get('/incidents/summary', authMiddleware, PLAN, rbac('behaviour', 'read'), async (req, res) => {
+router.get('/incidents/summary', authMiddleware, PLAN, behaviourAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId };
@@ -218,7 +264,7 @@ router.get('/incidents/summary', authMiddleware, PLAN, rbac('behaviour', 'read')
   } catch (err) { console.error('[behaviour/incidents/summary]', err); return E.serverError(res); }
 });
 
-router.get('/incidents/:id', authMiddleware, PLAN, rbac('behaviour', 'read'), async (req, res) => {
+router.get('/incidents/:id', authMiddleware, PLAN, behaviourAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('behaviour_incidents', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
@@ -227,7 +273,7 @@ router.get('/incidents/:id', authMiddleware, PLAN, rbac('behaviour', 'read'), as
   } catch (err) { console.error('[behaviour/incidents GET/:id]', err); return E.serverError(res); }
 });
 
-router.post('/incidents', authMiddleware, PLAN, rbac('behaviour', 'create'), async (req, res) => {
+router.post('/incidents', authMiddleware, PLAN, behaviourAccess('create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(IncidentSchema, req.body);
@@ -289,7 +335,7 @@ async function _notifyGuardians(req, incident) {
   });
 }
 
-router.put('/incidents/:id', authMiddleware, PLAN, rbac('behaviour', 'update'), async (req, res) => {
+router.put('/incidents/:id', authMiddleware, PLAN, behaviourAccess('update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(IncidentSchema.partial(), req.body);
@@ -320,7 +366,7 @@ router.put('/incidents/:id', authMiddleware, PLAN, rbac('behaviour', 'update'), 
   } catch (err) { console.error('[behaviour/incidents PUT/:id]', err); return E.serverError(res); }
 });
 
-router.delete('/incidents/:id', authMiddleware, PLAN, rbac('behaviour', 'delete'), async (req, res) => {
+router.delete('/incidents/:id', authMiddleware, PLAN, behaviourAccess('delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const doc = await tenantModel('behaviour_incidents', tenantContext(req)).findOneAndUpdate(
@@ -337,7 +383,7 @@ router.delete('/incidents/:id', authMiddleware, PLAN, rbac('behaviour', 'delete'
    APPEALS
    ══════════════════════════════════════════════════════════════ */
 
-router.get('/appeals', authMiddleware, PLAN, rbac('behaviour', 'read'), async (req, res) => {
+router.get('/appeals', authMiddleware, PLAN, behaviourAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -355,7 +401,7 @@ router.get('/appeals', authMiddleware, PLAN, rbac('behaviour', 'read'), async (r
   } catch (err) { console.error('[behaviour/appeals GET]', err); return E.serverError(res); }
 });
 
-router.post('/appeals', authMiddleware, PLAN, rbac('behaviour', 'create'), async (req, res) => {
+router.post('/appeals', authMiddleware, PLAN, behaviourAccess('create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(AppealSchema, req.body);
@@ -381,7 +427,7 @@ router.post('/appeals', authMiddleware, PLAN, rbac('behaviour', 'create'), async
   } catch (err) { console.error('[behaviour/appeals POST]', err); return E.serverError(res); }
 });
 
-router.put('/appeals/:id', authMiddleware, PLAN, rbac('behaviour', 'update'), async (req, res) => {
+router.put('/appeals/:id', authMiddleware, PLAN, behaviourAccess('update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(AppealSchema.partial(), req.body);
@@ -413,7 +459,7 @@ router.put('/appeals/:id', authMiddleware, PLAN, rbac('behaviour', 'update'), as
    CATEGORIES  (school-defined behaviour categories)
    ══════════════════════════════════════════════════════════════ */
 
-router.get('/categories', authMiddleware, PLAN, rbac('behaviour', 'read'), async (req, res) => {
+router.get('/categories', authMiddleware, PLAN, behaviourAccess('read'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     await _ensureDefaultCategories(schoolId, tenantContext(req), userId);
@@ -430,7 +476,7 @@ router.get('/categories', authMiddleware, PLAN, rbac('behaviour', 'read'), async
   } catch (err) { console.error('[behaviour/categories GET]', err); return E.serverError(res); }
 });
 
-router.post('/categories', authMiddleware, PLAN, rbac('behaviour', 'create'), async (req, res) => {
+router.post('/categories', authMiddleware, PLAN, behaviourAccess('create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(CategorySchema, req.body);
@@ -444,7 +490,7 @@ router.post('/categories', authMiddleware, PLAN, rbac('behaviour', 'create'), as
   } catch (err) { console.error('[behaviour/categories POST]', err); return E.serverError(res); }
 });
 
-router.put('/categories/:id', authMiddleware, PLAN, rbac('behaviour', 'update'), async (req, res) => {
+router.put('/categories/:id', authMiddleware, PLAN, behaviourAccess('update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(CategorySchema.partial(), req.body);
@@ -461,13 +507,50 @@ router.put('/categories/:id', authMiddleware, PLAN, rbac('behaviour', 'update'),
   } catch (err) { console.error('[behaviour/categories PUT/:id]', err); return E.serverError(res); }
 });
 
-router.delete('/categories/:id', authMiddleware, PLAN, rbac('behaviour', 'delete'), async (req, res) => {
+router.delete('/categories/:id', authMiddleware, PLAN, behaviourAccess('delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('behaviour_categories', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Category not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) { console.error('[behaviour/categories DELETE/:id]', err); return E.serverError(res); }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   OFFICER CONFIG — who the "Behaviour Officer" role is assigned to
+   ══════════════════════════════════════════════════════════════ */
+
+/* GET /api/behaviour/officer-config — any behaviour:read caller may
+   see who's currently assigned (needed just to display it). */
+router.get('/officer-config', authMiddleware, PLAN, behaviourAccess('read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const cfg = await getWorkflowConfig(tenantContext(req), schoolId, OFFICER_WORKFLOW_KEY);
+    return ok(res, { steps: cfg?.steps ?? [] });
+  } catch (err) { console.error('[behaviour/officer-config GET]', err); return E.serverError(res); }
+});
+
+/* PUT /api/behaviour/officer-config — admin/superadmin only. Deliberately
+   NOT gated by behaviourAccess(): reassigning who controls the module
+   is a governance action, not a behaviour:update action, and an
+   already-assigned officer reassigning themselves (or someone else)
+   without admin oversight would be a privilege-escalation path this
+   guards against. Empty steps ([]) is valid — it clears the
+   assignment, falling back to plain role_permissions for everyone. */
+router.put('/officer-config', authMiddleware, PLAN, async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    if (!['superadmin', 'admin'].includes(role)) {
+      return E.forbidden(res, 'Admin access required to assign the Behaviour Officer');
+    }
+    const steps = Array.isArray(req.body?.steps) ? req.body.steps : [];
+    const doc = await saveWorkflowConfig(tenantContext(req), schoolId, OFFICER_WORKFLOW_KEY, { steps }, userId, 0);
+    return ok(res, { steps: doc.steps });
+  } catch (err) {
+    if (err.statusCode === 400) return E.badRequest(res, err.message);
+    console.error('[behaviour/officer-config PUT]', err);
+    return E.serverError(res);
+  }
 });
 
 /* Governance Spec §2 — zeroes the CURRENT running-total balance shown
@@ -485,7 +568,7 @@ async function resetBehaviourPoints(schoolId, ctx, { resetBy, note } = {}) {
 }
 
 /* ── POST /api/behaviour/points-reset — manual, admin-triggered ── */
-router.post('/points-reset', authMiddleware, PLAN, rbac('behaviour', 'delete'), async (req, res) => {
+router.post('/points-reset', authMiddleware, PLAN, behaviourAccess('delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const doc = await resetBehaviourPoints(schoolId, tenantContext(req), { resetBy: userId, note: req.body?.note });
