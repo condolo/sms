@@ -10,9 +10,13 @@
    every other export type already uses.
 
    The one thing genuinely new here (not just "another type"): payroll
-   export is gated on its own dedicated action ('payroll_export'), not
-   the generic 'read' every other export type uses — verified below by
-   spying on the exact (module, action) pair rbac() is invoked with.
+   export is gated on its own dedicated sub-permission ('payroll_export'
+   under 'hr'), not the generic 'read' every other export type uses —
+   verified below by spying on the exact (module, action, subKey) rbac()
+   is invoked with. Uses rbac()'s subKey mechanism (server/middleware/
+   rbac.js) rather than a standalone action string, so it falls back to
+   plain hr:read until a school explicitly narrows it via Settings →
+   Roles & Permissions instead of being ungrantable by default.
 
    All DB calls are mocked — no MongoDB required.
    ============================================================ */
@@ -48,8 +52,8 @@ jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = mockCurrentUser; next(); },
 }));
 jest.mock('../../middleware/rbac', () => ({
-  rbac: (mod, action) => (_req, res, next) => {
-    mockRbacCalls.push([mod, action]);
+  rbac: (mod, action, subKey) => (_req, res, next) => {
+    mockRbacCalls.push(subKey ? [mod, action, subKey] : [mod, action]);
     if (mockRbacDeny) return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'denied' } });
     next();
   },
@@ -128,10 +132,10 @@ describe('GET /api/import-export/export/payroll', () => {
     expect(lines[1]).toContain('u_staff_1');
   });
 
-  test('is gated on the dedicated hr.payroll_export action, not the generic hr.read', async () => {
+  test('is gated on the dedicated hr.payroll_export sub-permission, not plain hr.read', async () => {
     const app = buildApp();
     await supertest(app).get('/api/import-export/export/payroll');
-    expect(mockRbacCalls).toContainEqual(['hr', 'payroll_export']);
+    expect(mockRbacCalls).toContainEqual(['hr', 'read', 'payroll_export']);
     expect(mockRbacCalls).not.toContainEqual(['hr', 'read']);
   });
 

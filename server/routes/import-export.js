@@ -1259,18 +1259,21 @@ router.post('/:type', authMiddleware, rawText, /* rbac: dynamic — checked via 
    Export all records as a downloadable CSV
    ──────────────────────────────────────────────────────────── */
 /* Module map for export rbac — export requires read permission on the
-   entity's module by default. payroll uses its own dedicated
-   moduleRegistry.js permission key (hr.payroll_export) rather than the
-   generic hr.read, since exporting payroll figures is a materially more
-   sensitive action than viewing them on-screen — a school may want HR
-   staff to see payroll but not bulk-download it. */
+   entity's module by default. payroll checks the dedicated 'payroll_export'
+   sub-permission (server/config/moduleRegistry.js's hr.payroll_export row)
+   via rbac's subKey support, since exporting payroll figures is a materially
+   more sensitive action than viewing them on-screen — a school may want HR
+   staff to see payroll but not bulk-download it. Falls back to plain hr:read
+   until a school explicitly narrows it via Settings → Roles & Permissions
+   (rbac()'s subKey fallback rule), so this isn't blocked for everyone by
+   default the way a standalone action string with no seeded grant would be. */
 const EXPORT_MODULE = {
   students:  'students',
   teachers:  'teachers',
   classes:   'classes',
   timetable: 'timetable',
   finance:   'finance',
-  payroll:   { module: 'hr', action: 'payroll_export' },
+  payroll:   { module: 'hr', action: 'read', subKey: 'payroll_export' },
 };
 
 router.get('/export/:type', authMiddleware, /* rbac: dynamic — checked via EXPORT_MODULE map inside handler */ async (req, res) => {
@@ -1278,13 +1281,13 @@ router.get('/export/:type', authMiddleware, /* rbac: dynamic — checked via EXP
   const { schoolId } = req.jwtUser;
 
   /* Check RBAC — export requires read permission on the module (or the
-     type's own explicit {module,action} override, e.g. payroll above) */
+     type's own explicit {module,action,subKey} override, e.g. payroll above) */
   const exportSpec = EXPORT_MODULE[type];
   if (exportSpec) {
-    const { module: rbacModule, action: rbacAction } =
+    const { module: rbacModule, action: rbacAction, subKey: rbacSubKey } =
       typeof exportSpec === 'string' ? { module: exportSpec, action: 'read' } : exportSpec;
     const rbacOk = await new Promise(resolve => {
-      rbac(rbacModule, rbacAction)(req, res, () => resolve(true));
+      rbac(rbacModule, rbacAction, rbacSubKey)(req, res, () => resolve(true));
     }).catch(() => false);
     if (!rbacOk) return;
   }

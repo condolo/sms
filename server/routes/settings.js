@@ -61,15 +61,26 @@ function _genTempPassword() {
 
 /* ── Derive backend API permissions from the V/E/D matrix ─── */
 // Used when a custom role's module-permissions are saved to also update role_permissions.
+// Persists BOTH the coarse module-level union (permissions.<mod>, unchanged —
+// every rbac(mod, action) call site that doesn't pass a subKey keeps working
+// exactly as before) AND each individual sub-level grant
+// (permissions.<mod>__<sub>, e.g. "hr__leave_view": ["read"]) so routes that
+// opt into finer-grained checks via rbac(mod, action, subKey) can grant one
+// sub-feature (e.g. viewing leave requests) without also granting sibling
+// sub-features under the same module (e.g. payroll) that happen to share the
+// same module-level key.
 function _deriveApiPerms(byRoleCell) {
   const perms = {};
   for (const mod of MODULE_KEYS) {
     const actions = new Set();
     for (const [key, cell] of Object.entries(byRoleCell ?? {})) {
       if (!key.startsWith(`${mod}__`)) continue;
-      if (cell.v) actions.add('read');
-      if (cell.e) { actions.add('create'); actions.add('update'); }
-      if (cell.d) actions.add('delete');
+      const subActions = [];
+      if (cell.v) subActions.push('read');
+      if (cell.e) { subActions.push('create'); subActions.push('update'); }
+      if (cell.d) subActions.push('delete');
+      perms[key] = subActions; // sub-level grant, e.g. perms['hr__leave_view']
+      subActions.forEach(a => actions.add(a));
     }
     perms[mod] = [...actions]; // always include — empty array means no access, module hidden from sidebar
   }
@@ -1262,3 +1273,4 @@ router.put('/admission-counter', authMiddleware, rbac('settings', 'update'), asy
 });
 
 module.exports = router;
+module.exports._deriveApiPerms = _deriveApiPerms; // test-only access, same pattern as behaviour.js's resetBehaviourPoints

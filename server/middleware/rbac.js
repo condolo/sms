@@ -93,14 +93,26 @@ async function _loadUserPerms(schoolId, userId) {
 
 /* ── Middleware factory ──────────────────────────────────────── */
 /**
- * rbac(module, action)
+ * rbac(module, action, subKey?)
  * Returns Express middleware that checks whether the requesting user
  * has the required permission. Must be used AFTER authMiddleware.
  *
- * @param {string} mod    - Permission module, e.g. 'students'
- * @param {string} action - Permission action, e.g. 'read', 'create', 'update', 'delete'
+ * When subKey is provided AND the role/user has an explicit grant for
+ * `${module}__${subKey}` (written by Settings → Roles & Permissions'
+ * per-sub V/E/D checkboxes, see settings.js's _deriveApiPerms()), that
+ * sub-level grant is checked INSTEAD of the coarse module-level grant —
+ * this is what lets "View Leave Requests" and "View Payroll" be granted
+ * independently within the same 'hr' module. If no sub-level grant
+ * exists (module not yet customized at that granularity, or the caller
+ * didn't pass a subKey), this falls back to the original module-level
+ * check exactly as before — fully backward compatible with every
+ * existing rbac(module, action) call site.
+ *
+ * @param {string} mod     - Permission module, e.g. 'students'
+ * @param {string} action  - Permission action, e.g. 'read', 'create', 'update', 'delete'
+ * @param {string} [subKey] - Optional sub-permission key, e.g. 'payroll_view'
  */
-function rbac(mod, action) {
+function rbac(mod, action, subKey) {
   return async (req, res, next) => {
     try {
       const { userId, schoolId, role, roles = [] } = req.jwtUser || {};
@@ -118,15 +130,20 @@ function rbac(mod, action) {
       // User-level overrides win for any module they specify; role perms fill the rest
       const perms = userPerms ? { ...rolePerms, ...userPerms } : rolePerms;
 
-      // Check if the module+action is permitted
-      const allowed = Array.isArray(perms[mod]) && perms[mod].includes(action);
+      const subFullKey = subKey ? `${mod}__${subKey}` : null;
+      const hasSubGrant = subFullKey && Array.isArray(perms[subFullKey]);
+
+      // Check if the module(+sub)+action is permitted
+      const allowed = hasSubGrant
+        ? perms[subFullKey].includes(action)
+        : Array.isArray(perms[mod]) && perms[mod].includes(action);
 
       if (!allowed) {
         return res.status(403).json({
           success: false,
           error: {
             code: 'FORBIDDEN',
-            message: `Your role does not have '${action}' permission on '${mod}'`
+            message: `Your role does not have '${action}' permission on '${mod}'${subKey ? ` (${subKey})` : ''}`
           }
         });
       }

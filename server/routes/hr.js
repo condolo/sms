@@ -431,7 +431,7 @@ router.patch('/leave/:id/advance', authMiddleware, async (req, res) => {
 
 /* PATCH /api/hr/leave/:id/resolve — HR's final confirmation (or, for schools with
    no configured chain, the single-step legacy resolution — unchanged behavior). */
-router.patch('/leave/:id/resolve', rbac('hr', 'update'), async (req, res) => {
+router.patch('/leave/:id/resolve', rbac('hr', 'update', 'leave_approve'), async (req, res) => {
   try {
     const { schoolId, userId, name, role, email } = req.jwtUser;
 
@@ -564,7 +564,7 @@ async function _resolveStatutoryInfo(schoolId) {
 }
 
 /* GET /api/hr/payroll-config — fetch this school's payroll policy (with defaults) */
-router.get('/payroll-config', rbac('hr', 'read'), async (req, res) => {
+router.get('/payroll-config', rbac('hr', 'read', 'payroll_view'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const [saved, statutory] = await Promise.all([
@@ -659,7 +659,7 @@ router.get('/payroll/mine', async (req, res) => {
 });
 
 /* GET /api/hr/payroll — list records for a period */
-router.get('/payroll', rbac('hr', 'read'), async (req, res) => {
+router.get('/payroll', rbac('hr', 'read', 'payroll_view'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
 
@@ -1193,7 +1193,7 @@ router.get('/payroll/:id/pdf', async (req, res) => {
    (Step 7). Written only when an admin edits a locked confirmed/paid
    record (see POST /payroll's wasLocked branch) — this is an audit
    trail of overwritten "official" figures, not a general history feed. */
-router.get('/payroll-history', rbac('hr', 'read'), async (req, res) => {
+router.get('/payroll-history', rbac('hr', 'read', 'payroll_view'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { staffId, payrollId } = req.query;
@@ -1220,7 +1220,7 @@ router.get('/payroll-history', rbac('hr', 'read'), async (req, res) => {
    on current employee data when regenerating historical payslips."
    Rendered with a distinct HISTORICAL watermark (not DRAFT) since the
    snapshot WAS official at the moment it was superseded. */
-router.get('/payroll-history/:id/pdf', rbac('hr', 'read'), async (req, res) => {
+router.get('/payroll-history/:id/pdf', rbac('hr', 'read', 'payroll_view'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
 
@@ -1281,7 +1281,7 @@ router.get('/documents', async (req, res) => {
 });
 
 /* POST /api/hr/documents */
-router.post('/documents', rbac('hr', 'create'), async (req, res) => {
+router.post('/documents', rbac('hr', 'create', 'documents'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
 
@@ -1311,7 +1311,7 @@ router.post('/documents', rbac('hr', 'create'), async (req, res) => {
 });
 
 /* PUT /api/hr/documents/:id */
-router.put('/documents/:id', rbac('hr', 'update'), async (req, res) => {
+router.put('/documents/:id', rbac('hr', 'update', 'documents'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
 
@@ -1329,7 +1329,7 @@ router.put('/documents/:id', rbac('hr', 'update'), async (req, res) => {
 });
 
 /* DELETE /api/hr/documents/:id */
-router.delete('/documents/:id', rbac('hr', 'delete'), async (req, res) => {
+router.delete('/documents/:id', rbac('hr', 'delete', 'documents'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
 
