@@ -6,8 +6,11 @@
      library_books  — book catalogue
      library_loans  — issue / return records
 
-   Plan:  standard | RBAC: MANAGE_ROLES for write; all auth users
-          can read catalogue and their own loans.
+   Plan:  standard | RBAC: rbac('library', action, subKey) — 'manage' for
+          catalogue writes, 'issue' for loan writes, 'delete'/'reports' for
+          their own rows. Every role with library:read (the school-wide
+          default) can browse the catalogue and see their own loans; only
+          a role with issue-management access sees every borrower's loans.
 
    Fine logic: default KSh 10 / overdue day; school can override
    via query param finePerDay on the return endpoint.
@@ -19,6 +22,7 @@ const { v4: uuidv4 } = require('uuid');
 const { authMiddleware } = require('../middleware/auth');
 const { planGate }       = require('../middleware/plan');
 const { moduleGate }     = require('../middleware/module-gate');
+const { rbac, hasPermission } = require('../middleware/rbac');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 
@@ -26,9 +30,6 @@ const router = express.Router();
 const PLAN   = planGate('library');
 
 router.use(authMiddleware, PLAN, moduleGate('library'));
-
-/* ── Roles allowed to manage the library ───────────────────── */
-const MANAGE_ROLES = new Set(['superadmin', 'admin', 'librarian']);
 
 /* ── Library config — school-configurable category catalogue ──
    Same one-doc-per-school / merged-over-defaults shape as
@@ -115,7 +116,7 @@ async function _checkBorrowerFK(schoolId, ctx, { borrowerType, borrowerId }) {
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/library/config */
-router.get('/config', async (req, res) => {
+router.get('/config', rbac('library', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const saved = await tenantModel('library_config', tenantContext(req)).findOne({ schoolId }).lean();
@@ -127,10 +128,9 @@ router.get('/config', async (req, res) => {
 });
 
 /* PUT /api/library/config */
-router.put('/config', async (req, res) => {
+router.put('/config', rbac('library', 'update', 'manage'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Library staff or Admin access required');
+    const { schoolId, userId } = req.jwtUser;
 
     const { data, error } = _validate(LibraryConfigSchema, req.body);
     if (error) return E.validation(res, error);
@@ -157,7 +157,7 @@ router.put('/config', async (req, res) => {
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/library/books */
-router.get('/books', async (req, res) => {
+router.get('/books', rbac('library', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -183,7 +183,7 @@ router.get('/books', async (req, res) => {
 });
 
 /* GET /api/library/books/:id */
-router.get('/books/:id', async (req, res) => {
+router.get('/books/:id', rbac('library', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('library_books', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
@@ -196,10 +196,9 @@ router.get('/books/:id', async (req, res) => {
 });
 
 /* POST /api/library/books */
-router.post('/books', async (req, res) => {
+router.post('/books', rbac('library', 'create', 'manage'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Library staff or Admin access required');
+    const { schoolId, userId } = req.jwtUser;
 
     const { data, error } = _validate(BookSchema, req.body);
     if (error) return E.validation(res, error);
@@ -221,10 +220,9 @@ router.post('/books', async (req, res) => {
 });
 
 /* PUT /api/library/books/:id */
-router.put('/books/:id', async (req, res) => {
+router.put('/books/:id', rbac('library', 'update', 'manage'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Library staff or Admin access required');
+    const { schoolId, userId } = req.jwtUser;
 
     const existing = await tenantModel('library_books', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Book not found');
@@ -249,10 +247,9 @@ router.put('/books/:id', async (req, res) => {
 });
 
 /* DELETE /api/library/books/:id */
-router.delete('/books/:id', async (req, res) => {
+router.delete('/books/:id', rbac('library', 'delete', 'delete'), async (req, res) => {
   try {
-    const { schoolId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Library staff or Admin access required');
+    const { schoolId } = req.jwtUser;
 
     /* Block deletion if any copies are on loan */
     const activeLoans = await tenantModel('library_loans', tenantContext(req)).countDocuments({
@@ -276,15 +273,20 @@ router.delete('/books/:id', async (req, res) => {
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/library/loans */
-router.get('/loans', async (req, res) => {
+router.get('/loans', rbac('library', 'read'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
+    const { schoolId, userId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
     const { status, borrowerId, bookId } = req.query;
 
     const filter = { schoolId };
-    /* Non-library staff only see their own loans */
-    if (!MANAGE_ROLES.has(role)) {
+    /* Only callers with library-issue management access see everyone's
+       loans; everyone else (the common case — students/staff checking
+       their own borrowing) is scoped to their own records. This is a
+       narrowing, not a gate — the rbac() check above already establishes
+       baseline library:read access. */
+    const canManage = await hasPermission(req, 'library', 'update', 'issue');
+    if (!canManage) {
       filter.borrowerId = userId;
     } else {
       if (borrowerId) filter.borrowerId = borrowerId;
@@ -304,10 +306,9 @@ router.get('/loans', async (req, res) => {
 });
 
 /* POST /api/library/loans — issue a book */
-router.post('/loans', async (req, res) => {
+router.post('/loans', rbac('library', 'create', 'issue'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Library staff or Admin access required');
+    const { schoolId, userId } = req.jwtUser;
 
     const { data, error } = _validate(LoanSchema, req.body);
     if (error) return E.validation(res, error);
@@ -360,10 +361,9 @@ router.post('/loans', async (req, res) => {
 });
 
 /* PATCH /api/library/loans/:id/return — return a book */
-router.patch('/loans/:id/return', async (req, res) => {
+router.patch('/loans/:id/return', rbac('library', 'update', 'issue'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Library staff or Admin access required');
+    const { schoolId, userId } = req.jwtUser;
 
     const loan = await tenantModel('library_loans', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!loan) return E.notFound(res, 'Loan record not found');
@@ -409,10 +409,9 @@ router.patch('/loans/:id/return', async (req, res) => {
 });
 
 /* PATCH /api/library/loans/:id/lost — mark a book lost (permanent, unlike a return) */
-router.patch('/loans/:id/lost', async (req, res) => {
+router.patch('/loans/:id/lost', rbac('library', 'update', 'issue'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Library staff or Admin access required');
+    const { schoolId, userId } = req.jwtUser;
 
     const loan = await tenantModel('library_loans', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!loan) return E.notFound(res, 'Loan record not found');
@@ -445,10 +444,9 @@ router.patch('/loans/:id/lost', async (req, res) => {
 });
 
 /* ── Overdue sync — mark active loans past their due date as overdue */
-router.post('/loans/sync-overdue', async (req, res) => {
+router.post('/loans/sync-overdue', rbac('library', 'update', 'issue'), async (req, res) => {
   try {
-    const { schoolId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Library staff or Admin access required');
+    const { schoolId } = req.jwtUser;
 
     const today = new Date().toISOString().slice(0, 10);
     const result = await tenantModel('library_loans', tenantContext(req)).updateMany(
@@ -463,10 +461,9 @@ router.post('/loans/sync-overdue', async (req, res) => {
 });
 
 /* ── Summary ─────────────────────────────────────────────────── */
-router.get('/summary', async (req, res) => {
+router.get('/summary', rbac('library', 'read', 'reports'), async (req, res) => {
   try {
-    const { schoolId, role } = req.jwtUser;
-    if (!MANAGE_ROLES.has(role)) return E.forbidden(res, 'Library staff or Admin access required');
+    const { schoolId } = req.jwtUser;
 
     const today = new Date().toISOString().slice(0, 10);
 

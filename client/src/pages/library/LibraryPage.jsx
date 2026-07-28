@@ -9,8 +9,6 @@ import { library as libApi, classes as classesApi, students as studentsApi, teac
 import useAuthStore from '@/store/auth.js';
 import { useToast } from '@/hooks/useToast.jsx';
 
-const MANAGE_ROLES = new Set(['superadmin', 'admin', 'librarian']);
-
 /* KpiCard — shared themed component (see @/components/ui/KpiCard.jsx) */
 
 /* ── Empty state ───────────────────────────────────────────── */
@@ -354,8 +352,14 @@ function LoanModal({ onClose, onSave }) {
 export default function LibraryPage() {
   const qc      = useQueryClient();
   const { toast } = useToast();
-  const role    = useAuthStore(s => s.session?.user?.role ?? 'student');
-  const canEdit = MANAGE_ROLES.has(role);
+  const role = useAuthStore(s => s.session?.user?.role ?? 'student');
+  const can  = useAuthStore(s => s.can.bind(s));
+  // library:read is granted broadly by default (everyone can browse the
+  // catalogue) — check the 'create' action specifically so read-only roles
+  // don't see manage controls they'd just get a 403 clicking. The real
+  // enforcement boundary is the server's rbac('library', action, subKey)
+  // checks, not this UI gate.
+  const canEdit = can('library', 'create') || role === 'admin' || role === 'superadmin';
 
   const [tab,    setTab]    = useState('books');    // books | loans
   const [search, setSearch] = useState('');

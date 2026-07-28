@@ -45,11 +45,18 @@ function makeFakeCollection(seed = []) {
   };
 }
 
-const mockJwtUser = { userId: 'usr_librarian', schoolId: SCHOOL_A, role: 'librarian', roles: ['librarian'] };
+const mockJwtUser = { userId: 'usr_admin', schoolId: SCHOOL_A, role: 'admin', roles: ['admin'] };
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = mockJwtUser; next(); },
 }));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
+jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res, next) => next() }));
+// This file's focus is the return/lost business logic, not permission
+// mechanics (covered separately by rbac-subkey.test.js) — pass-through.
+jest.mock('../../middleware/rbac', () => ({
+  rbac: () => (_req, _res, next) => next(),
+  hasPermission: async () => true,
+}));
 
 let mockBooks, mockLoans;
 jest.mock('../../utils/model', () => ({

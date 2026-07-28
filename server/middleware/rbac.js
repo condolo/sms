@@ -112,31 +112,55 @@ async function _loadUserPerms(schoolId, userId) {
  * @param {string} action  - Permission action, e.g. 'read', 'create', 'update', 'delete'
  * @param {string} [subKey] - Optional sub-permission key, e.g. 'payroll_view'
  */
+/* Shared by rbac()'s middleware path and the standalone hasPermission()
+   helper below — same subKey-falls-back-to-module-level rule either way. */
+async function _isAllowed(jwtUser, mod, action, subKey) {
+  const { userId, schoolId, role, roles = [] } = jwtUser || {};
+  if (!schoolId || !role) return false;
+  if (_isSuperRole(role, roles)) return true;
+
+  const rolePerms = await _loadPerms(schoolId, role);
+  const userPerms = await _loadUserPerms(schoolId, userId);
+  const perms = userPerms ? { ...rolePerms, ...userPerms } : rolePerms;
+
+  const subFullKey = subKey ? `${mod}__${subKey}` : null;
+  const hasSubGrant = subFullKey && Array.isArray(perms[subFullKey]);
+
+  return hasSubGrant
+    ? perms[subFullKey].includes(action)
+    : Array.isArray(perms[mod]) && perms[mod].includes(action);
+}
+
+/**
+ * hasPermission(req, module, action, subKey?)
+ * Standalone (non-middleware) permission check for handlers that need to
+ * branch on a permission INSIDE their own logic rather than gate the
+ * whole route — e.g. narrowing a list query to "your own records" for
+ * callers without a broader grant, the way GET /api/library/loans scopes
+ * results instead of 403ing outright. Same subKey-falls-back-to-module
+ * rule as rbac(); never throws — a lookup failure resolves to false,
+ * the same fail-closed posture rbac()'s own catch block has (a caller
+ * using this for scoping should treat false as "narrow the query", not
+ * "something broke").
+ */
+async function hasPermission(req, mod, action, subKey) {
+  try {
+    return await _isAllowed(req.jwtUser, mod, action, subKey);
+  } catch (err) {
+    console.error('[RBAC] hasPermission lookup failed:', err.message);
+    return false;
+  }
+}
+
 function rbac(mod, action, subKey) {
   return async (req, res, next) => {
     try {
-      const { userId, schoolId, role, roles = [] } = req.jwtUser || {};
-
+      const { schoolId, role } = req.jwtUser || {};
       if (!schoolId || !role) {
         return res.status(401).json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Authentication required' } });
       }
 
-      // Superadmin bypass all permission checks
-      if (_isSuperRole(role, roles)) return next();
-
-      const rolePerms = await _loadPerms(schoolId, role);
-      const userPerms = await _loadUserPerms(schoolId, userId);
-
-      // User-level overrides win for any module they specify; role perms fill the rest
-      const perms = userPerms ? { ...rolePerms, ...userPerms } : rolePerms;
-
-      const subFullKey = subKey ? `${mod}__${subKey}` : null;
-      const hasSubGrant = subFullKey && Array.isArray(perms[subFullKey]);
-
-      // Check if the module(+sub)+action is permitted
-      const allowed = hasSubGrant
-        ? perms[subFullKey].includes(action)
-        : Array.isArray(perms[mod]) && perms[mod].includes(action);
+      const allowed = await _isAllowed(req.jwtUser, mod, action, subKey);
 
       if (!allowed) {
         return res.status(403).json({
@@ -156,4 +180,4 @@ function rbac(mod, action, subKey) {
   };
 }
 
-module.exports = { rbac, invalidatePermCache };
+module.exports = { rbac, hasPermission, invalidatePermCache };

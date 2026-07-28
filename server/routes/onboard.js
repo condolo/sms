@@ -528,7 +528,7 @@ function _defaultPerms(role) {
         students:     R,    teachers:     R,    classes:      R,
         attendance:   RCU,  grades:       RCU,  assessment:   RCU,
         timetable:    R,    messages:     RCU,  report_cards: R,
-        exams:        R,    lessons:      RCUD,
+        exams:        R,    lessons:      RCUD, library:      R,
       };
 
     case 'finance':
@@ -536,6 +536,7 @@ function _defaultPerms(role) {
         students:     R,
         finance:      RCUD,
         report_cards: R,
+        library:      R,
       };
 
     case 'hr':
@@ -543,6 +544,7 @@ function _defaultPerms(role) {
         hr:           RCUD,
         teachers:     RCUD,
         students:     R,
+        library:      R,
       };
 
     case 'admissions_officer':
@@ -550,6 +552,7 @@ function _defaultPerms(role) {
         admissions:   RCUD,
         students:     RCU,
         classes:      R,
+        library:      R,
       };
 
     case 'exams_officer':
@@ -560,6 +563,7 @@ function _defaultPerms(role) {
         students:     R,
         classes:      R,
         report_cards: R,
+        library:      R,
       };
 
     case 'timetabler':
@@ -567,6 +571,7 @@ function _defaultPerms(role) {
         timetable:    RCUD,
         classes:      RCU,
         teachers:     R,
+        library:      R,
       };
 
     case 'section_head':
@@ -575,6 +580,7 @@ function _defaultPerms(role) {
         attendance:   R,   grades:       R,   assessment:   R,
         exams:        R,   timetable:    R,   report_cards: R,
         admissions:   R,   lessons:      RCU, analytics:    R,
+        library:      R,
       };
 
     case 'principal':
@@ -584,13 +590,14 @@ function _defaultPerms(role) {
         attendance:   RCUD, grades:       RCUD, assessment:   RCUD,
         exams:        RCUD, behaviour:    RCUD, timetable:    RCUD,
         messages:     RCUD, report_cards: RCU,  admissions:   RCU,
-        lessons:      RCUD, analytics:    R,
+        lessons:      RCUD, analytics:    R,    library:      R,
       };
 
     case 'discipline_committee':
       return {
         behaviour:    RCUD,
         students:     R,
+        library:      R,
       };
 
     case 'parent':
@@ -604,6 +611,7 @@ function _defaultPerms(role) {
       return {
         messages:     R,
         lessons:      R,   // view curriculum coverage for their class
+        library:      R,
       };
 
     default:

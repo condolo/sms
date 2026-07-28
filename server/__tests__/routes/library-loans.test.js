@@ -4,10 +4,18 @@
 
    Covers the reliability gap behind "staff should see their own
    borrowed books in the Library module": GET /loans already scoped
-   non-manage-role viewers to `borrowerId === their own userId`, but
-   nothing validated that a librarian's free-typed borrowerId actually
-   matched a real person — so a typo silently made a loan invisible to
-   the very person who borrowed it. _checkBorrowerFK closes that.
+   non-manage viewers to `borrowerId === their own userId`, but
+   nothing validated that a free-typed borrowerId actually matched a
+   real person — so a typo silently made a loan invisible to the very
+   person who borrowed it. _checkBorrowerFK closes that.
+
+   rbac() itself has its own dedicated test coverage (rbac-subkey.test.js)
+   — this file mocks it as a pass-through and controls hasPermission()
+   directly, so these tests stay focused on FK validation and the
+   self-scoping logic library.js actually implements, not permission
+   mechanics. 'librarian' was never a real assignable system role (see
+   Library RBAC rewire — library.js used to hardcode a role-name set
+   including it); real roles like 'admin'/'teacher' are used instead.
 
    All DB calls are mocked — no MongoDB required.
    ============================================================ */
@@ -50,11 +58,18 @@ function makeFakeCollection(seed = []) {
   };
 }
 
-let mockJwtUser = { userId: 'usr_librarian', schoolId: SCHOOL_A, role: 'librarian', roles: ['librarian'] };
+let mockJwtUser = { userId: 'usr_admin', schoolId: SCHOOL_A, role: 'admin', roles: ['admin'] };
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = mockJwtUser; next(); },
 }));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
+jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res, next) => next() }));
+
+let mockCanManageLoans = true; // controls hasPermission('library','update','issue') for self-scoping tests
+jest.mock('../../middleware/rbac', () => ({
+  rbac: () => (_req, _res, next) => next(),
+  hasPermission: async () => mockCanManageLoans,
+}));
 
 let mockBooks, mockLoans, mockStudents, mockTeachers;
 
@@ -81,7 +96,8 @@ function buildApp() {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockJwtUser  = { userId: 'usr_librarian', schoolId: SCHOOL_A, role: 'librarian', roles: ['librarian'] };
+  mockJwtUser  = { userId: 'usr_admin', schoolId: SCHOOL_A, role: 'admin', roles: ['admin'] };
+  mockCanManageLoans = true;
   mockBooks    = makeFakeCollection([{ id: 'book_1', schoolId: SCHOOL_A, title: 'Physics', available: 2, copies: 2 }]);
   mockLoans    = makeFakeCollection([]);
   mockStudents = makeFakeCollection([{ id: 'stu_1', schoolId: SCHOOL_A, firstName: 'A', lastName: 'One' }]);
@@ -139,6 +155,7 @@ describe('GET /loans — self-scoping for non-manage roles depends on a correct 
     });
 
     mockJwtUser = { userId: 'usr_teacher_1', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
+    mockCanManageLoans = false; // a plain teacher does not have issue-management access
     const res = await supertest(buildApp()).get('/api/library/loans');
     expect(res.status).toBe(200);
     expect(res.body.data.length).toBe(1);
@@ -151,8 +168,21 @@ describe('GET /loans — self-scoping for non-manage roles depends on a correct 
     });
 
     mockJwtUser = { userId: 'usr_other_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
+    mockCanManageLoans = false;
     const res = await supertest(buildApp()).get('/api/library/loans');
     expect(res.status).toBe(200);
     expect(res.body.data.length).toBe(0);
+  });
+
+  test('a role with issue-management access sees every borrower\'s loan', async () => {
+    await supertest(buildApp()).post('/api/library/loans').send({
+      bookId: 'book_1', borrowerId: 'usr_teacher_1', borrowerType: 'staff', dueDate,
+    });
+
+    mockJwtUser = { userId: 'usr_admin', schoolId: SCHOOL_A, role: 'admin', roles: ['admin'] };
+    mockCanManageLoans = true;
+    const res = await supertest(buildApp()).get('/api/library/loans');
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBe(1);
   });
 });

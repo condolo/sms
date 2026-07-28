@@ -42,7 +42,7 @@ const ROLE_DEFAULTS = {
     attendance:   RCU,  grades:       RCU,  assessment:   RCU,
     timetable:    R,    messages:     RCU,  events:       R,
     report_cards: R,    exams:        R,    lessons:      RCUD,
-    resources:    RCU,
+    resources:    RCU,  library:      R,
   },
 
   principal: {
@@ -51,6 +51,7 @@ const ROLE_DEFAULTS = {
     exams:        RCUD, behaviour:    RCUD, timetable:    RCUD,
     messages:     RCUD, events:       RCUD, report_cards: RCU,
     admissions:   RCU,  lessons:      RCUD, resources:    RCUD,
+    library:      R,
   },
 
   deputy_principal: {
@@ -59,6 +60,7 @@ const ROLE_DEFAULTS = {
     exams:        RCUD, behaviour:    RCUD, timetable:    RCUD,
     messages:     RCUD, events:       RCUD, report_cards: RCU,
     admissions:   RCU,  lessons:      RCUD, resources:    RCUD,
+    library:      R,
   },
 
   section_head: {
@@ -67,6 +69,7 @@ const ROLE_DEFAULTS = {
     exams:        R, timetable: R, report_cards: R,
     admissions:   R, lessons:  RCU,
     messages:     RCU, events:  R, resources: RCU,
+    library:      R,
   },
 
   admissions_officer: {
@@ -76,6 +79,7 @@ const ROLE_DEFAULTS = {
     messages:   RCU,
     events:     R,
     resources:  RCU,
+    library:    R,
   },
 
   exams_officer: {
@@ -88,6 +92,7 @@ const ROLE_DEFAULTS = {
     messages:     RCU,
     events:       R,
     resources:    RCU,
+    library:      R,
   },
 
   finance: {
@@ -97,6 +102,7 @@ const ROLE_DEFAULTS = {
     messages:     RCU,
     events:       R,
     resources:    RCU,
+    library:      R,
   },
 
   hr: {
@@ -105,6 +111,7 @@ const ROLE_DEFAULTS = {
     messages: RCU,
     events:   R,
     resources: RCU,
+    library:  R,
     // 'hr' module: hr.js's leave-resolve route already checks rbac('hr','update') —
     // this default was previously missing for the 'hr' role itself, fixed here
     // alongside adding manage_workflow for the new leave-chain-config permission.
@@ -118,6 +125,7 @@ const ROLE_DEFAULTS = {
     messages:  RCU,
     events:    RCUD,
     resources: RCU,
+    library:   R,
   },
 
   discipline_committee: {
@@ -126,6 +134,7 @@ const ROLE_DEFAULTS = {
     messages:  RCU,
     events:    R,
     resources: RCU,
+    library:   R,
   },
 
   parent: {
@@ -136,9 +145,10 @@ const ROLE_DEFAULTS = {
   },
 
   student: {
-    messages: R,
-    lessons:  R,
+    messages:  R,
+    lessons:   R,
     resources: R,
+    library:   R,
   },
 };
 

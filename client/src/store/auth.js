@@ -145,8 +145,13 @@ const useAuthStore = create((set, get) => ({
   setError(error)       { set({ error }); },
   clearError()          { set({ error: null }); },
 
-  /** Permission check helper — true if role is admin/superadmin or has ≥1 action for feature */
-  can(feature) {
+  /** Permission check helper.
+   *  can(feature)         — true if role is admin/superadmin or has ≥1 action for feature
+   *  can(feature, action) — true only if that SPECIFIC action ('read'/'create'/'update'/'delete')
+   *                         is granted, e.g. distinguishing "can view" from "can manage" when a
+   *                         module (like library) grants broad read access by default but reserves
+   *                         write actions for specific roles. */
+  can(feature, action) {
     const { session } = get();
     if (!session) return false;
     const { role, permissions = {} } = session.user ?? {};
@@ -155,10 +160,8 @@ const useAuthStore = create((set, get) => ({
     // but guard here too in case permissions arrives as null from the server)
     if (permissions === null) return true;
     const p = permissions[feature];
-    // permissions[feature] is always an array (from _deriveApiPerms).
-    // Empty array [] means no access — !![] is incorrectly truthy, so check length explicitly.
-    if (Array.isArray(p)) return p.length > 0;
-    return !!p;
+    if (Array.isArray(p)) return action ? p.includes(action) : p.length > 0;
+    return action ? false : !!p;
   },
 }));
 

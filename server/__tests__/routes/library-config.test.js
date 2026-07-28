@@ -3,8 +3,16 @@
 
    GET/PUT /api/library/config: school-configurable category list,
    same singleton pattern as finance.js's fee_config. Covers defaults-
-   when-unset, write gated to MANAGE_ROLES, duplicate-key rejection,
-   and GET /books' classId filter.
+   when-unset, write gated to rbac('library','update','manage'),
+   duplicate-key rejection, and GET /books' classId filter.
+
+   rbac is NOT mocked here — role_permissions is seeded with realistic
+   grants (admin: full library RCUD; teacher: read-only, matching the
+   real repairPermissions.js/onboard.js defaults after the Library RBAC
+   rewire) so these tests exercise the real permission integration,
+   not a stubbed-out pass-through. 'librarian' was never a real
+   assignable system role (library.js used to hardcode a role-name set
+   including it) — real roles are used instead.
 
    All DB calls are mocked — no MongoDB required.
    ============================================================ */
@@ -20,11 +28,12 @@ function mockChainObj(obj) {
   return c;
 }
 
-let mockJwtUser = { userId: 'usr_A', schoolId: SCHOOL_A, role: 'librarian', roles: ['librarian'] };
+let mockJwtUser = { userId: 'usr_A', schoolId: SCHOOL_A, role: 'admin', roles: ['admin'] };
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, _res, next) => { req.jwtUser = mockJwtUser; next(); },
 }));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
+jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res, next) => next() }));
 
 let mockConfig;
 function makeConfigStore(seed = null) {
@@ -53,10 +62,26 @@ function makeBooksStore(seed = []) {
 }
 let mockBooks = makeBooksStore();
 
+/* Realistic role_permissions: admin has full library RCUD (superadmin
+   bypasses rbac entirely, so admin — which does NOT bypass — is the
+   one that needs a real seeded grant); teacher has read-only, matching
+   the "every staff role can browse the catalogue, only admin manages
+   it by default" posture from the Library RBAC rewire. */
+const mockRolePerms = {
+  admin:   { library: ['read', 'create', 'update', 'delete'] },
+  teacher: { library: ['read'] },
+};
+function mockMakeRolePermsStore() {
+  return {
+    findOne: jest.fn(({ roleKey }) => mockChainObj(mockRolePerms[roleKey] ? { permissions: mockRolePerms[roleKey] } : null)),
+  };
+}
+
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((c) => {
-    if (c === 'library_config') return mockConfig;
-    if (c === 'library_books')  return mockBooks;
+    if (c === 'library_config')    return mockConfig;
+    if (c === 'library_books')     return mockBooks;
+    if (c === 'role_permissions')  return mockMakeRolePermsStore();
     return { find: jest.fn(() => mockChainArr([])), findOne: jest.fn(() => mockChainObj(null)) };
   }),
 }));
@@ -74,7 +99,7 @@ function buildApp() {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockJwtUser = { userId: 'usr_A', schoolId: SCHOOL_A, role: 'librarian', roles: ['librarian'] };
+  mockJwtUser = { userId: 'usr_A', schoolId: SCHOOL_A, role: 'admin', roles: ['admin'] };
   mockConfig = makeConfigStore(null);
   mockBooks  = makeBooksStore();
 });
