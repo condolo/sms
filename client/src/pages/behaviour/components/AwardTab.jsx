@@ -8,7 +8,7 @@ import {
   TrendingUp, TrendingDown, Search, X, Loader2, CheckCircle2, AlertTriangle,
 } from 'lucide-react';
 import {
-  MATRIX, meritTotal, demeritTotal, studentStage, studentMilestone,
+  meritTotal, demeritTotal, studentStage, studentMilestone,
   nextMilestone, isSerious,
 } from '../bpsConstants.js';
 import { behaviour as behaviourApi, students as studentsApi } from '@/api/client.js';
@@ -21,15 +21,24 @@ export default function AwardTab() {
   const qc   = useQueryClient();
   const user = useAuthStore(s => s.session?.user);
 
-  const [step, setStep]     = useState(1);
-  const [sid,  setSid]      = useState('');
-  const [sName, setSName]   = useState('');
-  const [type, setType]     = useState('');
-  const [catIdx, setCatIdx] = useState(0);
-  const [item, setItem]     = useState(null);
-  const [note, setNote]     = useState('');
+  const [step, setStep]         = useState(1);
+  const [sid,  setSid]          = useState('');
+  const [sName, setSName]       = useState('');
+  const [type, setType]         = useState('');
+  const [category, setCategory] = useState(null);
+  const [description, setDescription] = useState('');
+  const [note, setNote]         = useState('');
   const [stuSearch, setStuSearch] = useState('');
-  const [toast, setToast]   = useState(null);
+  const [toast, setToast]       = useState(null);
+
+  /* School's configurable categories, filtered to the chosen direction */
+  const { data: catData } = useQuery({
+    queryKey: ['behaviour', 'categories', type],
+    queryFn:  () => behaviourApi.categories.list({ direction: type, isActive: true }),
+    enabled:  !!type,
+    staleTime: 60_000,
+  });
+  const categories = catData?.data ?? [];
 
   /* Student search */
   const { data: stuData } = useQuery({
@@ -54,7 +63,9 @@ export default function AwardTab() {
   const currentDemerit = demeritTotal(stuLogs, sid);
   const currentStage   = studentStage(stuLogs, sid);
   const currentMs      = studentMilestone(stuLogs, sid);
-  const pts            = item ? (type === 'merit' ? item.merit : item.demerit) : null;
+  const pts            = category
+    ? (type === 'merit' ? category.meritPoints : -Math.abs(category.demeritPoints))
+    : null;
   const newMerits      = type === 'merit'  && pts ? currentMerits  + pts         : currentMerits;
   const newDemerit     = type === 'demerit' && pts ? currentDemerit + Math.abs(pts) : currentDemerit;
 
@@ -73,7 +84,7 @@ export default function AwardTab() {
   const nextMs    = nextMilestone(stuLogs, sid);
 
   const needsNote  = isSerious(pts);
-  const canSubmit  = !!sid && !!type && !!item && pts !== null && (!needsNote || note.trim().length >= 10);
+  const canSubmit  = !!sid && !!type && !!category && pts !== null && (!needsNote || note.trim().length >= 10);
 
   const mutation = useMutation({
     mutationFn: data => behaviourApi.incidents.create(data),
@@ -88,28 +99,24 @@ export default function AwardTab() {
 
   function reset() {
     setStep(1); setSid(''); setSName(''); setType('');
-    setCatIdx(0); setItem(null); setNote(''); setStuSearch('');
+    setCategory(null); setDescription(''); setNote(''); setStuSearch('');
   }
 
   function submit() {
     if (!canSubmit) return;
     mutation.mutate({
-      studentId:   sid,
+      studentId:    sid,
       type,
-      title:       item.label,
-      category:    MATRIX[catIdx]?.category,
-      description: item.label,
-      points:      pts,
-      severity:    Math.abs(pts) >= 10 ? 'critical' : Math.abs(pts) >= 5 ? 'high' : Math.abs(pts) >= 3 ? 'medium' : 'low',
-      note:        note.trim() || undefined,
-      date:        new Date().toISOString().slice(0, 10),
+      title:        category.name,
+      category:     category.name,
+      categoryId:   category.id ?? category._id,
+      description:  description.trim() || category.name,
+      points:       pts,
+      severity:     Math.abs(pts) >= 10 ? 'critical' : Math.abs(pts) >= 5 ? 'high' : Math.abs(pts) >= 3 ? 'medium' : 'low',
+      note:         note.trim() || undefined,
+      date:         new Date().toISOString().slice(0, 10),
     });
   }
-
-  /* Items visible for selected type in selected category */
-  const catItems = (MATRIX[catIdx]?.items ?? []).filter(i =>
-    type === 'merit' ? i.merit !== null : i.demerit !== null
-  );
 
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="space-y-4 max-w-2xl">
@@ -233,7 +240,7 @@ export default function AwardTab() {
           )}
           <div className="grid grid-cols-2 gap-3">
             <button
-              onClick={() => { setType('merit'); setCatIdx(0); setItem(null); setStep(3); }}
+              onClick={() => { setType('merit'); setCategory(null); setStep(3); }}
               className="flex flex-col items-center gap-2 p-5 rounded-xl border-2 border-emerald-300 bg-emerald-50 hover:bg-emerald-100 transition cursor-pointer"
             >
               <TrendingUp size={28} className="text-emerald-600" />
@@ -241,7 +248,7 @@ export default function AwardTab() {
               <span className="text-xs text-emerald-600">Reward positive behaviour</span>
             </button>
             <button
-              onClick={() => { setType('demerit'); setCatIdx(0); setItem(null); setStep(3); }}
+              onClick={() => { setType('demerit'); setCategory(null); setStep(3); }}
               className="flex flex-col items-center gap-2 p-5 rounded-xl border-2 border-red-300 bg-red-50 hover:bg-red-100 transition cursor-pointer"
             >
               <TrendingDown size={28} className="text-red-600" />
@@ -252,7 +259,7 @@ export default function AwardTab() {
         </div>
       )}
 
-      {/* ─── Step 3: Choose category + behaviour ─── */}
+      {/* ─── Step 3: Choose category ─── */}
       {step === 3 && (
         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
           <div className="flex items-center gap-2">
@@ -262,46 +269,38 @@ export default function AwardTab() {
 
           <div>
             <label className="block text-xs font-medium text-slate-700 mb-1.5">Category</label>
-            <select
-              value={catIdx}
-              onChange={e => { setCatIdx(+e.target.value); setItem(null); }}
-              className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 text-slate-800"
-            >
-              {MATRIX.map((cat, i) => {
-                const hasItems = cat.items.some(it => type === 'merit' ? it.merit !== null : it.demerit !== null);
-                return hasItems ? <option key={i} value={i}>{cat.category}</option> : null;
+            <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+              {categories.map(c => {
+                const p      = type === 'merit' ? c.meritPoints : -Math.abs(c.demeritPoints);
+                const active = (category?.id ?? category?._id) === (c.id ?? c._id);
+                return (
+                  <button
+                    key={c.id ?? c._id}
+                    onClick={() => { setCategory(c); setDescription(''); setNote(''); setStep(4); }}
+                    className={`w-full flex items-center justify-between gap-3 p-3 rounded-lg border-2 text-left transition-all ${
+                      active ? 'border-slate-800 bg-slate-50' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm text-slate-700">{c.name}</span>
+                      {c.description && <p className="text-xs text-slate-400 truncate">{c.description}</p>}
+                    </div>
+                    <span className={`font-bold text-sm shrink-0 ${p >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {p > 0 ? '+' : ''}{p}
+                    </span>
+                  </button>
+                );
               })}
-            </select>
-          </div>
-
-          <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
-            {catItems.map(it => {
-              const p      = type === 'merit' ? it.merit : it.demerit;
-              const active = item?.id === it.id;
-              return (
-                <button
-                  key={it.id}
-                  onClick={() => { setItem(it); setNote(''); setStep(4); }}
-                  className={`w-full flex items-center justify-between gap-3 p-3 rounded-lg border-2 text-left transition-all ${
-                    active ? 'border-slate-800 bg-slate-50' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                  }`}
-                >
-                  <span className="text-sm text-slate-700 flex-1">{it.label}</span>
-                  <span className={`font-bold text-sm shrink-0 ${p >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                    {p > 0 ? '+' : ''}{p}
-                  </span>
-                </button>
-              );
-            })}
-            {catItems.length === 0 && (
-              <p className="text-center text-sm text-slate-400 py-6">No {type} items in this category</p>
-            )}
+              {categories.length === 0 && (
+                <p className="text-center text-sm text-slate-400 py-6">No {type} categories configured — add one under Categories</p>
+              )}
+            </div>
           </div>
         </div>
       )}
 
       {/* ─── Step 4: Confirm ─── */}
-      {step === 4 && item && (
+      {step === 4 && category && (
         <div className={`bg-white rounded-xl border-2 p-5 space-y-4 ${type === 'merit' ? 'border-emerald-300' : 'border-red-300'}`}>
           <div className="flex items-center gap-2">
             <TypeBadge type={type} />
@@ -310,9 +309,8 @@ export default function AwardTab() {
 
           <div className="space-y-2 text-sm">
             {[
-              ['Student',   sName],
-              ['Category',  MATRIX[catIdx]?.category],
-              ['Behaviour', item.label],
+              ['Student',  sName],
+              ['Category', category.name],
             ].map(([label, value]) => (
               <div key={label} className="flex gap-3 py-1.5 border-b border-slate-100">
                 <span className="text-slate-400 w-24 shrink-0">{label}</span>
@@ -323,9 +321,19 @@ export default function AwardTab() {
               <span className="text-slate-400 w-24 shrink-0">Points</span>
               <span className={`font-bold text-lg ${pts >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                 {pts > 0 ? '+' : ''}{pts}
-                <span className="text-xs text-slate-400 font-normal ml-2">(locked — cannot be edited)</span>
+                <span className="text-xs text-slate-400 font-normal ml-2">(from category — edit in Categories to change)</span>
               </span>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1.5">Details (optional)</label>
+            <input
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="What specifically happened?"
+              className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 text-slate-800 placeholder-slate-400"
+            />
           </div>
 
           {/* Stage / milestone preview */}

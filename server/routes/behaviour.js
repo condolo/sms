@@ -29,6 +29,7 @@ const IncidentSchema = z.object({
   classId:      z.string().optional(),
   reportedBy:   z.string().optional(),          // userId of reporter; overridden by JWT
   categoryId:   z.string().optional(),
+  category:     z.string().max(100).optional(), // denormalized category name for display, same convention as library loans' bookTitle
   type:         z.enum(['merit', 'demerit', 'neutral']).default('demerit'),
   severity:     z.enum(['low', 'medium', 'high', 'critical']).optional(),
   title:        z.string().min(1).max(200),
