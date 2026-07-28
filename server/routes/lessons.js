@@ -27,6 +27,7 @@ const { z }           = require('zod');
 const { v4: uuidv4 }  = require('uuid');
 
 const { authMiddleware }  = require('../middleware/auth');
+const { moduleGate }     = require('../middleware/module-gate');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 const ScopeEngine         = require('../utils/scopeEngine');
 const { rbac }           = require('../middleware/rbac');
@@ -37,6 +38,7 @@ const { ok, created, paginate, parsePagination, E } = require('../utils/response
 
 const router = express.Router();
 const PLAN   = planGate('lessons');
+const MODGATE = moduleGate('lessons');
 
 /* ── Role helpers ────────────────────────────────────────────── */
 const MANAGE_ROLES = new Set(['superadmin', 'admin', 'deputy_principal', 'principal', 'section_head', 'teacher', 'hod', 'deputy']);
@@ -123,7 +125,7 @@ async function _coverageMap(schoolId, classId, subjectId, academicYear) {
    ═══════════════════════════════════════════════════════════════ */
 
 /* ── GET /api/lessons/topics ─ list topics for a subject ────── */
-router.get('/topics', authMiddleware, PLAN, async (req, res) => {
+router.get('/topics', authMiddleware, PLAN, MODGATE, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { subjectId, academicYear } = req.query;
@@ -142,7 +144,7 @@ router.get('/topics', authMiddleware, PLAN, async (req, res) => {
 });
 
 /* ── POST /api/lessons/topics ─ create topic ────────────────── */
-router.post('/topics', authMiddleware, PLAN, rbac('lessons', 'create'), async (req, res) => {
+router.post('/topics', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(TopicSchema, req.body);
@@ -188,7 +190,7 @@ router.post('/topics', authMiddleware, PLAN, rbac('lessons', 'create'), async (r
 });
 
 /* ── PUT /api/lessons/topics/:id ─ update topic ─────────────── */
-router.put('/topics/:id', authMiddleware, PLAN, rbac('lessons', 'update'), async (req, res) => {
+router.put('/topics/:id', authMiddleware, PLAN, MODGATE, rbac('lessons', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(TopicSchema.partial(), req.body);
@@ -215,7 +217,7 @@ router.put('/topics/:id', authMiddleware, PLAN, rbac('lessons', 'update'), async
 });
 
 /* ── DELETE /api/lessons/topics/:id ─ delete topic ──────────── */
-router.delete('/topics/:id', authMiddleware, PLAN, rbac('lessons', 'delete'), async (req, res) => {
+router.delete('/topics/:id', authMiddleware, PLAN, MODGATE, rbac('lessons', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('syllabus_topics', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
@@ -227,7 +229,7 @@ router.delete('/topics/:id', authMiddleware, PLAN, rbac('lessons', 'delete'), as
 });
 
 /* ── POST /api/lessons/topics/reorder ─ reorder topics ─────── */
-router.post('/topics/reorder', authMiddleware, PLAN, rbac('lessons', 'update'), async (req, res) => {
+router.post('/topics/reorder', authMiddleware, PLAN, MODGATE, rbac('lessons', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     // Body: { subjectId, academicYear, order: [{ id, order }] }
@@ -250,7 +252,7 @@ router.post('/topics/reorder', authMiddleware, PLAN, rbac('lessons', 'update'), 
   Since topics are now SHARED (not per-teacher), this copies topics
   from another school's syllabus or another academic year.
 */
-router.post('/topics/copy-from', authMiddleware, PLAN, rbac('lessons', 'create'), async (req, res) => {
+router.post('/topics/copy-from', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { fromAcademicYear, toAcademicYear, subjectId } = req.body;
@@ -297,7 +299,7 @@ router.post('/topics/copy-from', authMiddleware, PLAN, rbac('lessons', 'create')
   Returns each of the teacher's assigned class-subject pairs
   enriched with coverage percentage for the current academic year.
 */
-router.get('/my-classes', authMiddleware, PLAN, async (req, res) => {
+router.get('/my-classes', authMiddleware, PLAN, MODGATE, async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
 
@@ -353,7 +355,7 @@ router.get('/my-classes', authMiddleware, PLAN, async (req, res) => {
   Used by the teacher drill-down view.
   Query: classId, subjectId, academicYear (optional)
 */
-router.get('/coverage', authMiddleware, PLAN, scopeMiddleware, async (req, res) => {
+router.get('/coverage', authMiddleware, PLAN, MODGATE, scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { classId, subjectId, academicYear } = req.query;
@@ -416,7 +418,7 @@ router.get('/coverage', authMiddleware, PLAN, scopeMiddleware, async (req, res) 
 });
 
 /* ── POST /api/lessons/coverage ─ mark topic/subtopic covered ─ */
-router.post('/coverage', authMiddleware, PLAN, rbac('lessons', 'create'), async (req, res) => {
+router.post('/coverage', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(CoverageSchema, req.body);
@@ -479,7 +481,7 @@ router.post('/coverage', authMiddleware, PLAN, rbac('lessons', 'create'), async 
 });
 
 /* ── DELETE /api/lessons/coverage/:id ─ unmark coverage ─────── */
-router.delete('/coverage/:id', authMiddleware, PLAN, rbac('lessons', 'delete'), async (req, res) => {
+router.delete('/coverage/:id', authMiddleware, PLAN, MODGATE, rbac('lessons', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const filter = { id: req.params.id, schoolId };
@@ -493,7 +495,7 @@ router.delete('/coverage/:id', authMiddleware, PLAN, rbac('lessons', 'delete'), 
 });
 
 /* ── DELETE /api/lessons/coverage (bulk unmark for class-subject-topic) */
-router.delete('/coverage', authMiddleware, PLAN, rbac('lessons', 'delete'), async (req, res) => {
+router.delete('/coverage', authMiddleware, PLAN, MODGATE, rbac('lessons', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { classId, subjectId, topicId, subtopicId } = req.query;
@@ -519,7 +521,7 @@ router.delete('/coverage', authMiddleware, PLAN, rbac('lessons', 'delete'), asyn
   Returns all teaching assignments enriched with coverage %.
   Used by admin/HOD overview grid.
 */
-router.get('/summary', authMiddleware, PLAN, async (req, res) => {
+router.get('/summary', authMiddleware, PLAN, MODGATE, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { academicYear: yearQ, subjectId, classId, departmentId } = req.query;
@@ -581,7 +583,7 @@ router.get('/summary', authMiddleware, PLAN, async (req, res) => {
   Returns per-subject coverage for a class.
   Used in student and parent dashboards.
 */
-router.get('/class-summary/:classId', authMiddleware, PLAN, async (req, res) => {
+router.get('/class-summary/:classId', authMiddleware, PLAN, MODGATE, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { classId } = req.params;
@@ -662,7 +664,7 @@ router.get('/class-summary/:classId', authMiddleware, PLAN, async (req, res) => 
   Returns teachers who have uncovered topics for the current week.
   Used by HOD escalation view and reminder system.
 */
-router.get('/pending-teachers', authMiddleware, PLAN, async (req, res) => {
+router.get('/pending-teachers', authMiddleware, PLAN, MODGATE, async (req, res) => {
   try {
     if (!isHodOrAdmin(req)) return E.forbidden(res, 'HOD or admin access required');
     const { schoolId } = req.jwtUser;

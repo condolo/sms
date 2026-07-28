@@ -9,6 +9,7 @@ const { z }   = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware }               = require('../middleware/auth');
+const { moduleGate }     = require('../middleware/module-gate');
 const { rbac }                         = require('../middleware/rbac');
 const { planGate }                     = require('../middleware/plan');
 const { _model }                       = require('../utils/model');
@@ -23,6 +24,7 @@ const { resolveAcademicPeriod: _resolveAcademicPeriod } = require('../utils/acad
 
 const router = express.Router();
 const PLAN   = planGate('finance');
+const MODGATE = moduleGate('finance');
 
 /* ── Helpers ────────────────────────────────────────────────── */
 /** Round to 2 decimal places to avoid floating-point drift */
@@ -92,7 +94,7 @@ function _validate(schema, data) {
    ══════════════════════════════════════════════════════════════ */
 
 /* ── GET /api/finance/invoices ───────────────────────────────── */
-router.get('/invoices', authMiddleware, PLAN, rbac('finance', 'read'), async (req, res) => {
+router.get('/invoices', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -126,7 +128,7 @@ router.get('/invoices', authMiddleware, PLAN, rbac('finance', 'read'), async (re
 });
 
 /* ── GET /api/finance/invoices/:id ───────────────────────────── */
-router.get('/invoices/:id', authMiddleware, PLAN, rbac('finance', 'read'), async (req, res) => {
+router.get('/invoices/:id', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const Invoices = tenantModel('invoices', tenantContext(req));
@@ -140,7 +142,7 @@ router.get('/invoices/:id', authMiddleware, PLAN, rbac('finance', 'read'), async
 });
 
 /* ── POST /api/finance/invoices ─ Create invoice ────────────── */
-router.post('/invoices', authMiddleware, PLAN, rbac('finance', 'create'), async (req, res) => {
+router.post('/invoices', authMiddleware, PLAN, MODGATE, rbac('finance', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(InvoiceCreateSchema, req.body);
@@ -185,7 +187,7 @@ router.post('/invoices', authMiddleware, PLAN, rbac('finance', 'create'), async 
 });
 
 /* ── PUT /api/finance/invoices/:id ─ Update invoice ─────────── */
-router.put('/invoices/:id', authMiddleware, PLAN, rbac('finance', 'update'), async (req, res) => {
+router.put('/invoices/:id', authMiddleware, PLAN, MODGATE, rbac('finance', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(InvoiceCreateSchema.partial(), req.body);
@@ -241,7 +243,7 @@ router.put('/invoices/:id', authMiddleware, PLAN, rbac('finance', 'update'), asy
 });
 
 /* ── DELETE /api/finance/invoices/:id ─ Void invoice ────────── */
-router.delete('/invoices/:id', authMiddleware, PLAN, rbac('finance', 'delete'), async (req, res) => {
+router.delete('/invoices/:id', authMiddleware, PLAN, MODGATE, rbac('finance', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const Invoices = tenantModel('invoices', tenantContext(req));
@@ -270,7 +272,7 @@ router.delete('/invoices/:id', authMiddleware, PLAN, rbac('finance', 'delete'), 
    ══════════════════════════════════════════════════════════════ */
 
 /* ── GET /api/finance/payments ───────────────────────────────── */
-router.get('/payments', authMiddleware, PLAN, rbac('finance', 'read'), async (req, res) => {
+router.get('/payments', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -305,7 +307,7 @@ router.get('/payments', authMiddleware, PLAN, rbac('finance', 'read'), async (re
 });
 
 /* ── POST /api/finance/payments ─ Record payment ────────────── */
-router.post('/payments', authMiddleware, PLAN, rbac('finance', 'create'), async (req, res) => {
+router.post('/payments', authMiddleware, PLAN, MODGATE, rbac('finance', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(PaymentCreateSchema, req.body);
@@ -404,7 +406,7 @@ function _mergeFeeConfig(saved) {
 }
 
 /* GET /api/finance/fee-config */
-router.get('/fee-config', authMiddleware, PLAN, rbac('finance', 'read'), async (req, res) => {
+router.get('/fee-config', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const saved = await tenantModel('fee_config', tenantContext(req)).findOne({ schoolId }).lean();
@@ -416,7 +418,7 @@ router.get('/fee-config', authMiddleware, PLAN, rbac('finance', 'read'), async (
 });
 
 /* PUT /api/finance/fee-config */
-router.put('/fee-config', authMiddleware, PLAN, rbac('finance', 'update'), async (req, res) => {
+router.put('/fee-config', authMiddleware, PLAN, MODGATE, rbac('finance', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(FeeConfigSchema, req.body);
@@ -467,7 +469,7 @@ function _mergeInvoiceReminderConfig(saved) {
 }
 
 /* GET /api/finance/invoice-reminder-config */
-router.get('/invoice-reminder-config', authMiddleware, PLAN, rbac('finance', 'read'), async (req, res) => {
+router.get('/invoice-reminder-config', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const saved = await tenantModel('invoice_reminder_config', tenantContext(req)).findOne({ schoolId }).lean();
@@ -479,7 +481,7 @@ router.get('/invoice-reminder-config', authMiddleware, PLAN, rbac('finance', 're
 });
 
 /* PUT /api/finance/invoice-reminder-config */
-router.put('/invoice-reminder-config', authMiddleware, PLAN, rbac('finance', 'update'), async (req, res) => {
+router.put('/invoice-reminder-config', authMiddleware, PLAN, MODGATE, rbac('finance', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(InvoiceReminderConfigSchema, req.body);
@@ -572,7 +574,7 @@ function _validateTiers(tiers) {
 }
 
 /* ── GET /api/finance/discount-policies ──────────────────────── */
-router.get('/discount-policies', authMiddleware, PLAN, rbac('finance', 'read'), async (req, res) => {
+router.get('/discount-policies', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const DiscountPolicies = tenantModel('discount_policies', tenantContext(req));
@@ -585,7 +587,7 @@ router.get('/discount-policies', authMiddleware, PLAN, rbac('finance', 'read'), 
 });
 
 /* ── POST /api/finance/discount-policies ─────────────────────── */
-router.post('/discount-policies', authMiddleware, PLAN, rbac('finance', 'create'), async (req, res) => {
+router.post('/discount-policies', authMiddleware, PLAN, MODGATE, rbac('finance', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(DiscountPolicySchema, req.body);
@@ -607,7 +609,7 @@ router.post('/discount-policies', authMiddleware, PLAN, rbac('finance', 'create'
 });
 
 /* ── PUT /api/finance/discount-policies/:id ──────────────────── */
-router.put('/discount-policies/:id', authMiddleware, PLAN, rbac('finance', 'update'), async (req, res) => {
+router.put('/discount-policies/:id', authMiddleware, PLAN, MODGATE, rbac('finance', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(DiscountPolicySchema.partial(), req.body);
@@ -638,7 +640,7 @@ router.put('/discount-policies/:id', authMiddleware, PLAN, rbac('finance', 'upda
 });
 
 /* ── DELETE /api/finance/discount-policies/:id ───────────────── */
-router.delete('/discount-policies/:id', authMiddleware, PLAN, rbac('finance', 'delete'), async (req, res) => {
+router.delete('/discount-policies/:id', authMiddleware, PLAN, MODGATE, rbac('finance', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const DiscountPolicies = tenantModel('discount_policies', tenantContext(req));
@@ -721,7 +723,7 @@ async function _resolveSiblingDiscounts(schoolId, ctx, studentIds) {
 }
 
 /* ── GET /api/finance/fee-structures ─────────────────────────── */
-router.get('/fee-structures', authMiddleware, PLAN, rbac('finance', 'read'), async (req, res) => {
+router.get('/fee-structures', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const FeeStructures = tenantModel('fee_structures', tenantContext(req));
@@ -734,7 +736,7 @@ router.get('/fee-structures', authMiddleware, PLAN, rbac('finance', 'read'), asy
 });
 
 /* ── POST /api/finance/fee-structures ────────────────────────── */
-router.post('/fee-structures', authMiddleware, PLAN, rbac('finance', 'create'), async (req, res) => {
+router.post('/fee-structures', authMiddleware, PLAN, MODGATE, rbac('finance', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(FeeStructureSchema, req.body);
@@ -763,7 +765,7 @@ router.post('/fee-structures', authMiddleware, PLAN, rbac('finance', 'create'), 
 });
 
 /* ── PUT /api/finance/fee-structures/:id ─────────────────────── */
-router.put('/fee-structures/:id', authMiddleware, PLAN, rbac('finance', 'update'), async (req, res) => {
+router.put('/fee-structures/:id', authMiddleware, PLAN, MODGATE, rbac('finance', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(FeeStructureSchema.partial(), req.body);
@@ -799,7 +801,7 @@ router.put('/fee-structures/:id', authMiddleware, PLAN, rbac('finance', 'update'
 });
 
 /* ── DELETE /api/finance/fee-structures/:id ──────────────────── */
-router.delete('/fee-structures/:id', authMiddleware, PLAN, rbac('finance', 'delete'), async (req, res) => {
+router.delete('/fee-structures/:id', authMiddleware, PLAN, MODGATE, rbac('finance', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const FeeStructures = tenantModel('fee_structures', tenantContext(req));
@@ -814,7 +816,7 @@ router.delete('/fee-structures/:id', authMiddleware, PLAN, rbac('finance', 'dele
 });
 
 /* ── POST /api/finance/fee-structures/:id/generate ─ Bulk invoices */
-router.post('/fee-structures/:id/generate', authMiddleware, PLAN, rbac('finance', 'create'), async (req, res) => {
+router.post('/fee-structures/:id/generate', authMiddleware, PLAN, MODGATE, rbac('finance', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const FeeStructures = tenantModel('fee_structures', tenantContext(req));
@@ -880,7 +882,7 @@ router.post('/fee-structures/:id/generate', authMiddleware, PLAN, rbac('finance'
 });
 
 /* ── GET /api/finance/summary ─ School financial overview ────── */
-router.get('/summary', authMiddleware, PLAN, rbac('finance', 'read'), async (req, res) => {
+router.get('/summary', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
 

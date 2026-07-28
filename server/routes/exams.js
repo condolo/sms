@@ -11,6 +11,7 @@ const { z }   = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
+const { moduleGate }     = require('../middleware/module-gate');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
@@ -24,6 +25,7 @@ const email = require('../utils/email');
 
 const router = express.Router();
 const PLAN   = planGate('exams');
+const MODGATE = moduleGate('grades');
 
 /* ── Helpers ────────────────────────────────────────────────── */
 function _round(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
@@ -219,7 +221,7 @@ const AnnounceSittingSchema = z.object({
   termLabel:       z.string().optional(),
 });
 
-router.post('/announce', authMiddleware, PLAN, async (req, res) => { // rbac: teacher-only (inline role check)
+router.post('/announce', authMiddleware, PLAN, MODGATE, async (req, res) => { // rbac: teacher-only (inline role check)
   try {
     const { schoolId, userId, role } = req.jwtUser;
     if (role !== 'teacher') {
@@ -296,7 +298,7 @@ router.post('/announce', authMiddleware, PLAN, async (req, res) => { // rbac: te
   }
 });
 
-router.get('/', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) => {
+router.get('/', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -358,7 +360,7 @@ router.get('/', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) =>
   } catch (err) { console.error('[exams GET]', err); return E.serverError(res); }
 });
 
-router.get('/:id', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) => {
+router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('exams', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
@@ -385,7 +387,7 @@ async function _checkExamFKs(schoolId, ctx, { subjectId, classId }) {
   return null;
 }
 
-router.post('/', authMiddleware, PLAN, rbac('exams', 'create'), async (req, res) => {
+router.post('/', authMiddleware, PLAN, MODGATE, rbac('exams', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(ExamSchema, req.body);
@@ -403,7 +405,7 @@ router.post('/', authMiddleware, PLAN, rbac('exams', 'create'), async (req, res)
   } catch (err) { console.error('[exams POST]', err); return E.serverError(res); }
 });
 
-router.put('/:id', authMiddleware, PLAN, rbac('exams', 'update'), async (req, res) => {
+router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('exams', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const { data, error } = _validate(ExamSchema.partial(), req.body);
@@ -493,7 +495,7 @@ async function _notifyExamResultsPublished(req, exam) {
   });
 }
 
-router.delete('/:id', authMiddleware, PLAN, rbac('exams', 'delete'), async (req, res) => {
+router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('exams', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const doc = await tenantModel('exams', tenantContext(req)).findOneAndUpdate(
@@ -511,7 +513,7 @@ router.delete('/:id', authMiddleware, PLAN, rbac('exams', 'delete'), async (req,
    ══════════════════════════════════════════════════════════════ */
 
 /** POST /api/exams/:id/lock — admin locks an exam (approved → locked) */
-router.post('/:id/lock', authMiddleware, PLAN, rbac('exams', 'update'), async (req, res) => {
+router.post('/:id/lock', authMiddleware, PLAN, MODGATE, rbac('exams', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     if (!['admin', 'superadmin'].includes(role)) return E.forbidden(res, 'Only admins can lock exams');
@@ -538,7 +540,7 @@ router.post('/:id/lock', authMiddleware, PLAN, rbac('exams', 'update'), async (r
 });
 
 /** POST /api/exams/:id/unlock — admin unlocks (locked → approved) with mandatory reason */
-router.post('/:id/unlock', authMiddleware, PLAN, rbac('exams', 'update'), async (req, res) => {
+router.post('/:id/unlock', authMiddleware, PLAN, MODGATE, rbac('exams', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     if (!['admin', 'superadmin'].includes(role)) return E.forbidden(res, 'Only admins can unlock exams');
@@ -572,7 +574,7 @@ router.post('/:id/unlock', authMiddleware, PLAN, rbac('exams', 'update'), async 
 });
 
 /** GET /api/exams/:id/status-history — audit trail of status changes */
-router.get('/:id/status-history', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) => {
+router.get('/:id/status-history', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const exam = await tenantModel('exams', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
@@ -586,7 +588,7 @@ router.get('/:id/status-history', authMiddleware, PLAN, rbac('exams', 'read'), a
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/exams/:id/results */
-router.get('/:id/results', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) => {
+router.get('/:id/results', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -619,7 +621,7 @@ router.get('/:id/results', authMiddleware, PLAN, rbac('exams', 'read'), async (r
 });
 
 /* POST /api/exams/:id/results  — bulk upsert results for this exam */
-router.post('/:id/results', authMiddleware, PLAN, rbac('exams', 'create'), async (req, res) => {
+router.post('/:id/results', authMiddleware, PLAN, MODGATE, rbac('exams', 'create'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const { data, error } = _validate(BulkResultSchema, req.body);
@@ -787,7 +789,7 @@ router.post('/:id/results', authMiddleware, PLAN, rbac('exams', 'create'), async
 });
 
 /* GET /api/exams/results — cross-exam results query */
-router.get('/results/all', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) => {
+router.get('/results/all', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);

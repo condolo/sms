@@ -9,6 +9,7 @@ const { z }   = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
+const { moduleGate }     = require('../middleware/module-gate');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
@@ -17,6 +18,7 @@ const { ok, created, paginate, parsePagination, E, strParam } = require('../util
 
 const router = express.Router();
 const PLAN   = planGate('admissions');
+const MODGATE = moduleGate('admissions');
 
 /* ── Pipeline stage ordering ────────────────────────────────── */
 const STAGE_ORDER = ['enquiry', 'application', 'assessment', 'interview', 'offer', 'acceptance', 'enrolled', 'withdrawn', 'rejected'];
@@ -82,7 +84,7 @@ function _validate(schema, data) {
 }
 
 /* ── GET /api/admissions ─ Paginated pipeline ───────────────── */
-router.get('/', authMiddleware, PLAN, rbac('admissions', 'read'), async (req, res) => {
+router.get('/', authMiddleware, PLAN, MODGATE, rbac('admissions', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -119,7 +121,7 @@ router.get('/', authMiddleware, PLAN, rbac('admissions', 'read'), async (req, re
 });
 
 /* ── GET /api/admissions/stats ─ Pipeline overview ─────────── */
-router.get('/stats', authMiddleware, PLAN, rbac('admissions', 'read'), async (req, res) => {
+router.get('/stats', authMiddleware, PLAN, MODGATE, rbac('admissions', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId };
@@ -148,7 +150,7 @@ router.get('/stats', authMiddleware, PLAN, rbac('admissions', 'read'), async (re
 });
 
 /* ── GET /api/admissions/:id ──────────────────────────────────── */
-router.get('/:id', authMiddleware, PLAN, rbac('admissions', 'read'), async (req, res) => {
+router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('admissions', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('admissions', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
@@ -158,7 +160,7 @@ router.get('/:id', authMiddleware, PLAN, rbac('admissions', 'read'), async (req,
 });
 
 /* ── POST /api/admissions ─ Create application ──────────────── */
-router.post('/', authMiddleware, PLAN, rbac('admissions', 'create'), async (req, res) => {
+router.post('/', authMiddleware, PLAN, MODGATE, rbac('admissions', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(ApplicationSchema, req.body);
@@ -186,7 +188,7 @@ router.post('/', authMiddleware, PLAN, rbac('admissions', 'create'), async (req,
 });
 
 /* ── PUT /api/admissions/:id ─ Update application ──────────── */
-router.put('/:id', authMiddleware, PLAN, rbac('admissions', 'update'), async (req, res) => {
+router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('admissions', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(ApplicationSchema.partial(), req.body);
@@ -216,7 +218,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('admissions', 'update'), async (re
 });
 
 /* ── PATCH /api/admissions/:id/stage ─ Quick stage change ───── */
-router.patch('/:id/stage', authMiddleware, PLAN, rbac('admissions', 'update'), async (req, res) => {
+router.patch('/:id/stage', authMiddleware, PLAN, MODGATE, rbac('admissions', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(StageChangeSchema, req.body);
@@ -238,7 +240,7 @@ router.patch('/:id/stage', authMiddleware, PLAN, rbac('admissions', 'update'), a
 });
 
 /* ── DELETE /api/admissions/:id ─ Withdraw application ───────── */
-router.delete('/:id', authMiddleware, PLAN, rbac('admissions', 'delete'), async (req, res) => {
+router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('admissions', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const doc = await tenantModel('admissions', tenantContext(req)).findOneAndUpdate(

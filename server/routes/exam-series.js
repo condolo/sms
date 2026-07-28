@@ -12,6 +12,7 @@ const express            = require('express');
 const { v4: uuidv4 }    = require('uuid');
 const { z }              = require('zod');
 const { authMiddleware } = require('../middleware/auth');
+const { moduleGate }     = require('../middleware/module-gate');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
@@ -19,6 +20,7 @@ const { ok, created, E } = require('../utils/response');
 
 const router = express.Router();
 const PLAN   = planGate('exam_series');
+const MODGATE = moduleGate('grades');
 
 const STATUSES = ['draft', 'open', 'moderation', 'closed'];
 
@@ -42,7 +44,7 @@ function _validate(schema, data) {
 }
 
 /* ── GET /api/exam-series ───────────────────────────────── */
-router.get('/', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) => {
+router.get('/', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId };
@@ -62,7 +64,7 @@ router.get('/', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) =>
 });
 
 /* ── GET /api/exam-series/:id ───────────────────────────── */
-router.get('/:id', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res) => {
+router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('exam_series', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
@@ -75,7 +77,7 @@ router.get('/:id', authMiddleware, PLAN, rbac('exams', 'read'), async (req, res)
 });
 
 /* ── POST /api/exam-series ──────────────────────────────── */
-router.post('/', authMiddleware, PLAN, rbac('exams', 'create'), async (req, res) => {
+router.post('/', authMiddleware, PLAN, MODGATE, rbac('exams', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(SeriesSchema, req.body);
@@ -97,7 +99,7 @@ router.post('/', authMiddleware, PLAN, rbac('exams', 'create'), async (req, res)
 });
 
 /* ── PUT /api/exam-series/:id ───────────────────────────── */
-router.put('/:id', authMiddleware, PLAN, rbac('exams', 'update'), async (req, res) => {
+router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('exams', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(SeriesSchema.partial(), req.body);
@@ -122,7 +124,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('exams', 'update'), async (req, re
 });
 
 /* ── DELETE /api/exam-series/:id ────────────────────────── */
-router.delete('/:id', authMiddleware, PLAN, rbac('exams', 'delete'), async (req, res) => {
+router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('exams', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const existing = await tenantModel('exam_series', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
@@ -139,7 +141,7 @@ router.delete('/:id', authMiddleware, PLAN, rbac('exams', 'delete'), async (req,
 });
 
 /* ── POST /api/exam-series/:id/exams ────────────────────── add exam to series */
-router.post('/:id/exams', authMiddleware, PLAN, rbac('exams', 'update'), async (req, res) => {
+router.post('/:id/exams', authMiddleware, PLAN, MODGATE, rbac('exams', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { examId } = req.body;
@@ -167,7 +169,7 @@ router.post('/:id/exams', authMiddleware, PLAN, rbac('exams', 'update'), async (
 });
 
 /* ── DELETE /api/exam-series/:id/exams/:examId ──────────── remove exam */
-router.delete('/:id/exams/:examId', authMiddleware, PLAN, rbac('exams', 'update'), async (req, res) => {
+router.delete('/:id/exams/:examId', authMiddleware, PLAN, MODGATE, rbac('exams', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const existing = await tenantModel('exam_series', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();

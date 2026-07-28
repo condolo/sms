@@ -17,13 +17,14 @@ const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
 const { planGate }       = require('../middleware/plan');
+const { moduleGate }     = require('../middleware/module-gate');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 
 const router = express.Router();
 const PLAN   = planGate('hostel');
 
-router.use(authMiddleware, PLAN);
+router.use(authMiddleware, PLAN, moduleGate('hostel'));
 
 /* ── Roles allowed to manage the hostel ────────────────────── */
 const MANAGE_ROLES = new Set(['superadmin', 'admin', 'hostel_master']);

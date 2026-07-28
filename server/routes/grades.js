@@ -8,6 +8,7 @@ const { z }   = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware }  = require('../middleware/auth');
+const { moduleGate }     = require('../middleware/module-gate');
 const { rbac }            = require('../middleware/rbac');
 const { planGate }        = require('../middleware/plan');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
@@ -18,6 +19,7 @@ const { isYearArchived, firstArchivedYear } = require('../utils/archival');
 
 const router = express.Router();
 const PLAN   = planGate('grades');
+const MODGATE = moduleGate('grades');
 
 /* ── Helpers ────────────────────────────────────────────────── */
 function _round(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
@@ -51,7 +53,7 @@ function _validate(schema, data) {
 }
 
 /* ── GET /api/grades ─ Paginated list ───────────────────────── */
-router.get('/', authMiddleware, PLAN, rbac('grades', 'read'), scopeMiddleware, async (req, res) => {
+router.get('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -77,7 +79,7 @@ router.get('/', authMiddleware, PLAN, rbac('grades', 'read'), scopeMiddleware, a
 });
 
 /* ── GET /api/grades/report ─ Term report data per student ──── */
-router.get('/report', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
+router.get('/report', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
 
@@ -128,7 +130,7 @@ router.get('/report', authMiddleware, PLAN, rbac('grades', 'read'), async (req, 
 });
 
 /* ── GET /api/grades/:id ──────────────────────────────────────── */
-router.get('/:id', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
+router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('grades', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
@@ -138,7 +140,7 @@ router.get('/:id', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res
 });
 
 /* ── POST /api/grades ─ Create grade ────────────────────────── */
-router.post('/', authMiddleware, PLAN, rbac('grades', 'create'), async (req, res) => {
+router.post('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(GradeSchema, req.body);
@@ -175,7 +177,7 @@ router.post('/', authMiddleware, PLAN, rbac('grades', 'create'), async (req, res
 });
 
 /* ── POST /api/grades/bulk ─ Bulk upsert ────────────────────── */
-router.post('/bulk', authMiddleware, PLAN, rbac('grades', 'create'), async (req, res) => {
+router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(BulkGradeSchema, req.body);
@@ -231,7 +233,7 @@ router.post('/bulk', authMiddleware, PLAN, rbac('grades', 'create'), async (req,
 });
 
 /* ── PUT /api/grades/:id ──────────────────────────────────────── */
-router.put('/:id', authMiddleware, PLAN, rbac('grades', 'update'), async (req, res) => {
+router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const { data, error } = _validate(GradeSchema.partial(), req.body);
@@ -282,7 +284,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('grades', 'update'), async (req, r
 });
 
 /* ── DELETE /api/grades/:id ───────────────────────────────────── */
-router.delete('/:id', authMiddleware, PLAN, rbac('grades', 'delete'), async (req, res) => {
+router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('grades', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });

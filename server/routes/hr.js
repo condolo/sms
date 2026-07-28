@@ -15,6 +15,7 @@ const { v4: uuidv4 } = require('uuid');
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
+const { moduleGate }     = require('../middleware/module-gate');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { _model } = require('../utils/model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
@@ -41,8 +42,8 @@ const PAYROLL_MIN_STEPS    = 1;
 const router = express.Router();
 const PLAN   = planGate('hr');
 
-/* All HR routes require auth + plan gate */
-router.use(authMiddleware, PLAN);
+/* All HR routes require auth + plan gate + module-off gate */
+router.use(authMiddleware, PLAN, moduleGate('hr'));
 
 /* ── Role helpers ────────────────────────────────────────────── */
 const HR_ROLES    = new Set(['superadmin', 'admin', 'hr']);

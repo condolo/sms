@@ -7,10 +7,11 @@ const { v4: uuidv4 } = require('uuid');
 const { authMiddleware }   = require('../middleware/auth');
 const { tenantMiddleware } = require('../middleware/tenant');
 const { rbac }             = require('../middleware/rbac');
+const { moduleGate }       = require('../middleware/module-gate');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 
 const router = express.Router();
-router.use(authMiddleware, tenantMiddleware);
+router.use(authMiddleware, tenantMiddleware, moduleGate('events'));
 
 /* GET /api/events — list events for this school */
 router.get('/', rbac('events', 'read'), async (req, res) => {

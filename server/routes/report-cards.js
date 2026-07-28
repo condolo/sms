@@ -28,6 +28,7 @@ const mongoose  = require('mongoose');
 const crypto    = require('crypto');
 
 const { authMiddleware } = require('../middleware/auth');
+const { moduleGate }     = require('../middleware/module-gate');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
@@ -59,6 +60,7 @@ const {
 
 const router = express.Router();
 const PLAN   = planGate('grades');
+const MODGATE = moduleGate('report_cards');
 
 /* RC8 — report-level remark approval chain, reusing the same
    workflow-config.js engine leave_approval/marks_unlock/payroll already
@@ -340,7 +342,7 @@ async function _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNu
 /* ══════════════════════════════════════════════════════════════
    POST /generate  — live preview (not persisted)
    ══════════════════════════════════════════════════════════════ */
-router.post('/generate', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
+router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { data, error } = _validate(GenerateSchema, req.body);
@@ -449,7 +451,7 @@ router.post('/generate', authMiddleware, PLAN, rbac('grades', 'read'), async (re
 /* ══════════════════════════════════════════════════════════════
    POST /publish  — interrupt-safe versioned batch snapshot
    ══════════════════════════════════════════════════════════════ */
-router.post('/publish', authMiddleware, PLAN, rbac('grades', 'create'), async (req, res) => {
+router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async (req, res) => {
   const { schoolId, userId, role } = req.jwtUser;
   if (!['admin', 'superadmin'].includes(role)) return E.forbidden(res, 'Only admins can publish report cards');
 
@@ -890,7 +892,7 @@ async function _notifyReportCardsPublished(req, snaps) {
 /* ══════════════════════════════════════════════════════════════
    GET /publish-batches
    ══════════════════════════════════════════════════════════════ */
-router.get('/publish-batches', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
+router.get('/publish-batches', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -911,7 +913,7 @@ router.get('/publish-batches', authMiddleware, PLAN, rbac('grades', 'read'), asy
 /* ══════════════════════════════════════════════════════════════
    GET /  — list snapshots
    ══════════════════════════════════════════════════════════════ */
-router.get('/', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
+router.get('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
   try {
     const { schoolId, role } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -992,7 +994,7 @@ router.get('/verify/:reportId', async (req, res) => {
    completely unreachable before this fix, confirmed with no existing
    test coverage to have caught it.
    ══════════════════════════════════════════════════════════════ */
-router.get('/bulk-pdf', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
+router.get('/bulk-pdf', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
   try {
     const { schoolId, role } = req.jwtUser;
     if (!req.query.classId) return E.badRequest(res, 'classId query parameter is required');
@@ -1100,7 +1102,7 @@ router.get('/bulk-pdf', authMiddleware, PLAN, rbac('grades', 'read'), async (req
 });
 
 // GET /draft-comments?classId=&termNumber= — same registration-order reasoning as /bulk-pdf above
-router.get('/draft-comments', authMiddleware, PLAN, rbac('report_cards', 'read'), async (req, res) => {
+router.get('/draft-comments', authMiddleware, PLAN, MODGATE, rbac('report_cards', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId };
@@ -1118,7 +1120,7 @@ router.get('/draft-comments', authMiddleware, PLAN, rbac('report_cards', 'read')
    (RC8). Registered here for the same registration-order reason as
    /bulk-pdf and /draft-comments above — a third single-segment GET
    route that would otherwise be shadowed by GET /:id. */
-router.get('/workflow-config', authMiddleware, PLAN, rbac('report_cards', 'read'), async (req, res) => {
+router.get('/workflow-config', authMiddleware, PLAN, MODGATE, rbac('report_cards', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const config = await getWorkflowConfig(tenantContext(req), schoolId, REPORT_COMMENT_WORKFLOW_KEY);
@@ -1129,7 +1131,7 @@ router.get('/workflow-config', authMiddleware, PLAN, rbac('report_cards', 'read'
   }
 });
 
-router.put('/workflow-config', authMiddleware, PLAN, rbac('report_cards', 'update'), async (req, res) => {
+router.put('/workflow-config', authMiddleware, PLAN, MODGATE, rbac('report_cards', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { steps, notifyOnly } = req.body;
@@ -1145,7 +1147,7 @@ router.put('/workflow-config', authMiddleware, PLAN, rbac('report_cards', 'updat
 /* GET/PATCH /publication-policy — RC9. Same registration-order reasoning
    as /bulk-pdf, /draft-comments, /workflow-config above — a fourth
    single-segment GET route that would otherwise be shadowed by GET /:id. */
-router.get('/publication-policy', authMiddleware, PLAN, rbac('report_cards', 'read'), async (req, res) => {
+router.get('/publication-policy', authMiddleware, PLAN, MODGATE, rbac('report_cards', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     return ok(res, await _loadPublicationPolicy(schoolId));
@@ -1155,7 +1157,7 @@ router.get('/publication-policy', authMiddleware, PLAN, rbac('report_cards', 're
   }
 });
 
-router.patch('/publication-policy', authMiddleware, PLAN, rbac('report_cards', 'update'), async (req, res) => {
+router.patch('/publication-policy', authMiddleware, PLAN, MODGATE, rbac('report_cards', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const updates = req.body || {};
@@ -1185,7 +1187,7 @@ router.patch('/publication-policy', authMiddleware, PLAN, rbac('report_cards', '
 /* ══════════════════════════════════════════════════════════════
    GET /:id  — full snapshot
    ══════════════════════════════════════════════════════════════ */
-router.get('/:id', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
+router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
   try {
     const { schoolId, role, userId, guardianOf } = req.jwtUser;
     const doc = await tenantModel('report_card_snapshots', tenantContext(req))
@@ -1223,7 +1225,7 @@ router.get('/:id', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res
 /* ══════════════════════════════════════════════════════════════
    PUT /:id/comments
    ══════════════════════════════════════════════════════════════ */
-router.put('/:id/comments', authMiddleware, PLAN, rbac('grades', 'update'), async (req, res) => {
+router.put('/:id/comments', authMiddleware, PLAN, MODGATE, rbac('grades', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const { data, error } = _validate(CommentSchema, req.body);
@@ -1648,7 +1650,7 @@ async function _checkSnapshotAccess(req, res, snap) {
 /* ══════════════════════════════════════════════════════════════
    GET /:id/pdf  — single student PDF
    ══════════════════════════════════════════════════════════════ */
-router.get('/:id/pdf', authMiddleware, PLAN, _pdfAccess, async (req, res) => {
+router.get('/:id/pdf', authMiddleware, PLAN, MODGATE, _pdfAccess, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
 
@@ -1701,7 +1703,7 @@ router.get('/:id/pdf', authMiddleware, PLAN, _pdfAccess, async (req, res) => {
    its logo after publish is fine to show on a re-render (branding,
    not scored content); the actual marks/grades/rankings are frozen.
    ══════════════════════════════════════════════════════════════ */
-router.get('/:id/html', authMiddleware, PLAN, _pdfAccess, async (req, res) => {
+router.get('/:id/html', authMiddleware, PLAN, MODGATE, _pdfAccess, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
 
@@ -1789,7 +1791,7 @@ const PreviewHtmlSchema = z.object({
   }).optional(),
 });
 
-router.post('/preview-html', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
+router.post('/preview-html', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
   try {
     const { data, error } = _validate(PreviewHtmlSchema, req.body);
     if (error) return E.validation(res, error);
@@ -1842,7 +1844,7 @@ router.post('/preview-html', authMiddleware, PLAN, rbac('grades', 'read'), async
 
 // PUT /draft-comments/:studentId — upsert comment record for a student
 // subjectComments: { [subjectId]: string } — merged per-key (each teacher only touches their own subject)
-router.put('/draft-comments/:studentId', authMiddleware, PLAN, rbac('report_cards', 'update'), async (req, res) => {
+router.put('/draft-comments/:studentId', authMiddleware, PLAN, MODGATE, rbac('report_cards', 'update'), async (req, res) => {
   try {
     const { schoolId, userId: updatedBy } = req.jwtUser;
     const { studentId } = req.params;
@@ -1900,7 +1902,7 @@ router.put('/draft-comments/:studentId', authMiddleware, PLAN, rbac('report_card
 });
 
 // PUT /draft-comments/:studentId/subject/:subjectId — update one subject comment only (teacher-safe merge)
-router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN, rbac('report_cards', 'update'), async (req, res) => {
+router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN, MODGATE, rbac('report_cards', 'update'), async (req, res) => {
   try {
     const { schoolId, userId: updatedBy } = req.jwtUser;
     const { studentId, subjectId } = req.params;
@@ -1942,7 +1944,7 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
    a state where this route applies — use the legacy PUT
    /draft-comments/:studentId (classTeacherRemark/principalRemark)
    instead, completely unaffected by this route's existence. */
-router.patch('/draft-comments/:studentId/advance', authMiddleware, PLAN, rbac('report_cards', 'update'), async (req, res) => {
+router.patch('/draft-comments/:studentId/advance', authMiddleware, PLAN, MODGATE, rbac('report_cards', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, name, role } = req.jwtUser;
     const { studentId } = req.params;

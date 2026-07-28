@@ -10,6 +10,7 @@ const { v4: uuidv4 } = require('uuid');
 const bcrypt   = require('bcryptjs');
 
 const { authMiddleware }        = require('../middleware/auth');
+const { moduleGate }     = require('../middleware/module-gate');
 const { rbac }                  = require('../middleware/rbac');
 const { planGate }              = require('../middleware/plan');
 const { scopeMiddleware }       = require('../middleware/scopeMiddleware');
@@ -24,6 +25,7 @@ const { provisionIdentityForUser } = require('../utils/provision-identities');
 
 const router = express.Router();
 const PLAN   = planGate('students');
+const MODGATE = moduleGate('students');
 
 /* ── Validation schemas ─────────────────────────────────────── */
 const StudentCreateSchema = z.object({
@@ -97,7 +99,7 @@ async function _entityIdForms(col, schoolId, value) {
 }
 
 /* ── GET /api/students/stats ─ Aggregate overview for dashboard ─ */
-router.get('/stats', authMiddleware, PLAN, rbac('students', 'read'), async (req, res) => {
+router.get('/stats', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const Students = tenantModel('students', tenantContext(req));
@@ -152,7 +154,7 @@ router.get('/stats', authMiddleware, PLAN, rbac('students', 'read'), async (req,
 });
 
 /* ── GET /api/students ─ Paginated list ─────────────────────── */
-router.get('/', authMiddleware, PLAN, rbac('students', 'read'), scopeMiddleware, async (req, res) => {
+router.get('/', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -251,7 +253,7 @@ router.get('/', authMiddleware, PLAN, rbac('students', 'read'), scopeMiddleware,
 });
 
 /* ── GET /api/students/:id ─ Single student ─────────────────── */
-router.get('/:id', authMiddleware, PLAN, rbac('students', 'read'), async (req, res) => {
+router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const Students = tenantModel('students', tenantContext(req));
@@ -275,7 +277,7 @@ router.get('/:id', authMiddleware, PLAN, rbac('students', 'read'), async (req, r
 });
 
 /* ── POST /api/students ─ Create student ────────────────────── */
-router.post('/', authMiddleware, PLAN, rbac('students', 'create'), async (req, res) => {
+router.post('/', authMiddleware, PLAN, MODGATE, rbac('students', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
 
@@ -307,7 +309,7 @@ router.post('/', authMiddleware, PLAN, rbac('students', 'create'), async (req, r
 });
 
 /* ── PUT /api/students/:id ─ Update student ─────────────────── */
-router.put('/:id', authMiddleware, PLAN, rbac('students', 'update'), async (req, res) => {
+router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
 
@@ -350,7 +352,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('students', 'update'), async (req,
    Permanently removes student records and cascades to invoices + payments.
    Route MUST stay above /:id so Express doesn't treat 'purge' as an id.
    ──────────────────────────────────────────────────────────────────── */
-router.delete('/purge', authMiddleware, PLAN, rbac('students', 'delete'), async (req, res) => {
+router.delete('/purge', authMiddleware, PLAN, MODGATE, rbac('students', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
 
@@ -406,7 +408,7 @@ router.delete('/purge', authMiddleware, PLAN, rbac('students', 'delete'), async 
 });
 
 /* ── DELETE /api/students/:id ─ Soft-delete (status=inactive) ─ */
-router.delete('/:id', authMiddleware, PLAN, rbac('students', 'delete'), async (req, res) => {
+router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
 
@@ -437,7 +439,7 @@ router.delete('/:id', authMiddleware, PLAN, rbac('students', 'delete'), async (r
 });
 
 /* ── POST /api/students/bulk ─ Bulk create ──────────────────── */
-router.post('/bulk', authMiddleware, PLAN, rbac('students', 'create'), async (req, res) => {
+router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('students', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { students } = req.body;
@@ -495,7 +497,7 @@ router.post('/bulk', authMiddleware, PLAN, rbac('students', 'create'), async (re
    is the ONE-TIME plaintext temp password list (admin downloads it
    as a CSV to print and distribute; never stored or shown again).
    ──────────────────────────────────────────────────────────────── */
-router.post('/bulk-portal-accounts', authMiddleware, PLAN, rbac('students', 'update'), async (req, res) => {
+router.post('/bulk-portal-accounts', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const allowed = ['superadmin', 'admin', 'principal', 'deputy_principal'];
@@ -632,7 +634,7 @@ function _portalAllowed(school, portalType) {
    Restricted to admin / principal / deputy.
    Returns { username, tempPassword } — shown once, admin gives to student.
    ──────────────────────────────────────────────────────────────── */
-router.post('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'update'), async (req, res) => {
+router.post('/:id/portal-account', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const allowed = ['superadmin', 'admin', 'principal', 'deputy_principal'];
@@ -766,7 +768,7 @@ router.post('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'updat
 });
 
 /* ── DELETE /api/students/:id/portal-account — deactivate student login ── */
-router.delete('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'update'), async (req, res) => {
+router.delete('/:id/portal-account', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), async (req, res) => {
   try {
     const { schoolId, role } = req.jwtUser;
     const allowed = ['superadmin', 'admin', 'principal', 'deputy_principal'];
@@ -791,7 +793,7 @@ router.delete('/:id/portal-account', authMiddleware, PLAN, rbac('students', 'upd
    If a parent account already exists for this email, adds this student to their studentIds.
    Sends welcome email with credentials.
    ──────────────────────────────────────────────────────────────── */
-router.post('/:id/parent-account', authMiddleware, PLAN, rbac('students', 'update'), async (req, res) => {
+router.post('/:id/parent-account', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const allowed = ['superadmin', 'admin', 'principal', 'deputy_principal'];
@@ -896,7 +898,7 @@ router.post('/:id/parent-account', authMiddleware, PLAN, rbac('students', 'updat
    ──────────────────────────────────────────────────────────────── */
 const DEACTIVATE_REASONS = ['withdrawn', 'transferred', 'graduated', 'expelled', 'deceased', 'other'];
 
-router.patch('/:id/deactivate', authMiddleware, PLAN, rbac('students', 'update'), async (req, res) => {
+router.patch('/:id/deactivate', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     // Restrict to admin-level roles
@@ -951,7 +953,7 @@ router.patch('/:id/deactivate', authMiddleware, PLAN, rbac('students', 'update')
 /* ── PATCH /api/students/:id/reactivate ─────────────────────────
    Restore a withdrawn/graduated student to active status.
    ──────────────────────────────────────────────────────────────── */
-router.patch('/:id/reactivate', authMiddleware, PLAN, rbac('students', 'update'), async (req, res) => {
+router.patch('/:id/reactivate', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const allowed = ['superadmin', 'admin', 'principal', 'deputy_principal'];
@@ -998,7 +1000,7 @@ router.patch('/:id/reactivate', authMiddleware, PLAN, rbac('students', 'update')
      - graduated → status set to 'graduated', portal deactivated
    Skips: withdrawn, graduated, transferred, suspended.
    ──────────────────────────────────────────────────────────────── */
-router.post('/promote', authMiddleware, PLAN, rbac('students', 'update'), async (req, res) => {
+router.post('/promote', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
 

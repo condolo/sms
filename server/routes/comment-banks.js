@@ -21,6 +21,7 @@ const express            = require('express');
 const { v4: uuidv4 }    = require('uuid');
 const { z }              = require('zod');
 const { authMiddleware } = require('../middleware/auth');
+const { moduleGate }     = require('../middleware/module-gate');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
@@ -28,6 +29,7 @@ const { ok, created, E } = require('../utils/response');
 
 const router = express.Router();
 const PLAN   = planGate('grades');
+const MODGATE = moduleGate('grades');
 
 const CATEGORIES = ['academic', 'behaviour', 'general', 'subject'];
 
@@ -45,7 +47,7 @@ function _validate(schema, data) {
 }
 
 /* ── GET /api/comment-banks — shared read, see file header ── */
-router.get('/', authMiddleware, PLAN, async (req, res) => {
+router.get('/', authMiddleware, PLAN, MODGATE, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId };
@@ -68,7 +70,7 @@ router.get('/', authMiddleware, PLAN, async (req, res) => {
 });
 
 /* ── POST /api/comment-banks ─────────────────────────────── */
-router.post('/', authMiddleware, PLAN, rbac('grades', 'create'), async (req, res) => {
+router.post('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(CommentBankSchema, req.body);
@@ -90,7 +92,7 @@ router.post('/', authMiddleware, PLAN, rbac('grades', 'create'), async (req, res
 });
 
 /* ── PUT /api/comment-banks/:id ──────────────────────────── */
-router.put('/:id', authMiddleware, PLAN, rbac('grades', 'update'), async (req, res) => {
+router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(CommentBankSchema.partial(), req.body);
@@ -109,7 +111,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('grades', 'update'), async (req, r
 });
 
 /* ── DELETE /api/comment-banks/:id ──────────────────────── */
-router.delete('/:id', authMiddleware, PLAN, rbac('grades', 'delete'), async (req, res) => {
+router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('comment_banks', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });

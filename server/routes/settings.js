@@ -23,6 +23,7 @@ const emailUtil             = require('../utils/email');
 const { encrypt, smtpEncryptReady } = require('../utils/smtpEncrypt');
 const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY, GROUPS: NOTIF_GROUPS } = require('../utils/notif-settings');
 const { rbac, invalidatePermCache } = require('../middleware/rbac');
+const { invalidateModuleConfigCache } = require('../middleware/module-gate');
 const { peekAdmissionCounter, setAdmissionCounter } = require('../utils/counters');
 const { MODULE_REGISTRY, MODULE_KEYS } = require('../config/moduleRegistry');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
@@ -270,6 +271,9 @@ router.put('/school', authMiddleware, rbac('settings', 'update'), async (req, re
     const result = await Schools.updateOne({ id: req.jwtUser.schoolId }, { $set: update });
     if (result.matchedCount === 0) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'School not found' } });
+    }
+    if (update.moduleConfig !== undefined) {
+      invalidateModuleConfigCache(req.jwtUser.schoolId);
     }
 
     // Sync role_permissions for all roles whose V/E/D matrix was just saved.

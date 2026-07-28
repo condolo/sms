@@ -19,6 +19,7 @@ const { z }   = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
+const { moduleGate }     = require('../middleware/module-gate');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
@@ -26,6 +27,7 @@ const { ok, created, paginate, parsePagination, E, strParam } = require('../util
 
 const router = express.Router();
 const PLAN   = planGate('resources');
+const MODGATE = moduleGate('resources');
 
 /* Principal/admin see everything unfiltered — matches how audit
    visibility already works for admin roles elsewhere in the codebase. */
@@ -128,7 +130,7 @@ async function _visibleFilter(req) {
    CONFIG — resource category catalogue
    ══════════════════════════════════════════════════════════════ */
 
-router.get('/config', authMiddleware, PLAN, rbac('resources', 'read'), async (req, res) => {
+router.get('/config', authMiddleware, PLAN, MODGATE, rbac('resources', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const saved = await tenantModel('resources_config', tenantContext(req)).findOne({ schoolId }).lean();
@@ -136,7 +138,7 @@ router.get('/config', authMiddleware, PLAN, rbac('resources', 'read'), async (re
   } catch (err) { console.error('[resources GET /config]', err); return E.serverError(res); }
 });
 
-router.put('/config', authMiddleware, PLAN, async (req, res) => {
+router.put('/config', authMiddleware, PLAN, MODGATE, async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     if (!FULL_ACCESS_ROLES.has(role)) return E.forbidden(res, 'Admin access required to manage resource categories');
@@ -162,7 +164,7 @@ router.put('/config', authMiddleware, PLAN, async (req, res) => {
    RESOURCES
    ══════════════════════════════════════════════════════════════ */
 
-router.get('/', authMiddleware, PLAN, rbac('resources', 'read'), async (req, res) => {
+router.get('/', authMiddleware, PLAN, MODGATE, rbac('resources', 'read'), async (req, res) => {
   try {
     const { page, limit, skip } = parsePagination(req.query);
     const filter = await _visibleFilter(req);
@@ -177,7 +179,7 @@ router.get('/', authMiddleware, PLAN, rbac('resources', 'read'), async (req, res
   } catch (err) { console.error('[resources GET]', err); return E.serverError(res); }
 });
 
-router.get('/:id', authMiddleware, PLAN, rbac('resources', 'read'), async (req, res) => {
+router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('resources', 'read'), async (req, res) => {
   try {
     const filter = await _visibleFilter(req);
     filter.id = req.params.id;
@@ -187,7 +189,7 @@ router.get('/:id', authMiddleware, PLAN, rbac('resources', 'read'), async (req, 
   } catch (err) { console.error('[resources GET/:id]', err); return E.serverError(res); }
 });
 
-router.post('/', authMiddleware, PLAN, rbac('resources', 'create'), async (req, res) => {
+router.post('/', authMiddleware, PLAN, MODGATE, rbac('resources', 'create'), async (req, res) => {
   try {
     const { schoolId, userId, name } = req.jwtUser;
     const { data, error } = _validate(ResourceSchema, req.body);
@@ -206,7 +208,7 @@ router.post('/', authMiddleware, PLAN, rbac('resources', 'create'), async (req, 
   } catch (err) { console.error('[resources POST]', err); return E.serverError(res); }
 });
 
-router.put('/:id', authMiddleware, PLAN, rbac('resources', 'update'), async (req, res) => {
+router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('resources', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const { data, error } = _validate(ResourceSchema.partial(), req.body);
@@ -229,7 +231,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('resources', 'update'), async (req
   } catch (err) { console.error('[resources PUT/:id]', err); return E.serverError(res); }
 });
 
-router.delete('/:id', authMiddleware, PLAN, rbac('resources', 'delete'), async (req, res) => {
+router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('resources', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const Resources = tenantModel('resources', tenantContext(req));
@@ -249,7 +251,7 @@ router.delete('/:id', authMiddleware, PLAN, rbac('resources', 'delete'), async (
    purpose grouping primitive.
    ══════════════════════════════════════════════════════════════ */
 
-router.get('/groups/list', authMiddleware, PLAN, rbac('resources', 'read'), async (req, res) => {
+router.get('/groups/list', authMiddleware, PLAN, MODGATE, rbac('resources', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const docs = await tenantModel('resource_groups', tenantContext(req)).find({ schoolId }).sort({ name: 1 }).select('-__v').lean();
@@ -257,7 +259,7 @@ router.get('/groups/list', authMiddleware, PLAN, rbac('resources', 'read'), asyn
   } catch (err) { console.error('[resources/groups GET]', err); return E.serverError(res); }
 });
 
-router.post('/groups', authMiddleware, PLAN, rbac('resources', 'create'), async (req, res) => {
+router.post('/groups', authMiddleware, PLAN, MODGATE, rbac('resources', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(GroupSchema, req.body);
@@ -270,7 +272,7 @@ router.post('/groups', authMiddleware, PLAN, rbac('resources', 'create'), async 
   } catch (err) { console.error('[resources/groups POST]', err); return E.serverError(res); }
 });
 
-router.delete('/groups/:id', authMiddleware, PLAN, rbac('resources', 'delete'), async (req, res) => {
+router.delete('/groups/:id', authMiddleware, PLAN, MODGATE, rbac('resources', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('resource_groups', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });

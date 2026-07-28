@@ -17,6 +17,7 @@
 const express = require('express');
 
 const { authMiddleware } = require('../middleware/auth');
+const { moduleGate }     = require('../middleware/module-gate');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel }    = require('../utils/tenant-model');
@@ -25,6 +26,7 @@ const { ok, E }          = require('../utils/response');
 
 const router = express.Router();
 const PLAN   = planGate('analytics');
+const MODGATE = moduleGate('reports');
 
 /* ────────────────────────────────────────────────────────────
    Runs the 4 leadership aggregations for ONE school. Pure w.r.t.
@@ -305,7 +307,7 @@ function _combineSnapshots(perSchool) {
    Query params:
      days  — lookback window in days (7 | 30 | 90, default 30)
    ─────────────────────────────────────────────────────────── */
-router.get('/leadership', authMiddleware, PLAN, rbac('analytics', 'read'), async (req, res) => {
+router.get('/leadership', authMiddleware, PLAN, MODGATE, rbac('analytics', 'read'), async (req, res) => {
   try {
     const rawDays = parseInt(req.query.days) || 30;
     const days    = [7, 30, 90].includes(rawDays) ? rawDays : 30;
@@ -338,7 +340,7 @@ router.get('/leadership', authMiddleware, PLAN, rbac('analytics', 'read'), async
    of the whole platform. tenantModel() still isolates each school's
    query from every other's; rbac() is what limits who can reach here.
    ─────────────────────────────────────────────────────────── */
-router.get('/group', authMiddleware, PLAN, rbac('group_analytics', 'read'), async (req, res) => {
+router.get('/group', authMiddleware, PLAN, MODGATE, rbac('group_analytics', 'read'), async (req, res) => {
   try {
     const rawDays = parseInt(req.query.days) || 30;
     const days    = [7, 30, 90].includes(rawDays) ? rawDays : 30;

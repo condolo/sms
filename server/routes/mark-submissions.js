@@ -17,6 +17,7 @@ const express            = require('express');
 const { v4: uuidv4 }    = require('uuid');
 const { z }              = require('zod');
 const { authMiddleware } = require('../middleware/auth');
+const { moduleGate }     = require('../middleware/module-gate');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
@@ -28,6 +29,7 @@ const { _model } = require('../utils/model');
 
 const router = express.Router();
 const PLAN   = planGate('mark_submissions');
+const MODGATE = moduleGate('grades');
 
 const STATUSES = ['draft', 'submitted', 'approved', 'rejected', 'locked'];
 const MARKS_UNLOCK_WORKFLOW_KEY = 'marks_unlock';
@@ -56,7 +58,7 @@ function _validate(schema, data) {
 }
 
 /* ── GET /api/mark-submissions ──────────────────────────── */
-router.get('/', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
+router.get('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId };
@@ -81,7 +83,7 @@ router.get('/', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) =
 });
 
 /* ── GET /api/mark-submissions/:id ─────────────────────── */
-router.get('/:id', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res) => {
+router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('mark_submissions', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
@@ -94,7 +96,7 @@ router.get('/:id', authMiddleware, PLAN, rbac('grades', 'read'), async (req, res
 });
 
 /* ── POST /api/mark-submissions  (teacher submits marks) ── */
-router.post('/', authMiddleware, PLAN, rbac('grades', 'create'), async (req, res) => {
+router.post('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(SubmitSchema, req.body);
@@ -169,7 +171,7 @@ router.post('/', authMiddleware, PLAN, rbac('grades', 'create'), async (req, res
 });
 
 /* ── POST /api/mark-submissions/:id/recall  (teacher recalls) */
-router.post('/:id/recall', authMiddleware, PLAN, rbac('grades', 'update'), async (req, res) => {
+router.post('/:id/recall', authMiddleware, PLAN, MODGATE, rbac('grades', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const sub = await tenantModel('mark_submissions', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
@@ -191,7 +193,7 @@ router.post('/:id/recall', authMiddleware, PLAN, rbac('grades', 'update'), async
 });
 
 /* ── POST /api/mark-submissions/:id/review  (admin/section head reviews) */
-router.post('/:id/review', authMiddleware, PLAN, rbac('grades', 'update'), async (req, res) => {
+router.post('/:id/review', authMiddleware, PLAN, MODGATE, rbac('grades', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     if (!['admin', 'principal', 'section_head'].includes(role)) {
@@ -290,7 +292,7 @@ async function _autoRelock(payload) {
 registerHandler('marks_relock', _autoRelock);
 
 /* ── POST /api/mark-submissions/:id/request-unlock ──────────── */
-router.post('/:id/request-unlock', authMiddleware, PLAN, rbac('grades', 'update'), async (req, res) => {
+router.post('/:id/request-unlock', authMiddleware, PLAN, MODGATE, rbac('grades', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role, email } = req.jwtUser;
     const { reason } = req.body;
@@ -324,7 +326,7 @@ router.post('/:id/request-unlock', authMiddleware, PLAN, rbac('grades', 'update'
 });
 
 /* ── POST /api/mark-submissions/:id/reject-unlock-request ───── */
-router.post('/:id/reject-unlock-request', authMiddleware, PLAN, rbac('grades', 'update'), async (req, res) => {
+router.post('/:id/reject-unlock-request', authMiddleware, PLAN, MODGATE, rbac('grades', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role, email } = req.jwtUser;
     const { reason } = req.body;
@@ -366,7 +368,7 @@ router.post('/:id/reject-unlock-request', authMiddleware, PLAN, rbac('grades', '
 });
 
 /* ── POST /api/mark-submissions/:id/lock  (system — called by report-cards publish) */
-router.post('/:id/lock', authMiddleware, PLAN, rbac('grades', 'update'), async (req, res) => {
+router.post('/:id/lock', authMiddleware, PLAN, MODGATE, rbac('grades', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     if (!['admin', 'principal'].includes(role)) {
@@ -408,7 +410,7 @@ router.post('/:id/lock', authMiddleware, PLAN, rbac('grades', 'update'), async (
    A config exists: this route becomes the approval step of a request →
    approve flow — requires a pending unlock request first, and the caller
    must be the config's resolved approver, not just admin/principal. */
-router.post('/:id/unlock', authMiddleware, PLAN, rbac('grades', 'update'), async (req, res) => {
+router.post('/:id/unlock', authMiddleware, PLAN, MODGATE, rbac('grades', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role, email } = req.jwtUser;
     const ctx = tenantContext(req);

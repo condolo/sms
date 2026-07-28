@@ -30,6 +30,7 @@ const { z }   = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
+const { moduleGate }     = require('../middleware/module-gate');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
@@ -40,6 +41,7 @@ const { sanitisePdfStr }      = require('../utils/sanitisePdf');
 
 const router = express.Router();
 const PLAN   = planGate('timetable');
+const MODGATE = moduleGate('timetable');
 
 /* ── Constants ───────────────────────────────────────────────── */
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
@@ -195,7 +197,7 @@ async function _checkConflicts(schoolId, data, excludeId = null) {
    ══════════════════════════════════════════════════════════════ */
 
 /* ── GET /api/timetable ─ Filtered list ─────────────────────── */
-router.get('/', authMiddleware, PLAN, rbac('timetable', 'read'), async (req, res) => {
+router.get('/', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -225,7 +227,7 @@ router.get('/', authMiddleware, PLAN, rbac('timetable', 'read'), async (req, res
 });
 
 /* ── GET /api/timetable/workload ─ Teacher workload summary ─── */
-router.get('/workload', authMiddleware, PLAN, rbac('timetable', 'read'), async (req, res) => {
+router.get('/workload', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId, isActive: true, type: 'lesson' };
@@ -273,7 +275,7 @@ router.get('/workload', authMiddleware, PLAN, rbac('timetable', 'read'), async (
 });
 
 /* ── GET /api/timetable/conflicts ─ Institution-wide scan ────── */
-router.get('/conflicts', authMiddleware, PLAN, rbac('timetable', 'read'), async (req, res) => {
+router.get('/conflicts', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId, isActive: true };
@@ -413,7 +415,7 @@ router.get('/conflicts', authMiddleware, PLAN, rbac('timetable', 'read'), async 
 });
 
 /* ── GET /api/timetable/overview ─ Institution master grid ───── */
-router.get('/overview', authMiddleware, PLAN, rbac('timetable', 'read'), async (req, res) => {
+router.get('/overview', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId, isActive: true };
@@ -449,7 +451,7 @@ router.get('/overview', authMiddleware, PLAN, rbac('timetable', 'read'), async (
 });
 
 /* ── GET /api/timetable/class/:classId ─ Class timetable ─────── */
-router.get('/class/:classId', authMiddleware, PLAN, rbac('timetable', 'read'), async (req, res) => {
+router.get('/class/:classId', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId, classId: req.params.classId, isActive: true };
@@ -468,7 +470,7 @@ router.get('/class/:classId', authMiddleware, PLAN, rbac('timetable', 'read'), a
 });
 
 /* ── GET /api/timetable/teacher/:teacherId ─ Teacher schedule ── */
-router.get('/teacher/:teacherId', authMiddleware, PLAN, rbac('timetable', 'read'), async (req, res) => {
+router.get('/teacher/:teacherId', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId, teacherId: req.params.teacherId, isActive: true };
@@ -494,7 +496,7 @@ function _canEdit(req) {
 }
 
 /* ── GET /api/timetable/status ─ Publish state ──────────────── */
-router.get('/status', authMiddleware, PLAN, rbac('timetable', 'read'), async (req, res) => {
+router.get('/status', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
   try {
     const school = await _model('schools').findOne({ id: req.jwtUser.schoolId }).lean();
     const s = school?.timetableStatus ?? { published: false, publishedAt: null, termLabel: '' };
@@ -503,7 +505,7 @@ router.get('/status', authMiddleware, PLAN, rbac('timetable', 'read'), async (re
 });
 
 /* ── POST /api/timetable/publish ────────────────────────────── */
-router.post('/publish', authMiddleware, PLAN, rbac('timetable', 'update'), async (req, res) => {
+router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('timetable', 'update'), async (req, res) => {
   try {
     const { termLabel = '' } = req.body;
     const now = new Date().toISOString();
@@ -534,7 +536,7 @@ router.post('/publish', authMiddleware, PLAN, rbac('timetable', 'update'), async
 });
 
 /* ── POST /api/timetable/unpublish ─────────────────────────── */
-router.post('/unpublish', authMiddleware, PLAN, rbac('timetable', 'update'), async (req, res) => {
+router.post('/unpublish', authMiddleware, PLAN, MODGATE, rbac('timetable', 'update'), async (req, res) => {
   try {
     await _model('schools').updateOne({ id: req.jwtUser.schoolId }, {
       $set: { 'timetableStatus.published': false },
@@ -638,7 +640,7 @@ router.get('/my-children', authMiddleware, async (req, res) => {
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/timetable/substitutions?date=YYYY-MM-DD */
-router.get('/substitutions', authMiddleware, PLAN, rbac('timetable', 'read'), async (req, res) => {
+router.get('/substitutions', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { date, from, to } = req.query;
@@ -659,7 +661,7 @@ router.get('/substitutions', authMiddleware, PLAN, rbac('timetable', 'read'), as
 /* GET /api/timetable/substitutions/cover-pdf?date=YYYY-MM-DD
    Generates a printable A4 landscape PDF cover sheet for the given date.
    Columns: Absent · Lesson · Reason · Subject · Class · Type · Substitutes · Signature */
-router.get('/substitutions/cover-pdf', authMiddleware, PLAN, rbac('timetable', 'read'), async (req, res) => {
+router.get('/substitutions/cover-pdf', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { date } = req.query;
@@ -870,7 +872,7 @@ router.get('/substitutions/cover-pdf', authMiddleware, PLAN, rbac('timetable', '
    Given a teacherId + date, fetches all their slots for that day
    and creates substitution records (status: uncovered) for each.
    Idempotent — skips periods that already have records.           */
-router.post('/substitutions/absent', authMiddleware, PLAN, rbac('timetable', 'update'), async (req, res) => {
+router.post('/substitutions/absent', authMiddleware, PLAN, MODGATE, rbac('timetable', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { teacherId, date, reason = 'sick', notes = '' } = req.body;
@@ -957,7 +959,7 @@ router.post('/substitutions/absent', authMiddleware, PLAN, rbac('timetable', 'up
    For every uncovered substitution record on a given date, finds the best
    available teacher (same dept → fewest lessons) and assigns them.
    Tracks assignments within this call to avoid double-booking at same period. */
-router.post('/substitutions/auto-assign', authMiddleware, PLAN, rbac('timetable', 'update'), async (req, res) => {
+router.post('/substitutions/auto-assign', authMiddleware, PLAN, MODGATE, rbac('timetable', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { date } = req.body;
@@ -1067,7 +1069,7 @@ router.post('/substitutions/auto-assign', authMiddleware, PLAN, rbac('timetable'
 });
 
 /* PUT /api/timetable/substitutions/:id — assign substitute or update status */
-router.put('/substitutions/:id', authMiddleware, PLAN, rbac('timetable', 'update'), async (req, res) => {
+router.put('/substitutions/:id', authMiddleware, PLAN, MODGATE, rbac('timetable', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { substituteTeacherId, notes, status, type } = req.body;
@@ -1104,7 +1106,7 @@ router.put('/substitutions/:id', authMiddleware, PLAN, rbac('timetable', 'update
 });
 
 /* DELETE /api/timetable/substitutions/:id */
-router.delete('/substitutions/:id', authMiddleware, PLAN, rbac('timetable', 'delete'), async (req, res) => {
+router.delete('/substitutions/:id', authMiddleware, PLAN, MODGATE, rbac('timetable', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('substitutions', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
@@ -1114,7 +1116,7 @@ router.delete('/substitutions/:id', authMiddleware, PLAN, rbac('timetable', 'del
 });
 
 /* ── GET /api/timetable/versions — publish history ─────────── */
-router.get('/versions', authMiddleware, PLAN, rbac('timetable', 'read'), async (req, res) => {
+router.get('/versions', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const versions = await tenantModel('timetable_versions', tenantContext(req))
@@ -1128,7 +1130,7 @@ router.get('/versions', authMiddleware, PLAN, rbac('timetable', 'read'), async (
    Excludes: teachers scheduled in master timetable at that period, teachers
    marked absent today, substitutes already covering another slot at that period.
    Sorted: same-department first, then fewest weekly lessons (most available). */
-router.get('/available-teachers', authMiddleware, PLAN, rbac('timetable', 'read'), async (req, res) => {
+router.get('/available-teachers', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { date, period, subject = '' } = req.query;
@@ -1224,7 +1226,7 @@ router.get('/available-teachers', authMiddleware, PLAN, rbac('timetable', 'read'
 });
 
 /* ── GET /api/timetable/:id ───────────────────────────────────── */
-router.get('/:id', authMiddleware, PLAN, rbac('timetable', 'read'), async (req, res) => {
+router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('timetable', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
@@ -1238,7 +1240,7 @@ router.get('/:id', authMiddleware, PLAN, rbac('timetable', 'read'), async (req, 
    ══════════════════════════════════════════════════════════════ */
 
 /* ── POST /api/timetable ─ Create slot ──────────────────────── */
-router.post('/', authMiddleware, PLAN, rbac('timetable', 'create'), async (req, res) => {
+router.post('/', authMiddleware, PLAN, MODGATE, rbac('timetable', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(SlotSchema, req.body);
@@ -1268,7 +1270,7 @@ router.post('/', authMiddleware, PLAN, rbac('timetable', 'create'), async (req, 
 });
 
 /* ── POST /api/timetable/bulk ─ Bulk replace / populate ─────── */
-router.post('/bulk', authMiddleware, PLAN, rbac('timetable', 'create'), async (req, res) => {
+router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('timetable', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(BulkSlotSchema, req.body);
@@ -1310,7 +1312,7 @@ router.post('/bulk', authMiddleware, PLAN, rbac('timetable', 'create'), async (r
 });
 
 /* ── PUT /api/timetable/:id ─ Update slot ───────────────────── */
-router.put('/:id', authMiddleware, PLAN, rbac('timetable', 'update'), async (req, res) => {
+router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('timetable', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(SlotSchema.partial(), req.body);
@@ -1353,7 +1355,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('timetable', 'update'), async (req
 });
 
 /* ── DELETE /api/timetable/:id ───────────────────────────────── */
-router.delete('/:id', authMiddleware, PLAN, rbac('timetable', 'delete'), async (req, res) => {
+router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('timetable', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('timetable', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });

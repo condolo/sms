@@ -24,6 +24,7 @@ import { settings as settingsApi } from '@/api/client.js';
 import { academicConfig as academicConfigApi } from '@/api/client.js';
 import { billing as billingApi, mpesa as mpesaApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
+import { CONFIGURABLE_MODULES } from '@/components/layout/Sidebar.jsx';
 
 /* ── Tab config ─────────────────────────────────────────────── */
 const TABS = [
@@ -4774,11 +4775,19 @@ const SEC_BADGE = {
   Insights:   'bg-emerald-50 text-emerald-700 border-emerald-200',
 };
 
+// Only registry keys that correspond to a real Sidebar nav item are
+// genuine on/off toggles — e.g. 'exams'/'assessment'/'report_cards'
+// are separate PERMISSION rows in the registry but all fold under a
+// single nav entry ('grades' for Exams, 'report_cards' for its own
+// page); showing them as their own toggle rows here would do nothing.
+const TOGGLEABLE_MODULE_KEYS = new Set(CONFIGURABLE_MODULES.map(m => m.key));
+
 function initModuleList(registry, savedConfig) {
   const cfgMap = Object.fromEntries(
     (savedConfig ?? []).map((m, i) => [m.key, { enabled: m.enabled ?? true, order: m.order ?? i }])
   );
   return registry
+    .filter(m => TOGGLEABLE_MODULE_KEYS.has(m.key))
     .map((m, i) => ({ key: m.key, label: m.label, section: m.section,
       enabled: cfgMap[m.key]?.enabled ?? true, order: cfgMap[m.key]?.order ?? i }))
     .sort((a, b) => a.order - b.order);

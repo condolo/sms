@@ -14,6 +14,7 @@ const { z }   = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
+const { moduleGate }     = require('../middleware/module-gate');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
@@ -27,6 +28,7 @@ const { getWorkflowConfig, saveWorkflowConfig, resolveStep } = require('../utils
 
 const router = express.Router();
 const PLAN   = planGate('behaviour');
+const MODGATE = moduleGate('behaviour');
 
 const OFFICER_WORKFLOW_KEY = 'behaviour_officer';
 
@@ -348,7 +350,7 @@ function _validate(schema, data) {
    INCIDENTS
    ══════════════════════════════════════════════════════════════ */
 
-router.get('/incidents', authMiddleware, PLAN, behaviourAccess('read'), async (req, res) => {
+router.get('/incidents', authMiddleware, PLAN, MODGATE, behaviourAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -405,7 +407,7 @@ async function _lastResetDate(schoolId, ctx) {
    other all-time client-side aggregation should filter from, so house
    points follow the same yearly cycle as individual student totals
    instead of accumulating forever. */
-router.get('/points-reset/latest', authMiddleware, PLAN, behaviourAccess('read'), async (req, res) => {
+router.get('/points-reset/latest', authMiddleware, PLAN, MODGATE, behaviourAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const resetAt = await _lastResetDate(schoolId, tenantContext(req));
@@ -413,7 +415,7 @@ router.get('/points-reset/latest', authMiddleware, PLAN, behaviourAccess('read')
   } catch (err) { console.error('[behaviour/points-reset/latest GET]', err); return E.serverError(res); }
 });
 
-router.get('/incidents/summary', authMiddleware, PLAN, behaviourAccess('read'), async (req, res) => {
+router.get('/incidents/summary', authMiddleware, PLAN, MODGATE, behaviourAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId };
@@ -444,7 +446,7 @@ router.get('/incidents/summary', authMiddleware, PLAN, behaviourAccess('read'), 
   } catch (err) { console.error('[behaviour/incidents/summary]', err); return E.serverError(res); }
 });
 
-router.get('/incidents/:id', authMiddleware, PLAN, behaviourAccess('read'), async (req, res) => {
+router.get('/incidents/:id', authMiddleware, PLAN, MODGATE, behaviourAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('behaviour_incidents', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
@@ -453,7 +455,7 @@ router.get('/incidents/:id', authMiddleware, PLAN, behaviourAccess('read'), asyn
   } catch (err) { console.error('[behaviour/incidents GET/:id]', err); return E.serverError(res); }
 });
 
-router.post('/incidents', authMiddleware, PLAN, behaviourAccess('create'), async (req, res) => {
+router.post('/incidents', authMiddleware, PLAN, MODGATE, behaviourAccess('create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(IncidentSchema, req.body);
@@ -515,7 +517,7 @@ async function _notifyGuardians(req, incident) {
   });
 }
 
-router.put('/incidents/:id', authMiddleware, PLAN, behaviourAccess('update'), async (req, res) => {
+router.put('/incidents/:id', authMiddleware, PLAN, MODGATE, behaviourAccess('update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(IncidentSchema.partial(), req.body);
@@ -546,7 +548,7 @@ router.put('/incidents/:id', authMiddleware, PLAN, behaviourAccess('update'), as
   } catch (err) { console.error('[behaviour/incidents PUT/:id]', err); return E.serverError(res); }
 });
 
-router.delete('/incidents/:id', authMiddleware, PLAN, behaviourAccess('delete'), async (req, res) => {
+router.delete('/incidents/:id', authMiddleware, PLAN, MODGATE, behaviourAccess('delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const doc = await tenantModel('behaviour_incidents', tenantContext(req)).findOneAndUpdate(
@@ -563,7 +565,7 @@ router.delete('/incidents/:id', authMiddleware, PLAN, behaviourAccess('delete'),
    APPEALS
    ══════════════════════════════════════════════════════════════ */
 
-router.get('/appeals', authMiddleware, PLAN, behaviourAccess('read'), async (req, res) => {
+router.get('/appeals', authMiddleware, PLAN, MODGATE, behaviourAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -581,7 +583,7 @@ router.get('/appeals', authMiddleware, PLAN, behaviourAccess('read'), async (req
   } catch (err) { console.error('[behaviour/appeals GET]', err); return E.serverError(res); }
 });
 
-router.post('/appeals', authMiddleware, PLAN, behaviourAccess('create'), async (req, res) => {
+router.post('/appeals', authMiddleware, PLAN, MODGATE, behaviourAccess('create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(AppealSchema, req.body);
@@ -607,7 +609,7 @@ router.post('/appeals', authMiddleware, PLAN, behaviourAccess('create'), async (
   } catch (err) { console.error('[behaviour/appeals POST]', err); return E.serverError(res); }
 });
 
-router.put('/appeals/:id', authMiddleware, PLAN, behaviourAccess('update'), async (req, res) => {
+router.put('/appeals/:id', authMiddleware, PLAN, MODGATE, behaviourAccess('update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(AppealSchema.partial(), req.body);
@@ -639,7 +641,7 @@ router.put('/appeals/:id', authMiddleware, PLAN, behaviourAccess('update'), asyn
    CATEGORIES  (school-defined behaviour categories)
    ══════════════════════════════════════════════════════════════ */
 
-router.get('/categories', authMiddleware, PLAN, behaviourAccess('read'), async (req, res) => {
+router.get('/categories', authMiddleware, PLAN, MODGATE, behaviourAccess('read'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     await _ensureDefaultCategories(schoolId, tenantContext(req), userId);
@@ -659,7 +661,7 @@ router.get('/categories', authMiddleware, PLAN, behaviourAccess('read'), async (
   } catch (err) { console.error('[behaviour/categories GET]', err); return E.serverError(res); }
 });
 
-router.post('/categories', authMiddleware, PLAN, behaviourAccess('create'), async (req, res) => {
+router.post('/categories', authMiddleware, PLAN, MODGATE, behaviourAccess('create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(CategorySchema, req.body);
@@ -674,7 +676,7 @@ router.post('/categories', authMiddleware, PLAN, behaviourAccess('create'), asyn
   } catch (err) { console.error('[behaviour/categories POST]', err); return E.serverError(res); }
 });
 
-router.put('/categories/:id', authMiddleware, PLAN, behaviourAccess('update'), async (req, res) => {
+router.put('/categories/:id', authMiddleware, PLAN, MODGATE, behaviourAccess('update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(CategorySchema.partial(), req.body);
@@ -695,7 +697,7 @@ router.put('/categories/:id', authMiddleware, PLAN, behaviourAccess('update'), a
   } catch (err) { console.error('[behaviour/categories PUT/:id]', err); return E.serverError(res); }
 });
 
-router.delete('/categories/:id', authMiddleware, PLAN, behaviourAccess('delete'), async (req, res) => {
+router.delete('/categories/:id', authMiddleware, PLAN, MODGATE, behaviourAccess('delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('behaviour_categories', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
@@ -710,7 +712,7 @@ router.delete('/categories/:id', authMiddleware, PLAN, behaviourAccess('delete')
 
 /* GET /api/behaviour/officer-config — any behaviour:read caller may
    see who's currently assigned (needed just to display it). */
-router.get('/officer-config', authMiddleware, PLAN, behaviourAccess('read'), async (req, res) => {
+router.get('/officer-config', authMiddleware, PLAN, MODGATE, behaviourAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const cfg = await getWorkflowConfig(tenantContext(req), schoolId, OFFICER_WORKFLOW_KEY);
@@ -725,7 +727,7 @@ router.get('/officer-config', authMiddleware, PLAN, behaviourAccess('read'), asy
    without admin oversight would be a privilege-escalation path this
    guards against. Empty steps ([]) is valid — it clears the
    assignment, falling back to plain role_permissions for everyone. */
-router.put('/officer-config', authMiddleware, PLAN, async (req, res) => {
+router.put('/officer-config', authMiddleware, PLAN, MODGATE, async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     if (!['superadmin', 'admin'].includes(role)) {
@@ -756,7 +758,7 @@ async function resetBehaviourPoints(schoolId, ctx, { resetBy, note } = {}) {
 }
 
 /* ── POST /api/behaviour/points-reset — manual, admin-triggered ── */
-router.post('/points-reset', authMiddleware, PLAN, behaviourAccess('delete'), async (req, res) => {
+router.post('/points-reset', authMiddleware, PLAN, MODGATE, behaviourAccess('delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const doc = await resetBehaviourPoints(schoolId, tenantContext(req), { resetBy: userId, note: req.body?.note });

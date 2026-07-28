@@ -32,7 +32,13 @@ import useAuthStore from '@/store/auth.js';
 import { auth as authApi } from '@/api/client.js';
 
 /* ── All configurable modules (master list) ──────────────────── */
-const CONFIGURABLE_MODULES = [
+// Exported so Settings → Modules can filter the (broader) permission
+// registry down to only keys that actually correspond to a real,
+// toggleable nav item here — e.g. 'exams'/'assessment' are separate
+// permission rows in server/config/moduleRegistry.js but both live
+// under this single 'grades'-keyed "Exams" nav entry, so they must
+// NOT show up as their own (non-functional) toggle rows in Settings.
+export const CONFIGURABLE_MODULES = [
   { key: 'students',   to: '/students',   Icon: GraduationCap, label: 'Students',            section: 'Academic'   },
   { key: 'teachers',   to: '/teachers',   Icon: Users,          label: 'Teachers',            section: 'Academic'   },
   { key: 'classes',    to: '/classes',    Icon: BookOpen,        label: 'Classes',             section: 'Academic'   },

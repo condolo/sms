@@ -9,10 +9,13 @@ const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
+const { moduleGate }     = require('../middleware/module-gate');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 
 const router = express.Router();
+const MODGATE = moduleGate('subjects');
+router.use(authMiddleware, MODGATE);
 
 /* ── Validation ─────────────────────────────────────────────── */
 const SubjectSchema = z.object({

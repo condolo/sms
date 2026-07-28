@@ -9,6 +9,7 @@ const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware }  = require('../middleware/auth');
+const { moduleGate }     = require('../middleware/module-gate');
 const { rbac }            = require('../middleware/rbac');
 const { planGate }        = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
@@ -18,6 +19,7 @@ const { applyOptimisticLock } = require('../utils/optimistic-lock');
 
 const router = express.Router();
 const PLAN   = planGate('teachers');
+const MODGATE = moduleGate('teachers');
 
 /* ── Validation schemas ─────────────────────────────────────── */
 const TeacherCreateSchema = z.object({
@@ -157,7 +159,7 @@ router.put('/me', authMiddleware, async (req, res) => {
 });
 
 /* ── GET /api/teachers ─ Paginated list ─────────────────────── */
-router.get('/', authMiddleware, PLAN, rbac('teachers', 'read'), async (req, res) => {
+router.get('/', authMiddleware, PLAN, MODGATE, rbac('teachers', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -233,7 +235,7 @@ router.get('/', authMiddleware, PLAN, rbac('teachers', 'read'), async (req, res)
 });
 
 /* ── GET /api/teachers/:id ───────────────────────────────────── */
-router.get('/:id', authMiddleware, PLAN, rbac('teachers', 'read'), async (req, res) => {
+router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('teachers', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const projection = _canViewFullData(req.jwtUser.role) ? FULL_PROJECTION : LIMITED_PROJECTION;
@@ -253,7 +255,7 @@ router.get('/:id', authMiddleware, PLAN, rbac('teachers', 'read'), async (req, r
 });
 
 /* ── POST /api/teachers ─ Create teacher ────────────────────── */
-router.post('/', authMiddleware, PLAN, rbac('teachers', 'create'), async (req, res) => {
+router.post('/', authMiddleware, PLAN, MODGATE, rbac('teachers', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
 
@@ -304,7 +306,7 @@ router.post('/', authMiddleware, PLAN, rbac('teachers', 'create'), async (req, r
 });
 
 /* ── PUT /api/teachers/:id ───────────────────────────────────── */
-router.put('/:id', authMiddleware, PLAN, rbac('teachers', 'update'), async (req, res) => {
+router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('teachers', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
 
@@ -351,7 +353,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('teachers', 'update'), async (req,
 });
 
 /* ── DELETE /api/teachers/bulk — hard-delete multiple teachers + their user accounts ── */
-router.delete('/bulk', authMiddleware, PLAN, rbac('teachers', 'delete'), async (req, res) => {
+router.delete('/bulk', authMiddleware, PLAN, MODGATE, rbac('teachers', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { ids } = req.body;
@@ -398,7 +400,7 @@ router.delete('/bulk', authMiddleware, PLAN, rbac('teachers', 'delete'), async (
 });
 
 /* ── DELETE /api/teachers/:id ─ Soft-delete ─────────────────── */
-router.delete('/:id', authMiddleware, PLAN, rbac('teachers', 'delete'), async (req, res) => {
+router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('teachers', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const paramId = req.params.id;

@@ -8,6 +8,7 @@ const { z }   = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware }  = require('../middleware/auth');
+const { moduleGate }     = require('../middleware/module-gate');
 const { rbac }            = require('../middleware/rbac');
 const { planGate }        = require('../middleware/plan');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
@@ -28,6 +29,7 @@ const email = require('../utils/email');
 
 const router = express.Router();
 const PLAN   = planGate('attendance');
+const MODGATE = moduleGate('attendance');
 
 /* ── Validation ─────────────────────────────────────────────── */
 const AttendanceRecordSchema = z.object({
@@ -58,7 +60,7 @@ function _validate(schema, data) {
 }
 
 /* ── GET /api/attendance ─ Paginated list ───────────────────── */
-router.get('/', authMiddleware, PLAN, rbac('attendance', 'read'), scopeMiddleware, async (req, res) => {
+router.get('/', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -97,7 +99,7 @@ router.get('/', authMiddleware, PLAN, rbac('attendance', 'read'), scopeMiddlewar
 });
 
 /* ── GET /api/attendance/summary ─ Attendance stats per student ─ */
-router.get('/summary', authMiddleware, PLAN, rbac('attendance', 'read'), scopeMiddleware, async (req, res) => {
+router.get('/summary', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
 
@@ -147,7 +149,7 @@ router.get('/summary', authMiddleware, PLAN, rbac('attendance', 'read'), scopeMi
 });
 
 /* ── GET /api/attendance/:id ─────────────────────────────────── */
-router.get('/:id', authMiddleware, PLAN, rbac('attendance', 'read'), async (req, res) => {
+router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const Attendance = tenantModel('attendance', tenantContext(req));
@@ -161,7 +163,7 @@ router.get('/:id', authMiddleware, PLAN, rbac('attendance', 'read'), async (req,
 });
 
 /* ── POST /api/attendance ─ Single record ───────────────────── */
-router.post('/', authMiddleware, PLAN, rbac('attendance', 'create'), async (req, res) => {
+router.post('/', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(AttendanceRecordSchema, req.body);
@@ -195,7 +197,7 @@ router.post('/', authMiddleware, PLAN, rbac('attendance', 'create'), async (req,
 });
 
 /* ── POST /api/attendance/bulk ─ Mark whole class at once ───── */
-router.post('/bulk', authMiddleware, PLAN, rbac('attendance', 'create'), async (req, res) => {
+router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(BulkAttendanceSchema, req.body);
@@ -235,7 +237,7 @@ router.post('/bulk', authMiddleware, PLAN, rbac('attendance', 'create'), async (
 });
 
 /* ── PUT /api/attendance/:id ─ Update record ─────────────────── */
-router.put('/:id', authMiddleware, PLAN, rbac('attendance', 'update'), async (req, res) => {
+router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('attendance', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(AttendanceRecordSchema.partial(), req.body);
@@ -259,7 +261,7 @@ router.put('/:id', authMiddleware, PLAN, rbac('attendance', 'update'), async (re
 });
 
 /* ── DELETE /api/attendance/:id ──────────────────────────────── */
-router.delete('/:id', authMiddleware, PLAN, rbac('attendance', 'delete'), async (req, res) => {
+router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('attendance', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const Attendance = tenantModel('attendance', tenantContext(req));
