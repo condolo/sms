@@ -19,6 +19,7 @@ const AuditService = require('../services/audit');
 const { notifyGuardiansForStudents } = require('../utils/notify-students');
 const email = require('../utils/email');
 const { _model } = require('../utils/model');
+const { resolveAcademicPeriod } = require('../utils/academic-period');
 
 const router = express.Router();
 const PLAN   = planGate('behaviour');
@@ -30,6 +31,8 @@ const IncidentSchema = z.object({
   reportedBy:   z.string().optional(),          // userId of reporter; overridden by JWT
   categoryId:   z.string().optional(),
   category:     z.string().max(100).optional(), // denormalized category name for display, same convention as library loans' bookTitle
+  academicYearId: z.string().optional(),
+  termId:       z.string().optional(),
   type:         z.enum(['merit', 'demerit', 'neutral']).default('demerit'),
   severity:     z.enum(['low', 'medium', 'high', 'critical']).optional(),
   title:        z.string().min(1).max(200),
@@ -212,6 +215,11 @@ router.post('/incidents', authMiddleware, PLAN, rbac('behaviour', 'create'), asy
     const { data, error } = _validate(IncidentSchema, req.body);
     if (error) return E.validation(res, error);
 
+    const period = await resolveAcademicPeriod(schoolId, tenantContext(req), { academicYearId: data.academicYearId, termId: data.termId });
+    if (period.error) return E.badRequest(res, period.error);
+    data.academicYearId = period.academicYearId;
+    data.termId          = period.termId;
+
     const doc = await tenantModel('behaviour_incidents', tenantContext(req)).create({
       ...data,
       id:          uuidv4(),
@@ -270,7 +278,21 @@ router.put('/incidents/:id', authMiddleware, PLAN, rbac('behaviour', 'update'), 
     if (error) return E.validation(res, error);
     delete data.schoolId; delete data.id;
 
-    const doc = await tenantModel('behaviour_incidents', tenantContext(req)).findOneAndUpdate(
+    const Incidents = tenantModel('behaviour_incidents', tenantContext(req));
+
+    if (data.academicYearId !== undefined || data.termId !== undefined) {
+      const existing = await Incidents.findOne({ id: req.params.id, schoolId }).lean();
+      if (!existing) return E.notFound(res, 'Incident not found');
+      const period = await resolveAcademicPeriod(schoolId, tenantContext(req), {
+        academicYearId: data.academicYearId !== undefined ? data.academicYearId : existing.academicYearId,
+        termId:         data.termId         !== undefined ? data.termId         : existing.termId,
+      });
+      if (period.error) return E.badRequest(res, period.error);
+      data.academicYearId = period.academicYearId;
+      data.termId          = period.termId;
+    }
+
+    const doc = await Incidents.findOneAndUpdate(
       { id: req.params.id, schoolId },
       { ...data, updatedBy: userId },
       { new: true, runValidators: false }

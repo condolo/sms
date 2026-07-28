@@ -19,7 +19,7 @@ const { applyOptimisticLock } = require('../utils/optimistic-lock');
 const AuditService = require('../services/audit');
 const { notifyGuardiansForStudents } = require('../utils/notify-students');
 const email = require('../utils/email');
-const { resolveCurrentPeriod } = require('./academic-config');
+const { resolveAcademicPeriod: _resolveAcademicPeriod } = require('../utils/academic-period');
 
 const router = express.Router();
 const PLAN   = planGate('finance');
@@ -85,46 +85,6 @@ function _validate(schema, data) {
   const r = schema.safeParse(data);
   if (!r.success) return { error: r.error.issues.map(i => ({ field: i.path.join('.'), message: i.message })) };
   return { data: r.data };
-}
-
-/* Resolves + validates {academicYearId, termId} against the school's real
-   academic_years records — mirrors report-cards.js's _resolveTermScope
-   (same resolveCurrentPeriod fallback-to-current-period behavior when
-   nothing is given), but errors on an explicitly-given id that doesn't
-   exist for this school (matching exams.js's FK-validation style) instead
-   of silently discarding it — a typo'd id should surface, not vanish.
-   An academicYearId with no termId is valid (a fee structure/invoice can
-   cover the whole year). Neither given → live-resolves the current
-   year+term together, same as useCurrentAcademicPeriod client-side. */
-async function _resolveAcademicPeriod(schoolId, ctx, { academicYearId, termId }) {
-  const years = await tenantModel('academic_years', ctx).find({ schoolId }).lean();
-  if (!years.length) return { academicYearId: null, termId: null };
-
-  const current = resolveCurrentPeriod(years);
-
-  let year = null;
-  if (academicYearId) {
-    year = years.find(y => (y.id || y._id?.toString()) === academicYearId);
-    if (!year) return { error: `academicYearId "${academicYearId}" does not match any academic year for this school` };
-  } else {
-    year = current.year;
-  }
-  if (!year) return { academicYearId: null, termId: null };
-
-  const resolvedYearId = year.id || year._id?.toString();
-  const terms = Array.isArray(year.terms) ? year.terms : [];
-
-  let resolvedTermId = null;
-  if (termId) {
-    const term = terms.find(t => t.id === termId);
-    if (!term) return { error: `termId "${termId}" does not match any term in academic year "${year.name}"` };
-    resolvedTermId = term.id;
-  } else if (!academicYearId) {
-    resolvedTermId = current.term?.id ?? null;
-  }
-  // else: explicit academicYearId with no termId → year-wide scope, term left unset
-
-  return { academicYearId: resolvedYearId, termId: resolvedTermId };
 }
 
 /* ══════════════════════════════════════════════════════════════

@@ -59,6 +59,7 @@ beforeEach(() => {
   mockCurrentUser = { userId: 'u_teacher', schoolId: SCHOOL, role: 'teacher', roles: [] };
   mockStores = {
     behaviour_incidents: makeStore([]),
+    academic_years: makeStore([]), // resolveAcademicPeriod gracefully no-ops when a school has none configured
     students: makeStore([{ id: 'stu_1', schoolId: SCHOOL, firstName: 'Jane', lastName: 'Doe' }]),
     schools:  makeStore([{ id: SCHOOL, name: 'Test School', systemEmail: 'office@test.io' }]),
     users:    makeStore([
