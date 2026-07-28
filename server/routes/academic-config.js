@@ -718,6 +718,25 @@ router.post('/transition-year', authMiddleware, async (req, res) => { // rbac: s
       timestamp:         now,
     });
 
+    // ── Step D: Reset behaviour points for the new year ────────
+    // Lazy require — behaviour.js pulls in utils/academic-period.js,
+    // which requires this file, so a top-level require here would be
+    // circular. Best-effort: a failure here must never fail the
+    // transition itself (exams/grades/report-cards are already
+    // archived and the new year is already active by this point).
+    // Raw behaviour_incidents history is never touched — this only
+    // writes a behaviour_points_resets marker, same mechanism as the
+    // existing manual "Reset Points" admin action, just auto-fired.
+    try {
+      const { resetBehaviourPoints } = require('./behaviour');
+      await resetBehaviourPoints(schoolId, tenantContext(req), {
+        resetBy: userId,
+        note: `Automatic reset — academic year transition to "${activatedYear.name}"`,
+      });
+    } catch (err) {
+      console.error('[academic-config/transition-year] behaviour points reset failed (non-fatal):', err.message);
+    }
+
     console.log(`[ACADEMIC-CONFIG] Year transition: "${activatedYear.name}" is now active (by ${userId})`);
     return ok(res, {
       activatedYear: { ...activatedYear, status: 'active' },

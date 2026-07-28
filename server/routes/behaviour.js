@@ -452,26 +452,32 @@ router.delete('/categories/:id', authMiddleware, PLAN, rbac('behaviour', 'delete
   } catch (err) { console.error('[behaviour/categories DELETE/:id]', err); return E.serverError(res); }
 });
 
-/* ── POST /api/behaviour/points-reset ────────────────────────────
-   Governance Spec §2 — zeroes the CURRENT running-total balance shown
+/* Governance Spec §2 — zeroes the CURRENT running-total balance shown
    by /incidents/summary without touching behaviour_incidents history,
    which is never deleted, modified, or filtered out by this action.
-   Manual, admin-triggered (interim choice — automatic-on-date needs
-   an academic-year-transition hook that doesn't exist anywhere in the
-   codebase yet, left as an explicit open question in the spec). */
+   Exported so academic-config.js's /transition-year route can fire
+   this automatically at year-end, alongside the manual admin button
+   below — same mechanism, two triggers. */
+async function resetBehaviourPoints(schoolId, ctx, { resetBy, note } = {}) {
+  const now = new Date().toISOString();
+  const doc = await tenantModel('behaviour_points_resets', ctx).create({
+    id: uuidv4(), schoolId, resetAt: now, resetBy: resetBy || 'system', note: (note || '').trim(),
+  });
+  return doc.toObject ? doc.toObject() : doc;
+}
+
+/* ── POST /api/behaviour/points-reset — manual, admin-triggered ── */
 router.post('/points-reset', authMiddleware, PLAN, rbac('behaviour', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const now = new Date().toISOString();
-    const doc = await tenantModel('behaviour_points_resets', tenantContext(req)).create({
-      id: uuidv4(), schoolId, resetAt: now, resetBy: userId, note: req.body?.note?.trim() || '',
-    });
+    const doc = await resetBehaviourPoints(schoolId, tenantContext(req), { resetBy: userId, note: req.body?.note });
     await AuditService.log({
       action: 'behaviour.points_reset', actor: { userId, role: req.jwtUser.role, email: req.jwtUser.email }, schoolId,
-      target: { type: 'behaviour_points_reset', id: doc.id }, details: { resetAt: now }, req,
+      target: { type: 'behaviour_points_reset', id: doc.id }, details: { resetAt: doc.resetAt }, req,
     });
-    return created(res, doc.toObject ? doc.toObject() : doc);
+    return created(res, doc);
   } catch (err) { console.error('[behaviour/points-reset POST]', err); return E.serverError(res); }
 });
 
 module.exports = router;
+module.exports.resetBehaviourPoints = resetBehaviourPoints;
