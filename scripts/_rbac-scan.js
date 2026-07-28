@@ -28,14 +28,24 @@ const OWN_ACCOUNT_PATTERNS = [
 
 const ROUTE_RE = /router\.(get|post|put|patch|delete)\s*\(\s*['"`]([^'"`]+)['"`]/g;
 // Recognised protection patterns:
-//   rbac(         — standard RBAC middleware
-//   // rbac:      — manual annotation for intentional non-rbac guards
-//   planGate(     — plan-tier gate (bell-schedule, elearning, etc.)
-//   _pdfAccess    — custom PDF access guard (report-cards /:id/pdf)
-//   _can(         — teacher/admin inline guard (lesson-plans)
-//   _typeGuard    — growth-records type-based access guard
-const RBAC_RE  = /rbac\s*\(|\/[/*] rbac:|planGate\(|_pdfAccess|_can\(|_typeGuard/;
+//   rbac(            — standard RBAC middleware
+//   // rbac:         — manual annotation for intentional non-rbac guards
+//   planGate(        — plan-tier gate (bell-schedule, elearning, etc.)
+//   _pdfAccess       — custom PDF access guard (report-cards /:id/pdf)
+//   _can(            — teacher/admin inline guard (lesson-plans)
+//   _typeGuard       — growth-records type-based access guard
+//   behaviourAccess( — behaviour.js's rbac('behaviour', action) wrapper;
+//                      also lets the assigned Behaviour Officer through
+const RBAC_RE  = /rbac\s*\(|\/[/*] rbac:|planGate\(|_pdfAccess|_can\(|_typeGuard|behaviourAccess\(/;
 const AUTH_RE  = /authMiddleware/;
+// Some files apply authMiddleware once, file-wide, via router.use(...)
+// rather than repeating it on every individual route line (e.g.
+// library.js, hostel.js, transport.js, hr.js, messages.js, events.js,
+// subjects.js, birthdays.js). AUTH_RE's local-context check never sees
+// that string next to any specific route in those files, which used to
+// make every route in them invisible to this scanner — not counted as a
+// gap, not counted as protected, just silently excluded from `total`.
+const ROUTER_USE_AUTH_RE = /^\s*router\.use\s*\(\s*authMiddleware\b/m;
 
 /**
  * Scan server/routes and return coverage stats.
@@ -50,6 +60,7 @@ module.exports = function scanRoutes() {
 
     const source = fs.readFileSync(path.join(ROUTES_DIR, file), 'utf8');
     const lines  = source.split('\n');
+    const fileWideAuth = ROUTER_USE_AUTH_RE.test(source);
     let match;
     ROUTE_RE.lastIndex = 0;
 
@@ -59,7 +70,7 @@ module.exports = function scanRoutes() {
       const lineNum   = source.slice(0, match.index).split('\n').length;
       const lineCtx   = lines.slice(Math.max(0, lineNum - 1), lineNum + 3).join(' ');
 
-      if (!AUTH_RE.test(lineCtx)) continue;
+      if (!fileWideAuth && !AUTH_RE.test(lineCtx)) continue;
       total++;
 
       if (RBAC_RE.test(lineCtx) || OWN_ACCOUNT_PATTERNS.some(p => p.test(routePath))) {

@@ -727,7 +727,7 @@ router.get('/officer-config', authMiddleware, PLAN, MODGATE, behaviourAccess('re
    without admin oversight would be a privilege-escalation path this
    guards against. Empty steps ([]) is valid — it clears the
    assignment, falling back to plain role_permissions for everyone. */
-router.put('/officer-config', authMiddleware, PLAN, MODGATE, async (req, res) => {
+router.put('/officer-config', authMiddleware, PLAN, MODGATE, async (req, res) => { // rbac: manual superadmin/admin check below, not behaviourAccess() — see comment above
   try {
     const { schoolId, userId, role } = req.jwtUser;
     if (!['superadmin', 'admin'].includes(role)) {
