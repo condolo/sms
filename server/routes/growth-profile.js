@@ -76,6 +76,7 @@ router.get('/:studentId', authMiddleware, PLAN, rbac('growth_profile', 'read'), 
       student,
       sections: {
         academic:        { count: 0, label: 'Academic'        },   // populated via /academic sub-route
+        behaviour:       { count: 0, label: 'Behaviour'       },   // populated via /behaviour sub-route
         leadership:      { count: leadershipCount,  verified: leadershipVerified  },
         activities:      { count: activitiesCount,  verified: activitiesVerified  },
         projects:        { count: projectsCount,    verified: projectsVerified    },
@@ -211,6 +212,61 @@ router.get('/:studentId/academic', authMiddleware, PLAN, rbac('growth_profile', 
       reports: recentReports,
     });
   } catch (err) { console.error('[growth-profile GET/:studentId/academic]', err); return E.serverError(res); }
+});
+
+/* ── GET /api/growth-profile/:studentId/behaviour ──────────────
+   The permanent behaviour record — grouped by academic year, reading
+   ALL-TIME behaviour_incidents with no reset-window applied (unlike
+   Behaviour's own /incidents/summary, which floors at the most recent
+   points-reset). A yearly reset only moves the "current" window
+   Behaviour itself shows; it never touches this collection, so every
+   year's totals stay visible here permanently, per Governance Spec §2. */
+router.get('/:studentId/behaviour', authMiddleware, PLAN, rbac('growth_profile', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const { studentId } = req.params;
+
+    const student = await tenantModel('students', tenantContext(req)).findOne({ id: studentId, schoolId })
+      .select('id firstName lastName').lean();
+    if (!student) return E.notFound(res, 'Student not found');
+
+    const [byYear, years] = await Promise.all([
+      tenantModel('behaviour_incidents', tenantContext(req)).aggregate([
+        { $match: { schoolId, studentId } },
+        { $group: {
+          _id:       '$academicYearId',
+          merits:    { $sum: { $cond: [{ $eq: ['$type', 'merit'] }, 1, 0] } },
+          demerits:  { $sum: { $cond: [{ $eq: ['$type', 'demerit'] }, 1, 0] } },
+          points:    { $sum: '$points' },
+          total:     { $sum: 1 },
+          firstDate: { $min: '$date' },
+          lastDate:  { $max: '$date' },
+        }},
+      ]),
+      tenantModel('academic_years', tenantContext(req)).find({ schoolId }).select('id name').lean(),
+    ]);
+
+    const yearNameById = Object.fromEntries(years.map(y => [y.id, y.name]));
+    const history = byYear
+      .map(g => ({
+        academicYearId:   g._id,
+        academicYearName: g._id ? (yearNameById[g._id] ?? g._id) : 'Unassigned',
+        merits: g.merits, demerits: g.demerits, points: g.points, total: g.total,
+        firstDate: g.firstDate, lastDate: g.lastDate,
+      }))
+      .sort((a, b) => (a.firstDate || '').localeCompare(b.firstDate || ''));
+
+    return ok(res, {
+      student,
+      history,
+      allTime: {
+        merits:   history.reduce((s, h) => s + h.merits, 0),
+        demerits: history.reduce((s, h) => s + h.demerits, 0),
+        points:   history.reduce((s, h) => s + h.points, 0),
+        total:    history.reduce((s, h) => s + h.total, 0),
+      },
+    });
+  } catch (err) { console.error('[growth-profile GET/:studentId/behaviour]', err); return E.serverError(res); }
 });
 
 module.exports = router;

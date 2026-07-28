@@ -4,15 +4,16 @@
    Accessible via /growth-profile/:studentId
    Access point: StudentProfile header "Growth Profile" button.
 
-   8 sections:
+   9 sections:
      1. Academic   — read-only from grades/attendance/reports
-     2. Leadership — CRUD + verify
-     3. Activities — CRUD + verify
-     4. Projects   — CRUD + verify (supervisor ref)
-     5. Service    — CRUD + verify
-     6. Awards     — CRUD + verify
-     7. Recommendations — staff-write, student-read
-     8. Aspirations — student self-edit
+     2. Behaviour  — read-only, all-time by academic year, never reset
+     3. Leadership — CRUD + verify
+     4. Activities — CRUD + verify
+     5. Projects   — CRUD + verify (supervisor ref)
+     6. Service    — CRUD + verify
+     7. Awards     — CRUD + verify
+     8. Recommendations — staff-write, student-read
+     9. Aspirations — student self-edit
 
    RBAC: growth_profile module (standard plan)
    ============================================================ */
@@ -23,12 +24,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronLeft, GraduationCap, Crown, Music, Layers,
   Heart, Award, MessageSquare, Compass, Loader2, AlertTriangle,
-  TrendingUp, Shield, CheckCircle2, BookOpen, Hash,
+  TrendingUp, Shield, CheckCircle2, BookOpen, Hash, Scale,
 } from 'lucide-react';
 import { growthProfile as gpApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 
 import AcademicSection         from './sections/AcademicSection.jsx';
+import BehaviourSection        from './sections/BehaviourSection.jsx';
 import LeadershipSection       from './sections/LeadershipSection.jsx';
 import ActivitiesSection       from './sections/ActivitiesSection.jsx';
 import ProjectsSection         from './sections/ProjectsSection.jsx';
@@ -40,6 +42,7 @@ import AspirationsSection      from './sections/AspirationsSection.jsx';
 /* ── Section definitions ─────────────────────────────────────── */
 const SECTIONS = [
   { id: 'academic',        label: 'Academic',        Icon: GraduationCap, color: 'text-emerald-600' },
+  { id: 'behaviour',       label: 'Behaviour',       Icon: Scale,         color: 'text-slate-600'   },
   { id: 'leadership',      label: 'Leadership',      Icon: Crown,         color: 'text-violet-600'  },
   { id: 'activities',      label: 'Activities',      Icon: Music,         color: 'text-blue-600'    },
   { id: 'projects',        label: 'Projects',        Icon: Layers,        color: 'text-indigo-600'  },
@@ -190,6 +193,7 @@ export default function GrowthProfilePage() {
   /* Section count helper */
   function sectionCount(id) {
     if (id === 'academic')        return null;
+    if (id === 'behaviour')       return null;
     if (id === 'recommendations') return sections.recommendations?.count;
     if (id === 'aspirations')     return null;
     return sections[id]?.count;
@@ -204,6 +208,7 @@ export default function GrowthProfilePage() {
   function renderSection() {
     switch (activeSection) {
       case 'academic':        return <AcademicSection studentId={studentId} />;
+      case 'behaviour':       return <BehaviourSection studentId={studentId} />;
       case 'leadership':      return <LeadershipSection studentId={studentId} canEdit={canEdit} canVerify={canVerify} isAdmin={isAdmin} />;
       case 'activities':      return <ActivitiesSection studentId={studentId} canEdit={canEdit} canVerify={canVerify} isAdmin={isAdmin} />;
       case 'projects':        return <ProjectsSection studentId={studentId} canEdit={canEdit} canVerify={canVerify} isAdmin={isAdmin} />;

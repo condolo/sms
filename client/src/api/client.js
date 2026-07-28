@@ -643,6 +643,8 @@ export const growthProfile = {
   profile:  (studentId)       => _get(`/growth-profile/${studentId}`),
   /** Academic section: grades, attendance, recent reports (read-only aggregation) */
   academic: (studentId)       => _get(`/growth-profile/${studentId}/academic`),
+  /** Behaviour section: all-time history grouped by academic year, never reset (read-only aggregation) */
+  behaviour: (studentId)      => _get(`/growth-profile/${studentId}/behaviour`),
 
   /** Generic records: leadership | activities | service | awards */
   records: {
