@@ -7,6 +7,7 @@ const crypto   = require('crypto');
 const mongoose = require('mongoose');
 const { authMiddleware }   = require('../middleware/auth');
 const { tenantMiddleware } = require('../middleware/tenant');
+const { rbac }             = require('../middleware/rbac');
 const { tenantModel, tenantContext, PLATFORM_COLLECTIONS } = require('../utils/tenant-model');
 const email    = require('../utils/email');
 
@@ -91,6 +92,69 @@ function _isSuperAdmin(req) {
   return role === 'superadmin' || roles.includes('superadmin');
 }
 
+/* Collections that must stay admin-only on READ too, not just write —
+   raw PII/credentials (users), the permission model itself
+   (role_permissions), the school's own platform record (schools), and
+   platform billing data (billing_snapshots). Deliberately NOT the same
+   set as ADMIN_WRITE: most of ADMIN_WRITE (grades, attendance, exams,
+   invoices, ...) restricts WRITES to admin (matching each module's real
+   rbac gate, which is stricter for writes than reads), but plenty of
+   non-admin roles legitimately have READ access to those same modules
+   day-to-day (a teacher has real attendance:RCU/grades:RCU grants) —
+   gating their reads to admin-only here would silently break that. */
+const READ_ADMIN_ONLY = new Set(['users', 'role_permissions', 'schools', 'billing_snapshots']);
+
+/* This router is a generic escape hatch (originally built for offline
+   sync — see /bulk's comment) that reads/writes any ALLOWED collection
+   with no per-collection permission check beyond ADMIN_WRITE/
+   SUPERADMIN_WRITE/READ_ADMIN_ONLY — meaning any authenticated user
+   could read data through here that their role_permissions would deny
+   through the collection's own dedicated route (e.g. every staff
+   member's leave requests via /api/collections/leave_requests,
+   bypassing hr.js's deliberate self-scoping; or every student's
+   behaviour record via /api/collections/behaviour_incidents, bypassing
+   behaviourAccess() entirely). READ_MODULE maps a collection to the
+   same rbac module its real route already gates reads on — same
+   read-level access a role already has through the module's own page,
+   closing the generic bypass without narrowing anyone's real access.
+   Reference/curriculum data with no dedicated gate (subjects, classes,
+   timetable, library_books, etc.) is intentionally left open here,
+   matching how their own dedicated routes already treat it. */
+const READ_MODULE = {
+  behaviour_incidents:   'behaviour',
+  behaviour_appeals:     'behaviour',
+  behaviour_categories:  'behaviour',
+  leave_requests:        'hr',
+  payroll:               'hr',
+  grades:                'grades',
+  exams:                 'exams',
+  exam_results:          'exams',
+  assessment_marks:      'grades',
+  mark_submissions:      'grades',
+  mark_audit_log:        'grades',
+  report_card_snapshots: 'grades',
+  attendance:            'attendance',
+  admissions:            'admissions',
+  invoices:              'finance',
+  payments:              'finance',
+  fee_structures:        'finance',
+};
+
+/* Returns true if req may read `col` here; false means it already wrote
+   the 403/401 response (via rbac()'s own middleware body) and the
+   caller must return immediately without sending a second response. */
+async function _canRead(req, res, col) {
+  if (READ_ADMIN_ONLY.has(col) && !_isAdmin(req)) {
+    res.status(403).json({ error: 'Admin access required' });
+    return false;
+  }
+  const mod = READ_MODULE[col];
+  if (!mod || _isAdmin(req)) return true;
+  return new Promise(resolve => {
+    rbac(mod, 'read')(req, res, () => resolve(true));
+  }).catch(() => { res.status(500).json({ error: 'Failed to verify access' }); return false; });
+}
+
 /* Strip sensitive fields from user docs — strip BOTH field names to cover legacy docs */
 function _sanitiseUser(doc) {
   if (!doc) return doc;
@@ -125,9 +189,10 @@ function _accessor(col, req) {
 }
 
 /* ── GET /api/collections/:col  — list all docs for this school ── */
-router.get('/:col', authMiddleware, async (req, res) => {
+router.get('/:col', authMiddleware, async (req, res) => { // rbac: _canRead() below — dynamic per-collection module, see READ_MODULE
   const { col } = req.params;
   if (!ALLOWED.has(col)) return res.status(400).json({ error: `Unknown collection: ${col}` });
+  if (!(await _canRead(req, res, col))) return;
   try {
     const Model  = _accessor(col, req);
     const filter = GLOBAL.has(col) ? {} : { schoolId: req.jwtUser.schoolId };
@@ -142,7 +207,7 @@ router.get('/:col', authMiddleware, async (req, res) => {
 });
 
 /* ── POST /api/collections/:col  — insert a document ── */
-router.post('/:col', authMiddleware, async (req, res) => {
+router.post('/:col', authMiddleware, async (req, res) => { // rbac: ADMIN_WRITE/SUPERADMIN_WRITE checks below — dynamic per-collection
   const { col } = req.params;
   if (!ALLOWED.has(col)) return res.status(400).json({ error: `Unknown collection: ${col}` });
   // ⚠️ Security: only admins can create users/permissions/schools
@@ -163,7 +228,7 @@ router.post('/:col', authMiddleware, async (req, res) => {
 });
 
 /* ── PUT /api/collections/:col/:id  — update a document ── */
-router.put('/:col/:id', authMiddleware, async (req, res) => {
+router.put('/:col/:id', authMiddleware, async (req, res) => { // rbac: ADMIN_WRITE/SUPERADMIN_WRITE checks below — dynamic per-collection
   const { col, id } = req.params;
   if (!ALLOWED.has(col)) return res.status(400).json({ error: `Unknown collection: ${col}` });
   // ⚠️ Security: only admins can modify users/permissions/schools
@@ -219,7 +284,7 @@ router.put('/:col/:id', authMiddleware, async (req, res) => {
 });
 
 /* ── DELETE /api/collections/:col/:id  — delete a document ── */
-router.delete('/:col/:id', authMiddleware, async (req, res) => {
+router.delete('/:col/:id', authMiddleware, async (req, res) => { // rbac: ADMIN_WRITE/SUPERADMIN_WRITE checks below — dynamic per-collection
   const { col, id } = req.params;
   if (!ALLOWED.has(col)) return res.status(400).json({ error: `Unknown collection: ${col}` });
   if (SUPERADMIN_WRITE.has(col) && !_isSuperAdmin(req)) return res.status(403).json({ error: 'Super admin access required' });
@@ -237,7 +302,7 @@ router.delete('/:col/:id', authMiddleware, async (req, res) => {
 });
 
 /* ── POST /api/collections/:col/bulk  — bulk upsert (used by sync) ── */
-router.post('/:col/bulk', authMiddleware, async (req, res) => {
+router.post('/:col/bulk', authMiddleware, async (req, res) => { // rbac: ADMIN_WRITE/SUPERADMIN_WRITE checks below — dynamic per-collection
   const { col } = req.params;
   if (!ALLOWED.has(col)) return res.status(400).json({ error: `Unknown collection: ${col}` });
   if (SUPERADMIN_WRITE.has(col) && !_isSuperAdmin(req)) return res.status(403).json({ error: 'Super admin access required' });
