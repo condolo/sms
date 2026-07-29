@@ -49,6 +49,13 @@ function makeFakeCollection(seed = []) {
       docs[idx] = { ...docs[idx], ...flat };
       return mockChainObj(docs[idx]);
     }),
+    updateOne: jest.fn((filter, update) => {
+      const idx = docs.findIndex(d => matchesFilter(d, filter));
+      if (idx === -1) return Promise.resolve({ matchedCount: 0 });
+      const flat = update.$set ? { ...update.$set } : { ...update };
+      docs[idx] = { ...docs[idx], ...flat };
+      return Promise.resolve({ matchedCount: 1 });
+    }),
     findOneAndDelete: jest.fn((filter) => {
       const idx = docs.findIndex(d => matchesFilter(d, filter));
       if (idx === -1) return Promise.resolve(null);
@@ -120,6 +127,40 @@ test('GET /categories does not reseed once categories already exist', async () =
   expect(res.status).toBe(200);
   expect(res.body.data.length).toBe(1);
   expect(res.body.data[0].name).toBe('Custom Only');
+});
+
+test('GET /categories repairs a default-named category left with zero items by a pre-BPS-v2-reseed school, without touching unrelated categories', async () => {
+  mockCategories = makeFakeCollection([
+    // Pre-existing doc from before commit e0e4964's item-set restore —
+    // the category was created, but its items array was never populated.
+    { id: 'c1', schoolId: SCHOOL_A, name: 'Classroom & Academic', isActive: true, items: [] },
+    // A genuinely custom category the school added on its own — must be
+    // left completely untouched (no default matches this name).
+    { id: 'c2', schoolId: SCHOOL_A, name: 'Custom Only', isActive: true,
+      items: [{ id: 'i1', label: 'Custom item', direction: 'merit', points: 1 }] },
+  ]);
+
+  const res = await supertest(buildApp()).get('/api/behaviour/categories');
+  expect(res.status).toBe(200);
+  expect(res.body.data.length).toBe(2); // no new categories inserted — only existing ones repaired
+
+  const classroom = res.body.data.find(c => c.name === 'Classroom & Academic');
+  expect(classroom.items.length).toBeGreaterThan(0);
+  expect(classroom.items.every(i => i.id)).toBe(true); // fresh server-assigned ids
+
+  const custom = res.body.data.find(c => c.name === 'Custom Only');
+  expect(custom.items).toEqual([{ id: 'i1', label: 'Custom item', direction: 'merit', points: 1 }]);
+});
+
+test('GET /categories leaves a default-named category alone once it has at least one item', async () => {
+  mockCategories = makeFakeCollection([
+    { id: 'c1', schoolId: SCHOOL_A, name: 'Classroom & Academic', isActive: true,
+      items: [{ id: 'i1', label: 'School-edited item', direction: 'merit', points: 9 }] },
+  ]);
+
+  const res = await supertest(buildApp()).get('/api/behaviour/categories');
+  expect(res.status).toBe(200);
+  expect(res.body.data[0].items).toEqual([{ id: 'i1', label: 'School-edited item', direction: 'merit', points: 9 }]);
 });
 
 test('GET /categories?direction=merit only returns categories containing at least one merit item', async () => {

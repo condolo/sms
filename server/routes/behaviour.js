@@ -333,13 +333,41 @@ const DEFAULT_CATEGORIES = [
    themselves (incidents copy the label/points they used at the time). */
 async function _ensureDefaultCategories(schoolId, ctx, userId) {
   const Categories = tenantModel('behaviour_categories', ctx);
-  const count = await Categories.countDocuments({ schoolId });
-  if (count > 0) return;
-  await Categories.insertMany(DEFAULT_CATEGORIES.map(c => ({
-    ...c,
-    items: c.items.map(it => ({ ...it, id: uuidv4() })),
-    id: uuidv4(), schoolId, isActive: true, createdBy: userId || 'system', updatedBy: userId || 'system',
-  })));
+  const existing = await Categories.find({ schoolId }).select('id name items').lean();
+
+  if (existing.length === 0) {
+    await Categories.insertMany(DEFAULT_CATEGORIES.map(c => ({
+      ...c,
+      items: c.items.map(it => ({ ...it, id: uuidv4() })),
+      id: uuidv4(), schoolId, isActive: true, createdBy: userId || 'system', updatedBy: userId || 'system',
+    })));
+    return;
+  }
+
+  // A school with SOME categories already (even just one custom one) has
+  // opted out of the bulk auto-seed above by definition — deliberate,
+  // don't inject the other 7 defaults on top of a customized catalogue.
+  // But a category that matches a default's NAME and has zero items is a
+  // different case: a school seeded before the BPS v2 item-set restore
+  // (commit e0e4964, when the default set was a flattened placeholder
+  // with no items) is stuck with an empty picker under that name
+  // forever, since this function never looked past "does the collection
+  // have any docs at all." Repaired one level deeper, same "an empty
+  // picker catalogue gets reseeded on next read" reasoning as above —
+  // items carry no incident history (incidents copy the label/points
+  // they used at the time), so backfilling is safe.
+  const defaultsByName = new Map(DEFAULT_CATEGORIES.map(c => [c.name, c]));
+  const repairs = existing
+    .filter(cat => defaultsByName.has(cat.name) && (!Array.isArray(cat.items) || cat.items.length === 0))
+    .map(cat => Categories.updateOne(
+      { id: cat.id, schoolId },
+      { $set: {
+        items:     defaultsByName.get(cat.name).items.map(it => ({ ...it, id: uuidv4() })),
+        updatedAt: new Date().toISOString(),
+        updatedBy: userId || 'system',
+      } }
+    ));
+  if (repairs.length) await Promise.all(repairs);
 }
 
 function _validate(schema, data) {
