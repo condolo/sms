@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-29T05:57:25.859Z",
+  "generatedAt": "2026-07-29T06:14:30.242Z",
   "schemaVersion": 2,
   "description": "Platform Architecture Manifest — authorization posture of every HTTP endpoint",
   "summary": {
@@ -8,7 +8,7 @@
     "authOnly": 47,
     "public": 72,
     "tenantScoped": 504,
-    "auditLogged": 40,
+    "auditLogged": 58,
     "rateLimited": 0,
     "byRisk": {
       "critical": 139,
@@ -336,77 +336,12 @@
         "missingAudit": true
       },
       {
-        "endpoint": "PUT settings/",
-        "missingRbac": false,
-        "missingAudit": true
-      },
-      {
         "endpoint": "GET settings/school",
         "missingRbac": false,
         "missingAudit": true
       },
       {
-        "endpoint": "PUT settings/school",
-        "missingRbac": false,
-        "missingAudit": true
-      },
-      {
-        "endpoint": "PUT settings/school/logo",
-        "missingRbac": false,
-        "missingAudit": true
-      },
-      {
-        "endpoint": "DELETE settings/school/logo",
-        "missingRbac": false,
-        "missingAudit": true
-      },
-      {
-        "endpoint": "PUT settings/school/favicon",
-        "missingRbac": false,
-        "missingAudit": true
-      },
-      {
-        "endpoint": "DELETE settings/school/favicon",
-        "missingRbac": false,
-        "missingAudit": true
-      },
-      {
-        "endpoint": "PUT settings/school/login-bg",
-        "missingRbac": false,
-        "missingAudit": true
-      },
-      {
-        "endpoint": "DELETE settings/school/login-bg",
-        "missingRbac": false,
-        "missingAudit": true
-      },
-      {
         "endpoint": "GET settings/users",
-        "missingRbac": false,
-        "missingAudit": true
-      },
-      {
-        "endpoint": "POST settings/users/invite",
-        "missingRbac": false,
-        "missingAudit": true
-      },
-      {
-        "endpoint": "POST settings/users/bulk-invite",
-        "missingRbac": false,
-        "missingAudit": true
-      },
-      {
-        "endpoint": "PUT settings/users/:id",
-        "missingRbac": false,
-        "missingAudit": true
-      },
-      {
-        "endpoint": "DELETE settings/users/:id",
-        "missingRbac": false,
-        "missingAudit": true
-      },
-      {
-        "endpoint": "POST settings/users/:id/reset-password",
         "missingRbac": false,
         "missingAudit": true
       },
@@ -421,37 +356,12 @@
         "missingAudit": true
       },
       {
-        "endpoint": "POST settings/school/smtp",
-        "missingRbac": false,
-        "missingAudit": true
-      },
-      {
         "endpoint": "POST settings/school/smtp/test",
         "missingRbac": false,
         "missingAudit": true
       },
       {
-        "endpoint": "DELETE settings/school/smtp",
-        "missingRbac": false,
-        "missingAudit": true
-      },
-      {
         "endpoint": "GET settings/custom-roles",
-        "missingRbac": false,
-        "missingAudit": true
-      },
-      {
-        "endpoint": "POST settings/custom-roles",
-        "missingRbac": false,
-        "missingAudit": true
-      },
-      {
-        "endpoint": "PUT settings/custom-roles/:key",
-        "missingRbac": false,
-        "missingAudit": true
-      },
-      {
-        "endpoint": "DELETE settings/custom-roles/:key",
         "missingRbac": false,
         "missingAudit": true
       },
@@ -845,30 +755,12 @@
       "DELETE sections/:id",
       "GET settings/modules",
       "GET settings/",
-      "PUT settings/",
       "GET settings/school",
-      "PUT settings/school",
-      "PUT settings/school/logo",
-      "DELETE settings/school/logo",
-      "PUT settings/school/favicon",
-      "DELETE settings/school/favicon",
-      "PUT settings/school/login-bg",
-      "DELETE settings/school/login-bg",
       "GET settings/users",
-      "POST settings/users/invite",
-      "POST settings/users/bulk-invite",
-      "PUT settings/users/:id",
-      "DELETE settings/users/:id",
-      "POST settings/users/:id/reset-password",
       "GET settings/notifications",
       "PUT settings/notifications",
-      "POST settings/school/smtp",
       "POST settings/school/smtp/test",
-      "DELETE settings/school/smtp",
       "GET settings/custom-roles",
-      "POST settings/custom-roles",
-      "PUT settings/custom-roles/:key",
-      "DELETE settings/custom-roles/:key",
       "GET settings/admission-counter",
       "PUT settings/admission-counter",
       "GET streams/",
@@ -7858,7 +7750,7 @@
       "file": "settings.js",
       "method": "GET",
       "path": "/modules",
-      "line": 109,
+      "line": 110,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": null,
@@ -7874,7 +7766,7 @@
       "file": "settings.js",
       "method": "GET",
       "path": "/",
-      "line": 118,
+      "line": 119,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": null,
@@ -7890,7 +7782,7 @@
       "file": "settings.js",
       "method": "PUT",
       "path": "/",
-      "line": 138,
+      "line": 139,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": null,
@@ -7898,7 +7790,7 @@
       "hasAuth": true,
       "hasPlan": false,
       "tenantScoped": true,
-      "auditLogged": false,
+      "auditLogged": true,
       "rateLimit": false,
       "allowlisted": false
     },
@@ -7906,7 +7798,7 @@
       "file": "settings.js",
       "method": "GET",
       "path": "/school",
-      "line": 224,
+      "line": 231,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": null,
@@ -7922,7 +7814,7 @@
       "file": "settings.js",
       "method": "PUT",
       "path": "/school",
-      "line": 271,
+      "line": 278,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -7930,7 +7822,7 @@
       "hasAuth": true,
       "hasPlan": false,
       "tenantScoped": true,
-      "auditLogged": false,
+      "auditLogged": true,
       "rateLimit": false,
       "allowlisted": false
     },
@@ -7938,7 +7830,7 @@
       "file": "settings.js",
       "method": "PUT",
       "path": "/school/logo",
-      "line": 370,
+      "line": 388,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -7946,7 +7838,7 @@
       "hasAuth": true,
       "hasPlan": false,
       "tenantScoped": true,
-      "auditLogged": false,
+      "auditLogged": true,
       "rateLimit": false,
       "allowlisted": false
     },
@@ -7954,7 +7846,7 @@
       "file": "settings.js",
       "method": "DELETE",
       "path": "/school/logo",
-      "line": 391,
+      "line": 414,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -7962,7 +7854,7 @@
       "hasAuth": true,
       "hasPlan": false,
       "tenantScoped": true,
-      "auditLogged": false,
+      "auditLogged": true,
       "rateLimit": false,
       "allowlisted": false
     },
@@ -7970,7 +7862,7 @@
       "file": "settings.js",
       "method": "PUT",
       "path": "/school/favicon",
-      "line": 405,
+      "line": 433,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -7978,7 +7870,7 @@
       "hasAuth": true,
       "hasPlan": false,
       "tenantScoped": true,
-      "auditLogged": false,
+      "auditLogged": true,
       "rateLimit": false,
       "allowlisted": false
     },
@@ -7986,7 +7878,7 @@
       "file": "settings.js",
       "method": "DELETE",
       "path": "/school/favicon",
-      "line": 426,
+      "line": 459,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -7994,7 +7886,7 @@
       "hasAuth": true,
       "hasPlan": false,
       "tenantScoped": true,
-      "auditLogged": false,
+      "auditLogged": true,
       "rateLimit": false,
       "allowlisted": false
     },
@@ -8002,7 +7894,7 @@
       "file": "settings.js",
       "method": "PUT",
       "path": "/school/login-bg",
-      "line": 440,
+      "line": 478,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -8010,7 +7902,7 @@
       "hasAuth": true,
       "hasPlan": false,
       "tenantScoped": true,
-      "auditLogged": false,
+      "auditLogged": true,
       "rateLimit": false,
       "allowlisted": false
     },
@@ -8018,7 +7910,7 @@
       "file": "settings.js",
       "method": "DELETE",
       "path": "/school/login-bg",
-      "line": 461,
+      "line": 504,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -8026,7 +7918,7 @@
       "hasAuth": true,
       "hasPlan": false,
       "tenantScoped": true,
-      "auditLogged": false,
+      "auditLogged": true,
       "rateLimit": false,
       "allowlisted": false
     },
@@ -8034,7 +7926,7 @@
       "file": "settings.js",
       "method": "GET",
       "path": "/users",
-      "line": 479,
+      "line": 527,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -8050,7 +7942,7 @@
       "file": "settings.js",
       "method": "POST",
       "path": "/users/invite",
-      "line": 498,
+      "line": 546,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -8058,7 +7950,7 @@
       "hasAuth": true,
       "hasPlan": false,
       "tenantScoped": true,
-      "auditLogged": false,
+      "auditLogged": true,
       "rateLimit": false,
       "allowlisted": false
     },
@@ -8066,7 +7958,7 @@
       "file": "settings.js",
       "method": "POST",
       "path": "/users/bulk-invite",
-      "line": 597,
+      "line": 651,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -8074,7 +7966,7 @@
       "hasAuth": true,
       "hasPlan": false,
       "tenantScoped": true,
-      "auditLogged": false,
+      "auditLogged": true,
       "rateLimit": false,
       "allowlisted": false
     },
@@ -8082,7 +7974,7 @@
       "file": "settings.js",
       "method": "PUT",
       "path": "/users/:id",
-      "line": 670,
+      "line": 729,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -8090,7 +7982,7 @@
       "hasAuth": true,
       "hasPlan": false,
       "tenantScoped": true,
-      "auditLogged": false,
+      "auditLogged": true,
       "rateLimit": false,
       "allowlisted": false
     },
@@ -8098,7 +7990,7 @@
       "file": "settings.js",
       "method": "DELETE",
       "path": "/users/:id",
-      "line": 751,
+      "line": 822,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -8106,7 +7998,7 @@
       "hasAuth": true,
       "hasPlan": false,
       "tenantScoped": true,
-      "auditLogged": false,
+      "auditLogged": true,
       "rateLimit": false,
       "allowlisted": false
     },
@@ -8114,7 +8006,7 @@
       "file": "settings.js",
       "method": "POST",
       "path": "/users/:id/reset-password",
-      "line": 807,
+      "line": 883,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -8122,7 +8014,7 @@
       "hasAuth": true,
       "hasPlan": false,
       "tenantScoped": true,
-      "auditLogged": false,
+      "auditLogged": true,
       "rateLimit": false,
       "allowlisted": false
     },
@@ -8130,7 +8022,7 @@
       "file": "settings.js",
       "method": "GET",
       "path": "/notifications",
-      "line": 920,
+      "line": 1001,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -8146,7 +8038,7 @@
       "file": "settings.js",
       "method": "PUT",
       "path": "/notifications",
-      "line": 949,
+      "line": 1030,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -8162,7 +8054,7 @@
       "file": "settings.js",
       "method": "POST",
       "path": "/school/smtp",
-      "line": 997,
+      "line": 1078,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -8170,7 +8062,7 @@
       "hasAuth": true,
       "hasPlan": false,
       "tenantScoped": true,
-      "auditLogged": false,
+      "auditLogged": true,
       "rateLimit": false,
       "allowlisted": false
     },
@@ -8178,7 +8070,7 @@
       "file": "settings.js",
       "method": "POST",
       "path": "/school/smtp/test",
-      "line": 1037,
+      "line": 1125,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -8194,7 +8086,7 @@
       "file": "settings.js",
       "method": "DELETE",
       "path": "/school/smtp",
-      "line": 1099,
+      "line": 1187,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -8202,7 +8094,7 @@
       "hasAuth": true,
       "hasPlan": false,
       "tenantScoped": true,
-      "auditLogged": false,
+      "auditLogged": true,
       "rateLimit": false,
       "allowlisted": false
     },
@@ -8210,7 +8102,7 @@
       "file": "settings.js",
       "method": "GET",
       "path": "/custom-roles",
-      "line": 1134,
+      "line": 1227,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -8226,7 +8118,7 @@
       "file": "settings.js",
       "method": "POST",
       "path": "/custom-roles",
-      "line": 1144,
+      "line": 1237,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -8234,7 +8126,7 @@
       "hasAuth": true,
       "hasPlan": false,
       "tenantScoped": true,
-      "auditLogged": false,
+      "auditLogged": true,
       "rateLimit": false,
       "allowlisted": false
     },
@@ -8242,7 +8134,7 @@
       "file": "settings.js",
       "method": "PUT",
       "path": "/custom-roles/:key",
-      "line": 1190,
+      "line": 1288,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -8250,7 +8142,7 @@
       "hasAuth": true,
       "hasPlan": false,
       "tenantScoped": true,
-      "auditLogged": false,
+      "auditLogged": true,
       "rateLimit": false,
       "allowlisted": false
     },
@@ -8258,7 +8150,7 @@
       "file": "settings.js",
       "method": "DELETE",
       "path": "/custom-roles/:key",
-      "line": 1214,
+      "line": 1318,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -8266,7 +8158,7 @@
       "hasAuth": true,
       "hasPlan": false,
       "tenantScoped": true,
-      "auditLogged": false,
+      "auditLogged": true,
       "rateLimit": false,
       "allowlisted": false
     },
@@ -8274,7 +8166,7 @@
       "file": "settings.js",
       "method": "GET",
       "path": "/admission-counter",
-      "line": 1245,
+      "line": 1353,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",
@@ -8290,7 +8182,7 @@
       "file": "settings.js",
       "method": "PUT",
       "path": "/admission-counter",
-      "line": 1258,
+      "line": 1366,
       "risk": "critical",
       "category": "rbac",
       "rbacModule": "settings",

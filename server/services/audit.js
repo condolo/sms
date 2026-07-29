@@ -108,7 +108,20 @@ const ACTIONS = {
   // Users
   'user.role_changed':       { severity: 'warn' },
   'user.created':            { severity: 'info' },
+  'user.bulk_created':       { severity: 'info' },
   'user.deactivated':        { severity: 'warn' },
+  'user.password_reset_by_admin': { severity: 'warn' },
+  // Settings — school profile, branding, SMTP, custom roles (Audit
+  // Instrumentation sprint, 2026-07-29 — this is the "control panel" file
+  // from the Settings-as-control-panel work earlier this session, so its
+  // mutations (module toggles, role/permission grants, SMTP creds,
+  // custom-role definitions) are exactly the kind of change that needs a
+  // trail). severity escalated per-call-site to 'warn' when the change
+  // touches modulePermissions/moduleConfig specifically.
+  'settings.school_updated':        { severity: 'info' },
+  'settings.custom_role_created':   { severity: 'info' },
+  'settings.custom_role_updated':   { severity: 'info' },
+  'settings.custom_role_deleted':   { severity: 'warn' },
   // Students
   'student.deleted':         { severity: 'warn' },
   'student.deactivated':     { severity: 'warn' },

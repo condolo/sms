@@ -24,6 +24,7 @@ const { encrypt, smtpEncryptReady } = require('../utils/smtpEncrypt');
 const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY, GROUPS: NOTIF_GROUPS } = require('../utils/notif-settings');
 const { rbac, invalidatePermCache } = require('../middleware/rbac');
 const { invalidateModuleConfigCache } = require('../middleware/module-gate');
+const AuditService           = require('../services/audit');
 const { peekAdmissionCounter, setAdmissionCounter } = require('../utils/counters');
 const { MODULE_REGISTRY, MODULE_KEYS } = require('../config/moduleRegistry');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
@@ -199,6 +200,12 @@ router.put('/', authMiddleware, async (req, res) => { // rbac: self-scoped to th
         console.error('[settings] PUT / dual-write/revocation failed (non-fatal):', revokeErr.message);
       }
 
+      AuditService.log({
+        action: 'auth.password_changed', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
+        target: { type: 'user', id: req.jwtUser.userId, label: req.jwtUser.email },
+        details: { via: 'settings_self_service' }, req,
+      });
+
       return res.json({ success: true, message: 'Password updated.' });
     }
 
@@ -346,6 +353,17 @@ router.put('/school', authMiddleware, rbac('settings', 'update'), async (req, re
 
     const fresh = await Schools.findOne({ id: req.jwtUser.schoolId }).lean();
     const { _id, __v, ...safe } = fresh;
+
+    const changedFields = Object.keys(update).filter(k => k !== 'updatedAt');
+    const touchesPermissions = update.modulePermissions !== undefined;
+    const touchesModuleConfig = update.moduleConfig !== undefined;
+    AuditService.log({
+      action: 'settings.school_updated', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
+      target: { type: 'school', id: req.jwtUser.schoolId, label: fresh.name },
+      details: { changedFields, touchesPermissions, touchesModuleConfig },
+      ...((touchesPermissions || touchesModuleConfig) ? { severity: 'warn' } : {}), req,
+    });
+
     res.json({ success: true, data: safe });
   } catch (err) {
     console.error('[settings] PUT /school error:', err);
@@ -380,6 +398,11 @@ router.put('/school/logo', authMiddleware, rbac('settings', 'update'), async (re
       { id: req.jwtUser.schoolId },
       { $set: { logoBase64, logoUrl, updatedAt: new Date().toISOString() } }
     );
+    AuditService.log({
+      action: 'settings.school_updated', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
+      target: { type: 'school', id: req.jwtUser.schoolId },
+      details: { field: 'logo', op: 'uploaded' }, req,
+    });
     res.json({ success: true, logoUrl });
   } catch (err) {
     console.error('[settings] PUT /school/logo:', err);
@@ -395,6 +418,11 @@ router.delete('/school/logo', authMiddleware, rbac('settings', 'update'), async 
       { id: req.jwtUser.schoolId },
       { $unset: { logoBase64: '', logoUrl: '' }, $set: { updatedAt: new Date().toISOString() } }
     );
+    AuditService.log({
+      action: 'settings.school_updated', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
+      target: { type: 'school', id: req.jwtUser.schoolId },
+      details: { field: 'logo', op: 'removed' }, req,
+    });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to remove logo.' });
@@ -415,6 +443,11 @@ router.put('/school/favicon', authMiddleware, rbac('settings', 'update'), async 
       { id: req.jwtUser.schoolId },
       { $set: { faviconBase64, faviconUrl, updatedAt: new Date().toISOString() } }
     );
+    AuditService.log({
+      action: 'settings.school_updated', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
+      target: { type: 'school', id: req.jwtUser.schoolId },
+      details: { field: 'favicon', op: 'uploaded' }, req,
+    });
     res.json({ success: true, faviconUrl });
   } catch (err) {
     console.error('[settings] PUT /school/favicon:', err);
@@ -430,6 +463,11 @@ router.delete('/school/favicon', authMiddleware, rbac('settings', 'update'), asy
       { id: req.jwtUser.schoolId },
       { $unset: { faviconBase64: '', faviconUrl: '' }, $set: { updatedAt: new Date().toISOString() } }
     );
+    AuditService.log({
+      action: 'settings.school_updated', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
+      target: { type: 'school', id: req.jwtUser.schoolId },
+      details: { field: 'favicon', op: 'removed' }, req,
+    });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to remove favicon.' });
@@ -450,6 +488,11 @@ router.put('/school/login-bg', authMiddleware, rbac('settings', 'update'), async
       { id: req.jwtUser.schoolId },
       { $set: { loginBgBase64, loginBgUrl, updatedAt: new Date().toISOString() } }
     );
+    AuditService.log({
+      action: 'settings.school_updated', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
+      target: { type: 'school', id: req.jwtUser.schoolId },
+      details: { field: 'loginBg', op: 'uploaded' }, req,
+    });
     res.json({ success: true, loginBgUrl });
   } catch (err) {
     console.error('[settings] PUT /school/login-bg:', err);
@@ -465,6 +508,11 @@ router.delete('/school/login-bg', authMiddleware, rbac('settings', 'update'), as
       { id: req.jwtUser.schoolId },
       { $unset: { loginBgBase64: '', loginBgUrl: '' }, $set: { updatedAt: new Date().toISOString() } }
     );
+    AuditService.log({
+      action: 'settings.school_updated', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
+      target: { type: 'school', id: req.jwtUser.schoolId },
+      details: { field: 'loginBg', op: 'removed' }, req,
+    });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to remove login background.' });
@@ -585,6 +633,12 @@ router.post('/users/invite', authMiddleware, rbac('settings', 'create'), async (
       console.warn('[settings] invite email failed (non-fatal):', emailErr.message);
     }
 
+    AuditService.log({
+      action: 'user.created', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
+      target: { type: 'user', id: newUser.id, label: newUser.email },
+      details: { role, via: 'invite' }, req,
+    });
+
     const { password: _pw2, passwordHash: _ph, ...safe } = newUser;
     res.status(201).json({ success: true, data: { user: safe, tempPassword } });
   } catch (err) {
@@ -659,6 +713,11 @@ router.post('/users/bulk-invite', authMiddleware, rbac('settings', 'create'), as
     }));
 
     console.log(`[settings] Bulk invite: ${created} created, ${skipped} skipped, ${errors.length} errors — by ${userId}`);
+    AuditService.log({
+      action: 'user.bulk_created', actor: req.jwtUser, schoolId,
+      target: { type: 'user', id: null },
+      details: { created, skipped, errorCount: errors.length }, req,
+    });
     res.status(201).json({ success: true, data: { created, skipped, errors } });
   } catch (err) {
     console.error('[settings] POST /users/bulk-invite error:', err);
@@ -716,6 +775,12 @@ router.put('/users/:id', authMiddleware, rbac('settings', 'update'), async (req,
       ? { schoolId: req.jwtUser.schoolId, $or: [{ id: req.params.id }, { _id: req.params.id }] }
       : { id: req.params.id, schoolId: req.jwtUser.schoolId };
 
+    // Fetch the pre-update role when it's changing — needed for both the
+    // teacher-staffType cascade below (unchanged) and the audit trail.
+    const priorUser = role
+      ? await Users.findOne(putFilter, { id: 1, email: 1, role: 1 }).lean()
+      : null;
+
     const result = await Users.updateOne(putFilter, { $set: update });
     if (result.matchedCount === 0) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } });
@@ -724,10 +789,9 @@ router.put('/users/:id', authMiddleware, rbac('settings', 'update'), async (req,
     // Role changed — cascade to linked teacher record + revoke tokens immediately
     if (role) {
       try {
-        const changedUser = await Users.findOne(putFilter, { id: 1, email: 1 }).lean();
-        if (changedUser) {
+        if (priorUser) {
           await tenantModel('teachers', tenantContext(req)).updateOne(
-            { schoolId: req.jwtUser.schoolId, $or: [{ userId: changedUser.id }, { email: changedUser.email }] },
+            { schoolId: req.jwtUser.schoolId, $or: [{ userId: priorUser.id }, { email: priorUser.email }] },
             { $set: { staffType: role, updatedAt: new Date().toISOString() } }
           );
         }
@@ -737,6 +801,13 @@ router.put('/users/:id', authMiddleware, rbac('settings', 'update'), async (req,
       revokeUserTokens(req.params.id).catch(err =>
         console.warn('[settings] token revocation (non-fatal):', err.message)
       );
+      if (priorUser && priorUser.role !== role) {
+        AuditService.log({
+          action: 'user.role_changed', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
+          target: { type: 'user', id: priorUser.id, label: priorUser.email },
+          details: { oldRole: priorUser.role, newRole: role, via: 'settings' }, req,
+        });
+      }
     }
 
     const updated = await Users.findOne(putFilter, { password: 0, passwordHash: 0 }).lean();
@@ -789,6 +860,11 @@ router.delete('/users/:id', authMiddleware, rbac('settings', 'delete'), async (r
     revokeUserTokens(req.params.id).catch(err =>
       console.warn('[settings] token revocation on delete (non-fatal):', err.message)
     );
+
+    AuditService.log({
+      action: 'user.deactivated', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
+      target: { type: 'user', id: targetUser.id, label: targetUser.email }, req,
+    });
 
     res.json({ success: true, message: 'User removed.' });
   } catch (err) {
@@ -875,6 +951,11 @@ router.post('/users/:id/reset-password', authMiddleware, rbac('settings', 'updat
     } catch (revokeErr) {
       console.error('[settings] reset-password dual-write/revocation failed (non-fatal):', revokeErr.message);
     }
+
+    AuditService.log({
+      action: 'user.password_reset_by_admin', actor: req.jwtUser, schoolId,
+      target: { type: 'user', id: _resetTargetId, label: target.email }, req,
+    });
 
     /* Attempt email — non-fatal */
     const school = await School.findOne({ id: schoolId }).lean();
@@ -1026,6 +1107,13 @@ router.post('/school/smtp', authMiddleware, rbac('settings', 'update'), async (r
 
     await Schools.updateOne({ id: schoolId }, { $set: update });
     emailUtil.invalidateSmtpCache(schoolId);
+    // Details deliberately exclude smtpUser/smtpHost/password — audit_logs
+    // isn't a secrets store, just a "something changed" trail.
+    AuditService.log({
+      action: 'settings.school_updated', actor: req.jwtUser, schoolId,
+      target: { type: 'school', id: schoolId },
+      details: { field: 'smtp', op: 'configured', enabled: update.smtpEnabled }, req,
+    });
     return res.json({ success: true, message: 'SMTP settings saved.' });
   } catch (err) {
     console.error('[settings] POST /school/smtp error:', err);
@@ -1107,6 +1195,11 @@ router.delete('/school/smtp', authMiddleware, rbac('settings', 'update'), async 
       }
     );
     emailUtil.invalidateSmtpCache(req.jwtUser.schoolId);
+    AuditService.log({
+      action: 'settings.school_updated', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
+      target: { type: 'school', id: req.jwtUser.schoolId },
+      details: { field: 'smtp', op: 'removed' }, req,
+    });
     return res.json({ success: true, message: 'Custom SMTP configuration removed. Emails will now route through the Msingi platform.' });
   } catch (err) {
     console.error('[settings] DELETE /school/smtp error:', err);
@@ -1180,6 +1273,11 @@ router.post('/custom-roles', authMiddleware, rbac('settings', 'create'), async (
     });
 
     invalidatePermCache(schoolId);
+    AuditService.log({
+      action: 'settings.custom_role_created', actor: req.jwtUser, schoolId,
+      target: { type: 'custom_role', id: key, label: label.trim() },
+      details: { baseRole }, req,
+    });
     res.status(201).json({ success: true, data: doc.toObject ? doc.toObject() : doc });
   } catch (err) {
     console.error('[settings] POST /custom-roles:', err);
@@ -1203,6 +1301,12 @@ router.put('/custom-roles/:key', authMiddleware, rbac('settings', 'update'), asy
       { new: true }
     ).lean();
     if (!doc) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Custom role not found.' } });
+
+    AuditService.log({
+      action: 'settings.custom_role_updated', actor: req.jwtUser, schoolId,
+      target: { type: 'custom_role', id: key, label: doc.label },
+      details: { changedFields: Object.keys(patch).filter(k => k !== 'updatedAt') }, req,
+    });
 
     res.json({ success: true, data: doc });
   } catch (err) {
@@ -1230,6 +1334,10 @@ router.delete('/custom-roles/:key', authMiddleware, rbac('settings', 'delete'), 
     );
 
     invalidatePermCache(schoolId);
+    AuditService.log({
+      action: 'settings.custom_role_deleted', actor: req.jwtUser, schoolId,
+      target: { type: 'custom_role', id: key, label: deleted.label }, req,
+    });
     res.json({ success: true, message: `Role '${key}' deleted.` });
   } catch (err) {
     console.error('[settings] DELETE /custom-roles/:key:', err);
