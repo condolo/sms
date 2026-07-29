@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-07-16 (proposed) · 2026-07-16 (accepted)
-**Implementation:** Complete as of 2026-07-18 — ratchet at 24 direct-usage sites (from a baseline of 722), all reviewed exceptions (§4) or platform-admin routes out of scope by design. See `CHANGELOG.md` v4.68.0. This closes Governance Review D1.
+**Implementation:** Complete as of 2026-07-18 — ratchet started at 24 direct-usage sites (from a baseline of 722), all reviewed exceptions (§4) or platform-admin routes out of scope by design. See `CHANGELOG.md` v4.68.0. This closes Governance Review D1. **Current ratchet: 36 direct-usage sites** (raised twice since acceptance, each increase named and justified in §4 — see the `identities` exemption and the `mark-submissions.js` auto-relock job entries) **+ 9 dynamic `_model(<variable>)` call sites**, which fall outside the ratchet by design (`scripts/_tenant-scan.js` can't classify them statically, so they're surfaced for manual review on every scan rather than counted or silently ignored) — all 9 are in platform/migration/sync code (`backup.js`, `collections.js`, `onboard.js`, `platform.js`, `qa-health.js`, `sync.js`), consistent with §4's platform-admin/migration carve-out. Verified current against `scripts/_tenant-scan.js` and `scripts/.tenant-baseline` (both read 36) on 2026-07-29.
 **Change class:** Kernel (per `PLATFORM_OPERATING_MODEL.md §10`) — changes how every tenant-scoped query is written. Requires Architecture Review sign-off before implementation.
 **Unblocks:** C4 in `IMPLEMENTATION_DEPENDENCY_GRAPH_v1.md` (the highest-fan-out root).
 **Related:** Governance Review D1 (P2 not reflected in code — now closed, see Implementation above), SPC-001, MR-001; `PLATFORM_ARCHITECTURE_EVOLUTION_v1.md` §11/§17.1/Principle 4.
