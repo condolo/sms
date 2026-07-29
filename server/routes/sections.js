@@ -18,17 +18,17 @@ const { z }   = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
+const { rbac }           = require('../middleware/rbac');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 
 const router = express.Router();
-
-/* ── Admin guard ─────────────────────────────────────────────── */
-function _isAdmin(req) {
-  const r  = req.jwtUser?.role  || '';
-  const rs = req.jwtUser?.roles || [];
-  return r === 'superadmin' || r === 'admin' || rs.includes('superadmin') || rs.includes('admin');
-}
+// Writes gated on the 'school' sub-key under 'settings' — sections are
+// school configuration ("Admin manages these in Settings → School →
+// Sections", per the header comment above). No role_permissions entry
+// grants 'settings' to anyone but admin/superadmin by default, which
+// reproduces the old admin-only check exactly while making it
+// Settings-editable (a school could delegate this to a custom role).
 
 /* ── Built-in defaults (seeded on first GET per school) ─────── */
 const DEFAULT_SECTIONS = [
@@ -69,7 +69,7 @@ function _inferKey(name) {
 /* ── GET /api/sections ───────────────────────────────────────── */
 /* Any authenticated user can read sections (needed for filter   */
 /* tabs in Classes and Timetable pages for all roles).           */
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', authMiddleware, async (req, res) => { // rbac: intentionally open to every authenticated user — see comment above
   try {
     const { schoolId, userId } = req.jwtUser;
     const Sections = tenantModel('sections', tenantContext(req));
@@ -128,10 +128,8 @@ router.get('/', authMiddleware, async (req, res) => {
 });
 
 /* ── POST /api/sections ──────────────────────────────────────── */
-router.post('/', authMiddleware, async (req, res) => {
+router.post('/', authMiddleware, rbac('settings', 'create', 'school'), async (req, res) => {
   try {
-    if (!_isAdmin(req)) return E.forbidden(res, 'Admin access required to manage sections');
-
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(SectionSchema, req.body);
     if (error) return E.validation(res, error);
@@ -152,10 +150,8 @@ router.post('/', authMiddleware, async (req, res) => {
 
 /* ── PUT /api/sections/:id ───────────────────────────────────── */
 /* key is immutable — only name, color, order can change.        */
-router.put('/:id', authMiddleware, async (req, res) => {
+router.put('/:id', authMiddleware, rbac('settings', 'update', 'school'), async (req, res) => {
   try {
-    if (!_isAdmin(req)) return E.forbidden(res, 'Admin access required to manage sections');
-
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(
       SectionSchema.pick({ name: true, color: true, order: true, sectionHeadId: true }).partial(),
@@ -179,10 +175,8 @@ router.put('/:id', authMiddleware, async (req, res) => {
 
 /* ── DELETE /api/sections/:id ────────────────────────────────── */
 /* Blocked if active classes are assigned to this section.       */
-router.delete('/:id', authMiddleware, async (req, res) => {
+router.delete('/:id', authMiddleware, rbac('settings', 'delete', 'school'), async (req, res) => {
   try {
-    if (!_isAdmin(req)) return E.forbidden(res, 'Admin access required to manage sections');
-
     const { schoolId } = req.jwtUser;
     const Sections = tenantModel('sections', tenantContext(req));
     const section = await Sections.findOne({ id: req.params.id, schoolId }).lean();

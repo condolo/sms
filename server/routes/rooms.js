@@ -19,19 +19,17 @@ const { z }         = require('zod');
 const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
+const { rbac }           = require('../middleware/rbac');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 
 const router = express.Router();
-
-/* ── Roles that may create / update / delete rooms ─────────── */
-const MANAGE_ROLES = new Set(['admin', 'superadmin', 'deputy', 'principal', 'timetabler']);
-
-function canManage(req) {
-  const role  = req.jwtUser?.role  ?? '';
-  const roles = req.jwtUser?.roles ?? [];
-  return MANAGE_ROLES.has(role) || roles.some(r => MANAGE_ROLES.has(r));
-}
+// Writes gated on the 'rooms' sub-key under 'timetable' (already declared
+// in server/config/moduleRegistry.js's timetable subs — "Manage Rooms").
+// admin/superadmin/principal/deputy_principal/timetabler already hold real
+// timetable:RCUD grants server-side (repairPermissions.js/onboard.js), the
+// exact same 5 roles the old hardcoded MANAGE_ROLES set named — so this
+// reproduces current behavior exactly while making it Settings-editable.
 
 /* ── Validation ─────────────────────────────────────────────── */
 const RoomSchema = z.object({
@@ -43,7 +41,7 @@ const RoomSchema = z.object({
 });
 
 /* ── GET /api/rooms ─────────────────────────────────────────── */
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', authMiddleware, async (req, res) => { // rbac: intentionally open to every authenticated user — see header comment
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId, isActive: { $ne: false } };
@@ -62,7 +60,7 @@ router.get('/', authMiddleware, async (req, res) => {
 });
 
 /* ── GET /api/rooms/:id ─────────────────────────────────────── */
-router.get('/:id', authMiddleware, async (req, res) => {
+router.get('/:id', authMiddleware, async (req, res) => { // rbac: intentionally open, same as GET /
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('rooms', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
@@ -75,10 +73,8 @@ router.get('/:id', authMiddleware, async (req, res) => {
 });
 
 /* ── POST /api/rooms ─────────────────────────────────────────── */
-router.post('/', authMiddleware, async (req, res) => {
+router.post('/', authMiddleware, rbac('timetable', 'create', 'rooms'), async (req, res) => {
   try {
-    if (!canManage(req)) return E.forbidden(res);
-
     const { schoolId, userId } = req.jwtUser;
     const result = RoomSchema.safeParse(req.body);
     if (!result.success) return E.validation(res, result.error.issues);
@@ -108,10 +104,8 @@ router.post('/', authMiddleware, async (req, res) => {
 });
 
 /* ── PUT /api/rooms/:id ─────────────────────────────────────── */
-router.put('/:id', authMiddleware, async (req, res) => {
+router.put('/:id', authMiddleware, rbac('timetable', 'update', 'rooms'), async (req, res) => {
   try {
-    if (!canManage(req)) return E.forbidden(res);
-
     const { schoolId, userId } = req.jwtUser;
     const result = RoomSchema.partial().safeParse(req.body);
     if (!result.success) return E.validation(res, result.error.issues);
@@ -139,10 +133,8 @@ router.put('/:id', authMiddleware, async (req, res) => {
 });
 
 /* ── DELETE /api/rooms/:id — soft delete ───────────────────── */
-router.delete('/:id', authMiddleware, async (req, res) => {
+router.delete('/:id', authMiddleware, rbac('timetable', 'delete', 'rooms'), async (req, res) => {
   try {
-    if (!canManage(req)) return E.forbidden(res);
-
     const { schoolId, userId } = req.jwtUser;
     const doc = await tenantModel('rooms', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId },

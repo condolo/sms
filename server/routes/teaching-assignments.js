@@ -63,7 +63,7 @@ const AssignmentSchema = z.object({
 });
 
 /* ── GET /api/teaching-assignments ──────────────────────────── */
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', authMiddleware, async (req, res) => { // rbac: self-scoped below for plain teachers, open to all other real roles — see header comment
   try {
     const { schoolId } = req.jwtUser;
     const eff          = _effectiveRoles(req);
@@ -99,7 +99,7 @@ router.get('/', authMiddleware, async (req, res) => {
 });
 
 /* ── POST /api/teaching-assignments ─────────────────────────── */
-router.post('/', authMiddleware, async (req, res) => {
+router.post('/', authMiddleware, async (req, res) => { // rbac: canManage() below — real-role + HOD department-scope check
   try {
     const { schoolId, userId } = req.jwtUser;
     const role = req.jwtUser?.role ?? '';
@@ -179,7 +179,7 @@ router.post('/', authMiddleware, async (req, res) => {
 });
 
 /* ── PUT /api/teaching-assignments/:id — update preferred room / periods ── */
-router.put('/:id', authMiddleware, async (req, res) => {
+router.put('/:id', authMiddleware, async (req, res) => { // rbac: canManage() below — real-role + HOD department-scope check
   try {
     const { schoolId, userId } = req.jwtUser;
 
@@ -227,7 +227,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
 });
 
 /* ── DELETE /api/teaching-assignments/:id ───────────────────── */
-router.delete('/:id', authMiddleware, async (req, res) => {
+router.delete('/:id', authMiddleware, async (req, res) => { // rbac: canManage() below — real-role + HOD department-scope check
   try {
     const { schoolId } = req.jwtUser;
 
