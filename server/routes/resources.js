@@ -138,7 +138,12 @@ router.get('/config', authMiddleware, PLAN, MODGATE, rbac('resources', 'read'), 
   } catch (err) { console.error('[resources GET /config]', err); return E.serverError(res); }
 });
 
-router.put('/config', authMiddleware, PLAN, MODGATE, async (req, res) => {
+// A regular teacher already holds real resources:RCU (to update THEIR OWN
+// shared resource) but must not be able to edit the school-wide category
+// catalogue; a plain module-level permission check can't express that
+// distinction, so this deliberately keeps the stricter FULL_ACCESS_ROLES
+// check instead of rbac('resources','update').
+router.put('/config', authMiddleware, PLAN, MODGATE, async (req, res) => { // rbac: FULL_ACCESS_ROLES check below — see comment above
   try {
     const { schoolId, userId, role } = req.jwtUser;
     if (!FULL_ACCESS_ROLES.has(role)) return E.forbidden(res, 'Admin access required to manage resource categories');

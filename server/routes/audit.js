@@ -37,7 +37,7 @@ function _adminGuard(req, res, next) {
 /* ════════════════════════════════════════════════════════════════
    GET /api/audit
    ════════════════════════════════════════════════════════════════ */
-router.get('/', authMiddleware, _adminGuard, async (req, res) => {
+router.get('/', authMiddleware, _adminGuard, async (req, res) => { // rbac: _adminGuard above — real admin/superadmin check, see header comment
   try {
     const { schoolId: actorSchoolId } = req.jwtUser;
     const { page, limit } = parsePagination(req.query);
@@ -67,7 +67,7 @@ router.get('/', authMiddleware, _adminGuard, async (req, res) => {
    GET /api/audit/actions
    Returns the catalogue of known action types for filter dropdowns.
    ════════════════════════════════════════════════════════════════ */
-router.get('/actions', authMiddleware, _adminGuard, (req, res) => {
+router.get('/actions', authMiddleware, _adminGuard, (req, res) => { // rbac: _adminGuard above — real admin/superadmin check
   const actions = Object.entries(AuditService.ACTIONS).map(([action, meta]) => ({
     action,
     severity: meta.severity,

@@ -240,7 +240,7 @@ router.delete('/auth/disconnect', authMiddleware, async (req, res) => {
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/elearning/gc/courses — fetch courses from Google Classroom */
-router.get('/gc/courses', authMiddleware, async (req, res) => {
+router.get('/gc/courses', authMiddleware, async (req, res) => { // rbac: self-scoped to the caller's own connected Google account — no cross-user data
   try {
     const tok = await _getToken(req.jwtUser.userId);
     if (!tok) return res.status(403).json({ error: 'Google Classroom not connected.' });

@@ -370,7 +370,7 @@ async function _buildTeacherMap(schoolId) {
    GET /api/import-export/template/:type
    Download a demo CSV template with example rows and instructions
    ──────────────────────────────────────────────────────────── */
-router.get('/template/:type', authMiddleware, async (req, res) => {
+router.get('/template/:type', authMiddleware, async (req, res) => { // rbac: static blank CSV template, no tenant data — intentionally open
   const tpl = TEMPLATES[req.params.type];
   if (!tpl) return E.notFound(res, `No template for type '${req.params.type}'. Valid types: ${Object.keys(TEMPLATES).join(', ')}`);
 

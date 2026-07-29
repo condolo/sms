@@ -331,7 +331,7 @@ async function _identityMigrationStatus() {
 /* ════════════════════════════════════════════════════════════════ */
 /*  GET /api/qa/health                                             */
 /* ════════════════════════════════════════════════════════════════ */
-router.get('/health', authMiddleware, _superadmin, async (req, res) => {
+router.get('/health', authMiddleware, _superadmin, async (req, res) => { // rbac: _superadmin above — real superadmin-only check
   const startedAt = Date.now();
 
   try {

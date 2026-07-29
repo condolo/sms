@@ -412,7 +412,7 @@ function _resolveCurrentPeriod(years, todayStr) {
  * for defaulting year/term pickers anywhere in the app (admissions, exam
  * creation, report cards, mark entry, ...).
  */
-router.get('/current', authMiddleware, async (req, res) => {
+router.get('/current', authMiddleware, async (req, res) => { // rbac: intentionally open to every authenticated user — see comment above
   try {
     const { schoolId } = req.jwtUser;
     const years = await tenantModel('academic_years', tenantContext(req)).find({ schoolId }).lean();

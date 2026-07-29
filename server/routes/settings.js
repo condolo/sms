@@ -106,7 +106,7 @@ const SCHOOL_UPDATABLE = [
 /* ── GET /api/settings/modules — return the full module registry ─
    Returns the same structure as MODULE_REGISTRY (key, label, section, subs).
    Used by the R&P UI so the module list is always in sync with the server. */
-router.get('/modules', authMiddleware, (req, res) => {
+router.get('/modules', authMiddleware, (req, res) => { // rbac: public reference data (the registry itself), no per-school sensitivity
   return res.json({ success: true, data: MODULE_REGISTRY });
 });
 
@@ -115,7 +115,7 @@ router.get('/modules', authMiddleware, (req, res) => {
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/settings — return current user's profile */
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', authMiddleware, async (req, res) => { // rbac: self-scoped to the caller's own account (req.jwtUser.userId)
   try {
     const { userId, schoolId } = req.jwtUser;
     const Users = tenantModel('users', tenantContext(req));
@@ -135,7 +135,7 @@ router.get('/', authMiddleware, async (req, res) => {
 });
 
 /* PUT /api/settings — update display name or change password */
-router.put('/', authMiddleware, async (req, res) => {
+router.put('/', authMiddleware, async (req, res) => { // rbac: self-scoped to the caller's own account — name/password change only
   try {
     const Users = tenantModel('users', tenantContext(req));
     const { name, currentPassword, newPassword } = req.body;
@@ -221,7 +221,7 @@ router.put('/', authMiddleware, async (req, res) => {
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/settings/school */
-router.get('/school', authMiddleware, async (req, res) => {
+router.get('/school', authMiddleware, async (req, res) => { // rbac: inline admin-vs-non-admin field restriction below
   try {
     const Schools = _model('schools');
     const school  = await Schools.findOne({ id: req.jwtUser.schoolId }).lean();

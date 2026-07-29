@@ -349,7 +349,7 @@ router.post('/leave', async (req, res) => {
 /* PATCH /api/hr/leave/:id/advance — approve/reject a school-configured chain step
    (schools with no workflow_configs doc never reach a state where this applies —
    currentStepOrder stays null and /resolve alone handles them, unchanged). */
-router.patch('/leave/:id/advance', authMiddleware, async (req, res) => {
+router.patch('/leave/:id/advance', authMiddleware, async (req, res) => { // rbac: workflow-step approver check below — see comment above
   try {
     const { schoolId, userId, name, role, email } = req.jwtUser;
     const { status, notes } = req.body;
@@ -638,7 +638,7 @@ router.put('/payroll-config', rbac('hr', 'update'), async (req, res) => {
 });
 
 /* GET /api/hr/payroll/mine — current user's own payslips (no HR role needed) */
-router.get('/payroll/mine', async (req, res) => {
+router.get('/payroll/mine', async (req, res) => { // rbac: self-scoped to caller's own staffId, no HR role needed — see comment above
   try {
     const { schoolId, userId } = req.jwtUser;
     const { period } = req.query;
@@ -958,7 +958,7 @@ router.patch('/payroll/:id/status', rbac('hr', 'update'), async (req, res) => {
    workflow_configs doc never reach a state where this applies —
    currentStepOrder stays null and PATCH /status alone handles them,
    unchanged — exactly mirroring leave's /advance). */
-router.patch('/payroll/:id/advance', authMiddleware, async (req, res) => {
+router.patch('/payroll/:id/advance', authMiddleware, async (req, res) => { // rbac: workflow-step approver check below — see comment above
   try {
     const { schoolId, userId, role, email } = req.jwtUser;
     const { status: action, notes } = req.body;
@@ -1155,7 +1155,7 @@ router.delete('/payroll/:id', rbac('hr', 'delete'), async (req, res) => {
    download any record. payslip-engine.js applies the DRAFT watermark
    automatically whenever status isn't confirmed/paid — no branch needed
    here for that. */
-router.get('/payroll/:id/pdf', async (req, res) => {
+router.get('/payroll/:id/pdf', async (req, res) => { // rbac: self-scoped to own staffId, or HR_ROLES for any record — see comment above
   try {
     const { schoolId, userId, role } = req.jwtUser;
 
@@ -1255,7 +1255,7 @@ router.get('/payroll-history/:id/pdf', rbac('hr', 'read', 'payroll_view'), async
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/hr/documents */
-router.get('/documents', async (req, res) => {
+router.get('/documents', async (req, res) => { // rbac: self-scoped to own staffId, or HR_ROLES for any record — see filter logic below
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const { staffId } = req.query;

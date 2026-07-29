@@ -125,7 +125,7 @@ async function _coverageMap(schoolId, classId, subjectId, academicYear) {
    ═══════════════════════════════════════════════════════════════ */
 
 /* ── GET /api/lessons/topics ─ list topics for a subject ────── */
-router.get('/topics', authMiddleware, PLAN, MODGATE, async (req, res) => {
+router.get('/topics', authMiddleware, PLAN, MODGATE, async (req, res) => { // rbac: intentionally open to every authenticated user — curriculum reference data
   try {
     const { schoolId } = req.jwtUser;
     const { subjectId, academicYear } = req.query;
@@ -355,7 +355,7 @@ router.get('/my-classes', authMiddleware, PLAN, MODGATE, async (req, res) => {
   Used by the teacher drill-down view.
   Query: classId, subjectId, academicYear (optional)
 */
-router.get('/coverage', authMiddleware, PLAN, MODGATE, scopeMiddleware, async (req, res) => {
+router.get('/coverage', authMiddleware, PLAN, MODGATE, scopeMiddleware, async (req, res) => { // rbac: scopeMiddleware above + intentionally open — curriculum reference data
   try {
     const { schoolId } = req.jwtUser;
     const { classId, subjectId, academicYear } = req.query;
@@ -521,8 +521,14 @@ router.delete('/coverage', authMiddleware, PLAN, MODGATE, rbac('lessons', 'delet
   Returns all teaching assignments enriched with coverage %.
   Used by admin/HOD overview grid.
 */
-router.get('/summary', authMiddleware, PLAN, MODGATE, async (req, res) => {
+router.get('/summary', authMiddleware, PLAN, MODGATE, async (req, res) => { // rbac: isHodOrAdmin() below — real custom guard
   try {
+    // Fix: this route was documented "admin/HOD" (see comment above) but had
+    // no actual enforcement — any authenticated user, including students,
+    // could pull the full school-wide teacher coverage overview. Reuses the
+    // same isHodOrAdmin() guard /pending-teachers already uses below.
+    if (!isHodOrAdmin(req)) return E.forbidden(res, 'HOD or admin access required');
+
     const { schoolId } = req.jwtUser;
     const { academicYear: yearQ, subjectId, classId, departmentId } = req.query;
 
@@ -583,7 +589,7 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, async (req, res) => {
   Returns per-subject coverage for a class.
   Used in student and parent dashboards.
 */
-router.get('/class-summary/:classId', authMiddleware, PLAN, MODGATE, async (req, res) => {
+router.get('/class-summary/:classId', authMiddleware, PLAN, MODGATE, async (req, res) => { // rbac: intentionally open — used by student/parent dashboards, see comment above
   try {
     const { schoolId } = req.jwtUser;
     const { classId } = req.params;
@@ -664,7 +670,7 @@ router.get('/class-summary/:classId', authMiddleware, PLAN, MODGATE, async (req,
   Returns teachers who have uncovered topics for the current week.
   Used by HOD escalation view and reminder system.
 */
-router.get('/pending-teachers', authMiddleware, PLAN, MODGATE, async (req, res) => {
+router.get('/pending-teachers', authMiddleware, PLAN, MODGATE, async (req, res) => { // rbac: isHodOrAdmin() below — real custom guard
   try {
     if (!isHodOrAdmin(req)) return E.forbidden(res, 'HOD or admin access required');
     const { schoolId } = req.jwtUser;
