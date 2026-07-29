@@ -75,6 +75,7 @@ function behaviourAccess(action) {
 /* ── Validation schemas ─────────────────────────────────────── */
 const IncidentSchema = z.object({
   studentId:    z.string().min(1),
+  studentName:  z.string().max(200).optional(), // denormalized display name, same convention as category/itemLabel below
   classId:      z.string().optional(),
   reportedBy:   z.string().optional(),          // userId of reporter; overridden by JWT
   categoryId:   z.string().optional(),
@@ -102,6 +103,7 @@ const IncidentSchema = z.object({
 const AppealSchema = z.object({
   incidentId:   z.string().min(1),
   studentId:    z.string().min(1),
+  studentName:  z.string().max(200).optional(), // denormalized display name — backfilled from the incident if the caller doesn't send one
   reason:       z.string().min(1).max(3000),
   submittedBy:  z.string().optional(),
   outcome:      z.enum(['pending', 'upheld', 'overturned', 'partial']).default('pending'),
@@ -592,6 +594,11 @@ router.post('/appeals', authMiddleware, PLAN, MODGATE, behaviourAccess('create')
     // Verify incident exists and belongs to this school
     const incident = await tenantModel('behaviour_incidents', tenantContext(req)).findOne({ id: data.incidentId, schoolId }).lean();
     if (!incident) return E.notFound(res, 'Incident not found');
+
+    // No appeal-creation UI sends studentName today — reuse the incident's
+    // own denormalized name (see IncidentSchema) rather than requiring
+    // every future caller to know it.
+    if (!data.studentName && incident.studentName) data.studentName = incident.studentName;
 
     const doc = await tenantModel('behaviour_appeals', tenantContext(req)).create({
       ...data,

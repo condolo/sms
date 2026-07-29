@@ -111,6 +111,7 @@ export default function AwardTab() {
     if (!canSubmit) return;
     mutation.mutate({
       studentId:    sid,
+      studentName:  sName,
       type,
       title:        item.label,
       category:     category.name,
