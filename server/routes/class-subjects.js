@@ -44,7 +44,7 @@ function _linkQuery(schoolId, linkId) {
 /* ── GET /api/class-subjects/counts ─────────────────────────────
    Returns { [classId]: subjectCount }
    Used by class cards and the class dropdown to show curriculum size. */
-router.get('/counts', authMiddleware, async (req, res) => {
+router.get('/counts', authMiddleware, async (req, res) => { // rbac: intentionally open to every authenticated user — reference/count data
   try {
     const { schoolId } = req.jwtUser;
     const agg = await tenantModel('class_subjects', tenantContext(req)).aggregate([
@@ -83,7 +83,7 @@ router.get('/counts', authMiddleware, async (req, res) => {
      }]
    }
 */
-router.get('/enrollment-warnings', authMiddleware, async (req, res) => {
+router.get('/enrollment-warnings', authMiddleware, async (req, res) => { // rbac: intentionally open to every authenticated user — reference data
   try {
     const { schoolId } = req.jwtUser;
     const { classId: qClassId } = req.query;
@@ -204,7 +204,7 @@ router.get('/enrollment-warnings', authMiddleware, async (req, res) => {
    ?classId=X   → curriculum for a class (includes full subject + dept details)
    ?subjectId=X → all classes that offer a given subject (includes class meta)
    One of the two query params is required. */
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', authMiddleware, async (req, res) => { // rbac: intentionally open to every authenticated user — reference data
   try {
     const { schoolId } = req.jwtUser;
     const { classId, subjectId } = req.query;

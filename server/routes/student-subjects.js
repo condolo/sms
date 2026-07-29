@@ -17,7 +17,7 @@ const router = express.Router();
 /* GET /api/student-subjects/counts
    Returns { [subjectId]: number } for all subjects in the school.
    Used by SubjectsPage to show enrollment badges per subject. */
-router.get('/counts', authMiddleware, async (req, res) => {
+router.get('/counts', authMiddleware, async (req, res) => { // rbac: intentionally open to every authenticated user — reference/count data
   try {
     const { schoolId } = req.jwtUser;
     const agg = await tenantModel('student_subjects', tenantContext(req)).aggregate([
@@ -33,7 +33,7 @@ router.get('/counts', authMiddleware, async (req, res) => {
 /* GET /api/student-subjects
    ?subjectId=X  — list enrollments for a subject (includes student + class name)
    ?studentId=X  — list subjects a student is enrolled in */
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', authMiddleware, async (req, res) => { // rbac: intentionally open to every authenticated user — reference data
   try {
     const { schoolId } = req.jwtUser;
     const { subjectId, studentId } = req.query;

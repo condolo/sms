@@ -47,7 +47,7 @@ function _validate(schema, data) {
 }
 
 /* ── GET /api/comment-banks — shared read, see file header ── */
-router.get('/', authMiddleware, PLAN, MODGATE, async (req, res) => {
+router.get('/', authMiddleware, PLAN, MODGATE, async (req, res) => { // rbac: intentionally open to any authenticated staff — see RC10 header comment
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId };

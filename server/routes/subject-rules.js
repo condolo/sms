@@ -23,7 +23,7 @@ const { ok, created, E } = require('../utils/response');
 const router = express.Router();
 
 /* ── GET /api/subject-rules — list all rules for this school ──── */
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', authMiddleware, async (req, res) => { // rbac: intentionally open to every authenticated user — reference data
   try {
     const { schoolId } = req.jwtUser;
     const rules = await tenantModel('subject_rules', tenantContext(req))
@@ -38,7 +38,7 @@ router.get('/', authMiddleware, async (req, res) => {
 });
 
 /* ── GET /api/subject-rules/:id ───────────────────────────────── */
-router.get('/:id', authMiddleware, async (req, res) => {
+router.get('/:id', authMiddleware, async (req, res) => { // rbac: intentionally open to every authenticated user — reference data
   try {
     const { schoolId } = req.jwtUser;
     const rule = await tenantModel('subject_rules', tenantContext(req))

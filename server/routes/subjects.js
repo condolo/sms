@@ -36,7 +36,7 @@ function _v(data) {
 }
 
 /* ── GET /api/subjects — list (optionally filtered) ────────── */
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', authMiddleware, async (req, res) => { // rbac: intentionally open to every authenticated user — reference data
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId, isActive: { $ne: false } };
@@ -78,7 +78,7 @@ router.get('/', authMiddleware, async (req, res) => {
 });
 
 /* ── GET /api/subjects/:id ─────────────────────────────────── */
-router.get('/:id', authMiddleware, async (req, res) => {
+router.get('/:id', authMiddleware, async (req, res) => { // rbac: intentionally open to every authenticated user — reference data
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('subjects', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();

@@ -31,7 +31,7 @@ function _v(data) {
 }
 
 /* ── GET /api/departments — list all + embedded subject counts ─ */
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', authMiddleware, async (req, res) => { // rbac: intentionally open to every authenticated user — reference data
   try {
     const { schoolId } = req.jwtUser;
     const Dept    = tenantModel('departments', tenantContext(req));
@@ -54,7 +54,7 @@ router.get('/', authMiddleware, async (req, res) => {
 });
 
 /* ── GET /api/departments/:id ──────────────────────────────── */
-router.get('/:id', authMiddleware, async (req, res) => {
+router.get('/:id', authMiddleware, async (req, res) => { // rbac: intentionally open to every authenticated user — reference data
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('departments', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
@@ -64,7 +64,14 @@ router.get('/:id', authMiddleware, async (req, res) => {
 });
 
 /* ── POST /api/departments — create ────────────────────────── */
-router.post('/', authMiddleware, rbac('departments', 'create'), async (req, res) => {
+// Uses the 'subjects' rbac key, not a separate 'departments' one — the
+// registry's own subjects.create sub is literally labelled "Create
+// Subject / Department" (server/config/moduleRegistry.js), and the
+// sibling class-subjects.js/student-subjects.js routes already write
+// under 'subjects'. 'departments' was never a registered module key
+// (zero role_permissions grant anywhere, not even for admin), so this
+// also fixes a real "nobody could ever manage departments" gap.
+router.post('/', authMiddleware, rbac('subjects', 'create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _v(req.body);
@@ -83,7 +90,7 @@ router.post('/', authMiddleware, rbac('departments', 'create'), async (req, res)
 });
 
 /* ── PUT /api/departments/:id — update ─────────────────────── */
-router.put('/:id', authMiddleware, rbac('departments', 'update'), async (req, res) => {
+router.put('/:id', authMiddleware, rbac('subjects', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _v(req.body);
@@ -108,7 +115,7 @@ router.put('/:id', authMiddleware, rbac('departments', 'update'), async (req, re
 });
 
 /* ── DELETE /api/departments/:id — soft-delete ─────────────── */
-router.delete('/:id', authMiddleware, rbac('departments', 'delete'), async (req, res) => {
+router.delete('/:id', authMiddleware, rbac('subjects', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
 
