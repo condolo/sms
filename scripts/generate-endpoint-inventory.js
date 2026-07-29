@@ -37,9 +37,20 @@ const ALLOWLISTED = new Set([
 
 /* ── Regex patterns ─────────────────────────────────────────────────── */
 const ROUTE_RE     = /router\.(get|post|put|patch|delete)\s*\(\s*['"`]([^'"`]+)['"`]/g;
-const RBAC_RE      = /rbac\s*\(|\/[/*] rbac:/;
+// Kept in sync with _rbac-scan.js's RBAC_RE — that scanner's coverage number
+// is the platform's trusted "RBAC Coverage" figure; this file's own
+// category/coverage fields must recognize the same protection patterns or
+// they silently disagree (behaviourAccess/_pdfAccess/_can/_typeGuard/planGate
+// routes were previously miscounted here as "auth-only").
+const RBAC_RE      = /rbac\s*\(|\/[/*] rbac:|planGate\(|_pdfAccess|_can\(|_typeGuard|behaviourAccess\(/;
 const RBAC_ARGS_RE = /rbac\s*\(\s*['"`]([^'"`]+)['"`]\s*,\s*['"`]([^'"`]+)['"`]\s*\)/;
 const AUTH_RE      = /authMiddleware/;
+// Some files apply authMiddleware once, file-wide, via router.use(...)
+// instead of repeating it on every route (library.js, hostel.js, hr.js,
+// transport.js, messages.js, events.js, subjects.js, birthdays.js,
+// backup.js). See ROUTER_USE_AUTH_RE below — without it every route in
+// those files was invisible to the narrow per-line AUTH_RE check.
+const ROUTER_USE_AUTH_RE = /^\s*router\.use\s*\(\s*authMiddleware\b/m;
 const PLAN_RE      = /planGate|PLAN\b/;
 const TENANT_RE    = /schoolId/;
 const AUDIT_RE     = /AuditService\.log\s*\(|auditLog\s*\(|_audit\s*\(|auditTrail\s*\(/;
@@ -58,22 +69,33 @@ for (const file of fs.readdirSync(ROUTES_DIR).filter(f => f.endsWith('.js')).sor
   const source      = fs.readFileSync(path.join(ROUTES_DIR, file), 'utf8');
   const lines       = source.split('\n');
   const isAllowlist = ALLOWLISTED.has(file);
+  const fileWideAuth = ROUTER_USE_AUTH_RE.test(source);
 
-  let match;
+  /* First pass: collect every route match's start index so each route's
+     body span can run to the NEXT route's start (or EOF) instead of a
+     fixed line count — a handler longer than 20 lines was silently
+     invisible to auditLogged/tenantScoped detection before this fix. */
+  const routeMatches = [];
+  let m;
   ROUTE_RE.lastIndex = 0;
+  while ((m = ROUTE_RE.exec(source)) !== null) {
+    routeMatches.push({ method: m[1].toUpperCase(), route: m[2], index: m.index });
+  }
 
-  while ((match = ROUTE_RE.exec(source)) !== null) {
-    const method  = match[1].toUpperCase();
-    const route   = match[2];
-    const lineNum = source.slice(0, match.index).split('\n').length;
+  routeMatches.forEach((rm, i) => {
+    const method  = rm.method;
+    const route   = rm.route;
+    const lineNum = source.slice(0, rm.index).split('\n').length;
 
     /* Narrow context (4 lines): middleware detection */
     const lineCtx = lines.slice(Math.max(0, lineNum - 1), lineNum + 3).join(' ');
-    /* Wide context (20 lines): handler-body detection */
-    const wideCtx = lines.slice(Math.max(0, lineNum - 1), lineNum + 20).join(' ');
+    /* Body span: this route's declaration to the next route's declaration
+       (or EOF) — handler-body detection (audit/tenant checks). */
+    const bodyEnd = i + 1 < routeMatches.length ? routeMatches[i + 1].index : source.length;
+    const wideCtx = source.slice(rm.index, bodyEnd);
 
     const hasRbac     = RBAC_RE.test(lineCtx);
-    const hasAuth     = AUTH_RE.test(lineCtx);
+    const hasAuth     = fileWideAuth || AUTH_RE.test(lineCtx);
     const hasPlan     = PLAN_RE.test(lineCtx);
     const tenantScoped = TENANT_RE.test(wideCtx);
     const auditLogged  = AUDIT_RE.test(wideCtx);
@@ -116,7 +138,7 @@ for (const file of fs.readdirSync(ROUTES_DIR).filter(f => f.endsWith('.js')).sor
     if (auditLogged)   summary.auditLogged++;
     if (rateLimit)     summary.rateLimited++;
     if (risk) summary.byRisk[risk] = (summary.byRisk[risk] || 0) + 1;
-  }
+  });
 }
 
 /* ── Business coverage ──────────────────────────────────────────────── */
