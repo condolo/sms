@@ -27,6 +27,27 @@ const router = express.Router();
 const PLAN   = planGate('students');
 const MODGATE = moduleGate('students');
 
+/* Medical Centre milestone 1 — the Student Profile's "Medical" tab
+   (client/src/pages/students/StudentProfile.jsx, MedicalTab) has always
+   posted this shape via PUT /students/:id { medical: {...} }, but this
+   schema never declared a `medical` field — Zod silently strips unknown
+   keys, so every "Edit medical info" save was a no-op. This is the fix,
+   not a new field addition. Deliberately a plain sub-object (not its own
+   collection) to match the storage shape the existing UI already reads/
+   writes — see the dependency audit's "fix in place" decision. */
+const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-', 'Unknown'];
+const MedicalInfoSchema = z.object({
+  bloodGroup:        z.enum(BLOOD_GROUPS).or(z.literal('')).optional(),
+  allergies:         z.string().max(1000).optional(),
+  conditions:        z.string().max(1000).optional(),
+  emergencyName:     z.string().max(200).optional(),
+  emergencyPhone:    z.string().max(30).optional(),
+  emergencyRelation: z.string().max(100).optional(),
+  doctorName:        z.string().max(200).optional(),
+  doctorPhone:       z.string().max(30).optional(),
+  vaccinations:      z.string().max(1000).optional(),
+});
+
 /* ── Validation schemas ─────────────────────────────────────── */
 const StudentCreateSchema = z.object({
   admissionNumber: z.string().max(50).trim().optional(), // manual override; server auto-generates if omitted
@@ -52,7 +73,8 @@ const StudentCreateSchema = z.object({
   parentEmail:    z.string().email().optional().or(z.literal('')),
   parentPhone:    z.string().max(30).optional(),
   address:        z.string().max(500).optional(),
-  medicalNotes:   z.string().max(2000).optional(),
+  medicalNotes:   z.string().max(2000).optional(), // legacy free-text field — see MedicalInfoSchema above for the Medical tab's actual shape
+  medical:        MedicalInfoSchema.optional(),
   photo:          z.string().optional(),
   schoolEmail:    z.string().email().optional().or(z.literal('')),
   enrollmentDate: z.string().optional(),
@@ -341,6 +363,15 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), as
 
     if (conflict) return E.conflict(res, 'This student record was edited by someone else. Please refresh and try again.');
     if (!doc)     return E.notFound(res, 'Student not found');
+
+    if (data.medical) {
+      AuditService.log({
+        action: 'student.medical_updated', actor: req.jwtUser, schoolId,
+        target: { type: 'student', id: doc.id ?? String(doc._id), label: `${doc.firstName} ${doc.lastName}` },
+        req,
+      });
+    }
+
     return ok(res, doc);
   } catch (err) {
     console.error('[students PUT/:id]', err);

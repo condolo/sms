@@ -286,3 +286,69 @@ describe('POST /api/students', () => {
     expect(res.status).toBe(422);
   });
 });
+
+/* ══════════════════════════════════════════════════════════════
+   PUT /api/students/:id — medical field persistence
+   (Medical Centre milestone 1: StudentUpdateSchema never declared
+   `medical`, so Zod silently stripped it and the Student Profile's
+   Medical tab saved nothing. This is the regression test for that fix.)
+══════════════════════════════════════════════════════════════ */
+describe('PUT /api/students/:id — medical field', () => {
+  function mockExistingStudent(student) {
+    // Route does: findOne({id,schoolId}).lean() (no .select() on this call)
+    mockStudentsFindOne.mockReturnValue({ lean: jest.fn().mockResolvedValue(student) });
+  }
+
+  test('a medical payload reaches the $set update — was previously stripped by Zod', async () => {
+    const student = makeStudent();
+    mockExistingStudent(student);
+    mockStudentsFindOneAndUpdate.mockReturnValue({
+      lean: jest.fn().mockResolvedValue({ ...student, medical: 'placeholder' }),
+    });
+
+    const medical = {
+      bloodGroup: 'O+', allergies: 'Peanuts', conditions: 'Asthma',
+      emergencyName: 'Jane Doe', emergencyPhone: '0712345678', emergencyRelation: 'Mother',
+      doctorName: 'Dr. Kamau', doctorPhone: '0722000000', vaccinations: 'Up to date',
+    };
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .put('/api/students/stu_demo_001')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ medical });
+
+    expect(res.status).toBe(200);
+    expect(mockStudentsFindOneAndUpdate).toHaveBeenCalledTimes(1);
+    const [, updateOp] = mockStudentsFindOneAndUpdate.mock.calls[0];
+    expect(updateOp.$set.medical).toEqual(medical);
+  });
+
+  test('rejects an invalid bloodGroup value', async () => {
+    mockExistingStudent(makeStudent());
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .put('/api/students/stu_demo_001')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ medical: { bloodGroup: 'not-a-blood-group' } });
+
+    expect(res.status).toBe(422);
+    expect(mockStudentsFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  test('a field not declared on MedicalInfoSchema is stripped, not passed through', async () => {
+    const student = makeStudent();
+    mockExistingStudent(student);
+    mockStudentsFindOneAndUpdate.mockReturnValue({ lean: jest.fn().mockResolvedValue(student) });
+
+    const app = buildApp();
+    await supertest(app)
+      .put('/api/students/stu_demo_001')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ medical: { bloodGroup: 'A+', notARealField: 'should be dropped' } });
+
+    const [, updateOp] = mockStudentsFindOneAndUpdate.mock.calls[0];
+    expect(updateOp.$set.medical).toEqual({ bloodGroup: 'A+' });
+  });
+});

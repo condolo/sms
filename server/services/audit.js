@@ -126,6 +126,7 @@ const ACTIONS = {
   'student.deleted':         { severity: 'warn' },
   'student.deactivated':     { severity: 'warn' },
   'student.promoted':        { severity: 'info' },
+  'student.medical_updated': { severity: 'warn' }, // Medical Centre milestone 1 — sensitive data, distinct from a routine profile edit
   // Report Cards
   'report_card.publish':     { severity: 'critical' },
   'report_card.unpublish':   { severity: 'critical' },
