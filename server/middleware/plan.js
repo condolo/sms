@@ -62,6 +62,7 @@ const FEATURE_PLAN = {
   transport:          'core',
   hostel:             'core',
   medical:            'core',
+  inventory:          'core',
   lessons:            'core',
   custom_smtp:        'core',
   elearning:          'core',

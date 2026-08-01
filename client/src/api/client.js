@@ -273,6 +273,11 @@ export const medical = {
   reports: { summary: (params) => _get('/medical/reports', params) },
 };
 
+export const inventory = {
+  categories: _resource('inventory/categories'),
+  items:      _resource('inventory/items'),
+};
+
 export const exams = {
   ..._resource('exams'),
   results: {

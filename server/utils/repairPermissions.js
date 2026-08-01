@@ -48,6 +48,11 @@ const ROLE_DEFAULTS = {
     // clinic-visit records — no top-level 'medical' key granted, so
     // rbac('medical','read') without the 'alerts' subKey stays denied.
     medical__alerts: R,
+    // Requisition-only (raise + view own), never full inventory
+    // management — no top-level 'inventory' key, same posture as
+    // medical__alerts above. Matches the module spec's own examples
+    // (Teacher is named as a requester, not an inventory manager).
+    inventory__requisition: RCU,
   },
 
   principal: {
@@ -57,7 +62,7 @@ const ROLE_DEFAULTS = {
     messages:     RCUD, events:       RCUD, report_cards: RCU,
     admissions:   RCU,  lessons:      RCUD, resources:    RCUD,
     library:      R,    hostel:       R,    transport:    R,
-    medical:      RCUD,
+    medical:      RCUD, inventory:    RCUD,
   },
 
   deputy_principal: {
@@ -67,7 +72,7 @@ const ROLE_DEFAULTS = {
     messages:     RCUD, events:       RCUD, report_cards: RCU,
     admissions:   RCU,  lessons:      RCUD, resources:    RCUD,
     library:      R,    hostel:       R,    transport:    R,
-    medical:      RCUD,
+    medical:      RCUD, inventory:    RCUD,
   },
 
   section_head: {

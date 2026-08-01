@@ -189,6 +189,13 @@ const MODULE_REGISTRY = [
     { key: 'alerts',  label: 'View Medical Alerts (condition flags only, not full profile)' },
     { key: 'reports', label: 'View Medical Reports' },
   ]},
+  { key: 'inventory', label: 'Inventory', section: 'Operations', subs: [
+    { key: 'view',        label: 'View Inventory & Categories' },
+    { key: 'manage',      label: 'Add / Edit Items & Categories' },
+    { key: 'transact',    label: 'Record Stock Transactions (Receive/Issue/Return/Adjust)' },
+    { key: 'requisition', label: 'Raise Requisitions' },
+    { key: 'workflow',    label: 'Configure Requisition Approval Workflow' },
+  ]},
 
   /* ── Insights ─────────────────────────────────────────── */
   { key: 'growth_profile', label: 'Growth Profile', section: 'Insights', subs: [

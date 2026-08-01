@@ -521,6 +521,7 @@ function _defaultPerms(role) {
         timetable:    RCUD, messages:     RCUD, settings:     RCUD,
         assessment:   RCUD, report_cards: RCUD, lessons:      RCUD,
         hr:           RCUD, analytics:    RCUD, medical:      RCUD,
+        inventory:    RCUD,
       };
 
     case 'teacher':
@@ -531,6 +532,7 @@ function _defaultPerms(role) {
         exams:        R,    lessons:      RCUD, library:      R,
         hostel:       R,    transport:    R,
         medical__alerts: R, // condition flags only, never full clinic-visit records
+        inventory__requisition: RCU, // raise + view own requisitions, not full inventory management
       };
 
     case 'finance':
@@ -604,6 +606,7 @@ function _defaultPerms(role) {
         messages:     RCUD, report_cards: RCU,  admissions:   RCU,
         lessons:      RCUD, analytics:    R,    library:      R,
         hostel:       R,    transport:    R,    medical:      RCUD,
+        inventory:    RCUD,
       };
 
     case 'discipline_committee':

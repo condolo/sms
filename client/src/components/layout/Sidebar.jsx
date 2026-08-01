@@ -25,7 +25,7 @@ import {
   MessageSquare, UserCog, TrendingUp, Tag, HelpCircle,
   BookMarked, Bus, BedDouble, X, BookCheck, MonitorPlay,
   ChevronDown, BookMarked as ClassroomIcon, Video, Link2,
-  FileBarChart2, HeartPulse,
+  FileBarChart2, HeartPulse, Boxes,
 } from 'lucide-react';
 import clsx from 'clsx';
 import useAuthStore from '@/store/auth.js';
@@ -60,6 +60,7 @@ export const CONFIGURABLE_MODULES = [
   { key: 'transport',  to: '/transport',  Icon: Bus,            label: 'Transport',           section: 'Operations' },
   { key: 'hostel',     to: '/hostel',     Icon: BedDouble,      label: 'Hostel',              section: 'Operations' },
   { key: 'medical',    to: '/medical',    Icon: HeartPulse,     label: 'Medical Centre',      section: 'Operations' },
+  { key: 'inventory',  to: '/inventory',  Icon: Boxes,          label: 'Inventory',           section: 'Operations' },
   { key: 'reports',    to: '/reports',    Icon: TrendingUp,     label: 'Reports & Analytics', section: 'Insights'   },
 ];
 
