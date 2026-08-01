@@ -139,6 +139,11 @@ const ACTIONS = {
   // override of the recorded stock level, same escalation posture as
   // payroll.status_changed's 'paid' case).
   'inventory.transaction_recorded': { severity: 'info' },
+  // Inventory milestone 3 — Requisitions + Procurement (Workflow Engine reuse)
+  'inventory.requisition_raised':         { severity: 'info' },
+  'inventory.requisition_step_approved':  { severity: 'info' },
+  'inventory.requisition_step_rejected':  { severity: 'warn' },
+  'inventory.requisition_fulfilled':      { severity: 'info' },
   // Report Cards
   'report_card.publish':     { severity: 'critical' },
   'report_card.unpublish':   { severity: 'critical' },

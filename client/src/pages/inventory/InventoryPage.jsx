@@ -8,10 +8,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Boxes, Tag, Search, Plus, X, Loader2, AlertTriangle, Trash2, Edit2,
   ChevronLeft, ChevronRight, ArrowLeftRight, ArrowDownCircle, ArrowUpCircle,
-  RotateCcw, SlidersHorizontal,
+  RotateCcw, SlidersHorizontal, ClipboardList,
 } from 'lucide-react';
 import { inventory as inventoryApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
+import RequisitionsTab from './components/RequisitionsTab.jsx';
 
 const LIMIT = 20;
 const STATUSES = ['active', 'inactive', 'discontinued'];
@@ -19,12 +20,14 @@ const STATUSES = ['active', 'inactive', 'discontinued'];
 export default function InventoryPage() {
   const [tab, setTab] = useState('items');
   const can = useAuthStore(s => s.can);
-  const canManage   = can('inventory', 'create');
-  const canTransact = can('inventory', 'create') || can('inventory__transact', 'create');
+  const canManage      = can('inventory', 'create');
+  const canTransact     = can('inventory', 'create') || can('inventory__transact', 'create');
+  const canSeeRequisitions = can('inventory', 'read') || can('inventory__requisition', 'read');
 
   const TABS = [
     { id: 'items', label: 'Items', icon: Boxes },
     { id: 'transactions', label: 'Stock Transactions', icon: ArrowLeftRight },
+    ...(canSeeRequisitions ? [{ id: 'requisitions', label: 'Requisitions', icon: ClipboardList }] : []),
     ...(canManage ? [{ id: 'categories', label: 'Categories', icon: Tag }] : []),
   ];
   const activeTab = TABS.some(t => t.id === tab) ? tab : (TABS[0]?.id ?? 'items');
@@ -62,6 +65,7 @@ export default function InventoryPage() {
         <AnimatePresence mode="wait">
           {activeTab === 'items'        && <ItemsTab key="items" canManage={canManage} />}
           {activeTab === 'transactions' && <TransactionsTab key="transactions" canTransact={canTransact} />}
+          {activeTab === 'requisitions' && <RequisitionsTab key="requisitions" />}
           {activeTab === 'categories'   && <CategoriesTab key="categories" />}
         </AnimatePresence>
       </div>

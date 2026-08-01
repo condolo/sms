@@ -280,6 +280,16 @@ export const inventory = {
     list:   (params) => _get('/inventory/transactions', params),
     create: (data)    => _post('/inventory/transactions', data),
   },
+  requisitions: {
+    list:    (params)     => _get('/inventory/requisitions', params),
+    create:  (data)       => _post('/inventory/requisitions', data),
+    advance: (id, data)   => _patch(`/inventory/requisitions/${id}/advance`, data),
+    fulfill: (id, data)   => _post(`/inventory/requisitions/${id}/fulfill`, data ?? {}),
+    workflowConfig: {
+      get:  ()     => _get('/inventory/requisitions/workflow-config'),
+      save: (data) => _put('/inventory/requisitions/workflow-config', data),
+    },
+  },
 };
 
 export const exams = {
