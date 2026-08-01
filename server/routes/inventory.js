@@ -249,4 +249,124 @@ router.delete('/items/:id', authMiddleware, PLAN, MODGATE, rbac('inventory', 'de
   } catch (err) { console.error('[inventory/items DELETE]', err); return E.serverError(res); }
 });
 
+/* ══════════════════════════════════════════════════════════════
+   STOCK TRANSACTIONS — the movement ledger. Append-only: no PUT,
+   no DELETE. A mistake is corrected with an offsetting adjustment,
+   never by editing or removing the original entry.
+   ══════════════════════════════════════════════════════════════ */
+const TXN_TYPES    = ['receive', 'issue', 'return', 'adjustment'];
+const SIGN_BY_TYPE  = { receive: 1, issue: -1, return: 1 }; // adjustment's sign comes from `direction` instead
+
+const TransactionSchema = z.object({
+  itemId:    z.string().min(1),
+  type:      z.enum(TXN_TYPES),
+  quantity:  z.number().int().positive(),
+  direction: z.enum(['increase', 'decrease']).optional(), // required only for type:'adjustment'
+  reason:    z.string().max(500).optional(),
+  date:      z.string().optional(), // ISO date; defaults to today
+});
+
+router.get('/transactions', authMiddleware, PLAN, MODGATE, rbac('inventory', 'read', 'view'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const { page, limit, skip } = parsePagination(req.query);
+
+    const filter = { schoolId };
+    const _item = strParam(req.query.itemId);
+    const _type = strParam(req.query.type);
+    if (_item) filter.itemId = _item;
+    if (_type) filter.type   = _type;
+
+    const _df = strParam(req.query.dateFrom);
+    const _dt = strParam(req.query.dateTo);
+    if (_df || _dt) {
+      filter.date = {};
+      if (_df) filter.date.$gte = _df;
+      if (_dt) filter.date.$lte = _dt;
+    }
+
+    const Txns = tenantModel('inventory_transactions', tenantContext(req));
+    const [docs, total] = await Promise.all([
+      Txns.find(filter).sort({ date: -1, createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
+      Txns.countDocuments(filter),
+    ]);
+    return ok(res, docs, paginate(page, limit, total));
+  } catch (err) { console.error('[inventory/transactions GET]', err); return E.serverError(res); }
+});
+
+router.post('/transactions', authMiddleware, PLAN, MODGATE, rbac('inventory', 'create', 'transact'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { data, error } = _validate(TransactionSchema, req.body);
+    if (error) return E.validation(res, error);
+
+    let sign;
+    if (data.type === 'adjustment') {
+      if (!data.direction) return E.badRequest(res, "direction ('increase' or 'decrease') is required for adjustment transactions");
+      if (!data.reason?.trim()) return E.badRequest(res, 'A reason is required for adjustment transactions');
+      sign = data.direction === 'increase' ? 1 : -1;
+    } else {
+      sign = SIGN_BY_TYPE[data.type];
+    }
+    const delta = sign * data.quantity;
+
+    const ctx   = tenantContext(req);
+    const Items = tenantModel('inventory_items', ctx);
+
+    const item = await Items.findOne({ id: data.itemId, schoolId }).select('name unit quantity').lean();
+    if (!item) return E.badRequest(res, 'Unknown itemId.');
+
+    // Atomic $inc with a guard condition — avoids a lost-update race
+    // between two concurrent transactions on the same item (both reading
+    // the same starting quantity, one silently overwriting the other's
+    // decrement). The guard (quantity >= -delta) only bites for negative
+    // deltas (issue / decrease-adjustment); it's always satisfied for
+    // positive ones, so receive/return/increase never get blocked here.
+    const updatedItem = await Items.findOneAndUpdate(
+      { id: data.itemId, schoolId, quantity: { $gte: -delta } },
+      { $inc: { quantity: delta }, $set: { updatedAt: new Date().toISOString() } },
+      { new: true }
+    ).lean();
+    if (!updatedItem) {
+      return E.badRequest(res, `Insufficient stock — only ${item.quantity} ${item.unit} available.`);
+    }
+
+    let doc;
+    try {
+      doc = await tenantModel('inventory_transactions', ctx).create({
+        id: uuidv4(), schoolId,
+        itemId: data.itemId, itemName: item.name,
+        type: data.type, quantity: data.quantity, delta,
+        direction: data.type === 'adjustment' ? data.direction : undefined,
+        reason: data.reason ?? '',
+        date: data.date || new Date().toISOString().slice(0, 10),
+        performedBy: userId, createdAt: new Date().toISOString(),
+      });
+    } catch (ledgerErr) {
+      // The item quantity already moved (atomically, above) but the
+      // ledger entry explaining it failed to write — roll the quantity
+      // back rather than leave an unexplained change with no audit
+      // trail. A full multi-document Mongo transaction (see
+      // report-cards.js's snapshot writes for that pattern) would avoid
+      // needing this rollback at all, but brings session-lifecycle and
+      // standalone-MongoDB-fallback complexity this module's "keep V1
+      // lightweight" mandate doesn't justify for what's a rare failure
+      // window between two sequential writes — not the concurrency race,
+      // which the $inc guard above already owns on its own.
+      await Items.updateOne({ id: data.itemId, schoolId }, { $inc: { quantity: -delta } });
+      throw ledgerErr;
+    }
+    const plain = doc.toObject ? doc.toObject() : doc;
+
+    AuditService.log({
+      action: 'inventory.transaction_recorded', actor: req.jwtUser, schoolId,
+      target: { type: 'inventory_item', id: data.itemId, label: item.name },
+      details: { type: data.type, quantity: data.quantity, delta, resultingQuantity: updatedItem.quantity, reason: data.reason },
+      ...(data.type === 'adjustment' ? { severity: 'warn' } : {}), req,
+    });
+
+    return created(res, plain);
+  } catch (err) { console.error('[inventory/transactions POST]', err); return E.serverError(res); }
+});
+
 module.exports = router;

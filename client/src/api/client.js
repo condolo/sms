@@ -274,8 +274,12 @@ export const medical = {
 };
 
 export const inventory = {
-  categories: _resource('inventory/categories'),
-  items:      _resource('inventory/items'),
+  categories:   _resource('inventory/categories'),
+  items:        _resource('inventory/items'),
+  transactions: {
+    list:   (params) => _get('/inventory/transactions', params),
+    create: (data)    => _post('/inventory/transactions', data),
+  },
 };
 
 export const exams = {

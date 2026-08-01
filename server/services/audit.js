@@ -134,6 +134,11 @@ const ACTIONS = {
   // Inventory milestone 1 — Items
   'inventory.item_created': { severity: 'info' },
   'inventory.item_deleted': { severity: 'warn' },
+  // Inventory milestone 2 — Stock Transactions. Default 'info'; escalated
+  // to 'warn' per-call for adjustment-type transactions (a manual
+  // override of the recorded stock level, same escalation posture as
+  // payroll.status_changed's 'paid' case).
+  'inventory.transaction_recorded': { severity: 'info' },
   // Report Cards
   'report_card.publish':     { severity: 'critical' },
   'report_card.unpublish':   { severity: 'critical' },
