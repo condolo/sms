@@ -244,4 +244,48 @@ router.get('/alerts', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', 'al
   } catch (err) { console.error('[medical/alerts GET]', err); return E.serverError(res); }
 });
 
+/* ══════════════════════════════════════════════════════════════
+   REPORTS — simple operational counts, no advanced analytics per
+   the module spec. Visits Today/This Month are always the real
+   today/this-month regardless of dateFrom/dateTo; those two params
+   only widen or narrow the window "Common Conditions" and "Frequent
+   Visitors" are computed over (defaults to the current month).
+   ══════════════════════════════════════════════════════════════ */
+router.get('/reports', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', 'reports'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const Visits = tenantModel('medical_visits', tenantContext(req));
+
+    const today      = new Date().toISOString().slice(0, 10);
+    const monthStart = `${today.slice(0, 7)}-01`;
+
+    const periodFrom = strParam(req.query.dateFrom) || monthStart;
+    const periodTo   = strParam(req.query.dateTo)   || today;
+
+    const baseFilter = { schoolId, deletedAt: { $exists: false } };
+    const periodMatch = { deletedAt: { $exists: false }, date: { $gte: periodFrom, $lte: periodTo } };
+
+    const [visitsToday, visitsThisMonth, commonConditions, frequentVisitors] = await Promise.all([
+      Visits.countDocuments({ ...baseFilter, date: today }),
+      Visits.countDocuments({ ...baseFilter, date: { $gte: monthStart, $lte: today } }),
+      Visits.aggregate([
+        { $match: periodMatch },
+        { $group: { _id: '$complaint', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 10 },
+        { $project: { _id: 0, complaint: '$_id', count: 1 } },
+      ]),
+      Visits.aggregate([
+        { $match: periodMatch },
+        { $group: { _id: '$studentId', studentName: { $first: '$studentName' }, visitCount: { $sum: 1 } } },
+        { $sort: { visitCount: -1 } },
+        { $limit: 10 },
+        { $project: { _id: 0, studentId: '$_id', studentName: 1, visitCount: 1 } },
+      ]),
+    ]);
+
+    return ok(res, { visitsToday, visitsThisMonth, commonConditions, frequentVisitors, periodFrom, periodTo });
+  } catch (err) { console.error('[medical/reports GET]', err); return E.serverError(res); }
+});
+
 module.exports = router;

@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   HeartPulse, ClipboardList, Search, X, Loader2, CheckCircle2,
   AlertTriangle, ChevronLeft, ChevronRight, Trash2, Home, Ambulance, ShieldAlert,
+  BarChart3, CalendarDays, TrendingUp,
 } from 'lucide-react';
 import { medical as medicalApi, students as studentsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
@@ -22,12 +23,14 @@ export default function MedicalPage() {
   // 'medical' key — _deriveApiPerms() persists sub-keyed grants as their
   // own top-level entry in permissions, so this reads exactly like any
   // other feature check, no special client-side subKey plumbing needed.
-  const canSeeAlerts = can('medical', 'read') || can('medical__alerts', 'read');
+  const canSeeAlerts  = can('medical', 'read') || can('medical__alerts', 'read');
+  const canSeeReports = can('medical', 'read'); // reports use the module-level grant, not a sub-grant — see medical.js
 
   const TABS = [
     ...(canRecord ? [{ id: 'log', label: 'Log Visit', icon: HeartPulse }] : []),
     { id: 'visits', label: 'Visits', icon: ClipboardList },
     ...(canSeeAlerts ? [{ id: 'alerts', label: 'Alerts', icon: ShieldAlert }] : []),
+    ...(canSeeReports ? [{ id: 'reports', label: 'Reports', icon: BarChart3 }] : []),
   ];
   const activeTab = TABS.some(t => t.id === tab) ? tab : (TABS[0]?.id ?? 'visits');
 
@@ -62,9 +65,10 @@ export default function MedicalPage() {
 
       <div className="max-w-screen-xl mx-auto px-6 py-5">
         <AnimatePresence mode="wait">
-          {activeTab === 'log'    && <LogVisitTab key="log" />}
-          {activeTab === 'visits' && <VisitsTab key="visits" />}
-          {activeTab === 'alerts' && <AlertsTab key="alerts" />}
+          {activeTab === 'log'     && <LogVisitTab key="log" />}
+          {activeTab === 'visits'  && <VisitsTab key="visits" />}
+          {activeTab === 'alerts'  && <AlertsTab key="alerts" />}
+          {activeTab === 'reports' && <ReportsTab key="reports" />}
         </AnimatePresence>
       </div>
     </div>
@@ -372,6 +376,85 @@ function AlertsTab() {
         </div>
       )}
     </motion.div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   REPORTS — simple operational counts, no advanced analytics
+   ══════════════════════════════════════════════════════════════ */
+function ReportsTab() {
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['medical', 'reports'],
+    queryFn:  () => medicalApi.reports.summary(),
+    staleTime: 60_000,
+  });
+  const r = data?.data;
+
+  if (isLoading) {
+    return <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{[...Array(4)].map((_, i) => <div key={i} className="bg-white rounded-xl border border-slate-200 h-24 animate-pulse" />)}</div>;
+  }
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 gap-3">
+        <AlertTriangle size={24} className="text-red-400" />
+        <p className="text-sm text-slate-500">{error?.message ?? 'Failed to load'}</p>
+        <button onClick={refetch} className="text-xs font-medium text-slate-700 underline">Retry</button>
+      </div>
+    );
+  }
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="space-y-5">
+      <div className="grid grid-cols-2 gap-3 max-w-sm">
+        <StatCard icon={<CalendarDays size={16} />} label="Visits Today" value={r.visitsToday} />
+        <StatCard icon={<TrendingUp size={16} />} label="Visits This Month" value={r.visitsThisMonth} />
+      </div>
+
+      <p className="text-xs text-slate-400">Common Conditions and Frequent Visitors cover {r.periodFrom} to {r.periodTo}.</p>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="bg-white border border-slate-200 rounded-xl p-5">
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Common Conditions</h3>
+          {r.commonConditions.length === 0 ? (
+            <p className="text-sm text-slate-400">No visits recorded this period.</p>
+          ) : (
+            <ul className="space-y-2">
+              {r.commonConditions.map(c => (
+                <li key={c.complaint} className="flex items-center justify-between text-sm">
+                  <span className="text-slate-700 truncate">{c.complaint}</span>
+                  <span className="text-slate-400 font-medium shrink-0 ml-3">{c.count}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="bg-white border border-slate-200 rounded-xl p-5">
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Frequent Visitors</h3>
+          {r.frequentVisitors.length === 0 ? (
+            <p className="text-sm text-slate-400">No visits recorded this period.</p>
+          ) : (
+            <ul className="space-y-2">
+              {r.frequentVisitors.map(v => (
+                <li key={v.studentId} className="flex items-center justify-between text-sm">
+                  <span className="text-slate-700 truncate">{v.studentName ?? v.studentId}</span>
+                  <span className="text-slate-400 font-medium shrink-0 ml-3">{v.visitCount} visit{v.visitCount !== 1 ? 's' : ''}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function StatCard({ icon, label, value }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
+      <div className="text-slate-400">{icon}</div>
+      <div className="text-2xl font-semibold text-slate-900">{value}</div>
+      <div className="text-xs text-slate-500">{label}</div>
+    </div>
   );
 }
 
