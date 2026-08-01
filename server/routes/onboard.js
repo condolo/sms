@@ -520,7 +520,7 @@ function _defaultPerms(role) {
         exams:        RCUD, grades:       RCUD, admissions:   RCUD,
         timetable:    RCUD, messages:     RCUD, settings:     RCUD,
         assessment:   RCUD, report_cards: RCUD, lessons:      RCUD,
-        hr:           RCUD, analytics:    RCUD,
+        hr:           RCUD, analytics:    RCUD, medical:      RCUD,
       };
 
     case 'teacher':
@@ -530,6 +530,7 @@ function _defaultPerms(role) {
         timetable:    R,    messages:     RCU,  report_cards: R,
         exams:        R,    lessons:      RCUD, library:      R,
         hostel:       R,    transport:    R,
+        medical__alerts: R, // condition flags only, never full clinic-visit records
       };
 
     case 'finance':
@@ -602,7 +603,7 @@ function _defaultPerms(role) {
         exams:        RCUD, behaviour:    RCUD, timetable:    RCUD,
         messages:     RCUD, report_cards: RCU,  admissions:   RCU,
         lessons:      RCUD, analytics:    R,    library:      R,
-        hostel:       R,    transport:    R,
+        hostel:       R,    transport:    R,    medical:      RCUD,
       };
 
     case 'discipline_committee':

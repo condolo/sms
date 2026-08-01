@@ -44,6 +44,10 @@ const ROLE_DEFAULTS = {
     report_cards: R,    exams:        R,    lessons:      RCUD,
     resources:    RCU,  library:      R,    hostel:       R,
     transport:    R,
+    // Alerts only (severe allergy/asthma/epilepsy flags), never full
+    // clinic-visit records — no top-level 'medical' key granted, so
+    // rbac('medical','read') without the 'alerts' subKey stays denied.
+    medical__alerts: R,
   },
 
   principal: {
@@ -53,6 +57,7 @@ const ROLE_DEFAULTS = {
     messages:     RCUD, events:       RCUD, report_cards: RCU,
     admissions:   RCU,  lessons:      RCUD, resources:    RCUD,
     library:      R,    hostel:       R,    transport:    R,
+    medical:      RCUD,
   },
 
   deputy_principal: {
@@ -62,6 +67,7 @@ const ROLE_DEFAULTS = {
     messages:     RCUD, events:       RCUD, report_cards: RCU,
     admissions:   RCU,  lessons:      RCUD, resources:    RCUD,
     library:      R,    hostel:       R,    transport:    R,
+    medical:      RCUD,
   },
 
   section_head: {

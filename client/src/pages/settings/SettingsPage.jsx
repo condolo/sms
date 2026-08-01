@@ -3301,6 +3301,13 @@ const PERM_MODULES = [
     { key: 'assign', label: 'Assign Students to Rooms' },
     { key: 'delete', label: 'Delete Rooms / Blocks' },
   ]},
+  { key: 'medical', label: 'Medical Centre', subs: [
+    { key: 'view',    label: 'View Clinic Visits' },
+    { key: 'record',  label: 'Record Clinic Visit' },
+    { key: 'delete',  label: 'Delete Clinic Visit' },
+    { key: 'alerts',  label: 'View Medical Alerts (condition flags only, not full profile)' },
+    { key: 'reports', label: 'View Medical Reports' },
+  ]},
   { key: 'growth_profile', label: 'Growth Profile', subs: [
     { key: 'view',             label: 'View Growth Profiles' },
     { key: 'add_records',      label: 'Add Records (Leadership / Activities / Service / Awards)' },
@@ -3340,6 +3347,7 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='analytics') return V;
       if (['exams','assessment'].includes(m)) return T;   // matches RCUD already seeded server-side
       if (['library','hostel','transport'].includes(m)) return V;   // matches R already seeded server-side
+      if (m==='medical') return T;   // matches RCUD already seeded server-side
       return E;
     },
     principal: (m, s) => DEFS.deputy_principal(m, s),  // same defaults as deputy_principal; admin can adjust
@@ -3355,6 +3363,7 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (['library','transport','hostel'].includes(m)) return V;   // matches R already seeded server-side
       if (s==='import') return N;
       if (['exams','assessment','report_cards'].includes(m)) return V;   // matches R already seeded server-side
+      if (m==='medical') return N;   // nothing seeded server-side — full records stay restricted by default
       return E;
     },
 
@@ -3376,6 +3385,9 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (s==='import') return N;
       if (m==='classes'   && ['section','delete'].includes(s)) return N;
       if (m==='timetable' && ['rooms','bell_schedule','assignments'].includes(s)) return V;
+      // Alerts only (condition flags), never full clinic-visit records —
+      // matches the medical__alerts-only grant already seeded server-side.
+      if (m==='medical') return s==='alerts' ? V : N;
       return V;
     },
 

@@ -59,6 +59,7 @@ const LibraryPage       = lazy(() => import('@/pages/library/LibraryPage.jsx'));
 const ResourcesPage     = lazy(() => import('@/pages/resources/ResourcesPage.jsx'));
 const TransportPage     = lazy(() => import('@/pages/transport/TransportPage.jsx'));
 const HostelPage        = lazy(() => import('@/pages/hostel/HostelPage.jsx'));
+const MedicalPage       = lazy(() => import('@/pages/medical/MedicalPage.jsx'));
 const LessonsPage          = lazy(() => import('@/pages/lessons/LessonsPage.jsx'));
 const ELearningPage        = lazy(() => import('@/pages/elearning/ELearningPage.jsx'));
 const StudentDashboard     = lazy(() => import('@/pages/student-portal/StudentDashboard.jsx'));
@@ -273,6 +274,9 @@ export const router = createBrowserRouter([
 
       // Hostel (v4.29.0)
       { path: 'hostel',                 element: <SuspenseWrapper><HostelPage /></SuspenseWrapper> },
+
+      // Medical Centre (Module 1, milestone 3)
+      { path: 'medical',                element: <SuspenseWrapper><MedicalPage /></SuspenseWrapper> },
 
       // Lessons / Syllabus Tracker (v4.33.0)
       { path: 'lessons',                element: <SuspenseWrapper><LessonsPage /></SuspenseWrapper> },

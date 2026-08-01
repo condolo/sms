@@ -138,6 +138,16 @@ const EVENT_REGISTRY = {
     implemented: true,
   },
 
+  /* ── Medical Centre ──────────────────────────────────────── */
+  medical_visit_logged: {
+    label:       'Clinic Visit Logged',
+    desc:        'Sent to parents/guardians when their child visits the school clinic',
+    group:       'medical',
+    audience:    ['parents'],
+    channels:    { email: true, inApp: true },
+    implemented: true,
+  },
+
   /* ── HR & Payroll ────────────────────────────────────────── */
   payroll_status_changed: {
     label:       'Payroll Status Changed',
@@ -197,6 +207,7 @@ const GROUPS = [
   { key: 'finance',       label: 'Finance'       },
   { key: 'attendance',    label: 'Attendance'    },
   { key: 'behaviour',     label: 'Behaviour'     },
+  { key: 'medical',       label: 'Medical Centre' },
   { key: 'hr',            label: 'HR & Payroll'  },
   { key: 'account',       label: 'Account & Security' },
 ];

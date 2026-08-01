@@ -182,6 +182,13 @@ const MODULE_REGISTRY = [
     { key: 'assign',   label: 'Assign Students to Rooms' },
     { key: 'delete',   label: 'Delete Rooms / Blocks' },
   ]},
+  { key: 'medical', label: 'Medical Centre', section: 'Operations', subs: [
+    { key: 'view',    label: 'View Clinic Visits' },
+    { key: 'record',  label: 'Record Clinic Visit' },
+    { key: 'delete',  label: 'Delete Clinic Visit' },
+    { key: 'alerts',  label: 'View Medical Alerts (condition flags only, not full profile)' },
+    { key: 'reports', label: 'View Medical Reports' },
+  ]},
 
   /* ── Insights ─────────────────────────────────────────── */
   { key: 'growth_profile', label: 'Growth Profile', section: 'Insights', subs: [

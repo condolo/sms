@@ -249,6 +249,9 @@ app.use('/api/library',   require('./routes/library'));
 app.use('/api/transport', require('./routes/transport'));
 app.use('/api/hostel',    require('./routes/hostel'));
 
+/* ── Medical Centre (Module 1, milestone 3: Clinic Visits) ── */
+app.use('/api/medical',   require('./routes/medical'));
+
 /* ── Governance Spec §5: Resources (shared-links repository) ── */
 app.use('/api/resources', require('./routes/resources'));
 
