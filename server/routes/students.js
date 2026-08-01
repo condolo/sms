@@ -40,12 +40,24 @@ const MedicalInfoSchema = z.object({
   bloodGroup:        z.enum(BLOOD_GROUPS).or(z.literal('')).optional(),
   allergies:         z.string().max(1000).optional(),
   conditions:        z.string().max(1000).optional(),
+  disabilities:      z.string().max(1000).optional(),
+  // Supersedes the legacy top-level `medicalNotes` (still accepted at
+  // creation for a fast enrollment-time note; see the mirroring logic in
+  // POST / below). This is the field the Medical tab shows/edits going
+  // forward.
+  notes:             z.string().max(2000).optional(),
   emergencyName:     z.string().max(200).optional(),
   emergencyPhone:    z.string().max(30).optional(),
   emergencyRelation: z.string().max(100).optional(),
   doctorName:        z.string().max(200).optional(),
   doctorPhone:       z.string().max(30).optional(),
   vaccinations:      z.string().max(1000).optional(),
+  // Parent Medical Consent — recordedAt/recordedBy are deliberately NOT
+  // part of this client-facing schema; PUT /:id stamps them itself only
+  // when parentConsentGiven actually changes, same "server owns the
+  // audit-trail metadata" posture as createdBy/updatedBy elsewhere.
+  parentConsentGiven: z.boolean().optional(),
+  parentConsentNotes: z.string().max(500).optional(),
 });
 
 /* ── Validation schemas ─────────────────────────────────────── */
@@ -312,6 +324,15 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('students', 'create'), asyn
     const admissionNumber = manualAdmNo || await nextAdmissionNumber(schoolId, admCfg);
     delete data.admissionNumber;
 
+    // Enrollment forms (StudentList.jsx's Add Student modal) still capture
+    // the legacy top-level medicalNotes as a fast quick-entry field — mirror
+    // it into the new medical.notes home so a nurse filling in the full
+    // Medical tab later sees it already there, rather than two disconnected
+    // "medical notes" fields drifting apart from day one.
+    if (data.medicalNotes && !data.medical?.notes) {
+      data.medical = { ...data.medical, notes: data.medicalNotes };
+    }
+
     const Students = tenantModel('students', tenantContext(req));
     const doc = await Students.create({
       ...data,
@@ -354,6 +375,21 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), as
     }
     if (!existing) return E.notFound(res, 'Student not found');
 
+    // Parent Medical Consent — recordedAt/recordedBy are server-stamped,
+    // never trusted from the client, and only refreshed when the consent
+    // VALUE actually changes; an unrelated edit (e.g. updating allergies)
+    // must not silently overwrite who/when consent was last recorded.
+    const prevMedical = existing.medical || {};
+    let consentChanged = false;
+    if (data.medical && data.medical.parentConsentGiven !== undefined) {
+      consentChanged = data.medical.parentConsentGiven !== prevMedical.parentConsentGiven;
+      data.medical = {
+        ...data.medical,
+        parentConsentRecordedAt: consentChanged ? new Date().toISOString() : prevMedical.parentConsentRecordedAt,
+        parentConsentRecordedBy: consentChanged ? userId : prevMedical.parentConsentRecordedBy,
+      };
+    }
+
     const { doc, conflict } = await applyOptimisticLock(
       Students,
       { _id: existing._id },
@@ -363,6 +399,14 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), as
 
     if (conflict) return E.conflict(res, 'This student record was edited by someone else. Please refresh and try again.');
     if (!doc)     return E.notFound(res, 'Student not found');
+
+    if (consentChanged) {
+      AuditService.log({
+        action: 'student.medical_consent_recorded', actor: req.jwtUser, schoolId,
+        target: { type: 'student', id: doc.id ?? String(doc._id), label: `${doc.firstName} ${doc.lastName}` },
+        details: { given: data.medical.parentConsentGiven }, req,
+      });
+    }
 
     if (data.medical) {
       AuditService.log({

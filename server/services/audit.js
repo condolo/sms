@@ -127,6 +127,7 @@ const ACTIONS = {
   'student.deactivated':     { severity: 'warn' },
   'student.promoted':        { severity: 'info' },
   'student.medical_updated': { severity: 'warn' }, // Medical Centre milestone 1 — sensitive data, distinct from a routine profile edit
+  'student.medical_consent_recorded': { severity: 'critical' }, // Medical Centre milestone 2 — parent consent has real legal/compliance weight
   // Report Cards
   'report_card.publish':     { severity: 'critical' },
   'report_card.unpublish':   { severity: 'critical' },

@@ -1045,12 +1045,16 @@ function MedicalTab({ student, saving, onSave, canEdit }) {
     bloodGroup:        med.bloodGroup        ?? '',
     allergies:         med.allergies         ?? '',
     conditions:        med.conditions        ?? '',
+    disabilities:      med.disabilities      ?? '',
+    notes:             med.notes             ?? '',
     emergencyName:     med.emergencyName     ?? '',
     emergencyPhone:    med.emergencyPhone    ?? '',
     emergencyRelation: med.emergencyRelation ?? '',
     doctorName:        med.doctorName        ?? '',
     doctorPhone:       med.doctorPhone       ?? '',
     vaccinations:      med.vaccinations      ?? '',
+    parentConsentGiven: med.parentConsentGiven ?? false,
+    parentConsentNotes: med.parentConsentNotes ?? '',
   });
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
 
@@ -1062,7 +1066,9 @@ function MedicalTab({ student, saving, onSave, canEdit }) {
             <InfoRow label="Blood group"   value={med.bloodGroup} />
             <InfoRow label="Allergies"     value={med.allergies} />
             <InfoRow label="Conditions"    value={med.conditions} />
+            <InfoRow label="Disabilities"  value={med.disabilities} />
             <InfoRow label="Vaccinations"  value={med.vaccinations} />
+            <InfoRow label="Notes"         value={med.notes} />
           </InfoCard>
           <div className="space-y-4">
             <InfoCard title="Emergency Contact" icon={<Phone size={14} />}>
@@ -1073,6 +1079,18 @@ function MedicalTab({ student, saving, onSave, canEdit }) {
             <InfoCard title="Doctor" icon={<User size={14} />}>
               <InfoRow label="Doctor name"  value={med.doctorName} />
               <InfoRow label="Doctor phone" value={med.doctorPhone} />
+            </InfoCard>
+            <InfoCard title="Parent Medical Consent" icon={<Shield size={14} />}>
+              <InfoRow
+                label="Status"
+                value={med.parentConsentGiven
+                  ? <span className="inline-flex items-center gap-1 text-emerald-600"><CheckCircle2 size={13} /> Given</span>
+                  : <span className="inline-flex items-center gap-1 text-slate-400"><XCircle size={13} /> Not recorded</span>}
+              />
+              {med.parentConsentRecordedAt && (
+                <InfoRow label="Recorded" value={new Date(med.parentConsentRecordedAt).toLocaleDateString()} />
+              )}
+              <InfoRow label="Notes" value={med.parentConsentNotes} />
             </InfoCard>
           </div>
         </div>
@@ -1126,6 +1144,15 @@ function MedicalTab({ student, saving, onSave, canEdit }) {
               onChange={e => set('conditions', e.target.value)}
             />
           </FField>
+          <FField label="Disabilities">
+            <textarea
+              rows={2}
+              className={`${iCls()} resize-none`}
+              placeholder="e.g. Visual impairment, mobility support needed…"
+              value={form.disabilities}
+              onChange={e => set('disabilities', e.target.value)}
+            />
+          </FField>
           <FField label="Vaccination notes">
             <textarea
               rows={2}
@@ -1133,6 +1160,15 @@ function MedicalTab({ student, saving, onSave, canEdit }) {
               placeholder="e.g. BCG, MMR, Hepatitis B…"
               value={form.vaccinations}
               onChange={e => set('vaccinations', e.target.value)}
+            />
+          </FField>
+          <FField label="Notes">
+            <textarea
+              rows={3}
+              className={`${iCls()} resize-none`}
+              placeholder="Any other medical information the clinic should know…"
+              value={form.notes}
+              onChange={e => set('notes', e.target.value)}
             />
           </FField>
         </div>
@@ -1159,6 +1195,31 @@ function MedicalTab({ student, saving, onSave, canEdit }) {
             <FField label="Doctor / clinic phone">
               <input className={iCls()} value={form.doctorPhone} onChange={e => set('doctorPhone', e.target.value)} placeholder="+254 7xx xxx xxx" />
             </FField>
+          </div>
+          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Parent Medical Consent</h3>
+            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.parentConsentGiven}
+                onChange={e => set('parentConsentGiven', e.target.checked)}
+                className="rounded border-slate-300 text-slate-900 focus:ring-slate-900/10"
+              />
+              Parent/guardian has given consent for medical treatment
+            </label>
+            <FField label="Notes" hint="e.g. specific limits or instructions from the parent">
+              <textarea
+                rows={2}
+                className={`${iCls()} resize-none`}
+                value={form.parentConsentNotes}
+                onChange={e => set('parentConsentNotes', e.target.value)}
+              />
+            </FField>
+            {med.parentConsentRecordedAt && (
+              <p className="text-[11px] text-slate-400">
+                Last recorded {new Date(med.parentConsentRecordedAt).toLocaleDateString()}
+              </p>
+            )}
           </div>
         </div>
       </div>

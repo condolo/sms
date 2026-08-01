@@ -352,3 +352,116 @@ describe('PUT /api/students/:id — medical field', () => {
     expect(updateOp.$set.medical).toEqual({ bloodGroup: 'A+' });
   });
 });
+
+/* ══════════════════════════════════════════════════════════════
+   Medical Centre milestone 2 — disabilities/notes fields,
+   Parent Medical Consent stamping, legacy medicalNotes mirroring
+══════════════════════════════════════════════════════════════ */
+describe('PUT /api/students/:id — disabilities and notes', () => {
+  test('both persist through to the update', async () => {
+    const student = makeStudent();
+    mockStudentsFindOne.mockReturnValue({ lean: jest.fn().mockResolvedValue(student) });
+    mockStudentsFindOneAndUpdate.mockReturnValue({ lean: jest.fn().mockResolvedValue(student) });
+
+    const app = buildApp();
+    await supertest(app)
+      .put('/api/students/stu_demo_001')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ medical: { disabilities: 'Wheelchair access needed', notes: 'Prefers ground-floor classrooms' } });
+
+    const [, updateOp] = mockStudentsFindOneAndUpdate.mock.calls[0];
+    expect(updateOp.$set.medical.disabilities).toBe('Wheelchair access needed');
+    expect(updateOp.$set.medical.notes).toBe('Prefers ground-floor classrooms');
+  });
+});
+
+describe('PUT /api/students/:id — Parent Medical Consent stamping', () => {
+  test('recording consent for the first time stamps recordedAt/recordedBy from the server, not the client', async () => {
+    const student = makeStudent({ medical: {} }); // no prior consent
+    mockStudentsFindOne.mockReturnValue({ lean: jest.fn().mockResolvedValue(student) });
+    mockStudentsFindOneAndUpdate.mockReturnValue({ lean: jest.fn().mockResolvedValue(student) });
+
+    const app = buildApp();
+    await supertest(app)
+      .put('/api/students/stu_demo_001')
+      .set('Authorization', 'Bearer fake-token')
+      // client sends a spoofed recordedBy — must be ignored, MedicalInfoSchema doesn't declare it
+      .send({ medical: { parentConsentGiven: true, parentConsentRecordedBy: 'usr_attacker' } });
+
+    const [, updateOp] = mockStudentsFindOneAndUpdate.mock.calls[0];
+    expect(updateOp.$set.medical.parentConsentGiven).toBe(true);
+    expect(updateOp.$set.medical.parentConsentRecordedBy).toBe('usr_test_001'); // the authenticated actor, not the spoofed value
+    expect(updateOp.$set.medical.parentConsentRecordedAt).toEqual(expect.any(String));
+  });
+
+  test('an unrelated edit (e.g. allergies) does not touch an already-recorded consent timestamp', async () => {
+    const student = makeStudent({
+      medical: { parentConsentGiven: true, parentConsentRecordedAt: '2026-01-01T00:00:00.000Z', parentConsentRecordedBy: 'usr_nurse_001' },
+    });
+    mockStudentsFindOne.mockReturnValue({ lean: jest.fn().mockResolvedValue(student) });
+    mockStudentsFindOneAndUpdate.mockReturnValue({ lean: jest.fn().mockResolvedValue(student) });
+
+    const app = buildApp();
+    await supertest(app)
+      .put('/api/students/stu_demo_001')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ medical: { allergies: 'Updated allergy note' } }); // parentConsentGiven not sent at all
+
+    const [, updateOp] = mockStudentsFindOneAndUpdate.mock.calls[0];
+    expect(updateOp.$set.medical.allergies).toBe('Updated allergy note');
+    // parentConsentGiven wasn't part of this edit's payload, so the stamping
+    // branch never runs — the previously-recorded metadata is simply absent
+    // from this $set, leaving whatever's already in the DB untouched.
+    expect(updateOp.$set.medical.parentConsentRecordedAt).toBeUndefined();
+  });
+
+  test('re-sending the SAME consent value does not re-stamp recordedAt', async () => {
+    const student = makeStudent({
+      medical: { parentConsentGiven: true, parentConsentRecordedAt: '2026-01-01T00:00:00.000Z', parentConsentRecordedBy: 'usr_nurse_001' },
+    });
+    mockStudentsFindOne.mockReturnValue({ lean: jest.fn().mockResolvedValue(student) });
+    mockStudentsFindOneAndUpdate.mockReturnValue({ lean: jest.fn().mockResolvedValue(student) });
+
+    const app = buildApp();
+    await supertest(app)
+      .put('/api/students/stu_demo_001')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ medical: { parentConsentGiven: true } }); // same value as already on file
+
+    const [, updateOp] = mockStudentsFindOneAndUpdate.mock.calls[0];
+    expect(updateOp.$set.medical.parentConsentRecordedAt).toBe('2026-01-01T00:00:00.000Z');
+    expect(updateOp.$set.medical.parentConsentRecordedBy).toBe('usr_nurse_001');
+  });
+});
+
+describe('POST /api/students — legacy medicalNotes mirrors into medical.notes', () => {
+  test('a new student with medicalNotes but no medical.notes gets it mirrored', async () => {
+    mockStudentsCreate.mockResolvedValue({ toObject: () => makeStudent() });
+
+    const app = buildApp();
+    await supertest(app)
+      .post('/api/students')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ firstName: 'Alice', lastName: 'Wanjiku', gender: 'female', status: 'active', medicalNotes: 'Allergic to peanuts' });
+
+    const createArg = mockStudentsCreate.mock.calls[0][0];
+    expect(createArg.medical.notes).toBe('Allergic to peanuts');
+    expect(createArg.medicalNotes).toBe('Allergic to peanuts'); // legacy field itself is untouched
+  });
+
+  test('an explicit medical.notes wins over medicalNotes — no silent overwrite', async () => {
+    mockStudentsCreate.mockResolvedValue({ toObject: () => makeStudent() });
+
+    const app = buildApp();
+    await supertest(app)
+      .post('/api/students')
+      .set('Authorization', 'Bearer fake-token')
+      .send({
+        firstName: 'Alice', lastName: 'Wanjiku', gender: 'female', status: 'active',
+        medicalNotes: 'Legacy note', medical: { notes: 'Deliberately different note' },
+      });
+
+    const createArg = mockStudentsCreate.mock.calls[0][0];
+    expect(createArg.medical.notes).toBe('Deliberately different note');
+  });
+});
