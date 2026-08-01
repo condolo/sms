@@ -1,7 +1,8 @@
 /* ============================================================
-   Msingi — /api/medical  (Medical Centre — Module 1, milestone 3)
+   Msingi — /api/medical  (Medical Centre — Module 1, milestones 3-4)
    Sub-routes:
      /api/medical/visits — clinic visit log (the student's medical timeline)
+     /api/medical/alerts — critical-condition flags only (milestone 4)
 
    Plan: core | RBAC: medical:{view,record,delete,alerts,reports}
    (see server/config/moduleRegistry.js)
@@ -29,6 +30,8 @@ const { authMiddleware } = require('../middleware/auth');
 const { moduleGate }     = require('../middleware/module-gate');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
+const { scopeMiddleware } = require('../middleware/scopeMiddleware');
+const ScopeEngine         = require('../utils/scopeEngine');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 const AuditService = require('../services/audit');
@@ -181,6 +184,64 @@ router.delete('/visits/:id', authMiddleware, PLAN, MODGATE, rbac('medical', 'del
 
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) { console.error('[medical/visits DELETE/:id]', err); return E.serverError(res); }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   ALERTS — critical-condition flags only, never the full profile
+   ══════════════════════════════════════════════════════════════
+
+   The 'alerts' RBAC subKey (rbac('medical','read','alerts')) is what
+   lets a teacher — who has no top-level 'medical' grant — see this
+   endpoint at all (see repairPermissions.js/onboard.js: teacher gets
+   ONLY medical__alerts, never the base 'medical' key). Beyond that
+   permission gate, scopeMiddleware/ScopeEngine narrow results to the
+   requester's own classes exactly like the main student roster does —
+   a teacher sees alerts for their own students, not the whole school.
+
+   The response is hand-built field-by-field from the query result
+   rather than passed through — even a future .select() mistake widening
+   the query can't leak bloodGroup/doctor/consent/notes through this
+   route, because those fields are never referenced when building
+   `alerts` below. */
+router.get('/alerts', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', 'alerts'), scopeMiddleware, async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const filter = {
+      schoolId,
+      $or: [
+        { 'medical.severeAllergy': true },
+        { 'medical.hasAsthma': true },
+        { 'medical.hasEpilepsy': true },
+        { 'medical.otherCriticalAlert': { $exists: true, $ne: '' } },
+      ],
+    };
+
+    // Same class-based scoping the main student roster (GET /api/students)
+    // applies — a teacher only sees alerts for students in their own
+    // classes, school-level roles see everyone.
+    ScopeEngine.applyToFilter(req, 'students', filter);
+    if (ScopeEngine.hasNoAssignments(req, 'students')) return ok(res, []);
+
+    const docs = await tenantModel('students', tenantContext(req))
+      .find(filter)
+      .select('id firstName lastName classId className medical.severeAllergy medical.hasAsthma medical.hasEpilepsy medical.otherCriticalAlert')
+      .sort({ lastName: 1, firstName: 1 })
+      .limit(500)
+      .lean();
+
+    const alerts = docs.map(s => ({
+      studentId:   s.id,
+      studentName: `${s.firstName} ${s.lastName}`,
+      classId:     s.classId ?? null,
+      className:   s.className ?? null,
+      severeAllergy:      !!s.medical?.severeAllergy,
+      hasAsthma:          !!s.medical?.hasAsthma,
+      hasEpilepsy:        !!s.medical?.hasEpilepsy,
+      otherCriticalAlert: s.medical?.otherCriticalAlert || null,
+    }));
+
+    return ok(res, alerts);
+  } catch (err) { console.error('[medical/alerts GET]', err); return E.serverError(res); }
 });
 
 module.exports = router;

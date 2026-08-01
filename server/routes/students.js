@@ -58,6 +58,15 @@ const MedicalInfoSchema = z.object({
   // audit-trail metadata" posture as createdBy/updatedBy elsewhere.
   parentConsentGiven: z.boolean().optional(),
   parentConsentNotes: z.string().max(500).optional(),
+  // Medical Centre milestone 4 — critical-condition flags that surface as
+  // teacher-visible Alerts (GET /api/medical/alerts), distinct from and far
+  // narrower than the full profile above. The three named examples from
+  // the module spec get their own checkbox; anything else critical goes in
+  // the free-text catch-all rather than an ever-growing boolean list.
+  severeAllergy:      z.boolean().optional(),
+  hasAsthma:          z.boolean().optional(),
+  hasEpilepsy:        z.boolean().optional(),
+  otherCriticalAlert: z.string().max(300).optional(),
 });
 
 /* ── Validation schemas ─────────────────────────────────────── */

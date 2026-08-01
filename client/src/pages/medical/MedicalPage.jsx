@@ -7,7 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   HeartPulse, ClipboardList, Search, X, Loader2, CheckCircle2,
-  AlertTriangle, ChevronLeft, ChevronRight, Trash2, Home, Ambulance,
+  AlertTriangle, ChevronLeft, ChevronRight, Trash2, Home, Ambulance, ShieldAlert,
 } from 'lucide-react';
 import { medical as medicalApi, students as studentsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
@@ -18,10 +18,16 @@ export default function MedicalPage() {
   const [tab, setTab] = useState('log');
   const can = useAuthStore(s => s.can);
   const canRecord = can('medical', 'create');
+  // A teacher gets ONLY the medical__alerts sub-grant, never the base
+  // 'medical' key — _deriveApiPerms() persists sub-keyed grants as their
+  // own top-level entry in permissions, so this reads exactly like any
+  // other feature check, no special client-side subKey plumbing needed.
+  const canSeeAlerts = can('medical', 'read') || can('medical__alerts', 'read');
 
   const TABS = [
     ...(canRecord ? [{ id: 'log', label: 'Log Visit', icon: HeartPulse }] : []),
     { id: 'visits', label: 'Visits', icon: ClipboardList },
+    ...(canSeeAlerts ? [{ id: 'alerts', label: 'Alerts', icon: ShieldAlert }] : []),
   ];
   const activeTab = TABS.some(t => t.id === tab) ? tab : (TABS[0]?.id ?? 'visits');
 
@@ -58,6 +64,7 @@ export default function MedicalPage() {
         <AnimatePresence mode="wait">
           {activeTab === 'log'    && <LogVisitTab key="log" />}
           {activeTab === 'visits' && <VisitsTab key="visits" />}
+          {activeTab === 'alerts' && <AlertsTab key="alerts" />}
         </AnimatePresence>
       </div>
     </div>
@@ -315,6 +322,53 @@ function VisitsTab() {
               <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages} className="p-1.5 rounded-lg hover:bg-slate-200 disabled:opacity-40 transition text-slate-600"><ChevronRight size={14} /></button>
             </div>
           </div>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ALERTS — condition flags only, never the full medical profile.
+   Scoped server-side to the requester's own classes for teachers.
+   ══════════════════════════════════════════════════════════════ */
+function AlertsTab() {
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['medical', 'alerts'],
+    queryFn:  () => medicalApi.alerts.list(),
+    staleTime: 60_000,
+  });
+  const alerts = data?.data ?? [];
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="space-y-4">
+      {isLoading ? (
+        <div className="space-y-2">{[...Array(4)].map((_, i) => <div key={i} className="bg-white rounded-xl border border-slate-200 h-14 animate-pulse" />)}</div>
+      ) : isError ? (
+        <div className="flex flex-col items-center justify-center py-24 gap-3">
+          <AlertTriangle size={24} className="text-red-400" />
+          <p className="text-sm text-slate-500">{error?.message ?? 'Failed to load'}</p>
+          <button onClick={refetch} className="text-xs font-medium text-slate-700 underline">Retry</button>
+        </div>
+      ) : alerts.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-24 text-slate-400">
+          <ShieldAlert size={36} className="mb-3 opacity-40" />
+          <p className="text-sm font-medium text-slate-600">No critical alerts</p>
+          <p className="text-xs mt-1 text-center max-w-xs">No student in your classes has a flagged critical condition on file.</p>
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100">
+          {alerts.map(a => (
+            <div key={a.studentId} className="px-4 py-3 flex items-start gap-3">
+              <ShieldAlert size={16} className="text-red-500 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-slate-800">{a.studentName}{a.className ? <span className="text-slate-400 font-normal"> — {a.className}</span> : null}</p>
+                <p className="text-xs text-red-700 mt-0.5">
+                  {[a.severeAllergy && 'Severe allergy', a.hasAsthma && 'Asthma', a.hasEpilepsy && 'Epilepsy', a.otherCriticalAlert].filter(Boolean).join(' · ')}
+                </p>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </motion.div>

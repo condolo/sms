@@ -375,6 +375,25 @@ describe('PUT /api/students/:id — disabilities and notes', () => {
   });
 });
 
+describe('PUT /api/students/:id — critical alert flags (Medical Centre milestone 4)', () => {
+  test('severeAllergy/hasAsthma/hasEpilepsy/otherCriticalAlert all persist through to the update', async () => {
+    const student = makeStudent();
+    mockStudentsFindOne.mockReturnValue({ lean: jest.fn().mockResolvedValue(student) });
+    mockStudentsFindOneAndUpdate.mockReturnValue({ lean: jest.fn().mockResolvedValue(student) });
+
+    const app = buildApp();
+    await supertest(app)
+      .put('/api/students/stu_demo_001')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ medical: { severeAllergy: true, hasAsthma: true, hasEpilepsy: false, otherCriticalAlert: 'Cardiac condition' } });
+
+    const [, updateOp] = mockStudentsFindOneAndUpdate.mock.calls[0];
+    expect(updateOp.$set.medical).toEqual(expect.objectContaining({
+      severeAllergy: true, hasAsthma: true, hasEpilepsy: false, otherCriticalAlert: 'Cardiac condition',
+    }));
+  });
+});
+
 describe('PUT /api/students/:id — Parent Medical Consent stamping', () => {
   test('recording consent for the first time stamps recordedAt/recordedBy from the server, not the client', async () => {
     const student = makeStudent({ medical: {} }); // no prior consent

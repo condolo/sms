@@ -1055,12 +1055,31 @@ function MedicalTab({ student, saving, onSave, canEdit }) {
     vaccinations:      med.vaccinations      ?? '',
     parentConsentGiven: med.parentConsentGiven ?? false,
     parentConsentNotes: med.parentConsentNotes ?? '',
+    severeAllergy:      med.severeAllergy      ?? false,
+    hasAsthma:          med.hasAsthma          ?? false,
+    hasEpilepsy:        med.hasEpilepsy        ?? false,
+    otherCriticalAlert: med.otherCriticalAlert ?? '',
   });
+  const hasAnyAlert = med.severeAllergy || med.hasAsthma || med.hasEpilepsy || med.otherCriticalAlert;
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
 
   if (!editing) {
     return (
       <div className="space-y-4">
+        {hasAnyAlert && (
+          <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+            <ShieldAlert size={16} className="text-red-500 mt-0.5 shrink-0" />
+            <div className="text-sm text-red-800">
+              <span className="font-semibold">Critical alerts: </span>
+              {[
+                med.severeAllergy && 'Severe allergy',
+                med.hasAsthma && 'Asthma',
+                med.hasEpilepsy && 'Epilepsy',
+                med.otherCriticalAlert,
+              ].filter(Boolean).join(' · ')}
+            </div>
+          </div>
+        )}
         <div className="grid gap-4 md:grid-cols-2">
           <InfoCard title="Medical Information" icon={<Heart size={14} />}>
             <InfoRow label="Blood group"   value={med.bloodGroup} />
@@ -1116,6 +1135,28 @@ function MedicalTab({ student, saving, onSave, canEdit }) {
       }}
       className="space-y-4"
     >
+      <div className="bg-white border border-red-200 rounded-xl p-5 space-y-3">
+        <h3 className="text-xs font-semibold text-red-600 uppercase tracking-wider flex items-center gap-1.5"><ShieldAlert size={13} /> Critical Alerts</h3>
+        <p className="text-[11px] text-slate-400 -mt-2">Visible to teachers with alert access — never the full medical profile.</p>
+        <div className="flex flex-wrap gap-4">
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" checked={form.severeAllergy} onChange={e => set('severeAllergy', e.target.checked)} className="rounded border-slate-300 text-red-600 focus:ring-red-500/20" />
+            Severe allergy
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" checked={form.hasAsthma} onChange={e => set('hasAsthma', e.target.checked)} className="rounded border-slate-300 text-red-600 focus:ring-red-500/20" />
+            Asthma
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" checked={form.hasEpilepsy} onChange={e => set('hasEpilepsy', e.target.checked)} className="rounded border-slate-300 text-red-600 focus:ring-red-500/20" />
+            Epilepsy
+          </label>
+        </div>
+        <FField label="Other critical alert">
+          <input className={iCls()} value={form.otherCriticalAlert} onChange={e => set('otherCriticalAlert', e.target.value)} placeholder="e.g. Severe diabetes, cardiac condition…" />
+        </FField>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-2">
         {/* Medical info */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
