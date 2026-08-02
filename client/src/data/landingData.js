@@ -1,7 +1,7 @@
 import {
   Activity, BarChart3, BookCheck, BookMarked, BookOpen, Boxes, Building2, Bus,
   Calendar, CalendarDays, CheckCircle, ClipboardList, DollarSign,
-  FileCheck2, FileText, GraduationCap, HeartPulse, Layers, Link2, MessageSquare, MonitorPlay,
+  FileText, GraduationCap, HeartPulse, Layers, Link2, MessageSquare, MonitorPlay,
   ShieldCheck, TrendingUp, UserCheck, UserCog, Users,
 } from 'lucide-react';
 
@@ -21,8 +21,7 @@ export const ECOSYSTEM_NODES = [
   { label: 'Timetable',       Icon: Calendar,      color: 'bg-sky-500',     desc: 'Lessons scheduled'  },
   { label: 'Attendance',      Icon: CheckCircle,   color: 'bg-emerald-500', desc: 'Daily tracked'      },
   { label: 'Lessons',         Icon: BookCheck,     color: 'bg-cyan-500',    desc: 'Curriculum covered' },
-  { label: 'Exams',           Icon: FileCheck2,    color: 'bg-fuchsia-500', desc: 'Results recorded'   },
-  { label: 'Grades',          Icon: GraduationCap, color: 'bg-violet-500',  desc: 'Marks attributed'   },
+  { label: 'Grades & Exams',  Icon: GraduationCap, color: 'bg-violet-500',  desc: 'Marks attributed'   },
   { label: 'eLearning',       Icon: MonitorPlay,   color: 'bg-purple-600',  desc: 'Online learning'    },
   // Operations
   { label: 'Behaviour',       Icon: ShieldCheck,   color: 'bg-orange-500',  desc: 'Incidents logged'   },
@@ -182,7 +181,7 @@ export const MODULE_PREVIEWS = {
       'No data lost when staff change — institutional memory lives in the system',
     ],
     badge: 'Audit Ready',
-    connectedModules: ['Attendance', 'Grades', 'Reports', 'Behaviour', 'Finance'],
+    connectedModules: ['Attendance', 'Grades & Exams', 'Reports', 'Behaviour', 'Finance'],
     demoPath: '/students',
     mockup: {
       type: 'list',
@@ -209,7 +208,7 @@ export const MODULE_PREVIEWS = {
       'Timetable, attendance and reports always aligned — no manual class mapping',
     ],
     badge: 'Multi-Curriculum',
-    connectedModules: ['Attendance', 'Timetable', 'Grades', 'Reports', 'Finance'],
+    connectedModules: ['Attendance', 'Timetable', 'Grades & Exams', 'Reports', 'Finance'],
     demoPath: '/classes',
     mockup: {
       type: 'list',
@@ -261,7 +260,7 @@ export const MODULE_PREVIEWS = {
       'Attendance data in reports comes from the same record — no reconciliation',
     ],
     badge: 'Real-time',
-    connectedModules: ['Reports', 'Analytics', 'Grades', 'Student Records'],
+    connectedModules: ['Reports', 'Analytics', 'Grades & Exams', 'Student Records'],
     demoPath: '/attendance',
     mockup: {
       type: 'register',
@@ -288,7 +287,7 @@ export const MODULE_PREVIEWS = {
       'Parents informed on curriculum without teachers making individual phone calls',
     ],
     badge: 'Syllabus Linked',
-    connectedModules: ['Reports', 'Analytics', 'Grades', 'Timetable'],
+    connectedModules: ['Reports', 'Analytics', 'Grades & Exams', 'Timetable'],
     demoPath: '/lessons',
     mockup: {
       type: 'coverage',
@@ -300,21 +299,21 @@ export const MODULE_PREVIEWS = {
       ],
     },
   },
-  'Grades': {
-    tagline: 'CA, homework, mid-term and end-term marks entered once — totals calculated automatically.',
+  'Grades & Exams': {
+    tagline: 'Set papers, capture results, and calculate grades — one workflow from exam creation to published report card.',
     outcomes: [
-      'CA, Homework, Mid-Term and End-Term scores recorded per student per subject',
-      'Weighted totals and grade boundaries applied automatically — no Excel formulas',
-      'Grade boundaries configurable per school and curriculum, applied school-wide from one setting',
-      'Marks flow directly into report cards — zero manual transfer between registers and templates',
+      'Exams created per subject, class and term, linked to CA, homework, mid-term and end-term marks automatically',
+      'Weighted totals and grade boundaries applied automatically, configured once per school and curriculum — no Excel formulas',
+      'Results captured per student with marks, grade and remarks in one screen — the same record every report card pulls from',
+      "Marks flow directly into report cards the moment they're confirmed — zero manual transfer between registers and templates",
     ],
     results: [
-      'No grade entry errors from copying between registers and report templates',
-      'Subject totals, class averages and rank positions calculated in real time',
-      'Teachers spend time on teaching, not on reconciling mark sheets',
+      'No grade entry errors from copying between registers, exam sheets and report templates',
+      'Subject totals, class averages and rank positions calculated in real time, the day results are entered',
+      'Historic exam and grade performance retrievable for any student at any time',
     ],
     badge: 'Auto-Calculated',
-    connectedModules: ['Reports', 'Analytics', 'Attendance', 'Lessons'],
+    connectedModules: ['Reports', 'Analytics', 'Attendance', 'Student Records'],
     demoPath: '/grades',
     mockup: {
       type: 'list',
@@ -394,7 +393,7 @@ export const MODULE_PREVIEWS = {
       'Full audit trail protects the school in the event of a grade dispute',
     ],
     badge: '5-Stage Approval',
-    connectedModules: ['Grades', 'Analytics', 'Finance', 'Student Records'],
+    connectedModules: ['Grades & Exams', 'Analytics', 'Finance', 'Student Records'],
     demoPath: '/reports',
     mockup: {
       type: 'pipeline',
@@ -608,7 +607,7 @@ export const MODULE_PREVIEWS = {
       'Financial health, academic performance and operational data visible in one view',
     ],
     badge: 'Live Dashboard',
-    connectedModules: ['Finance', 'Grades', 'Attendance', 'Reports'],
+    connectedModules: ['Finance', 'Grades & Exams', 'Attendance', 'Reports'],
     demoPath: '/reports',
     mockup: {
       type: 'stats',
@@ -643,32 +642,6 @@ export const MODULE_PREVIEWS = {
         ['Ms Achieng',   'Math, Physics',    'Form 3A, 3B'],
         ['Mr Omondi',    'English, History', 'Form 1A, 2A'],
         ['Mrs Kamau',    'Biology, Chem',    'Form 4A, 4B'],
-      ],
-    },
-  },
-  'Exams': {
-    tagline: 'Set papers, capture results, and publish grades — the full exam cycle in one workflow.',
-    outcomes: [
-      'Exams created per subject, class, and term — linked to the academic year automatically',
-      'Results captured per student with marks, grade, and remarks in one screen',
-      'Grade boundaries configured per school so grades are consistent and transparent',
-      'Results feed into report cards the moment they are confirmed — no manual transfer',
-    ],
-    results: [
-      'Data-entry errors drop significantly — marks entered once, used everywhere',
-      'Parents see grades on the same day results are published',
-      'Historic exam performance retrievable for any student at any time',
-    ],
-    badge: 'Results Recorded',
-    connectedModules: ['Grades', 'Reports', 'Student Records'],
-    demoPath: '/exams',
-    mockup: {
-      type: 'list',
-      headers: ['Exam', 'Class', 'Avg Score'],
-      rows: [
-        ['Mid-Term Math', 'Form 3A', '67%'],
-        ['End-Term Eng',  'Form 1B', '72%'],
-        ['KCSE Mock',     'Form 4',  '58%'],
       ],
     },
   },
@@ -790,7 +763,7 @@ export const MODULE_PREVIEWS = {
       'Assessment results from online submissions feed directly into Grades',
     ],
     badge: 'Online Learning',
-    connectedModules: ['Lessons', 'Grades', 'Student Records', 'Subjects'],
+    connectedModules: ['Lessons', 'Grades & Exams', 'Student Records', 'Subjects'],
     demoPath: '/elearning',
     mockup: {
       type: 'list',
