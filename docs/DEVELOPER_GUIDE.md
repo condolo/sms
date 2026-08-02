@@ -42,6 +42,8 @@
 34. [Admin Password Reset API (v4.29.0+)](#34-admin-password-reset-api-v4290)
 35. [Security — CSPRNG Enforcement (v4.29.0+)](#35-security--csprng-enforcement-v4290)
 36. [Public Site SEO & SSG (v4.42.0+)](#36-public-site-seo--ssg-v4420)
+37. [Medical Centre — Module 1 (v5.32.0)](#37-medical-centre--module-1-v5320)
+38. [Inventory — Module 2 (v5.33.0)](#38-inventory--module-2-v5330)
 
 ---
 
@@ -3418,3 +3420,167 @@ There are **two** separate floating-widget components with overlapping purpose b
 - `client/public/sitemap.xml` — 24 URLs (hand-maintained, no generation script), `lastmod` dates, `changefreq`, `priority`. Live at `https://msingi.io/sitemap.xml`. Updating a page's content should also bump its `<lastmod>` by hand — Google uses that date to prioritize re-crawling; resubmitting the same sitemap without changing `<lastmod>` does not force a faster re-crawl. For urgent single-page updates, use Search Console's "Request Indexing" instead of waiting on the sitemap cycle.
 
 Both files are copied to `dist/` by Vite's public directory handling and require no additional build step.
+
+---
+
+## 37. Medical Centre — Module 1 (v5.32.0)
+
+### Architecture overview
+
+The module extends existing platform mechanisms rather than introducing parallel ones — no new permission system, no new audit log, no new notification channel, no second student record. Before implementation, a dependency audit confirmed the medical profile lives on the existing `students` document, RBAC/audit/tenant-isolation/notifications are the platform's existing systems, and Medical Alerts derive from the same profile rather than a separate flagged collection.
+
+### Collections
+
+| Collection | Purpose |
+|---|---|
+| `students.medical` | Sub-object on the existing `students` document (not a new collection). Blood group, allergies, conditions, disabilities, vaccinations, notes, emergency contact, doctor info, Parent Medical Consent, and the three Medical Alerts flags (see below). |
+| `medical_visits` | One document per clinic visit — the student's medical timeline. Append-only in practice: no `PUT` route exists. `deletedAt`/`deletedBy` soft-delete only, never a hard delete. |
+
+### `students.medical` shape (`server/routes/students.js`, `MedicalInfoSchema`)
+
+```js
+{
+  bloodGroup, allergies, conditions, disabilities, notes, vaccinations,
+  emergencyName, emergencyPhone, emergencyRelation,
+  doctorName, doctorPhone,
+  parentConsentGiven, parentConsentNotes,       // client-facing
+  parentConsentRecordedAt, parentConsentRecordedBy, // server-stamped only — not in the Zod schema
+  severeAllergy, hasAsthma, hasEpilepsy, otherCriticalAlert, // Medical Alerts flags
+}
+```
+
+`parentConsentRecordedAt`/`parentConsentRecordedBy` are deliberately absent from the client-facing schema — `PUT /api/students/:id` stamps them itself, and only when `parentConsentGiven`'s *value* actually changes (compared against the existing document before the update), so an unrelated edit like updating allergies can't silently overwrite who/when consent was last recorded.
+
+The legacy top-level `students.medicalNotes` field (still used by `StudentList.jsx`'s Add Student quick-entry form, since a brand-new student has no `id` yet for a full Medical tab edit) mirrors into `medical.notes` automatically at creation in `POST /api/students` when `medical.notes` isn't separately supplied. `scripts/backfill-student-medical-notes.js` (dry-run capable, same shape as `repair-identity.js`) covers students created before this mirroring existed.
+
+### `medical_visits` shape
+
+```js
+{
+  id, schoolId, studentId, studentName,        // studentName resolved server-side if the client omits it
+  date, time, complaint, observation, actionTaken, medicationGiven,
+  returnedToClass, sentHome, referred, referredTo,  // referredTo required when referred is true
+  notes, recordedBy,                            // the nurse/user — server-set from the JWT, not client-supplied
+  deletedAt, deletedBy,                         // soft-delete markers only
+}
+```
+
+### Routes (`server/routes/medical.js`, mounted at `/api/medical`)
+
+| Route | RBAC | Notes |
+|---|---|---|
+| `GET /visits` | `medical:read:view` | Paginated, filterable by `studentId`/`dateFrom`/`dateTo`/`search`. Excludes soft-deleted. |
+| `GET /visits/:id` | `medical:read:view` | |
+| `POST /visits` | `medical:create:record` | Creates a new record; never updates an existing one. Fires `medical_visit_logged` guardian notification + `medical.visit_logged` audit. |
+| `DELETE /visits/:id` | `medical:delete:delete` | Soft-delete only (`deletedAt`/`deletedBy`). |
+| `GET /alerts` | `medical:read:alerts` | Condition flags only — see below. Class-scoped for teachers. |
+| `GET /reports` | `medical:read:reports` | Uses the module-level `medical` grant via the subKey fallback rule in `rbac.js` — no separate default grant needed since admin/principal/deputy already hold it. |
+
+### Medical Alerts — the security-relevant route
+
+`GET /alerts` is the one route in this module built specifically to be narrower than everything else. Two properties make that real, not just documented:
+
+1. **RBAC**: gated by `rbac('medical', 'read', 'alerts')`. A teacher's default grant is `medical__alerts` *only* — no top-level `medical` key at all — so `rbac('medical', 'read')` (no subKey, used by `/visits` and `/reports`) stays denied for a teacher even though `/alerts` is reachable.
+2. **Response shape**: hand-built field-by-field from the query result (`studentId`, `studentName`, `classId`, `className`, the three boolean flags, `otherCriticalAlert`) rather than passed through from a `.lean()` result. Even a future `.select()` change that widens the underlying query cannot leak `bloodGroup`/`doctorName`/`notes`/`parentConsentGiven` through this route, because those fields are never referenced when constructing the response objects.
+
+Additionally, `GET /alerts` applies the same `scopeMiddleware`/`ScopeEngine` class-based restriction the main student roster (`GET /api/students`) already uses (`ScopeEngine.applyToFilter(req, 'students', filter)`) — a teacher only sees alerts for students in their own assigned classes, not the whole school.
+
+### RBAC (`server/config/moduleRegistry.js`)
+
+```js
+{ key: 'medical', label: 'Medical Centre', section: 'Operations', subs: [
+  { key: 'view', label: 'View Clinic Visits' },
+  { key: 'record', label: 'Record Clinic Visit' },
+  { key: 'delete', label: 'Delete Clinic Visit' },
+  { key: 'alerts', label: 'View Medical Alerts (condition flags only, not full profile)' },
+  { key: 'reports', label: 'View Medical Reports' },
+]}
+```
+
+Default grants (`repairPermissions.js` `ROLE_DEFAULTS`, `onboard.js` `_defaultPerms()`, `SettingsPage.jsx` `DEFS` — all three kept in sync, same reconciliation discipline as every other RBAC module in this codebase): admin/superadmin get it via the existing `ALL_MODULES` blanket; principal/deputy_principal get explicit full RCUD; teacher gets **only** `medical__alerts: ['read']`; every other built-in role gets nothing — a school grants a custom "Nurse" role via Settings → Roles & Permissions as needed.
+
+### Plan gating
+
+`server/middleware/plan.js` — `FEATURE_PLAN.medical = 'core'`, same tier as every other ERP module.
+
+### Audit actions (`server/services/audit.js`)
+
+`student.medical_updated` (warn), `student.medical_consent_recorded` (critical), `medical.visit_logged` (info), `medical.visit_deleted` (warn).
+
+### Frontend file map
+
+| File | Role |
+|---|---|
+| `client/src/pages/medical/MedicalPage.jsx` | Tab shell — Log Visit / Visits / Alerts / Reports |
+| `client/src/pages/students/StudentProfile.jsx` (`MedicalTab`) | Full profile read/edit, critical-alerts banner |
+| `client/src/pages/students/StudentList.jsx` | Add Student form's `medicalNotes` quick-entry field |
+| `client/src/api/client.js` (`medical`) | `visits` (`_resource`), `alerts.list()`, `reports.summary()` |
+
+---
+
+## 38. Inventory — Module 2 (v5.33.0)
+
+### Architecture overview
+
+A dependency audit before implementation found the example requisition flow in the module spec ("Requester → Department Approval → Finance (optional) → Procurement") needed **zero new plumbing**: those are example labels for steps in one generic school-configured approval chain, and `server/utils/workflow-config.js` — already proven for HR's Leave and Payroll approval — is directly reusable as-is. "Procurement is not another inventory module" is concretely true in the implementation: it is the requisition's own final approval stage (the last configured chain step), not a separate collection or route file.
+
+### Collections
+
+| Collection | Purpose |
+|---|---|
+| `inventory_categories` | Flat, school-editable category list. Auto-seeded with ICT/Laboratory/Sports/Furniture/Office/Cleaning/Kitchen on first read (same lazy-seed posture as Behaviour's categories). No nested items, unlike Behaviour — there's no per-category numeric value to carry here. |
+| `inventory_items` | Item code, name, category (denormalized `categoryName`), quantity, unit, store/location, status. `quantity` is server-owned once the ledger exists — stripped from `PUT`. |
+| `inventory_transactions` | The movement ledger. Append-only: no `PUT`, no `DELETE` route exists at all. Types: `receive`, `issue`, `return`, `adjustment`. |
+| `inventory_requisitions` | Requester → approval chain → Procurement (final step) → fulfillment. Reuses `workflow_configs` (`workflowKey: 'inventory_requisition'`) — no dedicated requisition-workflow collection. |
+
+### Stock Transactions — the atomicity-relevant route
+
+`POST /transactions` (`server/routes/inventory.js`) is the one route in this module built around a real concurrency concern: two staff members recording transactions against the same item at the same time.
+
+- **Sign resolution**: `receive`/`return` are always `+1`; `issue` is always `-1`; `adjustment` requires an explicit `direction` (`'increase'`/`'decrease'`) from the caller, since the system can't infer intent for a manual correction — a non-empty `reason` is also required.
+- **Atomic update**: the item's `quantity` moves via `Items.findOneAndUpdate({ id, schoolId, quantity: { $gte: -delta } }, { $inc: { quantity: delta } })` — a single atomic document operation, not a read-then-compute-then-write. The guard condition only bites for negative deltas (issue / decrease-adjustment); it's always satisfied for positive ones. If the guard fails (insufficient stock), the call returns `null` and nothing is mutated.
+- **Ledger-write-failure rollback**: the transaction record is written *after* the atomic quantity update succeeds. If that write fails, a compensating `$inc` with the opposite delta restores the item's quantity — chosen over a full multi-document Mongo transaction (the pattern `report-cards.js` uses for its snapshot writes, with `session.startSession()`/`withTransaction()` and a standalone-MongoDB fallback) because the real risk here — concurrent access — is already closed by the atomic guard; a full transaction would only additionally cover a much rarer sequential-write failure window, which doesn't justify the added session-lifecycle complexity for a module whose own spec asks to keep V1 lightweight.
+
+### Requisitions + Procurement — Workflow Engine reuse
+
+`POST /requisitions` creates a request with `currentStepOrder: config ? 1 : null` (mirrors `hr.js`'s `POST /leave` exactly). `PATCH /:id/advance` mirrors `hr.js`'s `PATCH /leave/:id/advance`:
+
+- **No `rbac()` gate** — authorization is being a `resolveStep()`-eligible approver for the request's *current* step, a narrower, per-instance mechanism than a module-level RBAC grant (annotated `// rbac: workflow-step approver check below` for the coverage scanner, same convention as every other workflow-driven route in this codebase).
+- Approving a non-final step just advances `currentStepOrder` and the request stays `pending`. Approving the *final* configured step sets `status: 'approved'` — this is "Procurement" clearing the request, with no separate confirmation step needed (unlike Leave, which has a distinct HR-confirm step after the configured chain; Inventory's last chain step *is* the final word).
+- Rejecting requires a non-empty `notes` reason.
+
+`POST /:id/fulfill` — "Receive Stock → Inventory Updated" — is gated by `rbac('inventory', 'create', 'transact')`, the same permission needed to record *any* stock transaction, deliberately decoupled from the approval chain itself (the chain decides who *approves* a request; a separate operational permission decides who can actually move physical stock). Only reachable once `status === 'approved'`. Creates a real `type: 'receive'` transaction tagged with `requisitionId`, goes through the same atomic-`$inc`-plus-rollback path as any other transaction, and marks the requisition `fulfilled`.
+
+A requisition may omit `itemId` entirely at creation (a brand-new item not yet in the catalogue, identified by free-text `itemName`) — it must be linked to a real catalogue item (via `req.body.itemId`) at fulfillment time if it didn't already have one.
+
+`GET /requisitions` self-scopes to the caller's own requests unless they also hold `inventory:read:view` (checked via the non-middleware `hasPermission()` helper, same pattern as the hostel/transport/library self-view routes) — a requester sees their own queue; admin/principal/deputy see everyone's.
+
+### RBAC (`server/config/moduleRegistry.js`)
+
+```js
+{ key: 'inventory', label: 'Inventory', section: 'Operations', subs: [
+  { key: 'view', label: 'View Inventory & Categories' },
+  { key: 'manage', label: 'Add / Edit Items & Categories' },
+  { key: 'transact', label: 'Record Stock Transactions (Receive/Issue/Return/Adjust)' },
+  { key: 'requisition', label: 'Raise Requisitions' },
+  { key: 'workflow', label: 'Configure Requisition Approval Workflow' },
+]}
+```
+
+Default grants mirror Medical Centre's posture exactly: admin/principal/deputy_principal get full RCUD; teacher gets **only** `inventory__requisition: ['read','create','update']` (raise + view/edit own requests — the module spec names Teacher as a requester example, not an inventory manager); every other built-in role gets nothing — Secretary, Cleaner, Laboratory Technician (also named as requester examples in the spec) are granted via custom roles, same as Medical Centre's "Nurse" precedent. `GET /reports`-equivalent here — `GET /transactions` and `GET /requisitions/workflow-config` — rely on the module-level grant via the subKey fallback rule, same mechanism Medical Centre's Reports route uses, so no extra default-grant entries were needed for those.
+
+### Plan gating
+
+`server/middleware/plan.js` — `FEATURE_PLAN.inventory = 'core'`.
+
+### Audit actions (`server/services/audit.js`)
+
+`inventory.item_created`/`item_deleted`, `inventory.transaction_recorded` (escalated to `warn` for `adjustment` type), `inventory.requisition_raised`, `inventory.requisition_step_approved`, `inventory.requisition_step_rejected` (warn), `inventory.requisition_fulfilled`.
+
+### Frontend file map
+
+| File | Role |
+|---|---|
+| `client/src/pages/inventory/InventoryPage.jsx` | Tab shell — Items / Stock Transactions / Requisitions / Categories |
+| `client/src/pages/inventory/components/RequisitionsTab.jsx` | Raise/approve/reject/fulfill UI + `WorkflowConfigModal` (role/user step picker — a separate component from HRPage.jsx's own `WorkflowConfigModal`, not an extraction, since the HR version has leave-specific behavior — a fixed trailing "HR always confirms last" step, a `>=2`-step minimum — baked into its markup) |
+| `client/src/api/client.js` (`inventory`) | `categories`/`items` (`_resource`), `transactions.{list,create}`, `requisitions.{list,create,advance,fulfill,workflowConfig}` |
