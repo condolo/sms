@@ -1,7 +1,7 @@
 import {
-  Activity, BarChart3, BookCheck, BookMarked, BookOpen, Building2, Bus,
+  Activity, BarChart3, BookCheck, BookMarked, BookOpen, Boxes, Building2, Bus,
   Calendar, CalendarDays, CheckCircle, ClipboardList, DollarSign,
-  FileCheck2, FileText, GraduationCap, Layers, Link2, MessageSquare, MonitorPlay,
+  FileCheck2, FileText, GraduationCap, HeartPulse, Layers, Link2, MessageSquare, MonitorPlay,
   ShieldCheck, TrendingUp, UserCheck, UserCog, Users,
 } from 'lucide-react';
 
@@ -32,6 +32,8 @@ export const ECOSYSTEM_NODES = [
   { label: 'HR & Payroll',    Icon: UserCog,       color: 'bg-slate-600',   desc: 'Staff & payroll'    },
   { label: 'Library',         Icon: BookOpen,      color: 'bg-lime-600',    desc: 'Books managed'      },
   { label: 'Resources',       Icon: Link2,         color: 'bg-indigo-400',  desc: 'Links shared'       },
+  { label: 'Medical Centre',  Icon: HeartPulse,    color: 'bg-red-500',     desc: 'Clinic visits logged' },
+  { label: 'Inventory',       Icon: Boxes,         color: 'bg-orange-600',  desc: 'Stock tracked'      },
   // Insights
   { label: 'Reports',         Icon: FileText,      color: 'bg-purple-500',  desc: 'Governed publish'   },
   { label: 'Analytics',       Icon: TrendingUp,    color: 'bg-teal-500',    desc: 'Director insight'   },
@@ -458,6 +460,87 @@ export const MODULE_PREVIEWS = {
       ],
     },
   },
+  'Resources': {
+    tagline: 'A shared library of links, notes and files — one searchable place instead of scattered email attachments.',
+    outcomes: [
+      'Teachers share links, documents and resources against a subject or class in seconds',
+      'Every resource attributed to who shared it and when — a permanent, browsable archive, not a lost email thread',
+      'Organised and searchable by subject and class — nothing buried three folders deep',
+      "Students and parents reach shared resources directly through their own portal, no separate login",
+    ],
+    results: [
+      "No more 'can you resend that link?' — every shared resource stays findable",
+      'New staff inherit a ready-made resource library instead of starting from zero',
+      'One searchable archive replaces scattered email attachments and WhatsApp links',
+    ],
+    badge: 'Shared Library',
+    connectedModules: ['Classes', 'Subjects', 'Messages'],
+    demoPath: '/resources',
+    mockup: {
+      type: 'list',
+      headers: ['Resource', 'Shared by', 'Class'],
+      rows: [
+        ['Form 3 Physics Notes',    'Mr Otieno',   'Form 3A'],
+        ['CBC Grade 7 Scheme',      'Mrs Wanjiru', 'Grade 7'],
+        ['Exam Revision Pack',      'Ms Achieng',  'Form 4'],
+        ['Parents Handbook 2026',   'Admin',       'All'],
+      ],
+    },
+  },
+  'Medical Centre': {
+    tagline: 'Every clinic visit recorded, every allergy flagged — a permanent medical record parents never have to re-explain.',
+    outcomes: [
+      "Blood group, allergies, chronic conditions and emergency contacts held on the student's own record — not a paper card in the sick bay",
+      'Every clinic visit logged as its own permanent entry — complaint, action taken, medication given, never overwritten',
+      'Severe allergy, asthma and epilepsy flags surface to a student\'s teachers automatically — full medical history stays restricted',
+      'Parent Medical Consent recorded once, with who approved it and when — never re-collected on paper',
+    ],
+    results: [
+      "No more emergency calls to ask 'does this child have any allergies?' — the answer is already in the system",
+      'A complete visit history exists the day a parent, doctor or inspector asks for it',
+      'Sensitive medical data stays restricted to school leadership and the clinic — teachers see only what keeps a student safe',
+    ],
+    badge: 'Permanent Record',
+    connectedModules: ['Student Records', 'Messages', 'Reports'],
+    demoPath: '/medical',
+    mockup: {
+      type: 'list',
+      headers: ['Student', 'Complaint', 'Outcome'],
+      rows: [
+        ['Amara W.', 'Headache',         'Returned to class'],
+        ['Brian O.',  'Sprained ankle',   'Sent home'],
+        ['Chloe K.',  'Asthma flare-up',  'Referred'],
+        ['David N.',  'Stomach ache',     'Returned to class'],
+      ],
+    },
+  },
+  'Inventory': {
+    tagline: 'Every item tracked from receipt to issue — with a requisition chain that routes itself.',
+    outcomes: [
+      'Categories and items — ICT equipment, lab supplies, sports gear, furniture — tracked with quantity, unit and location in one catalogue',
+      'Every stock movement recorded as its own permanent entry — received, issued, returned or adjusted, never edited after the fact',
+      "Staff raise a requisition for what they need; it routes through your school's own configured approval chain automatically",
+      'Once approved, stock is received and the catalogue updates itself — no separate spreadsheet to reconcile',
+    ],
+    results: [
+      "No more 'where did the stock go?' — every movement has a name, a date and a reason attached",
+      "Requisitions never stall on 'who approves this?' — the chain is configured once, then runs itself",
+      'One ledger for consumables and equipment alike — nothing tracked on paper or in someone\'s memory',
+    ],
+    badge: 'Full Ledger',
+    connectedModules: ['Finance', 'HR & Payroll', 'Reports'],
+    demoPath: '/inventory',
+    mockup: {
+      type: 'list',
+      headers: ['Item', 'Category', 'Status'],
+      rows: [
+        ['Dell Laptops (x12)',    'ICT',         'active'],
+        ['Lab Beakers (x40)',     'Laboratory',  'active'],
+        ['Football Set',          'Sports',      'active'],
+        ['Whiteboard Markers',    'Office',      'active'],
+      ],
+    },
+  },
   'Transport': {
     tagline: 'Route management, student assignments and capacity enforcement — centrally managed.',
     outcomes: [
@@ -577,7 +660,7 @@ export const MODULE_PREVIEWS = {
       'Historic exam performance retrievable for any student at any time',
     ],
     badge: 'Results Recorded',
-    connectedModules: ['Grades', 'Report Cards', 'Student Records'],
+    connectedModules: ['Grades', 'Reports', 'Student Records'],
     demoPath: '/exams',
     mockup: {
       type: 'list',
