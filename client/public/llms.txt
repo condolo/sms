@@ -1,6 +1,6 @@
 # Msingi
 
-> School management platform built for African schools. 22 connected modules covering attendance, grades, finance, admissions, report cards, timetabling, HR, parent portals, and student portals.
+> School management platform built for African schools. 24 connected modules covering attendance, grades, finance, admissions, report cards, timetabling, HR, medical centre, inventory, parent portals, and student portals.
 
 ## What Msingi is
 
@@ -12,7 +12,7 @@ Collins Ndolo — Physics teacher, academic coordinator, STEM educator, AI in Ed
 
 ## Pricing
 
-- Base: KES 150 per student per term (full admin + teacher access, all 22 modules)
+- Base: KES 150 per student per term (full admin + teacher access, all 24 modules)
 - Student Portal: KES 200 per student per term (adds student-facing portal)
 - Family Portal: KES 250 per student per term (adds parent-facing portal)
 
@@ -36,6 +36,8 @@ Kenya, Uganda, Tanzania, Rwanda. Expansion to Nigeria, Ghana, and South Africa o
 - Behaviour and discipline management
 - Analytics and reports
 - Library, Hostel, Transport modules
+- Medical Centre (student medical profiles, clinic visits, condition alerts)
+- Inventory (stock ledger, requisitions, procurement approval chain)
 - Growth profile (digital student portfolio)
 - Report card signing with SHA-256 and QR verification
 - RBAC — role-based access control, per-user permission overrides
@@ -63,7 +65,7 @@ https://msingi.io/contact
 
 - /why — Philosophy and manifesto
 - /about — Founder story (Collins Ndolo)
-- /platform — 22-module platform overview
+- /platform — 24-module platform overview
 - /pricing — Transparent per-student pricing
 - /security — Trust Centre, compliance, responsible AI
 - /difference — The Msingi Difference (vs generic ERPs and point solutions)

@@ -189,7 +189,7 @@ export default function Landing() {
                 </motion.h1>
 
                 <motion.p variants={fadeUp} className="text-xl sm:text-2xl text-slate-400 max-w-xl mx-auto lg:mx-0 leading-relaxed mb-3">
-                  22 connected modules. One institutional record. CBC, CAIE, IB, M-Pesa — native.
+                  24 connected modules. One institutional record. CBC, CAIE, IB, M-Pesa — native.
                 </motion.p>
                 <motion.p variants={fadeUp} className="text-lg text-slate-500 italic mb-10">
                   Not adapted for Africa. Built for it.
@@ -295,7 +295,7 @@ export default function Landing() {
                 Platform
               </motion.p>
               <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-bold tracking-tight text-white mb-4 leading-tight">
-                22 modules. One record. No reconciliation.
+                24 modules. One record. No reconciliation.
               </motion.h2>
               <motion.p variants={fadeUp} className="text-lg text-slate-400 max-w-xl leading-relaxed">
                 Data entered once flows everywhere it needs to be — without re-entry, without a spreadsheet to bridge the gap.
@@ -402,7 +402,7 @@ export default function Landing() {
                   <Link to="/platform"
                     className="group flex flex-col gap-2 p-5 bg-slate-900 border border-slate-800 rounded-2xl hover:bg-slate-800 transition-all">
                     <p className="text-sm font-semibold text-white">Full platform overview</p>
-                    <p className="text-sm text-slate-400 leading-relaxed flex-1">22 modules. How they connect. What they replace.</p>
+                    <p className="text-sm text-slate-400 leading-relaxed flex-1">24 modules. How they connect. What they replace.</p>
                     <span className="text-xs font-semibold text-slate-500 group-hover:text-slate-300 transition-colors flex items-center gap-1 mt-1">
                       Explore <ArrowRight size={11} />
                     </span>

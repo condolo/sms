@@ -42,6 +42,8 @@ const MODULES = {
   'Transport':       'Route management, vehicle allocation, and student transport records. Parents can see route status through the portal.',
   'Events':          'School calendar with audience targeting — notices to parents, staff, or the whole school. Links to Messages and Finance for fee deadlines.',
   'Messages':        'Structured institutional messaging between staff. Replaces informal WhatsApp for school communications with a permanent audit trail.',
+  'Medical Centre':  'Student medical profiles, clinic visit history, and teacher-visible condition alerts — allergies, asthma, epilepsy — without exposing the full record.',
+  'Inventory':       'Stock tracking with a full movement ledger and a configurable requisition-to-procurement approval chain, from ICT equipment to cleaning supplies.',
   // Insights
   'Analytics':       'Live director dashboard: attendance rates, fee collection velocity, academic performance trends, and staff metrics — no spreadsheet required.',
   'Reports':         'Governed report publishing with full attribution. Every report generation logged. Finance, academic, and HR reports in one place.',
@@ -52,7 +54,7 @@ const MODULES = {
 
 const GROUPS = [
   { label: 'Academic',   nodes: ['Students', 'Attendance', 'Grades & Exams', 'Report Cards', 'Timetable', 'Subjects', 'Lessons', 'E-Learning', 'Academic Records', 'Growth Profile', 'Admissions'] },
-  { label: 'Operations', nodes: ['Finance', 'HR', 'Library', 'Hostel', 'Transport', 'Events', 'Messages'] },
+  { label: 'Operations', nodes: ['Finance', 'HR', 'Library', 'Hostel', 'Transport', 'Events', 'Messages', 'Medical Centre', 'Inventory'] },
   { label: 'Insights',   nodes: ['Analytics', 'Reports'] },
   { label: 'Portals',    nodes: ['Student Portal', 'Parent Portal'] },
 ];
@@ -61,10 +63,10 @@ export default function PlatformPage() {
   return (
     <div className="min-h-screen bg-white text-slate-900 antialiased">
       <Helmet>
-        <title>Platform Overview | Msingi — 22 Modules, One Record</title>
-        <meta name="description" content="22 connected modules. One institutional record. Attendance, grades, finance, admissions, report cards, and parent portals — all connected." />
+        <title>Platform Overview | Msingi — 24 Modules, One Record</title>
+        <meta name="description" content="24 connected modules. One institutional record. Attendance, grades, finance, admissions, report cards, and parent portals — all connected." />
         <link rel="canonical" href="https://msingi.io/platform" />
-        <meta property="og:title" content="Msingi Platform — 22 Modules, One Record" />
+        <meta property="og:title" content="Msingi Platform — 24 Modules, One Record" />
         <meta property="og:url" content="https://msingi.io/platform" />
       </Helmet>
 
@@ -78,7 +80,7 @@ export default function PlatformPage() {
             <motion.div initial="hidden" animate="visible" variants={stagger(0.08)}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-6">Platform Overview</motion.p>
               <motion.h1 variants={fadeUp} className="text-4xl sm:text-5xl lg:text-[56px] font-bold tracking-tighter text-white leading-[1.06] mb-6">
-                22 modules. One record.{' '}
+                24 modules. One record.{' '}
                 <span className="text-slate-400">No reconciliation.</span>
               </motion.h1>
               <motion.p variants={fadeUp} className="text-lg text-slate-400 leading-relaxed max-w-2xl mb-10">
@@ -104,7 +106,7 @@ export default function PlatformPage() {
           </div>
           <div className="relative max-w-6xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-              <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">22 modules</motion.p>
+              <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">24 modules</motion.p>
               <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-12">Organised across four functional areas.</motion.h2>
               <div className="grid sm:grid-cols-2 gap-8">
                 {GROUPS.map(group => (

@@ -14,7 +14,7 @@ const TIERS = [
     price: 250,
     desc: 'Full platform for administration and teaching staff.',
     features: [
-      'All 22 modules (admin + teacher access)',
+      'All 24 modules (admin + teacher access)',
       'Attendance, Grades, Finance, Admissions',
       'Report card generation (CBC, CAIE, IB, custom)',
       'M-Pesa Paybill integration',
