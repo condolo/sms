@@ -45,8 +45,9 @@ const ROLE_DEFAULTS = {
     resources:    RCU,  library:      R,    hostel:       R,
     transport:    R,
     // Alerts only (severe allergy/asthma/epilepsy flags), never full
-    // clinic-visit records — no top-level 'medical' key granted, so
-    // rbac('medical','read') without the 'alerts' subKey stays denied.
+    // clinic-visit records — no top-level 'medical' key granted, so a
+    // module-level permission check without the 'alerts' subKey stays
+    // denied (see the RBAC middleware's subKey-fallback rule).
     medical__alerts: R,
     // Requisition-only (raise + view own), never full inventory
     // management — no top-level 'inventory' key, same posture as
