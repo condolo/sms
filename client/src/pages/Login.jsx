@@ -530,7 +530,7 @@ export default function Login() {
         .then(r => r.json())
         .then(res => {
           if (!res.user) throw new Error('Invalid exchange response');
-          setSession({ user: res.user, school: res.school });
+          setSession({ user: res.user, school: res.school, moduleRegistry: res.moduleRegistry });
           navigate(from || _defaultDest(res.user?.role), { replace: true });
         })
         .catch(() => {
@@ -606,7 +606,7 @@ export default function Login() {
       const res = await authApi.login({ email: demoEmail.toLowerCase(), password: demoPassword });
       if (res?.mfaRequired) { setPendingMfa({ userId: res.userId, schoolId: res.schoolId }); setMode(MODES.OTP); setLoading(false); return; }
       if (res?.passwordExpired) { setPendingPw({ userId: res.userId, schoolId: res.schoolId, reason: res.reason }); setMode(MODES.CHANGE_PASSWORD); setLoading(false); return; }
-      setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry });
+      setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry, moduleRegistry: res.moduleRegistry });
       navigate(from || _defaultDest(res.user?.role), { replace: true });
     } catch (err) {
       setError(err instanceof APIError ? err.message : 'Demo login failed — please try again.');
@@ -654,7 +654,7 @@ export default function Login() {
         return;
       }
 
-      setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry });
+      setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry, moduleRegistry: res.moduleRegistry });
       navigate(from || _defaultDest(res.user?.role), { replace: true });
     } catch (err) {
       if (err instanceof APIError && err.status === 429 && err.extra?.retryAfter) {
@@ -679,7 +679,7 @@ export default function Login() {
         return;
       }
 
-      setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry });
+      setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry, moduleRegistry: res.moduleRegistry });
       navigate(from || _defaultDest(res.user?.role), { replace: true });
     } catch (err) {
       setError(err instanceof APIError ? err.message : 'Could not complete sign-in. Please try again.');
@@ -711,7 +711,7 @@ export default function Login() {
         schoolId: pendingMfa.schoolId,
         otp:      otp.trim(),
       }, pendingMfa.schoolSlug ? { schoolSlug: pendingMfa.schoolSlug } : undefined);
-      setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry });
+      setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry, moduleRegistry: res.moduleRegistry });
       navigate(from || _defaultDest(res.user?.role), { replace: true });
     } catch (err) {
       setError(err instanceof APIError ? err.message : 'Invalid code. Please try again.');
@@ -732,7 +732,7 @@ export default function Login() {
         schoolId:    pendingPw.schoolId,
         newPassword,
       });
-      setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry });
+      setSession({ user: res.user, school: res.school, absoluteExpiry: res.absoluteExpiry, moduleRegistry: res.moduleRegistry });
       navigate(from || _defaultDest(res.user?.role), { replace: true });
     } catch (err) {
       setError(err instanceof APIError ? err.message : 'Password change failed.');

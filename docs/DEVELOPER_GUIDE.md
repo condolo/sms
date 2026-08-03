@@ -44,6 +44,7 @@
 36. [Public Site SEO & SSG (v4.42.0+)](#36-public-site-seo--ssg-v4420)
 37. [Medical Centre — Module 1 (v5.32.0)](#37-medical-centre--module-1-v5320)
 38. [Inventory — Module 2 (v5.33.0)](#38-inventory--module-2-v5330)
+39. [Module Registry Unification — Sidebar/Settings Nav Source of Truth (v5.34.0)](#39-module-registry-unification--sidebarsettings-nav-source-of-truth-v5340)
 
 ---
 
@@ -3584,3 +3585,40 @@ Default grants mirror Medical Centre's posture exactly: admin/principal/deputy_p
 | `client/src/pages/inventory/InventoryPage.jsx` | Tab shell — Items / Stock Transactions / Requisitions / Categories |
 | `client/src/pages/inventory/components/RequisitionsTab.jsx` | Raise/approve/reject/fulfill UI + `WorkflowConfigModal` (role/user step picker — a separate component from HRPage.jsx's own `WorkflowConfigModal`, not an extraction, since the HR version has leave-specific behavior — a fixed trailing "HR always confirms last" step, a `>=2`-step minimum — baked into its markup) |
 | `client/src/api/client.js` (`inventory`) | `categories`/`items` (`_resource`), `transactions.{list,create}`, `requisitions.{list,create,advance,fulfill,workflowConfig}` |
+
+---
+
+## 39. Module Registry Unification — Sidebar/Settings Nav Source of Truth (v5.34.0)
+
+### Problem this closes
+
+Three independent, hand-maintained lists described "what modules exist and how they're grouped": `server/config/moduleRegistry.js` (RBAC), `Sidebar.jsx`'s `CONFIGURABLE_MODULES` (nav icons/routes), and `PlatformPage.jsx`/`landingData.js` (marketing copy). A risk assessment (triggered by a proposed category-taxonomy reorg) found this had already caused two real drift bugs in one session — the landing page's icon grid silently missing two modules, and a dangling `connectedModules` reference — and confirmed the RBAC registry and Sidebar's list were the two that could actually be unified without conflating domains: the marketing lists bundle/rename for a non-technical audience and include non-RBAC concepts (Portals) that have no permission key at all, so they stay independent by design.
+
+### What changed
+
+`server/config/moduleRegistry.js` entries gained optional nav metadata — present only on the 23 of 28 entries that have their own Sidebar nav item:
+
+```js
+{ key: 'medical', label: 'Medical Centre', section: 'Operations',
+  icon: 'HeartPulse', navRoute: '/medical', navOrder: 20, subs: [...] }
+```
+
+- `icon` — a lucide-react export **name** (string), not a component — this file is server-side Node/CommonJS with no JSX.
+- `navRoute` — entries without it render no nav item at all (`growth_profile`, `analytics`, `settings`) or share another entry's (see `navGroupKey`).
+- `navLabel` — set only where the nav-appropriate label differs from the R&P permission label (e.g. `grades`/"Grades & Marks" shows as "Exams" in the nav; `hr`/"HR & Payroll" shows as "HR & Staff"). 6 of the 23 entries need this override; the other 17 fall back to `label`.
+- `navOrder` — default nav position (0–22), preserved exactly from the pre-existing `CONFIGURABLE_MODULES` array order (verified programmatically, not assumed — see Verified below), since a school's implicit default order was a real behavior to preserve, not just cosmetics.
+- `navGroupKey` — set on `exams`/`assessment` (both `'grades'`) to document that they share the `grades` entry's single nav item rather than having their own. Not yet consumed by any generation code (nothing needs to resolve it — those two entries simply have no `navRoute`, so they're naturally excluded from nav generation); kept as documentation of the relationship for a future consumer.
+
+`client/src/config/moduleNav.js` (new) is the one place that turns registry data into what a nav consumer needs: `NAV_ICON_MAP` (string → real lucide-react component, so both Sidebar and Settings render byte-identical icons) and `deriveNavModules(moduleRegistry)` (filters to `navRoute`-bearing entries, sorts by `navOrder`, applies `navLabel ?? label`). `FALLBACK_NAV_MODULES` in the same file is a verbatim snapshot of the old hardcoded list — a migration-safety net, not a second source of truth: it's used only when `session.moduleRegistry` is absent, which happens for exactly one reason (see Session delivery below).
+
+`Sidebar.jsx`'s `CONFIGURABLE_MODULES` array and `SettingsPage.jsx`'s import of it are both gone. Sidebar computes `deriveNavModules(session.moduleRegistry)` and passes it into `computeNav()` as a parameter (previously a closed-over module constant). Settings' Modules tab computes its own `toggleableKeys = new Set(deriveNavModules(session.moduleRegistry).map(m => m.key))` — the same derivation, read from the same session field, so the two consumers can't drift from each other again. `SECTION_ORDER` (`['Academic','Operations','Insights']`) and Settings' `SEC_BADGE` color map stay as their own small hand-maintained constants — presentation-only concerns, not module metadata, the same reasoning already applied to keeping the marketing lists independent.
+
+### Session delivery — not the JWT
+
+`moduleRegistry: MODULE_REGISTRY` is added to the JSON response body of every session-establishing auth route (`/login`, `/verify-otp`, `/force-change`, `/exchange`, and the shared `/org-login`+`/complete-org-login` helper in `server/routes/auth.js`) — **never** the JWT. The JWT lives in an HttpOnly cookie sent on every request; the full registry (~8.6KB with `subs`) would be a real per-request bloat cost there. `permissions` and `moduleConfig` already flow through the JSON body today, not the token, so this follows the existing precedent rather than a new one. `client/src/store/auth.js`'s `saveSession()` persists `moduleRegistry` into the same localStorage-backed slim session as `permissions`/`moduleConfig`, and every client `setSession(...)` call site (`Login.jsx`'s six flows, `TopBar.jsx`'s school-switch) forwards `res.moduleRegistry` through — `setSession()` replaces the whole in-memory session object rather than merging, so missing it at any one call site would have silently dropped the registry after that specific flow.
+
+A session created before this deploy has no `moduleRegistry` (the app never re-fetches it in the background — `GET /api/auth/me` exists but is unused by the client). `deriveNavModules()` falls back to `FALLBACK_NAV_MODULES` in that case, so nothing breaks for an already-logged-in user; they pick up the registry-backed path on their next login/exchange. `FALLBACK_NAV_MODULES` is safe to delete once no session can predate the deploy (check `SessionService`'s `absoluteExpiry`).
+
+### Verified
+
+Registry order/icons/labels/routes were cross-checked programmatically against the pre-existing `CONFIGURABLE_MODULES` array, not assumed: a Node script derived `{key, to, label, section}` from the new registry fields and diffed it against the old hardcoded array — 23/23 entries identical, including the 6 `navLabel` overrides and all 23 `navOrder` values. Icon correctness follows from construction (same `lucide-react` export names, same package) rather than a separate check. Production client build passes; full Jest suite (125 suites / 1182 tests) passes unchanged. A true end-to-end login/browser render could not be exercised — this environment has no `MONGODB_URI` configured, so no session can actually be issued by the server; this is a pre-existing environment constraint, not something this change introduced.

@@ -6,6 +6,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.34.0] — 2026-08-03 — refactor(nav): Module registry unification — Sidebar/Settings read one source of truth
+
+A proposed module-category reorganization prompted a risk assessment first, which found that three independent, hand-maintained lists described "what modules exist" (`server/config/moduleRegistry.js` for RBAC, `Sidebar.jsx`'s `CONFIGURABLE_MODULES` for nav, and the marketing pages for public copy) — and that this exact duplication had already caused two real drift bugs earlier in the session (a landing-page module silently missing from its icon grid; a dangling module reference). The registry and Sidebar's list could be unified without conflating domains; the marketing lists stay independent since they bundle/rename for a non-technical audience and include non-RBAC concepts (Portals) with no permission key at all.
+
+### Changed
+- `server/config/moduleRegistry.js` — the 23 of 28 entries with their own Sidebar nav item gained optional `icon` (lucide-react export name, string — this file is server-side with no JSX), `navRoute`, `navLabel` (only where it must differ from the R&P `label` — 6 entries), and `navOrder` (0–22, preserved exactly from the prior hardcoded array order, verified programmatically). `exams`/`assessment` gained `navGroupKey: 'grades'`, documenting that they share the `grades` entry's single nav item.
+- New `client/src/config/moduleNav.js` — `NAV_ICON_MAP` (icon-name → real component) and `deriveNavModules(moduleRegistry)`, the one place registry data becomes a nav list. `FALLBACK_NAV_MODULES` is a migration-safety snapshot of the old hardcoded list, used only when a session predates this change.
+- `Sidebar.jsx`'s hardcoded `CONFIGURABLE_MODULES` array is gone; nav is now `deriveNavModules(session.moduleRegistry)`. `SettingsPage.jsx`'s Modules tab computes its toggleable-key set the same way instead of importing Sidebar's constant — both consumers now read the same session field, so they can't drift from each other again.
+- `moduleRegistry: MODULE_REGISTRY` is now included in the JSON response body (never the JWT/cookie) of every session-establishing auth route (`/login`, `/verify-otp`, `/force-change`, `/exchange`, `/org-login`+`/complete-org-login`) — matching how `permissions`/`moduleConfig` already flow. Persisted in `client/src/store/auth.js`'s slim localStorage session alongside those fields.
+
+### Verified
+- A Node script derived `{key, to, label, section}` from the new registry fields and diff-checked it against the previous hardcoded `CONFIGURABLE_MODULES` array: 23/23 entries identical, including all 6 label overrides and all 23 order values. Icon correctness follows from construction (same `lucide-react` export names). Production client build and full Jest suite (125 suites / 1182 tests) both pass unchanged. A true end-to-end login render could not be exercised in this environment (no `MONGODB_URI` configured, pre-existing constraint) — logic equivalence was proven directly instead of assumed.
+
+---
+
 ## [v5.33.0] — 2026-08-02 — feat(inventory): Inventory — Module 2 (Categories, Items, Stock Transactions, Requisitions, Procurement)
 
 A dependency audit preceded implementation, per an explicit requirement that no code be written until the architecture was verified. The audit's key finding: the example requisition flow ("Requester → Department Approval → Finance (optional) → Procurement") needed zero new plumbing — those are just example labels for steps in one generic school-configured chain, and `server/utils/workflow-config.js` (already proven for HR's Leave and Payroll approval) is directly reusable as-is. "Procurement is not another inventory module" turned out to be concretely true once built: it's the requisition's own final approval stage, not a separate collection or route file.

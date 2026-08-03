@@ -9,6 +9,12 @@ const SESSION_KEY = 'msingi_session';
  *                  NO email (PII) — stays in memory only
  *   school (slim)— id, name, slug, plan, logoUrl, faviconUrl, moduleConfig, primaryColor
  *                  NO tagline, address, mpesa keys, etc.
+ *   moduleRegistry — the server's MODULE_REGISTRY (key/label/section/icon/
+ *                  navRoute/subs for every module), no PII, no per-school
+ *                  data. Persisted so Sidebar can render the nav from it
+ *                  after a page refresh with no extra request — same
+ *                  reasoning as permissions below. See client/src/config/
+ *                  moduleNav.js's deriveNavModules().
  *
  * permissions IS persisted (not PII — just module access flags) so the
  * sidebar stays correctly filtered after a page refresh without a re-fetch.
@@ -73,6 +79,11 @@ function saveSession(session) {
     user:            _slimUser(session.user),
     school:          _slimSchool(session.school),
     absoluteExpiry:  session.absoluteExpiry ?? undefined,
+    // Present only on responses issued after the registry-unification change
+    // (login/verify-otp/force-change/exchange/org-login). Absent on sessions
+    // persisted before that deploy — Sidebar/SettingsPage fall back to their
+    // own FALLBACK_NAV_MODULES until the user's next login re-establishes it.
+    moduleRegistry:  session.moduleRegistry ?? undefined,
     // availableSchools (just {id,name} pairs — no PII) — switching schools
     // (TopBar.jsx's handleSwitchSchool) deliberately hard-reloads the page
     // to discard school-scoped cache/component state, which wipes anything

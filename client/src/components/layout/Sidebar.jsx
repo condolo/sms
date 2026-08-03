@@ -19,50 +19,13 @@
 import { useState } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
-  LayoutDashboard, GraduationCap, Users, BookOpen, Calendar,
-  CheckSquare, ClipboardList, Scale, FileText,
-  Wallet, Settings, LogOut, Library,
-  MessageSquare, UserCog, TrendingUp, Tag, HelpCircle,
-  BookMarked, Bus, BedDouble, X, BookCheck, MonitorPlay,
-  ChevronDown, BookMarked as ClassroomIcon, Video, Link2,
-  FileBarChart2, HeartPulse, Boxes,
+  LayoutDashboard, Settings, LogOut, Tag, HelpCircle,
+  X, MonitorPlay, ChevronDown, Video,
 } from 'lucide-react';
 import clsx from 'clsx';
 import useAuthStore from '@/store/auth.js';
 import { auth as authApi } from '@/api/client.js';
-
-/* ── All configurable modules (master list) ──────────────────── */
-// Exported so Settings → Modules can filter the (broader) permission
-// registry down to only keys that actually correspond to a real,
-// toggleable nav item here — e.g. 'exams'/'assessment' are separate
-// permission rows in server/config/moduleRegistry.js but both live
-// under this single 'grades'-keyed "Exams" nav entry, so they must
-// NOT show up as their own (non-functional) toggle rows in Settings.
-export const CONFIGURABLE_MODULES = [
-  { key: 'students',   to: '/students',   Icon: GraduationCap, label: 'Students',            section: 'Academic'   },
-  { key: 'teachers',   to: '/teachers',   Icon: Users,          label: 'Teachers',            section: 'Academic'   },
-  { key: 'classes',    to: '/classes',    Icon: BookOpen,        label: 'Classes',             section: 'Academic'   },
-  { key: 'timetable',  to: '/timetable',  Icon: Calendar,       label: 'Timetable',           section: 'Academic'   },
-  { key: 'attendance', to: '/attendance', Icon: CheckSquare,     label: 'Attendance',          section: 'Academic'   },
-  { key: 'grades',     to: '/exams',      Icon: FileText,        label: 'Exams',               section: 'Academic'   },
-  { key: 'report_cards', to: '/report-cards', Icon: FileBarChart2, label: 'Report Cards',       section: 'Academic'   },
-  { key: 'subjects',   to: '/subjects',   Icon: Library,         label: 'Subjects',            section: 'Academic'   },
-  { key: 'admissions', to: '/admissions', Icon: ClipboardList,  label: 'Admissions',          section: 'Operations' },
-  { key: 'behaviour',  to: '/behaviour',  Icon: Scale,          label: 'Behaviour',           section: 'Operations' },
-  { key: 'finance',    to: '/finance',    Icon: Wallet,         label: 'Finance',             section: 'Operations' },
-  { key: 'messages',   to: '/messages',   Icon: MessageSquare,  label: 'Messages',            section: 'Operations' },
-  { key: 'events',     to: '/events',     Icon: Calendar,       label: 'Events',              section: 'Operations' },
-  { key: 'hr',         to: '/hr',         Icon: UserCog,        label: 'HR & Staff',          section: 'Operations' },
-  { key: 'lessons',    to: '/lessons',    Icon: BookCheck,      label: 'Lessons',             section: 'Academic'   },
-  { key: 'elearning',  to: '/elearning',  Icon: MonitorPlay,    label: 'eLearning',           section: 'Academic'   },
-  { key: 'library',    to: '/library',    Icon: BookMarked,     label: 'Library',             section: 'Operations' },
-  { key: 'resources',  to: '/resources',  Icon: Link2,          label: 'Resources',           section: 'Operations' },
-  { key: 'transport',  to: '/transport',  Icon: Bus,            label: 'Transport',           section: 'Operations' },
-  { key: 'hostel',     to: '/hostel',     Icon: BedDouble,      label: 'Hostel',              section: 'Operations' },
-  { key: 'medical',    to: '/medical',    Icon: HeartPulse,     label: 'Medical Centre',      section: 'Operations' },
-  { key: 'inventory',  to: '/inventory',  Icon: Boxes,          label: 'Inventory',           section: 'Operations' },
-  { key: 'reports',    to: '/reports',    Icon: TrendingUp,     label: 'Reports & Analytics', section: 'Insights'   },
-];
+import { deriveNavModules } from '@/config/moduleNav.js';
 
 const SECTION_ORDER = ['Academic', 'Operations', 'Insights'];
 
@@ -74,14 +37,14 @@ const SECTION_ORDER = ['Academic', 'Operations', 'Insights'];
  *                         (if a module has no entry in permissions, it defaults to visible)
  *   student / parent    → never reach Sidebar (ProtectedRoute redirects them first)
  */
-function computeNav(moduleConfig, userRole, userPermissions) {
+function computeNav(configurableModules, moduleConfig, userRole, userPermissions) {
   const isAdminLevel = userRole === 'admin' || userRole === 'superadmin';
 
   const cfgMap = Object.fromEntries(
     (moduleConfig ?? []).map((m, i) => [m.key, { enabled: m.enabled ?? true, order: m.order ?? i }])
   );
 
-  const visible = CONFIGURABLE_MODULES
+  const visible = configurableModules
     .filter(m => (cfgMap[m.key]?.enabled ?? true))
     .filter(m => {
       if (isAdminLevel) return true;
@@ -173,9 +136,11 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
 
   /* Dynamic nav — reacts to patchSchool({ moduleConfig }) and permission changes instantly */
   const moduleConfig   = useAuthStore(s => s.session?.school?.moduleConfig);
+  const moduleRegistry = useAuthStore(s => s.session?.moduleRegistry);
   const userRole       = user?.role;
   const userPermissions = user?.permissions;
-  const navSections    = computeNav(moduleConfig, userRole, userPermissions);
+  const configurableModules = deriveNavModules(moduleRegistry);
+  const navSections    = computeNav(configurableModules, moduleConfig, userRole, userPermissions);
 
   const schoolName     = school?.name ?? user?.schoolName ?? 'My School';
   const schoolInitials = schoolName

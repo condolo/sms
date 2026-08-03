@@ -24,7 +24,7 @@ import { settings as settingsApi } from '@/api/client.js';
 import { academicConfig as academicConfigApi } from '@/api/client.js';
 import { billing as billingApi, mpesa as mpesaApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
-import { CONFIGURABLE_MODULES } from '@/components/layout/Sidebar.jsx';
+import { deriveNavModules } from '@/config/moduleNav.js';
 
 /* ── Tab config ─────────────────────────────────────────────── */
 const TABS = [
@@ -4807,14 +4807,14 @@ const SEC_BADGE = {
 // are separate PERMISSION rows in the registry but all fold under a
 // single nav entry ('grades' for Exams, 'report_cards' for its own
 // page); showing them as their own toggle rows here would do nothing.
-const TOGGLEABLE_MODULE_KEYS = new Set(CONFIGURABLE_MODULES.map(m => m.key));
-
-function initModuleList(registry, savedConfig) {
+// The toggleable set is derived the same way Sidebar derives its own
+// nav list (deriveNavModules), so the two can never drift apart.
+function initModuleList(registry, savedConfig, toggleableKeys) {
   const cfgMap = Object.fromEntries(
     (savedConfig ?? []).map((m, i) => [m.key, { enabled: m.enabled ?? true, order: m.order ?? i }])
   );
   return registry
-    .filter(m => TOGGLEABLE_MODULE_KEYS.has(m.key))
+    .filter(m => toggleableKeys.has(m.key))
     .map((m, i) => ({ key: m.key, label: m.label, section: m.section,
       enabled: cfgMap[m.key]?.enabled ?? true, order: cfgMap[m.key]?.order ?? i }))
     .sort((a, b) => a.order - b.order);
@@ -4823,6 +4823,11 @@ function initModuleList(registry, savedConfig) {
 function ModulesTab() {
   const patchSchool = useAuthStore(s => s.patchSchool);
   const savedConfig = useAuthStore(s => s.session?.school?.moduleConfig);
+  const moduleRegistry = useAuthStore(s => s.session?.moduleRegistry);
+  const toggleableKeys = useMemo(
+    () => new Set(deriveNavModules(moduleRegistry).map(m => m.key)),
+    [moduleRegistry]
+  );
 
   /* Live module registry from server — single source of truth */
   const { data: registryData } = useQuery({
@@ -4837,8 +4842,8 @@ function ModulesTab() {
 
   /* Re-seed list whenever registry or saved config changes */
   useEffect(() => {
-    if (registry.length) setModules(initModuleList(registry, savedConfig));
-  }, [registry, savedConfig]);
+    if (registry.length) setModules(initModuleList(registry, savedConfig, toggleableKeys));
+  }, [registry, savedConfig, toggleableKeys]);
   const showT = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500); };
 
   const { mutate: save, isPending: saving } = useMutation({

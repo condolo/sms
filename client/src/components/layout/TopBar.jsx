@@ -100,7 +100,7 @@ export default function TopBar({ onMenuClick, collapsed = false, onExpand }) {
       const { code } = await authApi.switchSchool(schoolId);
       const res = await authApi.exchange(code);
       if (!res.user) throw new Error('Invalid exchange response');
-      setSession({ user: res.user, school: res.school, availableSchools: res.availableSchools });
+      setSession({ user: res.user, school: res.school, availableSchools: res.availableSchools, moduleRegistry: res.moduleRegistry });
       window.location.assign('/dashboard');
     } catch (err) {
       toast.error(err instanceof APIError ? err.message : 'Could not switch schools. Please try again.');

@@ -14,6 +14,7 @@ const { revokeUserTokens, revokeIdentityTokens, getIdentityTokenVersion } = requ
 const AuditService         = require('../services/audit');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
 const { isIdentityCutoverEnabled } = require('../utils/identity-cutover');
+const { MODULE_REGISTRY } = require('../config/moduleRegistry');
 
 const router = express.Router();
 
@@ -467,7 +468,7 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
     SecurityService.clearFail(req.school.id, loginId).catch(() => {});
     _setAuthCookie(res, token, absoluteExpiry);
     res.json({
-      user: safeUser, school: req.school, absoluteExpiry,
+      user: safeUser, school: req.school, absoluteExpiry, moduleRegistry: MODULE_REGISTRY,
       ...(availableSchools.length ? { availableSchools } : {}),
     });
   } catch (err) {
@@ -539,7 +540,7 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
     _checkTrialAndNotify(school).catch(() => {});
     _setAuthCookie(res, token, otpAbsExpiry);
     res.json({
-      user: safeUser, school, absoluteExpiry: otpAbsExpiry,
+      user: safeUser, school, absoluteExpiry: otpAbsExpiry, moduleRegistry: MODULE_REGISTRY,
       ...(otpAvailableSchools.length ? { availableSchools: otpAvailableSchools } : {}),
     });
   } catch (err) {
@@ -727,7 +728,7 @@ router.post('/force-change', forceChangeLimiter, tenantMiddleware, async (req, r
     const fcAvailableSchools = await _availableSchools(fcTokenPayload);
     _setAuthCookie(res, token, fcAbsExpiry);
     res.json({
-      user: safeUser, school, absoluteExpiry: fcAbsExpiry,
+      user: safeUser, school, absoluteExpiry: fcAbsExpiry, moduleRegistry: MODULE_REGISTRY,
       ...(fcAvailableSchools.length ? { availableSchools: fcAvailableSchools } : {}),
     });
   } catch (err) {
@@ -1256,7 +1257,7 @@ router.post('/exchange', exchangeLimiter, async (req, res) => {
 
     _setAuthCookie(res, entry.token);
     return res.json({
-      user: safeUser, school,
+      user: safeUser, school, moduleRegistry: MODULE_REGISTRY,
       ...(exchangeAvailableSchools.length ? { availableSchools: exchangeAvailableSchools } : {}),
     });
   } catch (err) {
@@ -1676,7 +1677,7 @@ async function _completeOrgLoginSession(req, res, user, school, identity) {
   _checkTrialAndNotify(school).catch(() => {});
   _setAuthCookie(res, token, absoluteExpiry);
   res.json({
-    user: safeUser, school, absoluteExpiry,
+    user: safeUser, school, absoluteExpiry, moduleRegistry: MODULE_REGISTRY,
     ...(availableSchools.length ? { availableSchools } : {}),
   });
 }
