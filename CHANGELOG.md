@@ -54,6 +54,24 @@ Follow-up to v5.38.0's shallow-fix investigation: the Dashboard's Behaviour card
 
 ---
 
+## [v5.43.0] — 2026-08-03 — fix(security): general rate limiter shared one bucket across an entire office
+
+A user reported "Too many requests" on three separate occasions in one day, on unrelated pages (Settings → Roles & Permissions, Teachers), and was rightly concerned about client-facing reliability. Investigated before touching anything, since a rate-limit message can come from a real abuse-protection working as intended, a code bug causing a request storm, or a limiter that's simply mis-scoped.
+
+### Root cause — confirmed, not a code bug on either reported page
+`server/index.js`'s general `apiLimiter` (600 requests / 15 min) is global (`app.use('/api/', apiLimiter)`, every `/api/*` route) and was keyed by **IP address** — `express-rate-limit`'s default `keyGenerator`. Neither Settings' Roles & Permissions "Per User" tab nor the Teachers list page has a request-storm bug: the Per User tab fires exactly 4 requests regardless of staff count, the Teachers search box is already debounced 350ms, and React Query's own defaults (`retry: 1`, `refetchOnWindowFocus: false`, no polling) rule out a retry cascade. The real problem is scope, not volume: an IP-keyed bucket is **shared by every device behind the same network** — a school office's shared WiFi/NAT means several staff members' browsers, or one admin's own multiple tabs, all draw from the *same* 600-request budget. Combined with the app's own acknowledged SPA chattiness (Dashboard alone fires ~9 parallel queries on mount, a documented and accepted tradeoff, not a bug), the shared bucket could plausibly be exhausted by entirely legitimate, simultaneous use — with no single user or page doing anything wrong.
+
+### Fixed
+- `apiLimiter` now keys by **authenticated user** (`user:<userId>`, decoded directly from the HttpOnly session cookie — `cookie-parser` already runs earlier in the middleware chain) instead of IP, falling back to IP only for requests with no valid token (login, public routes). This eliminates the shared-network amplification entirely — each staff member's session now has its own budget, independent of who else is on the same network or how many tabs any one person has open. Decoding failures fall through safely to the IP key, matching anonymous-request behaviour; the limiter itself can never throw or become a new failure mode.
+- Also raised the ceiling itself, 600 → 1000/15min, as a complementary buffer — the app's own prior comment already documents one earlier bump (300→600) for the same underlying SPA-chattiness reason, suggesting some margin remains warranted even after the keying fix.
+- `authLimiter` (login brute-force protection) and `platformLimiter` (platform-admin) are deliberately left IP-keyed — pre-login brute-force protection has no valid session to key against, so IP is correct there; only the general, authenticated-usage limiter had the mis-scoping problem.
+- Fixed a stale log line found in the same block: the startup log said "platform: 50/15min" while the actual configured value has been 10/15min since a prior hardening pass — cosmetic, but corrected in the same edit since it was staring right at the code being changed.
+
+### Verified
+- Full Jest suite (125 suites / 1182 tests) passes. This limiter only activates in production (`skip: () => NODE_ENV !== 'production'`), so — like every other fix this session — it cannot be exercised live in this environment; verification relies on direct code correctness (the JWT `verify()` helper this reuses already returns `null` rather than throwing on any invalid/expired/malformed token, confirmed by reading `server/utils/jwt.js`) rather than a live 429 reproduction.
+
+---
+
 ## [v5.42.0] — 2026-08-03 — feat(dashboard): global date-range filter (Week/Month/Year/Lifetime)
 
 One shared filter now drives every genuinely time-scoped widget on the main Dashboard — Week / Month (default) / Year / Lifetime — with live refetching as it changes. Planned in full before implementation (`EnterPlanMode`), since it touched 6 server routes and surfaced two real pre-existing bugs along the way, not just a UI addition.

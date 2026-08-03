@@ -8,6 +8,7 @@ const express    = require('express');
 const cors       = require('cors');
 const path       = require('path');
 const rateLimit  = require('express-rate-limit');
+const { verify: verifyJwt } = require('./utils/jwt');
 const monitoring = require('./utils/monitoring');
 const { connect }             = require('./config/db');
 const { ensureIndexes }       = require('./utils/indexes');
@@ -160,13 +161,37 @@ app.use(monitoring.requestHandler());
 // All rate limiter messages use the app's standard { success, error } envelope so
 // clients never fall back to the generic "Request failed" string.
 
-// General limiter: 600 req/15min per IP. Raised from 300 because a React Query SPA
-// fires 8-10 parallel requests per page and refetchOnWindowFocus adds bursts.
+// Keyed by authenticated user (decoded straight from the HttpOnly cookie,
+// cookie-parser already ran above this point) — falls back to IP only for
+// requests with no valid token (login, public routes). Without this, every
+// device behind the same school-office IP shared ONE 600-request bucket,
+// so a handful of concurrent staff — or one admin with a few tabs open —
+// could trip each other's rate limit with entirely legitimate traffic.
+// Never throws: an invalid/expired token just falls through to the IP key,
+// same as an anonymous request — the limiter must not be a new failure mode.
+function _rateLimitKey(req) {
+  try {
+    const token = req.cookies?.token;
+    if (token) {
+      const payload = verifyJwt(token);
+      if (payload?.userId) return `user:${payload.userId}`;
+    }
+  } catch { /* fall through to IP */ }
+  return req.ip;
+}
+
+// General limiter: 1000 req/15min, per authenticated user (or per IP for
+// anonymous requests). Raised from 600, which was itself raised from 300,
+// because a React Query SPA fires 8-10 parallel requests per page and
+// refetchOnWindowFocus adds bursts — per-user keying removes the
+// shared-IP amplification that made even that 600 too easy to exhaust
+// in a busy school office.
 const apiLimiter = rateLimit({
   windowMs:          15 * 60 * 1000,
-  max:               600,
+  max:               1000,
   standardHeaders:   true,
   legacyHeaders:     false,
+  keyGenerator:      _rateLimitKey,
   message:           { success: false, error: { code: 'RATE_LIMIT', message: 'Too many requests — please slow down and try again shortly.' } },
   skip: (req) => process.env.NODE_ENV !== 'production',
 });
@@ -201,7 +226,7 @@ app.use('/api/auth/change-password',    authLimiter);
 app.use('/api/auth/sessions/revoke-all',authLimiter);
 app.use('/api/platform', platformLimiter);
 
-console.log('[Security] rate limiting active — general: 600/15min, auth: 20/15min (login+force-change+change-password+revoke-all), platform: 50/15min');
+console.log('[Security] rate limiting active — general: 1000/15min per user (IP for anonymous), auth: 20/15min per IP (login+force-change+change-password+revoke-all), platform: 10/15min per IP');
 
 /* ── API Routes ─────────────────────────────────────────────── */
 app.use('/api/public',      require('./routes/public'));   // no auth — school branding
