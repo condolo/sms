@@ -908,6 +908,18 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), a
     const _ay2 = strParam(req.query.academicYearId);
     if (_ay2) filter.academicYearId = _ay2;
 
+    // Invoices (totalInvoiced/totalPaid/totalBalance below) stay an
+    // all-time, unfiltered snapshot — "what's currently owed" doesn't have
+    // a meaningful "last week" version, same reasoning as Total Students.
+    // Payments DO get period-scoped, via paidAt — "how much did we collect
+    // in the selected period" is a genuine, meaningful time-series metric.
+    const paymentFilter = { schoolId };
+    if (req.query.dateFrom || req.query.dateTo) {
+      paymentFilter.paidAt = {};
+      if (req.query.dateFrom) paymentFilter.paidAt.$gte = req.query.dateFrom;
+      if (req.query.dateTo)   paymentFilter.paidAt.$lte = `${req.query.dateTo}T23:59:59.999Z`;
+    }
+
     const Invoices = tenantModel('invoices', tenantContext(req));
     const Payments = tenantModel('payments', tenantContext(req));
 
@@ -931,14 +943,20 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), a
         }}
       ]),
       Payments.aggregate([
-        { $match: { schoolId } },
+        { $match: paymentFilter },
         { $group: { _id: '$method', totalCollected: { $sum: '$amount' }, count: { $sum: 1 } } }
       ])
     ]);
 
+    const periodCollected = paymentSummary.reduce((s, m) => s + (m.totalCollected || 0), 0);
+
     return ok(res, {
       invoices:       invoiceSummary[0] || { totalInvoiced: 0, totalPaid: 0, totalBalance: 0 },
-      paymentsByMethod: paymentSummary
+      paymentsByMethod: paymentSummary,
+      // Sum of paymentsByMethod above, in the requested period (or all-time
+      // if no dateFrom/dateTo given) — distinct from invoices.totalPaid,
+      // which is the all-time amountPaid field summed across invoices.
+      periodCollected,
     });
   } catch (err) {
     console.error('[finance GET /summary]', err);

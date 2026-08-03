@@ -263,6 +263,17 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), scopeMi
       };
     }
 
+    // Dashboard's "recently added" activity feed — filters by createdAt (a
+    // record-creation timestamp), deliberately distinct from enrollmentDate
+    // above (a nominal, sometimes-backdated academic date). "Students added
+    // in the selected period" should reflect actual system activity, not a
+    // manually-entered enrollment date that could predate the record itself.
+    if (req.query.dateFrom || req.query.dateTo) {
+      filter.createdAt = {};
+      if (req.query.dateFrom) filter.createdAt.$gte = new Date(req.query.dateFrom);
+      if (req.query.dateTo)   filter.createdAt.$lte = new Date(`${req.query.dateTo}T23:59:59.999Z`);
+    }
+
     // Free-text search on name / admissionNumber
     if (req.query.search) {
       const rx = new RegExp(req.query.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');

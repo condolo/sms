@@ -127,6 +127,11 @@ router.get('/stats', authMiddleware, PLAN, MODGATE, rbac('admissions', 'read'), 
     const filter = { schoolId };
     const _ay2 = strParam(req.query.academicYearId);
     if (_ay2) filter.academicYearId = _ay2;
+    if (req.query.dateFrom || req.query.dateTo) {
+      filter.enquiryDate = {};
+      if (req.query.dateFrom) filter.enquiryDate.$gte = req.query.dateFrom;
+      if (req.query.dateTo)   filter.enquiryDate.$lte = req.query.dateTo;
+    }
 
     const Apps = tenantModel('admissions', tenantContext(req));
     const pipeline = await Apps.aggregate([

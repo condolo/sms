@@ -54,6 +54,30 @@ Follow-up to v5.38.0's shallow-fix investigation: the Dashboard's Behaviour card
 
 ---
 
+## [v5.42.0] — 2026-08-03 — feat(dashboard): global date-range filter (Week/Month/Year/Lifetime)
+
+One shared filter now drives every genuinely time-scoped widget on the main Dashboard — Week / Month (default) / Year / Lifetime — with live refetching as it changes. Planned in full before implementation (`EnterPlanMode`), since it touched 6 server routes and surfaced two real pre-existing bugs along the way, not just a UI addition.
+
+### Found during investigation, fixed as prerequisites
+- **`GET /attendance/summary` 400'd whenever neither `classId` nor `studentId` was supplied** — exactly the shape the Dashboard's own "Today's Attendance" call has always sent, so that widget has never actually resolved. Fixed: when neither is given, the route now returns one school-wide aggregate (matching what `Dashboard.jsx` already expected to read) instead of rejecting the request; the existing per-student breakdown behaviour is unchanged for every other caller (`StudentProfile.jsx`).
+- **Fee Exposure and Academic Health** (two panels inside the existing Leadership Analytics section) sat inside a local 7/30/90-day selector but silently ignored it — their aggregations never filtered by date at all. Fixed by adding the same `createdAt` window the rest of that section already used.
+
+### Added
+- `client/src/components/ui/DateRangeFilter.jsx` — the shared control (`Week`/`Month`/`Year`/`Lifetime`, `Month` default) and `computeDateRange(preset)`, a pure helper producing `{ dateFrom, dateTo }`. No reusable date-range component existed before this — only two independent hand-rolled 7/30/90 selectors, one of which this replaces.
+- `dateFrom`/`dateTo` support added to `finance.js` (`GET /summary` — new period-scoped `periodCollected`, alongside the existing all-time `totalBalance`/`totalPaid`/`totalInvoiced`, which stay unfiltered snapshots by design), `admissions.js` (`GET /stats`, matched on `enquiryDate`), `students.js` (`GET /`, matched on `createdAt`, scoped to the Recent-Activity feed query only), and `analytics.js` (`GET /leadership`, replacing the old `[7,30,90]`-only whitelist).
+
+### Changed — confirmed with the user before building
+- **Snapshot metrics stay unfiltered, labelled "current"**: Total Students, Active Enrolment, Students by Gender, and the Outstanding Fees balance are headcounts/current-balances, not activity — filtering "Total Students" by "last week" doesn't have a coherent meaning, so these don't move when the range changes, and now say so explicitly (matching this session's earlier Behaviour-scope labeling precedent).
+- Every genuinely time-scoped widget now reflects the selected range: Fees Collected (via the new `periodCollected`), the Fee Collection donut's "Collected" slice, the Admissions funnel, Attendance Rate (relabelled from a literal, always-broken "Today's Attendance"), the Leadership Analytics panel (Attendance Risk, Fee Exposure, Behaviour Heatmap, Academic Health), and the Recently Enrolled feed.
+- `LeadershipPanel`'s own local day-selector button group is gone — it now reads `dateFrom`/`dateTo` from the shared filter via props, which is what closes the Fee Exposure/Academic Health bug above (there's only one filter now, not two).
+- The donut's "N% collection rate" caption (a `totalPaid/totalInvoiced` ratio) is replaced with an honest "Collected (period) vs. current outstanding balance" caption — the old ratio no longer describes what the two slices show once "Collected" became period-scoped and "Outstanding" stayed a snapshot. A separate, clearly-labelled "Lifetime Collection Rate" bar in the Term Overview panel keeps the original all-time ratio available on its own terms.
+- Upcoming Events stays out of scope, deliberately — it's forward-looking (`from: today`, no `to`), the opposite direction from a backward "last N days" filter.
+
+### Verified
+- Full Jest suite (125 suites / 1182 tests) passes, including every test file covering the 5 touched server routes. Production client build passes. Cannot run a live browser click-test in this sandbox (no `MONGODB_URI`, the same constraint noted throughout this session) — verified instead via the plan's own manual param/query-key trace and the two layers of automated checks above.
+
+---
+
 ## [v5.38.0] — 2026-08-03 — fix(behaviour): deep-fix the studentName/classId shallow fix
 
 A screenshot showed the "Serious Incidents" panel displaying raw studentIds ("std_demo_6", "std_demo_9" etc.) again, and asked directly: was the earlier fix shallow? Investigated and confirmed — yes.

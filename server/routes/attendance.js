@@ -103,10 +103,6 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read')
   try {
     const { schoolId } = req.jwtUser;
 
-    if (!req.query.classId && !req.query.studentId) {
-      return E.badRequest(res, 'classId or studentId is required for summary');
-    }
-
     const filter = { schoolId };
     if (req.query.classId)   filter.classId   = req.query.classId;
     if (req.query.studentId) filter.studentId = req.query.studentId;
@@ -118,12 +114,20 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read')
 
     ScopeEngine.applyToFilter(req, 'attendance', filter);
 
+    // No classId/studentId -> one school-wide aggregate (a single object,
+    // not an array) for dashboard-style summaries. With either given, keep
+    // the existing per-student breakdown (an array, one row per student)
+    // used by class/student-scoped consumers (e.g. StudentProfile.jsx).
+    // Previously this route 400'd with neither given — the exact shape the
+    // Dashboard's own call has always sent, so that widget never resolved.
+    const schoolWide = !req.query.classId && !req.query.studentId;
+
     const Attendance = tenantModel('attendance', tenantContext(req));
     const summary = await Attendance.aggregate([
       { $match: filter },
       {
         $group: {
-          _id:        '$studentId',
+          _id:        schoolWide ? null : '$studentId',
           total:      { $sum: 1 },
           present:    { $sum: { $cond: [{ $eq: ['$status', 'present'] }, 1, 0] } },
           absent:     { $sum: { $cond: [{ $eq: ['$status', 'absent'] }, 1, 0] } },
@@ -141,6 +145,9 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read')
       { $sort: { attendanceRate: 1 } }
     ]);
 
+    if (schoolWide) {
+      return ok(res, summary[0] ?? { total: 0, present: 0, absent: 0, late: 0, authorised: 0, attendanceRate: null });
+    }
     return ok(res, summary);
   } catch (err) {
     console.error('[attendance GET /summary]', err);

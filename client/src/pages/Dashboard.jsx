@@ -38,6 +38,7 @@ import {
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { KpiCard }  from '@/components/ui/KpiCard.jsx';
+import DateRangeFilter, { computeDateRange, DEFAULT_RANGE, RANGE_PRESETS } from '@/components/ui/DateRangeFilter.jsx';
 import { useSchoolTheme, withOpacity } from '@/hooks/useSchoolTheme.js';
 
 /* ── Helpers ──────────────────────────────────────────────── */
@@ -128,6 +129,20 @@ export default function Dashboard() {
   const canViewStudents   = can('students')   || isAdminLevel;
   const canViewLeadership = LEADER_ROLES.has(role);
 
+  /* ── Global date-range filter — drives every genuinely time-scoped
+     widget below (Fees Collected, Admissions funnel, Attendance,
+     Recently Enrolled, Leadership Analytics). Snapshot widgets — Total
+     Students, Active Enrolment, Students by Gender, Outstanding Fees
+     balance — deliberately stay unfiltered; see their "current" labels. */
+  const [range, setRange] = useState(DEFAULT_RANGE);
+  const { dateFrom, dateTo } = computeDateRange(range);
+  const rangeLabel = RANGE_PRESETS.find(p => p.id === range)?.label ?? 'Month';
+  // Attendance is no longer fixed to "today" — it follows the same global
+  // filter as everything else, so its label needs to say which period it's
+  // actually showing instead of a literal (and, before this session's
+  // attendance.js fix, never-actually-resolving) "Today".
+  const attendanceLabel = rangeLabel === 'Lifetime' ? 'Attendance Rate — Lifetime' : `Attendance — Last ${rangeLabel}`;
+
   /* ── Queries ──────────────────────────────────────────── */
   const { data: stuStats, isLoading: stuLoading, isError: stuError } = useQuery({
     queryKey: ['students', 'stats'],
@@ -137,22 +152,22 @@ export default function Dashboard() {
   });
 
   const { data: finData, isLoading: finLoading, isError: finError } = useQuery({
-    queryKey: ['finance', 'summary'],
-    queryFn:  () => financeApi.summary(),
+    queryKey: ['finance', 'summary', dateFrom, dateTo],
+    queryFn:  () => financeApi.summary({ dateFrom, dateTo }),
     enabled:  canViewFinance,
     staleTime: 5 * 60_000,
   });
 
   const { data: admData, isLoading: admLoading, isError: admError } = useQuery({
-    queryKey: ['admissions', 'stats'],
-    queryFn:  () => admissionsApi.stats(),
+    queryKey: ['admissions', 'stats', dateFrom, dateTo],
+    queryFn:  () => admissionsApi.stats({ dateFrom, dateTo }),
     enabled:  canViewAdm,
     staleTime: 5 * 60_000,
   });
 
   const { data: recentData, isLoading: recentLoading } = useQuery({
-    queryKey: ['students', 'recent'],
-    queryFn:  () => studentsApi.list({ limit: 8, sort: '-createdAt', status: 'active' }),
+    queryKey: ['students', 'recent', dateFrom, dateTo],
+    queryFn:  () => studentsApi.list({ limit: 8, sort: '-createdAt', status: 'active', dateFrom, dateTo }),
     enabled:  canViewStudents,
     staleTime: 2 * 60_000,
   });
@@ -177,10 +192,13 @@ export default function Dashboard() {
     staleTime: 5 * 60_000,
   });
 
-  /* Today's attendance summary */
+  /* Attendance summary — school-wide, scoped to the selected date range
+     (was hardcoded to "today" and, before the attendance.js fix this
+     session, sent a request shape the route rejected outright — this
+     widget has never actually resolved until now). */
   const { data: attData } = useQuery({
-    queryKey: ['attendance', 'today-summary'],
-    queryFn:  () => attendanceApi.summary({ date: todayStr() }),
+    queryKey: ['attendance', 'summary', dateFrom, dateTo],
+    queryFn:  () => attendanceApi.summary({ dateFrom, dateTo }),
     staleTime: 2 * 60_000,
   });
 
@@ -211,19 +229,25 @@ export default function Dashboard() {
     fill:  STATUS_COLORS[s._id] ?? '#94a3b8',
   }));
 
-  // Finance
+  // Finance — totalPaid/totalBalance/totalInvoiced are all-time snapshots
+  // (deliberately NOT period-filtered — a balance owed right now, or a
+  // lifetime collection rate, doesn't have a meaningful "last week"
+  // version, same reasoning as Total Students). periodCollected IS
+  // filtered by the selected range — payments with paidAt in range, a
+  // genuine activity total, not a snapshot.
   const invoices        = finData?.data?.invoices ?? {};
-  const totalPaid       = invoices.totalPaid    ?? null;
-  const totalBalance    = invoices.totalBalance ?? null;
-  const totalInvoiced   = invoices.totalInvoiced ?? null;
+  const totalPaid        = invoices.totalPaid     ?? null;
+  const totalBalance     = invoices.totalBalance  ?? null;
+  const totalInvoiced    = invoices.totalInvoiced ?? null;
+  const periodCollected  = finData?.data?.periodCollected ?? null;
   const paymentMethods  = (finData?.data?.paymentsByMethod ?? []).map((m, i) => ({
     name:  m._id ?? 'Other',
     value: m.totalCollected,
     count: m.count,
     fill:  METHOD_COLORS[i % METHOD_COLORS.length],
   }));
-  const finPieData = totalPaid != null ? [
-    { name: 'Collected', value: totalPaid,    fill: FINANCE_COLORS[0] },
+  const finPieData = periodCollected != null ? [
+    { name: 'Collected', value: periodCollected, fill: FINANCE_COLORS[0] },
     { name: 'Outstanding', value: totalBalance ?? 0, fill: FINANCE_COLORS[1] },
   ] : [];
 
@@ -318,6 +342,9 @@ export default function Dashboard() {
               : new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
         </span>
         <div className="flex items-center gap-2">
+          {!isTeacher && (
+            <DateRangeFilter value={range} onChange={setRange} />
+          )}
           <button
             id="btn-dashboard-reports"
             onClick={() => navigate('/reports')}
@@ -363,7 +390,7 @@ export default function Dashboard() {
               icon={<Users size={18} />}
               label="Total Students"
               value={fmt(totalStudents)}
-              sub={activeStudents != null ? `${fmt(activeStudents)} active` : null}
+              sub={activeStudents != null ? `${fmt(activeStudents)} active · current` : null}
               to="/students"
               loading={stuLoading} error={stuError}
             />
@@ -391,9 +418,9 @@ export default function Dashboard() {
             <KpiCard
               variant="filled" colorIndex={1}
               icon={<CheckCircle size={18} />}
-              label="Today's Attendance"
+              label="Attendance Rate"
               value={attRate != null ? `${attRate}%` : '—'}
-              sub={attPresent != null ? `${fmt(attPresent)} present` : 'Not taken yet'}
+              sub={attPresent != null ? `${fmt(attPresent)} present · ${rangeLabel === 'Lifetime' ? 'all time' : `last ${rangeLabel.toLowerCase()}`}` : 'No records yet'}
               to="/attendance"
             />
           )}
@@ -402,8 +429,8 @@ export default function Dashboard() {
               variant="filled" colorIndex={2}
               icon={<BadgeDollarSign size={18} />}
               label="Fees Collected"
-              value={fmtCurrency(totalPaid)}
-              sub={totalInvoiced != null ? `of ${fmtCurrency(totalInvoiced)} invoiced` : 'This year'}
+              value={fmtCurrency(periodCollected)}
+              sub={`${rangeLabel === 'Lifetime' ? 'All time' : `Last ${rangeLabel.toLowerCase()}`}`}
               to="/finance"
               loading={finLoading} error={finError}
             />
@@ -423,7 +450,7 @@ export default function Dashboard() {
               icon={<Wallet size={18} />}
               label="Outstanding Fees"
               value={fmtCurrency(totalBalance)}
-              sub="Unpaid balance"
+              sub="Unpaid balance · current"
               to="/finance"
               loading={finLoading} error={finError}
             />
@@ -431,9 +458,9 @@ export default function Dashboard() {
             <KpiCard
               variant="filled" colorIndex={3}
               icon={<CheckCircle size={18} />}
-              label="Today's Attendance"
+              label="Attendance Rate"
               value={attRate != null ? `${attRate}%` : '—'}
-              sub={attPresent != null ? `${fmt(attPresent)} present` : 'Not taken yet'}
+              sub={attPresent != null ? `${fmt(attPresent)} present · ${rangeLabel === 'Lifetime' ? 'all time' : `last ${rangeLabel.toLowerCase()}`}` : 'No records yet'}
               to="/attendance"
             />
           )}
@@ -448,7 +475,7 @@ export default function Dashboard() {
               <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: withOpacity(primary, 0.1) }}>
                 <Activity size={13} style={{ color: primary }} />
               </div>
-              <h2 className="text-[13px] font-bold text-slate-800 flex-1">Today's Attendance</h2>
+              <h2 className="text-[13px] font-bold text-slate-800 flex-1">{attendanceLabel}</h2>
               <span id="attendance-today-rate" className={`text-[13px] font-extrabold ${attRate == null ? 'text-slate-400' : attRate >= 80 ? 'text-emerald-600' : 'text-amber-500'}`}>
                 {attRate != null ? `${attRate}%` : '—'}
               </span>
@@ -492,13 +519,16 @@ export default function Dashboard() {
               {[
                 {
                   id:    'term-bar-fees',
-                  label: 'Fees Collected',
+                  // Lifetime, not period-filtered — same all-time totalPaid/
+                  // totalInvoiced as Outstanding Fees, deliberately distinct
+                  // from the period-scoped "Fees Collected" KPI card above.
+                  label: 'Lifetime Collection Rate',
                   pct:   totalPaid != null && totalInvoiced > 0 ? Math.min(100, Math.round((totalPaid / totalInvoiced) * 100)) : null,
                   color: '#4f46e5',
                 },
                 {
                   id:    'term-bar-adm',
-                  label: 'Enrolled (vs applications)',
+                  label: `Enrolled (${rangeLabel === 'Lifetime' ? 'lifetime' : `last ${rangeLabel.toLowerCase()}`})`,
                   pct:   (() => {
                     const total = admData?.data?.byStage?.reduce((s, x) => s + (x.count ?? 0), 0) ?? 0;
                     const enrolled = admData?.data?.byStage?.find(s => s.stage === 'enrolled')?.count ?? 0;
@@ -508,7 +538,7 @@ export default function Dashboard() {
                 },
                 {
                   id:    'term-bar-att',
-                  label: 'Monthly Avg. Attendance',
+                  label: `Avg. Attendance (${rangeLabel === 'Lifetime' ? 'lifetime' : `last ${rangeLabel.toLowerCase()}`})`,
                   pct:   attRate,
                   color: '#f59e0b',
                 },
@@ -592,7 +622,7 @@ export default function Dashboard() {
 
           {/* Gender pie — student access only */}
           {canViewStudents && (
-            <ChartCard title="Students by Gender" icon={<Users size={14} />} loading={stuLoading} primary={primary}>
+            <ChartCard title="Students by Gender · current" icon={<Users size={14} />} loading={stuLoading} primary={primary}>
               {genderData.length > 0 ? (
                 <div className="flex items-center gap-4">
                   <ResponsiveContainer width="55%" height={160}>
@@ -622,7 +652,7 @@ export default function Dashboard() {
           {/* Finance donut */}
           {canViewFinance && (
             <ChartCard title="Fee Collection" icon={<BadgeDollarSign size={14} />} loading={finLoading} primary={primary}>
-              {finPieData.length > 0 && totalInvoiced ? (
+              {finPieData.length > 0 ? (
                 <div className="flex items-center gap-4">
                   <ResponsiveContainer width="55%" height={160}>
                     <PieChart>
@@ -633,7 +663,14 @@ export default function Dashboard() {
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="flex-1 space-y-3">
-                    {finPieData.map(d => (
+                    {finPieData.map(d => {
+                      // Collected (period) and Outstanding (current balance)
+                      // are two different scopes shown side by side, not
+                      // parts of one whole — bar widths are proportional to
+                      // each other here, not to some unrelated all-time
+                      // invoiced total.
+                      const finVisualTotal = (periodCollected ?? 0) + (totalBalance ?? 0);
+                      return (
                       <div key={d.name}>
                         <div className="flex items-center justify-between mb-1">
                           <div className="flex items-center gap-2">
@@ -643,12 +680,13 @@ export default function Dashboard() {
                           <span className="text-xs font-semibold text-slate-800">{fmtCurrency(d.value)}</span>
                         </div>
                         <div className="h-1.5 bg-slate-100 rounded-full">
-                          <div className="h-full rounded-full" style={{ width: `${Math.round((d.value / (totalInvoiced || 1)) * 100)}%`, background: d.fill }} />
+                          <div className="h-full rounded-full" style={{ width: `${Math.round((d.value / (finVisualTotal || 1)) * 100)}%`, background: d.fill }} />
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                     <p className="text-[11px] text-slate-400 pt-1">
-                      {totalInvoiced ? `${Math.round((totalPaid / totalInvoiced) * 100)}% collection rate` : ''}
+                      Collected {rangeLabel === 'Lifetime' ? '(lifetime)' : `(last ${rangeLabel.toLowerCase()})`} vs. current outstanding balance
                     </p>
                   </div>
                 </div>
@@ -684,7 +722,7 @@ export default function Dashboard() {
 
           {/* If no finance — show attendance chart */}
           {!canViewFinance && (
-            <ChartCard title="Today's Attendance" icon={<UserCheck size={14} />} primary={primary}>
+            <ChartCard title={attendanceLabel} icon={<UserCheck size={14} />} primary={primary}>
               {attRate != null ? (
                 <div className="flex flex-col items-center justify-center py-4 gap-3">
                   <div className="relative w-28 h-28">
@@ -910,7 +948,7 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="flex-1">
-              <p className="text-sm font-semibold text-slate-700">Today's Attendance</p>
+              <p className="text-sm font-semibold text-slate-700">{attendanceLabel}</p>
               <p className="text-xs text-slate-400 mt-0.5">{fmt(attPresent)} present · {fmt(attTotal)} students</p>
             </div>
             <Link to="/attendance" className="shrink-0 flex items-center gap-1 text-xs font-medium transition" style={{ color: primary }}>
@@ -923,7 +961,7 @@ export default function Dashboard() {
         {canViewLeadership && (
           <>
             <div className="border-t border-slate-200 pt-2" />
-            <LeadershipPanel school={school} />
+            <LeadershipPanel school={school} dateFrom={dateFrom} dateTo={dateTo} rangeLabel={rangeLabel} />
           </>
         )}
         </>)}
@@ -1272,13 +1310,17 @@ function riskColor(pct) {
   return '#ef4444';
 }
 
-function LeadershipPanel({ school }) {
-  const [days, setDays] = useState(30);
+function LeadershipPanel({ school, dateFrom, dateTo, rangeLabel }) {
   const { primary } = useSchoolTheme();
 
+  // Was its own local 7/30/90-day selector — now driven by the Dashboard's
+  // shared global filter, same as every other widget. This also closes a
+  // real pre-existing bug: two of this panel's four sub-sections (Fee
+  // Exposure, Academic Health) used to silently ignore this selector
+  // entirely; there's only one filter now, so that's no longer possible.
   const { data: raw, isLoading, isError, refetch } = useQuery({
-    queryKey: ['analytics', 'leadership', days],
-    queryFn:  () => analyticsApi.leadership(days),
+    queryKey: ['analytics', 'leadership', dateFrom, dateTo],
+    queryFn:  () => analyticsApi.leadership({ dateFrom, dateTo }),
     staleTime: 5 * 60_000,
     retry: false,   // plan upgrade error should surface immediately, not retry
   });
@@ -1333,26 +1375,11 @@ function LeadershipPanel({ school }) {
           <div>
             <h2 className="text-sm font-semibold text-slate-800">Leadership Analytics</h2>
             <p className="text-xs text-slate-400">
-              {data?.meta?.since ? `From ${new Date(data.meta.since).toLocaleDateString('en-GB', { day:'numeric', month:'short' })}` : 'Loading…'}
+              {isLoading ? 'Loading…' : rangeLabel === 'Lifetime' ? 'Lifetime' : `Last ${rangeLabel.toLowerCase()}`}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {/* Period selector */}
-          <div className="flex bg-slate-100 rounded-lg p-0.5 gap-0.5">
-            {[7, 30, 90].map(d => (
-              <button
-                key={d}
-                onClick={() => setDays(d)}
-                className={`px-2.5 py-1 text-xs rounded-md font-medium transition ${
-                  days === d ? 'bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                }`}
-                style={days === d ? { color: primary } : {}}
-              >
-                {d}d
-              </button>
-            ))}
-          </div>
           <button
             onClick={() => refetch()}
             className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 transition"

@@ -28,6 +28,12 @@ const router = express.Router();
 const PLAN   = planGate('analytics');
 const MODGATE = moduleGate('reports');
 
+// "Lifetime" for _computeLeadershipSnapshot's days-based window — the
+// function only ever does since.setDate(since.getDate() - days), so a
+// far-past lookback is functionally equivalent to "no lower bound" without
+// needing a second code path through the aggregations below.
+const LIFETIME_DAYS = 36500; // ~100 years
+
 /* ────────────────────────────────────────────────────────────
    Runs the 4 leadership aggregations for ONE school. Pure w.r.t.
    its schoolId argument — not derived from req — so it can be
@@ -98,7 +104,11 @@ async function _computeLeadershipSnapshot(schoolId, days) {
       // status !== 'voided' — a voided invoice's balance/total/amountPaid
       // are left untouched by the void action, so a stale positive balance
       // would otherwise still count toward outstanding fee exposure.
-      { $match: { schoolId, balance: { $gt: 0 }, status: { $ne: 'voided' } } },
+      // createdAt >= since scopes this to invoices raised within the
+      // selected window — "new fee exposure introduced this period" — so
+      // the panel actually moves when the days/date filter changes, unlike
+      // before, when it silently ignored the selector entirely.
+      { $match: { schoolId, balance: { $gt: 0 }, status: { $ne: 'voided' }, createdAt: { $gte: since } } },
       {
         $group: {
           _id:              null,
@@ -151,7 +161,11 @@ async function _computeLeadershipSnapshot(schoolId, days) {
        Published grades → weighted avg per student → class avg.
        Shows how each class is performing academically.           */
     tenantModel('grades', { schoolId }).aggregate([
-      { $match: { schoolId, isPublished: true } },
+      // createdAt >= since — same fix as Fee Exposure above: this
+      // aggregation previously ignored the days/date window entirely,
+      // always showing all-time published grades regardless of the
+      // selector. Now scoped to grades recorded within the selected period.
+      { $match: { schoolId, isPublished: true, createdAt: { $gte: since } } },
       {
         $group: {
           _id:              { classId: '$classId', studentId: '$studentId' },
@@ -311,12 +325,26 @@ function _combineSnapshots(perSchool) {
 /* ────────────────────────────────────────────────────────────
    GET /api/analytics/leadership
    Query params:
-     days  — lookback window in days (7 | 30 | 90, default 30)
+     dateTo   — present whenever the caller uses the dashboard's global
+                date-range filter (always "today" today, but sent
+                explicitly so its absence is unambiguous)
+     dateFrom — the lower bound; omitted specifically means "lifetime"
+                (no lower bound), not "use the default"
+     days     — legacy fallback (7 | 30 | 90, default 30), only consulted
+                when dateTo is absent entirely (no caller sends this
+                anymore, kept for safety)
    ─────────────────────────────────────────────────────────── */
 router.get('/leadership', authMiddleware, PLAN, MODGATE, rbac('analytics', 'read'), async (req, res) => {
   try {
-    const rawDays = parseInt(req.query.days) || 30;
-    const days    = [7, 30, 90].includes(rawDays) ? rawDays : 30;
+    let days;
+    if (req.query.dateTo) {
+      days = req.query.dateFrom
+        ? Math.max(1, Math.ceil((Date.now() - new Date(req.query.dateFrom).getTime()) / 86400000))
+        : LIFETIME_DAYS;
+    } else {
+      const rawDays = parseInt(req.query.days) || 30;
+      days = [7, 30, 90].includes(rawDays) ? rawDays : 30;
+    }
 
     const snapshot = await _computeLeadershipSnapshot(req.jwtUser.schoolId, days);
     return ok(res, snapshot);

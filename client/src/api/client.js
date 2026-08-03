@@ -711,8 +711,11 @@ export const growthProfile = {
 };
 
 export const analytics = {
-  /** Leadership snapshot: attendance risk, fee exposure, behaviour, academic health */
-  leadership: (days = 30) => _get('/analytics/leadership', { days }),
+  /** Leadership snapshot: attendance risk, fee exposure, behaviour, academic
+   *  health. { dateFrom, dateTo } — dateFrom omitted means "lifetime" (no
+   *  lower bound); _get() already drops null/'' params from the query
+   *  string, so passing dateFrom: null naturally omits it. */
+  leadership: ({ dateFrom, dateTo } = {}) => _get('/analytics/leadership', { dateFrom, dateTo }),
 };
 
 export const billing = {
