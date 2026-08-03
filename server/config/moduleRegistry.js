@@ -17,7 +17,8 @@
      key       — matches the key used in role_permissions collection
                   and in the Sidebar's moduleConfig list
      label     — human-readable name shown in R&P UI
-     section   — grouping header: 'Academic' | 'Operations' | 'Insights' | 'System'
+     section   — grouping header: 'Academic Management' | 'Student Services' |
+                  'Operations' | 'Communication' | 'Analytics' | 'Administration'
      subs      — array of { key, label } defining the checkbox rows in R&P
                  sub.key is stored as `${mod.key}__${sub.key}` in modulePermissions
 
@@ -48,7 +49,7 @@
 
 const MODULE_REGISTRY = [
   /* ── Academic ─────────────────────────────────────────── */
-  { key: 'students', label: 'Students', section: 'Academic', icon: 'GraduationCap', navRoute: '/students', navOrder: 0, subs: [
+  { key: 'students', label: 'Students', section: 'Academic Management', icon: 'GraduationCap', navRoute: '/students', navOrder: 0, subs: [
     { key: 'list',    label: 'View Student List' },
     { key: 'profile', label: 'View Student Profile' },
     { key: 'create',  label: 'Add Student' },
@@ -57,7 +58,7 @@ const MODULE_REGISTRY = [
     { key: 'export',  label: 'Export Students (CSV)' },
     { key: 'import',  label: 'Import Students (CSV)' },
   ]},
-  { key: 'teachers', label: 'Teachers', section: 'Academic', icon: 'Users', navRoute: '/teachers', navOrder: 1, subs: [
+  { key: 'teachers', label: 'Teachers', section: 'Academic Management', icon: 'Users', navRoute: '/teachers', navOrder: 1, subs: [
     { key: 'list',   label: 'View Teacher List' },
     { key: 'detail', label: 'View Teacher Profile' },
     { key: 'create', label: 'Add Teacher' },
@@ -66,7 +67,7 @@ const MODULE_REGISTRY = [
     { key: 'export', label: 'Export Teachers (CSV)' },
     { key: 'import', label: 'Import Teachers (CSV)' },
   ]},
-  { key: 'classes', label: 'Classes & Streams', section: 'Academic', icon: 'BookOpen', navRoute: '/classes', navLabel: 'Classes', navOrder: 2, subs: [
+  { key: 'classes', label: 'Classes & Streams', section: 'Academic Management', icon: 'BookOpen', navRoute: '/classes', navLabel: 'Classes', navOrder: 2, subs: [
     { key: 'view',    label: 'View Classes' },
     { key: 'create',  label: 'Create Class' },
     { key: 'edit',    label: 'Edit Class' },
@@ -75,13 +76,13 @@ const MODULE_REGISTRY = [
     { key: 'import',  label: 'Import Classes (CSV)' },
     { key: 'section', label: 'Manage Sections & Streams' },
   ]},
-  { key: 'attendance', label: 'Attendance', section: 'Academic', icon: 'CheckSquare', navRoute: '/attendance', navOrder: 4, subs: [
+  { key: 'attendance', label: 'Attendance', section: 'Academic Management', icon: 'CheckSquare', navRoute: '/attendance', navOrder: 4, subs: [
     { key: 'view',   label: 'View Register' },
     { key: 'mark',   label: 'Mark Attendance' },
     { key: 'edit',   label: 'Edit Records' },
     { key: 'export', label: 'Export / Print Register' },
   ]},
-  { key: 'timetable', label: 'Timetable', section: 'Academic', icon: 'Calendar', navRoute: '/timetable', navOrder: 3, subs: [
+  { key: 'timetable', label: 'Timetable', section: 'Academic Management', icon: 'Calendar', navRoute: '/timetable', navOrder: 3, subs: [
     { key: 'view',          label: 'View Timetable' },
     { key: 'edit',          label: 'Edit Timetable' },
     { key: 'rooms',         label: 'Manage Rooms' },
@@ -90,20 +91,20 @@ const MODULE_REGISTRY = [
     { key: 'import',        label: 'Import Timetable (CSV)' },
     { key: 'export',        label: 'Export Timetable (CSV)' },
   ]},
-  { key: 'subjects', label: 'Subjects', section: 'Academic', icon: 'Library', navRoute: '/subjects', navOrder: 7, subs: [
+  { key: 'subjects', label: 'Subjects', section: 'Academic Management', icon: 'Library', navRoute: '/subjects', navOrder: 7, subs: [
     { key: 'view',   label: 'View Subjects & Departments' },
     { key: 'create', label: 'Create Subject / Department' },
     { key: 'edit',   label: 'Edit Subject' },
     { key: 'delete', label: 'Delete Subject' },
   ]},
-  { key: 'lessons', label: 'Lessons', section: 'Academic', icon: 'BookCheck', navRoute: '/lessons', navOrder: 14, subs: [
+  { key: 'lessons', label: 'Lessons', section: 'Academic Management', icon: 'BookCheck', navRoute: '/lessons', navOrder: 14, subs: [
     { key: 'view',     label: 'View Lesson Plans' },
     { key: 'create',   label: 'Create Lesson Plan' },
     { key: 'edit',     label: 'Edit Lesson Plan' },
     { key: 'delete',   label: 'Delete Lesson Plan' },
     { key: 'coverage', label: 'Mark Lesson Coverage' },
   ]},
-  { key: 'grades', label: 'Grades & Marks', section: 'Academic', icon: 'FileText', navRoute: '/exams', navLabel: 'Exams', navOrder: 5, subs: [
+  { key: 'grades', label: 'Grades & Marks', section: 'Academic Management', icon: 'FileText', navRoute: '/exams', navLabel: 'Exams', navOrder: 5, subs: [
     { key: 'view_grades',      label: 'View Grades & Marks' },
     { key: 'enter_marks',      label: 'Enter / Edit Marks' },
     { key: 'mark_submissions', label: 'Review / Approve Mark Submissions' },
@@ -111,22 +112,22 @@ const MODULE_REGISTRY = [
     { key: 'report_generate',  label: 'Generate / Publish Report Cards' },
     { key: 'export',           label: 'Export Grades (CSV)' },
   ]},
-  { key: 'exams', label: 'Exams', section: 'Academic', navGroupKey: 'grades', subs: [
+  { key: 'exams', label: 'Exams', section: 'Academic Management', navGroupKey: 'grades', subs: [
     { key: 'view',    label: 'View Exams & Results' },
     { key: 'create',  label: 'Create / Edit Exam' },
     { key: 'lock',    label: 'Lock / Unlock Exam' },
     { key: 'results', label: 'Enter Exam Results' },
     { key: 'delete',  label: 'Delete Exam' },
   ]},
-  { key: 'assessment', label: 'Assessment Scheduling', section: 'Academic', navGroupKey: 'grades', subs: [
+  { key: 'assessment', label: 'Assessment Scheduling', section: 'Academic Management', navGroupKey: 'grades', subs: [
     { key: 'lock', label: 'Lock / Unlock Assessment Schedule' },
   ]},
-  { key: 'report_cards', label: 'Report Card Settings', section: 'Academic', icon: 'FileBarChart2', navRoute: '/report-cards', navLabel: 'Report Cards', navOrder: 6, subs: [
+  { key: 'report_cards', label: 'Report Card Settings', section: 'Academic Management', icon: 'FileBarChart2', navRoute: '/report-cards', navLabel: 'Report Cards', navOrder: 6, subs: [
     { key: 'draft_comments',      label: 'Manage Draft Comments' },
     { key: 'workflow',            label: 'Configure Approval Workflow' },
     { key: 'publication_policy',  label: 'Configure Publication Policy' },
   ]},
-  { key: 'elearning', label: 'eLearning', section: 'Academic', icon: 'MonitorPlay', navRoute: '/elearning', navOrder: 15, subs: [
+  { key: 'elearning', label: 'eLearning', section: 'Academic Management', icon: 'MonitorPlay', navRoute: '/elearning', navOrder: 15, subs: [
     { key: 'view',   label: 'View Courses & Resources' },
     { key: 'create', label: 'Create / Upload Content' },
     { key: 'edit',   label: 'Edit Content' },
@@ -135,7 +136,7 @@ const MODULE_REGISTRY = [
   ]},
 
   /* ── Operations ───────────────────────────────────────── */
-  { key: 'admissions', label: 'Admissions', section: 'Operations', icon: 'ClipboardList', navRoute: '/admissions', navOrder: 8, subs: [
+  { key: 'admissions', label: 'Admissions', section: 'Student Services', icon: 'ClipboardList', navRoute: '/admissions', navOrder: 8, subs: [
     { key: 'view',   label: 'View Pipeline' },
     { key: 'create', label: 'Add Applicant' },
     { key: 'edit',   label: 'Edit Applicant Details' },
@@ -143,7 +144,7 @@ const MODULE_REGISTRY = [
     { key: 'delete', label: 'Delete Applicant' },
     { key: 'export', label: 'Export Applicants (CSV)' },
   ]},
-  { key: 'behaviour', label: 'Behaviour (BPS)', section: 'Operations', icon: 'Scale', navRoute: '/behaviour', navLabel: 'Behaviour', navOrder: 9, subs: [
+  { key: 'behaviour', label: 'Behaviour (BPS)', section: 'Student Services', icon: 'Scale', navRoute: '/behaviour', navLabel: 'Behaviour', navOrder: 9, subs: [
     { key: 'view',   label: 'View Incidents & BPS' },
     { key: 'create', label: 'Record Incident / Award Points' },
     { key: 'edit',   label: 'Edit Records' },
@@ -160,12 +161,12 @@ const MODULE_REGISTRY = [
     { key: 'import',         label: 'Import Finance Data (CSV)' },
     { key: 'mpesa',          label: 'Configure M-Pesa Integration' },
   ]},
-  { key: 'messages', label: 'Messages', section: 'Operations', icon: 'MessageSquare', navRoute: '/messages', navOrder: 11, subs: [
+  { key: 'messages', label: 'Messages', section: 'Communication', icon: 'MessageSquare', navRoute: '/messages', navOrder: 11, subs: [
     { key: 'view',   label: 'View Messages' },
     { key: 'send',   label: 'Send Messages' },
     { key: 'delete', label: 'Delete Messages' },
   ]},
-  { key: 'events', label: 'Events & Calendar', section: 'Operations', icon: 'Calendar', navRoute: '/events', navLabel: 'Events', navOrder: 12, subs: [
+  { key: 'events', label: 'Events & Calendar', section: 'Communication', icon: 'Calendar', navRoute: '/events', navLabel: 'Events', navOrder: 12, subs: [
     { key: 'view',   label: 'View Events' },
     { key: 'create', label: 'Create Event' },
     { key: 'edit',   label: 'Edit Event' },
@@ -180,7 +181,7 @@ const MODULE_REGISTRY = [
     { key: 'payroll_export', label: 'Export Payroll (CSV)' },
     { key: 'documents',      label: 'Manage Staff Documents' },
   ]},
-  { key: 'resources', label: 'Resources', section: 'Operations', icon: 'Link2', navRoute: '/resources', navOrder: 17, subs: [
+  { key: 'resources', label: 'Resources', section: 'Communication', icon: 'Link2', navRoute: '/resources', navOrder: 17, subs: [
     { key: 'read',   label: 'View Resources' },
     { key: 'create', label: 'Share a Resource' },
     { key: 'update', label: 'Edit a Resource' },
@@ -199,13 +200,13 @@ const MODULE_REGISTRY = [
     { key: 'assign',   label: 'Assign Students to Routes' },
     { key: 'delete',   label: 'Delete Routes / Vehicles' },
   ]},
-  { key: 'hostel', label: 'Hostel', section: 'Operations', icon: 'BedDouble', navRoute: '/hostel', navOrder: 19, subs: [
+  { key: 'hostel', label: 'Hostel', section: 'Student Services', icon: 'BedDouble', navRoute: '/hostel', navOrder: 19, subs: [
     { key: 'view',     label: 'View Rooms & Allocations' },
     { key: 'manage',   label: 'Add / Edit Rooms & Blocks' },
     { key: 'assign',   label: 'Assign Students to Rooms' },
     { key: 'delete',   label: 'Delete Rooms / Blocks' },
   ]},
-  { key: 'medical', label: 'Medical Centre', section: 'Operations', icon: 'HeartPulse', navRoute: '/medical', navOrder: 20, subs: [
+  { key: 'medical', label: 'Medical Centre', section: 'Student Services', icon: 'HeartPulse', navRoute: '/medical', navOrder: 20, subs: [
     { key: 'view',    label: 'View Clinic Visits' },
     { key: 'record',  label: 'Record Clinic Visit' },
     { key: 'delete',  label: 'Delete Clinic Visit' },
@@ -221,7 +222,7 @@ const MODULE_REGISTRY = [
   ]},
 
   /* ── Insights ─────────────────────────────────────────── */
-  { key: 'growth_profile', label: 'Growth Profile', section: 'Insights', subs: [
+  { key: 'growth_profile', label: 'Growth Profile', section: 'Student Services', subs: [
     { key: 'view',            label: 'View Growth Profiles' },
     { key: 'add_records',     label: 'Add Records (Leadership / Activities / Service / Awards)' },
     { key: 'edit_records',    label: 'Edit Own Records' },
@@ -231,16 +232,16 @@ const MODULE_REGISTRY = [
     { key: 'aspirations',     label: 'Edit Aspirations' },
     { key: 'verify',          label: 'Verify / Approve Records' },
   ]},
-  { key: 'reports', label: 'Reports & Analytics', section: 'Insights', icon: 'TrendingUp', navRoute: '/reports', navOrder: 22, subs: [
+  { key: 'reports', label: 'Reports & Analytics', section: 'Analytics', icon: 'TrendingUp', navRoute: '/reports', navOrder: 22, subs: [
     { key: 'view',   label: 'View Reports' },
     { key: 'export', label: 'Export Reports (CSV)' },
   ]},
-  { key: 'analytics', label: 'Analytics Dashboard', section: 'Insights', subs: [
+  { key: 'analytics', label: 'Analytics Dashboard', section: 'Analytics', subs: [
     { key: 'view', label: 'View Leadership Analytics' },
   ]},
 
   /* ── System ───────────────────────────────────────────── */
-  { key: 'settings', label: 'Settings', section: 'System', subs: [
+  { key: 'settings', label: 'Settings', section: 'Administration', subs: [
     { key: 'school',      label: 'Edit School Settings' },
     { key: 'users',       label: 'Manage Users / Invites' },
     { key: 'permissions', label: 'Manage Roles & Permissions' },

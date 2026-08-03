@@ -6,6 +6,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.35.0] — 2026-08-03 — refactor(nav): Category taxonomy reorg + marketing module counts now derived
+
+Built directly on v5.34.0's registry unification — the point of collapsing Sidebar/Settings onto one registry was to make exactly this kind of category change a single coordinated edit instead of a three-list sync.
+
+### Changed
+- `server/config/moduleRegistry.js` — `section` values reorganized from `Academic | Operations | Insights | System` into six categories: **Academic Management** (same 12 keys as `Academic`), **Student Services** (admissions, behaviour, hostel, medical + growth_profile moved in from Insights), **Operations** (narrowed to finance/hr/library/transport/inventory), **Communication** (messages, events, resources, new), **Analytics** (reports, analytics — renamed from `Insights`), **Administration** (settings — renamed from `System`).
+- `Sidebar.jsx`'s `SECTION_ORDER` and `SettingsPage.jsx`'s `SEC_BADGE` updated in the same change — a section rename without updating `SECTION_ORDER` silently drops every module in it from the sidebar for every user; verified programmatically that no `navRoute`-bearing entry's section is missing from `SECTION_ORDER` after the edit. The hardcoded Settings/Changelog/Help Centre nav block was relabeled "Administration" to match.
+- "Portals" (Student Portal / Parent Portal) has no RBAC key and can't be a `section` value — it already exists as its own group on `PlatformPage.jsx`'s independent marketing `GROUPS`, which is where it stays.
+- The literal "24 modules" text (9 occurrences across `Landing.jsx`/`PlatformPage.jsx`/`PricingPage.jsx`) now derives from each page's own data instead of a typed number: `PlatformPage.jsx` computes `MODULE_COUNT` from its own `GROUPS` (not `ECOSYSTEM_NODES` — the two lists are independently curated with different membership and both coincidentally total 24 today); `Landing.jsx` and `PricingPage.jsx` (which has no list of its own) both use `ECOSYSTEM_NODES.length`. `client/index.html`/`llms.txt` are plain static files with no templating available and stay hand-maintained — largely inert for real SEO anyway, since `prerender.mjs` overwrites `dist/index.html`'s `/` route with the actual rendered (and now derived) `Landing.jsx` output before every deploy.
+
+### Verified
+- Both derived counts recomputed to 24 via a Node script against the live source files — identical to the literal text they replaced, confirming no visible content change today. A separate script confirmed zero `navRoute`-bearing registry entries fall outside the new `SECTION_ORDER`. Production client build and full Jest suite (125 suites / 1182 tests) pass unchanged.
+
+---
+
 ## [v5.34.0] — 2026-08-03 — refactor(nav): Module registry unification — Sidebar/Settings read one source of truth
 
 A proposed module-category reorganization prompted a risk assessment first, which found that three independent, hand-maintained lists described "what modules exist" (`server/config/moduleRegistry.js` for RBAC, `Sidebar.jsx`'s `CONFIGURABLE_MODULES` for nav, and the marketing pages for public copy) — and that this exact duplication had already caused two real drift bugs earlier in the session (a landing-page module silently missing from its icon grid; a dangling module reference). The registry and Sidebar's list could be unified without conflating domains; the marketing lists stay independent since they bundle/rename for a non-technical audience and include non-RBAC concepts (Portals) with no permission key at all.

@@ -7,6 +7,7 @@ import { fadeUp, stagger, VP } from '@/utils/animations';
 import PublicNav from '@/components/landing/PublicNav';
 import PublicFooter from '@/components/landing/PublicFooter';
 import BreadcrumbSchema from '@/components/landing/BreadcrumbSchema';
+import { ECOSYSTEM_NODES } from '@/data/landingData';
 
 const TIERS = [
   {
@@ -14,7 +15,7 @@ const TIERS = [
     price: 250,
     desc: 'Full platform for administration and teaching staff.',
     features: [
-      'All 24 modules (admin + teacher access)',
+      `All ${ECOSYSTEM_NODES.length} modules (admin + teacher access)`,
       'Attendance, Grades, Finance, Admissions',
       'Report card generation (CBC, CAIE, IB, custom)',
       'M-Pesa Paybill integration',

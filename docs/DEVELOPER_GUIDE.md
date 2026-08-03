@@ -45,6 +45,7 @@
 37. [Medical Centre — Module 1 (v5.32.0)](#37-medical-centre--module-1-v5320)
 38. [Inventory — Module 2 (v5.33.0)](#38-inventory--module-2-v5330)
 39. [Module Registry Unification — Sidebar/Settings Nav Source of Truth (v5.34.0)](#39-module-registry-unification--sidebarsettings-nav-source-of-truth-v5340)
+40. [Category Taxonomy Reorg + Marketing Count Derivation (v5.35.0)](#40-category-taxonomy-reorg--marketing-count-derivation-v5350)
 
 ---
 
@@ -3622,3 +3623,37 @@ A session created before this deploy has no `moduleRegistry` (the app never re-f
 ### Verified
 
 Registry order/icons/labels/routes were cross-checked programmatically against the pre-existing `CONFIGURABLE_MODULES` array, not assumed: a Node script derived `{key, to, label, section}` from the new registry fields and diffed it against the old hardcoded array — 23/23 entries identical, including the 6 `navLabel` overrides and all 23 `navOrder` values. Icon correctness follows from construction (same `lucide-react` export names, same package) rather than a separate check. Production client build passes; full Jest suite (125 suites / 1182 tests) passes unchanged. A true end-to-end login/browser render could not be exercised — this environment has no `MONGODB_URI` configured, so no session can actually be issued by the server; this is a pre-existing environment constraint, not something this change introduced.
+
+---
+
+## 40. Category Taxonomy Reorg + Marketing Count Derivation (v5.35.0)
+
+### Taxonomy reorg
+
+Built directly on §39's unification — the whole point of collapsing Sidebar/Settings onto one registry was to make a category change like this a single-file edit instead of a three-list sync. `server/config/moduleRegistry.js`'s `section` values changed from `Academic | Operations | Insights | System` to `Academic Management | Student Services | Operations | Communication | Analytics | Administration`:
+
+| New section | Keys | Notes |
+|---|---|---|
+| Academic Management | students, teachers, classes, attendance, timetable, subjects, lessons, grades, exams, assessment, report_cards, elearning | Same 12 keys as the old `Academic`, renamed only |
+| Student Services | admissions, behaviour, hostel, medical, growth_profile | 4 moved from `Operations`, `growth_profile` moved from `Insights` |
+| Operations | finance, hr, library, transport, inventory | Narrowed from 12 to 5 — lost the 4 above plus 3 to Communication |
+| Communication | messages, events, resources | Moved from `Operations` |
+| Analytics | reports, analytics | Renamed from `Insights`, `growth_profile` left this section |
+| Administration | settings | Renamed from `System` |
+
+`Sidebar.jsx`'s `SECTION_ORDER` changed to `['Academic Management', 'Student Services', 'Operations', 'Communication', 'Analytics']` in the **same change** as the registry edit — a section rename without updating `SECTION_ORDER` silently drops every module in that section from the sidebar for every user (no error, no console warning; this is the exact hard-dependency the pre-implementation risk assessment flagged). Verified programmatically after the edit: every section value used by a `navRoute`-bearing registry entry has a matching `SECTION_ORDER` entry (script diff, zero silent-drop candidates). The hardcoded "System" nav block (Settings/Changelog/Help Centre — none of which are `navRoute`-driven, so none go through `SECTION_ORDER` at all) was separately relabeled `Administration`. `SettingsPage.jsx`'s `SEC_BADGE` color map was updated to the same 5 new section names (`Student Services`/`Communication` are new colors; the other 3 reuse their prior color under the new name) — a badge miss here is cosmetic only (falls back to gray), unlike the `SECTION_ORDER` miss.
+
+**Portals is not a `section` value anywhere in this codebase.** Student Portal / Parent Portal have no RBAC key at all — they're separate app shells (`/student-dashboard`, `/parent-dashboard`), not permissioned modules, so there is nothing in `moduleRegistry.js` to assign to a `Portals` section. The category already exists on the one surface where it's meaningful — `PlatformPage.jsx`'s own independent `GROUPS` array already has a `Portals` group — and stays there.
+
+### Marketing module counts now derive from their own data, not a typed literal
+
+The "24 modules" figure appeared as a hardcoded literal in 9 places across `Landing.jsx`, `PlatformPage.jsx`, and `PricingPage.jsx` — exactly the class of bug already hit twice this session (a landing-page module missing from its icon grid; a stale count after adding modules). Each page now computes its own count instead of a shared "the" module count, because `PlatformPage.jsx`'s `GROUPS` and `landingData.js`'s `ECOSYSTEM_NODES` are two independently curated lists that both happen to total 24 today but have different membership (`GROUPS` includes `Academic Records`/`Student Portal`/`Parent Portal`, none of which exist in `ECOSYSTEM_NODES`; `ECOSYSTEM_NODES` includes `Growth Profile`/`Analytics` as their own nodes, which `GROUPS` doesn't list separately) — inventing a dependency between them would either be wrong today or break the moment one is edited without the other, the opposite of the goal:
+- `PlatformPage.jsx` — new `MODULE_COUNT = GROUPS.flatMap(g => g.nodes).length`, used in its `<Helmet>` title/description/og:title and its hero H1/section badge. Derived from its own `GROUPS`, not `ECOSYSTEM_NODES` (which it already imports for icon lookups only) — so the number always matches what's actually listed on that page, not a different page's list.
+- `Landing.jsx` — its 3 literal mentions now read `{ECOSYSTEM_NODES.length}` (already imported).
+- `PricingPage.jsx` — had no module list of its own; now imports `ECOSYSTEM_NODES` from `landingData.js` and uses `` `All ${ECOSYSTEM_NODES.length} modules...` ``.
+
+`client/index.html` and `client/public/llms.txt` still say "24" as a hand-typed literal — both are plain static files with no build-time templating available to them, so they cannot derive from anything. `client/index.html`'s meta tags are additionally close to inert for real SEO purposes: `client/scripts/prerender.mjs` (§36) overwrites `dist/index.html` for the `/` route with Puppeteer's fully-rendered `Landing.jsx` output — including its now-derived count — before every deploy, so crawlers see the derived number regardless of the source file's static text. The source file's literal "24" was left as-is (still numerically correct) rather than silently ignored; future drift here can only be prevented by process, not code.
+
+### Verified
+
+Both derivations recomputed to 24 — identical to the literal text they replaced (`GROUPS.flatMap(...).length` and `ECOSYSTEM_NODES.length` both checked via Node script against the live source files) — confirming no visible content change today while removing the typed-literal drift risk going forward. Production client build and full Jest suite (1182 tests) both pass unchanged.

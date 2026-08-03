@@ -27,7 +27,7 @@ import useAuthStore from '@/store/auth.js';
 import { auth as authApi } from '@/api/client.js';
 import { deriveNavModules } from '@/config/moduleNav.js';
 
-const SECTION_ORDER = ['Academic', 'Operations', 'Insights'];
+const SECTION_ORDER = ['Academic Management', 'Student Services', 'Operations', 'Communication', 'Analytics'];
 
 /* Build nav sections from saved moduleConfig (or defaults if unset).
  * userRole and userPermissions come from the auth session.
@@ -72,7 +72,7 @@ function computeNav(configurableModules, moduleConfig, userRole, userPermissions
       .filter(sec => grouped[sec]?.length)
       .map(sec => ({ label: sec, items: grouped[sec] })),
     {
-      label: 'System',
+      label: 'Administration',
       items: [
         { to: '/settings',  Icon: Settings,   label: 'Settings'    },
         { to: '/changelog', Icon: Tag,        label: 'Changelog'   },

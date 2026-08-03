@@ -4797,9 +4797,11 @@ function NotificationsTab() {
    ══════════════════════════════════════════════════════════════ */
 
 const SEC_BADGE = {
-  Academic:   'bg-blue-50 text-blue-700 border-blue-200',
-  Operations: 'bg-violet-50 text-violet-700 border-violet-200',
-  Insights:   'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'Academic Management': 'bg-blue-50 text-blue-700 border-blue-200',
+  'Student Services':    'bg-amber-50 text-amber-700 border-amber-200',
+  Operations:            'bg-violet-50 text-violet-700 border-violet-200',
+  Communication:         'bg-cyan-50 text-cyan-700 border-cyan-200',
+  Analytics:             'bg-emerald-50 text-emerald-700 border-emerald-200',
 };
 
 // Only registry keys that correspond to a real Sidebar nav item are

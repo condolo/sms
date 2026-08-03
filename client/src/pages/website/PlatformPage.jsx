@@ -59,14 +59,19 @@ const GROUPS = [
   { label: 'Portals',    nodes: ['Student Portal', 'Parent Portal'] },
 ];
 
+// Derived from GROUPS itself (not ECOSYSTEM_NODES, a different, independently
+// curated list) so this page's own "N modules" copy can never drift from what
+// it actually lists below — the exact class of bug this was introduced to fix.
+const MODULE_COUNT = GROUPS.flatMap(g => g.nodes).length;
+
 export default function PlatformPage() {
   return (
     <div className="min-h-screen bg-white text-slate-900 antialiased">
       <Helmet>
-        <title>Platform Overview | Msingi — 24 Modules, One Record</title>
-        <meta name="description" content="24 connected modules. One institutional record. Attendance, grades, finance, admissions, report cards, and parent portals — all connected." />
+        <title>{`Platform Overview | Msingi — ${MODULE_COUNT} Modules, One Record`}</title>
+        <meta name="description" content={`${MODULE_COUNT} connected modules. One institutional record. Attendance, grades, finance, admissions, report cards, and parent portals — all connected.`} />
         <link rel="canonical" href="https://msingi.io/platform" />
-        <meta property="og:title" content="Msingi Platform — 24 Modules, One Record" />
+        <meta property="og:title" content={`Msingi Platform — ${MODULE_COUNT} Modules, One Record`} />
         <meta property="og:url" content="https://msingi.io/platform" />
       </Helmet>
 
@@ -80,7 +85,7 @@ export default function PlatformPage() {
             <motion.div initial="hidden" animate="visible" variants={stagger(0.08)}>
               <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-6">Platform Overview</motion.p>
               <motion.h1 variants={fadeUp} className="text-4xl sm:text-5xl lg:text-[56px] font-bold tracking-tighter text-white leading-[1.06] mb-6">
-                24 modules. One record.{' '}
+                {MODULE_COUNT} modules. One record.{' '}
                 <span className="text-slate-400">No reconciliation.</span>
               </motion.h1>
               <motion.p variants={fadeUp} className="text-lg text-slate-400 leading-relaxed max-w-2xl mb-10">
@@ -106,7 +111,7 @@ export default function PlatformPage() {
           </div>
           <div className="relative max-w-6xl mx-auto px-6 lg:px-8">
             <motion.div initial="hidden" whileInView="visible" viewport={VP} variants={stagger()}>
-              <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">24 modules</motion.p>
+              <motion.p variants={fadeUp} className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">{MODULE_COUNT} modules</motion.p>
               <motion.h2 variants={fadeUp} className="text-2xl font-bold text-slate-900 mb-12">Organised across four functional areas.</motion.h2>
               <div className="grid sm:grid-cols-2 gap-8">
                 {GROUPS.map(group => (
