@@ -423,13 +423,17 @@ export default function TimetablePage() {
             </div>
           </div>
 
-          {/* View tabs — active tab "bridges" into the white content below */}
-          <div className="flex gap-0.5 mt-5">
+          {/* View tabs — active tab "bridges" into the white content below.
+              overflow-x-auto here scrolls within its own bounds rather than
+              being clipped by the header's overflow-hidden (needed for the
+              decorative circles above) — same convention as SettingsPage.jsx
+              and InventoryPage.jsx's tab bars. */}
+          <div className="flex gap-0.5 mt-5 overflow-x-auto">
             {VIEWS.filter(v => !v.adminOnly || canEdit).map(v => (
               <button
                 key={v.id}
                 onClick={() => setActiveView(v.id)}
-                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold transition rounded-t-lg ${
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold transition rounded-t-lg whitespace-nowrap shrink-0 ${
                   activeView === v.id
                     ? 'bg-white text-indigo-700 shadow-sm'
                     : 'text-white/90 hover:text-white hover:bg-white/15'

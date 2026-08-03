@@ -35,13 +35,13 @@ export default function SubjectsPage() {
     <div className="min-h-full bg-slate-50">
       {/* Tab bar */}
       <div className="bg-white border-b border-slate-200 px-6">
-        <nav className="flex gap-0.5 -mb-px">
+        <nav className="flex gap-0.5 -mb-px overflow-x-auto">
           {TABS.map(({ id, label, Icon }) => (
             <button
               key={id}
               onClick={() => setTab(id)}
               className={clsx(
-                'flex items-center gap-2 px-4 py-3.5 text-sm font-medium border-b-2 transition',
+                'flex items-center gap-2 px-4 py-3.5 text-sm font-medium border-b-2 transition whitespace-nowrap shrink-0',
                 tab === id
                   ? 'border-violet-600 text-violet-700'
                   : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300',

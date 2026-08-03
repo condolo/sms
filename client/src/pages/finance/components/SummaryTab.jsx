@@ -62,8 +62,9 @@ export default function SummaryTab({ fmtCurrency }) {
 
   return (
     <div className="space-y-6">
-      {/* KPI cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* KPI cards — grid-cols-1 below sm, same currency-fit reasoning as
+          the main Dashboard's KPI row */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <SummaryCard label="Total Invoiced"  value={fmtCurrency(totalInvoiced)}          colorIndex={0} icon={<FileText size={18} />} />
         <SummaryCard label="Fees Collected"  value={fmtCurrency(totalPaid)}              colorIndex={1} icon={<CheckCircle2 size={18} />} sub={`${collectionRate}% collection rate`} />
         <SummaryCard label="Outstanding"     value={fmtCurrency(totalBalance)}           colorIndex={2} icon={<BadgeDollarSign size={18} />} />

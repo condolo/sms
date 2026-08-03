@@ -57,7 +57,7 @@ ${p.notes ? `<div class="row"><span class="k">Notes</span><span class="v">${p.no
 
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
         {isLoading ? (
           <RowSkeleton count={6} />
         ) : isError ? (

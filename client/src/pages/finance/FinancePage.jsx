@@ -63,12 +63,12 @@ export default function FinancePage() {
         </div>
 
         {/* Tab nav */}
-        <div className="max-w-screen-2xl mx-auto mt-4 flex gap-1">
+        <div className="max-w-screen-2xl mx-auto mt-4 flex gap-1 overflow-x-auto">
           {TABS.map(t => (
             <button
               key={t.id}
               onClick={() => switchTab(t.id)}
-              className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+              className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 ${
                 tab === t.id
                   ? 'bg-slate-900 text-white'
                   : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'

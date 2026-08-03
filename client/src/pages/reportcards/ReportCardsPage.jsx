@@ -44,8 +44,9 @@ export default function ReportCardsPage() {
             </div>
           </div>
 
-          {/* ── Tab bar ── */}
-          <div className="flex gap-0.5 mt-5">
+          {/* ── Tab bar — overflow-x-auto scrolls within its own bounds
+              rather than being clipped by the header's overflow-hidden ── */}
+          <div className="flex gap-0.5 mt-5 overflow-x-auto">
             {TABS.map(t => {
               const Icon = t.icon;
               const active = tab === t.id;
@@ -53,7 +54,7 @@ export default function ReportCardsPage() {
                 <button
                   key={t.id}
                   onClick={() => setTab(t.id)}
-                  className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold transition rounded-t-lg ${
+                  className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold transition rounded-t-lg whitespace-nowrap shrink-0 ${
                     active
                       ? 'bg-white text-teal-700 shadow-sm'
                       : 'text-white/90 hover:text-white hover:bg-white/15'

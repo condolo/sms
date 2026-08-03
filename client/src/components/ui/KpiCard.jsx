@@ -114,7 +114,7 @@ export function KpiCard({
             </div>
           ) : (
             <>
-              <p className="text-2xl font-bold tabular-nums tracking-tight">{value ?? '—'}</p>
+              <p className="text-xl sm:text-2xl font-bold tabular-nums tracking-tight truncate" title={typeof value === 'string' ? value : undefined}>{value ?? '—'}</p>
               {sub && <p className="text-xs mt-0.5 truncate" style={{ opacity: 0.72 }}>{sub}</p>}
             </>
           )}
@@ -151,7 +151,7 @@ export function KpiCard({
           </div>
         ) : (
           <>
-            <p className="text-xl font-bold text-slate-800 tabular-nums leading-tight">{value ?? '—'}</p>
+            <p className="text-xl font-bold text-slate-800 tabular-nums leading-tight truncate" title={typeof value === 'string' ? value : undefined}>{value ?? '—'}</p>
             {sub && <p className="text-[11px] text-slate-400 mt-0.5 truncate">{sub}</p>}
           </>
         )}

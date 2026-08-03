@@ -55,7 +55,11 @@ export default function OverviewTab() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="space-y-5">
-      {/* Stats strip */}
+      {/* Stats strip — all-time, unlike the Dashboard's own Behaviour card
+          (a rolling N-day window scoped per class) — labelled so the two
+          reading different numbers for the same school is legible as
+          intentional, not a bug. */}
+      <p className="text-[11px] text-slate-400 -mb-1">All-time totals across every recorded incident</p>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {/* Merits/demerits keep semantic green/red; neutral cards use school theme */}
         <StatCard icon={<TrendingUp size={18} className="text-emerald-600" />}  label="Total Merits"    value={`+${totalMerits}`}  valueColor="text-emerald-600" bg="bg-emerald-50" />

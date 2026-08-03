@@ -352,7 +352,11 @@ export default function Dashboard() {
         )}
 
         {/* ── KPI Cards ─────────────────────────────────── */}
-        <div id="dashboard-kpi-row" className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* grid-cols-1 below sm — on a ~375-414px phone, 2 columns leaves too
+            little width for a currency value like "KES 10,106,800" (see
+            KpiCard.jsx's truncate/title fallback for whatever still doesn't
+            fit even at full card width) */}
+        <div id="dashboard-kpi-row" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {canViewStudents ? (
             <KpiCard
               variant="filled" colorIndex={0}
@@ -1497,6 +1501,7 @@ function LeadershipPanel({ school }) {
                 <ShieldAlert size={13} style={{ color: primary }} />
               </div>
               <span className="text-sm font-semibold text-slate-700">Behaviour</span>
+              <span className="text-[10px] text-slate-400">· last {days} days</span>
             </div>
             <Link to="/behaviour" className="text-xs transition flex items-center gap-1 font-medium" style={{ color: primary }}>
               View <ArrowRight size={11} />

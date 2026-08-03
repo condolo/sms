@@ -70,7 +70,7 @@ export default function OverdueTab({ fmtCurrency }) {
           <p className="text-xs text-slate-400 mt-1">All outstanding invoices are within their due dates.</p>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
           <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
             <h3 className="text-sm font-medium text-slate-700">
               {rows.length} overdue invoice{rows.length !== 1 ? 's' : ''}

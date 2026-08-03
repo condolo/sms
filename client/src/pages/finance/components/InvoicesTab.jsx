@@ -152,7 +152,7 @@ ${itemRows ? `<table><thead><tr><th>Description</th><th style="text-align:center
         )}
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
         {isLoading ? (
           <RowSkeleton count={6} />
         ) : isError ? (

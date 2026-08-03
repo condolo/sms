@@ -73,21 +73,24 @@ export default function AdmissionsPage() {
       {/* ── Page header ─────────────────────────────────────── */}
       <div className="bg-white border-b border-slate-200 px-6 py-5">
         <div className="max-w-screen-2xl mx-auto">
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
               <h1 className="text-xl font-semibold text-slate-900 tracking-tight">Admissions Pipeline</h1>
               <p className="text-sm text-slate-500 mt-0.5">
                 {totalApplications} total applicant{totalApplications !== 1 ? 's' : ''} across all stages
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            {/* overflow-x-auto — same convention as the stats strip below
+                (line ~130) — scrolls this row on narrow screens instead of
+                forcing the whole page to scroll horizontally */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 -mb-1">
               {/* View toggle */}
-              <div className="flex rounded-lg border border-slate-200 overflow-hidden bg-slate-50">
+              <div className="flex rounded-lg border border-slate-200 overflow-hidden bg-slate-50 shrink-0">
                 {[['kanban', 'Board'], ['list', 'List']].map(([v, label]) => (
                   <button
                     key={v}
                     onClick={() => setViewMode(v)}
-                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === v ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${viewMode === v ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                   >
                     {label}
                   </button>
@@ -95,7 +98,7 @@ export default function AdmissionsPage() {
               </div>
               <button
                 onClick={() => exportAdmissionsCSV(kanbanCols)}
-                className="flex items-center gap-1.5 border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-600 text-sm font-medium px-3 py-2 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-600 text-sm font-medium px-3 py-2 rounded-lg transition-colors whitespace-nowrap shrink-0"
                 title="Export applicants CSV"
               >
                 <Download size={14} />
@@ -103,7 +106,7 @@ export default function AdmissionsPage() {
               </button>
               <button
                 onClick={() => setShowStudentImport(true)}
-                className="flex items-center gap-1.5 border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-600 text-sm font-medium px-3 py-2 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-600 text-sm font-medium px-3 py-2 rounded-lg transition-colors whitespace-nowrap shrink-0"
                 title="Bulk import students from CSV"
               >
                 <Upload size={14} />
@@ -111,14 +114,14 @@ export default function AdmissionsPage() {
               </button>
               <button
                 onClick={() => setShowEnroll(true)}
-                className="flex items-center gap-1.5 border border-emerald-300 hover:border-emerald-400 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 border border-emerald-300 hover:border-emerald-400 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap shrink-0"
               >
                 <GraduationCap size={15} />
                 Enrol Student
               </button>
               <button
                 onClick={() => setShowAdd(true)}
-                className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap shrink-0"
               >
                 <UserPlus size={15} />
                 New Application

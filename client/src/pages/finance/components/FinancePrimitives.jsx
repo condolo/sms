@@ -33,7 +33,7 @@ export function SummaryCard({ label, value, sub, colorIndex = 0, accent, icon })
       >
         {icon}
       </div>
-      <p className="text-2xl font-bold text-slate-900 tabular-nums tracking-tight">{value}</p>
+      <p className="text-xl sm:text-2xl font-bold text-slate-900 tabular-nums tracking-tight truncate" title={typeof value === 'string' ? value : undefined}>{value}</p>
       {sub && <p className="text-xs text-slate-400 mt-0.5">{sub}</p>}
       <p className="text-xs font-medium text-slate-500 mt-3">{label}</p>
     </div>
