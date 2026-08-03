@@ -29,41 +29,50 @@ export const NAV_ICON_MAP = {
   HeartPulse, Boxes, TrendingUp,
 };
 
-/* Migration-safety net only — verbatim snapshot of the module list as it
- * existed before moduleRegistry.js became the source of truth. Used only
- * when session.moduleRegistry is absent, which happens for exactly one
- * reason: a session persisted to localStorage before this change deployed
- * (the app never re-fetches it in the background — see auth.js's /me route,
- * which is unused by the client). Every session created after deploy
- * (login, verify-otp, force-change, exchange, school-switch) carries
+/* Migration-safety net only — snapshot of the module list for sessions
+ * whose session.moduleRegistry is absent (a session persisted to
+ * localStorage before the registry-unification change deployed — the app
+ * never re-fetches it in the background; see auth.js's /me route, which
+ * is unused by the client). Every session created after deploy (login,
+ * verify-otp, force-change, exchange, school-switch) carries
  * moduleRegistry and uses deriveNavModules() below instead.
+ *
+ * IMPORTANT: `section` here must be kept in sync with
+ * moduleRegistry.js's current section values, not frozen at whatever
+ * they were when this array was written — a mismatch means Sidebar.jsx's
+ * SECTION_ORDER won't recognize the section and silently drops those
+ * modules for any fallback session (this happened for real: the 2026-08
+ * taxonomy reorg updated SECTION_ORDER but not this file, and every
+ * fallback-path session lost Academic Management/Student Services/
+ * Communication/Analytics entirely until it was caught and fixed).
+ *
  * Safe to delete once no pre-deploy session can still be active (longest
  * session lifetime — check SessionService's absoluteExpiry default).
  */
 export const FALLBACK_NAV_MODULES = [
-  { key: 'students',   to: '/students',   Icon: GraduationCap, label: 'Students',            section: 'Academic'   },
-  { key: 'teachers',   to: '/teachers',   Icon: Users,          label: 'Teachers',            section: 'Academic'   },
-  { key: 'classes',    to: '/classes',    Icon: BookOpen,        label: 'Classes',             section: 'Academic'   },
-  { key: 'timetable',  to: '/timetable',  Icon: Calendar,       label: 'Timetable',           section: 'Academic'   },
-  { key: 'attendance', to: '/attendance', Icon: CheckSquare,     label: 'Attendance',          section: 'Academic'   },
-  { key: 'grades',     to: '/exams',      Icon: FileText,        label: 'Exams',               section: 'Academic'   },
-  { key: 'report_cards', to: '/report-cards', Icon: FileBarChart2, label: 'Report Cards',       section: 'Academic'   },
-  { key: 'subjects',   to: '/subjects',   Icon: Library,         label: 'Subjects',            section: 'Academic'   },
-  { key: 'admissions', to: '/admissions', Icon: ClipboardList,  label: 'Admissions',          section: 'Operations' },
-  { key: 'behaviour',  to: '/behaviour',  Icon: Scale,          label: 'Behaviour',           section: 'Operations' },
+  { key: 'students',   to: '/students',   Icon: GraduationCap, label: 'Students',            section: 'Academic Management' },
+  { key: 'teachers',   to: '/teachers',   Icon: Users,          label: 'Teachers',            section: 'Academic Management' },
+  { key: 'classes',    to: '/classes',    Icon: BookOpen,        label: 'Classes',             section: 'Academic Management' },
+  { key: 'timetable',  to: '/timetable',  Icon: Calendar,       label: 'Timetable',           section: 'Academic Management' },
+  { key: 'attendance', to: '/attendance', Icon: CheckSquare,     label: 'Attendance',          section: 'Academic Management' },
+  { key: 'grades',     to: '/exams',      Icon: FileText,        label: 'Exams',               section: 'Academic Management' },
+  { key: 'report_cards', to: '/report-cards', Icon: FileBarChart2, label: 'Report Cards',       section: 'Academic Management' },
+  { key: 'subjects',   to: '/subjects',   Icon: Library,         label: 'Subjects',            section: 'Academic Management' },
+  { key: 'admissions', to: '/admissions', Icon: ClipboardList,  label: 'Admissions',          section: 'Student Services' },
+  { key: 'behaviour',  to: '/behaviour',  Icon: Scale,          label: 'Behaviour',           section: 'Student Services' },
   { key: 'finance',    to: '/finance',    Icon: Wallet,         label: 'Finance',             section: 'Operations' },
-  { key: 'messages',   to: '/messages',   Icon: MessageSquare,  label: 'Messages',            section: 'Operations' },
-  { key: 'events',     to: '/events',     Icon: Calendar,       label: 'Events',              section: 'Operations' },
+  { key: 'messages',   to: '/messages',   Icon: MessageSquare,  label: 'Messages',            section: 'Communication' },
+  { key: 'events',     to: '/events',     Icon: Calendar,       label: 'Events',              section: 'Communication' },
   { key: 'hr',         to: '/hr',         Icon: UserCog,        label: 'HR & Staff',          section: 'Operations' },
-  { key: 'lessons',    to: '/lessons',    Icon: BookCheck,      label: 'Lessons',             section: 'Academic'   },
-  { key: 'elearning',  to: '/elearning',  Icon: MonitorPlay,    label: 'eLearning',           section: 'Academic'   },
+  { key: 'lessons',    to: '/lessons',    Icon: BookCheck,      label: 'Lessons',             section: 'Academic Management' },
+  { key: 'elearning',  to: '/elearning',  Icon: MonitorPlay,    label: 'eLearning',           section: 'Academic Management' },
   { key: 'library',    to: '/library',    Icon: BookMarked,     label: 'Library',             section: 'Operations' },
-  { key: 'resources',  to: '/resources',  Icon: Link2,          label: 'Resources',           section: 'Operations' },
+  { key: 'resources',  to: '/resources',  Icon: Link2,          label: 'Resources',           section: 'Communication' },
   { key: 'transport',  to: '/transport',  Icon: Bus,            label: 'Transport',           section: 'Operations' },
-  { key: 'hostel',     to: '/hostel',     Icon: BedDouble,      label: 'Hostel',              section: 'Operations' },
-  { key: 'medical',    to: '/medical',    Icon: HeartPulse,     label: 'Medical Centre',      section: 'Operations' },
+  { key: 'hostel',     to: '/hostel',     Icon: BedDouble,      label: 'Hostel',              section: 'Student Services' },
+  { key: 'medical',    to: '/medical',    Icon: HeartPulse,     label: 'Medical Centre',      section: 'Student Services' },
   { key: 'inventory',  to: '/inventory',  Icon: Boxes,          label: 'Inventory',           section: 'Operations' },
-  { key: 'reports',    to: '/reports',    Icon: TrendingUp,     label: 'Reports & Analytics', section: 'Insights'   },
+  { key: 'reports',    to: '/reports',    Icon: TrendingUp,     label: 'Reports & Analytics', section: 'Analytics' },
 ];
 
 /** moduleRegistry -> [{ key, to, Icon, label, section }], in navOrder,

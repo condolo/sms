@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.36.0] — 2026-08-03 — fix(nav): fallback session sidebar was silently dropping 4 of 5 sections
+
+A real, live regression from v5.35.0's taxonomy reorg, caught from a screenshot of the actual deployed sidebar showing only "OPERATIONS" (with all 12 pre-reorg members lumped together) and "ADMINISTRATION" — Academic Management, Student Services, Communication, and Analytics were entirely missing.
+
+### Root cause
+`client/src/config/moduleNav.js`'s `FALLBACK_NAV_MODULES` (the migration-safety snapshot used whenever `session.moduleRegistry` is absent — any session that hasn't re-authenticated since the registry-unification deploy) still had the **pre-reorg** section values (`Academic`/`Operations`/`Insights`). `Sidebar.jsx`'s `SECTION_ORDER` was updated to the new taxonomy in the same commit as the registry — but `FALLBACK_NAV_MODULES` was missed. `computeNav()` only ever rendered sections whose name appeared literally in `SECTION_ORDER`; `Academic`/`Insights` don't anymore, so every module tagged with them vanished with no error, while `Operations` (string unchanged) still matched and absorbed all 12 of its old members undivided. This is exactly the single highest-risk failure mode the original pre-implementation risk assessment named — it was guarded against for the registry's own section values, but the fallback file was a second, separately-hardcoded copy of the same data that the guard didn't cover.
+
+### Fixed
+- `FALLBACK_NAV_MODULES`'s `section` values updated to the current taxonomy, verified via script to produce byte-identical per-section membership to the live registry's own grouping (both the fallback path and the normal path now agree exactly).
+- `computeNav()` in `Sidebar.jsx` no longer silently drops a section it doesn't recognize: any section present in the grouped data but absent from `SECTION_ORDER` is now appended as its own heading (in its own name, in whatever position it lands) rather than discarded. This doesn't fix a future mismatch, but it turns "modules vanish with no error" into "modules appear under an unexpected heading" — recoverable and visible instead of silent.
+- `FALLBACK_NAV_MODULES`'s doc comment now explicitly warns that its `section` values must be kept in sync with `moduleRegistry.js`, citing this exact incident.
+
+### Verified
+- Script confirmed zero sections fall outside `SECTION_ORDER` for either the registry-derived or fallback-derived nav list, and that both produce identical section→keys membership. Production client build and full Jest suite (1182 tests) pass.
+
+---
+
 ## [v5.35.2] — 2026-08-03 — fix(platform): fold Academic Records into Report Cards, resolving the flagged item
 
 v5.35.1 flagged `MODULES['Academic Records']` rather than deleting it unilaterally — no `moduleRegistry.js` key backs it, and its copy read as a restatement of `Report Cards`' own permanence claim. Asked to make the call: merged rather than dropped outright, since the one real idea it carried (an immutable, attributable archive) is true and worth keeping — just not as its own module.

@@ -66,11 +66,21 @@ function computeNav(configurableModules, moduleConfig, userRole, userPermissions
     grouped[m.section].push(m);
   }
 
+  // Any section present in the data but missing from SECTION_ORDER (a
+  // renamed/typo'd section value that fell out of sync) still gets its
+  // own heading here instead of silently disappearing — a real instance
+  // of exactly that mismatch shipped once already (see moduleNav.js's
+  // FALLBACK_NAV_MODULES comment). Degrading to an unexpected heading is
+  // recoverable; modules vanishing with no error is not.
+  const knownSections  = new Set(SECTION_ORDER);
+  const unknownSections = Object.keys(grouped).filter(sec => !knownSections.has(sec));
+
   return [
     { label: null, items: [{ key: 'dashboard', to: '/dashboard', Icon: LayoutDashboard, label: 'Dashboard' }] },
     ...SECTION_ORDER
       .filter(sec => grouped[sec]?.length)
       .map(sec => ({ label: sec, items: grouped[sec] })),
+    ...unknownSections.map(sec => ({ label: sec, items: grouped[sec] })),
     {
       label: 'Administration',
       items: [
