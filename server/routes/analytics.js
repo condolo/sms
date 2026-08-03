@@ -95,12 +95,18 @@ async function _computeLeadershipSnapshot(schoolId, days) {
        Invoices with an outstanding balance.
        Totals + overdue count (dueDate before today).              */
     tenantModel('invoices', { schoolId }).aggregate([
-      { $match: { schoolId, balance: { $gt: 0 } } },
+      // status !== 'voided' — a voided invoice's balance/total/amountPaid
+      // are left untouched by the void action, so a stale positive balance
+      // would otherwise still count toward outstanding fee exposure.
+      { $match: { schoolId, balance: { $gt: 0 }, status: { $ne: 'voided' } } },
       {
         $group: {
           _id:              null,
           totalOutstanding: { $sum: '$balance'  },
-          totalInvoiced:    { $sum: '$amount'   },
+          // `total` is the canonical field every create/edit/generate path
+          // writes — `amount` is a legacy name only the demo seed script
+          // still used, which silently zeroed this for live-created invoices.
+          totalInvoiced:    { $sum: '$total'    },
           totalPaid:        { $sum: '$amountPaid' },
           studentsOwing:    { $sum: 1 },
           overdueCount:     { $sum: { $cond: [

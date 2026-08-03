@@ -53,7 +53,7 @@ const CRITICAL_COLLECTIONS = [
   { key: 'students',             label: 'Students' },
   { key: 'teachers',             label: 'Teachers' },
   { key: 'attendance_records',   label: 'Attendance Records' },
-  { key: 'finance_invoices',     label: 'Finance Invoices' },
+  { key: 'invoices',              label: 'Finance Invoices' },
   { key: 'exam_results',         label: 'Exam Results' },
   { key: 'report_card_snapshots',label: 'Report Card Snapshots' },
   { key: 'grade_entries',        label: 'Grade Entries' },
@@ -195,11 +195,12 @@ async function _integrityChecks() {
     return { count: docs.length, samples: docs.map(d => `${d.studentId}/${d.academicYear}/T${d.termNumber}`) };
   });
 
-  // 5. Finance invoices with no schoolId
+  // 5. Finance invoices with no schoolId — 'invoices', not 'finance_invoices'
+  // (which doesn't exist; this check silently ran against nothing before).
   await check('Finance invoices missing schoolId', async () => {
-    const docs = await _model('finance_invoices')
+    const docs = await _model('invoices')
       .find({ $or: [{ schoolId: { $exists: false } }, { schoolId: null }] })
-      .select('id studentId amount').limit(5).lean();
+      .select('id studentId total').limit(5).lean();
     return { count: docs.length, samples: docs.map(d => d.id || String(d._id)) };
   });
 

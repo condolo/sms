@@ -88,9 +88,14 @@ const RULES = [
     label:    'Finance invoices missing schoolId',
     severity: 'critical',
     async run() {
-      const docs = await _model('finance_invoices')
+      // 'invoices'/'payments' — not 'finance_invoices'/'finance_payments',
+      // which don't exist. These checks silently ran against empty
+      // collections for as long as the wrong names were here — see the
+      // finance amount/total field-name audit for how that let a real
+      // data-integrity bug through undetected.
+      const docs = await _model('invoices')
         .find({ $or: [{ schoolId: { $exists: false } }, { schoolId: null }] })
-        .select('id studentId amount').limit(10).lean();
+        .select('id studentId total').limit(10).lean();
       return { count: docs.length, samples: docs.map(d => d.id || String(d._id)) };
     },
   },
@@ -100,8 +105,8 @@ const RULES = [
     label:    'Payment receipts referencing non-existent invoices',
     severity: 'warn',
     async run() {
-      const invoiceIds = await _model('finance_invoices').distinct('id').catch(() => []);
-      const orphans = await _model('finance_payments')
+      const invoiceIds = await _model('invoices').distinct('id').catch(() => []);
+      const orphans = await _model('payments')
         .find({ invoiceId: { $nin: invoiceIds, $exists: true } })
         .select('invoiceId amount').limit(10).lean();
       return { count: orphans.length, samples: orphans.map(d => d.invoiceId) };

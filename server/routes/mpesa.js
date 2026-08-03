@@ -80,7 +80,12 @@ async function _reconcileInvoice(invoiceId, schoolId) {
   const paid    = Math.round((all.reduce((s, p) => s + (p.amount || 0), 0)) * 100) / 100;
   const balance = Math.max(0, Math.round(((invoice.total || 0) - paid) * 100) / 100);
   const status  = balance <= 0 ? 'paid' : (paid > 0 ? 'partial' : 'unpaid');
-  await Invoices.updateOne({ id: invoiceId }, { $set: { status, balance, paid, updatedAt: new Date().toISOString() } });
+  // amountPaid, not paid — `paid` is a dead field name nothing else in the
+  // codebase reads (server/routes/finance.js's own payment-recording path
+  // writes amountPaid). Writing the wrong name here left amountPaid stuck
+  // at its prior value (0, for an invoice's first M-Pesa payment) forever,
+  // breaking the total = amountPaid + balance invariant on that invoice.
+  await Invoices.updateOne({ id: invoiceId }, { $set: { status, balance, amountPaid: paid, updatedAt: new Date().toISOString() } });
 }
 
 /* ══════════════════════════════════════════════════════════════

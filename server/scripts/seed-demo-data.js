@@ -799,7 +799,11 @@ async function seedDemoData() {
         studentId:     s.id,
         title:         `${term} ${yearS} — School Fees`,
         feeType:       'tuition',
-        amount:        s.fees,
+        // `total`, not `amount` — `total` is the canonical field every
+        // real invoice create/edit/generate path writes; `amount` was a
+        // legacy name that silently zeroed out of the finance summary and
+        // report-cards' fee-clearance gate (both read `total`).
+        total:         s.fees,
         amountPaid:    s.paid,
         balance,
         status,

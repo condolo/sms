@@ -6,6 +6,54 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.41.0] — 2026-08-03 — fix(mobile): dashboards not usable in portrait across 6+ pages
+
+A user testing on an actual phone reported Timetable, Exams, Subjects, Admissions, and Finance all requiring landscape rotation or page-wide horizontal sliding to reach content, plus Dashboard KPI values getting cut off mid-digit. Investigated first (18 pages hand-roll their own tab-bar markup — no shared `Tabs`/`PageHeader` component, confirmed via grep — so this was a per-file sweep, not a one-component fix) and found the repo already has a correct, established convention (`SettingsPage.jsx`, `InventoryPage.jsx`, `MedicalPage.jsx` all already do this right) that the broken pages just never got.
+
+### Fixed
+- **Tab bars clipped, not scrollable** — `TimetablePage.jsx`, `ExamsPage.jsx`, `ReportCardsPage.jsx` (same bug, unreported but identical, caught in the same sweep): each page's tab row sits inside a gradient header with `overflow-hidden` (needed to clip decorative background circles), which was hard-clipping the tabs instead of scrolling them — the last tab was genuinely unreachable in portrait, not just visually cramped. Added `overflow-x-auto` to each tab row and `whitespace-nowrap shrink-0` to each button — the row now scrolls within its own bounds without touching the header's `overflow-hidden`.
+- **Page-level horizontal slide** — `SubjectsPage.jsx` (tab nav), `AdmissionsPage.jsx` (5-button action row), `FinancePage.jsx` (5-tab nav, the longest tab set of any module): none of these have an `overflow-hidden` ancestor, so their overflow instead widened the whole page body, forcing users to slide the entire screen to reach the last item. Same `overflow-x-auto`/`whitespace-nowrap` fix, using each page's own working precedent where one already existed (Admissions' stats strip already did this correctly one section below the broken button row).
+- **Wrong overflow value on data tables** — `finance/components/InvoicesTab.jsx`, `OverdueTab.jsx`, `PaymentsTab.jsx` all wrapped their `<table>` in `overflow-hidden` instead of `overflow-x-auto` — the correct convention already exists in `ExamsPage.jsx`'s Markbook grid. Same class of mistake as the tab bars, fixed the same way.
+- **Dashboard/Finance KPI currency values hard-clipped mid-digit** — `KpiCard.jsx`'s filled variant sits inside a container with `overflow-hidden` (for a decorative watermark icon) with an unguarded `text-2xl` value and a `grid-cols-2` row that only leaves ~155-165px per card on a phone — not enough room for a string like "KES 10,106,800", producing exactly the mid-digit clip in the report. Added `truncate` + a `title` tooltip fallback to both `KpiCard` variants and `finance/components/FinancePrimitives.jsx`'s `SummaryCard` (same unguarded pattern, different component), stepped the value text down to `text-xl` below the `sm` breakpoint, and changed the KPI grids in `Dashboard.jsx` and `finance/components/SummaryTab.jsx` from `grid-cols-2` to `grid-cols-1 sm:grid-cols-2 lg:grid-cols-4` — a full-width card gives the real value room to actually fit instead of relying on truncation as the only fallback.
+
+### Verified
+- Production client build passes. This is a CSS/layout-only change with no server or data implications — no server test suite impact expected or checked beyond the unrelated finance backend fixes shipped in the same session.
+
+---
+
+## [v5.40.0] — 2026-08-03 — fix(finance): $amount/$total field-rename gap silently zeroed the Dashboard's fee totals
+
+Dispatched a full audit after finding the Dashboard's Fee Collection numbers were mathematically inconsistent (a 77% collection rate that doesn't reconcile with the Collected/Outstanding figures next to it). Confirmed two independent, concrete root-cause bugs — not a hypothesis, read and traced through every write path.
+
+### Root causes
+- **`totalInvoiced` summed the wrong field name.** Every real invoice create/edit/bulk-generate path (`server/routes/finance.js`) writes the computed total under `total`. `GET /api/finance/summary` and `analytics.js`'s `feeExposure` aggregation both summed `$amount` instead — a field only the demo seed script still wrote. Every live-created invoice silently contributed 0 to `totalInvoiced`, while `totalPaid`/`totalBalance` (correct field names) summed across all of them — producing exactly the broken math in the screenshot.
+- **M-Pesa reconciliation wrote a dead field.** `server/routes/mpesa.js`'s `_reconcileInvoice` set `paid` on the invoice document — a field nothing else in the codebase reads. The real field, `amountPaid`, was left stuck at its prior value (0, for a first payment) for any invoice settled via M-Pesa, breaking `total = amountPaid + balance` on that document permanently.
+- **The platform's own integrity monitoring could never have caught either bug.** `server/services/ops/integrity/rules.js` and `server/routes/qa-health.js` both checked a collection named `finance_invoices`/`finance_payments` — these don't exist; the real collections are `invoices`/`payments`. Both checks had been silently running against nothing.
+
+### Fixed
+- `finance.js`'s summary and `analytics.js`'s `feeExposure` now sum `$total`, and both now exclude `status: 'voided'` invoices (a voided invoice's `total`/`balance`/`amountPaid` are left stale by the void action, so it was still counting toward totals).
+- `mpesa.js` writes `amountPaid`, not `paid`.
+- `seed-demo-data.js`'s invoices now write `total`, matching the real schema — this also fixes a second-order bug where seeded invoices' missing `total` field made `report-cards.js`'s fee-clearance download gate silently evaluate to 100%-cleared for every demo student regardless of actual balance.
+- `rules.js`/`qa-health.js` now check the real `invoices`/`payments` collection names.
+- `POST /payments` now resolves `studentName` server-side (from the invoice's own denormalized name, falling back to a direct student lookup) — payments never carried one at all, so `PaymentsTab.jsx` and the payment-received email both always showed the raw `studentId`. Same "server resolves, never trusts the client" pattern as this session's earlier Behaviour fix.
+
+### Confirmed present (not a gap)
+- Report Cards ↔ Finance: a real, working integration — batch-publish flags students with outstanding balances, and the report-card download route gates on a school-configurable fee-clearance threshold. Uses `total`/`balance` correctly (only broken indirectly, via the seed-data bug above).
+- Academic-config ↔ Finance: confirmed genuinely standalone, no connection exists or is expected.
+- Fee structures: correctly wired to invoice generation; editing a fee structure only affects future `/generate` runs by design, no cascade to already-issued invoices.
+
+### Verified
+- Full Jest suite (125 suites / 1182 tests) passes, including all finance/analytics/mpesa/qa-health test files. Production client build unaffected (server-only changes).
+- **Not yet verified live**: the exact split between the two root causes for the specific screenshot numbers, and whether any voided or stale multi-academic-year invoices are present, requires querying the actual `invoices` collection — not possible from this environment (no `MONGODB_URI`).
+
+---
+
+## [v5.39.0] — 2026-08-03 — fix(behaviour): label the Dashboard/Overview scope difference as intentional
+
+Follow-up to v5.38.0's shallow-fix investigation: the Dashboard's Behaviour card (rolling 30-day window, grouped per class) and the Behaviour module's own Overview tab (all-time, ungrouped) show different numbers for the same school by design, not by bug — but neither widget said so. Added "· last N days" next to the Dashboard card's title and "All-time totals across every recorded incident" above the Overview tab's stats strip, so the difference reads as intentional rather than broken.
+
+---
+
 ## [v5.38.0] — 2026-08-03 — fix(behaviour): deep-fix the studentName/classId shallow fix
 
 A screenshot showed the "Serious Incidents" panel displaying raw studentIds ("std_demo_6", "std_demo_9" etc.) again, and asked directly: was the earlier fix shallow? Investigated and confirmed — yes.

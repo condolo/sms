@@ -327,12 +327,26 @@ router.post('/payments', authMiddleware, PLAN, MODGATE, rbac('finance', 'create'
 
     const receiptNumber = await nextReceiptNumber(schoolId);
 
+    // Server-side resolve, never trust the client — payments never carried
+    // a denormalized studentName at all, which is why PaymentsTab.jsx and
+    // the payment-received email both fall back to showing the raw
+    // studentId. Prefer the invoice's own studentName (set on bulk
+    // fee-structure-generated invoices) and fall back to a direct student
+    // lookup for manually-created invoices, which don't set it.
+    let studentName = invoice.studentName;
+    if (!studentName) {
+      const student = await tenantModel('students', tenantContext(req))
+        .findOne({ id: invoice.studentId, schoolId }).select('firstName lastName').lean();
+      if (student) studentName = `${student.firstName} ${student.lastName}`.trim();
+    }
+
     const Payments = tenantModel('payments', tenantContext(req));
     const payment  = await Payments.create({
       ...data,
       id:            uuidv4(),
       schoolId,
       studentId:     invoice.studentId,
+      studentName,
       receiptNumber,
       paidAt:        data.paidAt || new Date().toISOString(),
       recordedBy:    userId,
@@ -886,7 +900,11 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), a
   try {
     const { schoolId } = req.jwtUser;
 
-    const filter = { schoolId };
+    // Excludes voided invoices — a voided invoice's total/balance/amountPaid
+    // are left untouched by the void action (server/routes/finance.js's
+    // void handler only flips `status`), so including it here would count
+    // stale, cancelled amounts toward the school's real totals.
+    const filter = { schoolId, status: { $ne: 'voided' } };
     const _ay2 = strParam(req.query.academicYearId);
     if (_ay2) filter.academicYearId = _ay2;
 
@@ -898,7 +916,12 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), a
         { $match: filter },
         { $group: {
           _id:          null,
-          totalInvoiced: { $sum: '$amount' },
+          // `total` is the canonical invoice-total field written by every
+          // create/edit/generate path (_calcInvoiceTotals's `total`) —
+          // `amount` is a legacy field name only the demo seed script still
+          // writes, which silently zeroed this aggregate for every
+          // live-created invoice.
+          totalInvoiced: { $sum: '$total' },
           totalPaid:    { $sum: '$amountPaid' },
           totalBalance: { $sum: '$balance' },
           countInvoices: { $sum: 1 },
