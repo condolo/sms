@@ -6,6 +6,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.37.0] — 2026-08-03 — feat(nav): collapsible sidebar sections
+
+Sidebar section headers (Academic Management, Student Services, Operations, Communication, Analytics, Administration) are now click-to-expand/collapse, mirroring the existing eLearning accordion pattern in the same file. Collapsed by default, except whichever section contains the current route — so navigating straight to a page never hides its own highlighted nav item behind a closed section (same precedent eLearning already set).
+
+### Added
+- `Sidebar.jsx` — `openSections` state (a `Set` of open section labels), initialized once on mount from the current pathname, purely user-toggled after that (same lifecycle as the existing `eLearningOpen` state). Section headers are now buttons with a rotating chevron, identical interaction pattern to eLearning's own toggle.
+- In the icon-only collapsed sidebar rail, section state is ignored and every item always shows — there's no header to click in that mode, matching how eLearning's own sub-items already behave when the rail is collapsed.
+- The `unknownSections` defensive fallback (v5.36.0) flows through the same generic accordion code with no special-casing.
+
+### Verified
+- Confirmed by diff that this change touches **only** `Sidebar.jsx` — `SettingsPage.jsx` (Modules on/off toggle) and `moduleRegistry.js` are untouched, so the Settings-driven module enable/disable and ordering mechanism cannot have been affected. `computeNav()`'s membership/ordering logic is unchanged; the accordion only gates the visual rendering of an already-computed section's items, never which items get computed. Production client build passes. A live click-test could not be run in this environment (no `MONGODB_URI`, same pre-existing constraint noted for prior sidebar changes) — verified instead via full manual trace of the toggle logic.
+
+---
+
 ## [v5.36.0] — 2026-08-03 — fix(nav): fallback session sidebar was silently dropping 4 of 5 sections
 
 A real, live regression from v5.35.0's taxonomy reorg, caught from a screenshot of the actual deployed sidebar showing only "OPERATIONS" (with all 12 pre-reorg members lumped together) and "ADMINISTRATION" — Academic Management, Student Services, Communication, and Analytics were entirely missing.

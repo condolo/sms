@@ -152,6 +152,25 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
   const configurableModules = deriveNavModules(moduleRegistry);
   const navSections    = computeNav(configurableModules, moduleConfig, userRole, userPermissions);
 
+  // Section accordion — collapsed by default, except whichever section
+  // contains the current route (same auto-open precedent as eLearning
+  // above), so navigating straight to a page never hides its own
+  // highlighted nav item behind a closed section. Computed once on mount,
+  // same as eLearningOpen — purely user-toggled after that.
+  const [openSections, setOpenSections] = useState(() => {
+    const active = navSections.find(s => s.label && s.items.some(
+      it => it.to && (location.pathname === it.to || location.pathname.startsWith(it.to + '/'))
+    ));
+    return new Set(active ? [active.label] : []);
+  });
+  function toggleSection(label) {
+    setOpenSections(prev => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label); else next.add(label);
+      return next;
+    });
+  }
+
   const schoolName     = school?.name ?? user?.schoolName ?? 'My School';
   const schoolInitials = schoolName
     .split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
@@ -229,13 +248,21 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
           collapsed ? 'px-1' : 'px-3',
         )}
       >
-        {navSections.map(section => (
+        {navSections.map(section => {
+          // Section accordion only applies when the sidebar itself is
+          // expanded — in the icon-only rail (collapsed) there's no header
+          // to click, so every item stays visible regardless of open state,
+          // same as eLearning's sub-items already behave when collapsed.
+          const sectionOpen = !section.label || collapsed || openSections.has(section.label);
+          return (
           <div key={section.label ?? '__top'}>
 
-            {/* Section label — height + opacity collapse */}
+            {/* Section label — clickable toggle, height + opacity collapse */}
             {section.label && (
-              <p
-                className="px-3 text-[10px] font-semibold uppercase tracking-widest text-slate-600 overflow-hidden"
+              <button
+                type="button"
+                onClick={() => toggleSection(section.label)}
+                className="w-full flex items-center justify-between px-3 text-[10px] font-semibold uppercase tracking-widest text-slate-600 hover:text-slate-400 transition-colors overflow-hidden"
                 style={{
                   opacity:    collapsed ? 0 : 1,
                   maxHeight:  collapsed ? 0 : 20,
@@ -246,10 +273,17 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
                     : 'opacity 0.18s ease 0.12s, max-height 0.15s ease, margin 0.12s ease',
                 }}
               >
-                {section.label}
-              </p>
+                <span>{section.label}</span>
+                {!collapsed && (
+                  <ChevronDown
+                    size={11}
+                    className={clsx('transition-transform duration-200 shrink-0', sectionOpen ? 'rotate-180' : '')}
+                  />
+                )}
+              </button>
             )}
 
+            {sectionOpen && (
             <ul className="space-y-0.5">
               {section.items.map(({ to, Icon, label, key }) => {
 
@@ -367,8 +401,10 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
                 );
               })}
             </ul>
+            )}
           </div>
-        ))}
+          );
+        })}
       </nav>
 
       {/* ── User footer ────────────────────────────────────────── */}
