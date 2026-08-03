@@ -255,12 +255,17 @@ async function sendAdminNewSchoolAlert({ schoolName, slug, adminName, adminEmail
   return _send(PLATFORM_EMAIL, `[Msingi] New School Registration — ${schoolName}`, html);
 }
 
-/* 3. School approved — welcome email with credentials */
-async function sendApprovalWelcome({ adminName, adminEmail, schoolName, slug, plan, tempPassword }) {
-  // Build the school's dedicated subdomain URL.
-  // APP_URL might be "https://school-management-ecosystem.onrender.com" or
-  // "https://msingi.io". We extract the base host and prepend the slug.
+/* Build a school's dedicated subdomain login URL from its slug.
+   APP_URL might be "https://school-management-ecosystem.onrender.com" or
+   "https://msingi.io" — extract the base host and prepend the slug.
+   Every "here's how to sign in" email needs this; centralised so a caller
+   can't accidentally pass the bare marketing-site URL instead (this
+   happened at every sendWelcomeCredentials call site before it was
+   centralised — see CHANGELOG). Falls back to a path-based, no-slug URL
+   for localhost/raw-IP APP_URLs, or when slug is missing/falsy. */
+function _buildSchoolLoginUrl(slug) {
   let loginUrl = `${APP_URL}/login`;
+  if (!slug) return loginUrl;
   try {
     const u     = new URL(APP_URL);
     const parts = u.hostname.split('.');
@@ -271,7 +276,12 @@ async function sendApprovalWelcome({ adminName, adminEmail, schoolName, slug, pl
       loginUrl = `${u.protocol}//${slug}.${base}`;
     }
   } catch { /* keep default */ }
+  return loginUrl;
+}
 
+/* 3. School approved — welcome email with credentials */
+async function sendApprovalWelcome({ adminName, adminEmail, schoolName, slug, plan, tempPassword }) {
+  const loginUrl = _buildSchoolLoginUrl(slug);
   const hasPassword = !!tempPassword;
   const html = _wrap(`
     <h2>🎉 Your school is approved!</h2>
@@ -444,8 +454,17 @@ async function sendLoginOTP({ name, email, otp, schoolName, schoolEmail, schoolI
   return _sendAsSchool(email, `${otp} — Your ${schoolName} sign-in code`, html, { schoolName, schoolEmail, schoolId });
 }
 
-/* 8. New user welcome — sends login credentials */
-async function sendWelcomeCredentials({ name, email, tempPassword, schoolName, schoolEmail, schoolId = null, role, loginUrl }) {
+/* 8. New user welcome — sends login credentials
+   `slug` builds the school's own subdomain login URL (via
+   _buildSchoolLoginUrl) — every call site used to build/pass a raw
+   `loginUrl` string instead, and every one of them got it wrong (bare
+   APP_URL, no slug), sending new users to the public marketing site
+   instead of their school's login page. Deriving it here, from the one
+   piece of data every caller already has (the school), closes the door
+   on that whole class of mistake rather than trusting each call site to
+   get the URL construction right individually. */
+async function sendWelcomeCredentials({ name, email, tempPassword, schoolName, schoolEmail, schoolId = null, role, slug }) {
+  const loginUrl  = _buildSchoolLoginUrl(slug);
   const roleLabel = (role || 'staff').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   const support   = schoolEmail || PLATFORM_EMAIL;
   const html = _wrap(`

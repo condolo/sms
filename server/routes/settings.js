@@ -627,7 +627,7 @@ router.post('/users/invite', authMiddleware, rbac('settings', 'create'), async (
         schoolId:    req.jwtUser.schoolId,
         tempPassword,
         role,
-        loginUrl:    process.env.APP_URL || 'https://msingi.io',
+        slug:        school?.slug,
       });
     } catch (emailErr) {
       console.warn('[settings] invite email failed (non-fatal):', emailErr.message);
@@ -702,7 +702,7 @@ router.post('/users/bulk-invite', authMiddleware, rbac('settings', 'create'), as
             schoolEmail: school?.systemEmail || school?.email || '',
             schoolId,
             tempPassword, role,
-            loginUrl: process.env.APP_URL || 'https://msingi.io',
+            slug: school?.slug,
           });
         } catch { /* non-fatal */ }
 
@@ -969,7 +969,7 @@ router.post('/users/:id/reset-password', authMiddleware, rbac('settings', 'updat
         schoolId,
         tempPassword: newPassword,
         role:         target.role,
-        loginUrl:     process.env.APP_URL || 'https://msingi.io',
+        slug:         school?.slug,
       });
       emailSent = true;
     } catch (emailErr) {

@@ -837,10 +837,9 @@ async function _importTeachers(rows, schoolId, userId) {
         if (emailsToSend.length > 0) {
           const schoolName  = school?.name  || 'Your School';
           const schoolEmail = school?.systemEmail || school?.email || '';
-          const loginUrl    = process.env.APP_URL || 'https://msingi.io';
 
           enqueueBatch(emailsToSend.map(({ email, name, tempPassword }) => () =>
-            emailUtil.sendWelcomeCredentials({ email, name, schoolName, schoolEmail, schoolId, tempPassword, role: 'teacher', loginUrl })
+            emailUtil.sendWelcomeCredentials({ email, name, schoolName, schoolEmail, schoolId, tempPassword, role: 'teacher', slug: school?.slug })
           )).catch(e => console.warn('[import/teachers] welcome email batch error:', e.message));
         }
       }

@@ -969,7 +969,7 @@ router.post('/:id/parent-account', authMiddleware, PLAN, MODGATE, rbac('students
       schoolName:  school.name,
       schoolEmail: school.systemEmail || '',
       role:        'Parent',
-      loginUrl:    `https://msingi.io/platform`,
+      slug:        school.slug,
     }).catch(err => console.error('[parent-account] Email send failed:', err.message));
 
     console.log(`[students] Parent account ${existing ? 'updated' : 'created'} for ${parentEmail} (student: ${studentDocId}) by ${userId}`);
