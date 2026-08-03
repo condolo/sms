@@ -139,7 +139,7 @@ router.post('/invite', authMiddleware, inviteLimiter, rbac('settings', 'users'),
       schoolEmail:  school?.systemEmail || '',
       schoolId,
       role:         safeRole,
-      loginUrl:     process.env.APP_URL || 'https://school-management-ecosystem.onrender.com'
+      slug:         school?.slug,
     }).catch(err => console.error('[invite email]', err.message));
 
     console.log(`[USERS] Invited: ${name} (${userEmail}) as ${safeRole} to school ${schoolId}`);
@@ -218,7 +218,7 @@ router.post('/bulk-invite', authMiddleware, inviteLimiter, rbac('settings', 'use
         schoolEmail:  school?.systemEmail || '',
         schoolId,
         role:         safeRole,
-        loginUrl:     process.env.APP_URL || 'https://school-management-ecosystem.onrender.com'
+        slug:         school?.slug,
       }).catch(() => {});
 
     } catch (e) {
@@ -470,14 +470,23 @@ router.delete('/me/photo', authMiddleware, async (req, res) => {
 });
 
 /* GET /api/users/:id/photo — serve photo as binary image
-   Requires ?schoolId= query param for tenant isolation.
-   Auth tokens cannot be sent by browser <img> tags, so we use schoolId
-   as a scoping guard instead of Bearer auth.  The schoolId is not sensitive
-   (every user knows their own school), but it prevents cross-tenant enumeration. */
-router.get('/:id/photo', async (req, res) => {
+   authMiddleware, not the ?schoolId= query param, is what actually scopes
+   this now. It previously had neither: no auth middleware (on the belief
+   that "auth tokens cannot be sent by browser <img> tags", which is wrong
+   for this app's cookie-based auth — a same-origin <img> DOES send the
+   HttpOnly cookie, SameSite=Strict only blocks cross-SITE requests, not
+   same-origin embedded resources) and the actual query filter below used
+   the client-supplied req.query.schoolId verbatim rather than the
+   authenticated caller's own school, which didn't "prevent cross-tenant
+   enumeration" as its old comment claimed — any logged-in user could pass
+   a different school's id and enumerate its users' photos. Both are fixed
+   by scoping to req.jwtUser.schoolId, the same tenant model every other
+   route in this file already trusts. The unauthenticated ?schoolId= param
+   is left in the URL shape only for backward compatibility with URLs the
+   upload route already handed out — it's no longer read for authorization. */
+router.get('/:id/photo', authMiddleware, async (req, res) => {
   try {
-    const { schoolId } = req.query;
-    if (!schoolId) return res.status(400).end();
+    const { schoolId } = req.jwtUser;
 
     const Photos = tenantModel('user_photos', tenantContext(req));
     const photo  = await Photos.findOne({ userId: req.params.id, schoolId }).lean();
