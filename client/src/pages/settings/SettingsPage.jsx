@@ -3370,7 +3370,7 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='growth_profile' && ['delete_records','aspirations'].includes(s)) return N;
       if (['library','transport','hostel'].includes(m)) return V;   // matches R already seeded server-side
       if (s==='import') return N;
-      if (['exams','assessment','report_cards'].includes(m)) return V;   // matches R already seeded server-side
+      if (['exams','assessment','report_cards','teachers'].includes(m)) return V;   // matches R already seeded server-side — the blanket E fallback below would over-grant create/edit on teacher records
       if (m==='medical') return N;   // nothing seeded server-side — full records stay restricted by default
       if (m==='inventory') return N;   // nothing seeded server-side — restricted by default
       return E;
@@ -3425,6 +3425,8 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='subjects')  return V;
       if (m==='classes')   return V;
       if (m==='students')  return V;
+      if (m==='teachers')  return V;   // matches R already seeded server-side — see teacher
+                                        // availability/names when building the timetable
       if (m==='lessons')   return V;   // see lesson plans to schedule accurately
       if (['library','hostel','transport'].includes(m)) return V;   // matches R already seeded server-side
       return N;
@@ -3457,6 +3459,11 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='settings') return N;
       if (m==='finance' && !['fee_structure'].includes(s)) return N;
       if (m==='hr')      return T;
+      if (m==='teachers') return T;   // matches RCUD already seeded server-side — the actual gate
+                                       // the Staff tab's list query checks (rbac('teachers','read'));
+                                       // was missing here entirely, silently falling to N (no access)
+                                       // on every Roles & Permissions save and overwriting the
+                                       // correct seeded default with an empty grant.
       if (m==='students') return V;
       if (m==='reports')  return V;
       if (['library','hostel','transport'].includes(m)) return V;   // matches R already seeded server-side

@@ -54,6 +54,63 @@ Follow-up to v5.38.0's shallow-fix investigation: the Dashboard's Behaviour card
 
 ---
 
+## [v5.46.0] — 2026-08-03 — fix(rbac): hr role's Teachers-module grant silently stripped on every R&P save
+
+A live customer's newly-created Hr user could see correct KPI numbers ("Total Staff: 22") but an empty staff list ("No staff records found") — despite Settings → Roles & Permissions showing the role had full staff-view access. Investigated before touching anything, since the symptom (working stats, empty list, same session) pointed at two different code paths disagreeing, not a simple missing grant.
+
+### Root cause
+- The Staff tab's actual list query hits `teachersApi.list()` → `rbac('teachers','read')` — a completely different RBAC module from `rbac('hr','read')`, which gates the KPI stats the user correctly saw as working.
+- Settings → Roles & Permissions' "HR & Payroll" section has a checkbox literally labelled "View Staff Records" (`hr__staff`) — but no route anywhere in the codebase checks that sub-permission. It's dead. The real gate lives entirely under the separate "Teachers" module (filed under Academic Management since this session's taxonomy reorg), which nothing in the HR & Payroll section visually connects to the Staff tab.
+- The client's default-permission generator (`DEFS.hr` in `SettingsPage.jsx`) had no case for the `teachers` module at all, silently falling through to "no access" — while the server's seeded default (`ROLE_DEFAULTS.hr.teachers`) is full access. Since Settings' Save always resends the *entire* `byRole` permission object, not just the row being edited, the first time anyone at that school ever saved Roles & Permissions — for any role, any reason — this client default overwrote the correct server-seeded grant with an empty one. Permanent, silent, and `repairPermissions.js`'s self-heal never catches it (it only repairs malformed documents, and this one was well-formed, just wrong).
+
+### Fixed
+- `DEFS.hr` now explicitly grants `teachers` full access, matching the server default it was missing.
+- Audited every other role's `DEFS` against `ROLE_DEFAULTS` for the same `teachers`-module gap while already in this code (same session; earlier passes already fixed this exact drift for `medical`/`inventory`/`hostel`/`transport`) — found and fixed two more: `timetabler` was missing `teachers` entirely (should be view-only, was none); `section_head`'s blanket fallback over-granted edit/delete on teacher records where the server default is view-only.
+
+### Not fixed here — needs a decision
+The dead `hr__staff` checkbox itself is still dead; wiring it to actually gate something, or removing/relabelling it so it stops looking like the real staff-visibility toggle, is a separate, smaller follow-up.
+
+### Verified
+- Full Jest suite (1182 tests) and production client build both pass.
+- **Does not retroactively fix this customer's already-corrupted stored permissions** — the client fix prevents this from happening to any future save, but Mascit Lab Academy's `hr` role already has `teachers: []` saved in their database from before this fix. Someone with admin access needs to re-check the Teachers module's view boxes for the Hr role in Settings → Roles & Permissions and Save once — that's the immediate unblock; it can't be done from here (no database access in this environment).
+
+---
+
+## [v5.45.0] — 2026-08-03 — fix(auth): welcome-credential emails sent every new user to the public marketing site
+
+A new Hr user's "Sign In Now" welcome-email button landed on the public msingi.io homepage, not their school's own login page — meaning a brand-new user has no way to actually sign in from the email they were sent.
+
+### Root cause
+Every call site that sends login credentials (`sendWelcomeCredentials`, 7 call sites across `settings.js`, `users.js`, `students.js`, `import-export.js`) built its own `loginUrl` — and every single one got it wrong, passing the bare marketing-site root (`process.env.APP_URL` or a hardcoded `'https://msingi.io'`/`'https://msingi.io/platform'`) with no school context at all. The correct pattern — a school subdomain URL built from `slug` — already existed, working correctly, in a *different* email function (`sendApprovalWelcome`, used only for the school-approval flow) — it was just never reused.
+
+### Fixed
+- Extracted the slug → subdomain-URL logic into a shared `_buildSchoolLoginUrl(slug)` helper in `server/utils/email.js`.
+- `sendWelcomeCredentials` now builds its own `loginUrl` internally from a `slug` parameter instead of trusting each caller to construct the URL correctly — closes the door on the whole class of mistake rather than fixing it at each call site individually (every caller already has the school document in scope; only needed to start reading its `slug` field instead of ignoring it).
+- Updated all 7 call sites to pass `slug` instead of a hand-built `loginUrl`.
+
+### Verified
+- Full Jest suite (1182 tests) passes. Production build unaffected (server-only). Cannot send/click a real email from this environment to confirm the resulting link — verified via direct code correctness (the same slug→URL construction this reuses is already proven correct in `sendApprovalWelcome`'s existing, working flow) rather than a live send.
+
+---
+
+## [v5.44.0] — 2026-08-03 — fix(security): profile photo never displayed — and was reachable cross-tenant
+
+Uploading a profile photo showed a genuine success message ("Photo updated...") but the avatar never stopped showing initials — both immediately after upload and on every later page load.
+
+### Root cause
+`GET /api/users/:id/photo` had no `authMiddleware` — its own comment explains why: *"Auth tokens cannot be sent by browser `<img>` tags, so we use schoolId as a scoping guard instead."* That premise is wrong for this app specifically: auth here is an HttpOnly cookie (`SameSite=Strict`), and a same-origin `<img src>` **does** send that cookie — `SameSite=Strict` only blocks cross-*site* requests, not same-origin embedded resources. With no `authMiddleware`, `req.jwtUser` was never populated, so the shared `tenantContext(req)` helper (which only ever reads `req.jwtUser`) always returned `null`, and `tenantModel()` — deliberately fail-closed — threw on every single call, caught by the route's own `catch` and turned into a silent 500. The client's `<img onError={() => setPhotoUrl(null)}>` then silently reverted to initials with no visible error, exactly matching "success message, but never reflects."
+
+A second, independent problem in the same route: even setting the crash aside, the actual data filter read `schoolId` straight from the **unauthenticated query string**, not from the caller's real session — so the route's own "prevents cross-tenant enumeration" claim wasn't actually enforced. Any logged-in user could pass a different school's id and fetch that school's users' photos.
+
+### Fixed
+- Added `authMiddleware` to the route.
+- Changed the tenant filter to use `req.jwtUser.schoolId` (the authenticated caller's own school) instead of the client-supplied `?schoolId=` query param — fixes both the crash and the cross-tenant gap in one change. The query param stays in the URL shape for backward compatibility with links the upload route already handed out; it's just no longer trusted for authorization.
+
+### Verified
+- Full Jest suite (1182 tests) passes; no existing test covered this route specifically. Cannot exercise a real authenticated `<img>` load in this sandbox (no database) — verified via direct reasoning about `SameSite=Strict` cookie semantics for same-origin embedded resources, and by tracing the exact `tenantContext`/`tenantModel` fail-closed mechanism that was throwing.
+
+---
+
 ## [v5.43.0] — 2026-08-03 — fix(security): general rate limiter shared one bucket across an entire office
 
 A user reported "Too many requests" on three separate occasions in one day, on unrelated pages (Settings → Roles & Permissions, Teachers), and was rightly concerned about client-facing reliability. Investigated before touching anything, since a rate-limit message can come from a real abuse-protection working as intended, a code bug causing a request storm, or a limiter that's simply mis-scoped.
