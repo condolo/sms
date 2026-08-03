@@ -24,6 +24,8 @@ const FLOW = [
 const MODULES = {
   // Academic
   'Students':        'Complete student profiles — personal details, admission number, class, stream, photo, and full academic history in one record.',
+  'Teachers':        'Full staff directory — contact details, subject and class assignments, and qualification records. Add one teacher or import an entire staff list via CSV.',
+  'Classes':         'Class and stream setup with section management and capacity tracking — the structural backbone attendance, timetable, and grades all build on.',
   'Attendance':      'Daily and per-period register marking on any device in under 90 seconds. Absent students trigger parent notifications automatically.',
   'Grades & Exams':  'Assessment entry against curriculum criteria (CBC, CAIE, IB, WASSCE, custom). Totals, averages, and grades calculated automatically.',
   'Report Cards':    'Auto-generated from grade data. Five-stage approval chain: Teacher → HOD → Principal → verified → Parent Portal. SHA-256 signed with QR verification.',
@@ -42,6 +44,8 @@ const MODULES = {
   'Transport':       'Route management, vehicle allocation, and student transport records. Parents can see route status through the portal.',
   'Events':          'School calendar with audience targeting — notices to parents, staff, or the whole school. Links to Messages and Finance for fee deadlines.',
   'Messages':        'Structured institutional messaging between staff. Replaces informal WhatsApp for school communications with a permanent audit trail.',
+  'Behaviour':       'Incident logging and merit/demerit points (BPS) with configurable categories and House standings — a permanent, attributable record for every entry.',
+  'Resources':       "Shared links, policies, and downloads staff and parents can reach in one place — the school's own quick-reference library.",
   'Medical Centre':  'Student medical profiles, clinic visit history, and teacher-visible condition alerts — allergies, asthma, epilepsy — without exposing the full record.',
   'Inventory':       'Stock tracking with a full movement ledger and a configurable requisition-to-procurement approval chain, from ICT equipment to cleaning supplies.',
   // Insights
@@ -53,8 +57,8 @@ const MODULES = {
 };
 
 const GROUPS = [
-  { label: 'Academic',   nodes: ['Students', 'Attendance', 'Grades & Exams', 'Report Cards', 'Timetable', 'Subjects', 'Lessons', 'E-Learning', 'Academic Records', 'Growth Profile', 'Admissions'] },
-  { label: 'Operations', nodes: ['Finance', 'HR', 'Library', 'Hostel', 'Transport', 'Events', 'Messages', 'Medical Centre', 'Inventory'] },
+  { label: 'Academic',   nodes: ['Students', 'Teachers', 'Classes', 'Attendance', 'Grades & Exams', 'Report Cards', 'Timetable', 'Subjects', 'Lessons', 'E-Learning', 'Academic Records', 'Growth Profile', 'Admissions'] },
+  { label: 'Operations', nodes: ['Finance', 'HR', 'Library', 'Hostel', 'Transport', 'Events', 'Messages', 'Behaviour', 'Resources', 'Medical Centre', 'Inventory'] },
   { label: 'Insights',   nodes: ['Analytics', 'Reports'] },
   { label: 'Portals',    nodes: ['Student Portal', 'Parent Portal'] },
 ];

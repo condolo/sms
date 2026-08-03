@@ -6,6 +6,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.35.1] — 2026-08-03 — fix(platform): /platform page was missing 4 real modules
+
+Surfaced by v5.35.0's count-derivation work: `PlatformPage.jsx`'s module list and `landingData.js`'s `ECOSYSTEM_NODES` both totaled 24 but with different membership — the two lists were never meant to be identical, but this specific mismatch was a real gap, not a deliberate difference. `PlatformPage.jsx` (the `/platform` marketing page, whose whole purpose is to describe every module) was missing four real, RBAC-backed modules that the landing page's own interactive grid already listed: **Teachers, Classes, Behaviour, Resources**.
+
+### Fixed
+- Added all four to `MODULES`/`GROUPS` with descriptions grounded in `moduleRegistry.js`'s actual sub-permissions (Teachers/Classes in the Academic group, Behaviour/Resources in Operations). All four already exist as `ECOSYSTEM_NODES` entries with matching exact label strings, so they pick up the correct icon via the page's existing `ECOSYSTEM_NODES.find(x => x.label === n)` lookup with no further changes. `MODULE_COUNT` (added in v5.35.0, derived from `GROUPS.flatMap(g => g.nodes).length`) picks up the new total automatically — now 28, not 24, since `/platform`'s job is a complete module list, not parity with the landing page's differently-curated showcase.
+- **Not changed, flagged instead**: `MODULES['Academic Records']` has no corresponding key anywhere in `server/config/moduleRegistry.js` and its copy ("Immutable term-by-term academic archive...") reads as a restatement of `Report Cards`' own permanence/audit-trail claim rather than a distinct feature. Left in place rather than unilaterally deleted — this is an editorial call on marketing copy, not a verifiable completeness bug like the four additions above.
+
+### Verified
+- Programmatic check: every `GROUPS` entry has a `MODULES` description and vice versa (zero orphans in either direction), all 28 total. Production client build passes.
+
+---
+
 ## [v5.35.0] — 2026-08-03 — refactor(nav): Category taxonomy reorg + marketing module counts now derived
 
 Built directly on v5.34.0's registry unification — the point of collapsing Sidebar/Settings onto one registry was to make exactly this kind of category change a single coordinated edit instead of a three-list sync.
