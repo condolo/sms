@@ -700,10 +700,23 @@ async function seedDemoData() {
       });
     }));
 
-    /* 5. Behaviour incidents */
-    await Promise.all(BEHAVIOUR.map(b =>
-      upsert(Behaviour, b.id, { ...b, status: 'open', createdBy: ADMIN_ID })
-    ));
+    /* 5. Behaviour incidents — studentName/classId resolved here from
+       STUDENTS rather than hardcoded onto each BEHAVIOUR entry, mirroring
+       the same "never trust the caller, derive from the student's own
+       record" fix now applied to POST /api/behaviour/incidents. Hand-
+       keeping 25 entries across 20 students in sync would be exactly the
+       kind of drift that caused std_demo_6/9/14 etc. to show raw IDs
+       instead of names, and "Unknown Class" on the Dashboard heatmap. */
+    const studentById = new Map(STUDENTS.map(s => [s.id, s]));
+    await Promise.all(BEHAVIOUR.map(b => {
+      const student = studentById.get(b.studentId);
+      return upsert(Behaviour, b.id, {
+        ...b,
+        studentName: student ? `${student.firstName} ${student.lastName}`.trim() : undefined,
+        classId:     student?.classId,
+        status: 'open', createdBy: ADMIN_ID,
+      });
+    }));
 
     /* 6. Timetable — Form 1A */
     await Promise.all(F1A_TIMETABLE.map((slot, i) =>

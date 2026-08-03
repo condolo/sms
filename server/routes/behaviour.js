@@ -496,6 +496,21 @@ router.post('/incidents', authMiddleware, PLAN, MODGATE, behaviourAccess('create
     data.academicYearId = period.academicYearId;
     data.termId          = period.termId;
 
+    // Server-side resolve, never trust the client for these — the caller
+    // (AwardTab.jsx) never sends classId at all today, and studentName is
+    // only sometimes supplied. A missing studentName is exactly what makes
+    // the Serious Incidents panel fall back to showing raw studentIds; a
+    // missing classId is exactly what makes the Dashboard's behaviour
+    // heatmap group everything under "Unknown Class". Resolving both here,
+    // from the student's own current record, closes the gap for every
+    // future incident regardless of what the client sends.
+    const student = await tenantModel('students', tenantContext(req))
+      .findOne({ id: data.studentId, schoolId }).select('firstName lastName classId').lean();
+    if (student) {
+      if (!data.studentName) data.studentName = `${student.firstName} ${student.lastName}`.trim();
+      data.classId = student.classId || data.classId;
+    }
+
     const doc = await tenantModel('behaviour_incidents', tenantContext(req)).create({
       ...data,
       id:          uuidv4(),

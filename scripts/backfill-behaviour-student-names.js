@@ -2,13 +2,17 @@
  * backfill-behaviour-student-names.js — one-time data-quality backfill
  *
  * behaviour_incidents/behaviour_appeals never carried a denormalized
- * studentName (unlike category/itemLabel, which always did) — every
- * incident/appeal created before the fix in server/routes/behaviour.js
- * + client/src/pages/behaviour/components/AwardTab.jsx has studentName
- * missing, which is why the Behaviour UI falls back to showing the raw
- * studentId (e.g. "std_demo_6") instead of a real name. New records
- * created after that fix already carry the name; this script patches
- * the ones that predate it.
+ * studentName (unlike category/itemLabel, which always did), and
+ * behaviour_incidents never carried classId at all — every incident/
+ * appeal created before the server-side resolve fix in
+ * server/routes/behaviour.js's POST /incidents has one or both missing,
+ * which is why the Behaviour UI falls back to showing the raw studentId
+ * (e.g. "std_demo_6") instead of a real name, and the Dashboard's
+ * behaviour heatmap groups everything under "Unknown Class". New records
+ * created after that fix are resolved server-side regardless of what the
+ * client sends; this script patches the ones that predate it. Only
+ * behaviour_incidents gets classId — behaviour_appeals' schema has no
+ * such field.
  *
  * Usage:
  *   node scripts/backfill-behaviour-student-names.js              # all schools
@@ -34,21 +38,32 @@ function _model(col) {
   return mongoose.model(name, schema, col);
 }
 
-async function _backfillCollection(collection, schoolId, studentNameById, dryRun) {
+async function _backfillCollection(collection, schoolId, studentById, dryRun) {
   const Coll = _model(collection);
-  const orphans = await Coll.find({
-    schoolId,
-    $or: [{ studentName: null }, { studentName: { $exists: false } }, { studentName: '' }],
-  }).select('id studentId').lean();
+  const patchesClassId = collection === 'behaviour_incidents'; // AppealSchema has no classId field
+
+  const missingName = [{ studentName: null }, { studentName: { $exists: false } }, { studentName: '' }];
+  const missingClassId = [{ classId: null }, { classId: { $exists: false } }, { classId: '' }];
+  const query = patchesClassId
+    ? { schoolId, $or: [...missingName, ...missingClassId] }
+    : { schoolId, $or: missingName };
+
+  const orphans = await Coll.find(query).select('id studentId studentName classId').lean();
 
   let patched = 0;
   const unresolved = [];
 
   for (const doc of orphans) {
-    const name = studentNameById.get(doc.studentId);
-    if (!name) { unresolved.push(doc.studentId); continue; }
+    const student = studentById.get(doc.studentId);
+    if (!student) { unresolved.push(doc.studentId); continue; }
+
+    const set = {};
+    if (!doc.studentName) set.studentName = `${student.firstName} ${student.lastName}`.trim();
+    if (patchesClassId && !doc.classId && student.classId) set.classId = student.classId;
+    if (Object.keys(set).length === 0) continue;
+
     if (!dryRun) {
-      await Coll.updateOne({ id: doc.id, schoolId }, { $set: { studentName: name } });
+      await Coll.updateOne({ id: doc.id, schoolId }, { $set: set });
     }
     patched++;
   }
@@ -68,12 +83,12 @@ async function run() {
   let grandPatched = 0;
 
   for (const school of schools) {
-    const students = await Students.find({ schoolId: school.id }).select('id firstName lastName').lean();
-    const studentNameById = new Map(students.map(s => [s.id, `${s.firstName} ${s.lastName}`.trim()]));
+    const students = await Students.find({ schoolId: school.id }).select('id firstName lastName classId').lean();
+    const studentById = new Map(students.map(s => [s.id, s]));
 
     const results = {};
     for (const collection of COLLECTIONS) {
-      results[collection] = await _backfillCollection(collection, school.id, studentNameById, DRY_RUN);
+      results[collection] = await _backfillCollection(collection, school.id, studentById, DRY_RUN);
     }
 
     const anyWork = Object.values(results).some(r => r.total > 0);

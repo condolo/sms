@@ -6,6 +6,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.38.0] — 2026-08-03 — fix(behaviour): deep-fix the studentName/classId shallow fix
+
+A screenshot showed the "Serious Incidents" panel displaying raw studentIds ("std_demo_6", "std_demo_9" etc.) again, and asked directly: was the earlier fix shallow? Investigated and confirmed — yes.
+
+### Root cause
+The earlier fix relied entirely on a client-write-time convention: `AwardTab.jsx` sends `studentName` when creating an incident, but nothing resolved it server-side if the caller omitted it, and `POST /incidents` never touched `classId` at all — `AwardTab.jsx` doesn't send it, full stop, so it was never a demo-data-only gap. This is the same "shallow fix" pattern this session already named for a different bug (missing server-side resolve-on-write, matching the exact reasoning that made Medical Centre's visit endpoints resolve `studentName` server-side "proactively avoiding the class of bug fixed in behaviour_incidents earlier this session" — except behaviour_incidents itself was never given that treatment).
+
+Also confirmed: the Dashboard's Behaviour card showing "4 merits / 2 demerits" against the Behaviour module's own Overview showing "+178 / -58" is a **separate, unrelated** issue — different routes entirely (`/api/analytics/leadership`, a rolling 30-day per-class heatmap capped at the top 15 classes, vs `/api/behaviour/incidents`, an all-time unfiltered list). Not a bug in the same sense; flagged separately below since reconciling it is a scope decision, not a fix.
+
+### Fixed
+- `server/routes/behaviour.js`'s `POST /incidents` — server-side resolves `studentName` (if the caller omitted it) and always derives `classId` from the student's own current record, never trusting the client. Closes the gap for every future incident regardless of what the client sends, matching the medical.js precedent this should have followed originally.
+- `server/scripts/seed-demo-data.js` — the `BEHAVIOUR` array's `studentName`/`classId` are now derived from the `STUDENTS` array at insertion time (a `studentById` lookup map) instead of being absent, mirroring the same "derive from the authoritative record" fix. Verified programmatically: all 25 entries across 20 referenced students resolve cleanly, zero unresolved.
+- `scripts/backfill-behaviour-student-names.js` — extended to also backfill `classId` on `behaviour_incidents` (not `behaviour_appeals`, whose schema has no such field), so already-seeded/production data predating this fix can be patched in one run without needing a full re-seed.
+
+### Not fixed (needs a decision, not code)
+- Dashboard Behaviour card vs. Behaviour Overview tab showing different totals — by design (different time window and grouping), but undocumented as such in either widget. Left for a scope decision: reconcile the windows, or label them distinctly so the difference reads as intentional rather than broken.
+
+### Verified
+- Programmatic check: every `BEHAVIOUR` seed entry's `studentId` resolves against `STUDENTS`, zero gaps. Full Jest suite (125 suites / 1182 tests) passes, including all 7 existing behaviour test files — the new `students` lookup in `POST /incidents` degrades safely (`if (student)` guard) against test mocks that don't seed one.
+- **Not yet verified live**: code changes fix the write path for *new* incidents and the seed script for a *fresh* seed, but do not retroactively touch already-persisted documents (the seed helper uses `$setOnInsert`, insert-only). Whoever owns the live/demo database needs to either re-seed (after clearing `behaviour_incidents`) or run `scripts/backfill-behaviour-student-names.js` against it to see the raw IDs replaced immediately — this repo has no `MONGODB_URI` configured, so that step could not be run from here.
+
+---
+
 ## [v5.37.1] — 2026-08-03 — style(nav): section headers use the brand violet instead of dull gray
 
 Confirmed working via screenshot from the previous release, then flagged as visually dull and inconsistent with the rest of the sidebar's type. Section header buttons go from `text-[10px] tracking-widest text-slate-600` to `text-[11px] tracking-wide text-violet-400` (hover `text-violet-300`) — the same violet family used for the school logo badge and user avatar elsewhere in this file. The chevron recolors along with it for free (lucide icons default to `stroke="currentColor"`, inheriting the button's text color with no separate class needed).
