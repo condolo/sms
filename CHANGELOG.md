@@ -6,6 +6,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.37.1] — 2026-08-03 — style(nav): section headers use the brand violet instead of dull gray
+
+Confirmed working via screenshot from the previous release, then flagged as visually dull and inconsistent with the rest of the sidebar's type. Section header buttons go from `text-[10px] tracking-widest text-slate-600` to `text-[11px] tracking-wide text-violet-400` (hover `text-violet-300`) — the same violet family used for the school logo badge and user avatar elsewhere in this file. The chevron recolors along with it for free (lucide icons default to `stroke="currentColor"`, inheriting the button's text color with no separate class needed).
+
+---
+
 ## [v5.37.0] — 2026-08-03 — feat(nav): collapsible sidebar sections
 
 Sidebar section headers (Academic Management, Student Services, Operations, Communication, Analytics, Administration) are now click-to-expand/collapse, mirroring the existing eLearning accordion pattern in the same file. Collapsed by default, except whichever section contains the current route — so navigating straight to a page never hides its own highlighted nav item behind a closed section (same precedent eLearning already set).

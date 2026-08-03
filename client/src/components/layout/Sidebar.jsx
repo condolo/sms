@@ -262,7 +262,7 @@ export default function Sidebar({ collapsed = false, onToggle, onClose }) {
               <button
                 type="button"
                 onClick={() => toggleSection(section.label)}
-                className="w-full flex items-center justify-between px-3 text-[10px] font-semibold uppercase tracking-widest text-slate-600 hover:text-slate-400 transition-colors overflow-hidden"
+                className="w-full flex items-center justify-between px-3 text-[11px] font-semibold uppercase tracking-wide text-violet-400 hover:text-violet-300 transition-colors overflow-hidden"
                 style={{
                   opacity:    collapsed ? 0 : 1,
                   maxHeight:  collapsed ? 0 : 20,
