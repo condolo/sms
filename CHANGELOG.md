@@ -6,6 +6,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.35.2] — 2026-08-03 — fix(platform): fold Academic Records into Report Cards, resolving the flagged item
+
+v5.35.1 flagged `MODULES['Academic Records']` rather than deleting it unilaterally — no `moduleRegistry.js` key backs it, and its copy read as a restatement of `Report Cards`' own permanence claim. Asked to make the call: merged rather than dropped outright, since the one real idea it carried (an immutable, attributable archive) is true and worth keeping — just not as its own module.
+
+### Changed
+- `Report Cards`' description now ends with the archival framing Academic Records used to carry: "...SHA-256 signed with QR verification — an immutable, term-by-term academic archive, permanent and attributable."
+- `Academic Records` removed from `MODULES` and `GROUPS`. `/platform`'s `MODULE_COUNT` (self-derived, no other edit needed) now correctly reads 27.
+
+### Verified
+- Programmatic check: 27/27, zero orphans either direction between `GROUPS` and `MODULES`, `Academic Records` confirmed absent from both. Production client build passes.
+
+---
+
 ## [v5.35.1] — 2026-08-03 — fix(platform): /platform page was missing 4 real modules
 
 Surfaced by v5.35.0's count-derivation work: `PlatformPage.jsx`'s module list and `landingData.js`'s `ECOSYSTEM_NODES` both totaled 24 but with different membership — the two lists were never meant to be identical, but this specific mismatch was a real gap, not a deliberate difference. `PlatformPage.jsx` (the `/platform` marketing page, whose whole purpose is to describe every module) was missing four real, RBAC-backed modules that the landing page's own interactive grid already listed: **Teachers, Classes, Behaviour, Resources**.

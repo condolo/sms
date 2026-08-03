@@ -28,12 +28,11 @@ const MODULES = {
   'Classes':         'Class and stream setup with section management and capacity tracking — the structural backbone attendance, timetable, and grades all build on.',
   'Attendance':      'Daily and per-period register marking on any device in under 90 seconds. Absent students trigger parent notifications automatically.',
   'Grades & Exams':  'Assessment entry against curriculum criteria (CBC, CAIE, IB, WASSCE, custom). Totals, averages, and grades calculated automatically.',
-  'Report Cards':    'Auto-generated from grade data. Five-stage approval chain: Teacher → HOD → Principal → verified → Parent Portal. SHA-256 signed with QR verification.',
+  'Report Cards':    'Auto-generated from grade data. Five-stage approval chain: Teacher → HOD → Principal → verified → Parent Portal. SHA-256 signed with QR verification — an immutable, term-by-term academic archive, permanent and attributable.',
   'Timetable':       'Drag-and-drop timetable builder with clash detection. Links directly to lesson records and teacher workload views.',
   'Subjects':        'Curriculum mapping per class, stream, and year group. Subjects link to assessments, grading schemes, and syllabus coverage.',
   'Lessons':         'Lesson planning linked to schemes of work and CBC/CAIE objectives. Syllabus coverage tracked live — no notebook required.',
   'E-Learning':      'Lessons, notes, videos, and assignments published online. Student progress tracked per module. Feeds directly into Grades.',
-  'Academic Records':'Immutable term-by-term academic archive. Every grade, every report, every approval — permanent and attributable.',
   'Growth Profile':  'Digital student portfolio tracking co-curricular achievements, competencies, and development across the full school journey.',
   'Admissions':      'Kanban pipeline from enquiry to enrolled. Offer tracking, waiting list management, and automatic student record creation on enrolment.',
   // Operations
@@ -57,7 +56,7 @@ const MODULES = {
 };
 
 const GROUPS = [
-  { label: 'Academic',   nodes: ['Students', 'Teachers', 'Classes', 'Attendance', 'Grades & Exams', 'Report Cards', 'Timetable', 'Subjects', 'Lessons', 'E-Learning', 'Academic Records', 'Growth Profile', 'Admissions'] },
+  { label: 'Academic',   nodes: ['Students', 'Teachers', 'Classes', 'Attendance', 'Grades & Exams', 'Report Cards', 'Timetable', 'Subjects', 'Lessons', 'E-Learning', 'Growth Profile', 'Admissions'] },
   { label: 'Operations', nodes: ['Finance', 'HR', 'Library', 'Hostel', 'Transport', 'Events', 'Messages', 'Behaviour', 'Resources', 'Medical Centre', 'Inventory'] },
   { label: 'Insights',   nodes: ['Analytics', 'Reports'] },
   { label: 'Portals',    nodes: ['Student Portal', 'Parent Portal'] },
