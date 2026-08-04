@@ -112,6 +112,27 @@ Customer reported a generic client-side crash ("Something went wrong") specifica
 
 ---
 
+## [v5.49.0]–[v5.53.0] — 2026-08-04 — fix(security): five Critical findings closed from the production security audit
+
+Following the full audit (executive summary + 16-category findings delivered separately), fixed all five independently-verified Critical vulnerabilities. Each was re-read against the actual current source before fixing — not taken on the audit write-up's word alone — and each closure is covered by new regression tests. Full Jest suite (1201 tests, 12 new) passes after all five.
+
+### [v5.49.0] — C-1 — Privilege escalation to platform-wide superadmin
+`POST /api/collections/users` accepted `role:"superadmin"` from any plain `admin` account — `PUT` already blocked this, `POST` and `POST /:col/bulk` (upsert, can also insert) never did, and neither stripped a client-supplied `password` before writing it unhashed. Fixed by mirroring PUT's guard on both routes and stripping `password`/`passwordHash` before create/upsert on `users`. `server/routes/collections.js`.
+
+### [v5.50.0] — C-2 — Cross-tenant billing data leak
+`GET /api/billing/all` checked `req.jwtUser.role === 'superadmin'` — a per-school session-JWT role every school's own onboarding-created owner account holds by default (confirmed directly in `onboard.js`), not the separate platform-admin credential. Confirmed this route had zero legitimate callers (the real, correctly-`platformSession`-gated implementation already lives in `platform.js`, independently corroborated by a prior CHANGELOG entry) and removed the duplicate rather than re-gating it. `server/routes/billing.js`.
+
+### [v5.51.0] — C-3 — Cross-tenant report-card ID collision, unauthenticated enumeration
+`_nextReportId`'s counter document was correctly school-scoped, but the returned string discarded that scoping — `RC-2026-1-000001` was reused by every school's own independent per-school sequence, and the public, unauthenticated `GET /verify/:reportId` endpoint (a deliberately public, cross-tenant-by-design lookup with no schoolId filter) could return an arbitrary other school's student data to anyone who guessed a common sequence number. A real unique index on `reportId` does exist and runs via `ensureIndexes()` on every boot, meaning the practical pre-fix failure mode may have been a hard publish-transaction rollback rather than the silent leak the audit assumed — unconfirmable without production DB access, so the fix closes the collision at its source either way. `_schoolReportCode()` embeds a short deterministic per-school code into the ID (`RC-SSSSSS-YYYY-TN-XXXXXX`). Does not retroactively fix already-issued report cards. `server/routes/report-cards.js`.
+
+### [v5.52.0] — C-4 — Unauthenticated stored XSS in the platform admin dashboard
+The public school-signup form's free-text fields (`schoolName`, `adminName`, `adminEmail`, `city`, `country`) flow unsanitised into `platform.html`'s unescaped template-literal `innerHTML` rendering — reachable by any anonymous internet user, executing inside a platform admin's own session. Added a shared `_esc()` HTML-escape helper and applied it at every confirmed render site of these fields (not just the one function originally flagged): the pending-approvals card, the approved-schools table, the org-schools modal, cross-tenant user-search results, and the per-school superadmins list. `_esc()` also closes a second injection vector found while fixing this — a double-quote breakout out of `onclick="..."` attributes that the old `.replace(/'/g,"\\'")` spot-fixes never covered. `platform.html`.
+
+### [v5.53.0] — C-5 — School deletion wrote no audit-log entry
+`DELETE /schools/all` and `DELETE /schools/:id` — full cascade delete across every tenant collection — logged only to `console.log`, invisible to `AuditService.query()`. `platform.school_deleted` was already pre-defined as a critical, alert-webhook-triggering action that could never fire because neither route ever called it. Added `AuditService.log()` to both, once per school for the bulk-wipe path so any single school's disappearance is individually investigable. `server/routes/platform.js`.
+
+---
+
 ## [v5.45.0] — 2026-08-03 — fix(auth): welcome-credential emails sent every new user to the public marketing site
 
 A new Hr user's "Sign In Now" welcome-email button landed on the public msingi.io homepage, not their school's own login page — meaning a brand-new user has no way to actually sign in from the email they were sent.
