@@ -125,6 +125,27 @@
 
 let _currentView = 'overview';
 
+/* ── HTML-escape untrusted data before interpolating into innerHTML ──
+   This page is plain JS (no framework, no auto-escaping) rendering data
+   that ultimately originates from the PUBLIC, unauthenticated school
+   onboarding form (POST /api/onboard — schoolName, adminName, adminEmail,
+   city, country) with no server-side sanitisation. Escaping HTML entities
+   here is sufficient for BOTH plain-text HTML body positions (e.g.
+   `<h4>${_esc(s.name)}</h4>`) and onclick="...('${_esc(s.name)}')"
+   attribute positions in the same template literal: the browser HTML-
+   decodes an attribute's value (turning &#39; back into ', &quot; back
+   into ", etc.) BEFORE handing it to the JS engine as the event handler's
+   source text — so an escaped value can never break out of the
+   onclick="..." attribute OR be interpreted as HTML/script either way.
+   Supersedes the old `.replace(/'/g, "\\'")` spot-fixes, which only
+   protected the JS-string-literal syntax and left the `<h4>` (and the
+   attribute's own double-quote boundary) unescaped. */
+function _esc(str) {
+  return String(str ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
 /* ── Auth ───────────────────────────────────────────────── */
 async function login() {
   const usernameEl = document.getElementById('login-username');
@@ -396,32 +417,32 @@ async function renderPending() {
 
 function _pendingCard(s) {
   const reg = s.createdAt ? new Date(s.createdAt).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
-  const curriculum = (s.curriculum || []).join(', ') || '—';
-  const sections   = (s.sections   || []).join(', ') || '—';
+  const curriculum = _esc((s.curriculum || []).join(', ') || '—');
+  const sections   = _esc((s.sections   || []).join(', ') || '—');
   return `
     <div class="pending-card" id="pc-${s._id}">
       <div class="pending-card-top">
         <div class="pending-card-info">
-          <h4>${s.name}</h4>
-          <span class="pending-meta"><i class="fas fa-link"></i> ${s.slug || '—'}</span>
-          <span class="pending-meta"><i class="fas fa-user"></i> ${s.adminName || '—'} · ${s.adminEmail || '—'}</span>
-          <span class="pending-meta"><i class="fas fa-map-marker-alt"></i> ${s.city || '—'}, ${s.country || '—'}</span>
+          <h4>${_esc(s.name)}</h4>
+          <span class="pending-meta"><i class="fas fa-link"></i> ${_esc(s.slug) || '—'}</span>
+          <span class="pending-meta"><i class="fas fa-user"></i> ${_esc(s.adminName) || '—'} · ${_esc(s.adminEmail) || '—'}</span>
+          <span class="pending-meta"><i class="fas fa-map-marker-alt"></i> ${_esc(s.city) || '—'}, ${_esc(s.country) || '—'}</span>
           <span class="pending-meta"><i class="fas fa-book"></i> ${curriculum}</span>
           <span class="pending-meta"><i class="fas fa-layer-group"></i> ${sections}</span>
         </div>
         <div class="pending-card-right">
-          <span class="plan-pill ${s.plan || 'core'}">${s.plan || 'core'}</span>
+          <span class="plan-pill ${s.plan || 'core'}">${_esc(s.plan) || 'core'}</span>
           <span style="font-size:11px;color:var(--gray-400);display:block;margin-top:6px;text-align:center">${reg}</span>
         </div>
       </div>
       <div class="pending-card-actions">
-        <button class="pa-btn success" onclick="approveSchool('${s._id}','${s.name.replace(/'/g,"\\'")}')">
+        <button class="pa-btn success" onclick="approveSchool('${s._id}','${_esc(s.name)}')">
           <i class="fas fa-check"></i> Approve
         </button>
-        <button class="pa-btn danger" onclick="rejectSchool('${s._id}','${s.name.replace(/'/g,"\\'")}')">
+        <button class="pa-btn danger" onclick="rejectSchool('${s._id}','${_esc(s.name)}')">
           <i class="fas fa-times"></i> Reject
         </button>
-        <button class="pa-btn" onclick="confirmImpersonate('${s._id}','${s.name.replace(/'/g,"\\'")}')">
+        <button class="pa-btn" onclick="confirmImpersonate('${s._id}','${_esc(s.name)}')">
           <i class="fas fa-eye"></i> Preview
         </button>
       </div>
@@ -561,39 +582,39 @@ function _schoolRow(s) {
   return `
     <tr>
       <td>
-        <strong style="display:block;font-size:13px;color:var(--gray-900)">${s.name}</strong>
-        <span style="font-size:11px;color:var(--gray-400)">${s.email||''}</span>
+        <strong style="display:block;font-size:13px;color:var(--gray-900)">${_esc(s.name)}</strong>
+        <span style="font-size:11px;color:var(--gray-400)">${_esc(s.email)||''}</span>
       </td>
-      <td><code style="font-size:12px;background:var(--gray-100);padding:2px 6px;border-radius:4px">${s.slug||'—'}</code></td>
-      <td><span class="plan-pill ${s.plan||'core'}">${s.plan||'core'}</span></td>
+      <td><code style="font-size:12px;background:var(--gray-100);padding:2px 6px;border-radius:4px">${_esc(s.slug)||'—'}</code></td>
+      <td><span class="plan-pill ${s.plan||'core'}">${_esc(s.plan)||'core'}</span></td>
       <td><span class="status-dot ${status}">${statusLabel}</span></td>
       <td>${s._stats?.students ?? '—'}</td>
       <td>${s._stats?.staff   ?? '—'}</td>
       <td>${trialStr}</td>
       <td>
         <div class="pa-action-wrap">
-          <button class="pa-btn" title="Log in as admin" onclick="confirmImpersonate('${s._id}','${s.name}')">
+          <button class="pa-btn" title="Log in as admin" onclick="confirmImpersonate('${s._id}','${_esc(s.name)}')">
             <i class="fas fa-user-secret"></i> Log in
           </button>
-          <button class="pa-btn" title="Change plan" onclick="changePlan('${s._id}','${s.plan}','${s.name}')">
+          <button class="pa-btn" title="Change plan" onclick="changePlan('${s._id}','${_esc(s.plan)}','${_esc(s.name)}')">
             <i class="fas fa-layer-group"></i> Plan
           </button>
-          <button class="pa-btn" title="Edit school name (slug is fixed and cannot be changed)" onclick="editSchoolName('${s._id}','${s.name.replace(/'/g,"\\'")}')">
+          <button class="pa-btn" title="Edit school name (slug is fixed and cannot be changed)" onclick="editSchoolName('${s._id}','${_esc(s.name)}')">
             <i class="fas fa-pen"></i> Rename
           </button>
-          <button class="pa-btn" title="Grant/revoke capabilities independent of plan tier" onclick="showEntitlements('${s._id}','${s.name.replace(/'/g,"\\'")}')">
+          <button class="pa-btn" title="Grant/revoke capabilities independent of plan tier" onclick="showEntitlements('${s._id}','${_esc(s.name)}')">
             <i class="fas fa-unlock-alt"></i> Entitlements
           </button>
-          <button class="pa-btn" title="View/add superadmin accounts" onclick="showSuperadmins('${s._id}','${s.name.replace(/'/g,"\\'")}')">
+          <button class="pa-btn" title="View/add superadmin accounts" onclick="showSuperadmins('${s._id}','${_esc(s.name)}')">
             <i class="fas fa-user-shield"></i> Superadmins
           </button>
           ${s.isActive
-            ? `<button class="pa-btn danger" title="Suspend school" onclick="toggleActive('${s._id}',false,'${s.name}')"><i class="fas fa-ban"></i></button>`
-            : `<button class="pa-btn success" title="Reinstate school" onclick="toggleActive('${s._id}',true,'${s.name}')"><i class="fas fa-check"></i></button>`
+            ? `<button class="pa-btn danger" title="Suspend school" onclick="toggleActive('${s._id}',false,'${_esc(s.name)}')"><i class="fas fa-ban"></i></button>`
+            : `<button class="pa-btn success" title="Reinstate school" onclick="toggleActive('${s._id}',true,'${_esc(s.name)}')"><i class="fas fa-check"></i></button>`
           }
           <button class="pa-btn" title="Delete school permanently"
             style="color:#dc2626;border-color:#fca5a5"
-            onclick="deleteSchool('${s._id}','${s.name.replace(/'/g,"\\'")}')">
+            onclick="deleteSchool('${s._id}','${_esc(s.name)}')">
             <i class="fas fa-trash-alt"></i>
           </button>
         </div>
@@ -831,11 +852,11 @@ function viewOrgSchools(orgId) {
 
   const rows = (org.schools || []).map(s => `
     <tr>
-      <td style="padding:8px 10px;font-weight:600">${s.name}</td>
-      <td style="padding:8px 10px"><span class="plan-pill ${s.plan||'core'}">${s.plan||'core'}</span></td>
+      <td style="padding:8px 10px;font-weight:600">${_esc(s.name)}</td>
+      <td style="padding:8px 10px"><span class="plan-pill ${s.plan||'core'}">${_esc(s.plan)||'core'}</span></td>
       <td style="padding:8px 10px">${s.isActive ? '<span style="color:#22c55e">Active</span>' : '<span style="color:#ef4444">Inactive</span>'}</td>
       <td style="padding:8px 10px">
-        <button class="pa-btn" style="padding:4px 10px;font-size:12px" title="Grant an existing person access to this school" onclick="showLinkIdentity('${s.id}', '${(s.name||'').replace(/'/g, "\\'")}')">
+        <button class="pa-btn" style="padding:4px 10px;font-size:12px" title="Grant an existing person access to this school" onclick="showLinkIdentity('${s.id}', '${_esc(s.name)}')">
           <i class="fas fa-link"></i> Link Identity
         </button>
       </td>
@@ -908,8 +929,8 @@ async function searchLinkIdentity(schoolId) {
     resultsEl.innerHTML = users.map(u => `
       <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:6px">
         <div>
-          <div style="font-size:13px;font-weight:600;color:#111827">${u.name || u.email}</div>
-          <div style="font-size:11px;color:#94a3b8">${u.email} · ${u.role || '—'} · ${u.schoolName || 'no current school'}</div>
+          <div style="font-size:13px;font-weight:600;color:#111827">${_esc(u.name) || _esc(u.email)}</div>
+          <div style="font-size:11px;color:#94a3b8">${_esc(u.email)} · ${_esc(u.role) || '—'} · ${_esc(u.schoolName) || 'no current school'}</div>
         </div>
         <button class="pa-btn primary" style="padding:4px 10px;font-size:12px" onclick="grantLinkIdentity('${u.id}', '${schoolId}')">
           <i class="fas fa-link"></i> Grant Access
@@ -1469,8 +1490,8 @@ async function loadSuperadmins(schoolId) {
       </thead>
       <tbody>${items.map(u => `
         <tr>
-          <td style="padding:6px 8px">${u.name || '—'}</td>
-          <td style="padding:6px 8px;color:#64748b">${u.email}</td>
+          <td style="padding:6px 8px">${_esc(u.name) || '—'}</td>
+          <td style="padding:6px 8px;color:#64748b">${_esc(u.email)}</td>
           <td style="padding:6px 8px">${u.isActive === false ? '<span style="color:#94a3b8">Inactive</span>' : '<span style="color:#22c55e">Active</span>'}${u.mustChangePassword ? ' <span style="color:#d97706">· must change password</span>' : ''}</td>
         </tr>`).join('')}
       </tbody>
