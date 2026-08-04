@@ -184,12 +184,12 @@ describe('_hashSnapshot', () => {
 });
 
 /* ─────────────────────────────────────────────────────────────── */
-/*  Report ID format                                               */
+/*  Report ID format (RC-SSSSSS-YYYY-TN-XXXXXX)                    */
 /* ─────────────────────────────────────────────────────────────── */
-describe('Report ID format (RC-YYYY-TN-XXXXXX)', () => {
-  test('matches expected pattern', () => {
-    const id = 'RC-2026-1-000001';
-    expect(id).toMatch(/^RC-\d{4}-\d+-\d{6}$/);
+describe('Report ID format (RC-SSSSSS-YYYY-TN-XXXXXX)', () => {
+  test('matches expected pattern — 6-char school code, year, term, 6-digit seq', () => {
+    const id = 'RC-A1B2C3-2026-1-000001';
+    expect(id).toMatch(/^RC-[0-9A-F]{6}-\d{4}-\d+-\d{6}$/);
   });
 
   test('seq is zero-padded to 6 digits', () => {
@@ -207,6 +207,58 @@ describe('Report ID format (RC-YYYY-TN-XXXXXX)', () => {
   test('term number is not zero-padded (1, 2, 3 not 01, 02)', () => {
     const tn = String(1).padStart(1, '0');
     expect(tn).toBe('1');
+  });
+});
+
+/* ─────────────────────────────────────────────────────────────── */
+/*  C-3: _nextReportId — cross-tenant collision fix                */
+/*  RC-2026-1-000001 used to be regenerated identically by every    */
+/*  school's own independent per-school counter (the counter DOC    */
+/*  was schoolId-scoped, but the returned STRING discarded that     */
+/*  scoping) — GET /verify/:reportId, a deliberately public,        */
+/*  cross-tenant-by-design lookup with no schoolId filter, could     */
+/*  then return an arbitrary OTHER school's student data to anyone   */
+/*  who guessed a low, common sequence number. _schoolReportCode()   */
+/*  embeds a short deterministic per-school code so the same         */
+/*  (year, term, seq) tuple from two different schools now produces  */
+/*  two different strings.                                           */
+/* ─────────────────────────────────────────────────────────────── */
+describe('_nextReportId (C-3 fix)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test('_schoolReportCode is deterministic and 6 uppercase hex chars', () => {
+    const a1 = reportCardsRouter._schoolReportCode('sch_trinitas');
+    const a2 = reportCardsRouter._schoolReportCode('sch_trinitas');
+    expect(a1).toBe(a2);
+    expect(a1).toMatch(/^[0-9A-F]{6}$/);
+  });
+
+  test('two different schools differ, even with identical sequence numbers', () => {
+    const codeA = reportCardsRouter._schoolReportCode('sch_trinitas');
+    const codeB = reportCardsRouter._schoolReportCode('sch_other_academy');
+    expect(codeA).not.toBe(codeB);
+  });
+
+  test('two schools generating their own first-ever report of the same term no longer collide', async () => {
+    // Both schools' counters start fresh at seq 1 — this is the exact
+    // real-world trigger condition (every school's very first published
+    // report card of a term) that produced an identical pre-fix string.
+    mockCountersUpdate.mockReturnValue({ lean: () => Promise.resolve({ seq: 1 }) });
+
+    const idSchoolA = await reportCardsRouter._nextReportId('sch_trinitas', 1, '2026');
+    const idSchoolB = await reportCardsRouter._nextReportId('sch_other_academy', 1, '2026');
+
+    expect(idSchoolA).not.toBe(idSchoolB);
+    expect(idSchoolA).toMatch(new RegExp(`^RC-${reportCardsRouter._schoolReportCode('sch_trinitas')}-2026-1-000001$`));
+    expect(idSchoolB).toMatch(new RegExp(`^RC-${reportCardsRouter._schoolReportCode('sch_other_academy')}-2026-1-000001$`));
+  });
+
+  test('the same school\'s counter is still what drives the sequence number', async () => {
+    mockCountersUpdate.mockReturnValue({ lean: () => Promise.resolve({ seq: 42 }) });
+    const id = await reportCardsRouter._nextReportId('sch_trinitas', 1, '2026');
+    expect(id).toBe(`RC-${reportCardsRouter._schoolReportCode('sch_trinitas')}-2026-1-000042`);
   });
 });
 
