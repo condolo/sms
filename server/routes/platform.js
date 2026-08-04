@@ -1293,6 +1293,23 @@ router.delete('/schools/all', async (req, res) => {
     await Promise.all(ops);
 
     console.log(`[PLATFORM] Wiped ${toPurge.length} school(s) and all tenant data`);
+    // ⚠️ Security: this is the platform's most destructive bulk operation and
+    // previously wrote NO audit-log entry at all (console.log only, which lives
+    // only in Render's ephemeral log stream and isn't tied to any school's own
+    // audit trail). 'platform.school_deleted' is already pre-defined as a
+    // critical, alert-webhook-triggering action (ALERT_ACTIONS in audit.js) —
+    // logged once per affected school so it surfaces when investigating any
+    // ONE of them, not just as a single opaque "N schools wiped" entry.
+    toPurge.forEach(s => {
+      AuditService.log({
+        action: 'platform.school_deleted',
+        actor:  { userId: 'platform', role: 'platform', email: null },
+        schoolId: s.id || s._id?.toString(),
+        target: { type: 'school', id: s.id || s._id?.toString(), label: s.name },
+        details: { slug: s.slug, adminEmail: s.adminEmail, bulkWipe: true, totalWiped: toPurge.length },
+        req,
+      });
+    });
     res.json({ success: true, deleted: toPurge.length });
   } catch (err) {
     console.error('[PLATFORM] Wipe error:', err);
@@ -1339,6 +1356,21 @@ router.delete('/schools/:id', async (req, res) => {
     await Promise.all(ops);
 
     console.log(`[PLATFORM] Deleted school: ${school.name} (${school.slug})`);
+    // ⚠️ Security: school deletion is the single most destructive action this
+    // platform can perform and previously wrote NO audit-log entry — only the
+    // console.log above, which lives solely in Render's ephemeral log stream,
+    // untagged with a correlation ID, and outside AuditService.query()'s
+    // reach entirely. 'platform.school_deleted' is already pre-defined as a
+    // critical, alert-webhook-triggering action (ALERT_ACTIONS in audit.js) —
+    // that alert could never fire because this code path never called it.
+    AuditService.log({
+      action: 'platform.school_deleted',
+      actor:  { userId: 'platform', role: 'platform', email: null },
+      schoolId: school.id || school._id?.toString(),
+      target: { type: 'school', id: school.id || school._id?.toString(), label: school.name },
+      details: { slug: school.slug, adminEmail: school.adminEmail },
+      req,
+    });
     res.json({ success: true, name: school.name });
   } catch (err) {
     console.error('[PLATFORM] Delete school error:', err);
