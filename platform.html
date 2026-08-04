@@ -1148,10 +1148,50 @@ async function doImpersonate(schoolId) {
     // ── Store session for the React SPA (key: msingi_session, used by auth store) ──
     // Token is NOT stored here — it lives in the HttpOnly cookie set by the server.
     // Normalise _id → id so isSessionActive() can read user.id.
+    //
+    // IMPORTANT: this must mirror the SAME slim shape client/src/store/auth.js's
+    // saveSession()/_slimUser()/_slimSchool() produce for every real login — this
+    // page is a separate static bundle (no build step, can't import that module),
+    // so the field list is duplicated here on purpose. Every real login path only
+    // ever persists these fields to localStorage; writing the full raw user/school
+    // docs here (as this used to do) meant an impersonated session — uniquely —
+    // left extra sensitive fields (e.g. the school's Mpesa keys) sitting in
+    // localStorage, and skipped moduleRegistry, which every other session-
+    // establishing response carries. Keep this list in sync with auth.js if either
+    // changes.
     const u = data.user || {};
+    const s = data.school || {};
     const sessionPayload = {
-      user:   { ...u, id: u.id || (u._id ? String(u._id) : undefined), password: undefined },
-      school: data.school || {},
+      user: {
+        id:          u.id || (u._id ? String(u._id) : undefined),
+        name:        u.name,
+        role:        u.role,
+        roles:       u.roles,
+        primaryRole: u.primaryRole,
+        schoolId:    u.schoolId,
+        studentId:   u.studentId  ?? undefined,
+        guardianOf:  u.guardianOf ?? undefined,
+        studentIds:  u.studentIds ?? undefined,
+        photoUrl:    u.photoUrl   ?? undefined,
+        permissions: u.permissions ?? undefined,
+      },
+      school: {
+        id:           s.id,
+        name:         s.name,
+        shortName:    s.shortName,
+        slug:         s.slug,
+        plan:         s.plan,
+        logoUrl:      s.logoUrl      ?? undefined,
+        faviconUrl:   s.faviconUrl   ?? undefined,
+        primaryColor: s.primaryColor ?? undefined,
+        accentColor:  s.accentColor  ?? undefined,
+        moduleConfig: s.moduleConfig ?? undefined,
+        modulePermissions: s.modulePermissions ?? undefined,
+        isActive:     s.isActive,
+        academicYear:        s.academicYear        ?? undefined,
+        emergencyOnlineMode: s.emergencyOnlineMode  ?? undefined,
+      },
+      moduleRegistry: data.moduleRegistry || undefined,
       // Populated only when the school's organization has multiSchoolEnabled
       // and this admin has 2+ eligible schools — makes the School Switcher
       // (TopBar.jsx) show up for an impersonated session exactly as it

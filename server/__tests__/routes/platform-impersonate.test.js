@@ -23,6 +23,19 @@
       in-process reuse convention as qa-health.js's
       _identityMigrationStatus), and returning availableSchools too.
 
+   3. The response never included moduleRegistry, unlike every other
+      session-establishing response (login/verify-otp/force-change/
+      exchange/org-login) — this route hand-builds its own response instead
+      of reusing auth.js's, and was missed when moduleRegistry embedding
+      was wired up. platform.html's doImpersonate() also wrote the RAW,
+      unsliced user/school docs straight into the localStorage session
+      (bypassing client/src/store/auth.js's _slimUser/_slimSchool), which
+      both dropped moduleRegistry parity and persisted extra sensitive
+      fields (e.g. the school's Mpesa keys) that no real login session ever
+      writes to localStorage. Fixed by adding moduleRegistry to this
+      response and rewriting platform.html's session write to mirror
+      _slimUser/_slimSchool's exact field list.
+
    All DB calls are mocked — no MongoDB required.
    ============================================================ */
 
@@ -141,6 +154,14 @@ describe('POST /api/platform/schools/:id/impersonate', () => {
     const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate');
     expect(res.status).toBe(200);
     expect(res.body.availableSchools).toBeUndefined();
+  });
+
+  test('response includes moduleRegistry, matching every other session-establishing response', async () => {
+    const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate');
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.moduleRegistry)).toBe(true);
+    expect(res.body.moduleRegistry.length).toBeGreaterThan(0);
+    expect(res.body.moduleRegistry[0]).toHaveProperty('key');
   });
 
   test('still 403s in production without ALLOW_IMPERSONATION', async () => {

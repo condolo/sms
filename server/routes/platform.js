@@ -18,6 +18,7 @@ const { tenantModel } = require('../utils/tenant-model');
 const { provisionOrganizationForSchool } = require('../utils/provision-organizations');
 const { provisionMembershipForUser } = require('../utils/provision-memberships');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
+const { MODULE_REGISTRY } = require('../config/moduleRegistry');
 
 const router = express.Router();
 
@@ -1171,6 +1172,11 @@ router.post('/schools/:id/impersonate', async (req, res) => {
         schoolId:   resolvedSchoolId,
       },
       school,
+      // Every other session-establishing response (login/verify-otp/force-change/
+      // exchange/org-login) carries the registry so the client can derive Sidebar/
+      // Settings nav without a fallback — this route was missed when that was wired
+      // up, since it hand-builds its own response instead of reusing auth.js's.
+      moduleRegistry: MODULE_REGISTRY,
       ...(availableSchools.length ? { availableSchools } : {}),
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
