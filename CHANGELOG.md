@@ -133,6 +133,30 @@ The public school-signup form's free-text fields (`schoolName`, `adminName`, `ad
 
 ---
 
+## [v5.54.0] — 2026-08-04 — fix(rbac): resources/messages/events permission defaults drifted from server across 10 roles (H-1)
+
+Continued down the audit's High-severity list. Fourth confirmed recurrence of the exact bug class fixed for the `teachers` module earlier this session (commit `3c7c717`): `SettingsPage.jsx`'s `DEFS.<role>` functions compute what a Roles & Permissions checkbox shows before an admin customizes it, and Settings' Save always resends the *entire* `byRole` object — so any role/module with a wrong client-side default gets its correct server-seeded grant permanently overwritten the first time anyone at that school saves R&P for any role.
+
+### Root cause
+Re-verified every role against `repairPermissions.js`'s `ROLE_DEFAULTS` by hand rather than trusting the audit's "six roles" count — the real scope was **ten**: `finance`/`hr`/`exams_officer`/`timetabler` (all three of resources/messages/events missing → no access), `admissions_officer`/`discipline_committee` (resources missing), `teacher` (resources under-granted to view-only), `principal`/`deputy_principal`/`deputy` (a blanket fallback silently dropping the `delete` action the server actually seeds), `section_head` (events over-granted, tightened), and `parent`/`student` (resources, and for `student` also messages, missing from their allowlist arrays entirely).
+
+### Fixed
+- `SettingsPage.jsx`'s `DEFS` — explicit rules added for all ten role/module gaps above.
+- `server/routes/onboard.js`'s `_defaultPerms()` — same three modules added across the same roles (the third of three sources meant to agree with each other).
+- Added `server/__tests__/permission-defaults-consistency.test.js`, which programmatically diffs `ROLE_DEFAULTS` against `_defaultPerms()` for every role/module. It immediately caught a real, additional, previously-unknown drift by hand-review: `onboard.js` granted the `hr` role full RCUD on its own `hr` module, while the server's real default deliberately restricts it to read/update/`manage_workflow` (no self-service delete). Fixed that too.
+- `repairPermissions.js` now also exports `ROLE_DEFAULTS` (additive, no behavior change) so the new test can reference it as the single source of truth.
+
+### Not fixed here — flagged as a follow-up
+This test guards the server-side pair of sources going forward; `SettingsPage.jsx` is a React component file with no Node/Jest-requirable boundary today, so the client side of this exact drift still can't be automatically guarded without a larger refactor (extracting `DEFS` into a standalone, dependency-free module).
+
+### Backfill
+Added `scripts/backfill-resources-messages-events-permission-corruption.js` — same conservative, dry-run-by-default, bit-identical-match-only approach as the earlier teachers backfill, covering all 10 confirmed role/module gaps. Verified against `mongodb-memory-server` with five synthetic schools. Deliberately does **not** touch the `hr` role's own `hr` module grant — the server's `manage_workflow` action isn't representable by any combination of the client's read/create/update/delete checkboxes at all, which is a separate product/UI decision, not a data-correction problem.
+
+### Verified
+- Full Jest suite (1214 tests, 13 new) and production client build both pass.
+
+---
+
 ## [v5.45.0] — 2026-08-03 — fix(auth): welcome-credential emails sent every new user to the public marketing site
 
 A new Hr user's "Sign In Now" welcome-email button landed on the public msingi.io homepage, not their school's own login page — meaning a brand-new user has no way to actually sign in from the email they were sent.
