@@ -76,6 +76,20 @@ The dead `hr__staff` checkbox itself is still dead; wiring it to actually gate s
 
 ---
 
+## [v5.47.0] — 2026-08-04 — fix(rbac): backfill script for the v5.46.0 Teachers-grant corruption, confirmed platform-wide
+
+Follow-up asked directly by the customer after v5.46.0 shipped: is this really just Mascit Lab Academy, or bigger? Traced with `git log -S` — the `DEFS.hr`/`DEFS.timetabler`/`DEFS.section_head` gaps and the "Settings Save resends the entire byRole object" mechanism have both existed unchanged since the earliest recoverable commit (2026-06-29). Conclusion, stated plainly to the customer: **every school that has ever saved Roles & Permissions, for any role, since that date is equally exposed** — Mascit Lab Academy is simply the one that got reported, not the only one affected.
+
+### Added
+- `scripts/backfill-teachers-permission-corruption.js` — one-time, idempotent, dry-run-by-default backfill. For every school that has ever saved R&P, checks each of the three affected roles' (`hr`, `timetabler`, `section_head`) stored `teachers__<sub>` cells and corrects **only** the cells that are bit-identical to the exact broken value that role's old `DEFS` fallback would have produced (`hr`/`timetabler`: all-N → correct default; `section_head`: over-granted E → view-only). Any cell that differs even slightly from the known-broken pattern is left untouched, on the assumption it was deliberately customized by an admin — this script cannot distinguish "never touched, defaulted from broken code" from "an admin happened to choose the identical value," so it errs toward not touching anything that isn't provably the bug.
+- Corrects both places the corruption lives, so it survives the next Settings Save: `schools.modulePermissions.byRole.<role>.teachers__<sub>` (the UI matrix Settings resends wholesale on every save) and `role_permissions { schoolId, roleKey }.permissions.teachers[*]` (the actual RBAC enforcement data), recomputing the module-level union exactly as `settings.js`'s `_deriveApiPerms` would.
+- Verified against `mongodb-memory-server` with four synthetic schools covering: classic all-cell corruption, a genuinely-customized cell that must survive untouched, a school that never saved R&P (skipped entirely), and a mixed school with some cells corrupted and one deliberately non-default cell that isn't the broken value — confirmed correct output for dry-run, apply, and a second no-op apply (idempotency).
+
+### Not done here
+- Running this script against the live database — this environment has no `MONGODB_URI` configured. Someone with database access needs to run `node scripts/backfill-teachers-permission-corruption.js --dry-run` first to review the report, then without the flag to apply. The live server's in-memory permission cache (5-minute TTL) isn't shared with this script's process, so affected users may need up to 5 minutes after it runs, or a server restart, before the corrected grants take effect.
+
+---
+
 ## [v5.45.0] — 2026-08-03 — fix(auth): welcome-credential emails sent every new user to the public marketing site
 
 A new Hr user's "Sign In Now" welcome-email button landed on the public msingi.io homepage, not their school's own login page — meaning a brand-new user has no way to actually sign in from the email they were sent.

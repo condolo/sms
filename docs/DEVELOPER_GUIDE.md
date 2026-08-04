@@ -3030,6 +3030,8 @@ server start
               └── seedDemoData()   [realistic content]
 ```
 
+**`repairPermissions()`'s limits**: it only fixes documents in the old broken legacy format (boolean values instead of arrays) or adds module keys that are entirely *missing* from a `role_permissions` doc — it never overwrites a key that already exists, even if the value is wrong. This means it cannot self-heal a well-formed-but-wrong grant, such as the `hr`/`timetabler`/`section_head` "Teachers module" corruption documented in `CHANGELOG.md` v5.46.0/v5.47.0: `DEFS.<role>` in `SettingsPage.jsx` had the wrong default for the `teachers` module, and since Settings' Save always resends the *entire* `byRole` object, the first R&P save at any school — for any role — silently baked the wrong value into both `schools.modulePermissions.byRole` and `role_permissions`. `scripts/backfill-teachers-permission-corruption.js` is the one-time, dry-run-capable script that retroactively corrects it (bit-identical-match only, so it never touches a deliberately-customized cell). This is a reminder that a value-level default bug in a client-side `DEFS` function is a *different failure mode* from the malformed-document case `repairPermissions()` was built for, and needs its own targeted backfill, not a rerun of the generic repair.
+
 ### 31.2 Plan Enforcement
 
 The demo school **must always be on the enterprise plan**. This is enforced by:
