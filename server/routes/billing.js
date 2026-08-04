@@ -4,7 +4,18 @@
    GET  /api/billing/current           — current unpaid invoice for school (admin)
    GET  /api/billing/history           — all billing snapshots for school (admin)
    POST /api/billing/generate          — manually generate term snapshot (admin)
-   GET  /api/billing/all               — all schools' snapshots (superadmin)
+
+   The platform-wide "all schools' snapshots" view lives at
+   GET /api/platform/billing/all (server/routes/platform.js), gated on
+   platformSession — the real platform-admin credential, not a school-session
+   role. A duplicate GET /all used to live in this file, gated only on
+   req.jwtUser.role === 'superadmin' (an ordinary per-school JWT role that
+   every school's own onboarding-created owner account holds by default) —
+   that meant any school's own admin could read every other school's
+   billing data with their normal login. Removed rather than re-gated: the
+   platform.js route is the one actually used by platform.html and every
+   other reference in the codebase, so this was dead, duplicated logic
+   whose only live purpose was as an unintended attack surface.
 
    Billing model:
      • Amount = activeStudentCount × tier rate (KSh 250/300/350)
@@ -28,9 +39,6 @@ function _uid() { return Date.now().toString(36) + crypto.randomBytes(4).toStrin
 function _isAdmin(req) {
   const r = req.jwtUser?.role || '';
   return ['superadmin', 'admin', 'principal'].includes(r);
-}
-function _isSuperAdmin(req) {
-  return req.jwtUser?.role === 'superadmin';
 }
 
 /* ── Billing invoice ref generator ─────────────────────────── */
@@ -156,41 +164,6 @@ router.post('/generate', authMiddleware, async (req, res) => {
     return created(res, { snapshot });
   } catch (err) {
     console.error('[billing POST /generate]', err);
-    return E.serverError(res);
-  }
-});
-
-/* ══════════════════════════════════════════════════════════════
-   GET /api/billing/all  — platform-wide view (superadmin only)
-   ══════════════════════════════════════════════════════════════ */
-router.get('/all', authMiddleware, async (req, res) => {
-  try {
-    if (!_isSuperAdmin(req)) return E.forbidden(res, 'Superadmin access required.');
-    // Deliberately cross-tenant — this is the platform-wide billing view for
-    // superadmins, not a school-scoped endpoint. Not a candidate for
-    // tenantModel(), same reasoning as platform.js / qa-health.js.
-    const Snapshots = _model('billing_snapshots');
-    const Schools   = _model('schools');
-
-    const snapshots = await Snapshots.find({})
-      .sort({ generatedAt: -1 })
-      .limit(500)
-      .lean();
-
-    // Attach school names
-    const schoolIds = [...new Set(snapshots.map(s => s.schoolId))];
-    const schools   = await Schools.find({ id: { $in: schoolIds } }).select('id name slug').lean();
-    const schoolMap = Object.fromEntries(schools.map(s => [s.id, s]));
-
-    const enriched = snapshots.map(s => ({
-      ...s,
-      schoolName: schoolMap[s.schoolId]?.name ?? s.schoolId,
-      schoolSlug: schoolMap[s.schoolId]?.slug ?? '',
-    }));
-
-    return ok(res, enriched);
-  } catch (err) {
-    console.error('[billing GET /all]', err);
     return E.serverError(res);
   }
 });
