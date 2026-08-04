@@ -213,11 +213,21 @@ router.post('/:col', authMiddleware, async (req, res) => { // rbac: ADMIN_WRITE/
   // ⚠️ Security: only admins can create users/permissions/schools
   if (SUPERADMIN_WRITE.has(col) && !_isSuperAdmin(req)) return res.status(403).json({ error: 'Super admin access required' });
   if (ADMIN_WRITE.has(col) && !_isAdmin(req)) return res.status(403).json({ error: 'Admin access required' });
+  // ⚠️ Security: only a superadmin may create a superadmin (mirrors the identical
+  // guard on PUT below — this route lacked it, letting any admin self-escalate by
+  // POSTing {role:'superadmin'} to /api/collections/users).
+  if (col === 'users' && !_isSuperAdmin(req) && req.body.role === 'superadmin') {
+    return res.status(403).json({ error: 'Cannot assign superadmin role' });
+  }
   try {
     const Model  = _accessor(col, req);
     const data  = { ...req.body };
     if (!GLOBAL.has(col)) data.schoolId = req.jwtUser.schoolId;
     if (!data.id) data.id = _uid();
+    // ⚠️ Security: never accept a password through this generic endpoint — real
+    // account creation goes through the dedicated invite flow (settings.js), which
+    // bcrypt-hashes it. Mirrors PUT's identical `delete update.password` below.
+    if (col === 'users') { delete data.password; delete data.passwordHash; }
     const doc = await Model.create(data);
     const out = doc.toObject();
     res.status(201).json(col === 'users' ? _sanitiseUser(out) : out);
@@ -309,15 +319,25 @@ router.post('/:col/bulk', authMiddleware, async (req, res) => { // rbac: ADMIN_W
   if (ADMIN_WRITE.has(col) && !_isAdmin(req)) return res.status(403).json({ error: 'Admin access required' });
   const rows = req.body;
   if (!Array.isArray(rows)) return res.status(400).json({ error: 'Body must be an array' });
+  // ⚠️ Security: same guards as POST/PUT above — bulk upserts can insert brand-new
+  // 'users' documents (via upsert:true), so it's exposed to the identical
+  // role-escalation and password-bypass risk, just via an array instead of one body.
+  if (col === 'users' && !_isSuperAdmin(req) && rows.some(r => r?.role === 'superadmin')) {
+    return res.status(403).json({ error: 'Cannot assign superadmin role' });
+  }
   try {
     const Model  = _accessor(col, req);
-    const ops    = rows.map(r => ({
-      updateOne: {
-        filter: { id: r.id, ...(GLOBAL.has(col) ? {} : { schoolId: req.jwtUser.schoolId }) },
-        update: { $set: { ...r, schoolId: GLOBAL.has(col) ? r.schoolId : req.jwtUser.schoolId } },
-        upsert: true
-      }
-    }));
+    const ops    = rows.map(r => {
+      const row = { ...r };
+      if (col === 'users') { delete row.password; delete row.passwordHash; }
+      return {
+        updateOne: {
+          filter: { id: row.id, ...(GLOBAL.has(col) ? {} : { schoolId: req.jwtUser.schoolId }) },
+          update: { $set: { ...row, schoolId: GLOBAL.has(col) ? row.schoolId : req.jwtUser.schoolId } },
+          upsert: true
+        }
+      };
+    });
     const result = await Model.bulkWrite(ops);
     res.json({ upserted: result.upsertedCount, modified: result.modifiedCount });
   } catch (err) {

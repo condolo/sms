@@ -39,7 +39,25 @@ function matchesFilter(doc, filter) {
 }
 function mockMakeFakeModel(seed = []) {
   const docs = [...seed];
-  return { find: jest.fn((filter) => mockChainArr(docs.filter(d => matchesFilter(d, filter)))) };
+  return {
+    find: jest.fn((filter) => mockChainArr(docs.filter(d => matchesFilter(d, filter)))),
+    create: jest.fn((data) => {
+      const doc = { ...data };
+      docs.push(doc);
+      return Promise.resolve({ toObject: () => doc });
+    }),
+    bulkWrite: jest.fn((ops) => {
+      let upsertedCount = 0, modifiedCount = 0;
+      for (const op of ops) {
+        const { filter, update } = op.updateOne;
+        const existing = docs.find(d => matchesFilter(d, filter));
+        if (existing) { Object.assign(existing, update.$set); modifiedCount++; }
+        else { docs.push({ ...update.$set }); upsertedCount++; }
+      }
+      return Promise.resolve({ upsertedCount, modifiedCount });
+    }),
+    _docs: docs,
+  };
 }
 
 let mockJwtUser = { userId: 'usr_admin', schoolId: SCHOOL_A, role: 'admin', roles: ['admin'] };
@@ -91,7 +109,63 @@ beforeEach(() => {
     attendance:          mockMakeFakeModel([{ id: 'a1', schoolId: SCHOOL_A }]),
     grades:              mockMakeFakeModel([{ id: 'g1', schoolId: SCHOOL_A }]),
     subjects:            mockMakeFakeModel([{ id: 's1', schoolId: SCHOOL_A, name: 'Math' }]),
+    users:               mockMakeFakeModel([]),
   };
+});
+
+describe('C-1: POST/bulk cannot self-escalate to superadmin or plant a raw password', () => {
+  test('a plain admin POSTing role:"superadmin" to /users is rejected', async () => {
+    const res = await supertest(buildApp())
+      .post('/api/collections/users')
+      .send({ name: 'Attacker', email: 'a@x.com', password: 'plaintext', role: 'superadmin' });
+    expect(res.status).toBe(403);
+    expect(mockTenantData.users._docs.length).toBe(0); // never written
+  });
+
+  test('a superadmin CAN create a superadmin via POST (legitimate path preserved)', async () => {
+    mockJwtUser = { userId: 'usr_super', schoolId: SCHOOL_A, role: 'superadmin', roles: ['superadmin'] };
+    const res = await supertest(buildApp())
+      .post('/api/collections/users')
+      .send({ name: 'New Super', email: 'b@x.com', role: 'superadmin' });
+    expect(res.status).toBe(201);
+    expect(mockTenantData.users._docs.length).toBe(1);
+  });
+
+  test('a plain admin POSTing a non-superadmin role to /users still works (no regression)', async () => {
+    const res = await supertest(buildApp())
+      .post('/api/collections/users')
+      .send({ name: 'New Teacher', email: 'c@x.com', role: 'teacher' });
+    expect(res.status).toBe(201);
+    expect(mockTenantData.users._docs.length).toBe(1);
+  });
+
+  test('a client-supplied password is stripped on POST /users, even for a legitimate admin create', async () => {
+    const res = await supertest(buildApp())
+      .post('/api/collections/users')
+      .send({ name: 'New Teacher', email: 'd@x.com', role: 'teacher', password: 'plaintext-attempt' });
+    expect(res.status).toBe(201);
+    expect(mockTenantData.users._docs[0].password).toBeUndefined();
+  });
+
+  test('bulk upsert containing role:"superadmin" anywhere in the array is rejected for a plain admin', async () => {
+    const res = await supertest(buildApp())
+      .post('/api/collections/users/bulk')
+      .send([
+        { id: 'u1', name: 'Fine', email: 'e@x.com', role: 'teacher' },
+        { id: 'u2', name: 'Attacker', email: 'f@x.com', role: 'superadmin' },
+      ]);
+    expect(res.status).toBe(403);
+    expect(mockTenantData.users._docs.length).toBe(0); // nothing in the batch was written
+  });
+
+  test('bulk upsert with no superadmin role, from a plain admin, still works and strips password', async () => {
+    const res = await supertest(buildApp())
+      .post('/api/collections/users/bulk')
+      .send([{ id: 'u3', name: 'Fine', email: 'g@x.com', role: 'teacher', password: 'plaintext' }]);
+    expect(res.status).toBe(200);
+    expect(mockTenantData.users._docs.length).toBe(1);
+    expect(mockTenantData.users._docs[0].password).toBeUndefined();
+  });
 });
 
 describe('the real leak this fix closes', () => {
