@@ -531,6 +531,10 @@ function _defaultPerms(role) {
         timetable:    R,    messages:     RCU,  report_cards: R,
         exams:        R,    lessons:      RCUD, library:      R,
         hostel:       R,    transport:    R,
+        // resources/events: match repairPermissions.js's ROLE_DEFAULTS.teacher —
+        // previously missing here entirely (this function predates those two
+        // modules being added to the registry and was never revisited).
+        resources:    RCU,  events:       R,
         medical__alerts: R, // condition flags only, never full clinic-visit records
         inventory__requisition: RCU, // raise + view own requisitions, not full inventory management
       };
@@ -543,16 +547,31 @@ function _defaultPerms(role) {
         library:      R,
         hostel:       R,
         transport:    R,
+        // resources/messages/events: match repairPermissions.js's ROLE_DEFAULTS.finance.
+        resources:    RCU,
+        messages:     RCU,
+        events:       R,
       };
 
     case 'hr':
       return {
-        hr:           RCUD,
+        // NOT RCUD — matches repairPermissions.js's ROLE_DEFAULTS.hr exactly:
+        // the hr role deliberately excludes 'create'/'delete' on its own 'hr'
+        // module (no self-service deleting of HR config/records) and instead
+        // gets 'manage_workflow' for the leave-approval-chain config screen.
+        // Was RCUD here, silently over-granting delete on every school
+        // onboarded through this flow until the Roles & Permissions consistency
+        // test caught it.
+        hr:           ['read', 'update', 'manage_workflow'],
         teachers:     RCUD,
         students:     R,
         library:      R,
         hostel:       R,
         transport:    R,
+        // resources/messages/events: match repairPermissions.js's ROLE_DEFAULTS.hr.
+        resources:    RCU,
+        messages:     RCU,
+        events:       R,
       };
 
     case 'admissions_officer':
@@ -563,6 +582,10 @@ function _defaultPerms(role) {
         library:      R,
         hostel:       R,
         transport:    R,
+        // resources/messages/events: match repairPermissions.js's ROLE_DEFAULTS.admissions_officer.
+        resources:    RCU,
+        messages:     RCU,
+        events:       R,
       };
 
     case 'exams_officer':
@@ -576,6 +599,10 @@ function _defaultPerms(role) {
         library:      R,
         hostel:       R,
         transport:    R,
+        // resources/messages/events: match repairPermissions.js's ROLE_DEFAULTS.exams_officer.
+        resources:    RCU,
+        messages:     RCU,
+        events:       R,
       };
 
     case 'timetabler':
@@ -586,6 +613,11 @@ function _defaultPerms(role) {
         library:      R,
         hostel:       R,
         transport:    R,
+        // resources/messages/events: match repairPermissions.js's ROLE_DEFAULTS.timetabler —
+        // events gets RCUD (not just R) there, to coordinate scheduling.
+        resources:    RCU,
+        messages:     RCU,
+        events:       RCUD,
       };
 
     case 'section_head':
@@ -595,6 +627,8 @@ function _defaultPerms(role) {
         exams:        R,   timetable:    R,   report_cards: R,
         admissions:   R,   lessons:      RCU, analytics:    R,
         library:      R,   hostel:       R,   transport:    R,
+        // resources/messages/events: match repairPermissions.js's ROLE_DEFAULTS.section_head.
+        resources:    RCU, messages:     RCU, events:       R,
       };
 
     case 'principal':
@@ -607,6 +641,9 @@ function _defaultPerms(role) {
         lessons:      RCUD, analytics:    R,    library:      R,
         hostel:       R,    transport:    R,    medical:      RCUD,
         inventory:    RCUD,
+        // resources/events: match repairPermissions.js's ROLE_DEFAULTS.principal/
+        // deputy_principal (full RCUD, same tier as 'messages' above).
+        resources:    RCUD, events:       RCUD,
       };
 
     case 'discipline_committee':
@@ -616,6 +653,10 @@ function _defaultPerms(role) {
         library:      R,
         hostel:       R,
         transport:    R,
+        // resources/messages/events: match repairPermissions.js's ROLE_DEFAULTS.discipline_committee.
+        resources:    RCU,
+        messages:     RCU,
+        events:       R,
       };
 
     case 'parent':
@@ -623,6 +664,9 @@ function _defaultPerms(role) {
         messages:     R,
         report_cards: R,   // read their own child's report cards
         lessons:      R,   // view curriculum coverage for their child's class
+        // resources: matches repairPermissions.js's ROLE_DEFAULTS.parent — was
+        // missing here entirely, same drift class as the other roles above.
+        resources:    R,
       };
 
     case 'student':
@@ -632,6 +676,9 @@ function _defaultPerms(role) {
         library:      R,
         hostel:       R,
         transport:    R,
+        // resources: matches repairPermissions.js's ROLE_DEFAULTS.student — was
+        // missing here entirely, same drift class as the other roles above.
+        resources:    R,
       };
 
     default:
@@ -666,5 +713,10 @@ function _timezoneForCountry(country) {
 function _initials(name) {
   return name.split(/\s+/).filter(w => w.length > 2).map(w => w[0].toUpperCase()).join('').substring(0, 6) || name.substring(0, 4).toUpperCase();
 }
+
+// Exposed for direct unit testing — see
+// server/__tests__/permission-defaults-consistency.test.js, which checks this
+// never silently drifts from repairPermissions.js's ROLE_DEFAULTS again.
+router._defaultPerms = _defaultPerms;
 
 module.exports = router;

@@ -273,4 +273,8 @@ async function repairPermissions() {
   }
 }
 
-module.exports = { repairPermissions };
+// ROLE_DEFAULTS exported alongside repairPermissions() so other code (and
+// tests) can compare against it as the single source of truth — see
+// server/__tests__/permission-defaults-consistency.test.js, which checks
+// onboard.js's _defaultPerms() never silently drifts from this again.
+module.exports = { repairPermissions, ROLE_DEFAULTS };

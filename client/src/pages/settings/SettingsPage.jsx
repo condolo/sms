@@ -3353,6 +3353,10 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='settings'   && s==='permissions') return N;
       if (m==='analytics') return V;
       if (['exams','assessment'].includes(m)) return T;   // matches RCUD already seeded server-side
+      // resources/messages/events: blanket E below (RCU) previously under-granted
+      // these — server seeds RCUD (repairPermissions.js's principal/deputy_principal
+      // ROLE_DEFAULTS) — silently dropping 'delete' on every Roles & Permissions save.
+      if (['resources','messages','events'].includes(m)) return T;
       if (['library','hostel','transport'].includes(m)) return V;   // matches R already seeded server-side
       if (m==='medical') return T;   // matches RCUD already seeded server-side
       if (m==='inventory') return T;   // matches RCUD already seeded server-side
@@ -3371,6 +3375,10 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (['library','transport','hostel'].includes(m)) return V;   // matches R already seeded server-side
       if (s==='import') return N;
       if (['exams','assessment','report_cards','teachers'].includes(m)) return V;   // matches R already seeded server-side — the blanket E fallback below would over-grant create/edit on teacher records
+      // events: server seeds R only (repairPermissions.js) — the blanket E
+      // fallback below would over-grant create/edit; resources/messages
+      // already correctly match server RCU via that same fallback.
+      if (m==='events') return V;
       if (m==='medical') return N;   // nothing seeded server-side — full records stay restricted by default
       if (m==='inventory') return N;   // nothing seeded server-side — restricted by default
       return E;
@@ -3390,6 +3398,10 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       }
       if (m==='lessons')                        { if (s==='delete') return N; return E; }   // teachers write plans, not delete others'
       if (m==='elearning')                      { if (s==='delete') return N; return E; }   // teachers upload content, not delete
+      // resources: server seeds RCU (repairPermissions.js) — the blanket V
+      // fallback below would under-grant to view-only. events is correctly V
+      // (matches server R) via that same fallback, left unchanged.
+      if (m==='resources') return E;
       if (['library','transport','hostel'].includes(m))   return V;   // matches R already seeded server-side
       if (s==='import') return N;
       if (m==='classes'   && ['section','delete'].includes(s)) return N;
@@ -3414,6 +3426,11 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='subjects') return V;
       if (m==='reports')  return E;
       if (m==='growth_profile') return V;
+      // resources/messages/events: nothing matched these above, so they fell
+      // to the final N below — server seeds RCU/RCU/R (repairPermissions.js).
+      if (m==='resources') return E;
+      if (m==='messages')  return E;
+      if (m==='events')    return V;
       if (['library','hostel','transport'].includes(m)) return V;   // matches R already seeded server-side
       return N;
     },
@@ -3428,6 +3445,12 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='teachers')  return V;   // matches R already seeded server-side — see teacher
                                         // availability/names when building the timetable
       if (m==='lessons')   return V;   // see lesson plans to schedule accurately
+      // resources/messages/events: fell to the final N below — server seeds
+      // RCU/RCU/RCUD (repairPermissions.js — timetabler is the one role
+      // that gets full RCUD on events, not just R, to coordinate scheduling).
+      if (m==='resources') return E;
+      if (m==='messages')  return E;
+      if (m==='events')    return T;
       if (['library','hostel','transport'].includes(m)) return V;   // matches R already seeded server-side
       return N;
     },
@@ -3440,6 +3463,8 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='classes')    return V;
       if (m==='events')     return V;
       if (m==='messages')   return s==='delete' ? N : E;
+      // resources: fell to the final N below — server seeds RCU (repairPermissions.js).
+      if (m==='resources')  return E;
       if (['library','hostel','transport'].includes(m)) return V;   // matches R already seeded server-side
       return N;
     },
@@ -3451,6 +3476,11 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='students') return V;
       if (m==='reports')  return V;
       if (m==='report_cards') return V;   // matches R already seeded server-side
+      // resources/messages/events: fell to the final N below — server seeds
+      // RCU/RCU/R (repairPermissions.js).
+      if (m==='resources') return E;
+      if (m==='messages')  return E;
+      if (m==='events')    return V;
       if (['library','hostel','transport'].includes(m)) return V;   // matches R already seeded server-side
       return N;
     },
@@ -3466,6 +3496,11 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
                                        // correct seeded default with an empty grant.
       if (m==='students') return V;
       if (m==='reports')  return V;
+      // resources/messages/events: fell to the final N below — server seeds
+      // RCU/RCU/R (repairPermissions.js), same drift class as 'teachers' above.
+      if (m==='resources') return E;
+      if (m==='messages')  return E;
+      if (m==='events')    return V;
       if (['library','hostel','transport'].includes(m)) return V;   // matches R already seeded server-side
       return N;
     },
@@ -3479,20 +3514,28 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='attendance') return V;
       if (m==='messages')  return s==='delete' ? N : E;
       if (m==='growth_profile') return V;
+      // resources/events: fell to the final N below — server seeds RCU/R
+      // (repairPermissions.js); messages above already matches server RCU.
+      if (m==='resources') return E;
+      if (m==='events')    return V;
       if (['library','hostel','transport'].includes(m)) return V;   // matches R already seeded server-side
       return N;
     },
 
     parent: (m, s) => {
+      // resources: server seeds R (repairPermissions.js) — was missing from
+      // this allowlist entirely, silently falling to N on every save.
       if (!['students','finance','attendance','grades','behaviour','events','messages','growth_profile',
-            'elearning','transport','hostel','report_cards'].includes(m)) return N;
+            'elearning','transport','hostel','report_cards','resources'].includes(m)) return N;
       if (m==='finance' && ['fee_structure','mpesa','import','create_invoice','void_invoice','record_payment'].includes(s)) return N;
       if (m==='growth_profile' && s !== 'view') return N;
       return V;   // report_cards: read their own child's report cards, matches R already seeded server-side
     },
 
     student: (m, s) => {
-      if (['students','timetable','grades','events',
+      // resources/messages: server seeds R for both (repairPermissions.js) —
+      // were missing from this allowlist entirely, silently falling to N.
+      if (['students','timetable','grades','events','messages','resources',
            'elearning','library','transport','hostel'].includes(m)) return V;
       if (m==='growth_profile') {
         if (s==='view') return V;
