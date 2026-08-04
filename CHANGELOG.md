@@ -90,6 +90,28 @@ Follow-up asked directly by the customer after v5.46.0 shipped: is this really j
 
 ---
 
+## [v5.48.0] — 2026-08-04 — fix(auth): impersonation wrote a differently-shaped session than every real login
+
+Customer reported a generic client-side crash ("Something went wrong") specifically when using Impersonation from the platform admin tool, plus general instability, after first suspecting (and ruling out, via Cloudflare's own Security Events log showing zero matching firewall events) newly-enabled Cloudflare Bot Fight Mode / Client-side security. Asked for a clean scan instead of another guess.
+
+### Root cause
+- `platform.html`'s `doImpersonate()` writes the session the React SPA reads on boot directly to `localStorage['msingi_session']` — the same key every real login writes to via `client/src/store/auth.js`'s `saveSession()`, which deliberately persists a **slim**, allow-listed shape (`_slimUser`/`_slimSchool`). Impersonation instead wrote the **raw, unsliced** admin/school documents returned by the API.
+- `useAuthStore`'s initial state reads `localStorage` unprocessed on module load (`session: loadSession()`), so an impersonated session boots the entire app with a shape no other code path produces or was ever tested against — before the user's very first render.
+- Two concrete divergences from that: the raw payload was missing `moduleRegistry` (every other session-establishing response — login/verify-otp/force-change/exchange/org-login — carries it; this route hand-builds its own response and was missed when that was wired up), and it persisted extra fields to `localStorage` that no real login session ever writes there, including the school's Mpesa keys.
+
+### Fixed
+- `platform.js`'s impersonate route now includes `moduleRegistry` in its response, matching the other four session-establishing routes.
+- `platform.html`'s session write now mirrors `_slimUser`/`_slimSchool`'s exact field list instead of spreading the raw API response. `platform.html` is a separate static bundle with no build step, so it can't import the client's actual `auth.js` module — this list is necessarily duplicated and flagged with a comment to keep the two in sync.
+- Added a regression test (`platform-impersonate.test.js`) asserting `moduleRegistry` is present in the response. Verified the corrected client-side payload directly in-browser: confirmed no Mpesa-key/address leakage into `localStorage` and correct `moduleRegistry` pass-through.
+
+### Not confirmed
+- This closes a real, verified shape divergence, but there is no captured stack trace yet tying it conclusively to the specific "Something went wrong" crash reported — every consumer of `session` checked (Sidebar, SettingsPage, ProtectedRoute, TopBar) tolerated the old shape without throwing in code review. If the crash recurs, the browser console's error/stack trace (visible even in production builds) is the fastest way to pinpoint the exact line.
+
+### Verified
+- Full Jest suite (1183 tests, 1 new) and production client build both pass.
+
+---
+
 ## [v5.45.0] — 2026-08-03 — fix(auth): welcome-credential emails sent every new user to the public marketing site
 
 A new Hr user's "Sign In Now" welcome-email button landed on the public msingi.io homepage, not their school's own login page — meaning a brand-new user has no way to actually sign in from the email they were sent.
