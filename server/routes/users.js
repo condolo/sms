@@ -484,7 +484,12 @@ router.delete('/me/photo', authMiddleware, async (req, res) => {
    route in this file already trusts. The unauthenticated ?schoolId= param
    is left in the URL shape only for backward compatibility with URLs the
    upload route already handed out — it's no longer read for authorization. */
-router.get('/:id/photo', authMiddleware, async (req, res) => {
+router.get('/:id/photo', authMiddleware, async (req, res) => { // rbac: no module gate by design —
+  // same trust model as viewing a colleague's name in a staff directory or
+  // class roster (both already render this photo with no 'users' RBAC grant,
+  // and no such module exists in this app; user MANAGEMENT is its own
+  // separate gate under 'settings'). authMiddleware + the schoolId scope
+  // above are the real protection here, not a role permission.
   try {
     const { schoolId } = req.jwtUser;
 
