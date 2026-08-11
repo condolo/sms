@@ -1528,7 +1528,9 @@ function LeadershipPanel({ school, dateFrom, dateTo, rangeLabel }) {
                 <ShieldAlert size={13} style={{ color: primary }} />
               </div>
               <span className="text-sm font-semibold text-slate-700">Behaviour</span>
-              <span className="text-[10px] text-slate-400">· last {days} days</span>
+              <span className="text-[10px] text-slate-400">
+                · {rangeLabel === 'Lifetime' ? 'lifetime' : `last ${rangeLabel.toLowerCase()}`}
+              </span>
             </div>
             <Link to="/behaviour" className="text-xs transition flex items-center gap-1 font-medium" style={{ color: primary }}>
               View <ArrowRight size={11} />
