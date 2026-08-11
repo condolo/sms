@@ -17,14 +17,41 @@ const express = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
+const { moduleGate }     = require('../middleware/module-gate');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, E }          = require('../utils/response');
 
 const router = express.Router();
-const PLAN   = planGate('growth_profile');
+const PLAN    = planGate('growth_profile');
+// Added alongside promoting this module to a real Sidebar entry (it now
+// has a navRoute, so it's independently toggleable from Settings → Modules
+// — every other toggleable module enforces its own off-state server-side
+// via moduleGate; this file predates having a navRoute at all and was
+// simply never wired into that pattern until now).
+const MODGATE = moduleGate('growth_profile');
+
+/* Parent/student self-service scoping. Coarser roles (teacher, admin,
+   etc.) are intentionally left to the module-level growth_profile:read
+   grant alone — this app's convention elsewhere (attendance, grades) is
+   that staff access is bounded by RBAC, not hard-coded to "my own class
+   only," and narrowing that further here would be a separate, bigger
+   product decision, not an access-control bug fix. Parent/student seeing
+   someone else's child, however, is unambiguously wrong regardless of
+   that convention — this closes exactly that gap, nothing broader. */
+function _forbiddenForSelfServiceRole(req, student) {
+  const role = req.jwtUser?.role;
+  if (role === 'student') {
+    return req.jwtUser.studentId !== student.id;
+  }
+  if (role === 'parent' || role === 'guardian') {
+    const owned = new Set([...(req.jwtUser.studentIds ?? []), ...(req.jwtUser.guardianOf ?? [])]);
+    return !owned.has(student.id);
+  }
+  return false; // any other role — module-level RBAC already gates this
+}
 
 /* ── GET /api/growth-profile/:studentId ────────────────────── */
-router.get('/:studentId', authMiddleware, PLAN, rbac('growth_profile', 'read'), async (req, res) => {
+router.get('/:studentId', authMiddleware, PLAN, MODGATE, rbac('growth_profile', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { studentId } = req.params;
@@ -34,6 +61,7 @@ router.get('/:studentId', authMiddleware, PLAN, rbac('growth_profile', 'read'), 
       .select('id firstName lastName admissionNumber classId className sectionKey photo status')
       .lean();
     if (!student) return E.notFound(res, 'Student not found');
+    if (_forbiddenForSelfServiceRole(req, student)) return E.forbidden(res, 'You can only view your own Growth Profile.');
 
     // Section counts — parallel fetch for performance
     const [
@@ -98,7 +126,7 @@ router.get('/:studentId', authMiddleware, PLAN, rbac('growth_profile', 'read'), 
 /* ── GET /api/growth-profile/:studentId/academic ───────────── */
 // Reads from existing grades, attendance, and report-cards collections.
 // NEVER writes to them.
-router.get('/:studentId/academic', authMiddleware, PLAN, rbac('growth_profile', 'read'), async (req, res) => {
+router.get('/:studentId/academic', authMiddleware, PLAN, MODGATE, rbac('growth_profile', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { studentId } = req.params;
@@ -106,6 +134,7 @@ router.get('/:studentId/academic', authMiddleware, PLAN, rbac('growth_profile', 
     // Verify student
     const student = await tenantModel('students', tenantContext(req)).findOne({ id: studentId, schoolId }).select('id firstName lastName classId className').lean();
     if (!student) return E.notFound(res, 'Student not found');
+    if (_forbiddenForSelfServiceRole(req, student)) return E.forbidden(res, 'You can only view your own Growth Profile.');
 
     // Parallel fetch from existing collections — read-only aggregation
     const [gradesAgg, attendanceAgg, recentReports] = await Promise.all([
@@ -221,7 +250,7 @@ router.get('/:studentId/academic', authMiddleware, PLAN, rbac('growth_profile', 
    points-reset). A yearly reset only moves the "current" window
    Behaviour itself shows; it never touches this collection, so every
    year's totals stay visible here permanently, per Governance Spec §2. */
-router.get('/:studentId/behaviour', authMiddleware, PLAN, rbac('growth_profile', 'read'), async (req, res) => {
+router.get('/:studentId/behaviour', authMiddleware, PLAN, MODGATE, rbac('growth_profile', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { studentId } = req.params;
@@ -229,6 +258,7 @@ router.get('/:studentId/behaviour', authMiddleware, PLAN, rbac('growth_profile',
     const student = await tenantModel('students', tenantContext(req)).findOne({ id: studentId, schoolId })
       .select('id firstName lastName').lean();
     if (!student) return E.notFound(res, 'Student not found');
+    if (_forbiddenForSelfServiceRole(req, student)) return E.forbidden(res, 'You can only view your own Growth Profile.');
 
     const [byYear, years] = await Promise.all([
       tenantModel('behaviour_incidents', tenantContext(req)).aggregate([

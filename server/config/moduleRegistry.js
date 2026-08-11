@@ -23,8 +23,8 @@
                  sub.key is stored as `${mod.key}__${sub.key}` in modulePermissions
 
    Optional nav metadata (present only on entries with their own Sidebar
-   nav item — 23 of the 28 entries; growth_profile/analytics/settings and
-   the exams/assessment pair have no `navRoute` and are excluded from nav
+   nav item — 24 of the 28 entries; analytics/settings and the
+   exams/assessment pair have no `navRoute` and are excluded from nav
    generation, exactly matching pre-existing Sidebar behaviour):
      icon        — lucide-react export name (string, not a component — this
                    file is plain Node/CommonJS with no JSX) resolved client-side
@@ -221,8 +221,7 @@ const MODULE_REGISTRY = [
     { key: 'workflow',    label: 'Configure Requisition Approval Workflow' },
   ]},
 
-  /* ── Insights ─────────────────────────────────────────── */
-  { key: 'growth_profile', label: 'Growth Profile', section: 'Student Services', subs: [
+  { key: 'growth_profile', label: 'Growth Profile', section: 'Student Services', icon: 'Sprout', navRoute: '/growth-profile', navOrder: 10, subs: [
     { key: 'view',            label: 'View Growth Profiles' },
     { key: 'add_records',     label: 'Add Records (Leadership / Activities / Service / Awards)' },
     { key: 'edit_records',    label: 'Edit Own Records' },

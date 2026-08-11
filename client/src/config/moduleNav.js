@@ -10,23 +10,23 @@
    lucide-react component references, so both consumers render
    identical icons without either hand-maintaining its own list.
 
-   Only entries with a `navRoute` get a nav item — growth_profile,
-   analytics, settings, and the exams/assessment pair (which share
-   the 'grades' entry's single nav item) are deliberately excluded,
-   matching the product behaviour this replaces.
+   Only entries with a `navRoute` get a nav item — analytics, settings,
+   and the exams/assessment pair (which share the 'grades' entry's single
+   nav item) are deliberately excluded, matching the product behaviour
+   this replaces.
    ============================================================ */
 import {
   GraduationCap, Users, BookOpen, Calendar, CheckSquare, FileText,
   FileBarChart2, Library, ClipboardList, Scale, Wallet, MessageSquare,
   UserCog, BookCheck, MonitorPlay, BookMarked, Link2, Bus, BedDouble,
-  HeartPulse, Boxes, TrendingUp, HelpCircle,
+  HeartPulse, Boxes, TrendingUp, Sprout, HelpCircle,
 } from 'lucide-react';
 
 export const NAV_ICON_MAP = {
   GraduationCap, Users, BookOpen, Calendar, CheckSquare, FileText,
   FileBarChart2, Library, ClipboardList, Scale, Wallet, MessageSquare,
   UserCog, BookCheck, MonitorPlay, BookMarked, Link2, Bus, BedDouble,
-  HeartPulse, Boxes, TrendingUp,
+  HeartPulse, Boxes, TrendingUp, Sprout,
 };
 
 /* Migration-safety net only — snapshot of the module list for sessions
@@ -60,6 +60,7 @@ export const FALLBACK_NAV_MODULES = [
   { key: 'subjects',   to: '/subjects',   Icon: Library,         label: 'Subjects',            section: 'Academic Management' },
   { key: 'admissions', to: '/admissions', Icon: ClipboardList,  label: 'Admissions',          section: 'Student Services' },
   { key: 'behaviour',  to: '/behaviour',  Icon: Scale,          label: 'Behaviour',           section: 'Student Services' },
+  { key: 'growth_profile', to: '/growth-profile', Icon: Sprout, label: 'Growth Profile',      section: 'Student Services' },
   { key: 'finance',    to: '/finance',    Icon: Wallet,         label: 'Finance',             section: 'Operations' },
   { key: 'messages',   to: '/messages',   Icon: MessageSquare,  label: 'Messages',            section: 'Communication' },
   { key: 'events',     to: '/events',     Icon: Calendar,       label: 'Events',              section: 'Communication' },

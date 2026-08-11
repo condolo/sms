@@ -55,6 +55,7 @@ const ChangelogPage     = lazy(() => import('@/pages/changelog/ChangelogPage.jsx
 const HelpPage          = lazy(() => import('@/pages/help/HelpPage.jsx'));
 const ProfilePage       = lazy(() => import('@/pages/profile/ProfilePage.jsx'));
 const GrowthProfilePage = lazy(() => import('@/pages/growth-profile/GrowthProfilePage.jsx'));
+const GrowthProfileHome = lazy(() => import('@/pages/growth-profile/GrowthProfileHome.jsx'));
 const LibraryPage       = lazy(() => import('@/pages/library/LibraryPage.jsx'));
 const ResourcesPage     = lazy(() => import('@/pages/resources/ResourcesPage.jsx'));
 const TransportPage     = lazy(() => import('@/pages/transport/TransportPage.jsx'));
@@ -261,7 +262,8 @@ export const router = createBrowserRouter([
       // Profile
       { path: 'profile',               element: <SuspenseWrapper><ProfilePage /></SuspenseWrapper> },
 
-      // Growth Profile (v4.22.0)
+      // Growth Profile (v4.22.0; standalone module + landing page added later)
+      { path: 'growth-profile',            element: <SuspenseWrapper><GrowthProfileHome /></SuspenseWrapper> },
       { path: 'growth-profile/:studentId', element: <SuspenseWrapper><GrowthProfilePage /></SuspenseWrapper> },
 
       // Library (v4.29.0)
