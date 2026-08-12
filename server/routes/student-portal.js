@@ -13,6 +13,10 @@ const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, E }          = require('../utils/response');
+// Weekly Snapshot's read logic is shared with weekly-snapshots.js's own
+// staff-facing routes — see that file's _findAuthorizedStudent header
+// comment for why this isn't reimplemented here.
+const { _helpers: weeklySnapshotHelpers } = require('./weekly-snapshots');
 
 const router = express.Router();
 
@@ -275,6 +279,50 @@ router.get('/me', authMiddleware, async (req, res) => {
     return ok(res, safe);
   } catch (err) {
     console.error('[student-portal GET /me]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   Weekly Student Snapshot — self-service, bypasses RBAC entirely
+   (no rbac()/moduleGate/planGate anywhere in this file, matching every
+   other route above). Always self — studentId comes from the JWT, no
+   :studentId param, so there's nothing to check ownership against
+   other than "is this my own studentId," which the shared helper
+   already does via req.jwtUser.studentId.
+   ══════════════════════════════════════════════════════════════ */
+router.get('/weekly-snapshot/weeks', authMiddleware, async (req, res) => {
+  if (!_requireStudent(req, res)) return;
+  try {
+    const result = await weeklySnapshotHelpers.getWeeksForStudent(req, req.jwtUser.studentId);
+    if (result.error === 'not_found') return E.notFound(res, 'Student record not found.');
+    if (result.error === 'forbidden') return E.forbidden(res, 'You can only view your own Weekly Snapshots.');
+    return ok(res, result);
+  } catch (err) {
+    console.error('[student-portal GET /weekly-snapshot/weeks]', err);
+    return E.serverError(res);
+  }
+});
+
+router.get('/weekly-snapshot/:weekStart', authMiddleware, async (req, res) => {
+  if (!_requireStudent(req, res)) return;
+  try {
+    const result = await weeklySnapshotHelpers.getSnapshotDetail(req, req.jwtUser.studentId, req.params.weekStart);
+    if (result.error === 'not_found') return E.notFound(res, 'No snapshot generated for that week');
+    if (result.error === 'forbidden') return E.forbidden(res, 'You can only view your own Weekly Snapshots.');
+    return ok(res, result);
+  } catch (err) {
+    console.error('[student-portal GET /weekly-snapshot/:weekStart]', err);
+    return E.serverError(res);
+  }
+});
+
+router.get('/weekly-snapshot/:weekStart/pdf', authMiddleware, async (req, res) => {
+  if (!_requireStudent(req, res)) return;
+  try {
+    await weeklySnapshotHelpers.streamSnapshotPdf(req, res, req.jwtUser.studentId, req.params.weekStart);
+  } catch (err) {
+    console.error('[student-portal GET /weekly-snapshot/:weekStart/pdf]', err);
     return E.serverError(res);
   }
 });

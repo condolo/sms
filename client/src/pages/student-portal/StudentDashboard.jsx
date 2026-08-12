@@ -12,7 +12,7 @@ import {
   LayoutDashboard, Calendar, BookCheck, CheckCircle, Clock,
   Download, FileText, GraduationCap, LogOut, AlertCircle,
   BookOpen, Lock, Bell, MessageSquare, Activity, Star,
-  MapPin, Play, MonitorPlay,
+  MapPin, Play, MonitorPlay, CalendarCheck,
 } from 'lucide-react';
 
 /* ── API ────────────────────────────────────────────────────────── */
@@ -36,6 +36,17 @@ async function _downloadReport(rcId, label) {
   const a    = document.createElement('a');
   a.href     = URL.createObjectURL(blob);
   a.download = `report-card-${label}.pdf`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function _downloadSnapshot(weekStart, label) {
+  const res = await fetch(`${API_BASE}/api/student-portal/weekly-snapshot/${weekStart}/pdf`, { credentials: 'include' });
+  if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error || 'Download failed'); }
+  const blob = await res.blob();
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  a.download = `weekly-snapshot-${label}.pdf`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -138,6 +149,7 @@ export default function StudentDashboard() {
   const [activeNav,   setActiveNav]   = useState('section-dashboard');
   const [downloading, setDownloading] = useState(null);
   const [dlError,     setDlError]     = useState('');
+  const [latestWeek,  setLatestWeek]  = useState(null); // most recent Weekly Snapshot, or undefined if none generated yet
 
   /* ── Auth guard + fetch ── */
   useEffect(() => {
@@ -149,6 +161,12 @@ export default function StudentDashboard() {
         if (e.code === 'auth_expired') { logout(); navigate('/login', { replace: true }); return; }
         setError(e.message); setLoading(false);
       });
+    // Independent of the dashboard payload — its own endpoint, per the
+    // confirmed self-service architecture (weekly-snapshots.js's shared
+    // read logic, reached here via student-portal.js's RBAC-bypassed route).
+    _fetch('/api/student-portal/weekly-snapshot/weeks')
+      .then(({ weeks }) => setLatestWeek(weeks?.[0] ?? undefined))
+      .catch(() => setLatestWeek(undefined));
   }, []);
 
   /* ── Scroll to section helper ── */
@@ -638,6 +656,48 @@ export default function StudentDashboard() {
                   )}
                 </div>
               </div>
+
+              {/* This Week's Snapshot — auto-generated every Saturday
+                 (weekly-snapshot-cron.js). `latestWeek === undefined`
+                 means "checked, none generated yet" vs. `null` = "still
+                 loading" — the card only appears once there's something
+                 real to show. */}
+              {latestWeek && (
+                <div id="section-weekly-snapshot" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center gap-2">
+                    <CalendarCheck size={14} className="text-sky-500" />
+                    <h2 className="text-[13px] font-bold text-slate-900">This Week's Snapshot</h2>
+                  </div>
+                  <div className="px-[18px] py-4 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[12px] font-semibold text-slate-700">
+                        Week of {latestWeek.weekStart} – {latestWeek.weekEnd}
+                      </p>
+                      <p className="text-[10px] text-slate-400">
+                        Topics, assignments, attendance, behaviour, and more
+                      </p>
+                    </div>
+                    <button
+                      id="download-weekly-snapshot"
+                      onClick={() => {
+                        setDlError('');
+                        setDownloading(`snap-${latestWeek.weekStart}`);
+                        _downloadSnapshot(latestWeek.weekStart, latestWeek.weekStart)
+                          .catch(e => setDlError(e.message))
+                          .finally(() => setDownloading(null));
+                      }}
+                      disabled={downloading === `snap-${latestWeek.weekStart}`}
+                      className="flex items-center gap-1 text-[10px] font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 px-2.5 py-1 rounded-full transition disabled:opacity-50 shrink-0"
+                    >
+                      {downloading === `snap-${latestWeek.weekStart}`
+                        ? <span className="w-3 h-3 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
+                        : <Download size={10} />
+                      }
+                      {downloading === `snap-${latestWeek.weekStart}` ? 'Saving…' : 'PDF'}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Upcoming Exams */}
               <div id="section-assignments" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">

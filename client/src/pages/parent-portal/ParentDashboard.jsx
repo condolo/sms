@@ -12,7 +12,7 @@ import {
   Activity, AlertCircle, Award, Bell, BookCheck, Calendar,
   CheckCircle, Clock, Download, FileText, GraduationCap,
   Lock, LogOut, MessageSquare, Receipt, Star, Wallet,
-  ChevronDown, MonitorPlay, MapPin, BookOpen,
+  ChevronDown, MonitorPlay, MapPin, BookOpen, CalendarCheck,
 } from 'lucide-react';
 
 /* ── API helpers ────────────────────────────────────────────────── */
@@ -35,6 +35,16 @@ async function _downloadRC(rcId, label) {
   const a    = document.createElement('a');
   a.href     = URL.createObjectURL(blob);
   a.download = `report-${label}.pdf`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+async function _downloadSnapshot(childId, weekStart, label) {
+  const res = await fetch(`${API_BASE}/api/parent-portal/weekly-snapshot/${childId}/${weekStart}/pdf`, { credentials: 'include' });
+  if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error || 'Download failed'); }
+  const blob = await res.blob();
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  a.download = `weekly-snapshot-${label}.pdf`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -136,6 +146,7 @@ export default function ParentDashboard() {
   const [loadingChild,  setLoadingChild]  = useState(false);
   const [downloading,   setDownloading]   = useState(null);
   const [dlError,       setDlError]       = useState('');
+  const [latestWeek,    setLatestWeek]    = useState(null); // most recent Weekly Snapshot for activeChildId, or undefined if none generated yet
   const [initError,     setInitError]     = useState('');
   const [activeNav,     setActiveNav]     = useState('section-overview');
   const [childMenuOpen, setChildMenuOpen] = useState(false);
@@ -178,6 +189,17 @@ export default function ParentDashboard() {
         if (e.code === 'auth_expired') { logout(); navigate('/login', { replace: true }); return; }
         setLoadingChild(false);
       });
+  }, [activeChildId]);
+
+  /* ── Load this child's most recent Weekly Snapshot (independent of the
+     dashboard payload — its own endpoint, per the confirmed self-service
+     architecture) ── */
+  useEffect(() => {
+    if (!activeChildId) return;
+    setLatestWeek(null);
+    _fetch(`/api/parent-portal/weekly-snapshot/${activeChildId}/weeks`)
+      .then(({ weeks }) => setLatestWeek(weeks?.[0] ?? undefined))
+      .catch(() => setLatestWeek(undefined)); // no snapshot yet, or transient error — card simply hides
   }, [activeChildId]);
 
   function handleLogout() { logout(); navigate('/login', { replace: true }); }
@@ -942,6 +964,50 @@ export default function ParentDashboard() {
                           />
                         </div>
                       ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── This Week's Snapshot ────────────────────────────
+                   Auto-generated every Saturday — see weekly-snapshot-
+                   cron.js. `latestWeek === undefined` means "checked,
+                   none generated yet" (vs. `null` = "still loading"),
+                   so the card only ever appears once there's something
+                   real to show — no empty-state clutter here, the full
+                   history lives behind the eventual dedicated view. */}
+                {latestWeek && (
+                  <div id="section-weekly-snapshot" className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="px-[18px] py-3.5 border-b border-slate-100 flex items-center gap-2">
+                      <CalendarCheck size={14} className="text-sky-500" />
+                      <h2 className="text-[13px] font-bold text-slate-900">This Week's Snapshot</h2>
+                    </div>
+                    <div className="px-[18px] py-4 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[12px] font-semibold text-slate-700">
+                          Week of {latestWeek.weekStart} – {latestWeek.weekEnd}
+                        </p>
+                        <p className="text-[10px] text-slate-400">
+                          Topics, assignments, attendance, behaviour, and more
+                        </p>
+                      </div>
+                      <button
+                        id="download-weekly-snapshot"
+                        onClick={() => {
+                          setDlError('');
+                          setDownloading(`snap-${latestWeek.weekStart}`);
+                          _downloadSnapshot(activeChildId, latestWeek.weekStart, `${activeChild?.name ?? 'child'}-${latestWeek.weekStart}`)
+                            .catch(e => setDlError(e.message))
+                            .finally(() => setDownloading(null));
+                        }}
+                        disabled={downloading === `snap-${latestWeek.weekStart}`}
+                        className="flex items-center gap-1 text-[10px] font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 px-2.5 py-1 rounded-full transition disabled:opacity-50 shrink-0"
+                      >
+                        {downloading === `snap-${latestWeek.weekStart}`
+                          ? <span className="w-3 h-3 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
+                          : <Download size={10} />
+                        }
+                        {downloading === `snap-${latestWeek.weekStart}` ? 'Saving…' : 'PDF'}
+                      </button>
                     </div>
                   </div>
                 )}

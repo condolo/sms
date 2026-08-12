@@ -59,6 +59,75 @@ async function _redactMedical(req, schoolId, sections) {
   return sections;
 }
 
+/* ══════════════════════════════════════════════════════════════
+   Shared read logic — the ONE place that looks up a student, checks
+   self-service ownership, and reads weekly_snapshots. Called by this
+   file's own staff-facing routes below AND by parent-portal.js /
+   student-portal.js's self-service routes (M6), so the two access
+   paths (RBAC-gated staff vs. RBAC-bypassed parent/student) never risk
+   drifting into two independent implementations of the same read.
+   Each returns { error: 'not_found' | 'forbidden' } on failure so the
+   caller's route handler decides the exact E.* response — these
+   helpers never touch `res` directly (except streamSnapshotPdf, which
+   owns the whole PDF response by necessity).
+   ══════════════════════════════════════════════════════════════ */
+async function _findAuthorizedStudent(req, studentId, selectFields) {
+  const { schoolId } = req.jwtUser;
+  const student = await tenantModel('students', tenantContext(req)).findOne({ id: studentId, schoolId })
+    .select(selectFields).lean();
+  if (!student) return { error: 'not_found' };
+  if (forbiddenForSelfServiceRole(req, student)) return { error: 'forbidden' };
+  return { student };
+}
+
+async function getWeeksForStudent(req, studentId) {
+  const { student, error } = await _findAuthorizedStudent(req, studentId, 'id firstName lastName classId className');
+  if (error) return { error };
+
+  const weeks = await tenantModel('weekly_snapshots', tenantContext(req))
+    .find({ studentId }).sort({ weekStart: -1 })
+    .select('weekStart weekEnd generatedAt').lean();
+
+  return { student, weeks };
+}
+
+async function getSnapshotDetail(req, studentId, weekStart) {
+  const { student, error } = await _findAuthorizedStudent(req, studentId, 'id firstName lastName classId className admissionNumber photo');
+  if (error) return { error };
+
+  const { schoolId } = req.jwtUser;
+  const snapshot = await tenantModel('weekly_snapshots', tenantContext(req)).findOne({ studentId, weekStart }).lean();
+  if (!snapshot) return { error: 'not_found' };
+
+  const sections = await _redactMedical(req, schoolId, snapshot.sections);
+  return { student, snapshot: { ...snapshot, sections } };
+}
+
+async function streamSnapshotPdf(req, res, studentId, weekStart) {
+  const result = await getSnapshotDetail(req, studentId, weekStart);
+  if (result.error === 'not_found') return E.notFound(res, 'No snapshot generated for that week');
+  if (result.error === 'forbidden') return E.forbidden(res, 'You can only view your own Weekly Snapshots.');
+  const { student, snapshot } = result;
+
+  let PDFDocument;
+  try { PDFDocument = require('pdfkit'); }
+  catch { return res.status(501).json({ error: 'pdfkit not installed. Run: npm install pdfkit' }); }
+
+  const pdfDoc  = new PDFDocument({ margin: 40, size: 'A4' });
+  const buffers = [];
+  pdfDoc.on('data', chunk => buffers.push(chunk));
+  pdfDoc.on('end', () => {
+    const pdf = Buffer.concat(buffers);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="weekly-snapshot-${student.id}-${weekStart}.pdf"`);
+    res.setHeader('Content-Length', pdf.length);
+    res.send(pdf);
+  });
+
+  _buildSnapshotPDF(pdfDoc, snapshot, student, snapshot.sections);
+  pdfDoc.end();
+}
+
 /* ── GET /api/weekly-snapshots/my-classes ──────────────────── */
 router.get('/my-classes', authMiddleware, PLAN, MODGATE, rbac('weekly_snapshot', 'read'), async (req, res) => {
   try {
@@ -84,19 +153,10 @@ router.get('/my-classes', authMiddleware, PLAN, MODGATE, rbac('weekly_snapshot',
 /* ── GET /api/weekly-snapshots/:studentId/weeks ─────────────── */
 router.get('/:studentId/weeks', authMiddleware, PLAN, MODGATE, rbac('weekly_snapshot', 'read'), async (req, res) => {
   try {
-    const { schoolId } = req.jwtUser;
-    const { studentId } = req.params;
-
-    const student = await tenantModel('students', tenantContext(req)).findOne({ id: studentId, schoolId })
-      .select('id firstName lastName classId className').lean();
-    if (!student) return E.notFound(res, 'Student not found');
-    if (forbiddenForSelfServiceRole(req, student)) return E.forbidden(res, 'You can only view your own Weekly Snapshots.');
-
-    const weeks = await tenantModel('weekly_snapshots', tenantContext(req))
-      .find({ studentId }).sort({ weekStart: -1 })
-      .select('weekStart weekEnd generatedAt').lean();
-
-    return ok(res, { student, weeks });
+    const result = await getWeeksForStudent(req, req.params.studentId);
+    if (result.error === 'not_found') return E.notFound(res, 'Student not found');
+    if (result.error === 'forbidden') return E.forbidden(res, 'You can only view your own Weekly Snapshots.');
+    return ok(res, result);
   } catch (err) {
     console.error('[weekly-snapshots GET /:studentId/weeks]', err);
     return E.serverError(res);
@@ -106,20 +166,10 @@ router.get('/:studentId/weeks', authMiddleware, PLAN, MODGATE, rbac('weekly_snap
 /* ── GET /api/weekly-snapshots/:studentId/:weekStart ────────── */
 router.get('/:studentId/:weekStart', authMiddleware, PLAN, MODGATE, rbac('weekly_snapshot', 'read'), async (req, res) => {
   try {
-    const { schoolId } = req.jwtUser;
-    const { studentId, weekStart } = req.params;
-
-    const student = await tenantModel('students', tenantContext(req)).findOne({ id: studentId, schoolId })
-      .select('id firstName lastName classId className admissionNumber photo').lean();
-    if (!student) return E.notFound(res, 'Student not found');
-    if (forbiddenForSelfServiceRole(req, student)) return E.forbidden(res, 'You can only view your own Weekly Snapshots.');
-
-    const snapshot = await tenantModel('weekly_snapshots', tenantContext(req))
-      .findOne({ studentId, weekStart }).lean();
-    if (!snapshot) return E.notFound(res, 'No snapshot generated for that week');
-
-    const sections = await _redactMedical(req, schoolId, snapshot.sections);
-    return ok(res, { student, snapshot: { ...snapshot, sections } });
+    const result = await getSnapshotDetail(req, req.params.studentId, req.params.weekStart);
+    if (result.error === 'not_found') return E.notFound(res, 'No snapshot generated for that week');
+    if (result.error === 'forbidden') return E.forbidden(res, 'You can only view your own Weekly Snapshots.');
+    return ok(res, result);
   } catch (err) {
     console.error('[weekly-snapshots GET /:studentId/:weekStart]', err);
     return E.serverError(res);
@@ -129,37 +179,7 @@ router.get('/:studentId/:weekStart', authMiddleware, PLAN, MODGATE, rbac('weekly
 /* ── GET /api/weekly-snapshots/:studentId/:weekStart/pdf ────── */
 router.get('/:studentId/:weekStart/pdf', authMiddleware, PLAN, MODGATE, rbac('weekly_snapshot', 'read'), async (req, res) => {
   try {
-    const { schoolId } = req.jwtUser;
-    const { studentId, weekStart } = req.params;
-
-    const student = await tenantModel('students', tenantContext(req)).findOne({ id: studentId, schoolId })
-      .select('id firstName lastName classId className admissionNumber').lean();
-    if (!student) return E.notFound(res, 'Student not found');
-    if (forbiddenForSelfServiceRole(req, student)) return E.forbidden(res, 'You can only view your own Weekly Snapshots.');
-
-    const snapshot = await tenantModel('weekly_snapshots', tenantContext(req))
-      .findOne({ studentId, weekStart }).lean();
-    if (!snapshot) return E.notFound(res, 'No snapshot generated for that week');
-
-    const sections = await _redactMedical(req, schoolId, snapshot.sections);
-
-    let PDFDocument;
-    try { PDFDocument = require('pdfkit'); }
-    catch { return res.status(501).json({ error: 'pdfkit not installed. Run: npm install pdfkit' }); }
-
-    const pdfDoc  = new PDFDocument({ margin: 40, size: 'A4' });
-    const buffers = [];
-    pdfDoc.on('data', chunk => buffers.push(chunk));
-    pdfDoc.on('end', () => {
-      const pdf = Buffer.concat(buffers);
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename="weekly-snapshot-${student.id}-${weekStart}.pdf"`);
-      res.setHeader('Content-Length', pdf.length);
-      res.send(pdf);
-    });
-
-    _buildSnapshotPDF(pdfDoc, snapshot, student, sections);
-    pdfDoc.end();
+    await streamSnapshotPdf(req, res, req.params.studentId, req.params.weekStart);
   } catch (err) {
     console.error('[weekly-snapshots GET /:studentId/:weekStart/pdf]', err);
     return E.serverError(res);
@@ -239,5 +259,11 @@ function _buildSnapshotPDF(doc, snapshot, student, sections) {
   doc.moveDown(1).fontSize(8).fillColor('#999')
     .text(`Generated ${snapshot.generatedAt} · Timezone: ${snapshot.schoolTimezone}`, { align: 'center' });
 }
+
+// Exposed for parent-portal.js / student-portal.js's self-service routes
+// (M6) — see the header comment on _findAuthorizedStudent above for why
+// this is a shared implementation rather than two independent copies.
+// Same convention as onboard.js's router._defaultPerms attachment.
+router._helpers = { getWeeksForStudent, getSnapshotDetail, streamSnapshotPdf };
 
 module.exports = router;

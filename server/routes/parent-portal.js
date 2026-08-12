@@ -13,6 +13,10 @@ const { authMiddleware } = require('../middleware/auth');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, E }          = require('../utils/response');
+// Weekly Snapshot's read logic is shared with weekly-snapshots.js's own
+// staff-facing routes — see that file's _findAuthorizedStudent header
+// comment for why this isn't reimplemented here.
+const { _helpers: weeklySnapshotHelpers } = require('./weekly-snapshots');
 
 const router = express.Router();
 
@@ -318,6 +322,49 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
     });
   } catch (err) {
     console.error('[parent-portal GET /dashboard/:childId]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   Weekly Student Snapshot — self-service, bypasses RBAC entirely
+   (no rbac()/moduleGate/planGate anywhere in this file, matching
+   every other route above). Ownership is enforced by the shared
+   helper reading req.jwtUser.studentIds/guardianOf, same as every
+   other child-scoped route in this file already checks manually.
+   ══════════════════════════════════════════════════════════════ */
+router.get('/weekly-snapshot/:childId/weeks', authMiddleware, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const result = await weeklySnapshotHelpers.getWeeksForStudent(req, req.params.childId);
+    if (result.error === 'not_found') return E.notFound(res, 'Student not found');
+    if (result.error === 'forbidden') return E.forbidden(res, 'You do not have access to this student\'s records.');
+    return ok(res, result);
+  } catch (err) {
+    console.error('[parent-portal GET /weekly-snapshot/:childId/weeks]', err);
+    return E.serverError(res);
+  }
+});
+
+router.get('/weekly-snapshot/:childId/:weekStart', authMiddleware, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    const result = await weeklySnapshotHelpers.getSnapshotDetail(req, req.params.childId, req.params.weekStart);
+    if (result.error === 'not_found') return E.notFound(res, 'No snapshot generated for that week');
+    if (result.error === 'forbidden') return E.forbidden(res, 'You do not have access to this student\'s records.');
+    return ok(res, result);
+  } catch (err) {
+    console.error('[parent-portal GET /weekly-snapshot/:childId/:weekStart]', err);
+    return E.serverError(res);
+  }
+});
+
+router.get('/weekly-snapshot/:childId/:weekStart/pdf', authMiddleware, async (req, res) => {
+  if (!_requireParent(req, res)) return;
+  try {
+    await weeklySnapshotHelpers.streamSnapshotPdf(req, res, req.params.childId, req.params.weekStart);
+  } catch (err) {
+    console.error('[parent-portal GET /weekly-snapshot/:childId/:weekStart/pdf]', err);
     return E.serverError(res);
   }
 });
