@@ -321,6 +321,10 @@ app.use('/api/growth-projects',        require('./routes/growth-projects'));
 // Recommendations + Aspirations share one route file.
 // Aspirations accessible at /api/growth-recommendations/aspirations/:studentId
 app.use('/api/growth-recommendations', require('./routes/growth-recommendations'));
+
+/* ── Weekly Student Snapshot (M3) ── */
+app.use('/api/weekly-snapshots',       require('./routes/weekly-snapshots'));
+
 app.use('/api/ops',                    require('./routes/ops'));
 app.use('/api/audit',                  require('./routes/audit'));
 

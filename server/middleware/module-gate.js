@@ -81,4 +81,24 @@ function moduleGate(moduleKey) {
   };
 }
 
-module.exports = { moduleGate, invalidateModuleConfigCache };
+/**
+ * isModuleEnabled(schoolId, moduleKey) — the same enabled/disabled check
+ * moduleGate() enforces as middleware, exposed as a plain async function
+ * for routes that need to branch on a DIFFERENT module's state mid-handler
+ * (e.g. weekly-snapshots.js redacting its medical section based on whether
+ * the school's medical module is on, while the route itself is gated by
+ * weekly_snapshot's own moduleGate). Shares the same cache — never a
+ * second, independently-drifting lookup.
+ */
+async function isModuleEnabled(schoolId, moduleKey) {
+  try {
+    const cfg   = await _getModuleConfig(schoolId);
+    const entry = cfg.find(m => m.key === moduleKey);
+    return !(entry && entry.enabled === false);
+  } catch (err) {
+    console.error(`[ModuleGate] isModuleEnabled lookup failed for '${moduleKey}' — defaulting to enabled:`, err.message);
+    return true;
+  }
+}
+
+module.exports = { moduleGate, invalidateModuleConfigCache, isModuleEnabled };
