@@ -6,6 +6,18 @@ import { Tag, Zap, Bug, Shield, Sparkles } from 'lucide-react';
 
 const RELEASES = [
   {
+    version: '4.60.0',
+    date: '2026-08-12',
+    label: 'Weekly Student Snapshot — Auto-Generated Weekly Digest',
+    changes: [
+      { type: 'new', text: 'Weekly Student Snapshot — a new module under Student Services that automatically compiles everything that happened for each student, every week: topics covered, assignments and scores, attendance, behaviour, medical visits, library activity, and new achievements.' },
+      { type: 'new', text: 'Generated automatically every Saturday, in each school’s own local time — no staff approval step required, so it never adds work to a class teacher’s week no matter how many classes or students they have.' },
+      { type: 'new', text: 'Parents and students are notified automatically by email and in-app the moment it’s ready, and can retrieve any past week at any time — nothing is ever thrown away.' },
+      { type: 'new', text: 'Staff view: pick a class, open a student, and step through the rest of the class with one click — no need to return to the roster each time. Download any week as a PDF.' },
+      { type: 'improvement', text: 'Medical details are only ever shown to someone who is actually allowed to see them at the moment they look — never baked in permanently at generation time.' },
+    ],
+  },
+  {
     version: '4.59.0',
     date: '2026-07-01',
     label: 'AuditService — Governance Subsystem Foundation',

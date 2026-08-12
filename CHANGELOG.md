@@ -6,6 +6,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.55.0] — 2026-08-12 — feat(weekly-snapshot): auto-generated weekly student digest, delivered per-school-timezone
+
+New **Weekly Student Snapshot** module (Student Services section) — a per-student, per-week digest of everything that happened across the system: topics covered, assignments and scores, attendance, the full behaviour record, medical visits, library activity, and new growth/co-curricular entries. Generated automatically every Saturday, frozen once written, retrievable forever.
+
+The design went through real iteration with the customer before any code was written: it started as an on-demand release requiring class-teacher (then section-head) approval, one-by-one or in bulk. Once walked through the actual numbers — a teacher who is class teacher of 3 classes of 255 students each would face hundreds of review clicks a week — the approval step was dropped entirely in favour of a fully automatic pipeline that creates no new work for staff. Confirmed directly: **parents/students see it automatically**, via email + in-app notification, no one has to click "approve" first.
+
+### Added
+- `weekly_snapshots` collection — one frozen document per (school, student, week), written via `insertOne` only (never `upsert`), so an already-delivered week can never silently change under a parent who already viewed it.
+- `server/utils/weekly-snapshot-aggregate.js` — batches all 7 source areas (11 underlying collections, including the 5 `growth_*` ones) exactly once per school via `$in`, never once per student.
+- `server/utils/weekly-snapshot-cron.js` — hourly tick, evaluates **each school's own local timezone independently** and generates once it's Saturday 13:00+ locally. This is the first genuinely per-school-timezone-aware scheduled job in the codebase (the other four are hardcoded to Africa/Nairobi) — this platform serves schools across multiple African timezones, and a single fixed UTC time would have delivered at the wrong local hour everywhere else. Idempotent by construction: a missed tick (deploy, restart) is simply picked up by the next hourly tick that finds the week still ungenerated — no separate backfill/catch-up code path needed.
+- `server/routes/weekly-snapshots.js` — staff-facing roster (teacher: own class only, via the existing `formTeacherId` field; other staff: every active class), per-week detail, and PDF export.
+- `parent-portal.js` / `student-portal.js` — self-service access for parents and students, following this platform's existing precedent that all self-service data (attendance, fees, report cards) bypasses the RBAC module-grant system entirely and is gated only by ownership.
+- Email + in-app notification (`weekly_snapshot_ready` event) fires automatically once a week's batch is generated.
+- New Sidebar entry under **Student Services**, next to Growth Profile; server-side moduleGate + RBAC (`weekly_snapshot:read`) for the staff surface, teacher/principal/deputy_principal granted view access by default.
+- Medical section: captured in full at generation time (the cron can't know in advance who will eventually view a given snapshot), redacted at **read** time instead — stripped unless the medical module is actually enabled for the school and, for staff, the caller also holds `medical:read`.
+- Roster prev/next/first/last navigation on the student detail page — steps between students in the same class (not between weeks), computed client-side over one class-roster fetch, no new server endpoint.
+
+### Verified
+- Full Jest suite passing (1279 tests across 133 suites, +44 new across 5 new test files this feature added). RBAC coverage gate held at 100.00% throughout. Production client build passes. No live MongoDB in this environment, so no live browser click-testing was possible for any part of this feature — verified via the test suites above plus manual trace of the aggregation/timezone/ownership logic.
+
+---
+
 ## [v5.41.0] — 2026-08-03 — fix(mobile): dashboards not usable in portrait across 6+ pages
 
 A user testing on an actual phone reported Timetable, Exams, Subjects, Admissions, and Finance all requiring landscape rotation or page-wide horizontal sliding to reach content, plus Dashboard KPI values getting cut off mid-digit. Investigated first (18 pages hand-roll their own tab-bar markup — no shared `Tabs`/`PageHeader` component, confirmed via grep — so this was a per-file sweep, not a one-component fix) and found the repo already has a correct, established convention (`SettingsPage.jsx`, `InventoryPage.jsx`, `MedicalPage.jsx` all already do this right) that the broken pages just never got.
