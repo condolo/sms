@@ -756,6 +756,17 @@ async function start() {
     } catch (err) {
       console.error('[attendance-summary-cron] Failed to start:', err.message);
     }
+
+    // Weekly Student Snapshot cron — hourly UTC tick, generates each
+    // school's digest once it's Saturday 13:00-or-later in that school's
+    // OWN local timezone (the first genuinely per-school-timezone-aware
+    // cron in this codebase — see weekly-snapshot-cron.js's header).
+    try {
+      const { startWeeklySnapshotCron } = require('./utils/weekly-snapshot-cron');
+      startWeeklySnapshotCron();
+    } catch (err) {
+      console.error('[weekly-snapshot-cron] Failed to start:', err.message);
+    }
   });
 }
 

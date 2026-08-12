@@ -537,6 +537,7 @@ function _defaultPerms(role) {
         resources:    RCU,  events:       R,
         medical__alerts: R, // condition flags only, never full clinic-visit records
         inventory__requisition: RCU, // raise + view own requisitions, not full inventory management
+        weekly_snapshot: R, // system-generated digest, view only
       };
 
     case 'finance':
@@ -644,6 +645,7 @@ function _defaultPerms(role) {
         // resources/events: match repairPermissions.js's ROLE_DEFAULTS.principal/
         // deputy_principal (full RCUD, same tier as 'messages' above).
         resources:    RCUD, events:       RCUD,
+        weekly_snapshot: R, // system-generated digest, view only
       };
 
     case 'discipline_committee':

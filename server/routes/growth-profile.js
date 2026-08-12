@@ -20,6 +20,7 @@ const { planGate }       = require('../middleware/plan');
 const { moduleGate }     = require('../middleware/module-gate');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, E }          = require('../utils/response');
+const { forbiddenForSelfServiceRole } = require('../utils/self-service-scope');
 
 const router = express.Router();
 const PLAN    = planGate('growth_profile');
@@ -30,25 +31,10 @@ const PLAN    = planGate('growth_profile');
 // simply never wired into that pattern until now).
 const MODGATE = moduleGate('growth_profile');
 
-/* Parent/student self-service scoping. Coarser roles (teacher, admin,
-   etc.) are intentionally left to the module-level growth_profile:read
-   grant alone — this app's convention elsewhere (attendance, grades) is
-   that staff access is bounded by RBAC, not hard-coded to "my own class
-   only," and narrowing that further here would be a separate, bigger
-   product decision, not an access-control bug fix. Parent/student seeing
-   someone else's child, however, is unambiguously wrong regardless of
-   that convention — this closes exactly that gap, nothing broader. */
-function _forbiddenForSelfServiceRole(req, student) {
-  const role = req.jwtUser?.role;
-  if (role === 'student') {
-    return req.jwtUser.studentId !== student.id;
-  }
-  if (role === 'parent' || role === 'guardian') {
-    const owned = new Set([...(req.jwtUser.studentIds ?? []), ...(req.jwtUser.guardianOf ?? [])]);
-    return !owned.has(student.id);
-  }
-  return false; // any other role — module-level RBAC already gates this
-}
+// Parent/student self-service scoping — extracted to utils/self-service-scope.js
+// so this and any other aggregate endpoint (e.g. weekly-snapshots.js) share one
+// implementation instead of risking two independent copies drifting apart.
+const _forbiddenForSelfServiceRole = forbiddenForSelfServiceRole;
 
 /* ── GET /api/growth-profile/:studentId ────────────────────── */
 router.get('/:studentId', authMiddleware, PLAN, MODGATE, rbac('growth_profile', 'read'), async (req, res) => {

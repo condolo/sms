@@ -19,14 +19,14 @@ import {
   GraduationCap, Users, BookOpen, Calendar, CheckSquare, FileText,
   FileBarChart2, Library, ClipboardList, Scale, Wallet, MessageSquare,
   UserCog, BookCheck, MonitorPlay, BookMarked, Link2, Bus, BedDouble,
-  HeartPulse, Boxes, TrendingUp, Sprout, HelpCircle,
+  HeartPulse, Boxes, TrendingUp, Sprout, CalendarCheck, HelpCircle,
 } from 'lucide-react';
 
 export const NAV_ICON_MAP = {
   GraduationCap, Users, BookOpen, Calendar, CheckSquare, FileText,
   FileBarChart2, Library, ClipboardList, Scale, Wallet, MessageSquare,
   UserCog, BookCheck, MonitorPlay, BookMarked, Link2, Bus, BedDouble,
-  HeartPulse, Boxes, TrendingUp, Sprout,
+  HeartPulse, Boxes, TrendingUp, Sprout, CalendarCheck,
 };
 
 /* Migration-safety net only — snapshot of the module list for sessions
@@ -61,6 +61,7 @@ export const FALLBACK_NAV_MODULES = [
   { key: 'admissions', to: '/admissions', Icon: ClipboardList,  label: 'Admissions',          section: 'Student Services' },
   { key: 'behaviour',  to: '/behaviour',  Icon: Scale,          label: 'Behaviour',           section: 'Student Services' },
   { key: 'growth_profile', to: '/growth-profile', Icon: Sprout, label: 'Growth Profile',      section: 'Student Services' },
+  { key: 'weekly_snapshot', to: '/weekly-snapshot', Icon: CalendarCheck, label: 'Weekly Snapshot', section: 'Student Services' },
   { key: 'finance',    to: '/finance',    Icon: Wallet,         label: 'Finance',             section: 'Operations' },
   { key: 'messages',   to: '/messages',   Icon: MessageSquare,  label: 'Messages',            section: 'Communication' },
   { key: 'events',     to: '/events',     Icon: Calendar,       label: 'Events',              section: 'Communication' },

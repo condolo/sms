@@ -54,6 +54,8 @@ const ROLE_DEFAULTS = {
     // medical__alerts above. Matches the module spec's own examples
     // (Teacher is named as a requester, not an inventory manager).
     inventory__requisition: RCU,
+    // System-generated digest, no manual create/update/delete — view only.
+    weekly_snapshot: R,
   },
 
   principal: {
@@ -64,6 +66,7 @@ const ROLE_DEFAULTS = {
     admissions:   RCU,  lessons:      RCUD, resources:    RCUD,
     library:      R,    hostel:       R,    transport:    R,
     medical:      RCUD, inventory:    RCUD,
+    weekly_snapshot: R,
   },
 
   deputy_principal: {
@@ -74,6 +77,7 @@ const ROLE_DEFAULTS = {
     admissions:   RCU,  lessons:      RCUD, resources:    RCUD,
     library:      R,    hostel:       R,    transport:    R,
     medical:      RCUD, inventory:    RCUD,
+    weekly_snapshot: R,
   },
 
   section_head: {

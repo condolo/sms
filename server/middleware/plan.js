@@ -57,6 +57,7 @@ const FEATURE_PLAN = {
   finance:            'core',
   report_cards:       'core',
   growth_profile:     'core',
+  weekly_snapshot:    'core',
   resources:          'core',
   library:            'core',
   transport:          'core',

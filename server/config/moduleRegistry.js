@@ -23,7 +23,7 @@
                  sub.key is stored as `${mod.key}__${sub.key}` in modulePermissions
 
    Optional nav metadata (present only on entries with their own Sidebar
-   nav item — 24 of the 28 entries; analytics/settings and the
+   nav item — 25 of the 29 entries; analytics/settings and the
    exams/assessment pair have no `navRoute` and are excluded from nav
    generation, exactly matching pre-existing Sidebar behaviour):
      icon        — lucide-react export name (string, not a component — this
@@ -230,6 +230,10 @@ const MODULE_REGISTRY = [
     { key: 'recommendations', label: 'Write Recommendations' },
     { key: 'aspirations',     label: 'Edit Aspirations' },
     { key: 'verify',          label: 'Verify / Approve Records' },
+  ]},
+  { key: 'weekly_snapshot', label: 'Weekly Student Snapshot', section: 'Student Services', icon: 'CalendarCheck', navRoute: '/weekly-snapshot', navOrder: 11, subs: [
+    { key: 'view',   label: 'View Weekly Snapshots' },
+    { key: 'manage', label: 'Manage Weekly Snapshot Settings' },
   ]},
   { key: 'reports', label: 'Reports & Analytics', section: 'Analytics', icon: 'TrendingUp', navRoute: '/reports', navOrder: 22, subs: [
     { key: 'view',   label: 'View Reports' },

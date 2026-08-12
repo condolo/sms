@@ -3325,6 +3325,10 @@ const PERM_MODULES = [
     { key: 'aspirations',      label: 'Edit Aspirations' },
     { key: 'verify',           label: 'Verify / Approve Records' },
   ]},
+  { key: 'weekly_snapshot', label: 'Weekly Student Snapshot', subs: [
+    { key: 'view',   label: 'View Weekly Snapshots' },
+    { key: 'manage', label: 'Manage Weekly Snapshot Settings' },
+  ]},
   { key: 'analytics',  label: 'Analytics Dashboard', subs: [
     { key: 'view', label: 'View Leadership Analytics' },
   ]},
@@ -3360,6 +3364,7 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (['library','hostel','transport'].includes(m)) return V;   // matches R already seeded server-side
       if (m==='medical') return T;   // matches RCUD already seeded server-side
       if (m==='inventory') return T;   // matches RCUD already seeded server-side
+      if (m==='weekly_snapshot') return V;   // matches R already seeded server-side — system-generated, view only
       return E;
     },
     principal: (m, s) => DEFS.deputy_principal(m, s),  // same defaults as deputy_principal; admin can adjust
@@ -3381,6 +3386,7 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='events') return V;
       if (m==='medical') return N;   // nothing seeded server-side — full records stay restricted by default
       if (m==='inventory') return N;   // nothing seeded server-side — restricted by default
+      if (m==='weekly_snapshot') return N;   // nothing seeded server-side — restricted by default
       return E;
     },
 
