@@ -18,6 +18,7 @@ const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
+const { GROWTH_PROFILE_STAFF_ROLES } = require('../utils/self-service-scope');
 
 const router = express.Router();
 const PLAN   = planGate('growth_profile');
@@ -83,7 +84,12 @@ router.get('/:id', authMiddleware, PLAN, rbac('growth_profile', 'read'), async (
 /* ── POST /api/growth-projects ──────────────────────────────── */
 router.post('/', authMiddleware, PLAN, rbac('growth_profile', 'create'), async (req, res) => {
   try {
-    const { schoolId, userId } = req.jwtUser;
+    const { schoolId, userId, role } = req.jwtUser;
+    // In-route staff guard, independent of the flat RBAC array — see
+    // GROWTH_PROFILE_STAFF_ROLES's own doc comment in self-service-scope.js.
+    if (!GROWTH_PROFILE_STAFF_ROLES.includes(role)) {
+      return E.forbidden(res, 'Only teaching staff can add Growth Profile projects.');
+    }
     const { data, error } = _validate(ProjectSchema, req.body);
     if (error) return E.validation(res, error);
 
@@ -102,7 +108,10 @@ router.post('/', authMiddleware, PLAN, rbac('growth_profile', 'create'), async (
 /* ── PUT /api/growth-projects/:id ───────────────────────────── */
 router.put('/:id', authMiddleware, PLAN, rbac('growth_profile', 'update'), async (req, res) => {
   try {
-    const { schoolId, userId } = req.jwtUser;
+    const { schoolId, userId, role } = req.jwtUser;
+    if (!GROWTH_PROFILE_STAFF_ROLES.includes(role)) {
+      return E.forbidden(res, 'Only teaching staff can edit Growth Profile projects.');
+    }
     const { data, error } = _validate(ProjectSchema.partial().omit({ studentId: true }), req.body);
     if (error) return E.validation(res, error);
 
@@ -124,7 +133,10 @@ router.put('/:id', authMiddleware, PLAN, rbac('growth_profile', 'update'), async
    and the pre-existing behaviour_incidents pattern. */
 router.delete('/:id', authMiddleware, PLAN, rbac('growth_profile', 'delete'), async (req, res) => {
   try {
-    const { schoolId, userId } = req.jwtUser;
+    const { schoolId, userId, role } = req.jwtUser;
+    if (!GROWTH_PROFILE_STAFF_ROLES.includes(role)) {
+      return E.forbidden(res, 'Only teaching staff can delete Growth Profile projects.');
+    }
     const doc = await tenantModel('growth_projects', tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId, deletedAt: { $exists: false } },
       { deletedAt: new Date().toISOString(), deletedBy: userId },
@@ -140,8 +152,7 @@ router.patch('/:id/verify', authMiddleware, PLAN, async (req, res) => { // rbac:
   try {
     const { schoolId, userId, role } = req.jwtUser;
 
-    const CAN_VERIFY = ['admin', 'superadmin', 'teacher', 'section_head', 'deputy_principal'];
-    if (!CAN_VERIFY.includes(role)) {
+    if (!GROWTH_PROFILE_STAFF_ROLES.includes(role)) {
       return E.forbidden(res, 'Only admin or teaching staff can verify project records');
     }
 

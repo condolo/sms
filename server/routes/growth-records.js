@@ -16,6 +16,7 @@ const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
+const { GROWTH_PROFILE_STAFF_ROLES } = require('../utils/self-service-scope');
 
 const router = express.Router();
 const PLAN   = planGate('growth_profile');
@@ -99,7 +100,15 @@ router.get('/:type/:id', authMiddleware, PLAN, rbac('growth_profile', 'read'), _
 /* ── POST /api/growth-records/:type ────────────────────────── */
 router.post('/:type', authMiddleware, PLAN, rbac('growth_profile', 'create'), _typeGuard, async (req, res) => {
   try {
-    const { schoolId, userId } = req.jwtUser;
+    const { schoolId, userId, role } = req.jwtUser;
+    // In-route staff guard, independent of the flat RBAC array — see
+    // GROWTH_PROFILE_STAFF_ROLES's own doc comment in self-service-scope.js
+    // for exactly why this can't be RBAC-only (a self-service role's
+    // unrelated sub-permission, e.g. growth_profile__aspirations, unions
+    // into this same flat 'create' action via SettingsPage.jsx's grid).
+    if (!GROWTH_PROFILE_STAFF_ROLES.includes(role)) {
+      return E.forbidden(res, 'Only teaching staff can add Growth Profile records.');
+    }
     const col = TYPE_COLLECTIONS[req.params.type];
     const { data, error } = _validate(RecordSchema, req.body);
     if (error) return E.validation(res, error);
@@ -120,7 +129,10 @@ router.post('/:type', authMiddleware, PLAN, rbac('growth_profile', 'create'), _t
 /* ── PUT /api/growth-records/:type/:id ──────────────────────── */
 router.put('/:type/:id', authMiddleware, PLAN, rbac('growth_profile', 'update'), _typeGuard, async (req, res) => {
   try {
-    const { schoolId, userId } = req.jwtUser;
+    const { schoolId, userId, role } = req.jwtUser;
+    if (!GROWTH_PROFILE_STAFF_ROLES.includes(role)) {
+      return E.forbidden(res, 'Only teaching staff can edit Growth Profile records.');
+    }
     const col = TYPE_COLLECTIONS[req.params.type];
     const { data, error } = _validate(RecordSchema.partial().omit({ studentId: true }), req.body);
     if (error) return E.validation(res, error);
@@ -148,7 +160,10 @@ router.put('/:type/:id', authMiddleware, PLAN, rbac('growth_profile', 'update'),
    destroyed. */
 router.delete('/:type/:id', authMiddleware, PLAN, rbac('growth_profile', 'delete'), _typeGuard, async (req, res) => {
   try {
-    const { schoolId, userId } = req.jwtUser;
+    const { schoolId, userId, role } = req.jwtUser;
+    if (!GROWTH_PROFILE_STAFF_ROLES.includes(role)) {
+      return E.forbidden(res, 'Only teaching staff can delete Growth Profile records.');
+    }
     const col = TYPE_COLLECTIONS[req.params.type];
     const doc = await tenantModel(col, tenantContext(req)).findOneAndUpdate(
       { id: req.params.id, schoolId, deletedAt: { $exists: false } },
@@ -166,8 +181,7 @@ router.patch('/:type/:id/verify', authMiddleware, PLAN, _typeGuard, async (req, 
     const { schoolId, userId, role } = req.jwtUser;
 
     // Verification requires staff role — separate from read/write RBAC
-    const CAN_VERIFY = ['admin', 'superadmin', 'teacher', 'section_head', 'deputy_principal'];
-    if (!CAN_VERIFY.includes(role)) {
+    if (!GROWTH_PROFILE_STAFF_ROLES.includes(role)) {
       return E.forbidden(res, 'Only admin or teaching staff can verify growth profile records');
     }
 

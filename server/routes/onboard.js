@@ -538,6 +538,7 @@ function _defaultPerms(role) {
         medical__alerts: R, // condition flags only, never full clinic-visit records
         inventory__requisition: RCU, // raise + view own requisitions, not full inventory management
         weekly_snapshot: R, // system-generated digest, view only
+        growth_profile: RCU, // matches repairPermissions.js's ROLE_DEFAULTS.teacher
       };
 
     case 'finance':
@@ -604,6 +605,7 @@ function _defaultPerms(role) {
         resources:    RCU,
         messages:     RCU,
         events:       R,
+        growth_profile: R, // matches repairPermissions.js's ROLE_DEFAULTS.exams_officer
       };
 
     case 'timetabler':
@@ -630,6 +632,7 @@ function _defaultPerms(role) {
         library:      R,   hostel:       R,   transport:    R,
         // resources/messages/events: match repairPermissions.js's ROLE_DEFAULTS.section_head.
         resources:    RCU, messages:     RCU, events:       R,
+        growth_profile: RCU, // matches repairPermissions.js's ROLE_DEFAULTS.section_head
       };
 
     case 'principal':
@@ -646,6 +649,7 @@ function _defaultPerms(role) {
         // deputy_principal (full RCUD, same tier as 'messages' above).
         resources:    RCUD, events:       RCUD,
         weekly_snapshot: R, // system-generated digest, view only
+        growth_profile: RCU, // matches repairPermissions.js's ROLE_DEFAULTS.principal/deputy_principal
       };
 
     case 'discipline_committee':
@@ -659,6 +663,7 @@ function _defaultPerms(role) {
         resources:    RCU,
         messages:     RCU,
         events:       R,
+        growth_profile: R, // matches repairPermissions.js's ROLE_DEFAULTS.discipline_committee
       };
 
     case 'parent':
@@ -669,6 +674,10 @@ function _defaultPerms(role) {
         // resources: matches repairPermissions.js's ROLE_DEFAULTS.parent — was
         // missing here entirely, same drift class as the other roles above.
         resources:    R,
+        // View only — was missing here entirely (same drift class), the exact
+        // gap this fix closes. See repairPermissions.js's ROLE_DEFAULTS.parent
+        // for why this stays view-only, never RCU, at this flat key.
+        growth_profile: R,
       };
 
     case 'student':
@@ -681,6 +690,14 @@ function _defaultPerms(role) {
         // resources: matches repairPermissions.js's ROLE_DEFAULTS.student — was
         // missing here entirely, same drift class as the other roles above.
         resources:    R,
+        // View only at the flat key, deliberately — see
+        // repairPermissions.js's ROLE_DEFAULTS.student for the full
+        // reasoning (a flat 'create'/'update' grant here would leak into
+        // growth-records.js's/growth-projects.js's unrelated write routes).
+        growth_profile: R,
+        // Aspirations self-edit — sub-key scoped, matches
+        // repairPermissions.js's ROLE_DEFAULTS.student.
+        growth_profile__aspirations: RCU,
       };
 
     default:

@@ -19,6 +19,7 @@ const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
+const { forbiddenForSelfServiceRole, GROWTH_PROFILE_STAFF_ROLES } = require('../utils/self-service-scope');
 
 const router = express.Router();
 const PLAN   = planGate('growth_profile');
@@ -100,8 +101,7 @@ router.post('/', authMiddleware, PLAN, rbac('growth_profile', 'create'), async (
     const { schoolId, userId, role } = req.jwtUser;
 
     // Only staff can write recommendations
-    const CAN_WRITE = ['admin', 'superadmin', 'teacher', 'section_head', 'deputy_principal'];
-    if (!CAN_WRITE.includes(role)) {
+    if (!GROWTH_PROFILE_STAFF_ROLES.includes(role)) {
       return E.forbidden(res, 'Only teaching staff can write recommendations');
     }
 
@@ -152,36 +152,51 @@ router.delete('/:id', authMiddleware, PLAN, rbac('growth_profile', 'delete'), as
    ══════════════════════════════════════════════════════════════ */
 
 /* ── GET /api/growth-aspirations/:studentId ────────────────── */
-router.get('/aspirations/:studentId', authMiddleware, PLAN, rbac('growth_profile', 'read'), async (req, res) => {
+router.get('/aspirations/:studentId', authMiddleware, PLAN, rbac('growth_profile', 'read', 'aspirations'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await tenantModel('growth_aspirations', tenantContext(req)).findOne({ schoolId, studentId: req.params.studentId }).select('-__v').lean();
+    const { studentId } = req.params;
+
+    const student = await tenantModel('students', tenantContext(req)).findOne({ id: studentId, schoolId }).select('id').lean();
+    if (!student) return E.notFound(res, 'Student not found');
+    if (forbiddenForSelfServiceRole(req, student)) return E.forbidden(res, 'You can only view your own aspirations.');
+
+    const doc = await tenantModel('growth_aspirations', tenantContext(req)).findOne({ schoolId, studentId }).select('-__v').lean();
     // Return empty object if not yet set — not a 404
-    return ok(res, doc ?? { studentId: req.params.studentId, careerInterests: [], universityAspirations: [], intendedCourses: [], targetCountries: [] });
+    return ok(res, doc ?? { studentId, careerInterests: [], universityAspirations: [], intendedCourses: [], targetCountries: [] });
   } catch (err) { console.error('[growth-aspirations GET]', err); return E.serverError(res); }
 });
 
 /* ── PUT /api/growth-aspirations/:studentId ────────────────── */
-router.put('/aspirations/:studentId', authMiddleware, PLAN, rbac('growth_profile', 'update'), async (req, res) => {
+// Students can only edit their own aspirations; staff can edit any
+// student's (per this file's header comment). The 'aspirations' subKey
+// on both routes above/below is what makes that student self-edit grant
+// safely scoped to JUST this route — see
+// repairPermissions.js's ROLE_DEFAULTS.student growth_profile comment
+// for the full reasoning (a flat, non-subKey'd grant here would also
+// satisfy growth-records.js's/growth-projects.js's unrelated write
+// routes). forbiddenForSelfServiceRole is what actually restricts a
+// student/parent to their OWN studentId — RBAC alone only establishes
+// THAT a student may call this route at all, never WHICH studentId.
+router.put('/aspirations/:studentId', authMiddleware, PLAN, rbac('growth_profile', 'update', 'aspirations'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
+    const { schoolId, userId } = req.jwtUser;
+    const { studentId } = req.params;
 
-    // Students can only edit their own aspirations; staff can edit any student's
-    const isStudent = role === 'student';
-    // For student self-edit, they would need to be linked to this studentId
-    // (we trust the server-side RBAC gate here; student role only gets 'update' on growth_profile
-    //  if configured in permissions — admin controls this)
+    const student = await tenantModel('students', tenantContext(req)).findOne({ id: studentId, schoolId }).select('id').lean();
+    if (!student) return E.notFound(res, 'Student not found');
+    if (forbiddenForSelfServiceRole(req, student)) return E.forbidden(res, 'You can only edit your own aspirations.');
 
     const { data, error } = _validate(AspirationsSchema, req.body);
     if (error) return E.validation(res, error);
 
     const now = new Date().toISOString();
     const doc = await tenantModel('growth_aspirations', tenantContext(req)).findOneAndUpdate(
-      { schoolId, studentId: req.params.studentId },
+      { schoolId, studentId },
       {
         ...data,
         schoolId,
-        studentId:  req.params.studentId,
+        studentId,
         updatedBy:  userId,
         updatedAt:  now,
         $setOnInsert: { id: uuidv4(), createdBy: userId, createdAt: now },

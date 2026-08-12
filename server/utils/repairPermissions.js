@@ -56,6 +56,13 @@ const ROLE_DEFAULTS = {
     inventory__requisition: RCU,
     // System-generated digest, no manual create/update/delete — view only.
     weekly_snapshot: R,
+    // Matches SettingsPage.jsx's teacher DEFS (view/add/edit records,
+    // recommendations, verify — excludes delete_records/aspirations, which
+    // has no server-side effect on this flat key today since no
+    // growth-records.js/growth-projects.js route currently checks a
+    // per-sub subKey; those two writes stay additionally gated in-route
+    // by GROWTH_PROFILE_STAFF_ROLES regardless of this grant).
+    growth_profile: RCU,
   },
 
   principal: {
@@ -67,6 +74,7 @@ const ROLE_DEFAULTS = {
     library:      R,    hostel:       R,    transport:    R,
     medical:      RCUD, inventory:    RCUD,
     weekly_snapshot: R,
+    growth_profile: RCU, // matches SettingsPage.jsx's deputy_principal DEFS (principal is aliased to it client-side)
   },
 
   deputy_principal: {
@@ -78,6 +86,7 @@ const ROLE_DEFAULTS = {
     library:      R,    hostel:       R,    transport:    R,
     medical:      RCUD, inventory:    RCUD,
     weekly_snapshot: R,
+    growth_profile: RCU, // matches SettingsPage.jsx's deputy_principal DEFS (blanket E fallback, no growth_profile override)
   },
 
   section_head: {
@@ -87,6 +96,7 @@ const ROLE_DEFAULTS = {
     admissions:   R, lessons:  RCU,
     messages:     RCU, events:  R, resources: RCU,
     library:      R, hostel:   R, transport:  R,
+    growth_profile: RCU, // matches SettingsPage.jsx's section_head DEFS (blanket E fallback, excludes delete_records/aspirations — see teacher's comment above)
   },
 
   admissions_officer: {
@@ -114,6 +124,7 @@ const ROLE_DEFAULTS = {
     library:      R,
     hostel:       R,
     transport:    R,
+    growth_profile: R, // matches SettingsPage.jsx's exams_officer DEFS (view only, no per-sub distinction)
   },
 
   finance: {
@@ -164,6 +175,7 @@ const ROLE_DEFAULTS = {
     library:   R,
     hostel:    R,
     transport: R,
+    growth_profile: R, // matches SettingsPage.jsx's discipline_committee DEFS (view only)
   },
 
   parent: {
@@ -171,6 +183,12 @@ const ROLE_DEFAULTS = {
     report_cards: R,
     lessons:      R,
     resources:    R,
+    // View only — matches SettingsPage.jsx's parent DEFS exactly
+    // (`s !== 'view' → N` for every growth_profile sub, including
+    // aspirations). Was previously absent entirely, 403ing every
+    // growth-profile.js/growth-recommendations.js route for every
+    // parent on a fresh school until an admin manually saved Settings.
+    growth_profile: R,
   },
 
   student: {
@@ -180,6 +198,30 @@ const ROLE_DEFAULTS = {
     library:   R,
     hostel:    R,
     transport: R,
+    // View only at the flat/module level — matches SettingsPage.jsx's
+    // student DEFS ('view' sub → V, everything else → N except
+    // aspirations). The 'aspirations' self-edit capability is granted
+    // separately below as a SUB-KEY grant, not folded into this flat
+    // array: growth-records.js's and growth-projects.js's PUT/POST
+    // routes check the bare `growth_profile` array with no subKey, so a
+    // flat 'create'/'update' grant here (matching what the client's own
+    // union-of-checkboxes logic would otherwise produce) would also
+    // satisfy those unrelated routes — letting a student edit or create
+    // ANY student's leadership/activities/service/awards/project
+    // records, not just their own aspirations. Confirmed by reading
+    // every write route in both files: neither has an in-route
+    // ownership/role check independent of RBAC (growth-records.js/
+    // growth-projects.js's POST/PUT/DELETE now also carry their own
+    // GROWTH_PROFILE_STAFF_ROLES guard as defense-in-depth, but this
+    // flat grant staying read-only is what keeps the RBAC layer itself
+    // correct, not just the route layer).
+    growth_profile: R,
+    // Aspirations: self-edit only, via growth-recommendations.js's
+    // /aspirations/:studentId routes, which now pass subKey:'aspirations'
+    // specifically (see that file) and additionally check
+    // forbiddenForSelfServiceRole so a student can only ever touch their
+    // OWN aspirations document, never another student's.
+    growth_profile__aspirations: RCU,
   },
 };
 

@@ -41,4 +41,31 @@ function forbiddenForSelfServiceRole(req, target) {
   return false; // any other role — module-level RBAC already gates this
 }
 
-module.exports = { forbiddenForSelfServiceRole };
+/* ── GROWTH_PROFILE_STAFF_ROLES ───────────────────────────────
+   Which roles may write (create/update/delete) a growth_profile
+   record, checked IN-ROUTE — not derived from the flat `growth_profile`
+   RBAC array alone.
+
+   Why this exists: SettingsPage.jsx's Roles & Permissions grid computes
+   ONE flat action array per module as the UNION of every sub-checkbox
+   under it (_deriveApiPerms in settings.js) — e.g. student's "view"
+   (read) + "aspirations" (read/create/update) checkboxes union into a
+   flat `growth_profile: ['read','create','update']` the moment an
+   admin saves. growth-records.js's and growth-projects.js's POST/PUT/
+   DELETE historically trusted that flat array alone (`rbac('growth_profile',
+   'update')`, no subKey) — meaning granting a self-service role like
+   student ANY write capability anywhere under growth_profile (even just
+   editing their own aspirations) would, via that same flat array, also
+   satisfy the RBAC check on unrelated routes like "edit any student's
+   leadership record." Confirmed by reading every write route in both
+   files — none had an in-route role check beyond RBAC before this.
+
+   This constant is the explicit, route-level staff allowlist those
+   write routes now check directly, independent of whatever the flat
+   RBAC array says — the same membership already used by both files'
+   pre-existing PATCH /verify handlers (verbatim, not reinterpreted).
+   Belongs here (not duplicated per file) for the same drift-prevention
+   reason as forbiddenForSelfServiceRole above. */
+const GROWTH_PROFILE_STAFF_ROLES = ['admin', 'superadmin', 'teacher', 'section_head', 'deputy_principal'];
+
+module.exports = { forbiddenForSelfServiceRole, GROWTH_PROFILE_STAFF_ROLES };
