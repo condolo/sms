@@ -19,9 +19,20 @@ function mockChain(result) {
 function mockMatches(doc, filter) {
   return Object.entries(filter || {}).every(([k, v]) => doc[k] === v);
 }
+function mockApplySet(doc, setObj) {
+  for (const [path, val] of Object.entries(setObj || {})) {
+    const parts = path.split('.');
+    let obj = doc;
+    for (let i = 0; i < parts.length - 1; i++) {
+      obj[parts[i]] = obj[parts[i]] || {};
+      obj = obj[parts[i]];
+    }
+    obj[parts[parts.length - 1]] = val;
+  }
+}
 
 let mockSchools;
-let mockSnapshots; // mutated in place by create()
+let mockSnapshots; // mutated in place by create()/updateOne()
 
 jest.mock('../utils/model', () => ({
   _model: jest.fn((col) => {
@@ -32,6 +43,11 @@ jest.mock('../utils/model', () => ({
       return {
         find: jest.fn((filter) => mockChain(mockSnapshots.filter(d => mockMatches(d, filter)))),
         create: jest.fn((doc) => { mockSnapshots.push(doc); return Promise.resolve(doc); }),
+        updateOne: jest.fn((filter, update) => {
+          const doc = mockSnapshots.find(d => mockMatches(d, filter));
+          if (doc && update?.$set) mockApplySet(doc, update.$set);
+          return Promise.resolve({ acknowledged: true });
+        }),
       };
     }
     throw new Error(`unexpected _model('${col}') call`);
@@ -44,6 +60,12 @@ jest.mock('../utils/weekly-snapshot-aggregate', () => ({
   fetchActiveRoster: (...args) => mockFetchActiveRoster(...args),
   buildSnapshotsForSchool: (...args) => mockBuildSnapshots(...args),
 }));
+
+const mockNotifyGuardiansForStudents = jest.fn();
+jest.mock('../utils/notify-students', () => ({
+  notifyGuardiansForStudents: (...args) => mockNotifyGuardiansForStudents(...args),
+}));
+jest.mock('../utils/email', () => ({ sendWeeklySnapshotReady: jest.fn() }));
 
 const { maybeGenerateForSchool } = require('../utils/weekly-snapshot-cron');
 
@@ -68,6 +90,7 @@ beforeEach(() => {
     for (const s of roster) m.set(s.id, emptySections());
     return m;
   });
+  mockNotifyGuardiansForStudents.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -161,7 +184,7 @@ describe('idempotency (the catch-up mechanism)', () => {
 });
 
 describe('written document shape', () => {
-  test('generated snapshots carry the frozen classId/className, schoolTimezone, and empty notified block', async () => {
+  test('generated snapshots carry the frozen classId/className, schoolTimezone, and stamped notified block', async () => {
     jest.setSystemTime(new Date('2026-08-08T10:05:00.000Z'));
     await maybeGenerateForSchool({ id: SCHOOL_A, timezone: 'Africa/Nairobi' });
 
@@ -169,10 +192,49 @@ describe('written document shape', () => {
     expect(doc).toMatchObject({
       schoolId: SCHOOL_A, studentId: 'stu_1', classId: 'cls_1', className: '5A',
       weekStart: '2026-08-03', weekEnd: '2026-08-09', schoolTimezone: 'Africa/Nairobi',
-      notified: { emailSentAt: null, inAppSentAt: null, emailError: null },
     });
     expect(typeof doc.id).toBe('string');
     expect(typeof doc.generatedAt).toBe('string');
     expect(doc.sections).toBeDefined();
+    // notified.* was null at write time, then stamped by the post-generation
+    // notification step (see 'parent notification dispatch' below) —
+    // by the time maybeGenerateForSchool() resolves, dispatch already ran.
+    expect(doc.notified.emailError).toBeNull();
+    expect(typeof doc.notified.emailSentAt).toBe('string');
+    expect(typeof doc.notified.inAppSentAt).toBe('string');
+  });
+});
+
+describe('parent notification dispatch (M4)', () => {
+  test('notifyGuardiansForStudents is called once with the weekly_snapshot_ready event key, one item per generated student', async () => {
+    jest.setSystemTime(new Date('2026-08-08T10:05:00.000Z'));
+    const school = { id: SCHOOL_A, timezone: 'Africa/Nairobi', name: 'Test School', systemEmail: 'admin@test.io' };
+    await maybeGenerateForSchool(school);
+
+    expect(mockNotifyGuardiansForStudents).toHaveBeenCalledTimes(1);
+    const call = mockNotifyGuardiansForStudents.mock.calls[0][0];
+    expect(call.eventKey).toBe('weekly_snapshot_ready');
+    expect(call.schoolId).toBe(SCHOOL_A);
+    expect(call.items).toHaveLength(2);
+    expect(call.items.map(i => i.studentId).sort()).toEqual(['stu_1', 'stu_2']);
+    expect(typeof call.items[0].sendEmail).toBe('function');
+  });
+
+  test('a notification dispatch failure does not change the already-committed generation result', async () => {
+    jest.setSystemTime(new Date('2026-08-08T10:05:00.000Z'));
+    mockNotifyGuardiansForStudents.mockRejectedValueOnce(new Error('smtp down'));
+    const result = await maybeGenerateForSchool({ id: SCHOOL_A, timezone: 'Africa/Nairobi' });
+    expect(result.generated).toBe(2); // snapshots were already written before notify ran
+    expect(mockSnapshots).toHaveLength(2);
+  });
+
+  test('no notification attempt when nothing new was generated (already-generated week)', async () => {
+    jest.setSystemTime(new Date('2026-08-08T10:05:00.000Z'));
+    const school = { id: SCHOOL_A, timezone: 'Africa/Nairobi' };
+    await maybeGenerateForSchool(school);
+    mockNotifyGuardiansForStudents.mockClear();
+
+    await maybeGenerateForSchool(school); // fully generated already — no-op
+    expect(mockNotifyGuardiansForStudents).not.toHaveBeenCalled();
   });
 });

@@ -59,6 +59,14 @@ const EVENT_REGISTRY = {
     channels:    { email: true, inApp: true },
     implemented: true,
   },
+  weekly_snapshot_ready: {
+    label:       'Weekly Student Snapshot Ready',
+    desc:        "When a student's weekly digest (topics, assignments, attendance, behaviour, and more) is generated",
+    group:       'academic',
+    audience:    ['parents', 'students'],
+    channels:    { email: true, inApp: true },
+    implemented: true,
+  },
   exam_results: {
     label:       'Exam Results Released',
     desc:        'When exam results are published for a class',

@@ -745,6 +745,24 @@ async function sendReportCardPublishedAlert({
   return _sendAsSchool(recipientEmail, `📄 Report Card Published — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
 }
 
+/* 18b. Weekly Student Snapshot ready — parent/guardian */
+async function sendWeeklySnapshotReady({
+  recipientName, recipientEmail, studentName, weekStart, weekEnd,
+  schoolName, schoolEmail, schoolId = null, appUrl,
+}) {
+  const url = appUrl || APP_URL;
+  const html = _wrap(`
+    <h2>📅 Weekly Student Snapshot Ready</h2>
+    <p>Dear ${recipientName || 'Parent/Guardian'},</p>
+    <p>This week's snapshot for <strong>${studentName}</strong> (${weekStart} – ${weekEnd}) is now available on <strong>${schoolName}</strong> — topics covered, assignments, attendance, behaviour, and more.</p>
+    <p style="text-align:center">
+      <a href="${url}" class="btn">View Snapshot →</a>
+    </p>
+    <p style="font-size:12px;color:#9ca3af">You are receiving this because you are a parent/guardian at <strong>${schoolName}</strong>. Log in to manage your notification preferences.</p>
+  `, schoolName);
+  return _sendAsSchool(recipientEmail, `📅 Weekly Snapshot Ready — ${studentName} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+}
+
 /* 19. Exam results published — parent/guardian */
 async function sendExamResultsAlert({
   recipientName, recipientEmail, studentName, examName,
@@ -901,6 +919,7 @@ module.exports = {
   sendBehaviourIncidentAlert,
   sendDigestSummary,
   sendReportCardPublishedAlert,
+  sendWeeklySnapshotReady,
   sendExamResultsAlert,
   sendFeeInvoiceCreatedAlert,
   sendFeePaymentReceivedAlert,

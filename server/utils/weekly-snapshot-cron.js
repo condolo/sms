@@ -28,6 +28,8 @@ const { v4: uuidv4 } = require('uuid');
 const { _model }     = require('./model');
 const { tenantModel } = require('./tenant-model');
 const { buildSnapshotsForSchool, fetchActiveRoster } = require('./weekly-snapshot-aggregate');
+const { notifyGuardiansForStudents } = require('./notify-students');
+const email = require('./email');
 
 const CRON_WEEKLY_SNAPSHOT = process.env.WEEKLY_SNAPSHOT_CRON || '0 * * * *'; // hourly; per-school local-time gate below decides actual delivery timing
 
@@ -103,7 +105,11 @@ async function maybeGenerateForSchool(school) {
     try {
       await Snapshots.create(doc);
       generated++;
-      createdDocs.push(doc);
+      // firstName/lastName ride along for the notification step below
+      // only — never persisted onto the snapshot doc itself (the
+      // collection schema deliberately has no studentName field, unlike
+      // report_card_snapshots; see the approved plan).
+      createdDocs.push({ ...doc, firstName: s.firstName, lastName: s.lastName });
     } catch (err) {
       // One student's write failure must not abort the rest of the
       // school's batch, nor the next school in the outer loop.
@@ -111,17 +117,65 @@ async function maybeGenerateForSchool(school) {
     }
   }
 
-  // M4 adds parent notification here (notifyGuardiansForStudents over
-  // createdDocs), after generation succeeds — deliberately not yet wired.
+  if (createdDocs.length) {
+    await _notifyGuardians(ctx, school, createdDocs);
+  }
 
   return { generated, weekStart, weekEnd, total: pending.length };
+}
+
+/* Best-effort parent notification (email + in-app) after generation.
+   Never blocks/fails snapshot generation itself — generation has already
+   committed by the time this runs. notifyGuardiansForStudents() already
+   isolates each student's failure internally (one guardian lookup/send
+   failing doesn't stop the rest); this function's own try/catch is the
+   outer safety net so a notification-layer exception can't propagate
+   back into the cron's per-school loop in runWeeklySnapshots(). */
+async function _notifyGuardians(ctx, school, createdDocs) {
+  try {
+    const schoolName  = school.name       || '';
+    const schoolEmail = school.systemEmail || '';
+
+    await notifyGuardiansForStudents({
+      ctx, schoolId: school.id, eventKey: 'weekly_snapshot_ready',
+      items: createdDocs.map(d => {
+        const studentName = [d.firstName, d.lastName].filter(Boolean).join(' ') || 'your child';
+        return {
+          studentId: d.studentId,
+          inAppSubject: `Weekly snapshot ready for ${studentName}`,
+          inAppBody:    `This week's snapshot (${d.weekStart} – ${d.weekEnd}) is now available.`,
+          emailDigestSubject: `Weekly Snapshot Ready — ${studentName}`,
+          emailDigestBody:    `This week's snapshot (${d.weekStart} – ${d.weekEnd}) is now available.`,
+          sendEmail: (recipient) => email.sendWeeklySnapshotReady({
+            recipientName: recipient.name, recipientEmail: recipient.email,
+            studentName, weekStart: d.weekStart, weekEnd: d.weekEnd,
+            schoolName, schoolEmail, schoolId: school.id,
+          }),
+        };
+      }),
+    });
+
+    // Best-effort notified.* timestamp stamp — matches this codebase's
+    // existing posture of not tracking per-recipient delivery success,
+    // only "was dispatch attempted." A finer-grained emailError would
+    // need dispatchNotification to surface per-recipient results, which
+    // no existing call site in this codebase does either.
+    const nowIso = new Date().toISOString();
+    const Snapshots = tenantModel('weekly_snapshots', ctx);
+    await Promise.all(createdDocs.map(d =>
+      Snapshots.updateOne({ id: d.id }, { $set: { 'notified.emailSentAt': nowIso, 'notified.inAppSentAt': nowIso } })
+        .catch(err => console.error(`[weekly-snapshot-cron] Failed to stamp notified.* for snapshot ${d.id}:`, err.message))
+    ));
+  } catch (err) {
+    console.error(`[weekly-snapshot-cron] Notification dispatch failed for school ${school.id}:`, err.message);
+  }
 }
 
 async function runWeeklySnapshots() {
   const Schools = _model('schools');
   let schools;
   try {
-    schools = await Schools.find({ isActive: { $ne: false } }).select('id name timezone').lean();
+    schools = await Schools.find({ isActive: { $ne: false } }).select('id name timezone systemEmail').lean();
   } catch (err) {
     console.error('[weekly-snapshot-cron] Failed to query schools:', err.message);
     return;
