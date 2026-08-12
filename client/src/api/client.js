@@ -710,6 +710,18 @@ export const growthProfile = {
   },
 };
 
+export const weeklySnapshots = {
+  /** Class roster for the picker — teacher: own class(es) only; other staff: all active classes */
+  myClasses: ()                     => _get('/weekly-snapshots/my-classes'),
+  /** List of generated weeks for a student (most recent first) */
+  weeks:     (studentId)            => _get(`/weekly-snapshots/${studentId}/weeks`),
+  /** One week's full snapshot (medical section redacted server-side by module state + permission) */
+  detail:    (studentId, weekStart) => _get(`/weekly-snapshots/${studentId}/${weekStart}`),
+  /** Same snapshot rendered to PDF, downloaded directly */
+  pdf:       (studentId, weekStart, filename) =>
+    _downloadPdf(`/weekly-snapshots/${studentId}/${weekStart}/pdf`, filename ?? `weekly-snapshot-${studentId}-${weekStart}.pdf`),
+};
+
 export const analytics = {
   /** Leadership snapshot: attendance risk, fee exposure, behaviour, academic
    *  health. { dateFrom, dateTo } — dateFrom omitted means "lifetime" (no
@@ -958,6 +970,7 @@ const api = {
   teachingAssignments,
   importExport,
   growthProfile,
+  weeklySnapshots,
   analytics,
   billing,
   mpesa,
