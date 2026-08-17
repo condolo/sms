@@ -24,6 +24,7 @@ const { encrypt, smtpEncryptReady } = require('../utils/smtpEncrypt');
 const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY, GROUPS: NOTIF_GROUPS } = require('../utils/notif-settings');
 const { rbac, invalidatePermCache } = require('../middleware/rbac');
 const { invalidateModuleConfigCache } = require('../middleware/module-gate');
+const { invalidateScopeCacheForRole } = require('../middleware/scopeMiddleware');
 const AuditService           = require('../services/audit');
 const { peekAdmissionCounter, setAdmissionCounter } = require('../utils/counters');
 const { MODULE_REGISTRY, MODULE_KEYS } = require('../config/moduleRegistry');
@@ -1214,6 +1215,14 @@ router.delete('/school/smtp', authMiddleware, rbac('settings', 'update'), async 
    DELETE /api/settings/custom-roles/:key   — delete a custom role
    ══════════════════════════════════════════════════════════════ */
 
+// Data-visibility choice for a custom role — independent of `baseRole`
+// (which only seeds the STARTING permission checkboxes; see scopeMiddleware.js
+// for the full story on why the two must not be conflated). 'school' sees
+// every record in the module; 'assigned' is scoped to classes actually
+// assigned via teaching_assignments, like a teacher — appropriate only for
+// custom roles that really do teach/co-teach a subset of classes.
+const CUSTOM_ROLE_SCOPE_LEVELS = new Set(['school', 'assigned']);
+
 const BUILT_IN_ROLE_KEYS = new Set([
   'superadmin','admin',
   'deputy_principal','deputy',          // deputy is the legacy alias
@@ -1236,8 +1245,11 @@ router.get('/custom-roles', authMiddleware, rbac('settings', 'read'), async (req
 
 router.post('/custom-roles', authMiddleware, rbac('settings', 'create'), async (req, res) => {
   try {
-    const { label, color = '#6366f1', baseRole = 'teacher' } = req.body;
+    const { label, color = '#6366f1', baseRole = 'teacher', scopeLevel = 'school' } = req.body;
     if (!label?.trim()) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Label is required.' } });
+    if (!CUSTOM_ROLE_SCOPE_LEVELS.has(scopeLevel)) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `scopeLevel must be one of: ${[...CUSTOM_ROLE_SCOPE_LEVELS].join(', ')}` } });
+    }
 
     // Derive a stable snake_case key from the label
     const key = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
@@ -1268,7 +1280,7 @@ router.post('/custom-roles', authMiddleware, rbac('settings', 'create'), async (
 
     // Create the custom_roles record
     const doc = await CustomRoles.create({
-      id: _uid(), schoolId, key, label: label.trim(), color, baseRole,
+      id: _uid(), schoolId, key, label: label.trim(), color, baseRole, scopeLevel,
       createdAt: now, createdBy: userId, updatedAt: now,
     });
 
@@ -1276,7 +1288,7 @@ router.post('/custom-roles', authMiddleware, rbac('settings', 'create'), async (
     AuditService.log({
       action: 'settings.custom_role_created', actor: req.jwtUser, schoolId,
       target: { type: 'custom_role', id: key, label: label.trim() },
-      details: { baseRole }, req,
+      details: { baseRole, scopeLevel }, req,
     });
     res.status(201).json({ success: true, data: doc.toObject ? doc.toObject() : doc });
   } catch (err) {
@@ -1289,11 +1301,16 @@ router.put('/custom-roles/:key', authMiddleware, rbac('settings', 'update'), asy
   try {
     const { key } = req.params;
     const { schoolId } = req.jwtUser;
-    const { label, color } = req.body;
+    const { label, color, scopeLevel } = req.body;
+
+    if (scopeLevel !== undefined && !CUSTOM_ROLE_SCOPE_LEVELS.has(scopeLevel)) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `scopeLevel must be one of: ${[...CUSTOM_ROLE_SCOPE_LEVELS].join(', ')}` } });
+    }
 
     const patch = { updatedAt: new Date().toISOString() };
-    if (label?.trim()) patch.label = label.trim();
-    if (color)         patch.color = color;
+    if (label?.trim())      patch.label      = label.trim();
+    if (color)               patch.color      = color;
+    if (scopeLevel !== undefined) patch.scopeLevel = scopeLevel;
 
     const doc = await tenantModel('custom_roles', tenantContext(req)).findOneAndUpdate(
       { schoolId, key },
@@ -1301,6 +1318,14 @@ router.put('/custom-roles/:key', authMiddleware, rbac('settings', 'update'), asy
       { new: true }
     ).lean();
     if (!doc) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Custom role not found.' } });
+
+    // A scopeLevel change affects every user currently holding this role, not
+    // just whoever's session happens to be active — drop the shared 5-minute
+    // scope cache for all of them so the fix is visible on their next request
+    // instead of silently lagging up to CACHE_TTL_MS behind the admin's save.
+    if (patch.scopeLevel !== undefined) {
+      await invalidateScopeCacheForRole(schoolId, key);
+    }
 
     AuditService.log({
       action: 'settings.custom_role_updated', actor: req.jwtUser, schoolId,

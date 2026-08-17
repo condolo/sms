@@ -710,6 +710,21 @@ export default function StudentList() {
               <p className="text-sm text-slate-500">{error?.message ?? 'Failed to load students'}</p>
               <button onClick={refetch} className="text-xs font-medium text-slate-700 underline">Retry</button>
             </div>
+          ) : rows.length === 0 && pagination.noAssignments ? (
+            // Distinct from a genuinely empty school: the account can see the
+            // Students module but has no classes assigned to it, so the data
+            // scope layer returns nothing regardless of RBAC permissions —
+            // "No students found" would wrongly read as "there are none",
+            // when the real issue is "nothing is assigned to you yet".
+            <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+              <AlertTriangle size={32} className="mb-2 opacity-40" />
+              <p className="text-sm font-medium text-slate-600">No classes assigned to your account yet</p>
+              <p className="text-xs mt-1 max-w-xs text-center">
+                Your role has permission to view students, but no classes are assigned to you.
+                Ask your school admin to assign classes, or adjust this role's data visibility
+                in Settings → Roles &amp; Permissions.
+              </p>
+            </div>
           ) : rows.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-slate-400">
               <GraduationCap size={32} className="mb-2 opacity-40" />

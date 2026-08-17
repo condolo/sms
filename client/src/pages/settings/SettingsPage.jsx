@@ -2987,13 +2987,14 @@ function AccountTab() {
    CREATE CUSTOM ROLE MODAL
    ══════════════════════════════════════════════════════════════ */
 function CreateCustomRoleModal({ onClose, onCreated }) {
-  const [label,    setLabel]    = useState('');
-  const [color,    setColor]    = useState('#6366f1');
-  const [baseRole, setBaseRole] = useState('teacher');
-  const [error,    setError]    = useState('');
+  const [label,      setLabel]      = useState('');
+  const [color,      setColor]      = useState('#6366f1');
+  const [baseRole,   setBaseRole]   = useState('teacher');
+  const [scopeLevel, setScopeLevel] = useState('school');
+  const [error,      setError]      = useState('');
 
   const { mutate, isPending } = useMutation({
-    mutationFn: () => settingsApi.customRoles.create({ label: label.trim(), color, baseRole }),
+    mutationFn: () => settingsApi.customRoles.create({ label: label.trim(), color, baseRole, scopeLevel }),
     onSuccess:  d  => onCreated(d?.data),
     onError:    err => setError(err?.message ?? 'Failed to create role.'),
   });
@@ -3037,6 +3038,22 @@ function CreateCustomRoleModal({ onClose, onCreated }) {
             <option value="deputy">Deputy — moderate access</option>
             <option value="admin">Admin — full access</option>
           </select>
+          <p className="text-[11px] text-slate-400 mt-1">
+            Only sets the starting checkboxes in Roles &amp; Permissions — you can change
+            any of them afterwards. Doesn't affect which records this role can see (that's below).
+          </p>
+        </FField>
+
+        <FField label="Data visibility">
+          <select value={scopeLevel} onChange={e => setScopeLevel(e.target.value)} className={iCls()}>
+            <option value="school">Whole school — sees every record in the modules it can access (recommended for non-teaching roles)</option>
+            <option value="assigned">Assigned classes only — like a teacher, scoped to their own timetable</option>
+          </select>
+          <p className="text-[11px] text-slate-400 mt-1">
+            Pick "Assigned classes only" only if this role genuinely teaches or
+            co-teaches specific classes — otherwise granting permissions above
+            won't show any records, since there's nothing assigned to scope them to.
+          </p>
         </FField>
 
         <FField label="Role colour">
@@ -3071,13 +3088,23 @@ function CreateCustomRoleModal({ onClose, onCreated }) {
 /* ══════════════════════════════════════════════════════════════
    EDIT CUSTOM ROLE MODAL
    ══════════════════════════════════════════════════════════════ */
+// baseRole -> the scope level a role with NO explicit scopeLevel of its own
+// currently falls back to (mirrors server/middleware/scopeMiddleware.js's
+// ROLE_SCOPE_LEVEL for the 3 baseRole choices a custom role can have).
+// Only used to show an honest "here's what's actually happening right now"
+// caption for legacy roles created before Data visibility existed.
+const LEGACY_SCOPE_FALLBACK = { teacher: 'assigned', deputy: 'school', admin: 'school' };
+
 function EditCustomRoleModal({ role, onClose, onSaved }) {
-  const [label, setLabel] = useState(role.label);
-  const [color, setColor] = useState(role.color ?? '#6366f1');
-  const [error, setError] = useState('');
+  const [label,      setLabel]      = useState(role.label);
+  const [color,      setColor]      = useState(role.color ?? '#6366f1');
+  const [scopeLevel, setScopeLevel] = useState(role.scopeLevel ?? 'school');
+  const [error,      setError]      = useState('');
+
+  const legacyFallback = !role.scopeLevel ? (LEGACY_SCOPE_FALLBACK[role.baseRole] ?? 'assigned') : null;
 
   const { mutate, isPending } = useMutation({
-    mutationFn: () => settingsApi.customRoles.update(role.key, { label: label.trim(), color }),
+    mutationFn: () => settingsApi.customRoles.update(role.key, { label: label.trim(), color, scopeLevel }),
     onSuccess:  d  => onSaved(d?.data),
     onError:    err => setError(err?.message ?? 'Failed to update role.'),
   });
@@ -3107,6 +3134,20 @@ function EditCustomRoleModal({ role, onClose, onSaved }) {
 
         <FField label="Display name">
           <input value={label} onChange={e => setLabel(e.target.value)} className={iCls()} autoFocus />
+        </FField>
+
+        <FField label="Data visibility">
+          <select value={scopeLevel} onChange={e => setScopeLevel(e.target.value)} className={iCls()}>
+            <option value="school">Whole school — sees every record in the modules it can access</option>
+            <option value="assigned">Assigned classes only — like a teacher, scoped to their own timetable</option>
+          </select>
+          {legacyFallback && (
+            <p className="text-[11px] text-amber-600 mt-1">
+              Not set explicitly yet — this role currently falls back to{' '}
+              <strong>{legacyFallback === 'assigned' ? 'Assigned classes only' : 'Whole school'}</strong>{' '}
+              based on its permission template. Save to fix it in place.
+            </p>
+          )}
         </FField>
 
         <FField label="Role colour">
