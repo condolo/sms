@@ -24,6 +24,7 @@ import {
   settings   as settingsApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
+import { useToast } from '@/hooks/useToast.jsx';
 import { studentStage, studentMilestone, demeritTotal, meritTotal, STAGES, MILESTONES } from '@/pages/behaviour/bpsConstants.js';
 
 /* ── Tab config ─────────────────────────────────────────────── */
@@ -93,6 +94,7 @@ export default function StudentProfile() {
   const qc            = useQueryClient();
   const can           = useAuthStore(s => s.can.bind(s));
   const currency      = useAuthStore(s => s.session?.school?.currency ?? 'KES');
+  const { toast }     = useToast();
   const [tab, setTab] = useState('overview');
   const [editing, setEditing] = useState(false);
 
@@ -143,13 +145,24 @@ export default function StudentProfile() {
     staleTime: 5 * 60_000,
   });
 
-  /* ── Update mutation ── */
+  /* ── Update mutation ──
+     Previously had no onError handler and no success toast at all — a
+     failed save (validation error, 409 version conflict, network drop,
+     500) silently set react-query's internal error state with nothing
+     rendering it, and even a successful save just closed the edit form
+     with zero confirmation. From the user's side this looked exactly
+     like "no response from the system, whether saved or not". Both
+     branches now surface via the app's standard toast system. */
   const { mutate: updateStudent, isPending: saving } = useMutation({
     mutationFn: data => studentsApi.update(studentId, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['students', studentId] });
       qc.invalidateQueries({ queryKey: ['students'] });
       setEditing(false);
+      toast.success('Student profile saved.');
+    },
+    onError: (err) => {
+      toast.error(err?.message || 'Failed to save student profile. Please try again.');
     },
   });
 
@@ -181,14 +194,15 @@ export default function StudentProfile() {
   async function handlePhotoChange(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { alert('Image must be under 5 MB'); return; }
+    if (file.size > 5 * 1024 * 1024) { toast.error('Image must be under 5 MB'); return; }
     setPhotoUploading(true);
     try {
       const dataUrl = await resizeToDataUrl(file);
       await studentsApi.update(studentId, { photo: dataUrl });
       qc.invalidateQueries({ queryKey: ['students', studentId] });
+      toast.success('Photo updated.');
     } catch (err) {
-      alert(err.message || 'Photo upload failed');
+      toast.error(err?.message || 'Photo upload failed');
     } finally {
       setPhotoUploading(false);
       if (photoInputRef.current) photoInputRef.current.value = '';
@@ -201,6 +215,9 @@ export default function StudentProfile() {
     try {
       await studentsApi.update(studentId, { photo: '' });
       qc.invalidateQueries({ queryKey: ['students', studentId] });
+      toast.success('Photo removed.');
+    } catch (err) {
+      toast.error(err?.message || 'Failed to remove photo');
     } finally {
       setPhotoUploading(false);
     }
