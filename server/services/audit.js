@@ -184,6 +184,7 @@ const ACTIONS = {
   'platform.school_deleted':    { severity: 'critical' },
   'platform.backup_restored':   { severity: 'critical' },
   'platform.superadmin_added':  { severity: 'warn' },
+  'platform.superadmin_password_reset': { severity: 'warn' }, // same tier as user.password_reset_by_admin
 };
 
 /**

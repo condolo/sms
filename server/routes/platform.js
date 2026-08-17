@@ -11,6 +11,7 @@ const rateLimit  = require('express-rate-limit');
 const { platformSession } = require('../middleware/auth');
 const { invalidatePlanCache } = require('../middleware/plan');
 const { invalidatePermCache }  = require('../middleware/rbac');
+const { revokeUserTokens, revokeIdentityTokens } = require('../utils/token-version');
 const AuditService      = require('../services/audit');
 const { sign } = require('../utils/jwt');
 const email    = require('../utils/email');
@@ -359,6 +360,128 @@ router.post('/schools/:id/superadmins', async (req, res) => {
         : 'Account created with the provided password.',
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* POST /api/platform/schools/:id/superadmins/:userId/reset-password
+   Closes the exact gap that motivated this route: a platform admin adds
+   a superadmin (above), the one-time temp password is lost before it's
+   copied (it's never stored in plaintext anywhere — see that route's
+   own comment — so it genuinely cannot be recovered any other way), and
+   Impersonate (POST .../impersonate, below) is disabled by default in
+   production (ALLOW_IMPERSONATION), so it isn't a reliable fallback
+   either. This route sets a new password directly — no login, no
+   impersonation, no env flag required.
+
+   Deliberately scoped to role:'superadmin' at THIS school only (not a
+   general "reset any user's password by id" tool) — a narrower,
+   purpose-built recovery action, not a backdoor. A school admin needing
+   to reset a teacher's/other staff's password already has
+   settings.js's own POST /users/:id/reset-password for that, from
+   inside the school.
+
+   Mirrors settings.js's POST /users/:id/reset-password's full rigor
+   (dual-write to the shared identities credential, session revocation,
+   audit log, best-effort welcome email) — adapted for the platform-
+   admin actor, which has no req.jwtUser (platformSession, not a school
+   JWT). Kept consistent with THIS file's own sibling account-creation
+   route above for the auto-vs-custom-password / mustChangePassword
+   policy, rather than settings.js's differing "never force a re-change"
+   policy — the two routes solve different problems (self-service reset
+   by a logged-in admin vs. platform-level account recovery) and
+   deserve their own policy, not a copy-pasted one. */
+router.post('/schools/:id/superadmins/:userId/reset-password', async (req, res) => {
+  try {
+    const { password } = req.body || {};
+    if (password !== undefined && password !== null && password !== '') {
+      if (typeof password !== 'string' || password.length < 8) {
+        return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+      }
+    }
+
+    const School = _model('schools');
+    const rid = req.params.id;
+    const schoolQuery = mongoose.isValidObjectId(rid) ? { $or: [{ _id: rid }, { id: rid }] } : { id: rid };
+    const school = await School.findOne(schoolQuery).lean();
+    if (!school) return res.status(404).json({ error: 'School not found' });
+
+    // Tenant-scoped to THIS school AND role:superadmin — the combination
+    // that keeps this a superadmin-recovery tool, not an arbitrary
+    // cross-tenant password-reset endpoint.
+    const User = tenantModel('users', { schoolId: school.id });
+    const { userId } = req.params;
+    const isOid = /^[0-9a-f]{24}$/i.test(userId);
+    const userQuery = isOid
+      ? { role: 'superadmin', $or: [{ id: userId }, { _id: userId }] }
+      : { role: 'superadmin', id: userId };
+    const target = await User.findOne(userQuery).lean();
+    if (!target) return res.status(404).json({ error: 'Superadmin not found at this school' });
+
+    const newPassword = (password && password.trim())
+      ? password.trim()
+      : crypto.randomBytes(9).toString('base64').replace(/[+/=]/g, '').slice(0, 12);
+    const hash = await bcrypt.hash(newPassword, 12);
+    const now  = new Date().toISOString();
+
+    const updateFilter = target.id ? { id: target.id, schoolId: school.id } : { _id: target._id, schoolId: school.id };
+    await User.updateOne(updateFilter, {
+      $set:   { password: hash, passwordChangedAt: now, updatedAt: now, mustChangePassword: !password },
+      $unset: { mustChangePwd: 1 },
+    });
+
+    const _resetTargetId = target.id || target._id.toString();
+
+    // C8/MR-001 dual-write + session revocation — same posture as
+    // settings.js's reset-password (non-fatal: a stale identities-doc
+    // copy or a lingering session is a smaller problem than blocking
+    // the whole recovery on it).
+    try {
+      if (target.identityId) {
+        await _model('identities').updateOne(
+          { id: target.identityId },
+          { $set: { passwordHash: hash, updatedAt: now } }
+        );
+      }
+      await revokeUserTokens(_resetTargetId);
+      if (target.identityId) await revokeIdentityTokens(target.identityId);
+    } catch (revokeErr) {
+      console.error('[platform/schools/:id/superadmins/:userId/reset-password] dual-write/revocation failed (non-fatal):', revokeErr.message);
+    }
+
+    await AuditService.log({
+      action: 'platform.superadmin_password_reset', actor: { userId: 'platform', role: 'platform', email: null },
+      schoolId: school.id, target: { type: 'user', id: _resetTargetId, label: target.email },
+      details: { schoolName: school.name }, req,
+    });
+
+    /* Best-effort welcome-style email — non-fatal, matches the sibling
+       account-creation route's and settings.js's own posture. */
+    let emailSent = false;
+    try {
+      await email.sendWelcomeCredentials({
+        email: target.email, name: target.name || target.email,
+        schoolName: school.name || 'Your School', schoolEmail: school.systemEmail || school.email || '',
+        schoolId: school.id, tempPassword: newPassword, role: target.role, slug: school.slug,
+      });
+      emailSent = true;
+    } catch (emailErr) {
+      console.warn('[platform/schools/:id/superadmins/:userId/reset-password] email failed:', emailErr.message);
+    }
+
+    res.json({
+      user: { id: _resetTargetId, name: target.name, email: target.email },
+      // Only returned here, once — never logged, never stored in
+      // plaintext, same rule as the account-creation route. Omitted
+      // entirely when the caller supplied their own password.
+      ...(!password ? { tempPassword: newPassword } : {}),
+      emailSent,
+      note: !password
+        ? 'A new temporary password was generated. It must be changed on first login. Any existing sessions for this account have been signed out.'
+        : 'Password updated. Any existing sessions for this account have been signed out.',
+    });
+  } catch (err) {
+    console.error('[platform/schools/:id/superadmins/:userId/reset-password]', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /* GET /api/platform/schools/pending — list schools awaiting approval */

@@ -1486,6 +1486,7 @@ async function loadSuperadmins(schoolId) {
           <th style="text-align:left;padding:6px 8px;color:#64748b;font-size:11px;text-transform:uppercase">Name</th>
           <th style="text-align:left;padding:6px 8px;color:#64748b;font-size:11px;text-transform:uppercase">Email</th>
           <th style="text-align:left;padding:6px 8px;color:#64748b;font-size:11px;text-transform:uppercase">Status</th>
+          <th style="text-align:right;padding:6px 8px;color:#64748b;font-size:11px;text-transform:uppercase">Actions</th>
         </tr>
       </thead>
       <tbody>${items.map(u => `
@@ -1493,11 +1494,52 @@ async function loadSuperadmins(schoolId) {
           <td style="padding:6px 8px">${_esc(u.name) || '—'}</td>
           <td style="padding:6px 8px;color:#64748b">${_esc(u.email)}</td>
           <td style="padding:6px 8px">${u.isActive === false ? '<span style="color:#94a3b8">Inactive</span>' : '<span style="color:#22c55e">Active</span>'}${u.mustChangePassword ? ' <span style="color:#d97706">· must change password</span>' : ''}</td>
+          <td style="padding:6px 8px;text-align:right">
+            <button class="pa-btn" style="font-size:11px;padding:4px 8px"
+              title="Set a new temporary password — invalidates any current sessions for this account"
+              onclick="resetSuperadminPassword('${schoolId}','${u.id}','${(u.email || '').replace(/'/g, "\\'")}')">
+              <i class="fas fa-key"></i> Reset Password
+            </button>
+          </td>
         </tr>`).join('')}
       </tbody>
     </table>`;
   } catch (err) {
     listEl.innerHTML = `<p style="font-size:12px;color:#b91c1c;margin:0">Failed to load: ${err.message}</p>`;
+  }
+}
+
+/* ── Reset a superadmin's password ────────────────────────
+   The recovery path for the exact scenario that motivated this
+   feature: the one-time temp password shown by addSuperadmin() above
+   is lost before it's copied (it's never stored in plaintext anywhere,
+   so it genuinely cannot be recovered any other way), and Impersonate
+   (below) is disabled by default in production. This sets a new
+   password directly — no login, no impersonation needed. */
+async function resetSuperadminPassword(schoolId, userId, email) {
+  const confirmed = confirm(
+    `Reset password for ${email}?\n\n` +
+    `A new temporary password will be generated and any existing sessions for this account will be signed out immediately. ` +
+    `The current password will stop working.`
+  );
+  if (!confirmed) return;
+
+  const errEl = document.getElementById('sa-error');
+  const resEl = document.getElementById('sa-result');
+  errEl.style.display = 'none';
+  resEl.style.display = 'none';
+
+  try {
+    const json = await api('POST', `/schools/${schoolId}/superadmins/${userId}/reset-password`);
+    if (json.tempPassword) {
+      resEl.innerHTML = `<strong>${_esc(email)}</strong> — new temporary password (shown once — copy it now):<br><code style="user-select:all;font-size:13px">${json.tempPassword}</code>`;
+      resEl.style.display = 'block';
+    }
+    toast(json.note || 'Password reset.', 'success');
+    loadSuperadmins(schoolId);
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
   }
 }
 
