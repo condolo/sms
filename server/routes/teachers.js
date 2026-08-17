@@ -265,7 +265,12 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('teachers', 'create'), asyn
     // Check for duplicate email within the school
     const Teachers = tenantModel('teachers', tenantContext(req));
     const existing = await Teachers.findOne({ schoolId, email: data.email }).lean();
-    if (existing) return E.conflict(res, `A teacher with email '${data.email}' already exists`);
+    // 'staff member', not 'teacher' — this collection is the whole-staff
+    // directory (staffType is a free-form field, not restricted to actual
+    // teaching roles), so an HR/finance/admin staff record with a
+    // colliding email would otherwise get a misleading "already exists as
+    // a teacher" message despite never having been one.
+    if (existing) return E.conflict(res, `A staff member with email '${data.email}' already exists`);
 
     const staffId = await nextStaffId(schoolId);
 
@@ -299,7 +304,7 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('teachers', 'create'), asyn
 
     return created(res, docObj);
   } catch (err) {
-    if (err.code === 11000) return E.conflict(res, 'A teacher with those details already exists');
+    if (err.code === 11000) return E.conflict(res, 'A staff member with those details already exists');
     console.error('[teachers POST]', err);
     return E.serverError(res);
   }
@@ -320,11 +325,15 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('teachers', 'update'), as
     delete data.id;
     delete data._v;
 
-    // If email is being changed, check for duplicates
+    // Every save re-submits the whole record (not just the fields on the
+    // currently-open tab), so this runs on every save regardless of
+    // whether email itself changed — correctly re-detecting a standing
+    // conflict, not something newly introduced by this specific edit.
     if (data.email) {
       const Teachers = tenantModel('teachers', tenantContext(req));
       const existing = await Teachers.findOne({ schoolId, email: data.email, id: { $ne: req.params.id } }).lean();
-      if (existing) return E.conflict(res, `Email '${data.email}' is already used by another teacher`);
+      // 'staff member', not 'teacher' — see the POST route's identical note above.
+      if (existing) return E.conflict(res, `Email '${data.email}' is already used by another staff member`);
     }
 
     const { doc, conflict } = await applyOptimisticLock(
