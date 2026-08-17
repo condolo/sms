@@ -180,15 +180,24 @@ function _rateLimitKey(req) {
   return req.ip;
 }
 
-// General limiter: 1000 req/15min, per authenticated user (or per IP for
-// anonymous requests). Raised from 600, which was itself raised from 300,
-// because a React Query SPA fires 8-10 parallel requests per page and
-// refetchOnWindowFocus adds bursts — per-user keying removes the
-// shared-IP amplification that made even that 600 too easy to exhaust
-// in a busy school office.
+// General limiter: 3000 req/15min, per authenticated user (or per IP for
+// anonymous requests). Raised from 1000, which was itself raised from 600,
+// which was raised from 300 — each bump chasing the same underlying cause
+// without actually sizing it: this SPA genuinely fires 8-10 parallel
+// requests per page load (documented, accepted tradeoff, not a bug), and
+// a single active admin session — testing/QA, bulk data entry, running
+// reports across many pages in one sitting — can plausibly exceed 1000
+// requests inside 15 minutes on its own, with nothing wrong on either
+// end. Per-user keying (see _rateLimitKey above) already means this
+// ceiling is never shared across users on the same network — raising it
+// further only affects how much a single account can do, not how many
+// accounts can pile onto one bucket. 3000 keeps meaningful headroom
+// above realistic peak single-session usage while still bounding a
+// genuine automated-abuse pattern (which looks nothing like normal
+// interactive browsing regardless of the exact ceiling).
 const apiLimiter = rateLimit({
   windowMs:          15 * 60 * 1000,
-  max:               1000,
+  max:               3000,
   standardHeaders:   true,
   legacyHeaders:     false,
   keyGenerator:      _rateLimitKey,
@@ -226,7 +235,7 @@ app.use('/api/auth/change-password',    authLimiter);
 app.use('/api/auth/sessions/revoke-all',authLimiter);
 app.use('/api/platform', platformLimiter);
 
-console.log('[Security] rate limiting active — general: 1000/15min per user (IP for anonymous), auth: 20/15min per IP (login+force-change+change-password+revoke-all), platform: 10/15min per IP');
+console.log('[Security] rate limiting active — general: 3000/15min per user (IP for anonymous), auth: 20/15min per IP (login+force-change+change-password+revoke-all), platform: 10/15min per IP');
 
 /* ── API Routes ─────────────────────────────────────────────── */
 app.use('/api/public',      require('./routes/public'));   // no auth — school branding

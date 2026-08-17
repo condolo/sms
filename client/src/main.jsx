@@ -67,7 +67,21 @@ const queryClient = new QueryClient({
     queries: {
       staleTime:          2 * 60 * 1000,   // 2 minutes — matches server TTL cache
       gcTime:             5 * 60 * 1000,   // 5 minutes GC
-      retry:              1,
+      // Retry once, but NEVER for a 4xx — those are never going to succeed
+      // on an immediate retry (bad request, forbidden, not found), and for
+      // 429 specifically a blind retry actively makes things worse: it
+      // fires a second request into an already-exhausted rate-limit
+      // window, which counts against the SAME budget and is virtually
+      // guaranteed to 429 again — every one of a page's 8-10 parallel
+      // queries auto-doubling the moment the limit trips. This is what
+      // made a rate-limit hit feel "stuck" rather than a one-off blip.
+      // Reserve the retry for what it's actually for: a transient network
+      // blip or a 5xx.
+      retry: (failureCount, error) => {
+        const status = error?.status;
+        if (typeof status === 'number' && status >= 400 && status < 500) return false;
+        return failureCount < 1;
+      },
       refetchOnWindowFocus: false,
     },
     mutations: {

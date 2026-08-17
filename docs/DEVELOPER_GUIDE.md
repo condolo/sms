@@ -1727,37 +1727,36 @@ Use these class names directly in JSX — avoid writing Tailwind utility strings
 
 ---
 
-## 20. Security Layer (v4.5+)
+## 20. Security Layer (v4.5+, rate limiting reworked v5.43.0/v5.56.0)
 
 ### Global Rate Limiting (`server/index.js`)
 
-Two limiters are applied before any route handler runs:
+Three limiters are applied before any route handler runs:
 
 ```
-Request → apiLimiter → [authLimiter if /api/auth] → route handler
+Request → apiLimiter → [authLimiter if credential-submission route] → [platformLimiter if /api/platform] → route handler
 ```
 
-| Limiter | Window | Max | Scope | Dev mode |
-|---------|--------|-----|-------|----------|
-| `apiLimiter` | 15 min | 300 req/IP | All `/api/*` | **Disabled** (skipped when `NODE_ENV !== 'production'`) |
-| `authLimiter` | 15 min | 20 req/IP | `/api/auth` only | **Always on** |
+| Limiter | Window | Max | Scope | Keyed by | Dev mode |
+|---------|--------|-----|-------|----------|----------|
+| `apiLimiter` | 15 min | 3000 req | All `/api/*` | **Authenticated user** (`user:<userId>`, decoded from the HttpOnly session cookie) — falls back to IP only for requests with no valid token | **Disabled** (skipped when `NODE_ENV !== 'production'`) |
+| `authLimiter` | 15 min | 20 req | Credential-submission routes only (`/api/auth/login`, `/force-change`, `/change-password`, `/sessions/revoke-all`) — NOT the whole `/api/auth` namespace, so `verify-otp`/`ping`/`me` don't share the same 20-request budget mid-login | IP | **Always on** (skipped only when `NODE_ENV === 'test'`) |
+| `platformLimiter` | 15 min | 10 req | `/api/platform` only | IP | **Disabled** (skipped when `NODE_ENV !== 'production'`) |
 
-**Why skip `apiLimiter` in dev?** Running seed scripts, automated tests, or hot-reload against `localhost` easily exceeds 300 requests. The auth limiter is always active so brute-force behaviour is testable locally.
+**Why `apiLimiter` is keyed per-user, not per-IP (v5.43.0):** an IP-keyed bucket is shared by *every device behind the same network* — a school office's shared WiFi/NAT meant several staff members, or one admin with a few tabs open, could trip each other's limit with entirely legitimate traffic. Per-user keying eliminates that cross-contamination; each account now has its own independent budget regardless of who else is on the same network.
 
-**Standard headers** — every response includes:
+**Why 3000, not something tighter (v5.56.0, raised from 1000, itself raised from 600, itself raised from 300):** this SPA genuinely fires 8-10 parallel requests per page load (an accepted tradeoff, not a bug) — a single active admin session (testing, bulk data entry, running reports across many pages) can plausibly exceed 1000 requests inside 15 minutes with nothing wrong on either end. Per-user keying means this ceiling only ever bounds what ONE account can do in the window, never how many accounts can pile onto a shared bucket — so raising it is a pure UX/false-positive tradeoff, not a re-opening of the office-WiFi bug above.
+
+**Why skip `apiLimiter`/`platformLimiter` in dev?** Running seed scripts, automated tests, or hot-reload against `localhost` would otherwise trip them constantly. `authLimiter` stays active outside dev so brute-force behaviour is still testable locally (only actually disabled in `NODE_ENV === 'test'`, for the Jest suite).
+
+**Standard headers** — every response includes (`apiLimiter` example):
 ```
-RateLimit-Limit: 300
-RateLimit-Remaining: 299
+RateLimit-Limit: 3000
+RateLimit-Remaining: 2999
 RateLimit-Reset: 1746285600
 ```
 
-**Client back-off pattern** (React SPA `client/src/api/client.js`):
-```js
-if (res.status === 429) {
-  const retryAfter = res.headers.get('RateLimit-Reset');
-  throw new APIError('rate_limited', 'Too many requests — please wait and try again.', 429);
-}
-```
+**Client-side handling** (`client/src/api/client.js`): there is no dedicated 429 back-off/countdown UI. A 429 is thrown through the same generic `APIError(code, message, status, json)` path as any other non-2xx response, carrying the server's own `message` field (`"Too many requests — please slow down and try again shortly."` for `apiLimiter`) — whatever component made the call is responsible for displaying that message, the same as it would for any other API error. React Query's global default `retry` (set in `client/src/main.jsx`) explicitly excludes all 4xx statuses, 429 included, specifically so a rate-limit hit isn't immediately doubled by an automatic retry landing in the same exhausted window (a real bug found and fixed in v5.56.0 — the previous blanket `retry: 1` retried every failure regardless of status, which made a 429 feel "stuck" rather than a one-off blip, since every one of a page's 8-10 parallel queries would auto-retry into the same wall the moment the limit tripped).
 
 ### Existing Per-Route Limits (unchanged)
 
