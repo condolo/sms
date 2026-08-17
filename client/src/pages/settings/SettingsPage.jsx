@@ -24,7 +24,7 @@ import { settings as settingsApi } from '@/api/client.js';
 import { academicConfig as academicConfigApi } from '@/api/client.js';
 import { billing as billingApi, mpesa as mpesaApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
-import { deriveNavModules } from '@/config/moduleNav.js';
+import { deriveNavModules, buildModuleConfigMap } from '@/config/moduleNav.js';
 
 /* ── Tab config ─────────────────────────────────────────────── */
 const TABS = [
@@ -4868,9 +4868,7 @@ const SEC_BADGE = {
 // The toggleable set is derived the same way Sidebar derives its own
 // nav list (deriveNavModules), so the two can never drift apart.
 function initModuleList(registry, savedConfig, toggleableKeys) {
-  const cfgMap = Object.fromEntries(
-    (savedConfig ?? []).map((m, i) => [m.key, { enabled: m.enabled ?? true, order: m.order ?? i }])
-  );
+  const cfgMap = buildModuleConfigMap(savedConfig);
   return registry
     .filter(m => toggleableKeys.has(m.key))
     .map((m, i) => ({ key: m.key, label: m.label, section: m.section,

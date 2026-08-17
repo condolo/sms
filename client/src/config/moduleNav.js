@@ -98,3 +98,19 @@ export function deriveNavModules(moduleRegistry) {
     .map(({ _order, ...rest }) => rest);
   return derived.length ? derived : FALLBACK_NAV_MODULES;
 }
+
+/** school.moduleConfig (array of { key, enabled?, order? }, or undefined
+ *  entirely on a school that's never touched the Modules tab) -> a
+ *  { [key]: { enabled, order } } lookup, with `enabled` defaulting to
+ *  true and `order` defaulting to array index for any entry that omits
+ *  them. Extracted from what were two independently hand-written,
+ *  byte-identical copies of this exact snippet (Sidebar.jsx's
+ *  computeNav and SettingsPage.jsx's initModuleList) — a third
+ *  independent copy (Help Centre's own module-enabled filter) is what
+ *  prompted pulling it out, rather than repeating the same
+ *  drift-prone pattern a third time. */
+export function buildModuleConfigMap(moduleConfig) {
+  return Object.fromEntries(
+    (moduleConfig ?? []).map((m, i) => [m.key, { enabled: m.enabled ?? true, order: m.order ?? i }])
+  );
+}

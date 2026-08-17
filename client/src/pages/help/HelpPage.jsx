@@ -9,10 +9,11 @@ import {
   Clock, ClipboardList, MonitorPlay, BookCheck,
   ClipboardCheck, Layers, UserCog, Database,
   BookMarked, Bus, BedDouble, TrendingUp, Library,
-  Sprout,
+  Sprout, CalendarCheck, HeartPulse, Boxes, Link2, LineChart,
 } from 'lucide-react';
 import { useSchoolTheme, withOpacity } from '@/hooks/useSchoolTheme.js';
 import useAuthStore from '@/store/auth.js';
+import { buildModuleConfigMap } from '@/config/moduleNav.js';
 
 /* ── Section → module permission key mapping ──────────────────────
    null  = always visible (Getting Started, universal sections)
@@ -90,6 +91,10 @@ const SECTIONS = [
         q: 'Can I delete a class that has students?',
         a: 'No. A class with active streams cannot be deleted, and a stream with active students cannot be deleted. Move or deactivate students first, then remove the stream, then the class.',
       },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Classes — see the class/stream list\n• Create Class — add a new class\n• Edit Class — change name, section, or year\n• Delete Class — permanently remove a class\n• Export Classes (CSV) — download the class list\n• Import Classes (CSV) — bulk-create from a spreadsheet\n• Manage Sections & Streams — add/edit streams and the Section groupings above classes\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+      },
     ],
   },
 
@@ -115,6 +120,10 @@ const SECTIONS = [
       {
         q: 'What is a class-subject?',
         a: 'A class-subject is the combination of a subject and a class — e.g. Mathematics in Form 3A. This is the unit that holds the syllabus, timetable slots, and the gradebook for that group.',
+      },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Subjects & Departments — see the subject list\n• Create Subject / Department — add a new subject\n• Edit Subject — change name, code, or teacher assignment\n• Delete Subject — permanently remove a subject\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -158,6 +167,48 @@ const SECTIONS = [
         q: 'Can I grant portal access to many students at once?',
         a: 'Yes. Select multiple students in the list → the bulk action bar shows "Grant Portal Access". This creates login accounts for all selected students who do not already have one and returns a created/skipped summary.',
       },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Student List — see the roster with filters and search\n• View Student Profile — open a student\'s full record\n• Add Student — create a new student record\n• Edit Student — update an existing record\n• Delete Student — permanently remove a record\n• Export Students (CSV) — download the roster\n• Import Students (CSV) — bulk-create records from a spreadsheet\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+      },
+    ],
+  },
+
+  /* ── Teachers ─────────────────────────────────────────────── */
+  {
+    id: 'teachers',
+    moduleKey: 'teachers',
+    Icon: Users,
+    title: 'Teachers',
+    articles: [
+      {
+        q: 'How do I add a teacher?',
+        a: 'Go to Teachers → "Add Teacher". Enter their name, email, subject specialisation, and qualifications. A user account and welcome email with login instructions are created automatically.',
+      },
+      {
+        q: 'How do I import teachers in bulk?',
+        a: 'Go to Teachers → Import → download the CSV template → fill in your staff data → upload. Each imported teacher who does not already have a login gets one created automatically, with a welcome email.',
+      },
+      {
+        q: 'How do I assign a teacher to a class or subject?',
+        a: 'Teaching assignments (which teacher delivers which subject to which class) are managed from Subjects → the class-subject link, or from Timetable when building the schedule. A teacher\'s profile shows all their current assignments.',
+      },
+      {
+        q: 'What can a teacher edit on their own profile?',
+        a: 'Teachers can update their phone, address, qualifications, specialisation, next-of-kin contact, and personal meeting links (Zoom PMI / Google Meet) from Profile — no admin approval required. Name, email, and role changes need an admin.',
+      },
+      {
+        q: 'How do I deactivate a teacher who has left the school?',
+        a: "Open the teacher's profile → Edit → set Status to \"Inactive\" → Save. Their login is disabled and they drop off active class/subject assignment pickers, but their historical records (marks entered, attendance taken, lesson coverage) are preserved.",
+      },
+      {
+        q: 'How do I filter and search teachers?',
+        a: 'Use the filter bar to narrow by Department, Subject, or Status. The Export button respects active filters, matching what is on screen.',
+      },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Teacher List — see the staff roster\n• View Teacher Profile — open a teacher\'s full record\n• Add Teacher — create a new staff account\n• Edit Teacher — update an existing record\n• Delete Teacher — permanently remove a record\n• Export Teachers (CSV) — download the staff list\n• Import Teachers (CSV) — bulk-create staff accounts from a spreadsheet\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+      },
     ],
   },
 
@@ -187,6 +238,10 @@ const SECTIONS = [
       {
         q: 'Where do I see the admissions funnel overview?',
         a: 'The Dashboard → Admissions Pipeline bar chart shows counts by stage. For full detail, go to Admissions — the board view shows all active applications grouped by stage.',
+      },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Pipeline — see all applications and their stage\n• Add Applicant — create a new application\n• Edit Applicant Details — update an application\n• Move Pipeline Stage — advance/move an application through the funnel\n• Delete Applicant — permanently remove an application\n• Export Applicants (CSV) — download the pipeline data\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -222,6 +277,10 @@ const SECTIONS = [
         q: 'Do teachers only see their own classes?',
         a: "Yes. Teachers see only the classes they are assigned to teach. Admins and deputy principals see all classes. Section Heads see classes within their section.",
       },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Register — see attendance already marked\n• Mark Attendance — record present/absent/late/excused\n• Edit Records — change attendance after it has been saved\n• Export / Print Register — download or print the register\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+      },
     ],
   },
 
@@ -252,6 +311,10 @@ const SECTIONS = [
         q: 'How do teachers save their meeting links?',
         a: 'Go to Profile → Online Meeting Links → paste your Zoom PMI URL and/or Google Meet URL → Save. These links appear automatically when Emergency Mode is active.',
       },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Timetable — see the schedule\n• Edit Timetable — assign subjects/teachers/rooms to periods\n• Manage Rooms — add/edit rooms\n• Configure Bell Schedule — set period start/end times\n• Manage Teaching Assignments — set which teacher delivers which subject to which class (pre-timetabling)\n• Import Timetable (CSV) — bulk-load a schedule\n• Export Timetable (CSV) — download the schedule\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+      },
     ],
   },
 
@@ -281,6 +344,10 @@ const SECTIONS = [
       {
         q: "What if I haven't saved my meeting link yet?",
         a: "The scheduling modal shows a yellow warning. Click 'Add it in Profile →' to save your link first. You must have a meeting link saved before scheduling sessions.",
+      },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Courses & Resources — browse available content\n• Create / Upload Content — add new courses/resources\n• Edit Content — update existing content\n• Delete Content — remove content\n• Enroll Students — add students to a course\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -320,6 +387,10 @@ const SECTIONS = [
         q: 'Can I import opening balances for students?',
         a: 'Yes. The student CSV import supports opening fee columns: openingFeeTitle, openingFeeAmount, openingFeePaid, and openingFeeDueDate. The system creates an invoice and payment record per student automatically.',
       },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Invoices — see issued invoices\n• Create Invoice — issue a new invoice\n• Void Invoice — cancel an issued invoice\n• View Payments — see recorded payments\n• Record Payment — log a payment against an invoice\n• Print Receipts / Invoices — generate printable documents\n• Manage Fee Structures — create/edit fee structure templates\n• Import Finance Data (CSV) — bulk-load invoices/opening balances\n• Configure M-Pesa Integration — set up Daraja API credentials\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+      },
     ],
   },
 
@@ -353,6 +424,10 @@ const SECTIONS = [
       {
         q: 'Can all teachers record behaviour for any student?',
         a: 'Yes. Behaviour is school-wide — teachers can record merits and demerits for any student, not just those in their assigned classes. This is by design to support pastoral care across the school.',
+      },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Incidents & BPS — see the incident log and point totals\n• Record Incident / Award Points — log a new merit or demerit\n• Edit Records — update an existing incident\n• Delete Records — permanently remove an incident\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -388,6 +463,10 @@ const SECTIONS = [
         q: 'How are grades calculated from multiple assessments?',
         a: 'The final grade is a weighted average of all assessment components (CA, Homework, Mid-Term, End-Term). Weights are configured per subject in Academic Config → Assessment Settings.',
       },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Exams & Results — see exams and their results\n• Create / Edit Exam — set up a new exam or change its details\n• Lock / Unlock Exam — freeze results against further edits, or reopen them\n• Enter Exam Results — record student scores\n• Delete Exam — permanently remove an exam\nThis is the "Exams" module specifically — a separate permission from "Grades & Marks" below, though both live under the Exams area in the sidebar. Your role\'s exact access is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+      },
     ],
   },
 
@@ -417,6 +496,14 @@ const SECTIONS = [
       {
         q: 'What is grid mark entry?',
         a: 'Grid mark entry lets you enter marks for an entire class at once in a spreadsheet-style table — one row per student, one column per assessment. This is faster than opening each student individually.',
+      },
+      {
+        q: 'What is "Assessment Scheduling" and how is it different from the marks above?',
+        a: 'Assessment Scheduling is its own small module, separate from Grades & Marks, covering only one action: locking or unlocking the assessment schedule (which CA/HW/MT/ET components exist and their weights) for a term. Entering marks against an already-scheduled assessment is a Grades & Marks action; changing the schedule itself needs this separate permission.',
+      },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Grades & Marks — see marks and grade summaries\n• Enter / Edit Marks — record scores in the markbook\n• Review / Approve Mark Submissions — sign off a teacher\'s submitted marks before they count\n• Manage Comment Banks — maintain the reusable teacher-comment library\n• Generate / Publish Report Cards — compile and release report cards to students/parents\n• Export Grades (CSV) — download markbook data\n• Lock / Unlock Assessment Schedule — a separate "Assessment Scheduling" permission (see above)\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -452,6 +539,10 @@ const SECTIONS = [
         q: 'Can parents download report cards as a PDF?',
         a: 'Yes. Once published, students and parents can download their report card PDF from their portal. The PDF includes the Report ID, QR code for verification, and the school stamp and signature.',
       },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• Manage Draft Comments — write/edit teacher comments before publishing\n• Configure Approval Workflow — set up the report-card sign-off chain (e.g. class teacher → section head)\n• Configure Publication Policy — set rules like fee-clearance thresholds that gate downloading\nThese three are the "Report Card Settings" module — configuration, not the actual generate/publish action. Generating and publishing report cards is a separate permission (Generate / Publish Report Cards, under Grades & Marks above) — a role can have one without the other. Your role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+      },
     ],
   },
 
@@ -478,6 +569,10 @@ const SECTIONS = [
         q: 'Do teachers only see their assigned classes in Lessons?',
         a: 'Yes. Teachers can only view and update coverage for classes they are assigned to teach. Admins and section heads have broader access.',
       },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Lesson Plans — see planned/logged lessons\n• Create Lesson Plan — add a new lesson plan\n• Edit Lesson Plan — update an existing plan\n• Delete Lesson Plan — remove a plan\n• Mark Lesson Coverage — mark a syllabus topic as taught\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+      },
     ],
   },
 
@@ -503,6 +598,10 @@ const SECTIONS = [
       {
         q: 'Can I switch between month, week, and list view?',
         a: 'Yes. Use the Month / Week / List toggle at the top of the Events page. List view is useful for scanning upcoming events chronologically.',
+      },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Events — see the calendar\n• Create Event — add a new event\n• Edit Event — update an existing event\n• Delete Event — remove an event\n• Export Events (CSV) — download the calendar\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -538,6 +637,10 @@ const SECTIONS = [
         q: 'Can a staff member have multiple roles?',
         a: 'Yes. In Settings → Users → open the user → assign multiple roles (e.g. Teacher + Finance Officer). The user sees all modules accessible to any of their combined roles.',
       },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Staff Records — see staff profiles\n• View Leave Requests — see submitted leave applications\n• Approve / Reject Leave — decide on a leave request\n• View Payroll — see payroll records\n• Export Payroll (CSV) — download payroll data\n• Manage Staff Documents — upload/manage staff document files\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+      },
     ],
   },
 
@@ -564,6 +667,40 @@ const SECTIONS = [
         q: 'Will I be notified of new messages?',
         a: 'An unread badge appears on the Messages icon in the sidebar. Email notifications depend on whether your school has configured SMTP in Settings.',
       },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Messages — see conversations\n• Send Messages — start or reply to a conversation\n• Delete Messages — remove a message\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+      },
+    ],
+  },
+
+  /* ── Resources ────────────────────────────────────────────── */
+  {
+    id: 'resources',
+    moduleKey: 'resources',
+    Icon: Link2,
+    title: 'Resources',
+    articles: [
+      {
+        q: 'What is the Resources module for?',
+        a: 'Resources is a shared library for links and files — timetables, policy documents, study guides, forms — that staff share with each other, a class, or the whole school. It is separate from eLearning (which is course content for students) and from Library (physical/digital book lending).',
+      },
+      {
+        q: 'How do I share a resource?',
+        a: "Go to Resources → 'Share a Resource'. Give it a title, choose the audience (school-wide, a class, or staff only), and either paste a link or upload a file. Click Share.",
+      },
+      {
+        q: 'Who can see a shared resource?',
+        a: 'Only the audience you selected when sharing it. A resource shared with "Form 3A" is visible to that class\'s students, parents, and teachers only — not the whole school.',
+      },
+      {
+        q: 'Can I edit or remove a resource after sharing it?',
+        a: 'Yes, if your role has the Edit / Delete permission for Resources. Open the resource and use the Edit or Delete action. Removing a resource removes it from every viewer\'s list immediately.',
+      },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Resources — see shared resources\n• Share a Resource — add a new one\n• Edit a Resource — update an existing one\n• Delete a Resource — remove one\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+      },
     ],
   },
 
@@ -589,6 +726,56 @@ const SECTIONS = [
       {
         q: 'How does Growth Profile link to report cards?',
         a: 'Teacher comments on report cards can reference a student\'s growth records and aspirations. This makes comments more personal and evidence-based rather than generic.',
+      },
+      {
+        q: 'Who can view or edit a student\'s aspirations?',
+        a: 'Staff with the Edit Aspirations permission can write on any student\'s behalf. A student can always view and edit their own aspirations — this self-service access is separate from the general staff permission and cannot be seen or edited by other students.',
+      },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Growth Profiles — see a student\'s Growth Profile\n• Add Records (Leadership / Activities / Service / Awards) — log a new entry\n• Edit Own Records — update entries you created\n• Delete Records — remove entries\n• Add / Edit Projects — manage the Projects section (has a supervisor reference)\n• Write Recommendations — add a staff recommendation for a student\n• Edit Aspirations — set career/university goals (students can always edit their own)\n• Verify / Approve Records — mark an entry as institution-verified or staff-verified\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+      },
+    ],
+  },
+
+  /* ── Weekly Student Snapshot ──────────────────────────────── */
+  {
+    id: 'weekly-snapshot',
+    moduleKey: 'weekly_snapshot',
+    Icon: CalendarCheck,
+    title: 'Weekly Student Snapshot',
+    articles: [
+      {
+        q: 'What is the Weekly Student Snapshot?',
+        a: "An automatically-generated weekly digest for every active student — topics covered, assignments and scores, attendance, the full behaviour record, medical visits, library activity, and new Growth Profile entries — all in one place, one snapshot per week.",
+      },
+      {
+        q: 'When is it generated? Do I need to do anything?',
+        a: "No action needed from any staff member. It generates automatically every Saturday, in your school's own local time — there is no approval step, so it never adds work to a class teacher's week regardless of how many classes or students they have.",
+      },
+      {
+        q: 'How do parents and students see it?',
+        a: 'They are notified automatically by email and in-app the moment it\'s ready, with a "This Week\'s Snapshot" card on their dashboard. Every past week stays available — nothing is ever deleted.',
+      },
+      {
+        q: 'How do staff view a class\'s snapshots?',
+        a: 'Go to Weekly Snapshot → pick your class → open a student. Use the prev/next/first/last arrows at the top to step through the rest of the class without returning to the roster each time.',
+      },
+      {
+        q: 'Can I download a snapshot as a PDF?',
+        a: 'Yes. Open any week from the picker inside a student\'s snapshot view and click Download PDF — staff, parents, and students can all do this for the weeks they have access to.',
+      },
+      {
+        q: 'Does the medical section show to everyone?',
+        a: "No. Medical details only appear if your school has the Medical Centre module enabled, and — for staff — only if you also hold the Medical Centre \"View Clinic Visits\" permission. This is checked every time the snapshot is viewed, not fixed at the moment it was generated, so it always reflects current access.",
+      },
+      {
+        q: 'A class teacher only ever sees their own class here — is that different from Growth Profile?',
+        a: 'Yes, deliberately. A plain teacher sees only the class(es) they are the class/form teacher for. Other staff (admin, principal, deputy principal, section head) see every active class. This is narrower than Growth Profile\'s own landing page, which this feature\'s design specifically asked for.',
+      },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Weekly Snapshots — see a class roster and open individual student snapshots\n• Manage Weekly Snapshot Settings — reserved for future school-level configuration of this feature\nParent and student access to their own/their child\'s snapshot does not go through this permission at all — it works the same way attendance, fees, and report cards already do for self-service accounts: gated by who the record belongs to, not by a Roles & Permissions toggle. Staff access is set in Settings → Roles & Permissions.',
       },
     ],
   },
@@ -620,6 +807,10 @@ const SECTIONS = [
         q: 'Can I search the catalogue?',
         a: 'Yes. Use the search bar in Library to find books by title, author, ISBN, or category. The result shows total copies and how many are currently available.',
       },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Catalogue & Records — browse books and loan records\n• Issue / Return Books — check out and check in books\n• Add / Edit Catalogue Items — manage the book catalogue\n• Delete Catalogue Items — remove a book from the catalogue\n• View Library Reports — see overdue/usage reports\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+      },
     ],
   },
 
@@ -650,6 +841,10 @@ const SECTIONS = [
         q: 'How does transport link to fees?',
         a: 'Transport fees can be set up in Finance → Fee Structures as a "Transport" fee type and invoiced to students assigned to a route, just like any other fee.',
       },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Routes & Vehicles — see routes, vehicles, and manifests\n• Add / Edit Routes & Stops — manage routes and stops\n• Assign Students to Routes — allocate a student to a route/stop\n• Delete Routes / Vehicles — remove a route or vehicle\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+      },
     ],
   },
 
@@ -679,6 +874,44 @@ const SECTIONS = [
       {
         q: 'Can I see which students are in which rooms?',
         a: 'Yes. Open any room to see the full occupancy list with student names, class, and stream. You can also see a student\'s hostel allocation from their profile → Hostel tab.',
+      },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Rooms & Allocations — see blocks, rooms, and who is allocated where\n• Add / Edit Rooms & Blocks — manage the physical hostel structure\n• Assign Students to Rooms — allocate a student to a room/bed\n• Delete Rooms / Blocks — remove a room or block\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+      },
+    ],
+  },
+
+  /* ── Medical Centre ───────────────────────────────────────── */
+  {
+    id: 'medical',
+    moduleKey: 'medical',
+    Icon: HeartPulse,
+    title: 'Medical Centre',
+    articles: [
+      {
+        q: 'How do I record a clinic visit?',
+        a: "Go to Medical Centre → \"Record Visit\". Select the student, enter the complaint, observation, and action taken (medication given, sent home, or referred elsewhere), and Save.",
+      },
+      {
+        q: 'What are Medical Alerts?',
+        a: 'Alerts are condition flags only — severe allergies, asthma, epilepsy, and similar — visible to roles who need to know a risk exists without seeing full clinic-visit detail. This is a deliberately narrower permission than full visit records.',
+      },
+      {
+        q: 'Who can see a student\'s full clinic history?',
+        a: 'Only roles with the View Clinic Visits permission — typically admin, principal, deputy principal, and medical/nursing staff. A teacher with only the Alerts permission sees flags, not the underlying visit records.',
+      },
+      {
+        q: 'Where else does medical information appear?',
+        a: 'Weekly Student Snapshot (if enabled) includes a medical section, but it is redacted the same way — hidden entirely unless the Medical Centre module is on for your school and, for staff, you also hold View Clinic Visits.',
+      },
+      {
+        q: 'How do I run a medical report?',
+        a: 'Go to Medical Centre → Reports for a summary view (visit counts, common complaints, referral rates) over a selected period.',
+      },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Clinic Visits — see full visit records\n• Record Clinic Visit — log a new visit\n• Delete Clinic Visit — remove a visit record\n• View Medical Alerts — condition flags only, not full visit records\n• View Medical Reports — see summary reports\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -714,6 +947,74 @@ const SECTIONS = [
         q: 'What is the Admissions Pipeline chart?',
         a: 'A bar chart on the dashboard showing the count of active applications at each stage (Enquiry → Enrolled). It updates in real time as applications move through stages.',
       },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Reports — see the Reports & Analytics area\n• Export Reports (CSV) — download report data\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+      },
+    ],
+  },
+
+  /* ── Inventory ────────────────────────────────────────────── */
+  {
+    id: 'inventory',
+    moduleKey: 'inventory',
+    Icon: Boxes,
+    title: 'Inventory',
+    articles: [
+      {
+        q: 'What does Inventory manage?',
+        a: 'School supplies, equipment, and consumables — categorised items with stock levels, tracked through receive/issue/return/adjust transactions, plus a requisition workflow for staff to request items that need approval before issue.',
+      },
+      {
+        q: 'How do I add a new inventory item or category?',
+        a: 'Go to Inventory → "Add Item" (or "Add Category" first if this is a new type of item). Set the item name, category, unit, and opening stock level.',
+      },
+      {
+        q: 'How do I record stock movement?',
+        a: 'Open the item → choose a transaction type: Receive (new stock in), Issue (given out), Return (came back), or Adjust (correct a count). Each transaction updates the running stock level and is logged.',
+      },
+      {
+        q: 'How do requisitions work?',
+        a: 'A staff member raises a requisition for the items and quantities they need. It moves through the approval workflow configured for your school — once approved, the requisition can be fulfilled, which issues the stock and reduces the level automatically.',
+      },
+      {
+        q: 'Who configures the requisition approval workflow?',
+        a: 'Go to Inventory → Requisition Settings (requires the Configure Requisition Approval Workflow permission) to set who needs to approve a requisition before it can be fulfilled — a single approver or a multi-step chain.',
+      },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Inventory & Categories — see items and stock levels\n• Add / Edit Items & Categories — manage the catalogue\n• Record Stock Transactions — receive, issue, return, or adjust stock\n• Raise Requisitions — request items (many roles get only this, not full inventory management — e.g. a teacher requesting classroom supplies)\n• Configure Requisition Approval Workflow — set up the approval chain\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+      },
+    ],
+  },
+
+  /* ── Analytics Dashboard ──────────────────────────────────── */
+  {
+    id: 'analytics',
+    moduleKey: 'analytics',
+    Icon: LineChart,
+    title: 'Analytics Dashboard',
+    articles: [
+      {
+        q: 'How is Analytics Dashboard different from Reports & Analytics?',
+        a: 'Analytics Dashboard is the Leadership Analytics panel on the main Dashboard — Attendance Risk, Fee Exposure, Behaviour Heatmap, and Academic Health, refreshed live as the school\'s selected date range changes. Reports & Analytics (a separate module, above) is the dedicated Reports area with exportable summaries. Many roles that see one do not automatically see the other.',
+      },
+      {
+        q: 'What does the Behaviour Heatmap show?',
+        a: 'A per-class view of merit/demerit activity over the Dashboard\'s selected date range (Week/Month/Year/Lifetime), helping leadership spot classes that need pastoral attention.',
+      },
+      {
+        q: 'What does Fee Exposure show?',
+        a: 'Outstanding balances grouped by class, scoped to the same date range as the rest of the Dashboard, so it reflects the exact period you\'re looking at rather than an all-time total.',
+      },
+      {
+        q: 'Who typically sees this panel?',
+        a: 'Leadership roles — admin, superadmin, deputy principal, section head. A plain teacher does not see the Leadership Analytics panel by default.',
+      },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• View Leadership Analytics — see the panel\nThis module has a single view permission — there is no separate edit/export action here, since the panel is read-only by nature. Your role\'s exact access is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+      },
     ],
   },
 
@@ -747,6 +1048,10 @@ const SECTIONS = [
       {
         q: 'Where can I see the Audit Log?',
         a: 'Go to Settings → Audit Log (admin only). This shows a filterable, paginated list of high-impact actions — logins, student deletions, report card publishes, role changes — with the actor, target, and timestamp.',
+      },
+      {
+        q: 'Who can do what here? (Roles & Permissions)',
+        a: '• Edit School Settings — change branding, academic year, SMTP, and similar school-wide configuration\n• Manage Users / Invites — create/edit user accounts and send invites\n• Manage Roles & Permissions — edit the Roles & Permissions grid itself\n• View System Info — see system/version/audit information\nThis page you\'re reading is visible to everyone regardless of these permissions — the ACTIONS inside Settings are what\'s individually gated. Your role\'s exact access to each is set in Settings → Roles & Permissions itself — ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -817,8 +1122,17 @@ const SECTIONS = [
 ];
 
 /* ── Article accordion ────────────────────────────────────────── */
+/* Answers are plain prose by default (unchanged from before). An answer
+   containing '\n' — used only by the new "Who can do what here?" role/
+   permission-reference articles, whose content is inherently list-
+   shaped (one sub-permission per line) — renders as a bulleted list
+   instead. A trailing line with no leading bullet (a closing sentence,
+   e.g. pointing to Settings → Roles & Permissions) renders as its own
+   plain paragraph below the list. */
 function Article({ q, a, primary }) {
   const [open, setOpen] = useState(false);
+  const lines = a.split('\n').filter(Boolean);
+  const isList = lines.length > 1 && lines.some(l => l.startsWith('• '));
   return (
     <div className="border-b border-slate-100 last:border-0">
       <button
@@ -831,7 +1145,19 @@ function Article({ q, a, primary }) {
           : <ChevronRight size={14} className="shrink-0 text-slate-400" />}
       </button>
       {open && (
-        <p className="pb-4 pr-6 text-sm text-slate-600 leading-relaxed">{a}</p>
+        isList ? (
+          <div className="pb-4 pr-6 space-y-1.5">
+            {lines.map((line, i) => line.startsWith('• ') ? (
+              <p key={i} className="text-sm text-slate-600 leading-relaxed pl-3.5 relative before:content-['•'] before:absolute before:left-0 before:text-slate-300">
+                {line.slice(2)}
+              </p>
+            ) : (
+              <p key={i} className="text-sm text-slate-500 leading-relaxed pt-1.5">{line}</p>
+            ))}
+          </div>
+        ) : (
+          <p className="pb-4 pr-6 text-sm text-slate-600 leading-relaxed">{a}</p>
+        )
       )}
     </div>
   );
@@ -843,18 +1169,26 @@ export default function HelpPage() {
   const [query,    setQuery]    = useState('');
   const [activeId, setActiveId] = useState(null);
 
-  // Role-based section filtering — only show help for modules the user can access
-  const can  = useAuthStore(s => s.can.bind(s));
-  const role = useAuthStore(s => s.session?.user?.role);
+  // Section filtering — RBAC (role/permission) AND SaaS tenancy (does
+  // THIS school even have the module turned on) — mirrors Sidebar.jsx's
+  // computeNav() exactly: the tenancy check runs first, unconditionally
+  // (admin/superadmin included — a school that's disabled Library
+  // shouldn't show Library help to anyone, admin included), then the
+  // role/permission check (which DOES have an admin/superadmin bypass).
+  // moduleKey: null sections (Getting Started, Settings, Roles, Data)
+  // skip both — they're not tied to one toggleable module.
+  const can          = useAuthStore(s => s.can.bind(s));
+  const role         = useAuthStore(s => s.session?.user?.role);
+  const moduleConfig = useAuthStore(s => s.session?.school?.moduleConfig);
 
-  const visibleSections = useMemo(() =>
-    SECTIONS.filter(sec =>
-      sec.moduleKey === null ||
-      role === 'superadmin' ||
-      role === 'admin' ||
-      can(sec.moduleKey),
-    ),
-  [role]); // `can` is a stable bound method — role change is the only trigger
+  const visibleSections = useMemo(() => {
+    const cfgMap = buildModuleConfigMap(moduleConfig);
+    return SECTIONS.filter(sec => {
+      if (sec.moduleKey === null) return true;
+      if (!(cfgMap[sec.moduleKey]?.enabled ?? true)) return false; // tenancy gate — unconditional
+      return role === 'superadmin' || role === 'admin' || can(sec.moduleKey); // RBAC gate
+    });
+  }, [role, moduleConfig]); // `can` is a stable bound method — role/moduleConfig change are the only triggers
 
   const filtered = useMemo(() => {
     if (!query.trim()) return visibleSections;
@@ -880,6 +1214,7 @@ export default function HelpPage() {
         </div>
         <h1 className="text-2xl font-bold text-slate-900">Help Centre</h1>
         <p className="text-slate-500 mt-1 text-sm">Find answers to common questions about Msingi.</p>
+        <p className="text-slate-400 mt-1 text-xs">Showing what applies to you — your role's access and the modules your school has enabled.</p>
       </div>
 
       {/* ── Search ──────────────────────────────────────────── */}

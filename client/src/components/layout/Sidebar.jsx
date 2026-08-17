@@ -25,7 +25,7 @@ import {
 import clsx from 'clsx';
 import useAuthStore from '@/store/auth.js';
 import { auth as authApi } from '@/api/client.js';
-import { deriveNavModules } from '@/config/moduleNav.js';
+import { deriveNavModules, buildModuleConfigMap } from '@/config/moduleNav.js';
 
 const SECTION_ORDER = ['Academic Management', 'Student Services', 'Operations', 'Communication', 'Analytics'];
 
@@ -40,9 +40,7 @@ const SECTION_ORDER = ['Academic Management', 'Student Services', 'Operations', 
 function computeNav(configurableModules, moduleConfig, userRole, userPermissions) {
   const isAdminLevel = userRole === 'admin' || userRole === 'superadmin';
 
-  const cfgMap = Object.fromEntries(
-    (moduleConfig ?? []).map((m, i) => [m.key, { enabled: m.enabled ?? true, order: m.order ?? i }])
-  );
+  const cfgMap = buildModuleConfigMap(moduleConfig);
 
   const visible = configurableModules
     .filter(m => (cfgMap[m.key]?.enabled ?? true))
