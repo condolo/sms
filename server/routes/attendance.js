@@ -170,11 +170,20 @@ router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read'), as
 });
 
 /* ── POST /api/attendance ─ Single record ───────────────────── */
-router.post('/', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create'), async (req, res) => {
+router.post('/', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(AttendanceRecordSchema, req.body);
     if (error) return E.validation(res, error);
+
+    // Scope was previously only enforced on the GET list — a scoped
+    // ('assigned') account could mark attendance for any class in the
+    // school via this route regardless of what teaching_assignments says,
+    // since the classes dropdown that feeds this form isn't scoped either.
+    // This is the authoritative check; the dropdown itself is unchanged.
+    if (!ScopeEngine.isClassInScope(req, 'attendance', data.classId)) {
+      return E.forbidden(res, 'This class is not in your assigned scope.');
+    }
 
     const Attendance = tenantModel('attendance', tenantContext(req));
 
@@ -204,13 +213,18 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create'), as
 });
 
 /* ── POST /api/attendance/bulk ─ Mark whole class at once ───── */
-router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create'), async (req, res) => {
+router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(BulkAttendanceSchema, req.body);
     if (error) return E.validation(res, error);
 
     const { classId, date, period, records } = data;
+
+    if (!ScopeEngine.isClassInScope(req, 'attendance', classId)) {
+      return E.forbidden(res, 'This class is not in your assigned scope.');
+    }
+
     const Attendance = tenantModel('attendance', tenantContext(req));
 
     // Build bulk upsert operations
@@ -244,7 +258,7 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create')
 });
 
 /* ── PUT /api/attendance/:id ─ Update record ─────────────────── */
-router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('attendance', 'update'), async (req, res) => {
+router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('attendance', 'update'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(AttendanceRecordSchema.partial(), req.body);
@@ -253,6 +267,17 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('attendance', 'update'), 
     delete data.schoolId; delete data.id;
 
     const Attendance = tenantModel('attendance', tenantContext(req));
+
+    // Fetch first — need the record's OWN classId to scope-check, since a
+    // partial update may not include one, and a caller could otherwise try
+    // to reassign an in-scope record onto an out-of-scope class via `data.classId`.
+    const existing = await Attendance.findOne({ id: req.params.id, schoolId }).select('classId').lean();
+    if (!existing) return E.notFound(res, 'Attendance record not found');
+    if (!ScopeEngine.isClassInScope(req, 'attendance', existing.classId) ||
+        !ScopeEngine.isClassInScope(req, 'attendance', data.classId)) {
+      return E.forbidden(res, 'This class is not in your assigned scope.');
+    }
+
     const doc = await Attendance.findOneAndUpdate(
       { id: req.params.id, schoolId },
       { ...data, updatedBy: userId },
@@ -268,10 +293,17 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('attendance', 'update'), 
 });
 
 /* ── DELETE /api/attendance/:id ──────────────────────────────── */
-router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('attendance', 'delete'), async (req, res) => {
+router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('attendance', 'delete'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const Attendance = tenantModel('attendance', tenantContext(req));
+
+    const existing = await Attendance.findOne({ id: req.params.id, schoolId }).select('classId').lean();
+    if (!existing) return E.notFound(res, 'Attendance record not found');
+    if (!ScopeEngine.isClassInScope(req, 'attendance', existing.classId)) {
+      return E.forbidden(res, 'This class is not in your assigned scope.');
+    }
+
     const doc = await Attendance.findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Attendance record not found');
     return ok(res, { id: req.params.id, deleted: true });

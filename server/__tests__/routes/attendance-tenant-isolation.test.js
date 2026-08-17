@@ -26,7 +26,7 @@ jest.mock('../../middleware/auth', () => ({
 jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/scopeMiddleware', () => ({ scopeMiddleware: (_req, _res, next) => next() }));
-jest.mock('../../utils/scopeEngine', () => ({ applyToFilter: jest.fn() }));
+jest.mock('../../utils/scopeEngine', () => ({ applyToFilter: jest.fn(), isClassInScope: jest.fn(() => true) }));
 
 /* Spy attendance model — records every filter/pipeline/op it receives.
    tenantModel() calls _model('attendance') under the hood, so these
@@ -46,13 +46,22 @@ function chain(result) {
   return c;
 }
 
+// findOne's default resolves the fixture 'att_1' (schoolId: school_A,
+// classId: c1) when asked for it under a School-A-scoped filter — anything
+// else (e.g. 'att_belonging_to_B') resolves null, exactly as tenantModel's
+// structural schoolId injection would produce in production: a query for
+// another school's record, once scoped to school_A, simply matches nothing.
+let mockFindOneResult = { id: 'att_1', schoolId: 'school_A', classId: 'c1' };
 const mockAttendanceModel = {
   find:             jest.fn((filter) => { seen.find.push(filter); return chain([]); }),
   countDocuments:   jest.fn((filter) => { seen.countDocuments.push(filter); return Promise.resolve(0); }),
   aggregate:        jest.fn((pipeline) => { seen.aggregate.push(pipeline); return Promise.resolve([]); }),
-  findOne:          jest.fn((filter) => { seen.findOne.push(filter); return chain(null); }),
+  findOne:          jest.fn((filter) => {
+    seen.findOne.push(filter);
+    return chain(filter.id === mockFindOneResult?.id ? mockFindOneResult : null);
+  }),
   findOneAndUpdate: jest.fn((filter, update) => { seen.findOneAndUpdate.push({ filter, update }); return chain({ id: 'att_1', schoolId: 'school_A' }); }),
-  findOneAndDelete: jest.fn((filter) => { seen.findOneAndDelete.push(filter); return Promise.resolve(null); }),
+  findOneAndDelete: jest.fn((filter) => { seen.findOneAndDelete.push(filter); return Promise.resolve(mockFindOneResult); }),
   bulkWrite:        jest.fn((ops) => { seen.bulkWrite.push(ops); return Promise.resolve({ upsertedCount: 1, modifiedCount: 0 }); }),
 };
 
@@ -78,6 +87,7 @@ function assertScopedToA(filterOrMatch) {
 beforeEach(() => {
   jest.clearAllMocks();
   for (const k of Object.keys(seen)) seen[k] = [];
+  mockFindOneResult = { id: 'att_1', schoolId: 'school_A', classId: 'c1' };
 });
 
 describe('attendance — cross-tenant isolation (authenticated as School A)', () => {
@@ -127,9 +137,37 @@ describe('attendance — cross-tenant isolation (authenticated as School A)', ()
     }
   });
 
-  test('DELETE /:id is scoped to School A (cannot delete another school\'s record)', async () => {
-    await supertest(buildApp()).delete('/api/attendance/att_belonging_to_B');
+  test('DELETE /:id 404s a cross-tenant id without ever reaching findOneAndDelete', async () => {
+    // The existence+scope pre-check (added alongside write-side scope
+    // enforcement) now does a School-A-scoped findOne first; a record from
+    // another school simply doesn't match that filter, same structural
+    // guarantee as every other route here, and the mutation never fires.
+    const res = await supertest(buildApp()).delete('/api/attendance/att_belonging_to_B');
+    expect(res.status).toBe(404);
+    expect(seen.findOne).toHaveLength(1);
+    assertScopedToA(seen.findOne[0]);
+    expect(seen.findOneAndDelete).toHaveLength(0);
+  });
+
+  test('DELETE /:id on a real School-A record is scoped to School A', async () => {
+    const res = await supertest(buildApp()).delete('/api/attendance/att_1');
+    expect(res.status).toBe(200);
     expect(seen.findOneAndDelete).toHaveLength(1);
     assertScopedToA(seen.findOneAndDelete[0]);
+  });
+
+  test('PUT /:id 404s a cross-tenant id without ever reaching findOneAndUpdate', async () => {
+    const res = await supertest(buildApp()).put('/api/attendance/att_belonging_to_B').send({ status: 'absent' });
+    expect(res.status).toBe(404);
+    expect(seen.findOne).toHaveLength(1);
+    assertScopedToA(seen.findOne[0]);
+    expect(seen.findOneAndUpdate).toHaveLength(0);
+  });
+
+  test('PUT /:id on a real School-A record proceeds to a School-A-scoped update', async () => {
+    const res = await supertest(buildApp()).put('/api/attendance/att_1').send({ status: 'absent' });
+    expect(res.status).toBe(200);
+    expect(seen.findOneAndUpdate).toHaveLength(1);
+    assertScopedToA(seen.findOneAndUpdate[0].filter);
   });
 });

@@ -184,13 +184,14 @@ describe('GET /api/medical/alerts — class-based scoping for teachers', () => {
     expect(res.body.data[0].studentId).toBe('stu_1');
   });
 
-  test('a teacher with zero class assignments gets an empty list, not a 403', async () => {
+  test('a teacher with zero class assignments gets an empty list, not a 403 — and a noAssignments flag distinguishing it from "checked, found none"', async () => {
     mockTeachingAssignments = mockMakeFakeCollection([]); // no assignments at all
     mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
 
     const res = await supertest(buildApp()).get('/api/medical/alerts');
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual([]);
+    expect(res.body.pagination).toEqual({ noAssignments: true });
   });
 
   test('admin (school-level scope) sees alerts across every class', async () => {

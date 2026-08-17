@@ -125,4 +125,50 @@ function isUnrestricted(req, module) {
   return req.scope.unrestrictedModules?.includes(module) ?? false;
 }
 
-module.exports = { applyToFilter, hasNoAssignments, isUnrestricted };
+/**
+ * Straight allow/deny check for a single classId — the write-route
+ * counterpart to applyToFilter's read-side filtering. Extracted once
+ * attendance.js and grades.js needed the identical check lessons.js's
+ * /coverage route already had inline on their write routes (POST/PUT/
+ * DELETE previously ran scopeMiddleware nowhere — scope was only ever
+ * enforced on the GET list, so a caller who could pick any class from an
+ * unrelated, unscoped dropdown could write to a class outside their own
+ * assigned scope regardless of what the list endpoint would have shown
+ * them).
+ *
+ * Deliberately does NOT reuse applyToFilter's mutate-an-object trick the
+ * original inline version did: applyToFilter's `allowed.length === 0`
+ * branch (a scoped user with literally zero assigned classIds) returns
+ * early with `filter[field] = { $in: [] }` — an object, not the string
+ * '__no_match__' — before ever reaching the string-comparison branch that
+ * check relies on. A zero-assignment user is the clearest possible
+ * out-of-scope case, and that early-return meant the old pattern silently
+ * ALLOWED them through instead of denying (caught by direct unit tests on
+ * this function — see scope-engine.test.js — before it shipped anywhere).
+ * This reimplements the check independently against `req.scope` so both
+ * "zero assignments" and "assigned to different classes" deny correctly.
+ *
+ * `classId` may legitimately be absent (e.g. grades.js's GradeSchema makes
+ * it optional) — with nothing to check, this allows by default rather than
+ * denying a request that was never scoped by class in the first place.
+ *
+ * @param {import('express').Request} req
+ * @param {string} module
+ * @param {string} [classId]
+ * @returns {boolean} true if this classId is within scope (or there's
+ *   nothing to check, or the module is unrestricted for this user)
+ */
+function isClassInScope(req, module, classId) {
+  if (!classId) return true;
+  const scope = req.scope;
+  if (!scope) return true; // school-level: unrestricted
+  if (scope.unrestrictedModules?.includes(module)) return true;
+
+  const mapping = MODULE_SCOPE[module];
+  if (!mapping || mapping.source === 'userId') return true; // not class-scoped
+
+  const allowed = scope[mapping.source] ?? [];
+  return allowed.includes(classId);
+}
+
+module.exports = { applyToFilter, hasNoAssignments, isUnrestricted, isClassInScope };

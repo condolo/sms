@@ -343,6 +343,7 @@ function AlertsTab() {
     staleTime: 60_000,
   });
   const alerts = data?.data ?? [];
+  const noAssignments = data?.pagination?.noAssignments === true;
 
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="space-y-4">
@@ -353,6 +354,17 @@ function AlertsTab() {
           <AlertTriangle size={24} className="text-red-400" />
           <p className="text-sm text-slate-500">{error?.message ?? 'Failed to load'}</p>
           <button onClick={refetch} className="text-xs font-medium text-slate-700 underline">Retry</button>
+        </div>
+      ) : alerts.length === 0 && noAssignments ? (
+        // Distinct from "checked and there are none": no classes are
+        // assigned to this account at all, so nothing was actually checked.
+        <div className="flex flex-col items-center justify-center py-24 text-slate-400">
+          <AlertTriangle size={36} className="mb-3 opacity-40" />
+          <p className="text-sm font-medium text-slate-600">No classes assigned to your account yet</p>
+          <p className="text-xs mt-1 text-center max-w-xs">
+            Your role has permission to view medical alerts, but no classes are assigned to you.
+            Ask your school admin to assign classes, or adjust this role's data visibility in Settings → Roles &amp; Permissions.
+          </p>
         </div>
       ) : alerts.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 text-slate-400">

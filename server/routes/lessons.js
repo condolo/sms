@@ -364,9 +364,7 @@ router.get('/coverage', authMiddleware, PLAN, MODGATE, scopeMiddleware, async (r
     }
 
     // Validate classId is within teacher's scope before doing work
-    const scopeCheck = { classId };
-    ScopeEngine.applyToFilter(req, 'lessons', scopeCheck);
-    if (scopeCheck.classId === '__no_match__') {
+    if (!ScopeEngine.isClassInScope(req, 'lessons', classId)) {
       return E.forbidden(res, 'This class is not in your teaching assignments.');
     }
 

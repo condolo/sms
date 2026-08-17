@@ -220,7 +220,7 @@ router.get('/alerts', authMiddleware, PLAN, MODGATE, rbac('medical', 'read', 'al
     // applies — a teacher only sees alerts for students in their own
     // classes, school-level roles see everyone.
     ScopeEngine.applyToFilter(req, 'students', filter);
-    if (ScopeEngine.hasNoAssignments(req, 'students')) return ok(res, []);
+    if (ScopeEngine.hasNoAssignments(req, 'students')) return ok(res, [], { noAssignments: true });
 
     const docs = await tenantModel('students', tenantContext(req))
       .find(filter)
