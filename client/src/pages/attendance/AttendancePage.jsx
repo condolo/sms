@@ -48,13 +48,25 @@ export default function AttendancePage() {
     setTimeout(() => setToast(null), 3500);
   }
 
-  /* ── Classes dropdown ──────────────────────────────────────── */
+  /* ── Classes dropdown ──────────────────────────────────────────
+     assignedOnly narrows this to the caller's own assigned classes for a
+     scoped ('assigned'-level) account — e.g. a teacher, or a custom role
+     without school-wide data visibility — and is a no-op for school-level
+     roles (admin etc. still see every class). This is a DIFFERENT query
+     key from the plain '['classes','all']' used elsewhere in the app
+     (Students, Admissions, Teachers, Exams) deliberately: those pages
+     need the full unrestricted list and must never share a cache entry
+     with this narrowed one. The write routes this feeds (POST /attendance,
+     POST /attendance/bulk) already enforce the same scope authoritatively
+     server-side regardless of what this dropdown shows — this just keeps
+     the picker from offering a class the write would reject anyway. */
   const { data: classesData } = useQuery({
-    queryKey: ['classes', 'all'],
-    queryFn:  () => classesApi.list({ limit: 200 }),
+    queryKey: ['classes', 'assignedOnly'],
+    queryFn:  () => classesApi.list({ limit: 200, assignedOnly: true }),
     staleTime: 5 * 60_000,
   });
   const classList = classesData?.data ?? [];
+  const noClassesAssigned = classesData?.pagination?.noAssignments === true;
 
   /* ── Attendance records for selected class + date ─────────── */
   const { data, isLoading, isError, error, refetch } = useQuery({
@@ -205,6 +217,12 @@ export default function AttendancePage() {
           <div>
             <h1 className="text-xl font-semibold text-slate-900 tracking-tight">Attendance</h1>
             <p className="text-sm text-slate-500 mt-0.5">Mark and review daily registers</p>
+            {noClassesAssigned && (
+              <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                <AlertTriangle size={12} />
+                No classes are assigned to your account yet — ask your school admin to assign classes.
+              </p>
+            )}
           </div>
 
           {/* Controls */}

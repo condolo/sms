@@ -11,6 +11,8 @@ const { authMiddleware } = require('../middleware/auth');
 const { moduleGate }     = require('../middleware/module-gate');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
+const { scopeMiddleware } = require('../middleware/scopeMiddleware');
+const ScopeEngine         = require('../utils/scopeEngine');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
@@ -35,7 +37,28 @@ function _validate(schema, data) {
 }
 
 /* ── GET /api/classes ────────────────────────────────────────── */
-router.get('/', authMiddleware, PLAN, MODGATE, rbac('classes', 'read'), async (req, res) => {
+// Deliberately UNSCOPED by default — this list feeds 21 different client
+// surfaces (Dashboard, Finance fee structures, Subjects catalog, Library,
+// Admissions, etc.), most of which have a legitimate reason to see every
+// class in the school regardless of the caller's own teaching/assigned
+// scope (e.g. building a fee structure needs to reference every class,
+// not just the classes the current staff member personally teaches).
+// Blanket-restricting this endpoint would be a broad, cross-cutting policy
+// change disguised as a bugfix — see scopeEngine.js's isClassInScope for
+// the related write-side story.
+//
+// `?assignedOnly=true` is the narrow, opt-in exception: a caller that
+// specifically wants "just the classes I can act on" (currently only
+// AttendancePage.jsx's class picker — the write routes it feeds, POST
+// /attendance and POST /attendance/bulk, already enforce this
+// authoritatively server-side; this narrows the dropdown itself so a
+// scoped user isn't shown classes they'd be rejected for picking) can ask
+// for it explicitly. Every other consumer that never passes the flag sees
+// exactly the same unrestricted list it always has — zero behavior change.
+router.get(
+  '/', authMiddleware, PLAN, MODGATE, rbac('classes', 'read'),
+  (req, res, next) => (req.query.assignedOnly === 'true' ? scopeMiddleware(req, res, next) : next()),
+  async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -47,6 +70,13 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('classes', 'read'), async (r
     if (req.query.search) {
       const rx = new RegExp(req.query.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       filter.$or = [{ name: rx }, { description: rx }];
+    }
+
+    if (req.query.assignedOnly === 'true') {
+      ScopeEngine.applyToFilter(req, 'classes', filter);
+      if (ScopeEngine.hasNoAssignments(req, 'classes')) {
+        return ok(res, [], { ...paginate(page, limit, 0), noAssignments: true });
+      }
     }
 
     const Classes = tenantModel('classes', tenantContext(req));
