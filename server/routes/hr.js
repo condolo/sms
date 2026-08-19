@@ -216,6 +216,23 @@ router.get('/leave', async (req, res) => {
       tenantModel('leave_requests', tenantContext(req)).find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-__v').lean(),
       tenantModel('leave_requests', tenantContext(req)).countDocuments(filter),
     ]);
+
+    // Self-heal existing records written before the POST /leave fix above:
+    // every request submitted while req.jwtUser.name was (always) undefined
+    // got staffName permanently baked in as ''. Resolve those in-memory for
+    // display rather than leaving the request blank forever — read-only,
+    // nothing is written back here, so this can't race with anything.
+    const blank = docs.filter(d => !d.staffName && d.staffId);
+    if (blank.length) {
+      const ids = [...new Set(blank.map(d => d.staffId))];
+      const users = await tenantModel('users', tenantContext(req))
+        .find({ id: { $in: ids }, schoolId }).select('id name').lean();
+      const nameById = Object.fromEntries(users.map(u => [u.id, u.name]));
+      for (const d of blank) {
+        if (nameById[d.staffId]) d.staffName = nameById[d.staffId];
+      }
+    }
+
     return ok(res, docs, paginate(page, limit, total));
   } catch (err) {
     console.error('[hr/leave GET]', err);
@@ -305,7 +322,7 @@ router.put('/leave/workflow-config', rbac('hr', 'manage_workflow'), async (req, 
 /* POST /api/hr/leave — submit a leave request */
 router.post('/leave', async (req, res) => {
   try {
-    const { schoolId, userId, name } = req.jwtUser;
+    const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(LeaveSchema, req.body);
     if (error) return E.validation(res, error);
 
@@ -319,11 +336,19 @@ router.post('/leave', async (req, res) => {
 
     const config = await getWorkflowConfig(tenantContext(req), schoolId, LEAVE_WORKFLOW_KEY);
 
+    // The JWT never carries a `name` field (see auth.js's _buildTokenPayload —
+    // userId/schoolId/email/role/roles/tv only), so `req.jwtUser.name` was
+    // always undefined and every leave request ever submitted got a blank
+    // staffName baked in permanently. Resolve the real display name from
+    // the users collection instead.
+    const submitter = await tenantModel('users', tenantContext(req))
+      .findOne({ id: userId, schoolId }).select('name').lean();
+
     const doc = await tenantModel('leave_requests', tenantContext(req)).create({
       id:            `lr_${uuidv4().slice(0, 8)}`,
       schoolId,
       staffId:       userId,
-      staffName:     name ?? '',
+      staffName:     submitter?.name || '',
       type:          data.type,
       startDate:     data.startDate,
       endDate:       data.endDate,
