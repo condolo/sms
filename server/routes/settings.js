@@ -543,28 +543,54 @@ router.get('/users', authMiddleware, rbac('settings', 'read'), async (req, res) 
   }
 });
 
+/* All canonical system roles (+ legacy deputy alias) that can be invited —
+   module-scoped so POST /users/invite and POST /users/bulk-invite validate
+   against exactly the same set. Both routes create login accounts; they
+   must reject the same invalid roles the same way, not drift into two
+   independently-maintained copies (bulk-invite used to have no validation
+   at all — see _validateInviteRole's own doc comment). */
+const BUILTIN_INVITE_ROLES = new Set([
+  'admin', 'principal', 'deputy_principal', 'deputy', 'section_head', 'teacher',
+  'exams_officer', 'timetabler', 'admissions_officer',
+  'finance', 'hr', 'discipline_committee', 'parent', 'student',
+]);
+
+/* Shared by POST /users/invite and POST /users/bulk-invite.
+   ROOT CAUSE this closes: bulk-invite used to do `const role = s.role ||
+   'teacher'` with NO validation at all, while invite (the single-item
+   equivalent of the exact same action) already validated correctly. The
+   client sends `role: staffType` — a free-text HR job-title field, not a
+   controlled vocabulary — so any staff member whose staffType wasn't
+   coincidentally a real role key got a login account created with a
+   garbage role: it authenticates fine but fails every RBAC check silently
+   (_loadPerms returns {} for an unrecognized role), a fully locked-out
+   ghost account with no error ever shown. Also closes a second gap found
+   alongside it: bulk-invite never enforced the superadmin-only admin-role
+   guard invite has, so a plain admin could self-grant 'admin' via the
+   bulk path.
+   Returns { ok: true } or { ok: false, message }. */
+async function _validateInviteRole(req, role) {
+  if (!BUILTIN_INVITE_ROLES.has(role)) {
+    const customRole = await tenantModel('custom_roles', tenantContext(req))
+      .findOne({ schoolId: req.jwtUser.schoolId, key: role }).lean();
+    if (!customRole) return { ok: false, message: `Invalid role '${role}'.` };
+  }
+  if (role === 'admin' && !_isSuperAdmin(req)) {
+    return { ok: false, message: 'Only superadmin can grant the admin role.' };
+  }
+  return { ok: true };
+}
+
 /* POST /api/settings/users/invite — invite a user to this school (admin only) */
 router.post('/users/invite', authMiddleware, rbac('settings', 'create'), async (req, res) => {
   try {
     const { name, email: userEmail, role = 'teacher', staffId } = req.body;
     if (!userEmail) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Email is required.' } });
 
-    /* All canonical system roles (+ legacy deputy alias) that can be invited */
-    const BUILTIN_INVITE_ROLES = new Set([
-      'admin', 'principal', 'deputy_principal', 'deputy', 'section_head', 'teacher',
-      'exams_officer', 'timetabler', 'admissions_officer',
-      'finance', 'hr', 'discipline_committee', 'parent', 'student',
-    ]);
-    if (!BUILTIN_INVITE_ROLES.has(role)) {
-      // Allow any custom role belonging to this school
-      const customRole = await tenantModel('custom_roles', tenantContext(req)).findOne({ schoolId: req.jwtUser.schoolId, key: role }).lean();
-      if (!customRole) {
-        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Invalid role '${role}'.` } });
-      }
-    }
-    // Superadmin-only guard: only superadmin can invite other admins
-    if (role === 'admin' && !_isSuperAdmin(req)) {
-      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Only superadmin can invite admin users.' } });
+    const roleCheck = await _validateInviteRole(req, role);
+    if (!roleCheck.ok) {
+      const status = roleCheck.message.startsWith('Only superadmin') ? 403 : 400;
+      return res.status(status).json({ success: false, error: { code: status === 403 ? 'FORBIDDEN' : 'VALIDATION_ERROR', message: roleCheck.message } });
     }
 
     const Users = tenantModel('users', tenantContext(req));
@@ -676,6 +702,11 @@ router.post('/users/bulk-invite', authMiddleware, rbac('settings', 'create'), as
         if (existing) { skipped++; return; }
 
         const role = s.role || 'teacher';
+        // Same validation POST /users/invite has always had — see
+        // _validateInviteRole's doc comment for why this was missing here.
+        const roleCheck = await _validateInviteRole(req, role);
+        if (!roleCheck.ok) { errors.push({ email: s.email, message: roleCheck.message }); return; }
+
         const tempPassword = _genTempPassword();
         const hash = await bcrypt.hash(tempPassword, 10);
         const name = (s.name || email.split('@')[0]).trim();

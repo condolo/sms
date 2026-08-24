@@ -527,10 +527,18 @@ function PayrollForm({ teachers, defaultPeriod, record, sym, onClose, onSave, sa
 
 /* ── Create login account modal ─────────────────────────── */
 function CreateLoginModal({ staff, allStaffRoles = [], onClose, onConfirm, saving }) {
-  // staffType IS the system role key — pre-populate from it
-  const [role, setRole] = useState(staff?.staffType || 'teacher');
-
   const allRoles = allStaffRoles.map(r => ({ value: r.key, label: r.label }));
+
+  // staffType is a free-text HR job-title field (e.g. "Front Office
+  // Assistant", "Marketing"), NOT the system role key — it was previously
+  // trusted directly as the pre-selected role, which silently granted the
+  // wrong access whenever staffType didn't happen to match a real role's
+  // key exactly (the common case). Only pre-fill when it genuinely IS a
+  // valid role (a real convenience, not a guess); otherwise force an
+  // explicit choice so an admin can't accidentally ship the wrong grant
+  // without ever seeing a role selected at all.
+  const staffTypeIsValidRole = allRoles.some(r => r.value === staff?.staffType);
+  const [role, setRole] = useState(staffTypeIsValidRole ? staff.staffType : '');
 
   const name  = [staff?.firstName, staff?.lastName].filter(Boolean).join(' ');
   const email = staff?.email ?? '';
@@ -574,10 +582,16 @@ function CreateLoginModal({ staff, allStaffRoles = [], onClose, onConfirm, savin
             </label>
             <select value={role} onChange={e => setRole(e.target.value)}
               className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40 bg-white">
+              <option value="" disabled>Select a role…</option>
               {allRoles.map(r => (
                 <option key={r.value} value={r.value}>{r.label}</option>
               ))}
             </select>
+            {!staffTypeIsValidRole && staff?.staffType && (
+              <p className="text-[11px] text-amber-600 mt-1">
+                Their staff type on file ("{staff.staffType}") isn't a system role — pick the correct one above.
+              </p>
+            )}
           </div>
 
           {/* What will happen */}
@@ -599,7 +613,7 @@ function CreateLoginModal({ staff, allStaffRoles = [], onClose, onConfirm, savin
               Cancel
             </button>
             <button onClick={() => onConfirm({ name, email, role, staffId: staff?.staffId })}
-              disabled={saving || !email}
+              disabled={saving || !email || !role}
               className="flex-1 rounded-xl bg-violet-600 hover:bg-violet-700 py-2.5 text-sm font-semibold text-white transition disabled:opacity-50 flex items-center justify-center gap-2">
               {saving ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />}
               {saving ? 'Creating…' : 'Create & Send Email'}
@@ -913,7 +927,16 @@ export default function HRPage() {
       const payload = staffList.map(t => ({
         name:  `${t.firstName ?? ''} ${t.lastName ?? ''}`.trim(),
         email: t.email,
-        role:  t.staffType ?? 'teacher',  // staffType IS the system role key
+        // staffType is a free-text HR job-title field ("Marketing",
+        // "Librarian", ...), NOT the system role key — it's only a valid
+        // role by coincidence when it happens to match one. This is a
+        // best-effort default for the common case (bulk-selecting a batch
+        // of actual teachers), not a guarantee: the server now validates
+        // every row against the real role list (see settings.js's
+        // _validateInviteRole) and rejects anything that doesn't match,
+        // surfaced per-row in the result banner below rather than silently
+        // creating a locked-out account like it used to.
+        role:  t.staffType ?? 'teacher',
       }));
       const res = await settingsApi.users.bulkInvite(payload);
       setBulkInviteResult(res.data ?? res);
@@ -1114,19 +1137,34 @@ export default function HRPage() {
 
           {/* Bulk invite result banner */}
           {bulkInviteResult && (
-            <div className="flex items-center justify-between gap-3 px-4 py-2.5 mb-4 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-800">
-              <div className="flex items-center gap-2">
-                <Check size={14} className="shrink-0 text-emerald-600" />
-                <span>
-                  <span className="font-semibold">{bulkInviteResult.created}</span> login account{bulkInviteResult.created !== 1 ? 's' : ''} created
-                  {bulkInviteResult.skipped > 0 && <span className="text-emerald-600"> · {bulkInviteResult.skipped} already had accounts (skipped)</span>}
-                  {bulkInviteResult.errors?.length > 0 && <span className="text-amber-700"> · {bulkInviteResult.errors.length} failed</span>}
-                  {bulkInviteResult.created > 0 && <span className="text-emerald-600"> · Welcome emails sent</span>}
-                </span>
+            <div className="mb-4">
+              <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-800">
+                <div className="flex items-center gap-2">
+                  <Check size={14} className="shrink-0 text-emerald-600" />
+                  <span>
+                    <span className="font-semibold">{bulkInviteResult.created}</span> login account{bulkInviteResult.created !== 1 ? 's' : ''} created
+                    {bulkInviteResult.skipped > 0 && <span className="text-emerald-600"> · {bulkInviteResult.skipped} already had accounts (skipped)</span>}
+                    {bulkInviteResult.errors?.length > 0 && <span className="text-amber-700"> · {bulkInviteResult.errors.length} failed</span>}
+                    {bulkInviteResult.created > 0 && <span className="text-emerald-600"> · Welcome emails sent</span>}
+                  </span>
+                </div>
+                <button onClick={() => setBulkInviteResult(null)} className="text-emerald-500 hover:text-emerald-800 transition">
+                  <X size={13} />
+                </button>
               </div>
-              <button onClick={() => setBulkInviteResult(null)} className="text-emerald-500 hover:text-emerald-800 transition">
-                <X size={13} />
-              </button>
+              {/* Each staff member's staff type (job title) rarely matches a real
+                  system role — this is exactly why bulk invite now validates per
+                  row server-side rather than silently granting whatever staffType
+                  happened to say. Show the actual reason, not just a count, so an
+                  admin can fix it (usually: use Create Login Account on that one
+                  person instead, and pick the correct role explicitly). */}
+              {bulkInviteResult.errors?.length > 0 && (
+                <div className="mt-1.5 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 space-y-1">
+                  {bulkInviteResult.errors.map((e, i) => (
+                    <p key={i}><span className="font-medium">{e.email}</span> — {e.message}</p>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
