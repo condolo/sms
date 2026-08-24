@@ -18,6 +18,7 @@ const { revokeUserTokens } = require('../utils/token-version');
 const email                = require('../utils/email');
 const AuditService         = require('../services/audit');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
+const { validateAssignableRole } = require('../utils/role-validation');
 
 const router = express.Router();
 
@@ -79,10 +80,25 @@ router.post('/invite', authMiddleware, inviteLimiter, rbac('settings', 'users'),
   if (!name || !userEmail) return res.status(400).json({ error: 'name and email are required' });
   if (!userEmail.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) return res.status(400).json({ error: 'Invalid email address' });
 
-  // Prevent assigning superadmin unless caller is superadmin
+  // ROOT CAUSE this closes (staffType/role separation audit): this route
+  // is a second, independent implementation of "create a login account
+  // with a role" — mounted live at /api/users/invite, separate from
+  // /api/settings/users/invite (already validated). It previously did
+  // `const safeRole = role || 'teacher'` with no validation beyond
+  // blocking 'superadmin' — any other string, including free-text HR
+  // staffType values, was accepted verbatim, creating the exact same
+  // locked-out-ghost-account failure mode as the bulk-invite bug fixed
+  // earlier. Unreachable from the current product UI (nothing in
+  // client/src calls this path), but live, mounted, and directly
+  // callable by anyone who clears its rbac() gate — a real gap, not a
+  // hypothetical one. Now the same shared validator every other
+  // role-assigning route uses, including its superadmin-only admin-role
+  // guard (previously this route also never blocked self-granting
+  // 'admin', only 'superadmin').
   const safeRole = role || 'teacher';
-  if (safeRole === 'superadmin' && !_isSuperAdmin(req)) {
-    return res.status(403).json({ error: 'Cannot assign superadmin role' });
+  const roleCheck = await validateAssignableRole(req, safeRole, tenantModel, tenantContext, _isSuperAdmin);
+  if (!roleCheck.ok) {
+    return res.status(roleCheck.status).json({ error: roleCheck.message });
   }
 
   try {
@@ -177,7 +193,13 @@ router.post('/bulk-invite', authMiddleware, inviteLimiter, rbac('settings', 'use
     if (!name || !userEmail) { results.errors.push({ email: userEmail, reason: 'Missing name or email' }); continue; }
     if (!userEmail.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) { results.errors.push({ email: userEmail, reason: 'Invalid email' }); continue; }
 
-    const safeRole = (role === 'superadmin' && !_isSuperAdmin(req)) ? 'teacher' : (role || 'teacher');
+    // Same shared validator as POST /invite above — previously this row
+    // silently downgraded an unauthorized 'superadmin' request to 'teacher'
+    // rather than rejecting it, and never validated any other role string
+    // at all (including never blocking self-granting 'admin').
+    const safeRole = role || 'teacher';
+    const roleCheck = await validateAssignableRole(req, safeRole, tenantModel, tenantContext, _isSuperAdmin);
+    if (!roleCheck.ok) { results.errors.push({ email: userEmail, reason: roleCheck.message }); continue; }
 
     try {
       const existing = await User.findOne({ email: userEmail.toLowerCase(), schoolId }).lean();

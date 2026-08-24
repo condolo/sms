@@ -295,13 +295,14 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('teachers', 'create'), asyn
 
     const docObj = doc.toObject ? doc.toObject() : doc;
 
-    // Sync staffType → user role so permissions apply immediately
-    if (data.staffType && docObj.userId) {
-      await tenantModel('users', tenantContext(req)).updateOne(
-        { id: docObj.userId, schoolId },
-        { $set: { role: data.staffType, primaryRole: data.staffType, roles: [data.staffType], updatedAt: new Date().toISOString() } }
-      );
-    }
+    // staffType/role separation audit (2026-08): removed the same
+    // implicit staffType-as-role-key cascade PUT /:id had — see that
+    // route's comment for the full rationale. Here it was arguably even
+    // riskier: `linkedUserId` is resolved purely by an EMAIL match
+    // against the users collection, so creating a new staff record whose
+    // email happened to coincide with an unrelated existing account could
+    // silently overwrite that account's role too. Role assignment now
+    // happens only through the explicit, validated Settings -> Users path.
 
     return created(res, docObj);
   } catch (err) {
@@ -363,13 +364,26 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('teachers', 'update'), as
     if (conflict) return E.conflict(res, 'This teacher record was edited by someone else. Please refresh and try again.');
     if (!doc)     return E.notFound(res, 'Teacher not found');
 
-    // Sync staffType → user role when staffType was explicitly updated
-    if (data.staffType && doc.userId) {
-      await tenantModel('users', tenantContext(req)).updateOne(
-        { id: doc.userId, schoolId },
-        { $set: { role: data.staffType, primaryRole: data.staffType, roles: [data.staffType], updatedAt: new Date().toISOString() } }
-      );
-    }
+    // staffType/role separation audit (2026-08): this route used to sync
+    // `data.staffType` straight onto the linked user's `role` on every
+    // save that included it — which, since the HR edit form resubmits
+    // the whole record, meant on essentially every save. staffType is an
+    // HR job-title field ("Marketing", "Front Office Assistant", ...),
+    // not a controlled RBAC vocabulary — an admin fixing someone's phone
+    // number could silently change their system role the moment staffType
+    // happened not to already equal their real role, with zero
+    // confirmation, zero audit log entry (unlike an intentional role
+    // change), and zero indication anything RBAC-relevant had happened.
+    // Role assignment now happens ONLY through the explicit, validated,
+    // audited path: Settings -> Users (settings.js's PUT /users/:id,
+    // which validates against the same role-validation.js allowlist and
+    // — deliberately kept, since it's an explicit RBAC-triggered action,
+    // not an accidental HR-edit side effect — cascades the new role back
+    // onto teachers.staffType as a courtesy label sync). If a school
+    // genuinely wants "changing someone's job title should also change
+    // their system role" as a real workflow, that needs to be its own
+    // explicit, confirmed action — not an implicit side effect of saving
+    // an unrelated field on the HR profile form.
 
     if (doc.userId) {
       let jwtRelevantChange = false;
