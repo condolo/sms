@@ -111,6 +111,37 @@ async function _buildTokenPayload(user, schoolId) {
     payload.studentId = user.studentId || null;
   }
 
+  // extraRoles (hod / class_teacher / timetabler / exam_officer / deputy /
+  // principal) and departmentId live only on the linked `teachers` record
+  // (see teachers.js's TeacherUpdateSchema) — neither was ever copied onto
+  // the JWT, so every server-side check gated on req.jwtUser.extraRoles
+  // (teaching-assignments.js's HOD-scoped assignment management, lessons.js,
+  // weekly-snapshots.js) silently evaluated as "no extra roles" for every
+  // real login, regardless of what was actually set on the staff profile.
+  // departmentId matters together with extraRoles, not instead of it:
+  // teaching-assignments.js's HOD department-scope check is
+  // `subject.departmentId !== hodDeptId` — with hodDeptId always undefined
+  // (unfixed), that comparison's `&&` chain short-circuits false, meaning
+  // an HOD would have been UNRESTRICTED across every department the
+  // moment extraRoles alone started working, not correctly scoped to
+  // their own. Both must be fixed together for HOD to mean what it says.
+  // Non-fatal by the same convention as every other lookup in this
+  // function — a failure here must not block login, and most users (no
+  // linked teacher record) get nothing added, keeping tokens lean.
+  try {
+    const teacher = await tenantModel('teachers', { schoolId })
+      .findOne({ schoolId, $or: [{ userId: payload.userId }, { email: user.email }] })
+      .select('extraRoles departmentId').lean();
+    if (Array.isArray(teacher?.extraRoles) && teacher.extraRoles.length) {
+      payload.extraRoles = teacher.extraRoles;
+    }
+    if (teacher?.departmentId) {
+      payload.departmentId = teacher.departmentId;
+    }
+  } catch (err) {
+    console.error('[auth] _buildTokenPayload extraRoles/departmentId lookup failed (non-fatal):', err.message);
+  }
+
   // C8/MR-001 Phase 1 (ADR-0003 Decision 4) — additive. Only users with a
   // shared credential (users.identityId set, C8/MR-001 Phase 0) carry these;
   // a password/MFA change bumps identities.tokenVersion, invalidating every

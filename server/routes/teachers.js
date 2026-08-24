@@ -16,6 +16,7 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { nextStaffId }     = require('../utils/counters');
 const { ok, created, fail, paginate, parsePagination, E } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
+const { revokeUserTokens } = require('../utils/token-version');
 
 const router = express.Router();
 const PLAN   = planGate('teachers');
@@ -336,6 +337,22 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('teachers', 'update'), as
       if (existing) return E.conflict(res, `Email '${data.email}' is already used by another staff member`);
     }
 
+    // Snapshot the PRIOR extraRoles/departmentId before the update — needed
+    // to detect whether this save actually changed them (only fetched when
+    // the payload includes either field, to avoid an extra round trip on
+    // every unrelated save). Both now ride on the JWT (see auth.js's
+    // _buildTokenPayload) so a change here must revoke the linked user's
+    // existing sessions immediately — the same policy already applied to a
+    // role change via settings.js's PUT /users/:id — otherwise an HOD grant,
+    // removal, or department reassignment would silently not take effect
+    // until their session naturally expires (up to 8h).
+    const needsPriorSnapshot = data.extraRoles !== undefined || data.departmentId !== undefined;
+    const prior = needsPriorSnapshot
+      ? await tenantModel('teachers', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('extraRoles departmentId').lean()
+      : null;
+    const priorExtraRoles   = data.extraRoles   !== undefined ? (prior?.extraRoles ?? [])    : undefined;
+    const priorDepartmentId = data.departmentId !== undefined ? (prior?.departmentId ?? null) : undefined;
+
     const { doc, conflict } = await applyOptimisticLock(
       tenantModel('teachers', tenantContext(req)),
       { id: req.params.id, schoolId },
@@ -352,6 +369,25 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('teachers', 'update'), as
         { id: doc.userId, schoolId },
         { $set: { role: data.staffType, primaryRole: data.staffType, roles: [data.staffType], updatedAt: new Date().toISOString() } }
       );
+    }
+
+    if (doc.userId) {
+      let jwtRelevantChange = false;
+
+      if (priorExtraRoles !== undefined) {
+        const before = new Set(priorExtraRoles);
+        const after  = new Set(doc.extraRoles ?? []);
+        if (before.size !== after.size || [...before].some(r => !after.has(r))) jwtRelevantChange = true;
+      }
+      if (priorDepartmentId !== undefined && priorDepartmentId !== (doc.departmentId ?? null)) {
+        jwtRelevantChange = true;
+      }
+
+      if (jwtRelevantChange) {
+        revokeUserTokens(doc.userId).catch(err =>
+          console.warn('[teachers] token revocation on extraRoles/departmentId change (non-fatal):', err.message)
+        );
+      }
     }
 
     return ok(res, doc);
