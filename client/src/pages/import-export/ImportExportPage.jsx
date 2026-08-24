@@ -15,15 +15,15 @@ const ENTITIES = [
     type:        'students',
     label:       'Students',
     icon:        '🎓',
-    description: 'Import new students with class assignment, parent contact, and medical notes.',
-    fields:      'firstName, lastName, dateOfBirth, gender, className, parentName, parentEmail, parentPhone, address, enrollmentDate, status',
+    description: 'Import new students with class/stream/house assignment, parent contact, medical notes, and opening fee balances.',
+    fields:      'admissionNumber, firstName, lastName, middleName, dateOfBirth, gender, className, streamName, houseName, parentName, parentEmail, parentPhone, schoolEmail, address, enrollmentDate, status, medicalNotes, openingFeeTitle, openingFeeAmount, openingFeePaid, openingFeeDueDate',
   },
   {
     type:        'teachers',
-    label:       'Teachers',
+    label:       'Staff',
     icon:        '👩‍🏫',
-    description: 'Import teaching staff with contact details, qualifications, and contract type.',
-    fields:      'firstName, lastName, email, phone, dateOfBirth, gender, title, qualifications, joinDate, contractType, status',
+    description: 'Import staff with contact details, system role, qualifications, and contract type. A login account is auto-created for each row.',
+    fields:      'firstName, lastName, middleName, email, phone, dateOfBirth, gender, title, staffType, extraRoles, departmentName, qualifications, joinDate, contractType, status',
   },
 ];
 

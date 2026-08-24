@@ -35,6 +35,8 @@ const { ok, fail, E }         = require('../utils/response');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
 const emailUtil               = require('../utils/email');
 const { enqueueBatch }        = require('../utils/email-queue');
+const { SYSTEM_ROLES }        = require('../utils/role-validation');
+const { resolveAcademicPeriod } = require('../utils/academic-period');
 
 /* ── Auth helpers (mirrors settings.js — CSPRNG only) ──────── */
 function _uid() {
@@ -140,10 +142,19 @@ const TEMPLATES = {
       'dateOfBirth', 'gender',
       'className',    // resolved to classId on import
       'streamName',   // optional — resolved to streamId on import (must match a stream in that class)
+      'houseName',    // optional — resolved to houseId on import (must match a house in Settings)
       'parentName', 'parentEmail', 'parentPhone',
       'schoolEmail',
       'address', 'enrollmentDate', 'status', 'medicalNotes',
-      // Opening fee columns — optional, for migration from another system
+      // Opening fee columns — optional, for migration from another system.
+      // This IS the finance/balance/status capability for imported students:
+      // each row with an amount creates a real invoice (+ payment record if
+      // partially paid), with the same balance/status computation the
+      // Finance module itself uses (paid / partial / unpaid). For a
+      // student's ONGOING termly fees (not a migration opening balance),
+      // use Finance -> Fee Structures -> Generate after import — the same
+      // explicit, live mechanism used for every other student, not
+      // something bulk student import should silently trigger on its own.
       'openingFeeTitle', 'openingFeeAmount', 'openingFeePaid', 'openingFeeDueDate',
     ],
     examples: [
@@ -151,7 +162,7 @@ const TEMPLATES = {
         admissionNumber: '',
         firstName: 'Amara', lastName: 'Osei', middleName: 'Kweku',
         dateOfBirth: '2015-03-14', gender: 'female',
-        className: 'Grade 3', streamName: 'A',
+        className: 'Grade 3', streamName: 'A', houseName: 'Baobab',
         parentName: 'Kofi Osei', parentEmail: 'kofi.osei@example.com', parentPhone: '+254712345678',
         schoolEmail: 'amara.osei@school.ac.ke',
         address: 'Nairobi, Kenya', enrollmentDate: '2026-01-15', status: 'active', medicalNotes: '',
@@ -161,7 +172,7 @@ const TEMPLATES = {
         admissionNumber: 'MLA-330297',
         firstName: 'Tomas', lastName: 'Muriuki', middleName: '',
         dateOfBirth: '2016-07-22', gender: 'male',
-        className: 'Grade 2', streamName: 'B',
+        className: 'Grade 2', streamName: 'B', houseName: '',
         parentName: 'Mary Muriuki', parentEmail: 'mary.m@example.com', parentPhone: '+254798765432',
         schoolEmail: '',
         address: 'Mombasa, Kenya', enrollmentDate: '2026-01-15', status: 'active', medicalNotes: 'Allergic to peanuts',
@@ -178,10 +189,16 @@ const TEMPLATES = {
       '#   gender               — male | female | other | prefer_not_to_say',
       '#   className            — exact class name as shown in your Msingi classes list',
       '#   streamName           — optional — stream within that class (e.g. A, B, East). Create streams first.',
+      '#   houseName            — optional — exact house name as shown in Settings -> School. Create houses first.',
       '#   enrollmentDate       — format YYYY-MM-DD',
-      '#   status               — active | inactive | suspended (default: active)',
+      '#   status               — active | inactive | suspended | graduated | transferred | withdrawn (default: active)',
       '#   parentEmail          — must be a valid email if provided',
       '#   schoolEmail          — school-issued email for student portal login (optional)',
+      '#',
+      '#   Imported students are automatically enrolled in your school\'s CURRENT',
+      '#   academic year/term (the same one shown as "current" throughout Msingi) —',
+      '#   no column needed for this; it matches what adding a student one at a',
+      '#   time already defaults to.',
       '#',
       '# Opening fee columns (all optional — for migration from another system):',
       '#   openingFeeTitle      — label for the fee invoice (default: "Opening Fee Balance")',
@@ -189,6 +206,8 @@ const TEMPLATES = {
       '#   openingFeePaid       — amount already paid before joining Msingi (e.g. 20000). Default: 0.',
       '#                          Must be ≤ openingFeeAmount. Creates a payment record on import.',
       '#   openingFeeDueDate    — format YYYY-MM-DD. Leave blank for no due date.',
+      '#   For a student\'s regular/ongoing termly fees (not a migration balance),',
+      '#   import students first, then use Finance -> Fee Structures -> Generate.',
       '#',
       '#   Rows beginning with # are ignored.',
       '#   Maximum 500 students per import file.',
@@ -203,6 +222,9 @@ const TEMPLATES = {
       'firstName', 'lastName', 'middleName',
       'email', 'phone',
       'dateOfBirth', 'gender', 'title',
+      'staffType',    // resolved + validated to the real system role on import — see notes below
+      'extraRoles',   // optional — comma-separated: hod, class_teacher, timetabler, exam_officer, deputy, principal
+      'departmentName', // optional — resolved to departmentId on import (only meaningful with extraRoles containing "hod")
       'qualifications', 'joinDate', 'contractType', 'status'
     ],
     examples: [
@@ -210,6 +232,7 @@ const TEMPLATES = {
         firstName: 'Grace', lastName: 'Akinyi', middleName: 'N.',
         email: 'grace.akinyi@school.example.com', phone: '+254712000001',
         dateOfBirth: '1985-06-10', gender: 'female', title: 'Mrs',
+        staffType: 'teacher', extraRoles: 'hod', departmentName: 'Mathematics',
         qualifications: 'B.Ed Mathematics, University of Nairobi',
         joinDate: '2026-01-06', contractType: 'full_time', status: 'active'
       },
@@ -217,25 +240,56 @@ const TEMPLATES = {
         firstName: 'Brian', lastName: 'Kamau', middleName: '',
         email: 'b.kamau@school.example.com', phone: '+254798000002',
         dateOfBirth: '1990-11-25', gender: 'male', title: 'Mr',
+        staffType: 'teacher', extraRoles: '', departmentName: '',
         qualifications: 'PGCE Science, Kenyatta University',
+        joinDate: '2026-01-06', contractType: 'full_time', status: 'active'
+      },
+      {
+        firstName: 'Wanjiru', lastName: 'Kariuki', middleName: '',
+        email: 'wanjiru.k@school.example.com', phone: '+254700000003',
+        dateOfBirth: '1988-02-19', gender: 'female', title: 'Mrs',
+        staffType: 'finance', extraRoles: '', departmentName: '',
+        qualifications: 'B.Com Finance, Strathmore University',
         joinDate: '2026-01-06', contractType: 'full_time', status: 'active'
       }
     ],
     notes: [
-      '# TEACHER IMPORT TEMPLATE — Msingi School Management',
+      '# STAFF IMPORT TEMPLATE — Msingi School Management',
       '# Instructions:',
       '#   firstName, lastName, email  — REQUIRED',
-      '#   email                       — must be unique per school',
+      '#   email                       — must be unique per school. A login account is',
+      '#                                 auto-created for every imported row with a',
+      '#                                 temporary password, emailed to them directly.',
       '#   dateOfBirth                 — format YYYY-MM-DD',
       '#   gender                      — male | female | other | prefer_not_to_say',
       '#   title                       — Mr | Mrs | Ms | Dr | Prof (any text)',
+      '#   staffType                   — what this person actually does, and what their login',
+      '#                                 account can access: teacher | admin | principal |',
+      '#                                 deputy_principal | section_head | exams_officer |',
+      '#                                 timetabler | admissions_officer | finance | hr |',
+      '#                                 discipline_committee — or the exact key of a custom',
+      '#                                 role your school has created in Settings -> Roles &',
+      '#                                 Permissions. Leave blank to default to "teacher".',
+      '#                                 This is NOT a free-text job title — every staff member',
+      '#                                 is a member of staff first (see qualifications/title for',
+      '#                                 the descriptive job title); staffType is specifically what',
+      '#                                 controls system access, so it must be one of the real',
+      '#                                 roles above, not any other text.',
+      '#   extraRoles                  — optional, comma-separated, on top of staffType:',
+      '#                                 hod | class_teacher | timetabler | exam_officer |',
+      '#                                 deputy | principal. e.g. a Teacher who ALSO heads a',
+      '#                                 department: staffType=teacher, extraRoles=hod.',
+      '#   departmentName               — optional, exact department name as shown in',
+      '#                                 Settings -> Departments. Only meaningful when',
+      '#                                 extraRoles includes "hod" (scopes their HOD',
+      '#                                 management rights to that one department).',
       '#   joinDate                    — format YYYY-MM-DD',
       '#   contractType                — full_time | part_time | supply | volunteer',
-      '#   status                      — active | inactive | on_leave (default: active)',
+      '#   status                      — active | inactive | on_leave | terminated (default: active)',
       '#   staffId                     — auto-generated by system, do NOT include',
       '#',
       '#   Rows beginning with # are ignored.',
-      '#   Maximum 500 teachers per import file.',
+      '#   Maximum 500 staff per import file.',
       '#',
     ]
   },
@@ -404,12 +458,30 @@ async function _importStudents(rows, schoolId, userId) {
   ]);
   const Students = tenantModel('students', { schoolId });
 
-  // Load school's admission number config once for the whole batch
-  const schoolDoc = await _model('schools').findOne({ id: schoolId }, { admissionConfig: 1 }).lean();
+  // Load school's admission number config + houses once for the whole batch
+  const schoolDoc = await _model('schools').findOne({ id: schoolId }, { admissionConfig: 1, houses: 1 }).lean();
   const admCfg    = schoolDoc?.admissionConfig || {};
+  const houseMap  = {};
+  for (const h of (schoolDoc?.houses ?? [])) {
+    if (h?.name) houseMap[h.name.toLowerCase().trim()] = h.id ?? h.name;
+  }
+
+  // Same current-period resolution the regular Add Student form defaults
+  // to client-side — the bulk-import path bypasses that form entirely
+  // (builds student docs directly, not through StudentCreateSchema), so
+  // without this every imported student silently ended up missing
+  // enrollmentAcademicYearId/enrollmentTermId that every other student in
+  // the system has. Resolved once for the whole batch, not per row — a
+  // school with no academic years configured yet just gets nulls (a
+  // brand-new school mid-onboarding), not an error.
+  const currentPeriod = await resolveAcademicPeriod(schoolId, { schoolId }, {});
 
   const VALID_GENDER  = new Set(['male', 'female', 'other', 'prefer_not_to_say']);
-  const VALID_STATUS  = new Set(['active', 'inactive', 'suspended', 'graduated', 'transferred']);
+  // 'withdrawn' is a real, live status (students.js's own StudentCreateSchema
+  // enum, and the default list filter excludes it by name) that this
+  // importer's validation was missing — any CSV row using it was rejected
+  // as "invalid status" even though it's a legitimate value everywhere else.
+  const VALID_STATUS  = new Set(['active', 'inactive', 'suspended', 'graduated', 'transferred', 'withdrawn']);
 
   const results   = { created: 0, skipped: 0, errors: [] };
   const validRows = []; // collect valid rows before touching counters
@@ -480,6 +552,17 @@ async function _importStudents(rows, schoolId, userId) {
       results.errors.push({ row, field: 'streamName', message: `streamName '${r.streamName}' ignored — className is required to resolve a stream.` });
     }
 
+    // House name → id resolution — optional, resolved against the same
+    // school.houses list the House Cup / behaviour points system reads.
+    let houseId = null;
+    if (r.houseName?.trim()) {
+      houseId = houseMap[r.houseName.trim().toLowerCase()] ?? null;
+      if (!houseId) {
+        results.errors.push({ row, field: 'houseName', message: `House '${r.houseName}' not found. Create it first in Settings, then re-import.` });
+        results.skipped++; continue;
+      }
+    }
+
     // Opening fee columns — validate only if amount is provided
     if (r.openingFeeAmount?.trim()) {
       const feeAmt  = parseFloat(r.openingFeeAmount);
@@ -499,7 +582,7 @@ async function _importStudents(rows, schoolId, userId) {
     }
 
     const manualAdmNo = r.admissionNumber?.trim() || null;
-    validRows.push({ r, row, gender, status, parentEmail, schoolEmail, classId, className, streamId, streamName, manualAdmNo });
+    validRows.push({ r, row, gender, status, parentEmail, schoolEmail, classId, className, streamId, streamName, houseId, manualAdmNo });
   }
 
   // Reserve admission numbers only for rows that don't supply their own
@@ -509,7 +592,7 @@ async function _importStudents(rows, schoolId, userId) {
     : [];
   let autoIdx = 0;
 
-  const toInsert = validRows.map(({ r, gender, status, parentEmail, schoolEmail, classId, className, streamId, streamName, manualAdmNo }) => ({
+  const toInsert = validRows.map(({ r, gender, status, parentEmail, schoolEmail, classId, className, streamId, streamName, houseId, manualAdmNo }) => ({
     id:              uuidv4(),
     schoolId,
     admissionNumber: manualAdmNo || autoNos[autoIdx++],
@@ -520,6 +603,9 @@ async function _importStudents(rows, schoolId, userId) {
     gender:          gender || undefined,
     classId:         classId    || undefined,
     className:       className  || undefined,
+    houseId:         houseId    || undefined,
+    enrollmentAcademicYearId: currentPeriod.academicYearId || undefined,
+    enrollmentTermId:         currentPeriod.termId || undefined,
     streamId:        streamId   || undefined,
     streamName:      streamName || undefined,
     parentName:      r.parentName?.trim() || undefined,
@@ -639,19 +725,37 @@ async function _importStudents(rows, schoolId, userId) {
 }
 
 /* ── Teacher import handler ────────────────────────── */
-async function _importTeachers(rows, schoolId, userId) {
+// staffType/role separation audit (2026-08): this handler used to
+// hardcode `role: 'teacher'` on every auto-created login account
+// regardless of what the imported person actually does — the exact
+// "assumed all staff are teachers" mistake fixed everywhere else in the
+// app this session, still alive here because bulk import was a fourth,
+// previously-missed write path. staffType is now a real column, validated
+// against the same SYSTEM_ROLES/custom_roles allowlist and superadmin-
+// only admin-role gate every other role-assigning route uses (see
+// utils/role-validation.js) — resolved once for the whole batch rather
+// than per row, matching this file's existing prefetch pattern
+// (classMap/streamMap/teacherMap above).
+async function _importTeachers(rows, schoolId, userId, req) {
   const Teachers = tenantModel('teachers', { schoolId });
 
-  const VALID_GENDER   = new Set(['male', 'female', 'other', 'prefer_not_to_say']);
-  const VALID_STATUS   = new Set(['active', 'inactive', 'on_leave', 'terminated']);
-  const VALID_CONTRACT = new Set(['full_time', 'part_time', 'supply', 'volunteer']);
+  const VALID_GENDER     = new Set(['male', 'female', 'other', 'prefer_not_to_say']);
+  const VALID_STATUS     = new Set(['active', 'inactive', 'on_leave', 'terminated']);
+  const VALID_CONTRACT   = new Set(['full_time', 'part_time', 'supply', 'volunteer']);
+  const VALID_EXTRA_ROLE = new Set(['hod', 'class_teacher', 'timetabler', 'exam_officer', 'deputy', 'principal']);
 
   const results   = { created: 0, skipped: 0, errors: [] };
   const validRows = [];
 
-  // Pre-fetch existing emails to detect duplicates early
-  const existing    = await Teachers.find({ schoolId }).select('email').lean();
-  const knownEmails = new Set(existing.map(t => t.email.toLowerCase()));
+  // Pre-fetch existing emails, valid roles, and departments once for the whole batch
+  const existing     = await Teachers.find({ schoolId }).select('email').lean();
+  const knownEmails  = new Set(existing.map(t => t.email.toLowerCase()));
+  const customRoles  = await tenantModel('custom_roles', { schoolId }).find({ schoolId }).select('key').lean();
+  const validRoleSet = new Set([...SYSTEM_ROLES, ...customRoles.map(cr => cr.key)]);
+  const isSuperAdmin = req?.jwtUser?.role === 'superadmin' || (req?.jwtUser?.roles ?? []).includes('superadmin');
+  const deptDocs = await tenantModel('departments', { schoolId }).find({ schoolId }).select('id name').lean();
+  const deptMap  = {};
+  for (const d of deptDocs) deptMap[d.name.toLowerCase().trim()] = d.id;
 
   for (let i = 0; i < rows.length; i++) {
     const r   = rows[i];
@@ -686,7 +790,45 @@ async function _importTeachers(rows, schoolId, userId) {
       results.skipped++; continue;
     }
 
-    validRows.push({ r, row, email, gender, contractType, status });
+    // staffType — this is the actual system role, not a free-text job
+    // title (see the template's own notes). Rejected outright if it
+    // doesn't match a real role, rather than silently defaulting or
+    // (as before) blindly hardcoding 'teacher' regardless of what was
+    // given — an admin-role row from a non-superadmin caller is rejected
+    // the same way every other role-assigning route in the app rejects it.
+    const staffType = r.staffType?.trim() || 'teacher';
+    if (!validRoleSet.has(staffType)) {
+      results.errors.push({ row, field: 'staffType', message: `Invalid staffType '${staffType}'. Use a real system role or a custom role key from Settings -> Roles & Permissions.` });
+      results.skipped++; continue;
+    }
+    if (staffType === 'admin' && !isSuperAdmin) {
+      results.errors.push({ row, field: 'staffType', message: `Only superadmin can grant the admin role. Row skipped.` });
+      results.skipped++; continue;
+    }
+
+    // extraRoles — optional, comma-separated
+    let extraRoles = [];
+    if (r.extraRoles?.trim()) {
+      const parts = r.extraRoles.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      const bad = parts.filter(p => !VALID_EXTRA_ROLE.has(p));
+      if (bad.length) {
+        results.errors.push({ row, field: 'extraRoles', message: `Invalid extraRoles: ${bad.join(', ')}. Use: hod, class_teacher, timetabler, exam_officer, deputy, principal.` });
+        results.skipped++; continue;
+      }
+      extraRoles = [...new Set(parts)];
+    }
+
+    // departmentName → departmentId resolution — optional
+    let departmentId = null;
+    if (r.departmentName?.trim()) {
+      departmentId = deptMap[r.departmentName.trim().toLowerCase()] ?? null;
+      if (!departmentId) {
+        results.errors.push({ row, field: 'departmentName', message: `Department '${r.departmentName}' not found. Create it first in Settings -> Departments, then re-import.` });
+        results.skipped++; continue;
+      }
+    }
+
+    validRows.push({ r, row, email, gender, contractType, status, staffType, extraRoles, departmentId });
   }
 
   // Reserve all staff IDs in one atomic DB call
@@ -694,7 +836,7 @@ async function _importTeachers(rows, schoolId, userId) {
     ? await reserveStaffIds(schoolId, validRows.length)
     : [];
 
-  const toInsert = validRows.map(({ r, email, gender, contractType, status }, idx) => ({
+  const toInsert = validRows.map(({ r, email, gender, contractType, status, staffType, extraRoles, departmentId }, idx) => ({
     id:             uuidv4(),
     schoolId,
     staffId:        staffIds[idx],
@@ -706,6 +848,9 @@ async function _importTeachers(rows, schoolId, userId) {
     dateOfBirth:    r.dateOfBirth?.trim() || undefined,
     gender:         gender || undefined,
     title:          r.title?.trim() || undefined,
+    staffType,
+    extraRoles:     extraRoles.length ? extraRoles : undefined,
+    departmentId:   departmentId || undefined,
     qualifications: r.qualifications?.trim() || undefined,
     joinDate:       r.joinDate?.trim() || undefined,
     contractType:   contractType || undefined,
@@ -766,15 +911,20 @@ async function _importTeachers(rows, schoolId, userId) {
           schoolId,
           name:              `${teacher.firstName} ${teacher.lastName}`.trim(),
           email:             teacher.email.toLowerCase(),
-          role:              'teacher',
-          roles:             ['teacher'],
+          // Was hardcoded 'teacher' regardless of who was actually being
+          // imported — now the same validated staffType stored on the
+          // teacher record itself (validated above against SYSTEM_ROLES/
+          // custom_roles, with the same superadmin-only admin-role gate
+          // every other role-assigning route enforces).
+          role:              teacher.staffType,
+          roles:             [teacher.staffType],
           password:          hash,
           passwordChangedAt: now,
           isActive:          true,
           createdAt:         now,
           updatedAt:         now,
         });
-        credentials.push({ email: teacher.email, name: `${teacher.firstName} ${teacher.lastName}`.trim(), tempPassword });
+        credentials.push({ email: teacher.email, name: `${teacher.firstName} ${teacher.lastName}`.trim(), tempPassword, role: teacher.staffType });
       }
 
       if (userDocs.length > 0) {
@@ -838,8 +988,8 @@ async function _importTeachers(rows, schoolId, userId) {
           const schoolName  = school?.name  || 'Your School';
           const schoolEmail = school?.systemEmail || school?.email || '';
 
-          enqueueBatch(emailsToSend.map(({ email, name, tempPassword }) => () =>
-            emailUtil.sendWelcomeCredentials({ email, name, schoolName, schoolEmail, schoolId, tempPassword, role: 'teacher', slug: school?.slug })
+          enqueueBatch(emailsToSend.map(({ email, name, tempPassword, role }) => () =>
+            emailUtil.sendWelcomeCredentials({ email, name, schoolName, schoolEmail, schoolId, tempPassword, role, slug: school?.slug })
           )).catch(e => console.warn('[import/teachers] welcome email batch error:', e.message));
         }
       }
@@ -1218,7 +1368,7 @@ router.post('/:type', authMiddleware, rawText, /* rbac: dynamic — checked via 
   try {
     let results;
     if (type === 'students')  results = await _importStudents(rows, schoolId, userId);
-    if (type === 'teachers')  results = await _importTeachers(rows, schoolId, userId);
+    if (type === 'teachers')  results = await _importTeachers(rows, schoolId, userId, req);
     if (type === 'classes')   results = await _importClasses(rows, schoolId, userId);
     if (type === 'timetable') results = await _importTimetable(rows, schoolId, userId);
     if (type === 'finance')   results = await _importFinance(rows, schoolId, userId);
@@ -1433,14 +1583,20 @@ router.get('/export/:type', authMiddleware, /* rbac: dynamic — checked via EXP
       const Classes = tenantModel('classes', tenantContext(req));
       const docs    = await Classes.find({ schoolId }).sort({ name: 1 }).lean();
 
-      const headers = ['name', 'section', 'keyStage', 'capacity', 'status', 'createdAt'];
+      // Was 'section'/'keyStage' — neither exists on a class document at
+      // all (the real field is sectionKey; keyStage isn't a class field
+      // anywhere in the schema, only a student one). Both columns were
+      // permanently blank, and the exported header row didn't match what
+      // the Classes import template/importer actually expects (sectionKey,
+      // year), so an exported file could never be re-imported as-is.
+      const headers = ['name', 'sectionKey', 'year', 'capacity', 'status', 'createdAt'];
       const rows    = docs.map(d => ({
-        name:      d.name || '',
-        section:   d.section || '',
-        keyStage:  d.keyStage || '',
-        capacity:  d.capacity ?? '',
-        status:    d.status || '',
-        createdAt: d.createdAt ? new Date(d.createdAt).toISOString().slice(0, 10) : ''
+        name:       d.name || '',
+        sectionKey: d.sectionKey || '',
+        year:       d.year || '',
+        capacity:   d.capacity ?? '',
+        status:     d.status || '',
+        createdAt:  d.createdAt ? new Date(d.createdAt).toISOString().slice(0, 10) : ''
       }));
 
       csv = toCSV(headers, rows);
