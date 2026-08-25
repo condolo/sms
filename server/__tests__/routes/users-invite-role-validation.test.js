@@ -84,9 +84,10 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockUsers = [];
   mockCustomRoles = [{ schoolId: SCHOOL_ID, key: 'front_office', label: 'Front Office' }];
-  // rbac('settings','users') — real behaviour: only superadmin bypasses
-  // (no ROLE_DEFAULTS grant ever includes a 'users' action), so grant
-  // nothing to 'admin' here — matches production exactly, not a workaround.
+  // Real production behaviour for the settings/users RBAC gate this route
+  // uses: only superadmin bypasses it (no ROLE_DEFAULTS grant ever
+  // includes a 'users' action), so grant nothing to 'admin' here — matches
+  // production exactly, not a workaround.
   mockRolePerms = [];
 });
 
