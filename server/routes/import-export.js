@@ -37,6 +37,7 @@ const emailUtil               = require('../utils/email');
 const { enqueueBatch }        = require('../utils/email-queue');
 const { SYSTEM_ROLES }        = require('../utils/role-validation');
 const { resolveAcademicPeriod } = require('../utils/academic-period');
+const AuditService            = require('../services/audit');
 
 /* ── Auth helpers (mirrors settings.js — CSPRNG only) ──────── */
 function _uid() {
@@ -451,7 +452,7 @@ router.get('/template/:type', authMiddleware, async (req, res) => { // rbac: sta
    ──────────────────────────────────────────────────────────── */
 
 /* ── Student import handler ───────────────────────── */
-async function _importStudents(rows, schoolId, userId) {
+async function _importStudents(rows, schoolId, userId, req) {
   const [classMap, streamMap] = await Promise.all([
     _buildClassMap(schoolId),
     _buildStreamMap(schoolId),
@@ -717,6 +718,20 @@ async function _importStudents(rows, schoolId, userId) {
       // the next payment is recorded (which would recompute from payments collection).
       await Payments.insertMany(paymentDocs, { ordered: false }).catch(e => {
         console.error('[import/students] Opening balance payment records failed:', e.message);
+      });
+    }
+
+    // Cross-module import audit (2026-08): finance.js's own POST /invoices
+    // and POST /fee-structures/:id/generate both log every invoice-creating
+    // action — this path created real invoice/payment documents with none
+    // at all. One summary entry per import batch (not one per invoice),
+    // matching the same choice bulk_invoices_generated already made for
+    // the equivalent bulk case.
+    if ((results.invoicesCreated ?? 0) > 0 && req) {
+      AuditService.log({
+        action: 'finance.invoices_imported', actor: req.jwtUser, schoolId,
+        target: { type: 'import', id: null, label: 'Student import — opening fee balances' },
+        details: { invoicesCreated: results.invoicesCreated, studentsImported: results.created }, req,
       });
     }
   }
@@ -1177,7 +1192,7 @@ async function _importTimetable(rows, schoolId, userId) {
 }
 
 /* ── Finance import handler ────────────────────────────────── */
-async function _importFinance(rows, schoolId, userId) {
+async function _importFinance(rows, schoolId, userId, req) {
   const Students = tenantModel('students', { schoolId });
   const Invoices = tenantModel('invoices', { schoolId });
   const Payments = tenantModel('payments', { schoolId });
@@ -1321,6 +1336,19 @@ async function _importFinance(rows, schoolId, userId) {
     }
   }
 
+  // Cross-module import audit (2026-08): finance.js's own POST /invoices
+  // and POST /fee-structures/:id/generate both log every invoice-creating
+  // action — this path created real invoice/payment documents with none
+  // at all. One summary entry per import batch, matching the same choice
+  // bulk_invoices_generated already made for the equivalent bulk case.
+  if (results.created > 0 && req) {
+    AuditService.log({
+      action: 'finance.invoices_imported', actor: req.jwtUser, schoolId,
+      target: { type: 'import', id: null, label: 'Finance import' },
+      details: { invoicesCreated: results.created, paymentsCreated: results.paymentsCreated }, req,
+    });
+  }
+
   return results;
 }
 
@@ -1367,11 +1395,11 @@ router.post('/:type', authMiddleware, rawText, /* rbac: dynamic — checked via 
 
   try {
     let results;
-    if (type === 'students')  results = await _importStudents(rows, schoolId, userId);
+    if (type === 'students')  results = await _importStudents(rows, schoolId, userId, req);
     if (type === 'teachers')  results = await _importTeachers(rows, schoolId, userId, req);
     if (type === 'classes')   results = await _importClasses(rows, schoolId, userId);
     if (type === 'timetable') results = await _importTimetable(rows, schoolId, userId);
-    if (type === 'finance')   results = await _importFinance(rows, schoolId, userId);
+    if (type === 'finance')   results = await _importFinance(rows, schoolId, userId, req);
 
     if (!results) return E.notFound(res, `No handler for type '${type}'`);
 

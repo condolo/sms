@@ -64,6 +64,9 @@ jest.mock('../../utils/academic-period', () => ({
   resolveAcademicPeriod: jest.fn(() => Promise.resolve(mockCurrentPeriod)),
 }));
 
+const mockAuditLog = jest.fn();
+jest.mock('../../services/audit', () => ({ log: (...args) => mockAuditLog(...args) }));
+
 const express   = require('express');
 const supertest = require('supertest');
 const importExportRouter = require('../../routes/import-export');
@@ -192,5 +195,30 @@ describe('POST /api/import-export/students — className still resolves against 
 
     expect(res.body.data.created).toBe(0);
     expect(mockStores.students._docs()).toHaveLength(0);
+  });
+});
+
+describe('POST /api/import-export/students — opening-fee invoice creation is now audited (cross-module import audit)', () => {
+  test('creating an opening-fee invoice via import logs finance.invoices_imported, matching how every other invoice-creating route is audited', async () => {
+    const res = await supertest(buildApp())
+      .post('/api/import-export/students')
+      .set('Content-Type', 'application/json')
+      .send({ rows: [row({ openingFeeAmount: '45000', openingFeePaid: '20000' })] });
+
+    expect(res.status).toBe(201);
+    expect(mockAuditLog).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'finance.invoices_imported',
+      schoolId: SCHOOL,
+      details: expect.objectContaining({ invoicesCreated: 1 }),
+    }));
+  });
+
+  test('no audit entry when the batch creates no invoices at all (no openingFeeAmount rows)', async () => {
+    await supertest(buildApp())
+      .post('/api/import-export/students')
+      .set('Content-Type', 'application/json')
+      .send({ rows: [row()] });
+
+    expect(mockAuditLog).not.toHaveBeenCalled();
   });
 });
