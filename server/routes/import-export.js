@@ -663,6 +663,22 @@ async function _importStudents(rows, schoolId, userId, req) {
       const student = toInsert[idx];
       const title   = r.openingFeeTitle?.trim() || 'Opening Fee Balance';
 
+      // Cross-module import audit (2026-08) — two DELIBERATE differences
+      // from finance.js's own POST /invoices, recorded here so neither
+      // reads as an oversight to a future reader comparing the two paths:
+      //   1. No academicYearId/termId is resolved/stamped (POST /invoices
+      //      live-resolves the current period). An opening/migration
+      //      balance usually predates the student's actual Msingi
+      //      enrollment, so stamping it with "today's" period could be
+      //      actively wrong, not just incomplete — unlike a student's own
+      //      enrollment period (fixed above to auto-resolve), there's no
+      //      safe default here. If period attribution is ever needed for
+      //      these, it should be an explicit import column, not a guess.
+      //   2. No _notifyInvoiceCreated call — a real-time "you have a new
+      //      invoice" ping for a backdated historical balance would likely
+      //      confuse a parent, not inform them. importedOpeningBalance:true
+      //      below is what marks these as migration records, not new ones.
+      // Decided, not defaulted — see the cross-module import audit.
       invoiceDocs.push({
         id:            invId,
         schoolId,
@@ -1257,6 +1273,13 @@ async function _importFinance(rows, schoolId, userId, req) {
     ? await reserveInvoiceNumbers(schoolId, validRows.length)
     : [];
 
+  // Cross-module import audit (2026-08) — same two deliberate differences
+  // as the Students importer's opening-fee invoices (see that block's
+  // comment for the full reasoning): no academicYearId/termId is
+  // resolved/stamped (this is migration data — no safe "current period"
+  // default exists), and no _notifyInvoiceCreated call (a real-time "new
+  // invoice" ping for a backdated historical balance would confuse, not
+  // inform). Decided, not defaulted.
   const toInsert = validRows.map(({ r, unitPrice, paidAmount, student }, idx) => {
     const balance   = _round(unitPrice - paidAmount);
     const invStatus = balance <= 0 ? 'paid' : paidAmount > 0 ? 'partial' : 'unpaid';
