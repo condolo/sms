@@ -59,30 +59,40 @@ jest.mock('../../utils/tenant-model', () => ({
   tenantContext: (req) => ({ schoolId: req.jwtUser.schoolId }),
   tenantModel: jest.fn((col) => {
     if (col === 'teachers') {
+      // Generic matcher supporting every filter shape teachers.js's PUT
+      // routes actually issue: {id}, {_id} (the dual-id-safe fallback —
+      // real Mongoose wraps this in `new mongoose.Types.ObjectId(...)`, an
+      // object, while this mock stores _id as a plain string, so compare
+      // by String() not ===), {email}, {email, _id: {$ne: ...}} (the
+      // duplicate-email exclusion), and {$or: [{userId}, {email}]}.
+      const matchesTeacher = (d, filter) => {
+        if (d.schoolId !== filter.schoolId) return false;
+        if (filter.id !== undefined && d.id !== filter.id) return false;
+        if (filter._id !== undefined) {
+          const target = filter._id;
+          if (target && typeof target === 'object' && '$ne' in target) {
+            if (String(d._id) === String(target.$ne)) return false;
+          } else if (String(d._id) !== String(target)) return false;
+        }
+        if (filter.email !== undefined && d.email !== filter.email) return false;
+        if (filter.$or && !filter.$or.some(c => (c.userId && d.userId === c.userId) || (c.email && d.email === c.email))) return false;
+        return true;
+      };
       return {
-        findOne: (filter) => mockChainObj(mockTeachers.find(d =>
-          (filter.id ? d.id === filter.id : true) &&
-          (filter.$or ? filter.$or.some(c => (c.userId && d.userId === c.userId) || (c.email && d.email === c.email)) : true) &&
-          d.schoolId === filter.schoolId
-        ) ?? null),
+        findOne: (filter) => mockChainObj(mockTeachers.find(d => matchesTeacher(d, filter)) ?? null),
         findOneAndUpdate: (filter, update) => {
-          // Two call shapes exist in teachers.js: PUT /:id filters by {id,
-          // schoolId}; PUT /me filters by {schoolId, email} (resolved via
-          // the caller's own user record) — support both.
-          const doc = mockTeachers.find(d =>
-            d.schoolId === filter.schoolId &&
-            (filter.id ? d.id === filter.id : d.email === filter.email)
-          );
+          // PUT /:id filters by {_id, schoolId} (post dual-id-safe fix);
+          // PUT /me filters by {schoolId, email} (resolved via the
+          // caller's own user record) — matchesTeacher() handles both,
+          // since {email}-only filters have no `id`/`_id` key to fail on.
+          const doc = mockTeachers.find(d => matchesTeacher(d, filter));
           if (!doc) return { lean: () => Promise.resolve(null) };
           Object.assign(doc, update.$set);
           doc._v = (doc._v ?? 0) + 1;
           return { lean: () => Promise.resolve({ ...doc }) };
         },
         updateOne: (filter, update) => {
-          const doc = mockTeachers.find(d =>
-            (filter.$or ? filter.$or.some(c => (c.userId && d.userId === c.userId) || (c.email && d.email === c.email)) : d.id === filter.id) &&
-            d.schoolId === filter.schoolId
-          );
+          const doc = mockTeachers.find(d => matchesTeacher(d, filter));
           if (doc && update.$set) Object.assign(doc, update.$set);
           return Promise.resolve({ matchedCount: doc ? 1 : 0 });
         },
@@ -156,7 +166,7 @@ beforeEach(() => {
     { id: 'usr_teacher', schoolId: SCHOOL_ID, email: 'amina@x.com',   role: 'teacher', roles: ['teacher'], phone: '0700000000' },
   ];
   mockTeachers = [
-    { id: 'tch_amina', schoolId: SCHOOL_ID, firstName: 'Amina', lastName: 'Otieno', email: 'amina@x.com', userId: 'usr_teacher', staffType: 'teacher', phone: '0700000000', extraRoles: [], _v: 0 },
+    { id: 'tch_amina', _id: 'mongo_tch_amina', schoolId: SCHOOL_ID, firstName: 'Amina', lastName: 'Otieno', email: 'amina@x.com', userId: 'usr_teacher', staffType: 'teacher', phone: '0700000000', extraRoles: [], _v: 0 },
   ];
 });
 

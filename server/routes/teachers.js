@@ -327,36 +327,54 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('teachers', 'update'), as
     delete data.id;
     delete data._v;
 
+    // Resolve the record being edited FIRST, dual-id-safe — mirrors GET
+    // /:id exactly. Staff records created before the UUID `id` migration
+    // (or imported without one) are only findable by Mongo _id, and GET /'s
+    // own response normalizes `id: d.id || d._id?.toString()` for the
+    // client, so req.params.id may in fact BE the _id string, not a real
+    // UUID. Every downstream check below must resolve and target this SAME
+    // document unambiguously (by _id, which always exists) — filtering by
+    // `id` alone, as this route used to, silently matched nothing for such
+    // a record on the actual update, and WORSE, on the duplicate-email
+    // check's exclusion below: `{id: {$ne: req.params.id}}` compares
+    // against a field that's undefined on the very record being edited, so
+    // `undefined !== req.params.id` is trivially true — the record matched
+    // ITSELF as a "duplicate" on every save that included its own
+    // unchanged email. Confirmed live: an admin editing "Ms. Ann Wanjiku"
+    // (no UUID id, resolvable only by _id) got "Email ... already used by
+    // another staff member" attempting to save any change at all.
+    const Teachers = tenantModel('teachers', tenantContext(req));
+    const paramId = req.params.id;
+    let existingDoc = await Teachers.findOne({ id: paramId, schoolId }).lean();
+    if (!existingDoc && /^[a-f\d]{24}$/i.test(paramId)) {
+      try { existingDoc = await Teachers.findOne({ _id: new mongoose.Types.ObjectId(paramId), schoolId }).lean(); } catch { /* ignore */ }
+    }
+    if (!existingDoc) return E.notFound(res, 'Teacher not found');
+
     // Every save re-submits the whole record (not just the fields on the
     // currently-open tab), so this runs on every save regardless of
     // whether email itself changed — correctly re-detecting a standing
     // conflict, not something newly introduced by this specific edit.
     if (data.email) {
-      const Teachers = tenantModel('teachers', tenantContext(req));
-      const existing = await Teachers.findOne({ schoolId, email: data.email, id: { $ne: req.params.id } }).lean();
+      const emailConflict = await Teachers.findOne({ schoolId, email: data.email, _id: { $ne: existingDoc._id } }).lean();
       // 'staff member', not 'teacher' — see the POST route's identical note above.
-      if (existing) return E.conflict(res, `Email '${data.email}' is already used by another staff member`);
+      if (emailConflict) return E.conflict(res, `Email '${data.email}' is already used by another staff member`);
     }
 
-    // Snapshot the PRIOR extraRoles/departmentId before the update — needed
-    // to detect whether this save actually changed them (only fetched when
-    // the payload includes either field, to avoid an extra round trip on
-    // every unrelated save). Both now ride on the JWT (see auth.js's
-    // _buildTokenPayload) so a change here must revoke the linked user's
-    // existing sessions immediately — the same policy already applied to a
-    // role change via settings.js's PUT /users/:id — otherwise an HOD grant,
-    // removal, or department reassignment would silently not take effect
-    // until their session naturally expires (up to 8h).
-    const needsPriorSnapshot = data.extraRoles !== undefined || data.departmentId !== undefined;
-    const prior = needsPriorSnapshot
-      ? await tenantModel('teachers', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('extraRoles departmentId').lean()
-      : null;
-    const priorExtraRoles   = data.extraRoles   !== undefined ? (prior?.extraRoles ?? [])    : undefined;
-    const priorDepartmentId = data.departmentId !== undefined ? (prior?.departmentId ?? null) : undefined;
+    // Snapshot the PRIOR extraRoles/departmentId — already have them on
+    // existingDoc from the resolve above, no separate fetch needed. Both
+    // now ride on the JWT (see auth.js's _buildTokenPayload) so a change
+    // here must revoke the linked user's existing sessions immediately —
+    // the same policy already applied to a role change via settings.js's
+    // PUT /users/:id — otherwise an HOD grant, removal, or department
+    // reassignment would silently not take effect until their session
+    // naturally expires (up to 8h).
+    const priorExtraRoles   = data.extraRoles   !== undefined ? (existingDoc.extraRoles ?? [])    : undefined;
+    const priorDepartmentId = data.departmentId !== undefined ? (existingDoc.departmentId ?? null) : undefined;
 
     const { doc, conflict } = await applyOptimisticLock(
-      tenantModel('teachers', tenantContext(req)),
-      { id: req.params.id, schoolId },
+      Teachers,
+      { _id: existingDoc._id, schoolId },
       { ...data, updatedBy: userId },
       clientVersion
     );
