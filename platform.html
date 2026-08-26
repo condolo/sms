@@ -250,8 +250,30 @@ async function api(method, path, body) {
     _showLogin('Your session has expired. Please sign in again.');
     throw new Error('PLATFORM_SESSION_EXPIRED');
   }
-  if (!res.ok) throw new Error(data?.error?.message || data?.error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    // Preserve the HTTP status so callers can tell "you're rate-limited"
+    // (429 — a normal amount of tab-clicking through this console can
+    // exhaust platformLimiter's per-IP budget) apart from a genuine
+    // network/server failure. Several render*() functions used to catch
+    // and discard this entirely, always showing "Cannot reach the server
+    // — make sure Express is running", which is actively wrong and
+    // alarming when the real cause is just a rate limit clearing itself
+    // in a few minutes.
+    const err = new Error(data?.error?.message || data?.error || `HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
   return data;
+}
+
+/* Shared error text for render*() catch blocks — distinguishes a rate
+   limit (self-clearing, not a real problem) from an actual failure. */
+function _apiErrorMessage(err) {
+  if (err && err.status === 429) {
+    return (err.message && err.message !== 'HTTP 429' ? err.message : 'Too many requests.')
+      + ' This clears on its own after a few minutes — no action needed.';
+  }
+  return 'Cannot reach the server. Make sure the Express server is running and PLATFORM_ADMIN_KEY is set.';
 }
 
 /* Fetch wrapper for full-path calls — session cookie is sent automatically */
@@ -409,7 +431,7 @@ async function renderPending() {
       <div class="pa-card">
         <div style="padding:20px;font-size:13px;color:var(--gray-500)">
           <i class="fas fa-triangle-exclamation" style="color:#f59e0b;margin-right:8px"></i>
-          Cannot reach the server. Make sure the Express backend is running.
+          ${_esc(_apiErrorMessage(err))}
         </div>
       </div>`;
   }
@@ -522,13 +544,13 @@ async function renderSchools() {
       return;
     }
     _renderSchoolsTable(el, schools);
-  } catch {
+  } catch (err) {
     el.innerHTML = `
       <div class="pa-card">
         <div class="pa-card-header"><h3>Registered Schools</h3></div>
         <div style="padding:20px;font-size:13px;color:var(--gray-500)">
           <i class="fas fa-triangle-exclamation" style="color:#f59e0b;margin-right:8px"></i>
-          Cannot reach the server. Make sure the Express server is running and PLATFORM_ADMIN_KEY is set.
+          ${_esc(_apiErrorMessage(err))}
         </div>
       </div>`;
   }

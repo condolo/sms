@@ -215,10 +215,26 @@ const authLimiter = rateLimit({
   skip:              () => process.env.NODE_ENV === 'test',
 });
 
-// Platform admin limiter: 10 req/15min — strict; this key grants full platform access
+// Platform admin limiter — covers every request under /api/platform/*
+// (Overview, Pending, Schools, Organizations, Diagnostics, Branding — not
+// just login), keyed by raw IP. Found live: 10/15min is far too low for
+// actually USING the console — clicking through a handful of tabs during
+// one normal working session exhausts it in well under a minute, and every
+// subsequent call (including the login POST itself, since it shares this
+// same outer limiter ahead of its own dedicated 5-failed-attempts-only
+// _loginLimiter in platform.js) 429s. The client then showed misleading
+// messages ("cannot reach the server", "too many failed attempts") that
+// read as a real outage or wrong credentials, when it was neither.
+// Raised proportionally to the same reasoning apiLimiter's own history
+// documents (300->600->1000->3000, each chasing normal interactive usage
+// it was never sized for) — 300 comfortably covers a full working session
+// of admin-console browsing while staying two orders of magnitude below
+// apiLimiter's ceiling, appropriate for a credential that grants full
+// platform access. Real automated abuse looks nothing like normal
+// clicking regardless of the exact number.
 const platformLimiter = rateLimit({
   windowMs:        15 * 60 * 1000,
-  max:             10,
+  max:             300,
   standardHeaders: true,
   legacyHeaders:   false,
   message:         { success: false, error: { code: 'RATE_LIMIT', message: 'Too many platform admin requests.' } },
