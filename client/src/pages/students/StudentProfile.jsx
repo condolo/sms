@@ -25,6 +25,7 @@ import {
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { useToast } from '@/hooks/useToast.jsx';
+import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
 import { studentStage, studentMilestone, demeritTotal, meritTotal, STAGES, MILESTONES } from '@/pages/behaviour/bpsConstants.js';
 
 /* ── Tab config ─────────────────────────────────────────────── */
@@ -117,9 +118,18 @@ export default function StudentProfile() {
   const houses = Array.isArray(settingsData?.data?.houses) ? settingsData.data.houses : [];
 
   /* ── Cross-module queries (lazy by tab) ── */
+  // Academic Year & Term Dependency Map, finding #3 — attendance has no
+  // year/term concept anywhere in the system, so this call previously had
+  // no date filter at all: a true lifetime aggregate, shown with no
+  // indication it wasn't "this year". Scoped to the current academic
+  // year to date, the same reused pattern as the Dashboard's leadership
+  // filter (useCurrentAcademicPeriod -> year.startDate) — not a new
+  // mechanism. No schema change: attendance_records still carry only a
+  // raw date; this filters by date range, same as every other consumer.
+  const { year: currentAcademicYear } = useCurrentAcademicPeriod();
   const { data: attData, isLoading: attLoading } = useQuery({
-    queryKey: ['attendance', 'summary', studentId],
-    queryFn:  () => attendanceApi.summary({ studentId }),
+    queryKey: ['attendance', 'summary', studentId, currentAcademicYear?.startDate],
+    queryFn:  () => attendanceApi.summary({ studentId, dateFrom: currentAcademicYear?.startDate }),
     enabled:  tab === 'attendance' && !!studentId,
     staleTime: 5 * 60_000,
   });
@@ -669,14 +679,19 @@ function AttendanceTab({ data, loading }) {
     </div>
   );
 
-  const rate = summary?.rate != null ? Math.round(summary.rate) : null;
+  // Field names below match the server's actual /attendance/summary
+  // response (total/present/absent/late/authorised/attendanceRate — see
+  // server/routes/attendance.js) — previously read as rate/presentCount/
+  // absentCount/lateCount, which don't exist on that response, so this
+  // card silently showed "—" for every value regardless of real data.
+  const rate = summary?.attendanceRate != null ? Math.round(summary.attendanceRate) : null;
   const rateColor = rate == null ? 'text-slate-400' : rate >= 90 ? 'text-emerald-600' : rate >= 75 ? 'text-amber-600' : 'text-red-600';
 
   const stats = [
     { label: 'Attendance rate',   value: rate != null ? `${rate}%` : '—', color: rateColor, Icon: CheckCheck },
-    { label: 'Days present',      value: summary?.presentCount ?? '—',    color: 'text-emerald-600', Icon: CheckCircle2 },
-    { label: 'Days absent',       value: summary?.absentCount ?? '—',     color: 'text-red-500',    Icon: XCircle },
-    { label: 'Days late',         value: summary?.lateCount ?? '—',       color: 'text-amber-600',  Icon: Clock },
+    { label: 'Days present',      value: summary?.present ?? '—',         color: 'text-emerald-600', Icon: CheckCircle2 },
+    { label: 'Days absent',       value: summary?.absent ?? '—',          color: 'text-red-500',    Icon: XCircle },
+    { label: 'Days late',         value: summary?.late ?? '—',            color: 'text-amber-600',  Icon: Clock },
   ];
 
   return (
@@ -684,7 +699,7 @@ function AttendanceTab({ data, loading }) {
       {/* Rate ring card */}
       <div className="bg-white border border-slate-200 rounded-xl p-5">
         <div className="flex items-center justify-between mb-1">
-          <h3 className="text-sm font-medium text-slate-700">Attendance rate</h3>
+          <h3 className="text-sm font-medium text-slate-700">Attendance rate — this academic year</h3>
           <span className={`text-2xl font-bold ${rateColor}`}>{rate != null ? `${rate}%` : '—'}</span>
         </div>
         <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
