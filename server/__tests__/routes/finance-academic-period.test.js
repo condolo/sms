@@ -77,6 +77,10 @@ let mockAcademicYears = makeFakeCollection();
 let mockInvoices      = makeFakeCollection();
 let mockFeeStructures = makeFakeCollection();
 let mockStudents      = makeFakeCollection();
+let mockPayments      = makeFakeCollection();
+// archival.js's isYearArchived() reads this directly — a plain findOne, not
+// tenantModel-wrapped, so it's mocked here rather than via makeFakeCollection.
+let mockArchivedYears = [];
 
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((c) => {
@@ -84,8 +88,10 @@ jest.mock('../../utils/model', () => ({
     if (c === 'invoices')       return mockInvoices;
     if (c === 'fee_structures') return mockFeeStructures;
     if (c === 'students')       return mockStudents;
+    if (c === 'payments')       return mockPayments;
     if (c === 'schools')        return { findOne: jest.fn(() => mockChainObj({ currency: 'KES' })) };
     if (c === 'audit_logs')     return { create: jest.fn().mockResolvedValue({}) };
+    if (c === 'academic_config') return { findOne: jest.fn(() => mockChainObj({ archivedAcademicYears: mockArchivedYears })) };
     return { find: jest.fn(() => mockChainArr([])), findOne: jest.fn(() => mockChainObj(null)) };
   }),
 }));
@@ -122,6 +128,8 @@ beforeEach(() => {
   mockInvoices      = makeFakeCollection();
   mockFeeStructures = makeFakeCollection();
   mockStudents      = makeFakeCollection();
+  mockPayments      = makeFakeCollection();
+  mockArchivedYears = [];
 });
 
 describe('POST /invoices — academic period resolution', () => {
@@ -207,5 +215,92 @@ describe('fee structures + /generate — same resolution, propagated onto create
     expect(res.status).toBe(201);
     expect(res.body.data.invoices[0].academicYearId).toBe('ay_2025');
     expect(res.body.data.invoices[0].termId).toBe('term_2025_1');
+  });
+});
+
+/* ── Academic Year & Term Dependency Map, finding #5 ──────────────
+   Finance previously never checked archival on any write path. These
+   prove every write is now blocked once its year is archived — both
+   when the request explicitly targets that year (routed through
+   _resolveAcademicPeriod) and, separately, when an existing record
+   already belongs to that year and the request doesn't touch the
+   period fields at all (the gap a naive fix to the shared utility
+   alone would have missed). ──────────────────────────────────────── */
+describe('Archival guard — every finance write path', () => {
+  beforeEach(() => { mockArchivedYears = ['ay_2025']; });
+
+  test('POST /invoices rejects an explicit archived academicYearId', async () => {
+    const res = await supertest(buildApp()).post('/api/finance/invoices').send({
+      studentId: 'stu_1', academicYearId: 'ay_2025',
+      lineItems: [{ description: 'Tuition', quantity: 1, unitPrice: 1000 }],
+    });
+    expect(res.status).toBe(400);
+    expect(mockInvoices.create).not.toHaveBeenCalled();
+  });
+
+  test('PUT /invoices/:id rejects editing an invoice already in an archived year, even when the edit does not touch the period fields', async () => {
+    mockInvoices = makeFakeCollection([{
+      id: 'inv_1', schoolId: SCHOOL_A, status: 'unpaid', lineItems: [{ description: 'Tuition', quantity: 1, unitPrice: 1000 }],
+      academicYearId: 'ay_2025', termId: 'term_2025_1', discountPct: 0, taxPct: 0, total: 1000,
+    }]);
+    const res = await supertest(buildApp()).put('/api/finance/invoices/inv_1').send({ notes: 'just a note' });
+    expect(res.status).toBe(400);
+  });
+
+  test('DELETE /invoices/:id refuses to void an invoice in an archived year', async () => {
+    mockInvoices = makeFakeCollection([{
+      id: 'inv_1', schoolId: SCHOOL_A, status: 'unpaid', academicYearId: 'ay_2025', total: 1000,
+    }]);
+    const res = await supertest(buildApp()).delete('/api/finance/invoices/inv_1');
+    expect(res.status).toBe(400);
+  });
+
+  test('POST /payments refuses to record a payment against an invoice in an archived year', async () => {
+    mockInvoices = makeFakeCollection([{
+      id: 'inv_1', schoolId: SCHOOL_A, status: 'unpaid', academicYearId: 'ay_2025',
+      total: 1000, balance: 1000, amountPaid: 0,
+    }]);
+    const res = await supertest(buildApp()).post('/api/finance/payments').send({
+      invoiceId: 'inv_1', amount: 500, method: 'cash',
+    });
+    expect(res.status).toBe(400);
+    expect(mockPayments.create).not.toHaveBeenCalled();
+  });
+
+  test('POST /fee-structures rejects an explicit archived academicYearId', async () => {
+    const res = await supertest(buildApp()).post('/api/finance/fee-structures').send({
+      name: 'Term 1 Fees', academicYearId: 'ay_2025',
+      lineItems: [{ description: 'Tuition', quantity: 1, unitPrice: 1000 }],
+    });
+    expect(res.status).toBe(400);
+    expect(mockFeeStructures.create).not.toHaveBeenCalled();
+  });
+
+  test('PUT /fee-structures/:id rejects editing one already in an archived year, even without touching the period fields', async () => {
+    mockFeeStructures = makeFakeCollection([{
+      id: 'fs_1', schoolId: SCHOOL_A, name: 'Term 1 Fees', academicYearId: 'ay_2025',
+      lineItems: [{ description: 'Tuition', quantity: 1, unitPrice: 1000 }],
+    }]);
+    const res = await supertest(buildApp()).put('/api/finance/fee-structures/fs_1').send({ name: 'Renamed' });
+    expect(res.status).toBe(400);
+  });
+
+  test('DELETE /fee-structures/:id refuses to delete one already in an archived year', async () => {
+    mockFeeStructures = makeFakeCollection([{
+      id: 'fs_1', schoolId: SCHOOL_A, name: 'Term 1 Fees', academicYearId: 'ay_2025',
+    }]);
+    const res = await supertest(buildApp()).delete('/api/finance/fee-structures/fs_1');
+    expect(res.status).toBe(400);
+  });
+
+  test('POST /fee-structures/:id/generate refuses to bulk-invoice from a fee structure whose own year is archived', async () => {
+    mockFeeStructures = makeFakeCollection([{
+      id: 'fs_1', schoolId: SCHOOL_A, name: 'Term 1 Fees', scopeType: 'all', academicYearId: 'ay_2025',
+      lineItems: [{ description: 'Tuition', quantity: 1, unitPrice: 1000 }],
+    }]);
+    mockStudents = makeFakeCollection([{ id: 's1', schoolId: SCHOOL_A, status: 'active', firstName: 'A', lastName: 'One' }]);
+    const res = await supertest(buildApp()).post('/api/finance/fee-structures/fs_1/generate');
+    expect(res.status).toBe(400);
+    expect(mockInvoices.create).not.toHaveBeenCalled();
   });
 });

@@ -24,6 +24,7 @@ const { notifyGuardiansForStudents } = require('../utils/notify-students');
 const email = require('../utils/email');
 const { _model } = require('../utils/model');
 const { resolveAcademicPeriod } = require('../utils/academic-period');
+const { isYearArchived } = require('../utils/archival');
 const { getWorkflowConfig, saveWorkflowConfig, resolveStep } = require('../utils/workflow-config');
 
 const router = express.Router();
@@ -571,9 +572,20 @@ router.put('/incidents/:id', authMiddleware, PLAN, MODGATE, behaviourAccess('upd
 
     const Incidents = tenantModel('behaviour_incidents', tenantContext(req));
 
+    // Loaded unconditionally (not just when the period fields are being
+    // touched) so archival can be checked against the EXISTING incident too
+    // — Academic Year & Term Dependency Map, finding #5 (this file was
+    // previously mis-recorded there as fully "Enforced"; it validates the
+    // period exists but never checked whether it's locked). Without this,
+    // editing e.g. an incident's notes while leaving its year untouched
+    // would bypass the archival check entirely, same gap as finance.js.
+    const existing = await Incidents.findOne({ id: req.params.id, schoolId }).lean();
+    if (!existing) return E.notFound(res, 'Incident not found');
+    if (await isYearArchived(schoolId, existing.academicYearId)) {
+      return E.badRequest(res, `Academic year is locked — this incident cannot be edited.`);
+    }
+
     if (data.academicYearId !== undefined || data.termId !== undefined) {
-      const existing = await Incidents.findOne({ id: req.params.id, schoolId }).lean();
-      if (!existing) return E.notFound(res, 'Incident not found');
       const period = await resolveAcademicPeriod(schoolId, tenantContext(req), {
         academicYearId: data.academicYearId !== undefined ? data.academicYearId : existing.academicYearId,
         termId:         data.termId         !== undefined ? data.termId         : existing.termId,
@@ -596,7 +608,18 @@ router.put('/incidents/:id', authMiddleware, PLAN, MODGATE, behaviourAccess('upd
 router.delete('/incidents/:id', authMiddleware, PLAN, MODGATE, behaviourAccess('delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const doc = await tenantModel('behaviour_incidents', tenantContext(req)).findOneAndUpdate(
+    const Incidents = tenantModel('behaviour_incidents', tenantContext(req));
+
+    // Academic Year & Term Dependency Map, finding #5 — this is a soft
+    // delete (status -> 'resolved'), a real mutation, so it needs the same
+    // guard as the edit path above.
+    const existing = await Incidents.findOne({ id: req.params.id, schoolId }).lean();
+    if (!existing) return E.notFound(res, 'Incident not found');
+    if (await isYearArchived(schoolId, existing.academicYearId)) {
+      return E.badRequest(res, `Academic year is locked — this incident cannot be deleted.`);
+    }
+
+    const doc = await Incidents.findOneAndUpdate(
       { id: req.params.id, schoolId },
       { status: 'resolved', deletedAt: new Date().toISOString(), deletedBy: userId },
       { new: true }

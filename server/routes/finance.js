@@ -21,6 +21,7 @@ const AuditService = require('../services/audit');
 const { notifyGuardiansForStudents } = require('../utils/notify-students');
 const email = require('../utils/email');
 const { resolveAcademicPeriod: _resolveAcademicPeriod } = require('../utils/academic-period');
+const { isYearArchived } = require('../utils/archival');
 
 const router = express.Router();
 const PLAN   = planGate('finance');
@@ -202,6 +203,17 @@ router.put('/invoices/:id', authMiddleware, PLAN, MODGATE, rbac('finance', 'upda
       return E.badRequest(res, 'Cannot edit a fully paid invoice');
     }
 
+    // Block ANY edit to an invoice whose year is already archived — not just
+    // one that tries to change academicYearId/termId. Academic Year & Term
+    // Dependency Map, finding #5: finance never checked archival at all;
+    // this specific check is unconditional because _resolveAcademicPeriod
+    // below only runs when the request is explicitly touching the period
+    // fields, which would have missed an edit (e.g. adjusting line items)
+    // to an invoice that's already sitting in a locked year.
+    if (await isYearArchived(schoolId, existing.academicYearId)) {
+      return E.badRequest(res, `Academic year is locked — this invoice cannot be edited.`);
+    }
+
     if (data.academicYearId !== undefined || data.termId !== undefined) {
       const period = await _resolveAcademicPeriod(schoolId, tenantContext(req), {
         academicYearId: data.academicYearId !== undefined ? data.academicYearId : existing.academicYearId,
@@ -252,6 +264,11 @@ router.delete('/invoices/:id', authMiddleware, PLAN, MODGATE, rbac('finance', 'd
 
     if (doc.status === 'paid') {
       return E.badRequest(res, 'Cannot void a fully paid invoice. Issue a refund instead.');
+    }
+
+    // Academic Year & Term Dependency Map, finding #5.
+    if (await isYearArchived(schoolId, doc.academicYearId)) {
+      return E.badRequest(res, `Academic year is locked — this invoice cannot be voided.`);
     }
 
     await Invoices.findOneAndUpdate(
@@ -318,6 +335,12 @@ router.post('/payments', authMiddleware, PLAN, MODGATE, rbac('finance', 'create'
     const invoice  = await Invoices.findOne({ id: data.invoiceId, schoolId }).lean();
     if (!invoice) return E.notFound(res, 'Invoice not found');
     if (invoice.status === 'voided') return E.badRequest(res, 'Cannot record payment on a voided invoice');
+
+    // Academic Year & Term Dependency Map, finding #5. Payments carry no
+    // academicYearId of their own — scoped via the invoice they belong to.
+    if (await isYearArchived(schoolId, invoice.academicYearId)) {
+      return E.badRequest(res, `Academic year is locked — a payment cannot be recorded against this invoice.`);
+    }
 
     // Validate payment amount doesn't exceed outstanding balance
     const maxPayable = _round(invoice.balance || (invoice.total - (invoice.amountPaid || 0)));
@@ -787,9 +810,18 @@ router.put('/fee-structures/:id', authMiddleware, PLAN, MODGATE, rbac('finance',
 
     const FeeStructures = tenantModel('fee_structures', tenantContext(req));
 
+    // Loaded unconditionally (not just when the period fields are being
+    // touched) so archival can be checked against the EXISTING record too —
+    // Academic Year & Term Dependency Map, finding #5. Without this, editing
+    // e.g. a fee structure's line items while leaving its year untouched
+    // would bypass the archival check entirely.
+    const existing = await FeeStructures.findOne({ id: req.params.id, schoolId }).lean();
+    if (!existing) return E.notFound(res, 'Fee structure not found');
+    if (await isYearArchived(schoolId, existing.academicYearId)) {
+      return E.badRequest(res, `Academic year is locked — this fee structure cannot be edited.`);
+    }
+
     if (data.academicYearId !== undefined || data.termId !== undefined) {
-      const existing = await FeeStructures.findOne({ id: req.params.id, schoolId }).lean();
-      if (!existing) return E.notFound(res, 'Fee structure not found');
       const period = await _resolveAcademicPeriod(schoolId, tenantContext(req), {
         academicYearId: data.academicYearId !== undefined ? data.academicYearId : existing.academicYearId,
         termId:         data.termId         !== undefined ? data.termId         : existing.termId,
@@ -819,6 +851,16 @@ router.delete('/fee-structures/:id', authMiddleware, PLAN, MODGATE, rbac('financ
   try {
     const { schoolId } = req.jwtUser;
     const FeeStructures = tenantModel('fee_structures', tenantContext(req));
+
+    // Looked up before deleting (not findOneAndDelete directly) so archival
+    // can be checked first — Academic Year & Term Dependency Map, finding
+    // #5. Checking after delete would be too late to actually block it.
+    const existing = await FeeStructures.findOne({ id: req.params.id, schoolId }).lean();
+    if (!existing) return E.notFound(res, 'Fee structure not found');
+    if (await isYearArchived(schoolId, existing.academicYearId)) {
+      return E.badRequest(res, `Academic year is locked — this fee structure cannot be deleted.`);
+    }
+
     const doc = await FeeStructures.findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Fee structure not found');
     AuditService.log({ action: 'finance.fee_structure_deleted', actor: req.jwtUser, schoolId, target: { type: 'fee_structure', id: req.params.id, label: doc.name }, req });
@@ -839,6 +881,14 @@ router.post('/fee-structures/:id/generate', authMiddleware, PLAN, MODGATE, rbac(
 
     const fs = await FeeStructures.findOne({ id: req.params.id, schoolId }).lean();
     if (!fs) return E.notFound(res, 'Fee structure not found');
+
+    // Academic Year & Term Dependency Map, finding #5 — a fee structure's
+    // own stored year is what gets stamped onto every invoice this
+    // generates below; bulk-invoicing against an already-locked year is
+    // exactly the write archival exists to prevent.
+    if (await isYearArchived(schoolId, fs.academicYearId)) {
+      return E.badRequest(res, `Academic year is locked — invoices cannot be generated from this fee structure.`);
+    }
 
     // Resolve target students — class/section/individual-student scope,
     // single source of truth (see _resolveScopeStudents above).

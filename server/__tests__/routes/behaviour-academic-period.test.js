@@ -58,12 +58,14 @@ jest.mock('../../utils/email', () => ({}));
 jest.mock('../../services/audit', () => ({ log: jest.fn() }));
 
 let mockAcademicYears, mockIncidents;
+let mockArchivedYears = [];
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((c) => {
     if (c === 'academic_years')      return mockAcademicYears;
     if (c === 'behaviour_incidents') return mockIncidents;
     if (c === 'students')            return { findOne: jest.fn(() => mockChainObj(null)) };
     if (c === 'schools')             return { findOne: jest.fn(() => mockChainObj(null)) };
+    if (c === 'academic_config')     return { findOne: jest.fn(() => mockChainObj({ archivedAcademicYears: mockArchivedYears })) };
     return { find: jest.fn(() => mockChainArr([])), findOne: jest.fn(() => mockChainObj(null)) };
   }),
 }));
@@ -94,6 +96,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockAcademicYears = makeFakeCollection([CURRENT_YEAR, OTHER_YEAR]);
   mockIncidents      = makeFakeCollection([]);
+  mockArchivedYears  = [];
 });
 
 test('POST /incidents with no academicYearId/termId defaults to the live-resolved current period', async () => {
@@ -133,4 +136,41 @@ test('PUT /incidents/:id without academicYearId/termId in the body leaves the st
   expect(res.status).toBe(200);
   expect(res.body.data.academicYearId).toBe('ay_2025');
   expect(res.body.data.termId).toBe('term_2025_1');
+});
+
+/* ── Academic Year & Term Dependency Map, finding #5 ──────────────
+   This file's own earlier state ("Enforced") was itself part of what
+   the dependency map got wrong — resolveAcademicPeriod validated the
+   period exists but never checked whether it's archived. These prove
+   both the create path (via the now-archival-aware shared utility) and
+   the edit/delete paths (via an unconditional check that runs even
+   when the request never touches the period fields) are blocked. ── */
+describe('Archival guard', () => {
+  beforeEach(() => { mockArchivedYears = ['ay_2025']; });
+
+  test('POST /incidents rejects an explicit archived academicYearId', async () => {
+    const res = await supertest(buildApp()).post('/api/behaviour/incidents').send({
+      studentId: 'stu_1', type: 'demerit', title: 'Late', points: -2, academicYearId: 'ay_2025',
+    });
+    expect(res.status).toBe(400);
+    expect(mockIncidents.create).not.toHaveBeenCalled();
+  });
+
+  test('PUT /incidents/:id rejects editing an incident already in an archived year, even without touching the period fields', async () => {
+    mockIncidents = makeFakeCollection([{
+      id: 'bi_1', schoolId: SCHOOL_A, studentId: 'stu_1', type: 'demerit', title: 'Late', points: -2,
+      academicYearId: 'ay_2025', termId: 'term_2025_1',
+    }]);
+    const res = await supertest(buildApp()).put('/api/behaviour/incidents/bi_1').send({ note: 'follow-up added' });
+    expect(res.status).toBe(400);
+  });
+
+  test('DELETE /incidents/:id (soft delete) rejects one already in an archived year', async () => {
+    mockIncidents = makeFakeCollection([{
+      id: 'bi_1', schoolId: SCHOOL_A, studentId: 'stu_1', type: 'demerit', title: 'Late', points: -2,
+      academicYearId: 'ay_2025', termId: 'term_2025_1', status: 'open',
+    }]);
+    const res = await supertest(buildApp()).delete('/api/behaviour/incidents/bi_1');
+    expect(res.status).toBe(400);
+  });
 });
