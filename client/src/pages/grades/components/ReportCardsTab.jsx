@@ -79,9 +79,16 @@ export default function ReportCardsTab() {
   });
 
   // Per-instance raw marks indexed as [studentId][subjectId][`${type}_${instance}`]
+  // academicYearId included — Academic Year & Term Dependency Map, finding
+  // #2. This tab has no year picker of its own (termNum defaults from and
+  // is implicitly scoped to the current academic year); without this, the
+  // per-instance breakdown shown here could include marks saved under the
+  // same classId+termNumber from a prior year, inconsistent with the
+  // report card's own weighted score, which report-cards.js now correctly
+  // resolves to the current year.
   const { data: instanceMarksAll } = useQuery({
-    queryKey: ['assessment', 'marks', { classId, termNum }],
-    queryFn:  () => assessmentApi.getMarks({ classId, termNumber: Number(termNum) }),
+    queryKey: ['assessment', 'marks', { classId, termNum, academicYearId: currentPeriod.academicYearId }],
+    queryFn:  () => assessmentApi.getMarks({ classId, termNumber: Number(termNum), academicYearId: currentPeriod.academicYearId || undefined }),
     enabled:  canQuery,
     staleTime: 60_000,
     select: (res) => {

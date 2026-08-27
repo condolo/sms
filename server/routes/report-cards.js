@@ -338,15 +338,20 @@ function _validate(schema, data) {
    resolution — a future admin UI that adds a real year picker doesn't
    need any server change.
 
-   Deliberately NOT used for aggregateAssessmentMarks: assessment_marks
-   documents are written by Markbook, which never sends academicYearId
-   (confirmed by reading MarkbookTab's save payload) — every existing
-   mark has academicYearId: null. Passing a resolved non-null year id
-   into that aggregation would filter every mark out (null ≠ a real
-   id), silently zeroing every report card's CA marks. That's a
-   separate, pre-existing gap in the CA-marks write path, out of scope
-   here — fixing it means touching live Markbook writes and historical
-   data, not just report-cards.js's read side. */
+   Now ALSO used for aggregateAssessmentMarks (Academic Year & Term
+   Dependency Map, finding #2). Previously deliberately exempted: every
+   assessment_marks document was written with academicYearId: null
+   (ExamsPage.jsx's Markbook never sent one), so passing a resolved
+   non-null year id would have filtered every mark out and silently
+   zeroed every report card's CA marks. Fixed at the source instead —
+   the Markbook save payload now sends the real academicYearId, and
+   assessment.js's mark-upsert adopts (and backfills) any legacy
+   null-tagged record for the same key on first touch rather than
+   orphaning it — so this can resolve CA marks the same way grades and
+   exam results already do. A record that has genuinely never been
+   re-saved since this fix still carries academicYearId: null and won't
+   match a resolved year filter; that's an accepted gap for untouched
+   historical marks, not a live-write bug. */
 async function _resolveTermScope(schoolId, ctx, { academicYearId, termId, termNumber }) {
   if (termId && academicYearId) return { academicYearId, termId };
 
@@ -391,7 +396,7 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
     const [gradesData, { data: examData }, caMarksData] = await Promise.all([
       aggregateGrades(schoolId, classId, scope.termId, scope.academicYearId, studentId),
       aggregateExamResults(schoolId, classId, scope.termId, scope.academicYearId, studentId),
-      aggregateAssessmentMarks(schoolId, classId, termNum ?? null, academicYearId, studentId),
+      aggregateAssessmentMarks(schoolId, classId, termNum ?? null, scope.academicYearId, studentId),
     ]);
 
     const activeWeights = _convertCustomTypesToWeights(caConfig.customTypes);
@@ -573,10 +578,11 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
     // ── Step 3: Aggregate grades + CA marks, then compute scores ──
     const [gradesData, caMarksData] = await Promise.all([
       aggregateGrades(schoolId, classId, scope.termId, scope.academicYearId),
-      // NOT scope.academicYearId — Markbook writes never tag academicYearId
-      // (always null in practice), so resolving a real year here would match
-      // zero CA-mark documents and silently drop them from every report card.
-      aggregateAssessmentMarks(schoolId, classId, termNum ?? null, academicYearId),
+      // scope.academicYearId — see _resolveTermScope's comment above.
+      // Markbook now tags marks with the real year and adopts/backfills
+      // any legacy null-tagged record on first touch, so this can resolve
+      // the year the same way grades does.
+      aggregateAssessmentMarks(schoolId, classId, termNum ?? null, scope.academicYearId),
     ]);
     // Merge old gradebook data with CA marks — CA marks win on per-type conflict
     const mergedGrades = _mergeGradeData(gradesData, caMarksData);

@@ -623,14 +623,21 @@ function MarkbookTab({ years }) {
 
   const canQuery = !!(classId && subjectId && selectedEntry);
 
-  /* ── Existing marks ── */
+  /* ── Existing marks ──
+     academicYearId included in both the fetch and the query key — Academic
+     Year & Term Dependency Map, finding #2. Without it, switching the year
+     picker while keeping the same class/subject/term/type returned (or
+     served from cache) marks from whichever year happened to be saved
+     under that same classId+subjectId+termNumber+type, since class IDs
+     persist across years. */
   const { data: existingData } = useQuery({
-    queryKey: ['assessment', 'marks', { classId, subjectId, assessmentType: selectedEntry?.assessmentType, termNumber: selectedEntry?.termNumber }],
+    queryKey: ['assessment', 'marks', { classId, subjectId, assessmentType: selectedEntry?.assessmentType, termNumber: selectedEntry?.termNumber, academicYearId: selectedEntry?.academicYearId }],
     queryFn:  () => assessmentApi.getMarks({
       classId,
       subjectId,
       termNumber:     selectedEntry.termNumber,
       assessmentType: selectedEntry.assessmentType,
+      academicYearId: selectedEntry.academicYearId || undefined,
     }),
     enabled:  canQuery,
     staleTime: 30_000,
@@ -713,6 +720,12 @@ function MarkbookTab({ years }) {
           const existingV = versions[sid]?.[col.colId];
           marksToSave.push({
             studentId: sid, subjectId, classId,
+            // Academic Year & Term Dependency Map, finding #2 — the
+            // schedule entry this column belongs to already carries the
+            // real academicYearId (it was fetched filtered by yearId);
+            // previously this was never sent, so every CA mark saved was
+            // untagged and effectively unscoped by year on the read side.
+            academicYearId: selectedEntry.academicYearId || undefined,
             termNumber:     selectedEntry.termNumber,
             assessmentType: col.typeKey,
             instance:       col.instance,

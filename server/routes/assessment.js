@@ -906,24 +906,49 @@ router.post('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), a
     }
 
     const label = d.label || _label(d.assessmentType, d.instance);
+    const Marks = tenantModel('assessment_marks', tenantContext(req));
+    const naturalKey = {
+      schoolId,
+      studentId:      d.studentId,
+      subjectId:      d.subjectId,
+      termNumber:     d.termNumber,
+      assessmentType: d.assessmentType,
+      instance:       d.instance,
+    };
 
-    const doc = await tenantModel('assessment_marks', tenantContext(req)).findOneAndUpdate(
-      {
-        schoolId,
-        studentId:      d.studentId,
-        subjectId:      d.subjectId,
-        termNumber:     d.termNumber,
-        assessmentType: d.assessmentType,
-        instance:       d.instance,
-        academicYearId: d.academicYearId || null,
-      },
+    // Which existing document (if any) this save should land on. Every mark
+    // entered before this fix was saved with academicYearId: null (the
+    // Markbook UI never sent one — see ExamsPage.jsx/report-cards.js's
+    // comments on the same gap). Matching on the real academicYearId alone
+    // would silently miss that legacy row and upsert:true would then INSERT
+    // A DUPLICATE for the same student/subject/term/type/instance instead of
+    // updating it — real data corruption on the very first re-save after
+    // this fix ships. So: match the real-year row if one already exists
+    // (the normal case for anything saved after this fix), else adopt the
+    // legacy null-tagged row for this same key if one exists (this is what
+    // backfills it), else fall through to a genuine new upsert.
+    const existing = d.academicYearId
+      ? await Marks.findOne({ ...naturalKey, $or: [{ academicYearId: d.academicYearId }, { academicYearId: null }] })
+          .sort({ academicYearId: -1 }) // real year (truthy) sorts before null
+          .lean()
+      : await Marks.findOne({ ...naturalKey, academicYearId: null }).lean();
+
+    const matchFilter = existing
+      ? { ...naturalKey, academicYearId: existing.academicYearId ?? null }
+      : { ...naturalKey, academicYearId: d.academicYearId || null };
+
+    const doc = await Marks.findOneAndUpdate(
+      matchFilter,
       {
         $set: {
-          rawScore:    d.rawScore,
-          classId:     d.classId,
+          rawScore:      d.rawScore,
+          classId:       d.classId,
           label,
-          isPublished: d.isPublished,
-          updatedBy:   userId,
+          isPublished:   d.isPublished,
+          updatedBy:     userId,
+          // Backfills a legacy null-tagged row the moment it's touched
+          // again; a no-op $set when it already matches.
+          academicYearId: d.academicYearId || null,
         },
         $setOnInsert: {
           id:        uuidv4(),
@@ -1013,7 +1038,15 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
       );
     }
 
-    // Guard: reject if any target marks are locked (post-approval lock)
+    // Guard: reject if any target marks are locked (post-approval lock).
+    // academicYearId deliberately included now — found during the Academic
+    // Year dependency-map fix below: an unscoped $or here meant a locked
+    // mark from one year could block writing the *same* student/subject/
+    // term/type/instance key in a completely different, unrelated year.
+    // That was mostly invisible before (every mark shared academicYearId:
+    // null, so year never differentiated anything); it becomes a real,
+    // user-visible false-block the moment marks are correctly year-tagged,
+    // so it has to move together with that fix, not after it.
     const Marks = tenantModel('assessment_marks', tenantContext(req));
     const lockedSample = await Marks.findOne({
       schoolId,
@@ -1024,6 +1057,7 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
         termNumber:     d.termNumber,
         assessmentType: d.assessmentType,
         instance:       d.instance,
+        academicYearId: d.academicYearId || null,
       })),
     }).lean();
     if (lockedSample) {
@@ -1039,24 +1073,43 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
     // bulkWrite — encoding _v into an upsert filter would make a stale
     // version silently create a duplicate instead of correctly failing to
     // match. Omitting _v (as older clients do) skips the check entirely.
+    //
+    // Widened deliberately: every mark saved before this fix has
+    // academicYearId: null (the Markbook UI never sent one — see
+    // ExamsPage.jsx/report-cards.js's comments on the same gap). Matching
+    // only on the real year would miss that legacy row entirely and
+    // upsert:true below would INSERT A DUPLICATE instead of updating it —
+    // so for any mark that now carries a real academicYearId, this also
+    // looks for its legacy null-tagged twin so _findExisting() can adopt
+    // (and backfill) it instead of orphaning it.
     const _markKey = d => `${d.studentId}|${d.subjectId}|${d.termNumber}|${d.assessmentType}|${d.instance}|${d.academicYearId || ''}`;
     const existingMarks = await Marks.find({
       schoolId,
-      $or: marks.map(d => ({
-        studentId:      d.studentId,
-        subjectId:      d.subjectId,
-        termNumber:     d.termNumber,
-        assessmentType: d.assessmentType,
-        instance:       d.instance,
-        academicYearId: d.academicYearId || null,
-      })),
+      $or: marks.flatMap(d => {
+        const base = {
+          studentId:      d.studentId,
+          subjectId:      d.subjectId,
+          termNumber:     d.termNumber,
+          assessmentType: d.assessmentType,
+          instance:       d.instance,
+        };
+        return d.academicYearId
+          ? [{ ...base, academicYearId: d.academicYearId }, { ...base, academicYearId: null }]
+          : [{ ...base, academicYearId: null }];
+      }),
     }).lean();
     const existingMarkMap = Object.fromEntries(existingMarks.map(m => [_markKey(m), m]));
+    // Real-year match first (the normal case for anything saved after this
+    // fix); falls back to the legacy null-tagged twin so it gets adopted
+    // (and backfilled) instead of orphaned into a duplicate row.
+    const _findExisting = d =>
+      existingMarkMap[_markKey(d)]
+      ?? (d.academicYearId ? existingMarkMap[_markKey({ ...d, academicYearId: null })] : undefined);
 
     const conflicts = [];
     const writableMarks = [];
     for (const d of marks) {
-      const existing = existingMarkMap[_markKey(d)];
+      const existing = _findExisting(d);
       if (existing && d._v != null && Number(d._v) !== (existing._v ?? 0)) {
         conflicts.push({
           studentId:       d.studentId,
@@ -1072,35 +1125,45 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
       writableMarks.push(d);
     }
 
-    const ops = writableMarks.map(d => ({
-      updateOne: {
-        filter: {
-          schoolId,
-          studentId:      d.studentId,
-          subjectId:      d.subjectId,
-          termNumber:     d.termNumber,
-          assessmentType: d.assessmentType,
-          instance:       d.instance,
-          academicYearId: d.academicYearId || null,
-        },
-        update: {
-          $set: {
-            rawScore:    d.rawScore,
-            classId:     d.classId,
-            label:       d.label || _label(d.assessmentType, d.instance),
-            isPublished: d.isPublished !== false,
-            updatedBy:   userId,
-          },
-          $setOnInsert: {
-            id:        uuidv4(),
+    const ops = writableMarks.map(d => {
+      const existing = _findExisting(d);
+      return {
+        updateOne: {
+          filter: {
             schoolId,
-            createdBy: userId,
+            studentId:      d.studentId,
+            subjectId:      d.subjectId,
+            termNumber:     d.termNumber,
+            assessmentType: d.assessmentType,
+            instance:       d.instance,
+            // Target whichever document actually exists (its own real
+            // academicYearId, or the legacy null tag) rather than the
+            // incoming value — matching on d.academicYearId alone when only
+            // a null-tagged legacy row exists would upsert:true a duplicate.
+            academicYearId: existing ? (existing.academicYearId ?? null) : (d.academicYearId || null),
           },
-          $inc: { _v: 1 },
+          update: {
+            $set: {
+              rawScore:    d.rawScore,
+              classId:     d.classId,
+              label:       d.label || _label(d.assessmentType, d.instance),
+              isPublished: d.isPublished !== false,
+              updatedBy:   userId,
+              // Backfills a legacy null-tagged row the moment it's touched
+              // again; a no-op $set when it's already correctly tagged.
+              academicYearId: d.academicYearId || null,
+            },
+            $setOnInsert: {
+              id:        uuidv4(),
+              schoolId,
+              createdBy: userId,
+            },
+            $inc: { _v: 1 },
+          },
+          upsert: true,
         },
-        upsert: true,
-      },
-    }));
+      };
+    });
 
     const result = ops.length
       ? await Marks.bulkWrite(ops, { ordered: false })
