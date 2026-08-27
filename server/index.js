@@ -251,7 +251,7 @@ app.use('/api/auth/change-password',    authLimiter);
 app.use('/api/auth/sessions/revoke-all',authLimiter);
 app.use('/api/platform', platformLimiter);
 
-console.log('[Security] rate limiting active — general: 3000/15min per user (IP for anonymous), auth: 20/15min per IP (login+force-change+change-password+revoke-all), platform: 10/15min per IP');
+console.log('[Security] rate limiting active — general: 3000/15min per user (IP for anonymous), auth: 20/15min per IP (login+force-change+change-password+revoke-all), platform: 300/15min per IP');
 
 /* ── API Routes ─────────────────────────────────────────────── */
 app.use('/api/public',      require('./routes/public'));   // no auth — school branding
@@ -420,6 +420,34 @@ const APP_SHELL_PATH = fs.existsSync(path.join(REACT_DIST, 'app-shell.html'))
   ? path.join(REACT_DIST, 'app-shell.html')
   : path.join(REACT_DIST, 'index.html');
 
+// Mirrors client/src/utils/schoolDetect.js's MAIN_HOSTS/NON_SCHOOL_SUBDOMAINS
+// exactly (kept as a small, synchronous, DB-free string check on purpose —
+// this runs on every static request, not just API calls, so it can't afford
+// tenantMiddleware's DB lookup). Found live: the prerendered-file lookup
+// below is purely path-based, with zero host awareness, so a school
+// subdomain hitting `/` (typing/bookmarking greenwood.msingi.io directly —
+// the normal way anyone reaches a school's login page) got served
+// dist/index.html, which `npm run build:ssg` overwrites with the fully-
+// rendered MARKETING landing page — the exact page a school subdomain must
+// never show at all (App.jsx's own router: isSchool ? <Navigate to="/login"/>
+// : <Landing/>, never both). The real school login page only appeared once
+// React hydrated and client-side routing corrected course a moment later —
+// a visible flash of the wrong site on every fresh visit or reload.
+// A school subdomain must always get the plain, un-prerendered app shell,
+// regardless of which path it requests — it never needs the SEO-prerendered
+// marketing HTML for any route, since it can't reach those routes anyway.
+const MAIN_HOSTS = new Set([
+  'localhost', '127.0.0.1',
+  'school-management-ecosystem.onrender.com',
+  'msingi.io', 'www.msingi.io', 'app.msingi.io',
+]);
+const NON_SCHOOL_SUBDOMAINS = new Set(['www', 'app', 'api', 'mail', 'admin', 'platform']);
+function _isSchoolSubdomainHost(req) {
+  const host  = (req.hostname || '').toLowerCase();
+  const parts = host.split('.');
+  return parts.length >= 3 && !MAIN_HOSTS.has(host) && !NON_SCHOOL_SUBDOMAINS.has(parts[0]);
+}
+
 // In production, prefer the compiled React app; fall back to legacy app root.
 const STATIC_DIR = (process.env.NODE_ENV === 'production' && reactBuilt) ? REACT_DIST : ROOT_DIR;
 
@@ -492,15 +520,21 @@ app.get('*', (req, res) => {
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
 
-    // Prerendered marketing pages (built by `npm run build:ssg`, see
-    // client/scripts/prerender.mjs) live at dist/<route>/index.html.
-    // Serve that fully-rendered HTML when it exists — crawlers that don't
-    // execute JS (and real users, for a faster first paint) get real
-    // content immediately; React hydrates over it normally afterwards.
-    // path.normalize + startsWith guards against path traversal via req.path.
-    const candidate = path.normalize(path.join(REACT_DIST, req.path, 'index.html'));
-    if (candidate.startsWith(REACT_DIST) && fs.existsSync(candidate)) {
-      return res.sendFile(candidate);
+    // A school subdomain never renders marketing content for ANY path (see
+    // _isSchoolSubdomainHost's comment above) — skip the prerendered-file
+    // lookup entirely and go straight to the plain app shell, regardless
+    // of which route was requested.
+    if (!_isSchoolSubdomainHost(req)) {
+      // Prerendered marketing pages (built by `npm run build:ssg`, see
+      // client/scripts/prerender.mjs) live at dist/<route>/index.html.
+      // Serve that fully-rendered HTML when it exists — crawlers that don't
+      // execute JS (and real users, for a faster first paint) get real
+      // content immediately; React hydrates over it normally afterwards.
+      // path.normalize + startsWith guards against path traversal via req.path.
+      const candidate = path.normalize(path.join(REACT_DIST, req.path, 'index.html'));
+      if (candidate.startsWith(REACT_DIST) && fs.existsSync(candidate)) {
+        return res.sendFile(candidate);
+      }
     }
 
     return res.sendFile(APP_SHELL_PATH);
