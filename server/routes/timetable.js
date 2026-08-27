@@ -38,6 +38,8 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { resolveBellSchedule } = require('./bell-schedule');
 const { sanitisePdfStr }      = require('../utils/sanitisePdf');
+const { resolveAcademicPeriod } = require('../utils/academic-period');
+const { isYearArchived } = require('../utils/archival');
 
 const router = express.Router();
 const PLAN   = planGate('timetable');
@@ -142,7 +144,16 @@ async function _sectionForClass(schoolId, classId) {
  */
 async function _checkConflicts(schoolId, data, excludeId = null) {
   const Timetable = tenantModel('timetable', { schoolId });
-  const base = { schoolId, day: data.day, isActive: true };
+  // academicYearId scoped — Academic Year & Term Dependency Map, finding
+  // #6. Every slot is now stamped with a real academicYearId at create
+  // time (see POST / and POST /bulk below) and the one-time backfill
+  // (scripts/backfill-timetable-academic-year.js) has tagged pre-existing
+  // active slots with the school's then-current year, so an exact match
+  // here is safe: a slot from a genuinely different year — including one
+  // still isActive: true because year-transition never touches this
+  // collection — no longer registers as a live conflict against a new
+  // year's timetable.
+  const base = { schoolId, day: data.day, isActive: true, academicYearId: data.academicYearId ?? null };
   if (excludeId) base.id = { $ne: excludeId };
 
   // 1. Class slot collision — same class, same day, same period key
@@ -1246,6 +1257,16 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('timetable', 'create'), asy
     const { data, error } = _validate(SlotSchema, req.body);
     if (error) return E.validation(res, error);
 
+    // Resolve + stamp the real academic year/term — Academic Year & Term
+    // Dependency Map, finding #6. No client sends this today, so this
+    // always defaults to the live-resolved current period, same pattern
+    // as finance.js/behaviour.js. Also blocks creating a slot explicitly
+    // targeting an archived year, if one is ever sent.
+    const period = await resolveAcademicPeriod(schoolId, tenantContext(req), { academicYearId: data.academicYearId, termId: data.termId });
+    if (period.error) return E.badRequest(res, period.error);
+    data.academicYearId = period.academicYearId;
+    data.termId          = period.termId;
+
     // Resolve the section for this class, then auto-populate startTime/endTime
     // from that section's bell schedule so cross-section conflicts can be detected.
     const section = await _sectionForClass(schoolId, data.classId);
@@ -1284,6 +1305,25 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('timetable', 'create'),
       await Timetable.deleteMany(delFilter);
     }
 
+    // Resolve + stamp the real academic year/term on every slot in the
+    // batch — Academic Year & Term Dependency Map, finding #6. Resolved
+    // once per distinct requested (academicYearId, termId) pair rather
+    // than once per slot (bulk payloads run up to 500 slots, and in
+    // practice every slot in a batch shares the same period — no client
+    // sends per-slot values today).
+    const periodCache = new Map();
+    async function _resolvedPeriod(academicYearId, termId) {
+      const key = `${academicYearId || ''}|${termId || ''}`;
+      if (!periodCache.has(key)) {
+        periodCache.set(key, await resolveAcademicPeriod(schoolId, tenantContext(req), { academicYearId, termId }));
+      }
+      return periodCache.get(key);
+    }
+    for (const s of data.slots) {
+      const period = await _resolvedPeriod(s.academicYearId, s.termId);
+      if (period.error) return E.badRequest(res, period.error);
+    }
+
     // Resolve section + times for each slot; cache by classId to avoid N+1
     const sectionCache = {};
     const toInsert = await Promise.all(data.slots.map(async s => {
@@ -1296,8 +1336,11 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('timetable', 'create'),
         const times = await _resolveSlotTimes(schoolId, section, s.period);
         if (times) { startTime = times.startTime; endTime = times.endTime; }
       }
+      const period = await _resolvedPeriod(s.academicYearId, s.termId);
       return {
         ...s, startTime, endTime,
+        academicYearId: period.academicYearId,
+        termId:         period.termId,
         section,
         id:        uuidv4(),
         schoolId,
@@ -1321,6 +1364,24 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('timetable', 'update'), a
 
     const current = await tenantModel('timetable', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!current) return E.notFound(res, 'Timetable slot not found');
+
+    // Academic Year & Term Dependency Map, finding #6 — unconditional (not
+    // just when the request touches academicYearId/termId), matching
+    // finance.js's/behaviour.js's fix for the identical gap: an edit that
+    // leaves the period untouched must still be blocked if the slot
+    // already belongs to an archived year.
+    if (await isYearArchived(schoolId, current.academicYearId)) {
+      return E.badRequest(res, `Academic year is locked — this timetable slot cannot be edited.`);
+    }
+    if (data.academicYearId !== undefined || data.termId !== undefined) {
+      const period = await resolveAcademicPeriod(schoolId, tenantContext(req), {
+        academicYearId: data.academicYearId !== undefined ? data.academicYearId : current.academicYearId,
+        termId:         data.termId         !== undefined ? data.termId         : current.termId,
+      });
+      if (period.error) return E.badRequest(res, period.error);
+      data.academicYearId = period.academicYearId;
+      data.termId          = period.termId;
+    }
 
     const merged = { ...current, ...data };
 
@@ -1358,7 +1419,18 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('timetable', 'update'), a
 router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('timetable', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await tenantModel('timetable', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
+    const Timetable = tenantModel('timetable', tenantContext(req));
+
+    // Academic Year & Term Dependency Map, finding #6 — looked up before
+    // deleting (not findOneAndDelete directly) so archival can be checked
+    // first, same pattern as finance.js's fee-structure delete.
+    const existing = await Timetable.findOne({ id: req.params.id, schoolId }).lean();
+    if (!existing) return E.notFound(res, 'Timetable slot not found');
+    if (await isYearArchived(schoolId, existing.academicYearId)) {
+      return E.badRequest(res, `Academic year is locked — this timetable slot cannot be deleted.`);
+    }
+
+    const doc = await Timetable.findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Timetable slot not found');
     return ok(res, { id: req.params.id, deleted: true });
   } catch (err) { console.error('[timetable DELETE /:id]', err); return E.serverError(res); }
