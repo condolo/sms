@@ -40,6 +40,7 @@ import useAuthStore from '@/store/auth.js';
 import { KpiCard }  from '@/components/ui/KpiCard.jsx';
 import DateRangeFilter, { computeDateRange, DEFAULT_RANGE, RANGE_PRESETS } from '@/components/ui/DateRangeFilter.jsx';
 import { useSchoolTheme, withOpacity } from '@/hooks/useSchoolTheme.js';
+import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
 
 /* ── Helpers ──────────────────────────────────────────────── */
 function greeting() {
@@ -135,7 +136,11 @@ export default function Dashboard() {
      Students, Active Enrolment, Students by Gender, Outstanding Fees
      balance — deliberately stay unfiltered; see their "current" labels. */
   const [range, setRange] = useState(DEFAULT_RANGE);
-  const { dateFrom, dateTo } = computeDateRange(range);
+  // "Year" resolves against the school's real current academic year, not a
+  // rolling 365-day window — see DateRangeFilter.jsx. Falls back to the old
+  // rolling behaviour while this is still loading or unconfigured.
+  const { year: currentAcademicYear } = useCurrentAcademicPeriod();
+  const { dateFrom, dateTo } = computeDateRange(range, currentAcademicYear?.startDate);
   const rangeLabel = RANGE_PRESETS.find(p => p.id === range)?.label ?? 'Month';
   // Attendance is no longer fixed to "today" — it follows the same global
   // filter as everything else, so its label needs to say which period it's
