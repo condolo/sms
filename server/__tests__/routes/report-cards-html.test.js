@@ -24,6 +24,7 @@ let mockSchoolDoc;
 let mockIncidentsAgg;
 let mockLastPointsReset;
 let mockAssessmentConfig = { customTypes: [], subjectTeacherCommentsEnabled: true };
+let mockInvoices = [];
 const mockAuditLogCreate = jest.fn().mockResolvedValue({});
 
 jest.mock('../../middleware/auth', () => ({
@@ -66,7 +67,7 @@ jest.mock('../../utils/tenant-model', () => ({
         }),
       };
     }
-    if (col === 'invoices') return { find: jest.fn(() => mockChain([])) };
+    if (col === 'invoices') return { find: jest.fn(() => mockChain(mockInvoices)) };
     if (col === 'mark_audit_log') return { create: mockAuditLogCreate };
     if (col === 'assessment_config') return { findOne: jest.fn(() => mockChain(mockAssessmentConfig)) };
     return { findOne: jest.fn(() => mockChain(null)), find: jest.fn(() => mockChain([])) };
@@ -138,6 +139,7 @@ beforeEach(() => {
   mockIncidentsAgg = [];
   mockLastPointsReset = [];
   mockAssessmentConfig = { customTypes: [], subjectTeacherCommentsEnabled: true };
+  mockInvoices = [];
 });
 
 describe('GET /api/report-cards/:id/html', () => {
@@ -204,6 +206,66 @@ describe('GET /api/report-cards/:id/html', () => {
     const res = await supertest(app).get('/report-cards/snap_1/html');
     expect(res.status).toBe(200);
     expect(res.body.data.html).toMatch(/Merits[\s\S]*?>5</);
+  });
+});
+
+/* ── Security Baseline Register, CFG-03 ────────────────────────
+   The fee-clearance gate's ?force=1 override used to be available to
+   ANY role that reaches _checkSnapshotAccess — including self-service
+   parent/student/guardian callers — with no authorization check and no
+   audit trail, despite the code's own comment saying "Admins and
+   force=1 always bypass" (i.e. force=1 was meant to be an admin-only
+   escape hatch, not a universal one). Fixed: force=1 now requires
+   admin/superadmin, is denied+audited otherwise, and is itself
+   audited when a genuine admin uses it. ───────────────────────── */
+describe('GET /:id/html — fee-clearance ?force=1 override (CFG-03)', () => {
+  function setUnpaidBelowThreshold() {
+    mockSchoolDoc = { ...mockSchoolDoc, portalConfig: { reportCardFeeThreshold: 100 } };
+    mockInvoices = [{ total: 1000, balance: 1000 }]; // 0% cleared, well below any threshold
+  }
+
+  test('a non-admin below the fee threshold is blocked (no force param)', async () => {
+    setUnpaidBelowThreshold();
+    mockCurrentUser = { schoolId: SCHOOL, role: 'student', studentId: 'stu_1', guardianOf: [] };
+    const app = buildApp();
+    const res = await supertest(app).get('/report-cards/snap_1/html');
+    expect(res.status).toBe(403);
+    expect(res.body.financialBlock).toBe(true);
+  });
+
+  test.each(['student', 'parent', 'guardian', 'teacher'])(
+    'role=%s sending ?force=1 is denied, not granted a bypass, and the attempt is audited',
+    async (role) => {
+      setUnpaidBelowThreshold();
+      mockCurrentUser = role === 'student'
+        ? { schoolId: SCHOOL, role, studentId: 'stu_1', guardianOf: [] }
+        : role === 'teacher'
+        ? { schoolId: SCHOOL, role, userId: 'u_t1', guardianOf: [] }
+        : { schoolId: SCHOOL, role, userId: 'u_g1', guardianOf: ['stu_1'] }; // parent/guardian, correctly linked
+      const app = buildApp();
+      const res = await supertest(app).get('/report-cards/snap_1/html?force=1');
+      expect(res.status).toBe(403);
+      expect(res.body.error?.message ?? res.body.error).toMatch(/administrator/i);
+      expect(mockAuditLogCreate).toHaveBeenCalledWith(expect.objectContaining({ action: 'FEE_CLEARANCE_OVERRIDE_DENIED', requestedRole: role }));
+    }
+  );
+
+  test('an admin is never blocked by fee status, with or without force=1', async () => {
+    setUnpaidBelowThreshold();
+    mockCurrentUser = { schoolId: SCHOOL, role: 'admin', userId: 'u_admin', guardianOf: [] };
+    const app = buildApp();
+    const res = await supertest(app).get('/report-cards/snap_1/html');
+    expect(res.status).toBe(200);
+    expect(mockAuditLogCreate).not.toHaveBeenCalledWith(expect.objectContaining({ action: 'FEE_CLEARANCE_OVERRIDDEN' }));
+  });
+
+  test('an admin explicitly using ?force=1 succeeds AND the override itself is audited', async () => {
+    setUnpaidBelowThreshold();
+    mockCurrentUser = { schoolId: SCHOOL, role: 'superadmin', userId: 'u_sa', guardianOf: [] };
+    const app = buildApp();
+    const res = await supertest(app).get('/report-cards/snap_1/html?force=1');
+    expect(res.status).toBe(200);
+    expect(mockAuditLogCreate).toHaveBeenCalledWith(expect.objectContaining({ action: 'FEE_CLEARANCE_OVERRIDDEN', requestedRole: 'superadmin', snapshotId: 'snap_1' }));
   });
 });
 

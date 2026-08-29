@@ -1652,9 +1652,50 @@ async function _checkSnapshotAccess(req, res, snap) {
     }
   }
 
-  // Fee clearance check — uses school-configurable threshold (default 100 = fully paid).
-  // Admins and force=1 always bypass. Threshold 0 means always accessible.
-  if (req.query.force !== '1' && !['admin', 'superadmin'].includes(role)) {
+  // Fee clearance check — uses school-configurable threshold (default 100 = fully
+  // paid). Admins always bypass. ?force=1 is a genuine, deliberate override —
+  // the comment that used to sit here said so explicitly ("Admins and force=1
+  // always bypass") — but the implementation granted it to ANY role that
+  // reaches this handler, including self-service parent/student/guardian
+  // callers via _pdfAccess's RESTRICTED_ROLES bypass, with no authorization
+  // check and no audit trail. No caller anywhere in this codebase has ever
+  // actually sent force=1 (grepped the whole client — zero hits), so nothing
+  // relies on the old, open behavior. Security Baseline Register, CFG-03.
+  const isAdmin = ['admin', 'superadmin'].includes(role);
+  const forced  = req.query.force === '1';
+
+  if (forced && !isAdmin) {
+    tenantModel('mark_audit_log', tenantContext(req)).create({
+      action:          'FEE_CLEARANCE_OVERRIDE_DENIED',
+      schoolId,
+      requestedBy:     userId,
+      requestedRole:   role,
+      targetStudentId: snap.studentId,
+      snapshotId:      snap.id,
+      route:           req.method + ' ' + req.baseUrl + req.path,
+      timestamp:       new Date().toISOString(),
+    }).catch(e => console.error('[report-cards] fee-override-denied audit log failed:', e.message));
+    E.forbidden(res, 'Only an administrator can override the fee-clearance requirement.');
+    return false;
+  }
+
+  if (isAdmin) {
+    if (forced) {
+      // The override was explicitly invoked, not just implied by role — worth
+      // its own audit trail distinct from an admin's routine download, which
+      // never needed the fee check to begin with.
+      tenantModel('mark_audit_log', tenantContext(req)).create({
+        action:          'FEE_CLEARANCE_OVERRIDDEN',
+        schoolId,
+        requestedBy:     userId,
+        requestedRole:   role,
+        targetStudentId: snap.studentId,
+        snapshotId:      snap.id,
+        route:           req.method + ' ' + req.baseUrl + req.path,
+        timestamp:       new Date().toISOString(),
+      }).catch(e => console.error('[report-cards] fee-override audit log failed:', e.message));
+    }
+  } else {
     try {
       const school    = await _model('schools').findOne({ id: schoolId }, { 'portalConfig.reportCardFeeThreshold': 1 }).lean();
       const threshold = school?.portalConfig?.reportCardFeeThreshold ?? 100;

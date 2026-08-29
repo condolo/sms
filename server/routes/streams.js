@@ -12,6 +12,8 @@ const { v4: uuidv4 } = require('uuid');
 const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
+const { scopeMiddleware } = require('../middleware/scopeMiddleware');
+const ScopeEngine         = require('../utils/scopeEngine');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
@@ -110,7 +112,7 @@ router.get('/:id', authMiddleware, PLAN, rbac('classes', 'read'), async (req, re
 });
 
 /* ── GET /api/streams/:id/students ─ Students in this stream ─── */
-router.get('/:id/students', authMiddleware, PLAN, rbac('students', 'read'), async (req, res) => {
+router.get('/:id/students', authMiddleware, PLAN, rbac('students', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -122,6 +124,14 @@ router.get('/:id/students', authMiddleware, PLAN, rbac('students', 'read'), asyn
       try { stream = await Streams.findOne({ _id: new mongoose.Types.ObjectId(paramId), schoolId }).lean(); } catch { /* ignore */ }
     }
     if (!stream) return E.notFound(res, 'Stream not found');
+
+    // Security Baseline Register, AUTHZ-28 — identical gap to classes.js's
+    // GET /:id/students (AUTHZ-27): no scope check at all. A stream belongs
+    // to one parent class (stream.classId), so scope is checked against
+    // that, the same field a teacher's assignment scope is actually keyed on.
+    if (!ScopeEngine.isClassInScope(req, 'students', stream.classId)) {
+      return E.forbidden(res, 'This class is not in your assigned scope.');
+    }
 
     const Students = tenantModel('students', tenantContext(req));
     // Match students stored under ANY identifier form of this stream —

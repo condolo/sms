@@ -151,7 +151,7 @@ router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('classes', 'read'), async
 });
 
 /* ── GET /api/classes/:id/students ─ Students in a class ─────── */
-router.get('/:id/students', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), async (req, res) => {
+router.get('/:id/students', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -164,6 +164,16 @@ router.get('/:id/students', authMiddleware, PLAN, MODGATE, rbac('students', 'rea
       try { cls = await Classes.findOne({ _id: new mongoose.Types.ObjectId(pId), schoolId }).lean(); } catch { /* ignore */ }
     }
     if (!cls) return E.notFound(res, 'Class not found');
+
+    // Security Baseline Register, AUTHZ-27 — this route had no scope check at
+    // all, unlike GET /api/students (the list route for the same underlying
+    // data), which correctly enforces ScopeEngine.applyToFilter. A teacher
+    // restricted to their own assigned classes on the list endpoint could
+    // still pull any class's full roster — including parent contact PII — by
+    // id here. Live-confirmed against production before this fix.
+    if (!ScopeEngine.isClassInScope(req, 'students', cls.id)) {
+      return E.forbidden(res, 'This class is not in your assigned scope.');
+    }
 
     const Students = tenantModel('students', tenantContext(req));
     // Match students stored under ANY identifier form of this class —
