@@ -10,7 +10,8 @@
    ============================================================ */
 
 jest.mock('../../middleware/auth', () => ({
-  platformSession: (req, _res, next) => next(),
+  platformSession: (req, _res, next) => { req.platformOperatorTier = 'owner'; next(); },
+  requireOwnerTier: (req, _res, next) => next(),
 }));
 jest.mock('../../middleware/plan', () => ({ invalidatePlanCache: jest.fn() }));
 const mockInvalidatePermCache = jest.fn();

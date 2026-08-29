@@ -89,7 +89,22 @@ function platformAdmin(req, res, next) {
 }
 
 /* Platform session middleware — verifies the HttpOnly platform_token cookie.
-   Issued by POST /api/platform/auth/login; separate from school JWT. */
+   Issued by POST /api/platform/auth/login; separate from school JWT.
+
+   Security Baseline Register, PLAT-01 — accepts two token shapes:
+     sub: 'platform-operator' — issued for a named platform_operators
+       account (the normal path once any operator exists). Carries a
+       real identity (operatorId/name/email) and a tier ('support' |
+       'owner'), exposed as req.platformOperator / req.platformOperatorTier
+       for routes that need to distinguish them (see requireOwnerTier
+       below).
+     sub: 'platform-admin' — the legacy shared-credential token,
+       issued only while platform_operators is empty (see the login
+       route's bootstrap-safety comment). Treated as owner-tier with no
+       real identity behind it, same as it always implicitly was.
+   req.platformAdmin stays a plain boolean for either shape, unchanged,
+   so ops.js/audit.js/billing.js's existing "is this a platform
+   operator at all" checks need no changes. */
 function platformSession(req, res, next) {
   const token  = req.cookies?.platform_token;
   const secret = process.env.PLATFORM_JWT_SECRET;
@@ -103,12 +118,31 @@ function platformSession(req, res, next) {
   }
   try {
     const payload = jwt.verify(token, secret);
-    if (payload.sub !== 'platform-admin') throw new Error('invalid subject');
-    req.platformAdmin = true;
+    if (payload.sub === 'platform-operator') {
+      req.platformAdmin = true;
+      req.platformOperator = { id: payload.operatorId, name: payload.name, email: payload.email, tier: payload.tier };
+      req.platformOperatorTier = payload.tier;
+    } else if (payload.sub === 'platform-admin') {
+      req.platformAdmin = true;
+      req.platformOperator = null;
+      req.platformOperatorTier = 'owner'; // legacy shared credential — always full access, as it always implicitly was
+    } else {
+      throw new Error('invalid subject');
+    }
     next();
   } catch {
     return res.status(401).json({ success: false, error: { code: 'PLATFORM_SESSION_EXPIRED', message: 'Platform session expired. Please sign in again.' } });
   }
 }
 
-module.exports = { authMiddleware, platformAdmin, platformSession };
+/* Owner-tier gate — layered on top of platformSession. A support-tier
+   operator can reach any platformSession-gated route that doesn't also
+   require this; owner-tier is required for anything mutating or
+   otherwise sensitive. See platform.js's router-level wiring for which
+   routes that covers. */
+function requireOwnerTier(req, res, next) {
+  if (req.platformOperatorTier === 'owner') return next();
+  return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'This action requires owner-tier platform access.' } });
+}
+
+module.exports = { authMiddleware, platformAdmin, platformSession, requireOwnerTier };

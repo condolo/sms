@@ -9,7 +9,7 @@ const bcrypt     = require('bcryptjs');
 const jwt        = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const rateLimit  = require('express-rate-limit');
-const { platformSession } = require('../middleware/auth');
+const { platformSession, requireOwnerTier } = require('../middleware/auth');
 const { invalidatePlanCache } = require('../middleware/plan');
 const { invalidatePermCache }  = require('../middleware/rbac');
 const { revokeUserTokens, revokeIdentityTokens } = require('../utils/token-version');
@@ -77,48 +77,91 @@ const _loginLimiter = rateLimit({
   message: { success: false, error: { code: 'RATE_LIMIT', message: 'Too many failed login attempts. Please wait 15 minutes before trying again.' } },
 });
 
-/* POST /api/platform/auth/login */
+/* POST /api/platform/auth/login
+   Security Baseline Register, PLAT-01 — this used to check ONE shared
+   username/password pair from env vars, with no per-operator identity
+   at all: the resulting session was a bare boolean (req.platformAdmin
+   = true), and every audit entry for every platform action, by every
+   person who ever used that one credential, was hardcoded to the
+   literal actor {userId:'platform', role:'platform', email:null} —
+   Msingi itself could not tell which of its own staff did something,
+   even internally (PLAT-04).
+
+   Now checks the platform_operators collection first — real, named,
+   individually-revocable accounts with a tier (support: read-only;
+   owner: full access, enforced by requireOwnerTier below). The legacy
+   env-var credential still works, but ONLY as a bootstrap path: the
+   moment a single active operator exists in platform_operators, the
+   env-var path stops being checked at all, permanently — see the
+   bootstrap-safety comment further down. Run
+   scripts/create-platform-operator.js to create the first (owner-tier)
+   operator; there is no live MongoDB in this environment, so that
+   script has not been run against production from here — the env-var
+   credential keeps working exactly as before until it is. */
 router.post('/auth/login', _loginLimiter, async (req, res) => {
   const { username, password } = req.body || {};
+  const secret = process.env.PLATFORM_JWT_SECRET || '';
 
-  const expectedUser = process.env.PLATFORM_ADMIN_USER      || '';
-  const passHash     = process.env.PLATFORM_ADMIN_PASS_HASH || '';
-  const secret       = process.env.PLATFORM_JWT_SECRET      || '';
-
-  if (!expectedUser || !passHash || !secret) {
-    console.error('[platform/login] Missing env vars: PLATFORM_ADMIN_USER, PLATFORM_ADMIN_PASS_HASH, PLATFORM_JWT_SECRET');
+  if (!secret) {
+    console.error('[platform/login] Missing env var: PLATFORM_JWT_SECRET');
     return res.status(503).json({ success: false, error: { code: 'MISCONFIGURED', message: 'Platform admin credentials are not configured on this server.' } });
   }
-
   if (!username || !password) {
     return res.status(401).json({ success: false, error: { code: 'INVALID_CREDENTIALS', message: 'Username and password are required.' } });
   }
 
-  // Constant-time username comparison (pad to same length to avoid length oracle)
-  const uBuf  = Buffer.from(username.trim());
-  const eBuf  = Buffer.from(expectedUser);
-  const len   = Math.max(uBuf.length, eBuf.length, 1);
-  const uPad  = Buffer.concat([uBuf, Buffer.alloc(len - uBuf.length)]);
-  const ePad  = Buffer.concat([eBuf, Buffer.alloc(len - eBuf.length)]);
-  const userMatch = crypto.timingSafeEqual(uPad, ePad) && uBuf.length === eBuf.length;
+  const loginEmail = username.trim().toLowerCase();
+  const Operators  = _model('platform_operators');
 
-  // bcrypt.compare is inherently constant-time
-  const passMatch = await bcrypt.compare(password, passHash);
+  // Bootstrap-safety: the legacy env-var path is only ever consulted when
+  // NO operator exists yet — once the first one is created, this branch is
+  // structurally unreachable, with no separate "now delete the old code"
+  // deployment step required. Checked before the operator lookup so an
+  // empty collection never even attempts a (guaranteed-empty) query below.
+  const anyOperatorExists = await Operators.exists({ isActive: true });
 
-  if (!userMatch || !passMatch) {
-    AuditService.log({ action: 'platform.login.failed', actor: { userId: 'platform', role: 'platform', email: null }, schoolId: null, target: { type: 'platform', id: null, label: 'platform-admin' }, details: { attemptedUser: (username || '').slice(0, 32) }, req });
+  if (!anyOperatorExists) {
+    const expectedUser = process.env.PLATFORM_ADMIN_USER      || '';
+    const passHash     = process.env.PLATFORM_ADMIN_PASS_HASH || '';
+    if (!expectedUser || !passHash) {
+      console.error('[platform/login] No platform operators exist yet, and PLATFORM_ADMIN_USER/PLATFORM_ADMIN_PASS_HASH are also unset.');
+      return res.status(503).json({ success: false, error: { code: 'MISCONFIGURED', message: 'Platform admin credentials are not configured on this server.' } });
+    }
+
+    // Constant-time username comparison (pad to same length to avoid length oracle)
+    const uBuf  = Buffer.from(username.trim());
+    const eBuf  = Buffer.from(expectedUser);
+    const len   = Math.max(uBuf.length, eBuf.length, 1);
+    const uPad  = Buffer.concat([uBuf, Buffer.alloc(len - uBuf.length)]);
+    const ePad  = Buffer.concat([eBuf, Buffer.alloc(len - eBuf.length)]);
+    const userMatch = crypto.timingSafeEqual(uPad, ePad) && uBuf.length === eBuf.length;
+    const passMatch = await bcrypt.compare(password, passHash); // inherently constant-time
+
+    if (!userMatch || !passMatch) {
+      AuditService.log({ action: 'platform.login.failed', actor: { userId: 'platform', role: 'platform', email: null }, schoolId: null, target: { type: 'platform', id: null, label: 'platform-admin' }, details: { attemptedUser: (username || '').slice(0, 32), authPath: 'legacy-env-credential' }, req });
+      return res.status(401).json({ success: false, error: { code: 'INVALID_CREDENTIALS', message: 'Invalid username or password.' } });
+    }
+
+    const token = jwt.sign({ sub: 'platform-admin' }, secret, { expiresIn: '2h' });
+    res.cookie('platform_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 2 * 60 * 60 * 1000 });
+    AuditService.log({ action: 'platform.login.success', actor: { userId: 'platform', role: 'platform', email: null }, schoolId: null, target: { type: 'platform', id: null, label: 'platform-admin' }, details: { authPath: 'legacy-env-credential' }, req });
+    return res.json({ success: true });
+  }
+
+  // Named-operator path.
+  const operator = await Operators.findOne({ email: loginEmail, isActive: true }).lean();
+  const passMatch = operator ? await bcrypt.compare(password, operator.passwordHash) : await bcrypt.compare(password, '$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvali'); // dummy hash — keeps timing similar whether or not the email matched, same principle as the legacy path's constant-time compare
+
+  if (!operator || !passMatch) {
+    AuditService.log({ action: 'platform.login.failed', actor: { userId: 'platform', role: 'platform', email: null }, schoolId: null, target: { type: 'platform', id: null, label: 'platform-admin' }, details: { attemptedUser: (username || '').slice(0, 64), authPath: 'operator' }, req });
     return res.status(401).json({ success: false, error: { code: 'INVALID_CREDENTIALS', message: 'Invalid username or password.' } });
   }
 
-  const token = jwt.sign({ sub: 'platform-admin' }, secret, { expiresIn: '2h' });
-  res.cookie('platform_token', token, {
-    httpOnly: true,
-    secure:   process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
-    maxAge:   2 * 60 * 60 * 1000,
-  });
+  const token = jwt.sign({ sub: 'platform-operator', operatorId: operator.id, name: operator.name, email: operator.email, tier: operator.tier }, secret, { expiresIn: '2h' });
+  res.cookie('platform_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 2 * 60 * 60 * 1000 });
+  await Operators.updateOne({ id: operator.id }, { $set: { lastLoginAt: new Date().toISOString() } });
 
-  AuditService.log({ action: 'platform.login.success', actor: { userId: 'platform', role: 'platform', email: null }, schoolId: null, target: { type: 'platform', id: null, label: 'platform-admin' }, details: {}, req });
+  AuditService.log({ action: 'platform.login.success', actor: { userId: operator.id, role: `platform_${operator.tier}`, email: operator.email }, schoolId: null, target: { type: 'platform', id: null, label: 'platform-admin' }, details: { authPath: 'operator', tier: operator.tier }, req });
   return res.json({ success: true });
 });
 
@@ -131,12 +174,39 @@ router.post('/auth/logout', (req, res) => {
 // All routes below require a valid platform session cookie
 router.use(platformSession);
 
+// Security Baseline Register, PLAT-01 — support-tier operators may reach any
+// read-only (GET) route below, matching the register's own stated scope
+// ("support can view schools/metadata/billing but cannot impersonate,
+// delete a school, or grant entitlements"). Every mutating verb requires
+// owner tier, gated once here rather than needing to be individually added
+// to ~35 route registrations. The legacy shared-credential token is always
+// owner-tier (see platformSession), so this changes nothing for it.
+router.use((req, res, next) => {
+  if (req.method === 'GET') return next();
+  return requireOwnerTier(req, res, next);
+});
+
 function _model(col) {
   const name = col.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
                   .replace(/^./, c => c.toUpperCase()) + 'Doc';
   if (mongoose.models[name]) return mongoose.models[name];
   const schema = new mongoose.Schema({}, { strict: false, timestamps: true });
   return mongoose.model(name, schema, col);
+}
+
+/* Security Baseline Register, PLAT-04 — falls out of PLAT-01 rather than
+   being fixed separately: every AuditService.log call in this file used to
+   hardcode actor:{userId:'platform',role:'platform',email:null}, so Msingi
+   itself could never tell which of its own staff performed a given action,
+   even internally. Now attributes to the real, named operator when the
+   session has one (req.platformOperator, set by platformSession); falls
+   back to the old generic actor only for the legacy shared-credential
+   token, which genuinely has no real identity behind it. */
+function _platformActor(req) {
+  if (req.platformOperator) {
+    return { userId: req.platformOperator.id, role: `platform_${req.platformOperator.tier}`, email: req.platformOperator.email };
+  }
+  return { userId: 'platform', role: 'platform', email: null };
 }
 
 /* GET /api/platform/schools — list all schools with stats */
@@ -347,7 +417,7 @@ router.post('/schools/:id/superadmins', async (req, res) => {
     }
 
     await AuditService.log({
-      action: 'platform.superadmin_added', actor: { userId: 'platform', role: 'platform', email: null },
+      action: 'platform.superadmin_added', actor: _platformActor(req),
       schoolId: school.id, target: { type: 'user', id: userId }, details: { email, schoolName: school.name }, req,
     });
 
@@ -449,7 +519,7 @@ router.post('/schools/:id/superadmins/:userId/reset-password', async (req, res) 
     }
 
     await AuditService.log({
-      action: 'platform.superadmin_password_reset', actor: { userId: 'platform', role: 'platform', email: null },
+      action: 'platform.superadmin_password_reset', actor: _platformActor(req),
       schoolId: school.id, target: { type: 'user', id: _resetTargetId, label: target.email },
       details: { schoolName: school.name }, req,
     });
@@ -714,7 +784,7 @@ router.post('/organizations/:id/director', async (req, res) => {
     invalidatePermCache(anchorSchool.id);
 
     await AuditService.log({
-      action: 'platform.group_director_added', actor: { userId: 'platform', role: 'platform', email: null },
+      action: 'platform.group_director_added', actor: _platformActor(req),
       schoolId: anchorSchool.id, target: { type: 'user', id: userId },
       details: { email, organizationId: org.id, organizationName: org.name, anchorSchool: anchorSchool.name }, req,
     });
@@ -802,7 +872,7 @@ router.post('/organizations/:id/enable-multi-school', async (req, res) => {
 
     AuditService.log({
       action: 'platform.organization.multi_school_enabled',
-      actor:  { userId: 'platform', role: 'platform', email: null },
+      actor:  _platformActor(req),
       schoolId: null,
       target: { type: 'organization', id: org.id, label: org.name },
       details: {},
@@ -832,7 +902,7 @@ router.post('/organizations/:id/disable-multi-school', async (req, res) => {
 
     AuditService.log({
       action: 'platform.organization.multi_school_disabled',
-      actor:  { userId: 'platform', role: 'platform', email: null },
+      actor:  _platformActor(req),
       schoolId: null,
       target: { type: 'organization', id: org.id, label: org.name },
       details: {},
@@ -851,7 +921,11 @@ router.post('/organizations/:id/disable-multi-school', async (req, res) => {
    Used by the "Link Identity" flow to find an existing person before
    granting them access to a second school. Strips credentials/MFA/token
    fields — this is platform-admin tooling, not a general user lookup. */
-router.get('/users/search', async (req, res) => {
+// Owner-tier despite being a GET — searches PII (name/email/role/school)
+// across every school in the platform, a materially different exposure
+// than "view a school's metadata" (Security Baseline Register, PLAT-05
+// classified this as sensitive independent of PLAT-01).
+router.get('/users/search', requireOwnerTier, async (req, res) => {
   try {
     const email = (req.query.email || '').trim();
     if (!email || email.length < 3) {
@@ -959,7 +1033,7 @@ router.post('/memberships', async (req, res) => {
 
     AuditService.log({
       action: 'platform.membership.grant',
-      actor:  { userId: 'platform', role: 'platform', email: null },
+      actor:  _platformActor(req),
       schoolId,
       target: { type: 'user', id: userId, label: user.email },
       details: { grantedSchoolId: schoolId, orgId: targetOrgId },
@@ -1169,7 +1243,7 @@ router.post('/schools/:id/entitlements', async (req, res) => {
 
     AuditService.log({
       action: 'platform.entitlement.grant',
-      actor:  { userId: 'platform', role: 'platform', email: null },
+      actor:  _platformActor(req),
       schoolId,
       target: { type: 'school', id: schoolId, label: school.name },
       details: { key, expiresAt: expiresAt || null },
@@ -1208,7 +1282,7 @@ router.delete('/schools/:id/entitlements/:key', async (req, res) => {
 
     AuditService.log({
       action: 'platform.entitlement.revoke',
-      actor:  { userId: 'platform', role: 'platform', email: null },
+      actor:  _platformActor(req),
       schoolId,
       target: { type: 'school', id: schoolId, label: school.name },
       details: { key },
@@ -1298,7 +1372,7 @@ router.post('/schools/:id/impersonate', async (req, res) => {
     const token = sign(tokenPayload);
     const availableSchools = await authRouter._availableSchools(tokenPayload);
 
-    AuditService.log({ action: 'platform.impersonate', actor: { userId: 'platform', role: 'platform', email: null }, schoolId: resolvedSchoolId, target: { type: 'school', id: resolvedSchoolId, label: school.name }, details: { targetEmail: admin.email, reason, impersonationId }, req });
+    AuditService.log({ action: 'platform.impersonate', actor: _platformActor(req), schoolId: resolvedSchoolId, target: { type: 'school', id: resolvedSchoolId, label: school.name }, details: { targetEmail: admin.email, reason, impersonationId }, req });
 
     /* Set HttpOnly cookie so the React SPA's authMiddleware accepts subsequent requests */
     res.cookie('token', token, {
@@ -1453,7 +1527,7 @@ router.delete('/schools/all', async (req, res) => {
     toPurge.forEach(s => {
       AuditService.log({
         action: 'platform.school_deleted',
-        actor:  { userId: 'platform', role: 'platform', email: null },
+        actor:  _platformActor(req),
         schoolId: s.id || s._id?.toString(),
         target: { type: 'school', id: s.id || s._id?.toString(), label: s.name },
         details: { slug: s.slug, adminEmail: s.adminEmail, bulkWipe: true, totalWiped: toPurge.length },
@@ -1515,7 +1589,7 @@ router.delete('/schools/:id', async (req, res) => {
     // that alert could never fire because this code path never called it.
     AuditService.log({
       action: 'platform.school_deleted',
-      actor:  { userId: 'platform', role: 'platform', email: null },
+      actor:  _platformActor(req),
       schoolId: school.id || school._id?.toString(),
       target: { type: 'school', id: school.id || school._id?.toString(), label: school.name },
       details: { slug: school.slug, adminEmail: school.adminEmail },
@@ -1937,7 +2011,9 @@ router.delete('/orphans', async (req, res) => {
 });
 
 /* GET /api/platform/test-email — verify SMTP is working (sends a test email to PLATFORM_EMAIL) */
-router.get('/test-email', async (req, res) => {
+// Owner-tier despite being a GET — this sends a real email (a side effect,
+// not a read) and discloses partial SMTP credential configuration.
+router.get('/test-email', requireOwnerTier, async (req, res) => {
   const smtpUser    = process.env.SMTP_USER;
   const smtpPass    = process.env.SMTP_PASS;
   const platformAddr = process.env.PLATFORM_EMAIL || smtpUser;
