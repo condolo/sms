@@ -246,9 +246,25 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
         portalConfig: school?.portalConfig || null,
       },
       attendance:       attSummary,
-      feeBalance,
-      feeClearancePct,
-      nextFeeDueDate:   nextDueInvoice?.dueDate ?? null,
+      // Security Baseline Register, CFG-09 — school.portalConfig.
+      // studentCanSeeFees is a real Settings toggle ("When off, students
+      // cannot see their fee balance") that was previously read by
+      // nothing at all, server or client: this route always returned the
+      // fee fields regardless of the setting, and the client never even
+      // checked it. Defaults to visible (!== false) unless a school has
+      // explicitly turned it off, matching the toggle's own stated
+      // default. Gated at the response, not the query, since a school
+      // could flip this at any time and every other consumer of these
+      // already-computed values in this function is unaffected.
+      ...(school?.portalConfig?.studentCanSeeFees !== false ? {
+        feeBalance,
+        feeClearancePct,
+        nextFeeDueDate: nextDueInvoice?.dueDate ?? null,
+      } : {
+        feeBalance: null,
+        feeClearancePct: null,
+        nextFeeDueDate: null,
+      }),
       lessonsCoverage,
       timetableToday,
       reportCards,

@@ -225,9 +225,15 @@ export default function StudentDashboard() {
     ? Math.round(lessonsCoverage.reduce((sum, s) => sum + s.percentage, 0) / lessonsCoverage.length)
     : (reportCards[0]?.averageScore ?? null);
 
-  /* Fee display */
-  const feePaid    = feeBalance <= 0;
-  const feeDisplay = feePaid ? 'Cleared' : `KSh ${(feeBalance ?? 0).toLocaleString()}`;
+  /* Fee display — feeBalance is null when portalConfig.studentCanSeeFees
+     is off (Security Baseline Register, CFG-09); null <= 0 is true in JS,
+     which previously made an unpaid-but-hidden balance render as "Cleared"
+     the moment the server started correctly withholding it. Currently
+     unused in this file's JSX, but fixed here rather than left wrong for
+     whoever reaches for it next. */
+  const feesVisible = feeBalance !== null;
+  const feePaid     = feesVisible && feeBalance <= 0;
+  const feeDisplay  = !feesVisible ? null : feePaid ? 'Cleared' : `KSh ${feeBalance.toLocaleString()}`;
 
   /* Behaviour */
   const { totalPoints = 0, badgeLevel } = behaviourSummary ?? {};
