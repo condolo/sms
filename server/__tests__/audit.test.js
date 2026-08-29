@@ -188,6 +188,74 @@ describe('AuditService.log — membership/org enrichment', () => {
   });
 });
 
+/* ── Security Baseline Register, PLAT-03 ────────────────────────
+   Every action logged during an impersonated session must preserve
+   BOTH identities: the impersonated user's own userId/role/email
+   (unchanged — that's who the action legitimately shows as having
+   been performed by, same as today) AND the fact that this was an
+   impersonated session, correlated back to the specific grant via
+   impersonationId. Before this fix, actor.impersonated was set on
+   the session's JWT at grant time but never read by AuditService.log
+   — every action during an impersonated session was recorded
+   identically to one performed by the real school admin, with no way
+   to tell the two apart. ───────────────────────────────────────── */
+describe('AuditService.log — impersonation identity propagation (PLAT-03)', () => {
+  test('an action logged during an impersonated session preserves the impersonated user\'s own identity AND marks the session as impersonated', async () => {
+    // Shape matches req.jwtUser for a session issued by platform.js's
+    // impersonate route: the IMPERSONATED admin's real identity, plus the
+    // two fields that route now stamps onto the token at grant time.
+    await AuditService.log({
+      action: 'finance.invoice_voided',
+      actor: {
+        userId: 'usr_admin1', role: 'superadmin', email: 'admin@trinitas-tis.example',
+        impersonated: true, impersonationId: 'imp_5f3a2b1c',
+      },
+      schoolId: 'sch_trinitas',
+      target: { type: 'invoice', id: 'inv_1' },
+    });
+
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: expect.objectContaining({
+          // identity 1 — the impersonated admin, exactly as an ordinary
+          // (non-impersonated) action from this same account would show
+          userId: 'usr_admin1', role: 'superadmin', email: 'admin@trinitas-tis.example',
+          // identity 2 — the impersonation itself, now visible, correlated
+          // back to the platform.impersonate grant that has who/why/when
+          impersonated: true, impersonationId: 'imp_5f3a2b1c',
+        }),
+      })
+    );
+  });
+
+  test('an ordinary (non-impersonated) session never gets impersonation fields on its audit entries', async () => {
+    await AuditService.log({
+      action: 'finance.invoice_voided',
+      actor: { userId: 'usr_admin1', role: 'superadmin', email: 'admin@trinitas-tis.example' },
+      schoolId: 'sch_trinitas',
+    });
+
+    const written = mockCreate.mock.calls[0][0];
+    expect(written.actor).not.toHaveProperty('impersonated');
+    expect(written.actor).not.toHaveProperty('impersonationId');
+  });
+
+  test('every subsequent action in the SAME impersonated session carries the SAME impersonationId, enabling correlation across the whole session', async () => {
+    const impersonatedActor = {
+      userId: 'usr_admin1', role: 'superadmin', email: 'admin@trinitas-tis.example',
+      impersonated: true, impersonationId: 'imp_session_77',
+    };
+    await AuditService.log({ action: 'finance.invoice_voided', actor: impersonatedActor, schoolId: 'sch_trinitas', target: { type: 'invoice', id: 'inv_1' } });
+    await AuditService.log({ action: 'hr.payroll_deleted',     actor: impersonatedActor, schoolId: 'sch_trinitas', target: { type: 'payroll', id: 'pr_1' } });
+
+    const written1 = mockCreate.mock.calls[0][0];
+    const written2 = mockCreate.mock.calls[1][0];
+    expect(written1.actor.impersonationId).toBe('imp_session_77');
+    expect(written2.actor.impersonationId).toBe('imp_session_77');
+    expect(written1.actor.impersonationId).toBe(written2.actor.impersonationId);
+  });
+});
+
 describe('AuditService.query — new filters', () => {
   test('applies correlationId/orgId/membershipId to the Mongo filter when provided', async () => {
     await AuditService.query({ correlationId: 'corr_1', orgId: 'org_1', membershipId: 'mem_1' });

@@ -219,6 +219,18 @@ async function log({ action, actor, schoolId, target, details, severity, req } =
         userId,
         role:    actor?.role     ?? null,
         email:   actor?.email    ?? null,
+        // Security Baseline Register, PLAT-03 — preserves BOTH identities
+        // for any action logged during an impersonated session: `userId`/
+        // `role`/`email` above still show the impersonated school admin
+        // (unchanged, exactly as before), while these two fields make the
+        // impersonation itself visible instead of invisible, and correlate
+        // this entry back to the platform.impersonate grant that has who
+        // requested it, which school, when, and why. `actor` here is
+        // req.jwtUser at virtually every call site already — this reads
+        // whatever that session's JWT already carries (set once, at grant
+        // time, in platform.js's impersonate route) rather than requiring
+        // every existing call site to be touched individually.
+        ...(actor?.impersonated ? { impersonated: true, impersonationId: actor?.impersonationId ?? null } : {}),
       },
       target: target ?? null,
       details: details ?? null,

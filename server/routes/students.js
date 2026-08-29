@@ -475,7 +475,7 @@ router.delete('/purge', authMiddleware, PLAN, MODGATE, rbac('students', 'delete'
         { id: { $in: ids } },
         ...(validObjectIds.length ? [{ _id: { $in: validObjectIds } }] : []),
       ],
-    }).select('id _id').lean();
+    }).select('id _id firstName lastName').lean();
 
     if (found.length === 0) {
       console.warn(`[students/purge] No students found. schoolId=${schoolId} requested ids=${JSON.stringify(ids.slice(0, 5))}`);
@@ -493,6 +493,33 @@ router.delete('/purge', authMiddleware, PLAN, MODGATE, rbac('students', 'delete'
         Payments.deleteMany({ studentId: { $in: customIds }, schoolId }),
       ] : []),
     ]);
+
+    // Security Baseline Register, AUD-04 — this route deleted students (plus
+    // their invoices and payments) permanently and irreversibly with only a
+    // console.log, unlike the single-record DELETE /:id above, which calls
+    // AuditService.log and is registered in ALERT_ACTIONS (webhook alerting)
+    // for exactly this action. The webhook built specifically to catch
+    // student deletions never fired for a bulk purge. Reuses the SAME
+    // action name ('student.deleted') the single-delete route already uses
+    // — not a new action — so the existing ALERT_ACTIONS lookup and any
+    // downstream consumer that already filters by that action name picks
+    // this up with no separate wiring. One combined entry for the whole
+    // batch, not one per student, matching this codebase's existing
+    // convention for bulk operations (e.g. finance.js's
+    // 'finance.bulk_invoices_generated') rather than firing up to 200
+    // separate webhook deliveries for one request.
+    AuditService.log({
+      action: 'student.deleted',
+      actor:  req.jwtUser,
+      schoolId,
+      target: { type: 'student', id: 'bulk', label: `${found.length} student(s) (bulk purge)` },
+      details: {
+        count: found.length,
+        requested: ids.length,
+        students: found.map(s => ({ id: s.id ?? String(s._id), name: `${s.firstName ?? ''} ${s.lastName ?? ''}`.trim() })),
+      },
+      req,
+    });
 
     console.log(`[students/purge] ${userId} permanently deleted ${found.length} student(s) in school ${schoolId}`);
     return ok(res, { deleted: found.length, requested: ids.length });

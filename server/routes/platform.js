@@ -7,6 +7,7 @@ const crypto     = require('crypto');
 const mongoose   = require('mongoose');
 const bcrypt     = require('bcryptjs');
 const jwt        = require('jsonwebtoken');
+const { v4: uuidv4 } = require('uuid');
 const rateLimit  = require('express-rate-limit');
 const { platformSession } = require('../middleware/auth');
 const { invalidatePlanCache } = require('../middleware/plan');
@@ -1228,6 +1229,18 @@ router.post('/schools/:id/impersonate', async (req, res) => {
     return res.status(403).json({ error: 'Impersonation is disabled in production. Set ALLOW_IMPERSONATION=true to enable.' });
   }
 
+  // Security Baseline Register, PLAT-02 — this route previously never read
+  // req.body at all: no reason/justification was accepted or recorded for
+  // an action that grants full impersonated access to a school's superadmin
+  // account. Requiring and persisting one is a real, enforceable minimum —
+  // an operator must state why — matching the "reason required" pattern
+  // already used elsewhere in this codebase (e.g. mark-submissions.js's
+  // unlock-request flow) rather than inventing a new convention.
+  const reason = (req.body?.reason || '').trim();
+  if (!reason) {
+    return res.status(400).json({ error: 'A reason is required to impersonate a school.' });
+  }
+
   try {
     const School   = _model('schools');
     // Not tenantModel(): same email-fallback reasoning as /approve above —
@@ -1268,10 +1281,24 @@ router.post('/schools/:id/impersonate', async (req, res) => {
     const authRouter    = require('./auth');
     const tokenPayload  = await authRouter._buildTokenPayload(admin, resolvedSchoolId);
     tokenPayload.impersonated = true;
+    // Security Baseline Register, PLAT-03 — a fresh id per impersonation
+    // grant, carried on the token for the impersonated session's entire
+    // lifetime. AuditService.log() (see server/services/audit.js) reads
+    // actor.impersonated/actor.impersonationId off whatever `actor` object
+    // a call site passes — which is req.jwtUser at virtually every call
+    // site already — so every security-sensitive action taken during this
+    // session (voiding an invoice, editing payroll, anything) is now
+    // automatically tagged as impersonated and correlated back to THIS
+    // exact grant: who requested it, which school, when, and why (reason,
+    // logged below). Preserves both identities without requiring every one
+    // of this codebase's ~50+ existing AuditService.log call sites to be
+    // individually touched.
+    const impersonationId = uuidv4();
+    tokenPayload.impersonationId = impersonationId;
     const token = sign(tokenPayload);
     const availableSchools = await authRouter._availableSchools(tokenPayload);
 
-    AuditService.log({ action: 'platform.impersonate', actor: { userId: 'platform', role: 'platform', email: null }, schoolId: resolvedSchoolId, target: { type: 'school', id: resolvedSchoolId, label: school.name }, details: { targetEmail: admin.email }, req });
+    AuditService.log({ action: 'platform.impersonate', actor: { userId: 'platform', role: 'platform', email: null }, schoolId: resolvedSchoolId, target: { type: 'school', id: resolvedSchoolId, label: school.name }, details: { targetEmail: admin.email, reason, impersonationId }, req });
 
     /* Set HttpOnly cookie so the React SPA's authMiddleware accepts subsequent requests */
     res.cookie('token', token, {

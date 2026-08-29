@@ -128,7 +128,7 @@ describe('POST /api/platform/schools/:id/impersonate', () => {
   });
 
   test('response includes the full school doc, not just token/user', async () => {
-    const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate');
+    const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate').send({ reason: 'Support investigation — ticket #123' });
     expect(res.status).toBe(200);
     expect(res.body.school).toBeDefined();
     expect(res.body.school.plan).toBe('family');
@@ -136,7 +136,7 @@ describe('POST /api/platform/schools/:id/impersonate', () => {
   });
 
   test('builds the token via auth.js\'s _buildTokenPayload, not a hand-rolled payload', async () => {
-    await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate');
+    await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate').send({ reason: 'Support investigation — ticket #123' });
     expect(mockBuildTokenPayload).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'usr_admin1' }),
       'sch_trinitas',
@@ -145,19 +145,19 @@ describe('POST /api/platform/schools/:id/impersonate', () => {
 
   test('multi-school org (orgId + identityId present) → availableSchools included in response', async () => {
     mockAdminDoc = { ...mockAdminDoc, orgId: 'org_trinity_group', identityId: 'idn_1' };
-    const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate');
+    const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate').send({ reason: 'Support investigation — ticket #123' });
     expect(res.status).toBe(200);
     expect(res.body.availableSchools).toEqual([{ id: 'sch_other_campus', name: 'Other Campus' }]);
   });
 
   test('single-school org (no orgId) → availableSchools omitted, not an empty-array footgun', async () => {
-    const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate');
+    const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate').send({ reason: 'Support investigation — ticket #123' });
     expect(res.status).toBe(200);
     expect(res.body.availableSchools).toBeUndefined();
   });
 
   test('response includes moduleRegistry, matching every other session-establishing response', async () => {
-    const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate');
+    const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate').send({ reason: 'Support investigation — ticket #123' });
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.moduleRegistry)).toBe(true);
     expect(res.body.moduleRegistry.length).toBeGreaterThan(0);
@@ -167,8 +167,61 @@ describe('POST /api/platform/schools/:id/impersonate', () => {
   test('still 403s in production without ALLOW_IMPERSONATION', async () => {
     process.env.NODE_ENV = 'production';
     process.env.ALLOW_IMPERSONATION = '';
-    const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate');
+    const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate').send({ reason: 'Support investigation — ticket #123' });
     expect(res.status).toBe(403);
     process.env.NODE_ENV = 'test';
+  });
+
+  /* ── Security Baseline Register, PLAT-02 / PLAT-03 ──────────── */
+  describe('reason requirement and impersonation audit trail (PLAT-02 / PLAT-03)', () => {
+    test('no reason in the body → 400, no impersonation granted', async () => {
+      const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate').send({});
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/reason/i);
+      expect(mockBuildTokenPayload).not.toHaveBeenCalled();
+    });
+
+    test('a blank/whitespace-only reason is also rejected', async () => {
+      const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate').send({ reason: '   ' });
+      expect(res.status).toBe(400);
+      expect(mockBuildTokenPayload).not.toHaveBeenCalled();
+    });
+
+    test('a real reason is granted, and the SAME reason is recorded on the platform.impersonate audit entry', async () => {
+      const AuditService = require('../../services/audit');
+      const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate')
+        .send({ reason: 'Investigating a support ticket re: fee balance discrepancy' });
+      expect(res.status).toBe(200);
+      expect(AuditService.log).toHaveBeenCalledWith(expect.objectContaining({
+        action: 'platform.impersonate',
+        details: expect.objectContaining({ reason: 'Investigating a support ticket re: fee balance discrepancy' }),
+      }));
+    });
+
+    test('the issued token carries impersonated:true and a fresh impersonationId', async () => {
+      const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate').send({ reason: 'Support case #42' });
+      expect(res.status).toBe(200);
+      // the mocked sign() returns 'signed:' + JSON.stringify(payload) — inspect what was about to be signed
+      const signedPayload = JSON.parse(res.body.token.replace(/^signed:/, ''));
+      expect(signedPayload.impersonated).toBe(true);
+      expect(typeof signedPayload.impersonationId).toBe('string');
+      expect(signedPayload.impersonationId.length).toBeGreaterThan(10);
+    });
+
+    test('the same impersonationId that was put on the token is also on the platform.impersonate audit entry — the correlation this fix depends on', async () => {
+      const AuditService = require('../../services/audit');
+      const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate').send({ reason: 'Support case #43' });
+      const signedPayload = JSON.parse(res.body.token.replace(/^signed:/, ''));
+      const loggedCall = AuditService.log.mock.calls.find(([c]) => c.action === 'platform.impersonate');
+      expect(loggedCall[0].details.impersonationId).toBe(signedPayload.impersonationId);
+    });
+
+    test('two separate impersonation grants get two DIFFERENT impersonationIds', async () => {
+      const res1 = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate').send({ reason: 'First grant' });
+      const res2 = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate').send({ reason: 'Second grant' });
+      const id1 = JSON.parse(res1.body.token.replace(/^signed:/, '')).impersonationId;
+      const id2 = JSON.parse(res2.body.token.replace(/^signed:/, '')).impersonationId;
+      expect(id1).not.toBe(id2);
+    });
   });
 });
