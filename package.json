@@ -48,6 +48,9 @@
   },
   "jest": {
     "testEnvironment": "node",
+    "setupFiles": [
+      "<rootDir>/server/__tests__/jest.setup.js"
+    ],
     "testTimeout": 15000,
     "testMatch": [
       "**/server/__tests__/**/*.test.js"
