@@ -25,10 +25,13 @@ const { seedDemo }            = require('./scripts/seed-demo');
    and @sentry/node is installed).                              */
 monitoring.init();
 
-/* ── Security: warn if JWT_SECRET not set ───────────────────── */
-if (!process.env.JWT_SECRET) {
-  console.warn('\n⚠️  [Security] JWT_SECRET env var is NOT set — using insecure default. Set it in your .env file or Render dashboard!\n');
-}
+/* Security Baseline Register, EXP-05 — the JWT_SECRET check itself now
+   lives solely in ./utils/jwt (required above, at the top of this file's
+   own imports), which fails closed (process.exit) the moment it's missing,
+   in every environment. A duplicate warn-only check here was dead code:
+   execution never reaches this point when JWT_SECRET is unset, since
+   requiring ./utils/jwt already exits first — and its message described
+   the old, now-removed "insecure default" fallback behaviour. */
 
 /* ── Security: enforce platform admin credentials are configured ── */
 {
@@ -448,9 +451,6 @@ function _isSchoolSubdomainHost(req) {
   return parts.length >= 3 && !MAIN_HOSTS.has(host) && !NON_SCHOOL_SUBDOMAINS.has(parts[0]);
 }
 
-// In production, prefer the compiled React app; fall back to legacy app root.
-const STATIC_DIR = (process.env.NODE_ENV === 'production' && reactBuilt) ? REACT_DIST : ROOT_DIR;
-
 // Serve React build assets (hashed filenames → long cache)
 if (reactBuilt) {
   app.use(express.static(REACT_DIST, {
@@ -470,10 +470,24 @@ if (reactBuilt) {
   }));
 }
 
-// Serve legacy vanilla-JS static assets (css, js, images, html files)
+// Serve the legacy pages' stylesheets (onboard.html, platform.html — both
+// still served via explicit res.sendFile below, not by this middleware).
+// Security Baseline Register, EXP-01/S-1 (CRITICAL): this used to be
+// `express.static(ROOT_DIR, ...)` mounted at the app root — since ROOT_DIR
+// is the repository root one level above server/, that served the ENTIRE
+// project tree as static files: every route handler in server/routes/,
+// every script in scripts/ (including seed-demo.js, with the demo
+// credentials, and decrypt-backup.js), package.json/package-lock.json
+// (full dependency manifest), docs/, logs/ — anything Express could resolve
+// a path into. Confirmed live in production before this fix (GET
+// https://msingi.io/server/index.js returned the real source with a 200).
+// The only thing onboard.html/platform.html actually need served this way
+// is their own stylesheet (css/onboard.css, css/platform.css, referenced
+// as a same-directory relative path from each page) — so the mount is now
+// scoped to exactly that one real directory, not the whole repository.
 // index:false — do NOT auto-serve index.html for /, that is handled by the
 // SPA fallback route below so the React app takes precedence when built.
-app.use(express.static(ROOT_DIR, {
+app.use('/css', express.static(path.join(ROOT_DIR, 'css'), {
   index: false,
   setHeaders: (res) => {
     if (process.env.NODE_ENV !== 'production') {
