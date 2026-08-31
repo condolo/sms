@@ -47,22 +47,13 @@ export function inferSection(name = '') {
   return 'other';
 }
 
-export const SECTIONS = [
-  { id: 'all',       label: 'All Sections' },
-  { id: 'kg',        label: 'Kindergarten' },
-  { id: 'primary',   label: 'Primary'      },
-  { id: 'secondary', label: 'Secondary'    },
-  { id: 'alevel',    label: 'A-Level'      },
-  { id: 'other',     label: 'Other'        },
-];
-
-export const BELL_SECTIONS = [
-  { id: 'all',       label: 'School Default', desc: 'Used by all sections without a custom schedule' },
-  { id: 'kg',        label: 'Kindergarten',   desc: 'Early years — typically shorter periods'        },
-  { id: 'primary',   label: 'Primary',        desc: 'Grades 1–6 or equivalent'                       },
-  { id: 'secondary', label: 'Secondary',      desc: 'Form 1–4 or Grades 7–9'                        },
-  { id: 'alevel',    label: 'A-Level',        desc: 'Form 5–6 / Year 10–13'                         },
-];
+// SECTIONS and BELL_SECTIONS used to live here as a hardcoded
+// kg/primary/secondary/alevel list — removed. Real, per-school section
+// data comes from useSections() (client/src/hooks/useSections.js),
+// which reflects what each school actually configured under Classes →
+// Sections, not a fixed generic set. inferSection() below is a
+// different, narrower thing — a best-effort guess for a legacy class
+// with no stored sectionKey at all, not a source of truth.
 
 export const ABSENCE_REASONS = [
   { v: 'sick',      l: 'Sick Leave'    },

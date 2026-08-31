@@ -21,18 +21,13 @@ import {
 } from '@/api/client.js';
 import { useSections } from '@/hooks/useSections.js';
 
-const SECTION_BADGE = {
-  primary:   'bg-blue-100 text-blue-700',
-  secondary: 'bg-violet-100 text-violet-700',
-  alevel:    'bg-amber-100 text-amber-700',
-  all:       'bg-slate-100 text-slate-600',
-  kg:        'bg-pink-100 text-pink-700',
-};
-const SECTION_LABELS = { kg: 'KG', primary: 'Primary', secondary: 'Secondary', alevel: 'A-Level', all: 'All' };
-
 export default function EnrollmentTab({ flash }) {
   const qc = useQueryClient();
-  const { sections: schoolSections } = useSections();
+  // sectionMap gives the school's own real section name + color per key —
+  // used instead of a hardcoded kg/primary/secondary/alevel-only label/
+  // colour table, which silently mislabelled (or fell straight to the raw
+  // key for) any school using different section names, e.g. "KS3 Section".
+  const { sections: schoolSections, sectionMap } = useSections();
   const [classId,    setClassId]    = useState('');
   const [subjectId,  setSubjectId]  = useState('');
   const [search,     setSearch]     = useState('');
@@ -101,7 +96,6 @@ export default function EnrollmentTab({ flash }) {
     return acc;
   }, {});
   const knownSectionKeys = new Set(schoolSections.map(s => s.key));
-  const sectionLabelMap  = Object.fromEntries(schoolSections.map(s => [s.key, s.name]));
   const sectionOrder = [
     ...schoolSections.map(s => s.key),
     ...Object.keys(classBySection).filter(k => !knownSectionKeys.has(k) && k !== 'other'),
@@ -159,7 +153,7 @@ export default function EnrollmentTab({ flash }) {
             {sectionOrder.map(sec => {
               const group = classBySection[sec];
               if (!group?.length) return null;
-              const label = sectionLabelMap[sec] ?? SECTION_LABELS[sec] ?? sec;
+              const label = sectionMap[sec]?.name ?? sec;
               return (
                 <optgroup key={sec} label={label}>
                   {group.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -189,8 +183,11 @@ export default function EnrollmentTab({ flash }) {
         )}
 
         {selectedClass && (
-          <span className={clsx('rounded-full px-2.5 py-0.5 text-xs font-medium', SECTION_BADGE[sectionKey] ?? 'bg-slate-100 text-slate-600')}>
-            {SECTION_LABELS[sectionKey] ?? sectionKey}
+          <span
+            className={clsx('rounded-full px-2.5 py-0.5 text-xs font-medium', !sectionMap[sectionKey] && 'bg-slate-100 text-slate-600')}
+            style={sectionMap[sectionKey] ? { backgroundColor: sectionMap[sectionKey].color + '18', color: sectionMap[sectionKey].color } : undefined}
+          >
+            {sectionMap[sectionKey]?.name ?? sectionKey}
           </span>
         )}
       </div>

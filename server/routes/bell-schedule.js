@@ -1,7 +1,8 @@
 /* ============================================================
    Msingi — Bell Schedule Routes
    Supports per-section schedules so multi-level schools can have
-   different lesson times for KG, Primary, Secondary, and A-Level.
+   different lesson times for each of their own configured sections
+   (Classes → Sections) — not a fixed set of generic names.
 
    GET  /api/bell-schedule?section=primary  — fetch section schedule
         (falls back: section-specific → 'all' → hardcoded default)
@@ -12,8 +13,11 @@
    Plan gate: 'bell_schedule' → standard plan
    Auth:      authMiddleware (GET), authMiddleware + admin (PUT)
 
-   Sections: 'all' (school-wide default) | 'kg' | 'primary' |
-             'secondary' | 'alevel'
+   Sections: 'all' (school-wide default) plus whatever this school has
+             actually configured under Classes → Sections — NOT a fixed
+             kg/primary/secondary/alevel set (see _schoolSectionKeys
+             below: a school using different section names, e.g.
+             "KS3 Section", can set a schedule for it too).
 
    Period entry shape:
    { p: string, start: 'HH:MM', end: 'HH:MM', label: string, isBreak: bool }
@@ -28,8 +32,24 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 
 const router = express.Router();
 
-/* ── Sections ─────────────────────────────────────────────────── */
-const VALID_SECTIONS = ['all', 'kg', 'primary', 'secondary', 'alevel'];
+/* ── Sections ─────────────────────────────────────────────────────
+   Used to be a fixed ['all','kg','primary','secondary','alevel']
+   enum — meant every school could only ever have a per-section bell
+   schedule for those four generic names, silently coercing anything
+   else (a real section like "KS3 Section") back to 'all' on every
+   GET, and rejecting it outright on PUT/DELETE. Live-confirmed: a
+   school with real, custom-named sections had this feature
+   completely unreachable for every one of them.
+   'all' isn't itself a section — it's the school-wide default bucket
+   every section falls back to — so it's always valid regardless of
+   what the school has configured. */
+async function _schoolSectionKeys(schoolId, ctx) {
+  // Same order as Classes → Sections' own listing (sections.js's GET /),
+  // so this feature's section tabs land in the order the school actually
+  // set, not an arbitrary DB order.
+  const docs = await tenantModel('sections', ctx).find({ schoolId }).sort({ order: 1, name: 1 }).select('key').lean();
+  return new Set(['all', ...docs.map(d => d.key).filter(Boolean)]);
+}
 
 /* ── Default bell schedule (school-wide, 07:30–17:00) ───────── */
 const DEFAULT_BELL = [
@@ -55,7 +75,10 @@ const PeriodSchema = z.object({
   isBreak: z.boolean(),
 });
 const BellBodySchema = z.object({
-  section: z.enum(VALID_SECTIONS).default('all'),
+  // Shape-only here — membership against this school's real section
+  // keys (plus 'all') is checked in the route handler, since that set
+  // is per-school and can't be known at schema-definition time.
+  section: z.string().min(1).max(30).default('all'),
   periods: z.array(PeriodSchema).min(1).max(40),
 });
 
@@ -96,14 +119,19 @@ async function resolveBellSchedule(schoolId, section = 'all') {
 /* GET /api/bell-schedule/sections — list all configured sections ─ */
 router.get('/sections', authMiddleware, planGate('bell_schedule'), async (req, res) => {
   try {
-    const Bs   = tenantModel('bell_schedules', tenantContext(req));
-    const docs = await Bs.find({ schoolId: req.jwtUser.schoolId }).lean();
+    const schoolId = req.jwtUser.schoolId;
+    const ctx      = tenantContext(req);
+    const [docs, sectionKeys] = await Promise.all([
+      tenantModel('bell_schedules', ctx).find({ schoolId }).lean(),
+      _schoolSectionKeys(schoolId, ctx),
+    ]);
 
-    // Return one entry per VALID_SECTION indicating configured/default
+    // Return one entry per this school's real sections (plus 'all'),
+    // indicating configured/default — not a fixed generic list.
     const configured = {};
     docs.forEach(d => { configured[d.section] = d; });
 
-    const result = VALID_SECTIONS.map(s => ({
+    const result = [...sectionKeys].map(s => ({
       section:      s,
       configured:   !!configured[s],
       periodCount:  configured[s] ? configured[s].periods.length : null,
@@ -121,8 +149,10 @@ router.get('/sections', authMiddleware, planGate('bell_schedule'), async (req, r
 /* GET /api/bell-schedule?section=primary ────────────────────── */
 router.get('/', authMiddleware, planGate('bell_schedule'), async (req, res) => {
   try {
-    const section = VALID_SECTIONS.includes(req.query.section) ? req.query.section : 'all';
-    const result  = await resolveBellSchedule(req.jwtUser.schoolId, section);
+    const schoolId    = req.jwtUser.schoolId;
+    const sectionKeys = await _schoolSectionKeys(schoolId, tenantContext(req));
+    const section = sectionKeys.has(req.query.section) ? req.query.section : 'all';
+    const result  = await resolveBellSchedule(schoolId, section);
     res.json({ success: true, data: result });
   } catch (err) {
     console.error('[bell-schedule] GET error:', err);
@@ -142,16 +172,24 @@ router.put('/', authMiddleware, planGate('bell_schedule'), rbac('timetable', 'be
     }
 
     const { section, periods } = parsed.data;
-    const now  = new Date().toISOString();
-    const Bs   = tenantModel('bell_schedules', tenantContext(req));
+    const schoolId = req.jwtUser.schoolId;
+    const ctx      = tenantContext(req);
 
-    const existing = await Bs.findOne({ schoolId: req.jwtUser.schoolId, section }).lean();
+    const sectionKeys = await _schoolSectionKeys(schoolId, ctx);
+    if (!sectionKeys.has(section)) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Unknown section '${section}'.` } });
+    }
+
+    const now = new Date().toISOString();
+    const Bs  = tenantModel('bell_schedules', ctx);
+
+    const existing = await Bs.findOne({ schoolId, section }).lean();
     if (existing) {
       await Bs.updateOne({ id: existing.id }, { $set: { periods, updatedAt: now } });
     } else {
       await Bs.create({
         id:        _uid(),
-        schoolId:  req.jwtUser.schoolId,
+        schoolId,
         section,
         periods,
         createdAt: now,
@@ -169,14 +207,17 @@ router.put('/', authMiddleware, planGate('bell_schedule'), rbac('timetable', 'be
 /* DELETE /api/bell-schedule?section=primary — revert to default ─ */
 router.delete('/', authMiddleware, planGate('bell_schedule'), rbac('timetable', 'bell_schedule'), async (req, res) => {
   try {
-    const section = req.query.section;
+    const section  = req.query.section;
+    const schoolId = req.jwtUser.schoolId;
+    const ctx      = tenantContext(req);
     if (!section || section === 'all') {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: "Cannot delete the 'all' schedule. Use PUT to update it." } });
     }
-    if (!VALID_SECTIONS.includes(section)) {
+    const sectionKeys = await _schoolSectionKeys(schoolId, ctx);
+    if (!sectionKeys.has(section)) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Unknown section '${section}'.` } });
     }
-    await tenantModel('bell_schedules', tenantContext(req)).deleteOne({ schoolId: req.jwtUser.schoolId, section });
+    await tenantModel('bell_schedules', ctx).deleteOne({ schoolId, section });
     res.json({ success: true, message: `Bell schedule for '${section}' removed. Will now use school default.` });
   } catch (err) {
     console.error('[bell-schedule] DELETE error:', err);

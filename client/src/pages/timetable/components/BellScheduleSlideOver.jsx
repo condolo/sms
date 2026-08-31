@@ -9,10 +9,20 @@ import { motion } from 'framer-motion';
 import { Loader2, Save, Plus, AlertTriangle, CheckCircle2, X } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { bellSchedule as bellApi } from '@/api/client.js';
-import { DEFAULT_BELL, BELL_SECTIONS } from '../constants.js';
+import { DEFAULT_BELL } from '../constants.js';
+import { useSections } from '@/hooks/useSections.js';
 
 export default function BellScheduleSlideOver({ onClose }) {
   const qc = useQueryClient();
+  // Real, school-configured sections — this used to be a hardcoded
+  // kg/primary/secondary/alevel list, which meant a school using
+  // different section names (e.g. "KS3 Section") could never set a
+  // bell schedule for any of its actual sections at all.
+  const { sections } = useSections();
+  const bellSections = [
+    { id: 'all', label: 'School Default' },
+    ...sections.filter(s => s.key).map(s => ({ id: s.key, label: s.name })),
+  ];
   const [activeSection, setActiveSection] = useState('all');
   const [rows,  setRows]  = useState(null);
   const [dirty, setDirty] = useState(false);
@@ -65,7 +75,7 @@ export default function BellScheduleSlideOver({ onClose }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['bell-schedule'] });
       setDirty(false);
-      showT(`${BELL_SECTIONS.find(s => s.id === activeSection)?.label} schedule saved.`);
+      showT(`${bellSections.find(s => s.id === activeSection)?.label} schedule saved.`);
     },
     onError: err => showT(err?.message ?? 'Failed to save.', 'error'),
   });
@@ -104,7 +114,7 @@ export default function BellScheduleSlideOver({ onClose }) {
 
         {/* Section tabs */}
         <div className="flex gap-1 px-4 py-2.5 border-b border-slate-100 overflow-x-auto">
-          {BELL_SECTIONS.map(s => {
+          {bellSections.map(s => {
             const hasCustom = configuredSet.has(s.id);
             return (
               <button
