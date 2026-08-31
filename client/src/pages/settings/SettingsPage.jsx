@@ -224,10 +224,15 @@ function SectionsPanel() {
   /* Update */
   const { mutate: updateSec, isPending: updating } = useMutation({
     mutationFn: ({ id, data }) => sectionsApi.update(id, data),
-    onSuccess: () => {
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['sections'] });
       setEditId(null);
-      showT('Section updated.');
+      // headWarning: the Section Head's sectionAssigned was updated, but
+      // their system role isn't (or can't be resolved to) section_head, or
+      // they have no login account yet — assignment is only half-done
+      // until that's addressed in Settings -> Users.
+      const warning = res?.data?.headWarning;
+      showT(warning ?? 'Section updated.', warning ? 'warning' : 'success');
     },
     onError: err => showT(err?.message ?? 'Failed to update section.', 'error'),
   });

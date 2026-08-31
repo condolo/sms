@@ -21,6 +21,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
+const { invalidateScopeCache } = require('../middleware/scopeMiddleware');
 
 const router = express.Router();
 // Writes gated on the 'school' sub-key under 'settings' — sections are
@@ -53,6 +54,68 @@ function _validate(schema, data) {
   const r = schema.safeParse(data);
   if (!r.success) return { error: r.error.issues.map(i => ({ field: i.path.join('.'), message: i.message })) };
   return { data: r.data };
+}
+
+/**
+ * sectionHeadId (set here) used to be purely a display label — "Head:
+ * Mrs X" next to the section — with zero effect on what that person could
+ * actually see. Real section-scoped access needs TWO things on the
+ * person's own user record: role === 'section_head' AND
+ * sectionAssigned === this section's key. Neither was ever set here.
+ *
+ * This cascades the sectionAssigned half automatically — safe to do
+ * unprompted because it's inert on its own (does nothing unless their
+ * role is ALSO section_head). The role half is deliberately NOT touched
+ * here — an unrelated-looking edit silently granting real system access
+ * is exactly the failure mode already fixed twice this session
+ * (staffType/role separation, custom extraRoles); role changes stay an
+ * explicit, confirmed action via Settings → Users only.
+ *
+ * Returns a warning string when the newly-assigned head's role isn't
+ * actually section_head yet, so the UI can say so instead of implying
+ * the assignment is fully in effect.
+ */
+async function _cascadeSectionHead(req, section, newHeadTeacherId) {
+  const { schoolId } = req.jwtUser;
+  const oldHeadTeacherId = section?.sectionHeadId ?? null;
+  const normalizedNew    = newHeadTeacherId || null;
+  if (oldHeadTeacherId === normalizedNew) return { warning: null };
+
+  const Teachers = tenantModel('teachers', tenantContext(req));
+  const Users    = tenantModel('users', tenantContext(req));
+
+  const [oldTeacher, newTeacher] = await Promise.all([
+    oldHeadTeacherId ? Teachers.findOne({ schoolId, id: oldHeadTeacherId }).select('userId').lean() : null,
+    normalizedNew    ? Teachers.findOne({ schoolId, id: normalizedNew }).select('userId').lean()    : null,
+  ]);
+
+  // Outgoing head: clear sectionAssigned, but only if it still points at
+  // THIS section — never clobber an unrelated assignment (e.g. they were
+  // reassigned as head of a different section by a separate edit already).
+  if (oldTeacher?.userId) {
+    await Users.updateOne(
+      { schoolId, id: oldTeacher.userId, sectionAssigned: section.key },
+      { $set: { sectionAssigned: null } },
+    );
+    invalidateScopeCache(oldTeacher.userId, schoolId);
+  }
+
+  let warning = null;
+  if (newTeacher?.userId) {
+    await Users.updateOne(
+      { schoolId, id: newTeacher.userId },
+      { $set: { sectionAssigned: section.key } },
+    );
+    invalidateScopeCache(newTeacher.userId, schoolId);
+
+    const newUser = await Users.findOne({ schoolId, id: newTeacher.userId }).select('role').lean();
+    if (newUser && newUser.role !== 'section_head') {
+      warning = `This person's system role is "${newUser.role}", not Section Head — they won't see section-scoped data until their role is changed in Settings → Users.`;
+    }
+  } else if (normalizedNew) {
+    warning = 'This person has no login account linked yet, so section access could not be granted — link or create their account first.';
+  }
+  return { warning };
 }
 
 /* ── Infer a section key from its display name ───────────────── */
@@ -141,7 +204,15 @@ router.post('/', authMiddleware, rbac('settings', 'create', 'school'), async (re
     const doc = await Sections.create({
       ...data, id: uuidv4(), schoolId, createdBy: userId, updatedBy: userId,
     });
-    return created(res, doc.toObject ? doc.toObject() : doc);
+
+    let headWarning = null;
+    if (data.sectionHeadId) {
+      const cascade = await _cascadeSectionHead(req, { key: data.key, sectionHeadId: null }, data.sectionHeadId);
+      headWarning = cascade.warning;
+    }
+
+    const docObj = doc.toObject ? doc.toObject() : doc;
+    return created(res, headWarning ? { ...docObj, headWarning } : docObj);
   } catch (err) {
     console.error('[sections POST]', err);
     return E.serverError(res);
@@ -160,13 +231,26 @@ router.put('/:id', authMiddleware, rbac('settings', 'update', 'school'), async (
     if (error) return E.validation(res, error);
 
     const Sections = tenantModel('sections', tenantContext(req));
+
+    // Fetch first — need the section's PRIOR sectionHeadId to know whether
+    // the head is actually changing, and to clear the outgoing head's
+    // sectionAssigned correctly (see _cascadeSectionHead above).
+    const existing = await Sections.findOne({ id: req.params.id, schoolId }).lean();
+    if (!existing) return E.notFound(res, 'Section not found');
+
+    let headWarning = null;
+    if ('sectionHeadId' in data) {
+      const cascade = await _cascadeSectionHead(req, existing, data.sectionHeadId);
+      headWarning = cascade.warning;
+    }
+
     const doc = await Sections.findOneAndUpdate(
       { id: req.params.id, schoolId },
       { ...data, updatedBy: userId },
       { new: true },
     ).lean();
     if (!doc) return E.notFound(res, 'Section not found');
-    return ok(res, doc);
+    return ok(res, headWarning ? { ...doc, headWarning } : doc);
   } catch (err) {
     console.error('[sections PUT/:id]', err);
     return E.serverError(res);
