@@ -53,6 +53,23 @@ function canManage(req, subjectDepartmentId = null) {
   return false;
 }
 
+/* ── Helper: find a class by either custom id (UUID) or _id (ObjectId string) ─
+   Classes created before the id field was added only have _id. GET /classes
+   normalises both into `id` for the frontend's own dropdowns (see its own
+   "Normalize" comment), so a class missing a real id still displays and
+   selects correctly — but a write route that only matches the literal `id`
+   field never finds that class, surfacing as a false "Class not found" even
+   though the class is right there in the picker. Same helper/reasoning as
+   class-subjects.js's _classQuery, kept local rather than shared since
+   every route in this codebase that needs it keeps its own copy (e.g.
+   students.js's _entityIdForms). */
+function _classQuery(schoolId, classId) {
+  const isOid = /^[a-f\d]{24}$/i.test(classId);
+  return isOid
+    ? { schoolId, $or: [{ id: classId }, { _id: classId }] }
+    : { schoolId, id: classId };
+}
+
 /* ── Validation ─────────────────────────────────────────────── */
 const AssignmentSchema = z.object({
   teacherId:       z.string().min(1),    // userId format (e.g. u_demo_t3)
@@ -115,7 +132,7 @@ router.post('/', authMiddleware, async (req, res) => { // rbac: canManage() belo
         $or: [{ userId: data.teacherId }, { id: data.teacherId }],
       }).lean(),
       tenantModel('subjects', tenantContext(req)).findOne({ schoolId, id: data.subjectId, isActive: { $ne: false } }).lean(),
-      tenantModel('classes', tenantContext(req)).findOne({ schoolId, id: data.classId }).lean(),
+      tenantModel('classes', tenantContext(req)).findOne(_classQuery(schoolId, data.classId)).lean(),
       data.preferredRoomId
         ? tenantModel('rooms', tenantContext(req)).findOne({ schoolId, id: data.preferredRoomId, isActive: { $ne: false } }).lean()
         : Promise.resolve(null),
