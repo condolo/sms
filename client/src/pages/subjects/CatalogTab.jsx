@@ -54,7 +54,7 @@ function ColorDot({ color, size = 'md' }) {
 }
 
 /* ── Department slide-over form ───────────────────────────── */
-function DeptForm({ initial, onSave, onClose, saving }) {
+function DeptForm({ initial, departments, onSave, onClose, saving }) {
   const [form, setForm] = useState({
     name:        initial?.name        ?? '',
     code:        initial?.code        ?? '',
@@ -62,7 +62,13 @@ function DeptForm({ initial, onSave, onClose, saving }) {
     hodName:     initial?.hodName     ?? '',
     hodId:       initial?.hodId       ?? '',
     description: initial?.description ?? '',
-    order:       initial?.order       ?? 0,
+    // New departments are appended after every existing one, same as HR's
+    // approval-step and report-card-template ordering elsewhere in this
+    // codebase — the admin shouldn't have to guess a free slot. Editing an
+    // existing department still exposes the field below, since this list
+    // has no drag-to-reorder UI and typing a number is the only way to
+    // move one.
+    order:       initial?.order       ?? (departments?.length ?? 0),
   });
   const [hodSearch, setHodSearch] = useState(initial?.hodName ?? '');
   const [hodOpen, setHodOpen]     = useState(false);
@@ -105,18 +111,20 @@ function DeptForm({ initial, onSave, onClose, saving }) {
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
             placeholder="e.g. Mathematics" />
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className={clsx('grid gap-3', initial ? 'grid-cols-2' : 'grid-cols-1')}>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Code <span className="text-red-500">*</span></label>
             <input value={form.code} onChange={e => set('code', e.target.value.toUpperCase())}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500"
               placeholder="e.g. MATH" maxLength={20} />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Order</label>
-            <input type="number" min={0} value={form.order} onChange={e => set('order', parseInt(e.target.value) || 0)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500" />
-          </div>
+          {initial && (
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Order</label>
+              <input type="number" min={0} value={form.order} onChange={e => set('order', parseInt(e.target.value) || 0)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500" />
+            </div>
+          )}
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-2">Colour</label>
@@ -179,20 +187,37 @@ function DeptForm({ initial, onSave, onClose, saving }) {
 }
 
 /* ── Subject slide-over form ──────────────────────────────── */
-function SubjectForm({ initial, departments, onSave, onClose, saving }) {
+function SubjectForm({ initial, departments, allSubjects = [], deptId, onSave, onClose, saving }) {
   const { sectionTabs } = useSections();
+  const initialDeptId = initial?.departmentId ?? deptId ?? (departments[0]?.id ?? '');
+  // A subject's display position only matters relative to its own
+  // department's card, so "next slot" is scoped per department, not
+  // global. New subjects append after the others already in that
+  // department; editing an existing one still exposes the field, same
+  // reasoning as DeptForm above.
+  function nextOrderFor(dId) {
+    return allSubjects.filter(s => s.departmentId === dId && s.id !== initial?.id).length;
+  }
   const [form, setForm] = useState({
     name:         initial?.name         ?? '',
     code:         initial?.code         ?? '',
     shortName:    initial?.shortName    ?? '',
-    departmentId: initial?.departmentId ?? (departments[0]?.id ?? ''),
+    departmentId: initialDeptId,
     sections:     initial?.sections     ?? ['all'],
     isCompulsory: initial?.isCompulsory ?? false,
     color:        initial?.color        ?? '#6366F1',
-    order:        initial?.order        ?? 0,
+    order:        initial?.order        ?? nextOrderFor(initialDeptId),
     description:  initial?.description  ?? '',
   });
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+  // Re-derive the auto order only while creating — if the admin switches
+  // department in the dropdown before saving, a new subject should still
+  // land at the end of whichever department it's actually being added to.
+  useEffect(() => {
+    if (initial) return;
+    set('order', nextOrderFor(form.departmentId));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.departmentId]);
   function toggleSection(val) {
     setForm(f => {
       const cur = f.sections;
@@ -256,7 +281,7 @@ function SubjectForm({ initial, departments, onSave, onClose, saving }) {
           </button>
           <span className="text-sm text-slate-700">Compulsory subject</span>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className={clsx('grid gap-3', initial ? 'grid-cols-2' : 'grid-cols-1')}>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">Colour</label>
             <div className="flex flex-wrap gap-2">
@@ -269,11 +294,13 @@ function SubjectForm({ initial, departments, onSave, onClose, saving }) {
                 className="h-6 w-6 cursor-pointer rounded-full border border-slate-300 p-0.5" title="Custom colour" />
             </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Order</label>
-            <input type="number" min={0} value={form.order} onChange={e => set('order', parseInt(e.target.value) || 0)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500" />
-          </div>
+          {initial && (
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Order</label>
+              <input type="number" min={0} value={form.order} onChange={e => set('order', parseInt(e.target.value) || 0)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500" />
+            </div>
+          )}
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
@@ -700,12 +727,13 @@ export default function CatalogTab({ flash }) {
 
       {/* Slide-overs */}
       <SlideOver open={!!deptSlide} onClose={() => setDeptSlide(null)}>
-        {deptSlide && <DeptForm initial={deptSlide.mode === 'edit' ? deptSlide.data : null}
+        {deptSlide && <DeptForm initial={deptSlide.mode === 'edit' ? deptSlide.data : null} departments={depts}
           onSave={form => saveDept.mutate({ id: deptSlide.data?.id, data: form })}
           onClose={() => setDeptSlide(null)} saving={saveDept.isPending} />}
       </SlideOver>
       <SlideOver open={!!subSlide} onClose={() => setSubSlide(null)}>
         {subSlide && <SubjectForm initial={subSlide.mode === 'edit' ? subSlide.data : null} departments={depts}
+          allSubjects={allSubjects} deptId={subSlide.deptId}
           onSave={form => { const data = { ...form }; if (subSlide.mode === 'new' && subSlide.deptId && !form.departmentId) data.departmentId = subSlide.deptId; saveSub.mutate({ id: subSlide.data?.id, data }); }}
           onClose={() => setSubSlide(null)} saving={saveSub.isPending} />}
       </SlideOver>
