@@ -219,11 +219,24 @@ export default function StaffFormModal({ mode, teacher, departments = [], subjec
                 {isEdit && <p className="text-[10px] text-slate-400 mt-0.5">Email cannot be changed here</p>}
               </div>
               <div>
-                <label className={lbl}>Staff Type / Role *</label>
+                <label className={lbl}>Staff Type / Job Title *</label>
                 <select required value={form.staffType} onChange={e => set('staffType', e.target.value)} className={fCls}>
-                  <option value="">— Select role —</option>
+                  <option value="">— Select —</option>
                   {staffRoles.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
                 </select>
+                {/* This list is drawn from the same role names as System
+                    Role for convenience, but it's the HR job-title field —
+                    changing it does NOT change what this person can access
+                    if they already have a login. That's deliberate: an HR
+                    edit here used to silently grant system access too,
+                    which was a real privilege-escalation risk (see
+                    staff-role-separation.test.js) and was fixed. To
+                    actually change their portal access, use Settings →
+                    Users. */}
+                <p className="text-[10px] text-slate-400 mt-1">
+                  This is their job title for HR records — it does not change what they can access.
+                  {isEdit && teacher?.userId && ' To change their system access, use Settings → Users.'}
+                </p>
               </div>
             </div>
             <div className="grid grid-cols-3 gap-3 mb-3">

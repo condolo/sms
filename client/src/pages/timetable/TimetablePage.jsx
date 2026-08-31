@@ -130,6 +130,12 @@ export default function TimetablePage() {
   });
   const allSlots = allSlotsData?.data ?? [];
   const teacherList = teachersData?.data ?? [];
+  // Must match exactly what AddSlotSlideOver stores as timetable_slots.
+  // teacherId (its own teacherKey helper) — the server's GET
+  // /timetable/teacher/:teacherId does a strict literal match, no id/_id
+  // tolerance, so sending the wrong identifier form here silently returns
+  // zero slots for a teacher who visibly has plenty in the Class Grid.
+  function teacherKey(t) { return t.userId ?? t.id ?? String(t._id); }
 
   /* ── Emergency Online Mode ───────────────────────────────────
      Reads from Zustand (persisted to localStorage via _slimSchool).
@@ -146,7 +152,7 @@ export default function TimetablePage() {
   });
   const teacherMap = emergencyMode
     ? Object.fromEntries(
-        (teacherLinksData?.data ?? teacherList).map(t => [t.id ?? t._id, t])
+        (teacherLinksData?.data ?? teacherList).map(t => [teacherKey(t), t])
       )
     : {};
 
@@ -323,7 +329,7 @@ export default function TimetablePage() {
     setTimeout(() => win.print(), 500);
   }
 
-  const selectedTeacher = teacherList.find(t => (t.id ?? t._id) === teacherId);
+  const selectedTeacher = teacherList.find(t => teacherKey(t) === teacherId);
 
   /* ══════════════════════════════════════════════════════════
      RENDER
@@ -564,7 +570,7 @@ export default function TimetablePage() {
               >
                 <option value="">Select teacher…</option>
                 {teacherList.map(t => (
-                  <option key={t._id ?? t.id} value={t._id ?? t.id}>{t.firstName} {t.lastName}</option>
+                  <option key={teacherKey(t)} value={teacherKey(t)}>{t.firstName} {t.lastName}</option>
                 ))}
               </select>
               {selectedTeacher && (

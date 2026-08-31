@@ -62,6 +62,12 @@ function SubstituteCell({ sub, date, onAssign }) {
   );
 }
 
+// Must match exactly what AddSlotSlideOver stores as timetable_slots.teacherId
+// (its own teacherKey helper) — markAbsent looks up this teacher's slots for
+// the day by an exact teacherId match server-side, so the wrong identifier
+// form here silently finds zero lessons for a teacher who clearly has some.
+function teacherKey(t) { return t.userId ?? t.id ?? String(t._id); }
+
 export default function CoverTab({ teachers }) {
   const qc = useQueryClient();
   const [date,        setDate]        = useState(() => new Date().toISOString().slice(0, 10));
@@ -214,7 +220,7 @@ export default function CoverTab({ teachers }) {
             >
               <option value="">Select teacher…</option>
               {teachers.map(t => (
-                <option key={t.id ?? t._id} value={t.id ?? t._id}>{t.firstName} {t.lastName}</option>
+                <option key={teacherKey(t)} value={teacherKey(t)}>{t.firstName} {t.lastName}</option>
               ))}
             </select>
           </div>
