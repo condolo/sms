@@ -597,6 +597,27 @@ router.post('/users/invite', authMiddleware, rbac('settings', 'create'), async (
 
     const createdUser = await Users.create(newUser);
 
+    // "Create Login Account" flow (HR passes staffId for an existing staff
+    // member) — link the new login back to the staff record it's for.
+    // Nothing else ever sets teachers.userId after the teacher was first
+    // created (that original bind only fires if a matching-email user
+    // already existed at THAT moment — see teachers.js POST's "required
+    // for timetable slot resolution" comment); without this, a teacher
+    // who gets a login through this flow keeps userId: null forever, and
+    // every lookup that depends on it (GET /timetable/my chief among
+    // them) falls back to weaker, more fragile matching for them
+    // indefinitely instead of just working.
+    if (staffId) {
+      try {
+        await tenantModel('teachers', tenantContext(req)).updateOne(
+          { schoolId: req.jwtUser.schoolId, id: staffId },
+          { $set: { userId: createdUser.id } }
+        );
+      } catch (linkErr) {
+        console.warn('[settings] teacher userId backlink (non-fatal):', linkErr.message);
+      }
+    }
+
     // C8/MR-001 Phase 0 (ADR-0003, Shadow) — non-blocking, self-healing.
     try {
       await provisionIdentityForUser(createdUser);
@@ -680,6 +701,17 @@ router.post('/users/bulk-invite', authMiddleware, rbac('settings', 'create'), as
           isActive: true, mustChangePassword: true,
           createdAt: now, updatedAt: now, createdBy: userId,
         });
+
+        // Same teacher.userId FK gap as /users/invite's staffId-linked
+        // path (see that route's comment) — bulk-invite doesn't carry a
+        // staffId per row, so match by email instead, and only touch a
+        // teacher record that isn't already linked to something else.
+        try {
+          await tenantModel('teachers', tenantContext(req)).updateOne(
+            { schoolId, email, userId: { $in: [null, undefined] } },
+            { $set: { userId: createdUser.id } }
+          );
+        } catch { /* non-fatal */ }
 
         // C8/MR-001 Phase 0 (ADR-0003, Shadow) — non-blocking, self-healing.
         try {

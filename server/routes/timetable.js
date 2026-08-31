@@ -43,6 +43,29 @@ const { isYearArchived } = require('../utils/archival');
 
 const router = express.Router();
 const PLAN   = planGate('timetable');
+
+/* ── Teacher identifier-form resolver ──────────────────────────
+   A timetable slot's teacherId may have been stamped with any of
+   three forms depending on the teacher's linkage state AT THE TIME
+   the slot was written: their own staff `id`, their linked login's
+   `userId` (every write path — AddSlotSlideOver, the compulsory-
+   subject autofill, CSV import's _buildTeacherMap, TeacherAssignments-
+   Tab — prefers this form when present), or a raw Mongo `_id` for
+   legacy records. A teacher whose login gets linked (or self-heal-
+   backfilled — see GET /my below) AFTER some of their lessons were
+   already scheduled ends up with old slots under one form and new
+   ones under another. A literal single-value match silently misses
+   whichever form isn't current, so every teacherId filter in this
+   file matches against every known form instead. */
+function _teacherSlotForms(teacher) {
+  return [teacher.id, teacher.userId, teacher._id && String(teacher._id)].filter(Boolean);
+}
+async function _resolveTeacherByAnyId(schoolId, tenantCtx, value) {
+  const isOid = /^[a-f\d]{24}$/i.test(value || '');
+  const or = [{ id: value }, { userId: value }];
+  if (isOid) or.push({ _id: value });
+  return tenantModel('teachers', tenantCtx).findOne({ schoolId, $or: or }).lean();
+}
 const MODGATE = moduleGate('timetable');
 
 /* ── Constants ───────────────────────────────────────────────── */
@@ -495,7 +518,11 @@ router.get('/class/:classId', authMiddleware, PLAN, MODGATE, rbac('timetable', '
 router.get('/teacher/:teacherId', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const filter = { schoolId, teacherId: req.params.teacherId, isActive: true };
+    const teacherDoc = await _resolveTeacherByAnyId(schoolId, tenantContext(req), req.params.teacherId);
+    // teacherDoc not found (e.g. a stale id) — fall back to the literal
+    // param rather than silently returning everything.
+    const forms  = teacherDoc ? _teacherSlotForms(teacherDoc) : [req.params.teacherId];
+    const filter = { schoolId, teacherId: { $in: forms }, isActive: true };
     if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
     if (req.query.termId)         filter.termId         = req.query.termId;
 
@@ -597,14 +624,31 @@ router.get('/my', authMiddleware, async (req, res) => {
       return ok(res, { slots, section: section ?? 'all', role: 'section_head' });
     }
 
-    // Teacher — resolve teacher record by email
-    const teacher = await tenantModel('teachers', tenantContext(req))
-      .findOne({ schoolId, email: (email || '').toLowerCase() }).lean();
+    // Teacher — resolve via the authoritative userId FK first (set at
+    // teacher-creation time, or meant to be set by "Create Login Account"
+    // — see the backfill added to POST /users/invite). Fall back to email
+    // match only for a record that link hasn't reached yet, and self-heal
+    // it right here so every later lookup for this person can skip the
+    // fallback (mirrors provisionIdentityForUser's own self-heal comment
+    // in settings.js). Matching by email alone — the previous behaviour
+    // — silently resolves to a DIFFERENT teacher record whenever this
+    // login's email doesn't textually equal that record's stored email,
+    // which is exactly what happens for any account whose display name
+    // was edited without also updating the underlying teacher profile.
+    const Teachers = tenantModel('teachers', tenantContext(req));
+    let teacher = await Teachers.findOne({ schoolId, userId }).lean();
+    if (!teacher) {
+      teacher = await Teachers.findOne({ schoolId, email: (email || '').toLowerCase() }).lean();
+      if (teacher && !teacher.userId) {
+        Teachers.updateOne({ schoolId, id: teacher.id }, { $set: { userId } }).catch(() => {});
+        teacher.userId = userId;
+      }
+    }
     if (!teacher) {
       return ok(res, { slots: [], teacher: null, message: 'No teacher record is linked to this account.' });
     }
     const slots = await tenantModel('timetable', tenantContext(req))
-      .find({ schoolId, teacherId: teacher.id, isActive: true })
+      .find({ schoolId, teacherId: { $in: _teacherSlotForms(teacher) }, isActive: true })
       .sort({ day: 1, startTime: 1, periodNumber: 1, period: 1 })
       .limit(500).lean();
     return ok(res, {
