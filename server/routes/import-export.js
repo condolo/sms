@@ -325,17 +325,25 @@ const TEMPLATES = {
   timetable: {
     plan:    'timetable',
     rbacRes: 'timetable',
-    headers: ['className', 'day', 'period', 'subject', 'teacherName', 'room', 'type'],
+    headers: ['className', 'streamName', 'day', 'period', 'subject', 'teacherName', 'room', 'type'],
     examples: [
-      { className: 'Form 4A', day: 'monday',    period: '1', subject: 'Mathematics', teacherName: 'Grace Akinyi', room: 'Room 101', type: 'lesson' },
-      { className: 'Form 4A', day: 'monday',    period: '2', subject: 'Physics',     teacherName: 'Brian Kamau',  room: 'Lab 1',    type: 'lesson' },
-      { className: 'Form 3B', day: 'tuesday',   period: '1', subject: 'English',     teacherName: 'Agnes Mwangi', room: 'Room 202', type: 'lesson' },
-      { className: 'Form 4A', day: 'wednesday', period: '3', subject: 'Assembly',    teacherName: '',             room: 'Hall',     type: 'assembly' },
+      { className: 'Form 4A', streamName: '',  day: 'monday',    period: '1', subject: 'Mathematics', teacherName: 'Grace Akinyi', room: 'Room 101', type: 'lesson' },
+      { className: 'Form 4A', streamName: '',  day: 'monday',    period: '2', subject: 'Physics',     teacherName: 'Brian Kamau',  room: 'Lab 1',    type: 'lesson' },
+      { className: 'Form 3B', streamName: '',  day: 'tuesday',   period: '1', subject: 'English',     teacherName: 'Agnes Mwangi', room: 'Room 202', type: 'lesson' },
+      { className: 'Form 4A', streamName: '',  day: 'wednesday', period: '3', subject: 'Assembly',    teacherName: '',             room: 'Hall',     type: 'assembly' },
+      { className: 'Year 7',  streamName: '7i',  day: 'monday', period: '1', subject: 'Mathematics', teacherName: 'Grace Akinyi', room: 'Room 101', type: 'lesson' },
+      { className: 'Year 7',  streamName: '7ii', day: 'monday', period: '1', subject: 'Mathematics', teacherName: 'Brian Kamau',  room: 'Room 102', type: 'lesson' },
     ],
     notes: [
       '# TIMETABLE IMPORT TEMPLATE — Msingi School Management',
       '# Instructions:',
       '#   className   — REQUIRED, exact class name as shown in your Classes list',
+      '#   streamName  — optional, exact stream name within that class (e.g. 7i, A).',
+      '#                 Leave blank for a whole-class slot. Use this when different',
+      '#                 streams have different teachers for the same subject/period',
+      '#                 (e.g. 7i and 7ii each have their own Maths teacher) — without',
+      '#                 it, two rows for the same class/day/period overwrite each',
+      '#                 other instead of creating two separate slots.',
       '#   day         — REQUIRED: monday | tuesday | wednesday | thursday | friday',
       '#   period      — REQUIRED: lesson period number, e.g. 1, 2, 3',
       '#   subject     — subject name, e.g. Mathematics (optional)',
@@ -343,7 +351,8 @@ const TEMPLATES = {
       '#   room        — room name, e.g. Lab 1 or Room 202 (optional)',
       '#   type        — lesson | assembly | registration | free  (default: lesson)',
       '#',
-      '#   Existing slots for the same class/day/period are UPDATED (upsert behaviour).',
+      '#   Existing slots for the same class/stream/day/period are UPDATED (upsert',
+      '#   behaviour). Imported into the school\'s current academic year/term.',
       '#   To start fresh: clear your timetable in the Timetable module first, then import.',
       '#   Maximum 500 rows per import file.',
       '#',
@@ -416,7 +425,15 @@ async function _buildTeacherMap(schoolId) {
   for (const t of docs) {
     const key = `${t.firstName} ${t.lastName}`.toLowerCase().trim();
     map[key] = {
-      teacherId:   t.userId ?? String(t._id),
+      // userId ?? id ?? _id — this used to jump straight from userId to
+      // the raw Mongo _id, skipping the teacher's own `id`. AddSlotSlideOver/
+      // teaching-assignments.js/TimetablePage.jsx's teacherKey() all use
+      // this exact chain to store and look up timetable teacherId — a
+      // teacher with no linked login account imported here previously got
+      // a value matching NONE of those forms, invisible to Teacher View,
+      // Cover/Subs, and Emergency Online Mode's meeting-link lookup even
+      // though the row imported "successfully" with the right name shown.
+      teacherId:   t.userId ?? t.id ?? String(t._id),
       teacherName: `${t.firstName} ${t.lastName}`.trim(),
     };
   }
@@ -1120,10 +1137,24 @@ async function _importClasses(rows, schoolId, userId) {
 
 /* ── Timetable import handler ──────────────────────────────── */
 async function _importTimetable(rows, schoolId, userId) {
-  const [classMap, teacherMap] = await Promise.all([
+  const [classMap, teacherMap, streamMap] = await Promise.all([
     _buildClassMap(schoolId),
     _buildTeacherMap(schoolId),
+    _buildStreamMap(schoolId),
   ]);
+
+  // Same current-period resolution _importStudents already does for
+  // enrollmentAcademicYearId/enrollmentTermId, for the identical reason:
+  // the bulk-import path bypasses POST /timetable entirely (writes docs
+  // directly), so without this every imported slot silently ended up
+  // missing the academicYearId/termId every other slot in the system has
+  // had since the Academic Year & Term Dependency Map fix (commit
+  // e99ec43) — meaning imported slots weren't correctly year-scoped for
+  // conflict detection or archival locking. Resolved once for the whole
+  // batch, not per row; a school with no academic years configured yet,
+  // or whose current year happens to be archived, just gets nulls rather
+  // than blocking the whole import.
+  const currentPeriod = await resolveAcademicPeriod(schoolId, { schoolId }, {});
 
   const Timetable  = tenantModel('timetable', { schoolId });
   const VALID_DAYS = new Set(['monday', 'tuesday', 'wednesday', 'thursday', 'friday']);
@@ -1163,13 +1194,40 @@ async function _importTimetable(rows, schoolId, userId) {
       results.skipped++; continue;
     }
 
+    // Resolve stream name → FK, optional — same {classId}::{name} convention
+    // _importStudents already uses. Deliberately part of the upsert FILTER
+    // below (not just $set): without it, importing 7i's Monday P1 and then
+    // 7ii's Monday P1 as two separate CSV rows for the same class/day/
+    // period would upsert onto the SAME document — the second row silently
+    // overwriting the first's teacher/subject/room instead of creating a
+    // second, stream-specific slot (exactly the multi-stream case this
+    // module's stream-scoping work exists to support — see teaching-
+    // assignments.js).
+    let streamId = null;
+    if (r.streamName?.trim()) {
+      const streamKey   = `${classId}::${r.streamName.trim().toLowerCase()}`;
+      const streamEntry = streamMap[streamKey];
+      if (!streamEntry) {
+        results.errors.push({ row, field: 'streamName', message: `Stream '${r.streamName}' not found in class '${r.className}'. Create it first, then re-import.` });
+        results.skipped++; continue;
+      }
+      streamId = streamEntry.id;
+    }
+
     const type = r.type?.trim().toLowerCase() || 'lesson';
     if (!VALID_TYPE.has(type)) {
       results.errors.push({ row, field: 'type', message: `type must be: lesson, assembly, registration, or free. Got: '${r.type}'` });
       results.skipped++; continue;
     }
 
-    // Resolve teacher name → FK (best-effort; not required)
+    // Resolve teacher name → FK (best-effort; not required). userId ??
+    // id ?? _id — same fallback chain AddSlotSlideOver/teaching-
+    // assignments.js/TimetablePage.jsx's own teacherKey() all use; this one
+    // used to skip straight from userId to the raw Mongo _id, so a teacher
+    // with no linked login account imported here got a teacherId matching
+    // NONE of those forms — invisible to Teacher View, Cover/Subs, and
+    // Emergency Online Mode's meeting-link lookup despite the row importing
+    // "successfully" with the right name displayed.
     let teacherId   = undefined;
     let teacherName = r.teacherName?.trim() || undefined;
     if (teacherName) {
@@ -1182,16 +1240,23 @@ async function _importTimetable(rows, schoolId, userId) {
     }
 
     try {
-      const filter = { schoolId, classId, day, period };
+      const filter = {
+        schoolId, classId, day, period,
+        streamId:       streamId || null,
+        academicYearId: currentPeriod.academicYearId || null,
+      };
       const update = {
         $set: {
-          subject:     r.subject?.trim() || undefined,
-          teacherId:   teacherId   || undefined,
-          teacherName: teacherName || undefined,
-          room:        r.room?.trim() || undefined,
+          subject:        r.subject?.trim() || undefined,
+          teacherId:      teacherId   || undefined,
+          teacherName:    teacherName || undefined,
+          room:           r.room?.trim() || undefined,
           type,
-          isActive:    true,
-          updatedBy:   userId,
+          streamId:       streamId || null,
+          academicYearId: currentPeriod.academicYearId || undefined,
+          termId:         currentPeriod.termId         || undefined,
+          isActive:       true,
+          updatedBy:      userId,
         },
         $setOnInsert: {
           id:        uuidv4(),
