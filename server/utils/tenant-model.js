@@ -54,6 +54,7 @@ const PLATFORM_COLLECTIONS = new Set([
   'system_announcements', // platform-wide notices shown on every school's dashboard
   'queue_jobs',           // C11 Phase 1 / ADR-0006 — job queue; not every job is school-scoped
   'identities',           // C8/MR-001 — org/credential-scoped, not schoolId-shaped (see above)
+  'platform_operators',   // named SaaS operator accounts (platform.js login) — no schoolId concept, same shape as platform_settings
 ]);
 
 /* ── Tenant context ─────────────────────────────────────────────
