@@ -15,25 +15,36 @@
 import { useQuery } from '@tanstack/react-query';
 import { sections as sectionsApi } from '@/api/client.js';
 
-/* ── Fallback used while loading / on error ─────────────────── */
-export const DEFAULT_SECTIONS = [
-  { id: 'kg_default',        key: 'kg',        name: 'Kindergarten', color: '#10b981', order: 1, sectionHeadId: null, sectionHeadName: null },
-  { id: 'primary_default',   key: 'primary',   name: 'Primary',      color: '#3b82f6', order: 2, sectionHeadId: null, sectionHeadName: null },
-  { id: 'secondary_default', key: 'secondary', name: 'Secondary',    color: '#8b5cf6', order: 3, sectionHeadId: null, sectionHeadName: null },
-  { id: 'alevel_default',    key: 'alevel',    name: 'A-Level',      color: '#f59e0b', order: 4, sectionHeadId: null, sectionHeadName: null },
-];
-
 export function useSections() {
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['sections'],
     queryFn:  () => sectionsApi.list(),
     staleTime: 10 * 60_000,   // 10 minutes — sections rarely change
     gcTime:    30 * 60_000,
   });
 
-  const sections = (data?.data && data.data.length > 0)
-    ? data.data
-    : DEFAULT_SECTIONS;
+  // Real data only — no fabricated stand-in. This used to fall back to a
+  // hardcoded Kindergarten/Primary/Secondary/A-Level list whenever `data`
+  // was empty, which conflated three very different states (still
+  // loading, the request failed, genuinely zero sections) into one and
+  // rendered made-up section names with zero visual difference from the
+  // real thing — confirmed live: a school with real, custom-named
+  // sections (e.g. "KS3 Section") appeared to show a completely
+  // different, generic section list for a user whose request just
+  // hadn't resolved yet.
+  //
+  // The server-side route this calls (GET /sections) auto-seeds a
+  // school's first four sections the moment it's ever queried and finds
+  // none (see sections.js's own DEFAULT_SECTIONS) — so in steady state,
+  // after that first request, `data.data` is never actually empty for a
+  // real, successful response. An empty array here means "still
+  // loading" or "the request failed," never "this school has no
+  // sections." Consumers that need to tell those apart should check
+  // isLoading/isError below rather than infer it from an empty array —
+  // every existing consumer already degrades gracefully on an empty
+  // sections array (several already gate their own render on isLoading/
+  // isError for other data), so none needed changes for this.
+  const sections = data?.data ?? [];
 
   /* { kg: { name:'Kindergarten', color:'#10b981', id:'...' }, ... } */
   const sectionMap = {};
@@ -50,5 +61,5 @@ export function useSections() {
       .map(s => ({ id: s.key, label: s.name, color: s.color || '#6366f1' })),
   ];
 
-  return { sections, sectionMap, sectionTabs, isLoading: isLoading && !isError };
+  return { sections, sectionMap, sectionTabs, isLoading, isError, error, refetch };
 }
