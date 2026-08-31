@@ -1100,7 +1100,18 @@ router.put('/substitutions/:id', authMiddleware, PLAN, MODGATE, rbac('timetable'
 
     if (substituteTeacherId !== undefined) {
       if (substituteTeacherId) {
-        const sub = await tenantModel('teachers', tenantContext(req)).findOne({ id: substituteTeacherId, schoolId }).lean();
+        // GET /available-teachers (the dropdown this id comes from) returns
+        // each candidate's userId as `id` specifically so it matches
+        // timetable_slots' own teacherId format — but a lookup here that
+        // only matched the literal `id` FIELD on the teachers collection
+        // (the staff record's own id, a different value from userId) never
+        // found the teacher, silently fell back to storing the raw id
+        // string as the "name", and printed exactly that on the cover
+        // sheet (e.g. "u_demo_t6") instead of a real name. Same dual-form
+        // lookup convention used everywhere else a caller might send
+        // either identifier (e.g. teaching-assignments.js's POST /).
+        const sub = await tenantModel('teachers', tenantContext(req))
+          .findOne({ schoolId, $or: [{ userId: substituteTeacherId }, { id: substituteTeacherId }] }).lean();
         update.substituteTeacherId   = substituteTeacherId;
         update.substituteTeacherName = sub
           ? `${sub.title ?? ''} ${sub.firstName} ${sub.lastName}`.trim()
