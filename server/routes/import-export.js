@@ -278,8 +278,10 @@ const TEMPLATES = {
       '#                                 roles above, not any other text.',
       '#   extraRoles                  — optional, comma-separated, on top of staffType:',
       '#                                 hod | class_teacher | timetabler | exam_officer |',
-      '#                                 deputy | principal. e.g. a Teacher who ALSO heads a',
-      '#                                 department: staffType=teacher, extraRoles=hod.',
+      '#                                 deputy | principal, or a custom responsibility key',
+      '#                                 from Settings -> Staff Roles & Responsibilities.',
+      '#                                 e.g. a Teacher who ALSO heads a department:',
+      '#                                 staffType=teacher, extraRoles=hod.',
       '#   departmentName               — optional, exact department name as shown in',
       '#                                 Settings -> Departments. Only meaningful when',
       '#                                 extraRoles includes "hod" (scopes their HOD',
@@ -773,7 +775,6 @@ async function _importTeachers(rows, schoolId, userId, req) {
   const VALID_GENDER     = new Set(['male', 'female', 'other', 'prefer_not_to_say']);
   const VALID_STATUS     = new Set(['active', 'inactive', 'on_leave', 'terminated']);
   const VALID_CONTRACT   = new Set(['full_time', 'part_time', 'supply', 'volunteer']);
-  const VALID_EXTRA_ROLE = new Set(['hod', 'class_teacher', 'timetabler', 'exam_officer', 'deputy', 'principal']);
 
   const results   = { created: 0, skipped: 0, errors: [] };
   const validRows = [];
@@ -783,6 +784,16 @@ async function _importTeachers(rows, schoolId, userId, req) {
   const knownEmails  = new Set(existing.map(t => t.email.toLowerCase()));
   const customRoles  = await tenantModel('custom_roles', { schoolId }).find({ schoolId }).select('key').lean();
   const validRoleSet = new Set([...SYSTEM_ROLES, ...customRoles.map(cr => cr.key)]);
+  // extraRoles: the 6 built-ins, plus whatever custom responsibilities this
+  // school has defined (Settings → Staff Roles & Responsibilities) — a
+  // hardcoded list here rejected every custom one outright, the same gap
+  // teachers.js's single-record PUT/POST had (see that file's
+  // _validateExtraRoles for the fuller rationale).
+  const school = await _model('schools').findOne({ id: schoolId }).select('staffResponsibilities').lean();
+  const VALID_EXTRA_ROLE = new Set([
+    'hod', 'class_teacher', 'timetabler', 'exam_officer', 'deputy', 'principal',
+    ...(school?.staffResponsibilities ?? []).map(r => r.value),
+  ]);
   const isSuperAdmin = req?.jwtUser?.role === 'superadmin' || (req?.jwtUser?.roles ?? []).includes('superadmin');
   const deptDocs = await tenantModel('departments', { schoolId }).find({ schoolId }).select('id name').lean();
   const deptMap  = {};
@@ -843,7 +854,7 @@ async function _importTeachers(rows, schoolId, userId, req) {
       const parts = r.extraRoles.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
       const bad = parts.filter(p => !VALID_EXTRA_ROLE.has(p));
       if (bad.length) {
-        results.errors.push({ row, field: 'extraRoles', message: `Invalid extraRoles: ${bad.join(', ')}. Use: hod, class_teacher, timetabler, exam_officer, deputy, principal.` });
+        results.errors.push({ row, field: 'extraRoles', message: `Invalid extraRoles: ${bad.join(', ')}. Use: hod, class_teacher, timetabler, exam_officer, deputy, principal, or a custom responsibility from Settings -> Staff Roles & Responsibilities.` });
         results.skipped++; continue;
       }
       extraRoles = [...new Set(parts)];

@@ -182,6 +182,35 @@ describe('POST /api/import-export/teachers — extraRoles', () => {
     expect(res.body.data.created).toBe(0);
     expect(res.body.data.errors[0].field).toBe('extraRoles');
   });
+
+  test('a custom responsibility the school has defined (Settings -> Staff Roles & Responsibilities) is accepted, not just the 6 built-ins', async () => {
+    mockStores.schools = makeStore([{
+      id: SCHOOL, name: 'Demo School',
+      staffResponsibilities: [{ value: 'ks3_academic_coordinator', label: 'KS3 Academic Coordinator' }],
+    }]);
+    const res = await supertest(buildApp())
+      .post('/api/import-export/teachers')
+      .set('Content-Type', 'application/json')
+      .send({ rows: [row({ extraRoles: 'hod, ks3_academic_coordinator' })] });
+
+    expect(res.status).toBe(201);
+    expect(mockStores.teachers._docs()[0].extraRoles.sort()).toEqual(['hod', 'ks3_academic_coordinator']);
+  });
+
+  test('a value that is neither built-in nor defined by this school is still rejected, even with staffResponsibilities present', async () => {
+    mockStores.schools = makeStore([{
+      id: SCHOOL, name: 'Demo School',
+      staffResponsibilities: [{ value: 'ks3_academic_coordinator', label: 'KS3 Academic Coordinator' }],
+    }]);
+    const res = await supertest(buildApp())
+      .post('/api/import-export/teachers')
+      .set('Content-Type', 'application/json')
+      .send({ rows: [row({ extraRoles: 'ks3_academic_coordinator, still_not_real' })] });
+
+    expect(res.body.data.created).toBe(0);
+    expect(res.body.data.errors[0].field).toBe('extraRoles');
+    expect(res.body.data.errors[0].message).toMatch(/still_not_real/);
+  });
 });
 
 describe('POST /api/import-export/teachers — departmentName resolution', () => {

@@ -13,6 +13,7 @@ const { moduleGate }     = require('../middleware/module-gate');
 const { rbac }            = require('../middleware/rbac');
 const { planGate }        = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { _model } = require('../utils/model');
 const { nextStaffId }     = require('../utils/counters');
 const { ok, created, fail, paginate, parsePagination, E } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
@@ -47,7 +48,12 @@ const TeacherCreateSchema = z.object({
   staffType:    z.string().max(60).optional(),
   departmentId: z.string().optional(),
   formClassId:  z.string().optional(),
-  extraRoles:   z.array(z.enum(['hod','class_teacher','timetabler','exam_officer','deputy','principal'])).optional(),
+  // Shape-only here — the 6 built-ins are always valid, but a school can
+  // also define its own custom responsibilities (Settings → Staff Roles &
+  // Responsibilities, school.staffResponsibilities), so a hardcoded enum
+  // would reject those outright. _validateExtraRoles() below does the real
+  // check, live against that school's own list.
+  extraRoles:   z.array(z.string().min(1).max(60)).optional(),
   // Sensitive HR fields (stored on profile, visible to HR/Admin only)
   nationalId:   z.string().max(50).optional(),
   nssfNo:       z.string().max(50).optional(),
@@ -63,6 +69,30 @@ const TeacherCreateSchema = z.object({
 const TeacherUpdateSchema = TeacherCreateSchema.partial().omit({ email: true }).extend({
   email: z.string().email().optional(),
 });
+
+// Matches StaffFormModal.jsx's/SettingsPage.jsx's own DEFAULT_STAFF_RESPONSIBILITIES
+// — these 6 are always valid regardless of what a school has customized.
+const BUILTIN_EXTRA_ROLES = new Set(['hod', 'class_teacher', 'timetabler', 'exam_officer', 'deputy', 'principal']);
+
+/**
+ * Validates extraRoles values against the built-in 6 PLUS whatever custom
+ * responsibilities this school has defined (Settings → Staff Roles &
+ * Responsibilities, school.staffResponsibilities — e.g. "KS3 Academic
+ * Coordinator"). A hardcoded enum here would reject every custom one
+ * outright, breaking the entire save (not just that field) the moment an
+ * admin ticked a responsibility their own school had added.
+ * Returns { ok: true } or { ok: false, invalid: [...] }.
+ */
+async function _validateExtraRoles(schoolId, extraRoles) {
+  if (!extraRoles || extraRoles.length === 0) return { ok: true };
+  const unknown = extraRoles.filter(r => !BUILTIN_EXTRA_ROLES.has(r));
+  if (unknown.length === 0) return { ok: true };
+
+  const school = await _model('schools').findOne({ id: schoolId }).select('staffResponsibilities').lean();
+  const customValues = new Set((school?.staffResponsibilities ?? []).map(r => r.value));
+  const invalid = unknown.filter(r => !customValues.has(r));
+  return invalid.length ? { ok: false, invalid } : { ok: true };
+}
 
 function _validate(schema, data) {
   const result = schema.safeParse(data);
@@ -263,6 +293,11 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('teachers', 'create'), asyn
     const { data, error } = _validate(TeacherCreateSchema, req.body);
     if (error) return E.validation(res, error);
 
+    const extraRolesCheck = await _validateExtraRoles(schoolId, data.extraRoles);
+    if (!extraRolesCheck.ok) {
+      return E.validation(res, [{ field: 'extraRoles', message: `Unknown responsibility: ${extraRolesCheck.invalid.join(', ')}` }]);
+    }
+
     // Check for duplicate email within the school
     const Teachers = tenantModel('teachers', tenantContext(req));
     const existing = await Teachers.findOne({ schoolId, email: data.email }).lean();
@@ -319,6 +354,11 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('teachers', 'update'), as
 
     const { data, error } = _validate(TeacherUpdateSchema, req.body);
     if (error) return E.validation(res, error);
+
+    const extraRolesCheck = await _validateExtraRoles(schoolId, data.extraRoles);
+    if (!extraRolesCheck.ok) {
+      return E.validation(res, [{ field: 'extraRoles', message: `Unknown responsibility: ${extraRolesCheck.invalid.join(', ')}` }]);
+    }
 
     // Immutable fields
     const clientVersion = data._v;
