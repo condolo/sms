@@ -30,6 +30,11 @@ jest.mock('../../utils/token-version', () => ({
   revokeUserTokens: jest.fn().mockResolvedValue(undefined),
   revokeIdentityTokens: jest.fn().mockResolvedValue(undefined),
 }));
+const mockInvalidateScopeCache = jest.fn();
+jest.mock('../../middleware/scopeMiddleware', () => ({
+  invalidateScopeCache: (...args) => mockInvalidateScopeCache(...args),
+  invalidateScopeCacheForRole: jest.fn(),
+}));
 
 const mockAuditLog = jest.fn().mockResolvedValue(undefined);
 jest.mock('../../services/audit', () => ({ log: (...args) => mockAuditLog(...args) }));
@@ -163,6 +168,23 @@ describe('PUT /api/settings/users/:id', () => {
       action: 'user.role_changed',
       details: expect.objectContaining({ oldRole: 'teacher', newRole: 'finance' }),
     }));
+  });
+
+  test('role changing busts the per-user scope cache — not just the token', async () => {
+    // The token revocation alone forces a fresh JWT on the next request,
+    // but scopeMiddleware's own cache is a SEPARATE 5-minute entry keyed
+    // by userId::schoolId — someone moving between two different scoped
+    // roles within that window could otherwise see stale classIds despite
+    // an already-correct token. See settings.js's PUT /users/:id comment.
+    mockUsers.docs.push({ id: 'usr_target_001', email: 't@demo.school', role: 'teacher', schoolId: SCHOOL_ID });
+    const app = buildApp();
+    const res = await supertest(app)
+      .put('/api/settings/users/usr_target_001')
+      .set('Cookie', authCookie({ userId: 'usr_admin_001', schoolId: SCHOOL_ID }))
+      .send({ role: 'finance' });
+
+    expect(res.status).toBe(200);
+    expect(mockInvalidateScopeCache).toHaveBeenCalledWith('usr_target_001', SCHOOL_ID);
   });
 
   test('role field resent unchanged does NOT log a role change', async () => {

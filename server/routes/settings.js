@@ -24,7 +24,7 @@ const { encrypt, smtpEncryptReady } = require('../utils/smtpEncrypt');
 const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY, GROUPS: NOTIF_GROUPS } = require('../utils/notif-settings');
 const { rbac, invalidatePermCache } = require('../middleware/rbac');
 const { invalidateModuleConfigCache } = require('../middleware/module-gate');
-const { invalidateScopeCacheForRole } = require('../middleware/scopeMiddleware');
+const { invalidateScopeCache, invalidateScopeCacheForRole } = require('../middleware/scopeMiddleware');
 const AuditService           = require('../services/audit');
 const { peekAdmissionCounter, setAdmissionCounter } = require('../utils/counters');
 const { MODULE_REGISTRY, MODULE_KEYS } = require('../config/moduleRegistry');
@@ -790,6 +790,20 @@ router.put('/users/:id', authMiddleware, rbac('settings', 'update'), async (req,
       revokeUserTokens(req.params.id).catch(err =>
         console.warn('[settings] token revocation (non-fatal):', err.message)
       );
+      // Scope (scopeMiddleware.js — which records within a permitted module
+      // this person can see, e.g. their assigned classIds) is a SEPARATE
+      // 5-minute cache from the token itself, keyed by userId::schoolId.
+      // Revoking the token forces a fresh JWT with the new role on their
+      // next request, but if they were already 'assigned'/'section'-level
+      // scoped before AND after this change (moving between two different
+      // scoped roles, not to/from an unrestricted one), a stale scope
+      // entry from before the change could still serve for up to 5 more
+      // minutes despite the token already being correct. Drop it under
+      // every identifier form this person might be cached under, same
+      // defensive reasoning as invalidateScopeCacheForRole's own comment.
+      invalidateScopeCache(req.params.id, req.jwtUser.schoolId);
+      if (priorUser?.id) invalidateScopeCache(priorUser.id, req.jwtUser.schoolId);
+      if (priorUser?._id) invalidateScopeCache(String(priorUser._id), req.jwtUser.schoolId);
       if (priorUser && priorUser.role !== role) {
         AuditService.log({
           action: 'user.role_changed', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
