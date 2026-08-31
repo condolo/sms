@@ -90,6 +90,41 @@ function _deriveApiPerms(byRoleCell) {
   return perms;
 }
 
+/* ── Derive a Per-User OVERRIDE delta (NOT a full definition) ───
+   Role Architecture Audit 2026-08 §2d / the Per-User override bug.
+   _deriveApiPerms above is correct for a ROLE: a role's saved doc is
+   meant to be the complete definition of what that role can do, so it
+   iterates every registered module and writes an explicit empty array
+   for anything not granted. Reusing it for a per-user override was the
+   bug — Per-User's own toggle() only ever writes the ONE mod__sub key
+   an admin actually touched into perms.byUser[userId], but the old
+   code ran that sparse object through _deriveApiPerms anyway, which
+   then dutifully wrote an explicit [] for every OTHER module too. At
+   merge time (rbac.js) that empty array fully replaced the role's own
+   grant for every untouched module — one single override silently
+   erased everyone's inherited access to everything else.
+   This derives ONLY the keys actually present in the input — no
+   iteration over MODULE_KEYS, no manufactured empties for anything the
+   admin didn't touch. The coarse module-level union for any affected
+   module is intentionally NOT computed here — this function has no
+   visibility into the role's OTHER sub-key grants for that module, so
+   any union it computed here would only ever reflect the touched
+   key(s), reintroducing the same wipeout at module-grain instead of
+   school-grain. That recomputation happens once, correctly, at
+   resolution time in rbac.js's _mergeUserOverrides, which does have
+   the role's full grant in view. */
+function _deriveUserOverridePerms(byUserCell) {
+  const perms = {};
+  for (const [key, cell] of Object.entries(byUserCell ?? {})) {
+    const subActions = [];
+    if (cell.v) subActions.push('read');
+    if (cell.e) { subActions.push('create'); subActions.push('update'); }
+    if (cell.d) subActions.push('delete');
+    perms[key] = subActions;
+  }
+  return perms;
+}
+
 /* ── Allowed fields for school update ──────────────────────── */
 const SCHOOL_UPDATABLE = [
   'name', 'tagline', 'email', 'phone', 'address', 'website',
@@ -328,15 +363,21 @@ router.put('/school', authMiddleware, rbac('settings', 'update'), async (req, re
       }
     }
 
-    // Sync per-user permission overrides — written to role_permissions with userId instead of roleKey.
-    // RBAC middleware checks these first and merges on top of role permissions.
+    // Sync per-user permission overrides — written to role_permissions with
+    // userId instead of roleKey. rbac.js merges these on top of the
+    // person's role permissions at read time (_mergeUserOverrides).
+    // Uses _deriveUserOverridePerms, NOT _deriveApiPerms — see that
+    // function's own comment. This must stay a sparse delta: only the
+    // exact mod__sub keys this admin actually touched get written, never
+    // a manufactured empty array for every module they didn't touch.
     if (update.modulePermissions?.byUser) {
       try {
         const userOps = [];
         for (const [userId, userPerms] of Object.entries(update.modulePermissions.byUser)) {
-          const derived = _deriveApiPerms(userPerms);
+          const derived = _deriveUserOverridePerms(userPerms);
+          if (!Object.keys(derived).length) continue; // nothing explicitly touched for this user
           const permFields = Object.fromEntries(
-            Object.entries(derived).map(([mod, actions]) => [`permissions.${mod}`, actions])
+            Object.entries(derived).map(([key, actions]) => [`permissions.${key}`, actions])
           );
           userOps.push(tenantModel('role_permissions', tenantContext(req)).updateOne(
             { schoolId: req.jwtUser.schoolId, userId },
@@ -1441,3 +1482,4 @@ router.put('/admission-counter', authMiddleware, rbac('settings', 'update'), asy
 
 module.exports = router;
 module.exports._deriveApiPerms = _deriveApiPerms; // test-only access, same pattern as behaviour.js's resetBehaviourPoints
+module.exports._deriveUserOverridePerms = _deriveUserOverridePerms; // test-only access

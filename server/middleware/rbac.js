@@ -55,6 +55,41 @@ function _isSuperRole(role, roles = []) {
    the alias, fall back to the canonical key's document. */
 const ROLE_ALIASES = { deputy: 'deputy_principal' };
 
+/* ── Merge a per-user override delta on top of a role's permissions ──
+   Role Architecture Audit 2026-08 §2d. userPerms is a SPARSE delta —
+   settings.js's _deriveUserOverridePerms only ever writes the exact
+   mod__sub keys an admin explicitly touched via Per User, nothing else.
+   A plain `{...rolePerms, ...userPerms}` gets the per-key override part
+   right for free (an untouched key is simply absent from userPerms, so
+   the role's own value for it survives the spread untouched) — but it
+   leaves each affected module's own COARSE key (perms[mod], the one a
+   no-subKey rbac() call actually reads) stuck at whatever the role
+   alone produced, ignoring the override entirely for anyone who checks
+   module-level access rather than a specific sub-feature.
+   Recomputed here, per affected module, as the union of: the role's own
+   original coarse grant (a floor — some role docs, e.g. freshly seeded
+   ones from repairPermissions.js, have ONLY this coarse grant with no
+   mod__sub breakdown at all yet), the role's own sub-key grants, and
+   the override's sub-key grants. Never narrower than what the role
+   already grants at the coarse level — the UI has no control that lets
+   an admin revoke a bare module key via Per User, only individual
+   sub-features, so there is nothing here that should ever shrink it. */
+function _mergeUserOverrides(rolePerms, userPerms) {
+  const merged = { ...rolePerms, ...userPerms };
+
+  const touchedModules = new Set(
+    Object.keys(userPerms).filter(k => k.includes('__')).map(k => k.split('__')[0])
+  );
+  for (const mod of touchedModules) {
+    const actions = new Set(Array.isArray(rolePerms[mod]) ? rolePerms[mod] : []);
+    for (const [key, arr] of Object.entries(merged)) {
+      if (key.startsWith(`${mod}__`) && Array.isArray(arr)) arr.forEach(a => actions.add(a));
+    }
+    merged[mod] = [...actions];
+  }
+  return merged;
+}
+
 /* ── Load permissions from DB (with cache) ──────────────────── */
 async function _loadPerms(schoolId, role) {
   const cached = _getCached(schoolId, role);
@@ -121,7 +156,7 @@ async function _isAllowed(jwtUser, mod, action, subKey) {
 
   const rolePerms = await _loadPerms(schoolId, role);
   const userPerms = await _loadUserPerms(schoolId, userId);
-  const perms = userPerms ? { ...rolePerms, ...userPerms } : rolePerms;
+  const perms = userPerms ? _mergeUserOverrides(rolePerms, userPerms) : rolePerms;
 
   const subFullKey = subKey ? `${mod}__${subKey}` : null;
   const hasSubGrant = subFullKey && Array.isArray(perms[subFullKey]);
@@ -180,4 +215,4 @@ function rbac(mod, action, subKey) {
   };
 }
 
-module.exports = { rbac, hasPermission, invalidatePermCache };
+module.exports = { rbac, hasPermission, invalidatePermCache, _mergeUserOverrides };
