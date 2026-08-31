@@ -94,6 +94,24 @@ function _streamQuery(schoolId, classId, streamId) {
     : { schoolId, classId, id: streamId };
 }
 
+/* Same reasoning as _classQuery, for rooms — the Preferred Room picker
+   (TeacherList.jsx's TeacherAssignmentsTab) built its option values as
+   `r._id ?? r.id`, the wrong priority: every room document always has a
+   Mongo _id, so that fallback never actually reached `r.id` at all — the
+   dropdown was unconditionally sending the raw Mongo _id, which this
+   route's literal `id`-only match then never found. "Room not found" was
+   not intermittent or data-dependent; it fired on every save that picked
+   a room, regardless of whether that room had a proper id (client fix is
+   the real one; this is defense in depth, same as _classQuery/_streamQuery,
+   in case a room is ever missing a real id via some path that hasn't been
+   audited). */
+function _roomQuery(schoolId, roomId) {
+  const isOid = /^[a-f\d]{24}$/i.test(roomId);
+  return isOid
+    ? { schoolId, isActive: { $ne: false }, $or: [{ id: roomId }, { _id: roomId }] }
+    : { schoolId, isActive: { $ne: false }, id: roomId };
+}
+
 /* ── Validation ─────────────────────────────────────────────── */
 const AssignmentSchema = z.object({
   teacherId:       z.string().min(1),    // userId format (e.g. u_demo_t3)
@@ -165,7 +183,7 @@ router.post('/', authMiddleware, async (req, res) => { // rbac: canManage() belo
       tenantModel('subjects', tenantContext(req)).findOne({ schoolId, id: data.subjectId, isActive: { $ne: false } }).lean(),
       tenantModel('classes', tenantContext(req)).findOne(_classQuery(schoolId, data.classId)).lean(),
       data.preferredRoomId
-        ? tenantModel('rooms', tenantContext(req)).findOne({ schoolId, id: data.preferredRoomId, isActive: { $ne: false } }).lean()
+        ? tenantModel('rooms', tenantContext(req)).findOne(_roomQuery(schoolId, data.preferredRoomId)).lean()
         : Promise.resolve(null),
     ]);
 
@@ -179,6 +197,7 @@ router.post('/', authMiddleware, async (req, res) => { // rbac: canManage() belo
     // via _classQuery's _id fallback has no real `id` field, and every
     // lookup below (class_subjects, streams) needs a stable id to key on.
     if (!cls.id) cls.id = String(cls._id);
+    if (room && !room.id) room.id = String(room._id);
 
     // HOD scope check: HODs may only assign within their department
     const eff = _effectiveRoles(req);
@@ -292,9 +311,9 @@ router.put('/:id', authMiddleware, async (req, res) => { // rbac: canManage() be
     if ('preferredRoomId' in result.data) {
       const rId = result.data.preferredRoomId;
       if (rId) {
-        const room = await tenantModel('rooms', tenantContext(req)).findOne({ schoolId, id: rId, isActive: { $ne: false } }).lean();
+        const room = await tenantModel('rooms', tenantContext(req)).findOne(_roomQuery(schoolId, rId)).lean();
         if (!room) return E.notFound(res, 'Room not found');
-        patch.preferredRoomId   = room.id;
+        patch.preferredRoomId   = room.id || String(room._id);
         patch.preferredRoomName = room.name;
       } else {
         patch.preferredRoomId   = null;

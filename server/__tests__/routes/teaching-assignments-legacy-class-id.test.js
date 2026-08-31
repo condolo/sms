@@ -49,6 +49,12 @@ function mockMakeFakeCollection(seed = []) {
     findOne:        jest.fn((filter) => mockChainObj(docs.find(d => mockMatchesFilter(d, filter)) || null)),
     countDocuments: jest.fn((filter) => Promise.resolve(docs.filter(d => mockMatchesFilter(d, filter)).length)),
     create:         jest.fn(async (doc) => { docs.push(doc); return { ...doc, toObject: () => doc }; }),
+    findOneAndUpdate: jest.fn((filter, update) => {
+      const doc = docs.find(d => mockMatchesFilter(d, filter));
+      if (!doc) return mockChainObj(null);
+      Object.assign(doc, update);
+      return mockChainObj(doc);
+    }),
     _docs:          docs,
   };
 }
@@ -70,6 +76,15 @@ const frenchSubject = { id: 'subj_french', schoolId: SCHOOL_A, name: 'French', i
 
 const stream7i  = { id: 'strm_7i',  schoolId: SCHOOL_A, classId: 'cls_yr7', name: '7i' };
 const stream7ii = { id: 'strm_7ii', schoolId: SCHOOL_A, classId: 'cls_yr7', name: '7ii', status: 'active' };
+
+// A real, normally-created room — has a proper id. Every room actually
+// created via rooms.js's POST route looks like this; the bug this covers
+// was the CLIENT sending r._id for one of exactly these.
+const LEGACY_ROOM_OID = '607f1f77bcf86cd799439099';
+const ROOM1_OID = '707f1f77bcf86cd799439055';
+const room1 = { id: 'room_1', _id: ROOM1_OID, schoolId: SCHOOL_A, name: 'RM 1', isActive: true };
+// A legacy room with no real id — defense-in-depth case, not the reported bug.
+const legacyRoom = { _id: LEGACY_ROOM_OID, schoolId: SCHOOL_A, name: 'Legacy Lab', isActive: true };
 
 let mockClasses, mockTeachers, mockSubjects, mockRooms, mockAssignments, mockClassSubjects, mockStreams;
 jest.mock('../../utils/tenant-model', () => ({
@@ -101,7 +116,7 @@ function freshCollections() {
   mockClasses     = mockMakeFakeCollection([legacyClass, uuidClass, year7Class]);
   mockTeachers    = mockMakeFakeCollection([teacherDoc]);
   mockSubjects    = mockMakeFakeCollection([mathSubject, frenchSubject]);
-  mockRooms       = mockMakeFakeCollection([]);
+  mockRooms       = mockMakeFakeCollection([room1, legacyRoom]);
   mockAssignments = mockMakeFakeCollection([]);
   mockClassSubjects = mockMakeFakeCollection([
     { schoolId: SCHOOL_A, classId: legacyClass._id, subjectId: mathSubject.id, isCompulsoryForClass: false },
@@ -241,5 +256,70 @@ describe('POST /api/teaching-assignments — elective vs compulsory stream rule'
 
     expect(res.status).toBe(201);
     expect(res.body?.data?.streamId).toBeNull();
+  });
+});
+
+describe('POST/PUT /api/teaching-assignments — Preferred Room resolution', () => {
+  // The reported bug: TeacherAssignmentsTab's Preferred Room dropdown sent
+  // r._id ?? r.id — every room always has a Mongo _id, so that fallback
+  // never actually reached r.id at all. Every save that picked a room
+  // failed with "Room not found", unconditionally — not intermittent, not
+  // data-dependent. Client fix is the real one; this proves the server
+  // side (now dual-id-tolerant, same as class/stream) independently.
+  test('a normal room (has a real id) resolves correctly — no regression', async () => {
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/teaching-assignments')
+      .send({ teacherId: teacherDoc.userId, subjectId: mathSubject.id, classId: uuidClass.id, preferredRoomId: room1.id });
+
+    expect(res.status).toBe(201);
+    expect(res.body?.data?.preferredRoomId).toBe('room_1');
+    expect(res.body?.data?.preferredRoomName).toBe('RM 1');
+  });
+
+  test('submitting the room\'s raw Mongo _id (what the buggy dropdown sent) still resolves — defense in depth', async () => {
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/teaching-assignments')
+      .send({ teacherId: teacherDoc.userId, subjectId: mathSubject.id, classId: uuidClass.id, preferredRoomId: ROOM1_OID });
+
+    expect(res.status).toBe(201);
+    expect(res.body?.data?.preferredRoomId).toBe('room_1'); // resolved back to the real id, not stored as the raw _id
+  });
+
+  test('a legacy room with no real id at all still resolves via its _id', async () => {
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/teaching-assignments')
+      .send({ teacherId: teacherDoc.userId, subjectId: mathSubject.id, classId: uuidClass.id, preferredRoomId: LEGACY_ROOM_OID });
+
+    expect(res.status).toBe(201);
+    expect(res.body?.data?.preferredRoomId).toBe(LEGACY_ROOM_OID);
+    expect(res.body?.data?.preferredRoomName).toBe('Legacy Lab');
+  });
+
+  test('a room id matching nothing at all still 404s as "Room not found"', async () => {
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/teaching-assignments')
+      .send({ teacherId: teacherDoc.userId, subjectId: mathSubject.id, classId: uuidClass.id, preferredRoomId: 'room_does_not_exist' });
+
+    expect(res.status).toBe(404);
+    expect(res.body?.error?.message ?? res.body?.error).toMatch(/room not found/i);
+  });
+
+  test('PUT /:id also resolves a room by its raw _id, not just POST', async () => {
+    const app = buildApp();
+    const create = await supertest(app)
+      .post('/api/teaching-assignments')
+      .send({ teacherId: teacherDoc.userId, subjectId: mathSubject.id, classId: uuidClass.id });
+    const assignmentId = create.body.data.id;
+
+    const res = await supertest(app)
+      .put(`/api/teaching-assignments/${assignmentId}`)
+      .send({ preferredRoomId: ROOM1_OID });
+
+    expect(res.status).toBe(200);
+    expect(res.body?.data?.preferredRoomId).toBe('room_1');
   });
 });

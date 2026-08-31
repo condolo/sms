@@ -1028,7 +1028,7 @@ function TeacherAssignmentsTab({ teacher, canEdit }) {
                 <select value={af.preferredRoomId} onChange={e => setField('preferredRoomId', e.target.value)} className={`mt-1 ${fCls()}`}>
                   <option value="">None</option>
                   {roomList.map(r => (
-                    <option key={r._id ?? r.id} value={r._id ?? r.id}>{r.name}</option>
+                    <option key={r.id ?? r._id} value={r.id ?? r._id}>{r.name}</option>
                   ))}
                 </select>
               </div>
