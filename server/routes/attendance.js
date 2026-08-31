@@ -176,12 +176,22 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create'), sc
     const { data, error } = _validate(AttendanceRecordSchema, req.body);
     if (error) return E.validation(res, error);
 
+    // Resolve the student once — needed both to stream-scope the write
+    // (a teacher whose only grant here is a compulsory subject in ONE
+    // stream — see teaching-assignments.js — never appears in classIds at
+    // all, so the classId-only check below would wrongly deny them their
+    // own stream's attendance) and to denormalize streamId onto the
+    // record itself, the same way classId already is, so later reads can
+    // be scoped the same way (see scopeEngine.js's streamAware modules).
+    const student = await tenantModel('students', tenantContext(req))
+      .findOne({ schoolId, id: data.studentId }).select('streamId').lean();
+
     // Scope was previously only enforced on the GET list — a scoped
     // ('assigned') account could mark attendance for any class in the
     // school via this route regardless of what teaching_assignments says,
     // since the classes dropdown that feeds this form isn't scoped either.
     // This is the authoritative check; the dropdown itself is unchanged.
-    if (!ScopeEngine.isClassInScope(req, 'attendance', data.classId)) {
+    if (!ScopeEngine.isClassInScope(req, 'attendance', data.classId, student?.streamId)) {
       return E.forbidden(res, 'This class is not in your assigned scope.');
     }
 
@@ -197,7 +207,7 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create'), sc
 
     const doc = await Attendance.findOneAndUpdate(
       filter,
-      { ...data, schoolId, markedBy: userId, updatedBy: userId, $setOnInsert: { id: uuidv4(), createdBy: userId } },
+      { ...data, streamId: student?.streamId ?? null, schoolId, markedBy: userId, updatedBy: userId, $setOnInsert: { id: uuidv4(), createdBy: userId } },
       { upsert: true, new: true, runValidators: false }
     ).lean();
 
@@ -221,18 +231,39 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create')
 
     const { classId, date, period, records } = data;
 
-    if (!ScopeEngine.isClassInScope(req, 'attendance', classId)) {
-      return E.forbidden(res, 'This class is not in your assigned scope.');
+    const wholeClassGrant = ScopeEngine.isClassInScope(req, 'attendance', classId);
+
+    // Resolve each submitted student's stream — needed to denormalize
+    // streamId onto every record (same as classId already is) and, for a
+    // teacher whose only grant here is one specific stream (a compulsory
+    // subject — see teaching-assignments.js), to verify server-side which
+    // of the submitted students they're actually allowed to mark, rather
+    // than trusting the client's list wholesale. In normal use the
+    // roster this form is built from is already scoped correctly (see
+    // Milestone 1), so this is a defense-in-depth check, not the
+    // primary UX gate.
+    const studentDocs = await tenantModel('students', tenantContext(req))
+      .find({ schoolId, id: { $in: records.map(r => r.studentId) } })
+      .select('id streamId').lean();
+    const streamByStudent = Object.fromEntries(studentDocs.map(s => [s.id, s.streamId ?? null]));
+
+    let allowedRecords = records;
+    if (!wholeClassGrant) {
+      const myStreamIds = req.scope?.streamIds ?? [];
+      allowedRecords = records.filter(r => myStreamIds.includes(streamByStudent[r.studentId]));
+      if (allowedRecords.length === 0) {
+        return E.forbidden(res, 'This class is not in your assigned scope.');
+      }
     }
 
     const Attendance = tenantModel('attendance', tenantContext(req));
 
     // Build bulk upsert operations
-    const ops = records.map(r => ({
+    const ops = allowedRecords.map(r => ({
       updateOne: {
         filter: { schoolId, studentId: r.studentId, date, classId, ...(period ? { period } : {}) },
         update: {
-          $set:        { status: r.status, note: r.note || '', markedBy: userId, updatedBy: userId, classId, date, ...(period ? { period } : {}), schoolId },
+          $set:        { status: r.status, note: r.note || '', streamId: streamByStudent[r.studentId] ?? null, markedBy: userId, updatedBy: userId, classId, date, ...(period ? { period } : {}), schoolId },
           $setOnInsert: { id: uuidv4(), createdBy: userId }
         },
         upsert: true
@@ -241,7 +272,7 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create')
 
     const result = await Attendance.bulkWrite(ops, { ordered: false });
 
-    const absentees = records.filter(r => r.status === 'absent').map(r => ({ studentId: r.studentId, date }));
+    const absentees = allowedRecords.filter(r => r.status === 'absent').map(r => ({ studentId: r.studentId, date }));
     if (absentees.length) {
       _notifyAbsences(req, absentees).catch(err => console.error('[attendance/bulk absence notify]', err));
     }
@@ -249,7 +280,8 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create')
     return ok(res, {
       upserted: result.upsertedCount,
       modified: result.modifiedCount,
-      total:    records.length
+      total:    allowedRecords.length,
+      skipped:  records.length - allowedRecords.length
     }, null, 201);
   } catch (err) {
     console.error('[attendance POST /bulk]', err);
@@ -268,13 +300,14 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('attendance', 'update'), 
 
     const Attendance = tenantModel('attendance', tenantContext(req));
 
-    // Fetch first — need the record's OWN classId to scope-check, since a
-    // partial update may not include one, and a caller could otherwise try
-    // to reassign an in-scope record onto an out-of-scope class via `data.classId`.
-    const existing = await Attendance.findOne({ id: req.params.id, schoolId }).select('classId').lean();
+    // Fetch first — need the record's OWN classId (and streamId, already
+    // denormalized at create time) to scope-check, since a partial update
+    // may not include one, and a caller could otherwise try to reassign an
+    // in-scope record onto an out-of-scope class via `data.classId`.
+    const existing = await Attendance.findOne({ id: req.params.id, schoolId }).select('classId streamId').lean();
     if (!existing) return E.notFound(res, 'Attendance record not found');
-    if (!ScopeEngine.isClassInScope(req, 'attendance', existing.classId) ||
-        !ScopeEngine.isClassInScope(req, 'attendance', data.classId)) {
+    if (!ScopeEngine.isClassInScope(req, 'attendance', existing.classId, existing.streamId) ||
+        !ScopeEngine.isClassInScope(req, 'attendance', data.classId, existing.streamId)) {
       return E.forbidden(res, 'This class is not in your assigned scope.');
     }
 
@@ -298,9 +331,9 @@ router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('attendance', 'delete'
     const { schoolId } = req.jwtUser;
     const Attendance = tenantModel('attendance', tenantContext(req));
 
-    const existing = await Attendance.findOne({ id: req.params.id, schoolId }).select('classId').lean();
+    const existing = await Attendance.findOne({ id: req.params.id, schoolId }).select('classId streamId').lean();
     if (!existing) return E.notFound(res, 'Attendance record not found');
-    if (!ScopeEngine.isClassInScope(req, 'attendance', existing.classId)) {
+    if (!ScopeEngine.isClassInScope(req, 'attendance', existing.classId, existing.streamId)) {
       return E.forbidden(res, 'This class is not in your assigned scope.');
     }
 

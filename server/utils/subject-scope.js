@@ -49,26 +49,45 @@ async function isSubjectAssignmentEnforced(req) {
   return cfg?.subjectAssignmentEnforced === true;
 }
 
+/* A teaching_assignments row with no streamId is a whole-class grant and
+   covers every stream of that class; one WITH a streamId only covers that
+   exact stream (a compulsory subject in a class that has streams — see
+   teaching-assignments.js, e.g. 7i's Maths teacher isn't 7ii's). Matches
+   either shape so a whole-class grant still passes when the caller doesn't
+   know or pass a streamId (existing callers, unaffected). */
+function _streamOr(streamId) {
+  const or = [{ streamId: null }, { streamId: { $exists: false } }];
+  if (streamId) or.push({ streamId });
+  return or;
+}
+
 /**
- * Single {classId, subjectId} check for one write. Returns true when the
- * write may proceed — enforcement is off for this school, the caller is a
- * management-tier role, or a matching teaching_assignments record exists.
+ * Single {classId, subjectId[, streamId]} check for one write. Returns true
+ * when the write may proceed — enforcement is off for this school, the
+ * caller is a management-tier role, or a matching teaching_assignments
+ * record exists (a whole-class grant, or one scoped to this exact stream).
+ *
+ * `streamId` is optional and backward compatible: omitting it (as every
+ * pre-Milestone-2 caller does) only ever matches whole-class assignments,
+ * same as before — it never widens what an existing caller could already do.
  */
-async function canWriteSubject(req, classId, subjectId) {
+async function canWriteSubject(req, classId, subjectId, streamId) {
   if (_isManagement(req)) return true;
   if (!(await isSubjectAssignmentEnforced(req))) return true;
 
   const { schoolId, userId } = req.jwtUser;
   const doc = await tenantModel('teaching_assignments', tenantContext(req))
-    .findOne({ schoolId, teacherId: userId, classId, subjectId }).select('id').lean();
+    .findOne({ schoolId, teacherId: userId, classId, subjectId, $or: _streamOr(streamId) }).select('id').lean();
   return !!doc;
 }
 
 /**
- * Bulk variant — checks every distinct {classId, subjectId} pair in one
- * query instead of one round-trip per mark. Returns the subset of `pairs`
- * the caller is NOT permitted to write (empty when enforcement is off, the
- * caller is management-tier, or every pair is assigned to them).
+ * Bulk variant — checks every distinct {classId, subjectId[, streamId]}
+ * triple in one query instead of one round-trip per mark. Returns the
+ * subset of `pairs` the caller is NOT permitted to write (empty when
+ * enforcement is off, the caller is management-tier, or every pair is
+ * assigned to them). Each pair's `streamId` is optional, same backward-
+ * compatibility contract as canWriteSubject above.
  */
 async function unassignedPairs(req, pairs) {
   if (pairs.length === 0) return [];
@@ -79,12 +98,22 @@ async function unassignedPairs(req, pairs) {
   const assigned = await tenantModel('teaching_assignments', tenantContext(req))
     .find({
       schoolId, teacherId: userId,
-      $or: pairs.map(({ classId, subjectId }) => ({ classId, subjectId })),
+      $or: pairs.map(({ classId, subjectId, streamId }) => ({
+        classId, subjectId, $or: _streamOr(streamId),
+      })),
     })
-    .select('classId subjectId').lean();
+    .select('classId subjectId streamId').lean();
 
-  const assignedKeys = new Set(assigned.map(a => `${a.classId}::${a.subjectId}`));
-  return pairs.filter(({ classId, subjectId }) => !assignedKeys.has(`${classId}::${subjectId}`));
+  // A pair with a streamId is satisfied by either a whole-class assignment
+  // row (streamId null/absent) or one matching that exact stream; a pair
+  // with no streamId (unknown / not resolved) only matches a whole-class row.
+  function isAssigned({ classId, subjectId, streamId }) {
+    return assigned.some(a =>
+      a.classId === classId && a.subjectId === subjectId &&
+      (!a.streamId || (streamId && a.streamId === streamId))
+    );
+  }
+  return pairs.filter(p => !isAssigned(p));
 }
 
 module.exports = { isSubjectAssignmentEnforced, canWriteSubject, unassignedPairs };

@@ -76,7 +76,11 @@ jest.mock('../../utils/model', () => ({
     if (collection === 'assessment_marks') {
       return { findOne: mockMarksFindOne, find: mockMarksFind, bulkWrite: mockBulkWrite };
     }
-    return { findOne: jest.fn(() => mockChain(() => null)) };
+    // 'students' — resolved by assessment.js's POST /marks(/bulk) to
+    // denormalize/scope-check streamId (Milestone 2); no test here cares
+    // about actual stream values, so an empty result keeps every write
+    // treated as a whole-class grant, same as before that change.
+    return { findOne: jest.fn(() => mockChain(() => null)), find: jest.fn(() => mockChain(() => [])) };
   }),
 }));
 

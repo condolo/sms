@@ -146,13 +146,22 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), scopeM
     const { data, error } = _validate(GradeSchema, req.body);
     if (error) return E.validation(res, error);
 
+    // Resolve the student's stream once — needed both to stream-scope the
+    // write (a teacher whose only grant here is a compulsory subject in
+    // ONE stream — see teaching-assignments.js — never appears in classIds
+    // at all) and to denormalize streamId onto the record itself, same as
+    // classId, so later reads can be scoped the same way (scopeEngine.js's
+    // streamAware modules).
+    const gradeStudent = await tenantModel('students', tenantContext(req))
+      .findOne({ schoolId, id: data.studentId }).select('streamId').lean();
+
     // Scope was previously only enforced on the GET list. classId is
     // optional on this schema — nothing to check when absent, but when
     // present it must be within the caller's scope. (No live UI currently
     // calls this write route — client only consumes GET /grades/report —
     // but closing this now avoids the same gap attendance.js had the
     // moment something does start writing through it.)
-    if (!ScopeEngine.isClassInScope(req, 'grades', data.classId)) {
+    if (!ScopeEngine.isClassInScope(req, 'grades', data.classId, gradeStudent?.streamId)) {
       return E.forbidden(res, 'This class is not in your assigned scope.');
     }
 
@@ -176,6 +185,7 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), scopeM
       ...data,
       id:          uuidv4(),
       schoolId,
+      streamId:    gradeStudent?.streamId ?? null,
       percentage:  _round((data.score / data.maxScore) * 100),
       gradedBy:    userId,
       date:        data.date || new Date().toISOString().slice(0, 10),
@@ -193,7 +203,14 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), sc
     const { data, error } = _validate(BulkGradeSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const outOfScope = data.grades.find(g => !ScopeEngine.isClassInScope(req, 'grades', g.classId));
+    // See POST / above — resolved once for the whole batch, keyed by
+    // studentId, both for the scope check and to stamp streamId per row.
+    const bulkStudentIds = [...new Set(data.grades.map(g => g.studentId))];
+    const bulkStudentDocs = await tenantModel('students', tenantContext(req))
+      .find({ schoolId, id: { $in: bulkStudentIds } }).select('id streamId').lean();
+    const streamByStudent = Object.fromEntries(bulkStudentDocs.map(s => [s.id, s.streamId ?? null]));
+
+    const outOfScope = data.grades.find(g => !ScopeEngine.isClassInScope(req, 'grades', g.classId, streamByStudent[g.studentId]));
     if (outOfScope) {
       return E.forbidden(res, 'One or more classes in this batch are not in your assigned scope.');
     }
@@ -231,6 +248,7 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), sc
           $set: {
             ...g,
             schoolId,
+            streamId:   streamByStudent[g.studentId] ?? null,
             percentage: _round((g.score / g.maxScore) * 100),
             gradedBy:   userId,
             updatedBy:  userId,
@@ -258,8 +276,8 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'update'), scop
     // Always fetch existing record — needed for audit trail and percentage recalc
     const existing = await tenantModel('grades', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Grade not found');
-    if (!ScopeEngine.isClassInScope(req, 'grades', existing.classId) ||
-        !ScopeEngine.isClassInScope(req, 'grades', data.classId)) {
+    if (!ScopeEngine.isClassInScope(req, 'grades', existing.classId, existing.streamId) ||
+        !ScopeEngine.isClassInScope(req, 'grades', data.classId, existing.streamId)) {
       return E.forbidden(res, 'This class is not in your assigned scope.');
     }
 
@@ -308,9 +326,9 @@ router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'delete'), s
     const { schoolId } = req.jwtUser;
     const Grades = tenantModel('grades', tenantContext(req));
 
-    const existing = await Grades.findOne({ id: req.params.id, schoolId }).select('classId').lean();
+    const existing = await Grades.findOne({ id: req.params.id, schoolId }).select('classId streamId').lean();
     if (!existing) return E.notFound(res, 'Grade not found');
-    if (!ScopeEngine.isClassInScope(req, 'grades', existing.classId)) {
+    if (!ScopeEngine.isClassInScope(req, 'grades', existing.classId, existing.streamId)) {
       return E.forbidden(res, 'This class is not in your assigned scope.');
     }
 

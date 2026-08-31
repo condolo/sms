@@ -879,9 +879,18 @@ router.post('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), a
       return _err(res, 'This academic year is locked — marks cannot be added or modified.', 403);
     }
 
+    // Resolve the student's stream once — needed both for the scope check
+    // below (a teacher whose only assignment for this class+subject is
+    // scoped to ONE stream — a compulsory subject, see teaching-
+    // assignments.js — must not be able to write marks for a different
+    // stream's student) and to denormalize streamId onto the mark itself,
+    // same as classId, so reads can be scoped the same way later.
+    const markStudent = await tenantModel('students', tenantContext(req))
+      .findOne({ schoolId, id: d.studentId }).select('streamId').lean();
+
     // Guard: subject-teacher scoping (RC6) — only enforced when the school
     // has turned on academic_config.subjectAssignmentEnforced
-    if (!(await canWriteSubject(req, d.classId, d.subjectId))) {
+    if (!(await canWriteSubject(req, d.classId, d.subjectId, markStudent?.streamId))) {
       return _err(res, 'You are not assigned to teach this subject in this class.', 403);
     }
 
@@ -943,6 +952,7 @@ router.post('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), a
         $set: {
           rawScore:      d.rawScore,
           classId:       d.classId,
+          streamId:      markStudent?.streamId ?? null,
           label,
           isPublished:   d.isPublished,
           updatedBy:     userId,
@@ -989,11 +999,26 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
       }
     }
 
+    // Resolve every submitted student's stream once — needed both for the
+    // scope check below (a teacher whose only assignment for a class+
+    // subject is scoped to ONE stream must not write marks for a different
+    // stream's student) and to denormalize streamId onto each mark.
+    const bulkStudentIds = [...new Set(marks.map(d => d.studentId))];
+    const bulkStudentDocs = await tenantModel('students', tenantContext(req))
+      .find({ schoolId, id: { $in: bulkStudentIds } }).select('id streamId').lean();
+    const streamByStudent = Object.fromEntries(bulkStudentDocs.map(s => [s.id, s.streamId ?? null]));
+
     // Guard: subject-teacher scoping (RC6) — one query for every distinct
-    // {classId, subjectId} pair in the batch, only enforced when the school
-    // has turned on academic_config.subjectAssignmentEnforced
+    // {classId, subjectId, streamId} triple in the batch, only enforced
+    // when the school has turned on academic_config.subjectAssignmentEnforced.
+    // Deduped by triple, not just {classId, subjectId} — within one class+
+    // subject, 7i and 7ii can have different assigned teachers, so the same
+    // pair can be assigned for one stream and not the other.
     const distinctPairs = [...new Map(
-      marks.map(d => [`${d.classId}::${d.subjectId}`, { classId: d.classId, subjectId: d.subjectId }])
+      marks.map(d => {
+        const streamId = streamByStudent[d.studentId] ?? null;
+        return [`${d.classId}::${d.subjectId}::${streamId}`, { classId: d.classId, subjectId: d.subjectId, streamId }];
+      })
     ).values()];
     const denied = await unassignedPairs(req, distinctPairs);
     if (denied.length > 0) {
@@ -1146,6 +1171,7 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
             $set: {
               rawScore:    d.rawScore,
               classId:     d.classId,
+              streamId:    streamByStudent[d.studentId] ?? null,
               label:       d.label || _label(d.assessmentType, d.instance),
               isPublished: d.isPublished !== false,
               updatedBy:   userId,
@@ -1186,7 +1212,21 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
 router.delete('/marks/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await tenantModel('assessment_marks', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
+    const Marks = tenantModel('assessment_marks', tenantContext(req));
+
+    // Same RC6 subject-teacher guard as POST /marks — this route had none
+    // at all before, so any grades:delete holder could remove any mark in
+    // the school regardless of subject assignment, even with enforcement
+    // turned on for every other write path. Closed here using the exact
+    // same helper, not a new mechanism, since it's the natural counterpart
+    // to the write-side check that already existed for POST.
+    const target = await Marks.findOne({ id: req.params.id, schoolId }).select('classId subjectId streamId').lean();
+    if (!target) return E.notFound(res, 'Mark not found');
+    if (!(await canWriteSubject(req, target.classId, target.subjectId, target.streamId))) {
+      return _err(res, 'You are not assigned to teach this subject in this class.', 403);
+    }
+
+    const doc = await Marks.findOneAndDelete({ id: req.params.id, schoolId });
     if (!doc) return E.notFound(res, 'Mark not found');
     return _ok(res, { id: req.params.id, deleted: true });
   } catch (err) {

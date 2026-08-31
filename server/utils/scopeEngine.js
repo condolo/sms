@@ -26,20 +26,26 @@
 // record (students already does, natively) — turning this on for a module
 // whose records have no streamId yet doesn't leak anything (a stream-scoped
 // teacher just sees nothing there until it's wired up), but it's cleaner to
-// leave it off until that's true. Currently: students + classes only.
-// attendance/grades/assessment/report_cards/growth_profile/growth_records
-// are the deliberately-deferred next batch (Security Baseline Register /
-// stream-scoping follow-up).
+// leave it off until that's true.
+// Milestone 1: students + classes (students natively carry streamId).
+// Milestone 2: attendance/grades/assessment/report_cards/growth_profile/
+// growth_records now stamp streamId at write time too (resolved from the
+// referenced student's own record — see each route's create/update path).
+// `lessons` stays deferred — it's a class+subject coverage log, not a
+// per-student record, so there's no student to resolve a streamId from;
+// making it stream-aware would need its own schema field and its own
+// write-time source, a different shape of change from the rest of this
+// batch.
 const MODULE_SCOPE = {
   students:        { field: 'classId',   source: 'classIds', streamAware: true },
   classes:         { field: 'id',        source: 'classIds', streamAware: true },
   'class-subjects':{ field: 'classId',   source: 'classIds'   },
-  attendance:      { field: 'classId',   source: 'classIds'   },
-  grades:          { field: 'classId',   source: 'classIds'   },
-  assessment:      { field: 'classId',   source: 'classIds'   },
-  report_cards:    { field: 'classId',   source: 'classIds'   },
-  growth_profile:  { field: 'classId',   source: 'classIds'   },
-  growth_records:  { field: 'classId',   source: 'classIds'   },
+  attendance:      { field: 'classId',   source: 'classIds', streamAware: true },
+  grades:          { field: 'classId',   source: 'classIds', streamAware: true },
+  assessment:      { field: 'classId',   source: 'classIds', streamAware: true },
+  report_cards:    { field: 'classId',   source: 'classIds', streamAware: true },
+  growth_profile:  { field: 'classId',   source: 'classIds', streamAware: true },
+  growth_records:  { field: 'classId',   source: 'classIds', streamAware: true },
   lessons:         { field: 'classId',   source: 'classIds'   },
   exams:           { field: 'subjectId', source: 'subjectIds' },
   timetable:       { field: 'teacherId', source: 'userId'     },
@@ -220,13 +226,22 @@ function isUnrestricted(req, module) {
  * it optional) — with nothing to check, this allows by default rather than
  * denying a request that was never scoped by class in the first place.
  *
+ * `streamId` (optional, 4th param): for a streamAware module, a teacher with
+ * ONLY a stream-scoped grant (a compulsory subject in one specific stream —
+ * see teaching-assignments.js) never appears in `classIds` at all, so the
+ * classId check alone would wrongly deny them writing to their own stream's
+ * records. Existing call sites that don't pass this are completely
+ * unaffected — the stream branch simply never triggers.
+ *
  * @param {import('express').Request} req
  * @param {string} module
  * @param {string} [classId]
- * @returns {boolean} true if this classId is within scope (or there's
- *   nothing to check, or the module is unrestricted for this user)
+ * @param {string} [streamId]
+ * @returns {boolean} true if this classId (or, for a streamAware module,
+ *   this streamId) is within scope, or there's nothing to check, or the
+ *   module is unrestricted for this user
  */
-function isClassInScope(req, module, classId) {
+function isClassInScope(req, module, classId, streamId) {
   if (!classId) return true;
   const scope = req.scope;
   if (!scope) return true; // school-level: unrestricted
@@ -236,7 +251,12 @@ function isClassInScope(req, module, classId) {
   if (!mapping || mapping.source === 'userId') return true; // not class-scoped
 
   const allowed = scope[mapping.source] ?? [];
-  return allowed.includes(classId);
+  if (allowed.includes(classId)) return true;
+
+  if (mapping.streamAware && streamId) {
+    return (scope.streamIds ?? []).includes(streamId);
+  }
+  return false;
 }
 
 module.exports = { applyToFilter, hasNoAssignments, isUnrestricted, isClassInScope };
