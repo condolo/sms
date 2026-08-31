@@ -23,6 +23,7 @@ import {
   classSubjects,
   teachingAssignments as assignmentsApi,
   rooms as roomsApi,
+  streams as streamsApi,
 } from '@/api/client.js';
 import { DAYS, DAY_FULL, DEFAULT_BELL } from '../constants.js';
 import { FField, iCls } from './TimetablePrimitives.jsx';
@@ -64,12 +65,18 @@ export default function AddSlotSlideOver({
   const [subjectId,         setSubjectId]         = useState(editSlot?.subjectId ?? '');
   const [userPickedSubject, setUserPickedSubject] = useState(false);
   const [autoFillApplied,   setAutoFillApplied]   = useState(false);
+  // Set only when this slot is for one specific stream (compulsory subject
+  // in a class that has streams — 7i's Maths and 7ii's Maths are two
+  // separate slots, same reasoning as teaching-assignments.js). Empty =
+  // whole-class slot.
+  const [streamId,          setStreamId]          = useState(editSlot?.streamId ?? '');
 
   // Re-init when editSlot changes (user clicks a different slot)
   useEffect(() => {
     setFormState(buildForm());
     setErrors({});
     setSubjectId(editSlot?.subjectId ?? '');
+    setStreamId(editSlot?.streamId ?? '');
     setUserPickedSubject(false);
     setAutoFillApplied(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -98,6 +105,17 @@ export default function AddSlotSlideOver({
   });
   const curriculumSubjects = csData?.data ?? [];
 
+  /* ── Streams of this class ────────────────────────────────── */
+  const { data: streamsData } = useQuery({
+    queryKey: ['streams', classId],
+    queryFn:  () => streamsApi.list({ classId, status: 'active' }),
+    staleTime: 5 * 60_000,
+    enabled:  !!classId,
+  });
+  const streamList = streamsData?.data ?? [];
+  const selectedSubjectMeta = curriculumSubjects.find(s => s.subjectId === subjectId);
+  const streamRequired = !!selectedSubjectMeta?.isCompulsoryForClass && streamList.length > 0;
+
   /* ── Registered rooms ────────────────────────────────────── */
   const { data: roomsData } = useQuery({
     queryKey: ['rooms'],
@@ -107,11 +125,17 @@ export default function AddSlotSlideOver({
   const roomList = roomsData?.data ?? [];
 
   /* ── Teaching assignment lookup ──────────────────────────── */
+  // For a compulsory subject with per-stream teachers, streamId is what
+  // tells the lookup WHICH of the (possibly several) assignments for this
+  // class+subject to auto-fill from — without it, a class with two
+  // different stream teachers for the same subject couldn't be told apart.
+  // Deliberately doesn't fire yet if a stream is required but not picked.
+  const lookupReady = !!classId && !!subjectId && userPickedSubject && (!streamRequired || !!streamId);
   const { data: lookupData, isFetching: lookingUp } = useQuery({
-    queryKey: ['ta-lookup', classId, subjectId],
-    queryFn:  () => assignmentsApi.lookup(classId, subjectId),
+    queryKey: ['ta-lookup', classId, subjectId, streamId],
+    queryFn:  () => assignmentsApi.lookup(classId, subjectId, streamId || undefined),
     staleTime: 60_000,
-    enabled:  !!classId && !!subjectId && userPickedSubject,
+    enabled:  lookupReady,
   });
   const assignment = lookupData?.data?.[0] ?? null;
 
@@ -130,12 +154,14 @@ export default function AddSlotSlideOver({
 
   function handleSubjectSelect(cs) {
     const name = cs.subject?.name ?? cs.subjectId;
-    // Clear teacher + room so auto-fill can write them
+    // Clear teacher + room so auto-fill can write them; clear streamId too
+    // since a different subject may have a different stream requirement
     setFormState(f => ({ ...f, subject: name, teacherId: '', teacherName: '', room: '' }));
     setSubjectId(cs.subjectId);
+    setStreamId('');
     setUserPickedSubject(true);
     setAutoFillApplied(false);
-    setErrors(e => { const n = { ...e }; delete n.subject; return n; });
+    setErrors(e => { const n = { ...e }; delete n.subject; delete n.streamId; return n; });
   }
 
   /* ── Mutation ────────────────────────────────────────────── */
@@ -146,6 +172,7 @@ export default function AddSlotSlideOver({
         period:      form.period,
         subject:     form.subject.trim()     || undefined,
         subjectId:   subjectId               || undefined,
+        streamId:    streamId                || undefined,
         teacherId:   form.teacherId          || undefined,
         teacherName: form.teacherName.trim() || undefined,
         room:        form.room.trim()        || undefined,
@@ -162,6 +189,7 @@ export default function AddSlotSlideOver({
     e.preventDefault();
     const errs = {};
     if (!form.subject.trim()) errs.subject = 'Subject is required.';
+    if (streamRequired && !streamId) errs.streamId = 'This subject is compulsory here — select which stream this lesson is for.';
     if (Object.keys(errs).length) { setErrors(errs); return; }
     mutate();
   }
@@ -255,8 +283,31 @@ export default function AddSlotSlideOver({
             )}
           </FField>
 
+          {/* ── Stream ─────────────────────────────────────── */}
+          {subjectId && streamList.length > 0 && (
+            <FField label={`Stream${streamRequired ? ' *' : ' (optional — leave blank for the whole class)'}`} error={errors.streamId}>
+              <select
+                value={streamId}
+                onChange={e => { setStreamId(e.target.value); setAutoFillApplied(false); setErrors(er => { const n = { ...er }; delete n.streamId; return n; }); }}
+                className={iCls(errors.streamId)}
+              >
+                <option value="">{streamRequired ? 'Select stream…' : 'Whole class (every stream)'}</option>
+                {streamList.map(s => (
+                  <option key={s.id ?? s._id} value={s.id ?? s._id}>{s.name}</option>
+                ))}
+              </select>
+              {streamRequired && !errors.streamId && (
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  This subject is compulsory for this class — each stream has its own lesson and teacher.
+                </p>
+              )}
+            </FField>
+          )}
+
           {/* ── Auto-fill status banner ─────────────────────── */}
-          {subjectId && userPickedSubject && (
+          {/* Waiting on a required stream pick — don't claim "not found"
+              before the lookup has even had a chance to run. */}
+          {subjectId && userPickedSubject && streamRequired && !streamId ? null : subjectId && userPickedSubject && (
             <div className={`flex items-center gap-2 text-[11px] px-3 py-2 rounded-lg border ${
               lookingUp
                 ? 'bg-slate-50 text-slate-400 border-slate-200'

@@ -651,9 +651,10 @@ export const teachingAssignments = {
   update: (id, data)   => _put(`/teaching-assignments/${id}`, data),
   /** Remove an assignment */
   remove: (id)         => _delete(`/teaching-assignments/${id}`),
-  /** Convenience: find the teacher assigned to a subject in a class */
-  lookup: (classId, subjectId) =>
-    _get('/teaching-assignments', { classId, subjectId }),
+  /** Convenience: find the teacher assigned to a subject in a class (and,
+      for compulsory subjects with separate per-stream teachers, the stream) */
+  lookup: (classId, subjectId, streamId) =>
+    _get('/teaching-assignments', { classId, subjectId, ...(streamId ? { streamId } : {}) }),
 };
 
 export const sections = {

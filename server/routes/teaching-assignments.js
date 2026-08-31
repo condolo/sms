@@ -1,12 +1,27 @@
 /* ============================================================
    Msingi — /api/teaching-assignments
    Pre-timetabling assignment: which teacher delivers which subject
-   to which class, in which preferred room.
+   to which class (and, when it matters, which stream), in which
+   preferred room.
 
    One record = "Agnes teaches Pure Maths to Class 12 in Room AL-1"
 
+   Stream rule (class has streams, e.g. 7i / 7ii with different Maths
+   teachers — a plain class-wide assignment can't express that):
+     - Subject is COMPULSORY for this class (class_subjects.
+       isCompulsoryForClass) AND the class actually has streams
+       → streamId is REQUIRED. Each stream gets its own assignment row,
+         and each is independently scoped — assigning Agnes to 7i's
+         Maths does not give her visibility into 7ii.
+     - Subject is ELECTIVE for this class, OR the class has no streams
+       at all → streamId is OPTIONAL. Omitted = whole-class grant
+       (electives commonly pool students from every stream into one
+       group, so class-wide is the correct default, not a narrowing).
+   See scopeEngine.js / scopeMiddleware.js for how streamId then flows
+   into what a teacher can actually see.
+
    This feeds:
-     - Timetable slot editor auto-fill (GET ?classId=X&subjectId=Y)
+     - Timetable slot editor auto-fill (GET ?classId=X&subjectId=Y&streamId=Z)
      - Teacher profile "Assignments" tab (GET ?teacherId=X)
      - Room availability (GET ?roomId=X)
 
@@ -70,11 +85,21 @@ function _classQuery(schoolId, classId) {
     : { schoolId, id: classId };
 }
 
+/* Same reasoning as _classQuery, for streams — see streams.js, whose own
+   POST/GET routes tolerate the identical legacy _id-as-id case. */
+function _streamQuery(schoolId, classId, streamId) {
+  const isOid = /^[a-f\d]{24}$/i.test(streamId);
+  return isOid
+    ? { schoolId, classId, $or: [{ id: streamId }, { _id: streamId }] }
+    : { schoolId, classId, id: streamId };
+}
+
 /* ── Validation ─────────────────────────────────────────────── */
 const AssignmentSchema = z.object({
   teacherId:       z.string().min(1),    // userId format (e.g. u_demo_t3)
   subjectId:       z.string().min(1),
   classId:         z.string().min(1),    // string id (e.g. cls_demo_4a)
+  streamId:        z.string().min(1).optional(),
   preferredRoomId: z.string().optional(),
   periodsPerWeek:  z.number().int().min(1).max(40).optional(),
 });
@@ -100,6 +125,12 @@ router.get('/', authMiddleware, async (req, res) => { // rbac: self-scoped below
     if (req.query.teacherId)  filter.teacherId  = req.query.teacherId;
     if (req.query.classId)    filter.classId    = req.query.classId;
     if (req.query.subjectId)  filter.subjectId  = req.query.subjectId;
+    // Timetable auto-fill lookup (?classId=X&subjectId=Y&streamId=Z) needs
+    // this to pick the RIGHT teacher when a compulsory subject has separate,
+    // stream-scoped assignments — without it, a class with two different
+    // stream teachers for the same subject would match both rows and the
+    // lookup couldn't tell them apart.
+    if (req.query.streamId)   filter.streamId   = req.query.streamId;
     if (req.query.roomId)     filter.preferredRoomId = req.query.roomId;
     if (req.query.departmentId) filter.departmentId  = req.query.departmentId;
 
@@ -143,6 +174,12 @@ router.post('/', authMiddleware, async (req, res) => { // rbac: canManage() belo
     if (!cls)     return E.notFound(res, 'Class not found');
     if (data.preferredRoomId && !room) return E.notFound(res, 'Room not found');
 
+    // Same normalization GET /classes already applies for its own dropdowns
+    // (see that route's "Normalize" comment) — a legacy class matched only
+    // via _classQuery's _id fallback has no real `id` field, and every
+    // lookup below (class_subjects, streams) needs a stable id to key on.
+    if (!cls.id) cls.id = String(cls._id);
+
     // HOD scope check: HODs may only assign within their department
     const eff = _effectiveRoles(req);
     const isHodOnly = eff.has('hod') && ![...FULL_MANAGE].some(r => eff.has(r));
@@ -155,15 +192,50 @@ router.post('/', authMiddleware, async (req, res) => { // rbac: canManage() belo
       return E.forbidden(res);
     }
 
-    // Duplicate guard — same teacher+subject+class is idempotent (conflict)
+    // ── Stream rule ──────────────────────────────────────────
+    // The subject must already be part of this class's curriculum (the
+    // Subject dropdown in both the Assignments tab and the timetable editor
+    // is populated from exactly this — class_subjects — so under normal use
+    // this always exists; this is the server-side backstop for direct API
+    // calls). isCompulsoryForClass is the actual source of truth for
+    // whether a stream is required, not the subject's own school-wide
+    // isCompulsory flag — a subject can be compulsory for one class and
+    // elective for another (see class-subjects.js).
+    const classSubject = await tenantModel('class_subjects', tenantContext(req))
+      .findOne({ schoolId, classId: cls.id, subjectId: data.subjectId }).lean();
+    if (!classSubject) {
+      return E.badRequest(res, 'This subject is not part of this class\'s curriculum — add it in Curriculum first.');
+    }
+
+    const classIdForms = [...new Set([cls.id, String(cls._id)].filter(Boolean))];
+    const streamCount = await tenantModel('streams', tenantContext(req))
+      .countDocuments({ schoolId, classId: { $in: classIdForms }, status: 'active' });
+
+    let stream = null;
+    if (data.streamId) {
+      // classId as { $in: classIdForms } is a valid Mongo filter value —
+      // matches the stream regardless of which id-form it was stored under.
+      stream = await tenantModel('streams', tenantContext(req))
+        .findOne(_streamQuery(schoolId, { $in: classIdForms }, data.streamId)).lean();
+      if (!stream) return E.notFound(res, 'Stream not found in this class');
+    } else if (classSubject.isCompulsoryForClass && streamCount > 0) {
+      return E.badRequest(res, 'This subject is compulsory for this class, and the class has streams — select which stream this teacher covers.');
+    }
+
+    // Duplicate guard — same teacher+subject+class+stream is idempotent
+    // (conflict). streamId is part of the identity now: Agnes/Maths/Year 7i
+    // and Agnes/Maths/Year 7ii are two distinct, non-conflicting rows.
     const existing = await tenantModel('teaching_assignments', tenantContext(req)).findOne({
       schoolId,
       teacherId: data.teacherId,
       subjectId: data.subjectId,
       classId:   data.classId,
+      streamId:  stream?.id ?? null,
     }).lean();
     if (existing) {
-      return E.conflict(res, 'This teacher is already assigned to this subject and class');
+      return E.conflict(res, stream
+        ? `This teacher is already assigned to this subject in ${stream.name}`
+        : 'This teacher is already assigned to this subject and class');
     }
 
     const teacherName = [teacher.title, teacher.firstName, teacher.lastName]
@@ -178,6 +250,8 @@ router.post('/', authMiddleware, async (req, res) => { // rbac: canManage() belo
       subjectName:       subject.name,
       classId:           data.classId,
       className:         cls.name,
+      streamId:          stream?.id   ?? null,
+      streamName:        stream?.name ?? null,
       departmentId:      subject.departmentId ?? null,
       preferredRoomId:   room?.id            ?? null,
       preferredRoomName: room?.name          ?? null,

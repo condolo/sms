@@ -171,15 +171,42 @@ router.get('/:id/students', authMiddleware, PLAN, MODGATE, rbac('students', 'rea
     // restricted to their own assigned classes on the list endpoint could
     // still pull any class's full roster — including parent contact PII — by
     // id here. Live-confirmed against production before this fix.
-    if (!ScopeEngine.isClassInScope(req, 'students', cls.id)) {
+    //
+    // Stream-scoping follow-up: a teacher assigned a compulsory subject in
+    // ONE stream of this class (e.g. 7i's Maths, not 7ii's) has real,
+    // narrower access here — not the binary "whole class or nothing" this
+    // gate used to enforce. isClassInScope only ever means a whole-class
+    // grant; a teacher with stream-only access fails it and must be allowed
+    // through here specifically so the query below can narrow them to just
+    // their own stream(s), same reasoning as streams.js's own roster route.
+    const inWholeClassScope = ScopeEngine.isClassInScope(req, 'students', cls.id);
+    const myStreamIds = req.scope?.streamIds ?? [];
+    const classIdForms = [...new Set([cls.id, String(cls._id), req.params.id].filter(Boolean))];
+
+    // A teacher's streamIds may belong to a totally different class (e.g.
+    // stream-scoped to 4A's Maths, requesting 9C's roster) — narrow to only
+    // the ones that actually belong to THIS class before deciding access,
+    // so that case denies (403) the same way a whole-class-elsewhere
+    // teacher already does, rather than silently 200-with-an-empty-list.
+    const relevantStreamIds = (!inWholeClassScope && myStreamIds.length)
+      ? await tenantModel('streams', tenantContext(req))
+          .find({ schoolId, classId: { $in: classIdForms }, id: { $in: myStreamIds } })
+          .select('id').lean().then(docs => docs.map(d => d.id))
+      : [];
+
+    if (!inWholeClassScope && relevantStreamIds.length === 0) {
       return E.forbidden(res, 'This class is not in your assigned scope.');
     }
 
     const Students = tenantModel('students', tenantContext(req));
     // Match students stored under ANY identifier form of this class —
     // UUID `id` or Mongo `_id` string (pre-migration / imported records)
-    const classIdForms = [...new Set([cls.id, String(cls._id), req.params.id].filter(Boolean))];
     const filter   = { schoolId, classId: { $in: classIdForms } };
+    if (!inWholeClassScope) {
+      // Stream-scoped only: narrow to just the caller's own stream(s) within
+      // this class.
+      filter.streamId = { $in: relevantStreamIds };
+    }
     if (req.query.status) filter.status = req.query.status;
 
     const [docs, total] = await Promise.all([

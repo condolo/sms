@@ -61,6 +61,11 @@ function _inferSection(className = '') {
 /* ── Validation ─────────────────────────────────────────────── */
 const SlotSchema = z.object({
   classId:        z.string().min(1),
+  // Set only when this slot is for one specific stream, not the whole
+  // class — e.g. 7i's Maths and 7ii's Maths are two separate slots with
+  // different teachers, same classId, different streamId. See
+  // teaching-assignments.js for the same class↔stream rule this mirrors.
+  streamId:       z.string().optional(),
   day:            z.enum(DAYS),
   period:         z.string().min(1).max(20),          // "1", "2", "Break", etc.
   periodNumber:   z.number().int().min(0).optional(),
@@ -156,12 +161,17 @@ async function _checkConflicts(schoolId, data, excludeId = null) {
   const base = { schoolId, day: data.day, isActive: true, academicYearId: data.academicYearId ?? null };
   if (excludeId) base.id = { $ne: excludeId };
 
-  // 1. Class slot collision — same class, same day, same period key
-  const classConflict = await Timetable.findOne({
-    ...base, classId: data.classId, period: data.period,
-  }).lean();
+  // 1. Class slot collision — same class, same day, same period key.
+  // Stream-aware: two DIFFERENT streams of the same class (e.g. 7i and 7ii,
+  // each with their own Maths teacher) are independent groups of students
+  // and may legitimately have different simultaneous lessons — only a
+  // genuine same-audience collision should block. Either slot being
+  // whole-class (no streamId) still conflicts with anything, since a
+  // whole-class slot by definition covers every stream too.
+  const classSlots = await Timetable.find({ ...base, classId: data.classId, period: data.period }).lean();
+  const classConflict = classSlots.find(s => !data.streamId || !s.streamId || s.streamId === data.streamId);
   if (classConflict) {
-    return `Slot already exists for this class on ${data.day} period ${data.period}.`;
+    return `Slot already exists for this ${data.streamId && classConflict.streamId ? 'stream' : 'class'} on ${data.day} period ${data.period}.`;
   }
 
   // 2. Teacher double-booking — time-overlap aware across all sections
@@ -215,6 +225,7 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async 
 
     const filter = { schoolId };
     if (req.query.classId)        filter.classId        = req.query.classId;
+    if (req.query.streamId)       filter.streamId       = req.query.streamId;
     if (req.query.teacherId)      filter.teacherId      = req.query.teacherId;
     if (req.query.subjectId)      filter.subjectId      = req.query.subjectId;
     if (req.query.day)            filter.day            = req.query.day;
@@ -1386,7 +1397,7 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('timetable', 'update'), a
     const merged = { ...current, ...data };
 
     // Re-resolve section + times if period or classId changed
-    const scheduleChanged = ['classId', 'day', 'period'].some(f => data[f] !== undefined);
+    const scheduleChanged = ['classId', 'streamId', 'day', 'period'].some(f => data[f] !== undefined);
     if (scheduleChanged) {
       const section = await _sectionForClass(schoolId, merged.classId);
       merged.section = section;
@@ -1399,7 +1410,7 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('timetable', 'update'), a
       data.endTime   = merged.endTime;
     }
 
-    const schedulingChanged = ['classId', 'day', 'period', 'teacherId', 'room'].some(f => data[f] !== undefined);
+    const schedulingChanged = ['classId', 'streamId', 'day', 'period', 'teacherId', 'room'].some(f => data[f] !== undefined);
     if (schedulingChanged) {
       const conflictMsg = await _checkConflicts(schoolId, merged, req.params.id);
       if (conflictMsg) return E.conflict(res, conflictMsg);

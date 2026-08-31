@@ -17,6 +17,7 @@ import {
   rooms as roomsApi,
   classes as classesApi,
   classSubjects,
+  streams as streamsApi,
   importExport,
   departments as deptsApi,
   subjects as subjectsApi,
@@ -825,7 +826,7 @@ function TeacherAssignmentsTab({ teacher, canEdit }) {
   const teacherId = teacher.userId ?? teacher.id ?? teacher._id;
 
   const [showAdd, setShowAdd] = useState(false);
-  const [af, setAf]           = useState({ classId: '', subjectId: '', preferredRoomId: '', periodsPerWeek: '' });
+  const [af, setAf]           = useState({ classId: '', subjectId: '', streamId: '', preferredRoomId: '', periodsPerWeek: '' });
   const [afErr, setAfErr]     = useState({});
 
   /* ── Fetch assignments for this teacher ─── */
@@ -854,6 +855,23 @@ function TeacherAssignmentsTab({ teacher, canEdit }) {
   });
   const subjectList = sData?.data ?? [];
 
+  /* ── Fetch streams for the selected class ─── */
+  const { data: strData } = useQuery({
+    queryKey: ['streams', af.classId],
+    queryFn:  () => streamsApi.list({ classId: af.classId, status: 'active' }),
+    staleTime: 60_000,
+    enabled: showAdd && !!af.classId,
+  });
+  const streamList = strData?.data ?? [];
+
+  // Stream rule (mirrors teaching-assignments.js's own server-side check):
+  // a subject compulsory for this class, in a class that actually has
+  // streams, needs a specific stream picked — a plain class-wide assignment
+  // can't express "different teacher per stream". Electives, or a class
+  // with no streams, leave it optional.
+  const selectedSubject = subjectList.find(cs => cs.subjectId === af.subjectId);
+  const streamRequired  = !!selectedSubject?.isCompulsoryForClass && streamList.length > 0;
+
   /* ── Fetch rooms (only when add form is open) ─── */
   const { data: rData } = useQuery({
     queryKey: ['rooms'],
@@ -870,7 +888,7 @@ function TeacherAssignmentsTab({ teacher, canEdit }) {
     onSuccess:  () => {
       invalidate();
       setShowAdd(false);
-      setAf({ classId: '', subjectId: '', preferredRoomId: '', periodsPerWeek: '' });
+      setAf({ classId: '', subjectId: '', streamId: '', preferredRoomId: '', periodsPerWeek: '' });
       setAfErr({});
       toast.success('Assignment added.');
     },
@@ -886,7 +904,8 @@ function TeacherAssignmentsTab({ teacher, canEdit }) {
   function setField(k, v) {
     setAf(f => {
       const n = { ...f, [k]: v };
-      if (k === 'classId') n.subjectId = ''; // reset subject when class changes
+      if (k === 'classId') { n.subjectId = ''; n.streamId = ''; } // reset downstream selections when class changes
+      if (k === 'subjectId') n.streamId = ''; // a different subject may have a different stream requirement
       return n;
     });
     setAfErr(e => { const n = { ...e }; delete n[k]; delete n._s; return n; });
@@ -896,11 +915,13 @@ function TeacherAssignmentsTab({ teacher, canEdit }) {
     const e = {};
     if (!af.classId)   e.classId   = 'Select a class';
     if (!af.subjectId) e.subjectId = 'Select a subject';
+    if (streamRequired && !af.streamId) e.streamId = 'This subject is compulsory here — select the stream this teacher covers';
     if (Object.keys(e).length) { setAfErr(e); return; }
     createMut.mutate({
       teacherId,
       classId:   af.classId,
       subjectId: af.subjectId,
+      ...(af.streamId          ? { streamId:         af.streamId }                : {}),
       ...(af.preferredRoomId  ? { preferredRoomId:  af.preferredRoomId }          : {}),
       ...(af.periodsPerWeek   ? { periodsPerWeek:   Number(af.periodsPerWeek) }   : {}),
     });
@@ -964,13 +985,41 @@ function TeacherAssignmentsTab({ teacher, canEdit }) {
                   <option value="">{af.classId ? 'Select subject…' : 'Choose class first'}</option>
                   {subjectList.map(cs => (
                     <option key={cs.subjectId} value={cs.subjectId}>
-                      {cs.subject?.name ?? cs.subjectId}
+                      {cs.subject?.name ?? cs.subjectId}{cs.isCompulsoryForClass ? ' ★' : ''}
                     </option>
                   ))}
                 </select>
                 {afErr.subjectId && <p className="text-[10px] text-red-500 mt-0.5">{afErr.subjectId}</p>}
               </div>
             </div>
+
+            {/* Stream picker — required for a compulsory subject in a class
+                that has streams (different teacher per stream, e.g. 7i vs
+                7ii's Maths); optional otherwise, so an elective can still be
+                narrowed to one stream if a school genuinely wants that. */}
+            {af.subjectId && streamList.length > 0 && (
+              <div>
+                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
+                  Stream{streamRequired ? ' *' : ' (optional — leave blank for the whole class)'}
+                </label>
+                <select
+                  value={af.streamId}
+                  onChange={e => setField('streamId', e.target.value)}
+                  className={`mt-1 ${fCls(afErr.streamId)}`}
+                >
+                  <option value="">{streamRequired ? 'Select stream…' : 'Whole class (every stream)'}</option>
+                  {streamList.map(s => (
+                    <option key={s.id ?? s._id} value={s.id ?? s._id}>{s.name}</option>
+                  ))}
+                </select>
+                {afErr.streamId && <p className="text-[10px] text-red-500 mt-0.5">{afErr.streamId}</p>}
+                {streamRequired && !afErr.streamId && (
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    This subject is compulsory for this class — each stream needs its own assignment.
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               {/* Room picker */}
@@ -1041,6 +1090,7 @@ function TeacherAssignmentsTab({ teacher, canEdit }) {
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
                   <span className="text-[10px] text-slate-500">
                     <span className="font-medium">Class:</span> {a.className ?? a.classId}
+                    {a.streamName ? ` (${a.streamName})` : ''}
                   </span>
                   {a.preferredRoomName && (
                     <span className="text-[10px] text-slate-400">· Room: {a.preferredRoomName}</span>

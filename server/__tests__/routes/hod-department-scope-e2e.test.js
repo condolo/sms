@@ -37,13 +37,22 @@ const mockSubjects = {
   sub_math:    { id: 'sub_math',    name: 'Mathematics', schoolId: SCHOOL_ID, departmentId: 'dept_math',    isActive: true },
   sub_science: { id: 'sub_science', name: 'Biology',     schoolId: SCHOOL_ID, departmentId: 'dept_science', isActive: true },
 };
+// Both subjects are electives on cls_1 for this suite's purposes — its own
+// concern is department scoping, not the stream rule, so no streamId is
+// ever required here.
+const mockClassSubjects = {
+  sub_math:    { classId: 'cls_1', subjectId: 'sub_math',    isCompulsoryForClass: false },
+  sub_science: { classId: 'cls_1', subjectId: 'sub_science', isCompulsoryForClass: false },
+};
 
 jest.mock('../../utils/tenant-model', () => ({
   tenantContext: (req) => ({ schoolId: req.jwtUser.schoolId }),
   tenantModel: jest.fn((col) => {
-    if (col === 'teachers')  return { findOne: () => mockChainObj(mockTeacher) };
-    if (col === 'classes')   return { findOne: () => mockChainObj(mockClass) };
-    if (col === 'subjects')  return { findOne: (f) => mockChainObj(mockSubjects[f.id] ?? null) };
+    if (col === 'teachers')       return { findOne: () => mockChainObj(mockTeacher) };
+    if (col === 'classes')        return { findOne: () => mockChainObj(mockClass) };
+    if (col === 'subjects')       return { findOne: (f) => mockChainObj(mockSubjects[f.id] ?? null) };
+    if (col === 'class_subjects') return { findOne: (f) => mockChainObj(mockClassSubjects[f.subjectId] ?? null) };
+    if (col === 'streams')        return { countDocuments: () => Promise.resolve(0), find: () => ({ select: () => mockChainObj([]) }) };
     if (col === 'rooms')     return { findOne: () => mockChainObj(null) };
     if (col === 'teaching_assignments') {
       return {

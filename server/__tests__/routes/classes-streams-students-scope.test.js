@@ -95,6 +95,11 @@ const STUDENT_9C = {
   firstName: 'Amara', lastName: 'Osei', admissionNumber: 'ADM-9C-01',
   parentName: 'Mrs Osei', parentEmail: 'osei.parent@example.com', parentPhone: '+254700000001',
 };
+const STUDENT_9C_BLUE = {
+  id: 'stu_9c_2', schoolId: SCHOOL_A, classId: 'cls_9c', streamId: 'strm_9c_blue',
+  firstName: 'Chiamaka', lastName: 'Nwosu', admissionNumber: 'ADM-9C-02',
+  parentName: 'Mrs Nwosu', parentEmail: 'nwosu.parent@example.com', parentPhone: '+254700000099',
+};
 const STUDENT_4A = {
   id: 'stu_4a_1', schoolId: SCHOOL_A, classId: 'cls_4a', streamId: 'strm_4a_blue',
   firstName: 'Brian', lastName: 'Onyango', admissionNumber: 'ADM-4A-01',
@@ -110,9 +115,10 @@ beforeEach(() => {
   ]);
   mockStreams = mockMakeFakeCollection([
     { id: 'strm_9c_red',  schoolId: SCHOOL_A, classId: 'cls_9c', name: 'Red' },
+    { id: 'strm_9c_blue', schoolId: SCHOOL_A, classId: 'cls_9c', name: 'Blue' },
     { id: 'strm_4a_blue', schoolId: SCHOOL_A, classId: 'cls_4a', name: 'Blue' },
   ]);
-  mockStudents = mockMakeFakeCollection([STUDENT_9C, STUDENT_4A]);
+  mockStudents = mockMakeFakeCollection([STUDENT_9C, STUDENT_9C_BLUE, STUDENT_4A]);
   mockTeachingAssignments = mockMakeFakeCollection([]);
   invalidateScopeCache('usr_admin', SCHOOL_A);
   invalidateScopeCache('usr_teacher', SCHOOL_A);
@@ -123,6 +129,15 @@ function asTeacherOf(...classIds) {
   mockTeachingAssignments = mockMakeFakeCollection(
     classIds.map(classId => ({ schoolId: SCHOOL_A, teacherId: 'usr_teacher', classId }))
   );
+}
+
+// Compulsory-subject, stream-scoped assignment — the 7i/7ii-different-teacher
+// case. No whole-class grant at all; classIds stays empty for this teacher.
+function asStreamTeacherOf(classId, streamId) {
+  mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
+  mockTeachingAssignments = mockMakeFakeCollection([
+    { schoolId: SCHOOL_A, teacherId: 'usr_teacher', classId, subjectId: 'subj_math', streamId },
+  ]);
 }
 
 describe('GET /api/classes/:id/students — AUTHZ-27', () => {
@@ -147,9 +162,10 @@ describe('GET /api/classes/:id/students — AUTHZ-27', () => {
     asTeacherOf('cls_9c');
     const res = await supertest(buildApp()).get('/api/classes/cls_9c/students');
     expect(res.status).toBe(200);
-    expect(res.body.data).toHaveLength(1);
-    expect(res.body.data[0].firstName).toBe('Amara');
-    expect(res.body.data[0].parentEmail).toBe('osei.parent@example.com');
+    // Whole-class grant → both streams' students (Red's Amara, Blue's Chiamaka)
+    expect(res.body.data).toHaveLength(2);
+    expect(res.body.data.map(s => s.firstName).sort()).toEqual(['Amara', 'Chiamaka']);
+    expect(res.body.data.find(s => s.firstName === 'Amara').parentEmail).toBe('osei.parent@example.com');
   });
 
   test('a teacher assigned to multiple classes can see each one, but only those', async () => {
@@ -172,6 +188,22 @@ describe('GET /api/classes/:id/students — AUTHZ-27', () => {
     asTeacherOf('cls_4a');
     // same request shape a client would send if just editing the URL
     const res = await supertest(buildApp()).get('/api/classes/cls_9c/students?status=active');
+    expect(res.status).toBe(403);
+  });
+
+  test('a teacher stream-scoped to ONLY Red (compulsory subject, no whole-class grant) sees Red\'s roster, not Blue\'s', async () => {
+    asStreamTeacherOf('cls_9c', 'strm_9c_red');
+    const res = await supertest(buildApp()).get('/api/classes/cls_9c/students');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].firstName).toBe('Amara');
+    expect(JSON.stringify(res.body)).not.toContain('Chiamaka');
+    expect(JSON.stringify(res.body)).not.toContain('nwosu.parent@example.com');
+  });
+
+  test('a teacher stream-scoped to a stream in a DIFFERENT class is still denied entirely for this class', async () => {
+    asStreamTeacherOf('cls_4a', 'strm_4a_blue');
+    const res = await supertest(buildApp()).get('/api/classes/cls_9c/students');
     expect(res.status).toBe(403);
   });
 });
@@ -209,5 +241,19 @@ describe('GET /api/streams/:id/students — AUTHZ-28', () => {
     asTeacherOf('cls_9c');
     const res = await supertest(buildApp()).get('/api/streams/strm_does_not_exist/students');
     expect(res.status).toBe(404);
+  });
+
+  test('a teacher stream-scoped to exactly this stream (no whole-class grant) can access it directly', async () => {
+    asStreamTeacherOf('cls_9c', 'strm_9c_red');
+    const res = await supertest(buildApp()).get('/api/streams/strm_9c_red/students');
+    expect(res.status).toBe(200);
+    expect(res.body.data[0].firstName).toBe('Amara');
+  });
+
+  test('a teacher stream-scoped to Red cannot access Blue, its sibling stream in the same class', async () => {
+    asStreamTeacherOf('cls_9c', 'strm_9c_red');
+    const res = await supertest(buildApp()).get('/api/streams/strm_9c_blue/students');
+    expect(res.status).toBe(403);
+    expect(JSON.stringify(res.body)).not.toContain('Chiamaka');
   });
 });

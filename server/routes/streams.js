@@ -129,14 +129,21 @@ router.get('/:id/students', authMiddleware, PLAN, rbac('students', 'read'), scop
     // GET /:id/students (AUTHZ-27): no scope check at all. A stream belongs
     // to one parent class (stream.classId), so scope is checked against
     // that, the same field a teacher's assignment scope is actually keyed on.
-    if (!ScopeEngine.isClassInScope(req, 'students', stream.classId)) {
+    //
+    // Stream-scoping follow-up: a teacher assigned a compulsory subject in
+    // exactly THIS stream (not the whole class) never appears in
+    // scope.classIds — that's deliberate, see teaching-assignments.js — so
+    // the whole-class check alone would wrongly deny them their own
+    // stream's roster. Their own streamId list is checked directly here
+    // too, since this route is already stream-specific.
+    const streamIdForms = [...new Set([stream.id, String(stream._id), req.params.id].filter(Boolean))];
+    const inWholeClassScope = ScopeEngine.isClassInScope(req, 'students', stream.classId);
+    const inOwnStreamScope  = (req.scope?.streamIds ?? []).some(sid => streamIdForms.includes(sid));
+    if (!inWholeClassScope && !inOwnStreamScope) {
       return E.forbidden(res, 'This class is not in your assigned scope.');
     }
 
     const Students = tenantModel('students', tenantContext(req));
-    // Match students stored under ANY identifier form of this stream —
-    // UUID `id` or Mongo `_id` string (pre-migration / imported records)
-    const streamIdForms = [...new Set([stream.id, String(stream._id), req.params.id].filter(Boolean))];
     const filter   = { schoolId, streamId: { $in: streamIdForms } };
     if (req.query.status) filter.status = req.query.status;
 

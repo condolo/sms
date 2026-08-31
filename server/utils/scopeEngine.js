@@ -14,9 +14,25 @@
 /* ── Module → MongoDB field mapping ────────────────────────── */
 // Maps each module to the field used to restrict records and which scope
 // array to source the allowed IDs from.
+//
+// `streamAware: true` marks a module whose underlying records carry a real
+// `streamId` field that can be trusted for scope narrowing. A teacher's
+// compulsory-subject teaching assignment is now stream-scoped whenever the
+// class actually has streams (see teaching-assignments.js) — e.g. 7i's Maths
+// teacher is a different person from 7ii's — so a plain classId grant is too
+// broad for that assignment; streamMiddleware.js computes `scope.streamIds`
+// alongside `scope.classIds` for exactly this. Only mark a module
+// streamAware once its own write path actually stamps streamId onto every
+// record (students already does, natively) — turning this on for a module
+// whose records have no streamId yet doesn't leak anything (a stream-scoped
+// teacher just sees nothing there until it's wired up), but it's cleaner to
+// leave it off until that's true. Currently: students + classes only.
+// attendance/grades/assessment/report_cards/growth_profile/growth_records
+// are the deliberately-deferred next batch (Security Baseline Register /
+// stream-scoping follow-up).
 const MODULE_SCOPE = {
-  students:        { field: 'classId',   source: 'classIds'   },
-  classes:         { field: 'id',        source: 'classIds'   },
+  students:        { field: 'classId',   source: 'classIds', streamAware: true },
+  classes:         { field: 'id',        source: 'classIds', streamAware: true },
   'class-subjects':{ field: 'classId',   source: 'classIds'   },
   attendance:      { field: 'classId',   source: 'classIds'   },
   grades:          { field: 'classId',   source: 'classIds'   },
@@ -45,6 +61,14 @@ const MODULE_SCOPE = {
  * - Filter does not have the scope field:
  *     → adds { field: { $in: allowedIds } }
  *
+ * Stream narrowing (streamAware modules only): a teacher can hold a
+ * whole-class grant (`scope.classIds`, e.g. an elective, or a compulsory
+ * subject in a class with no streams) AND/OR a stream-scoped grant
+ * (`scope.streamIds`, a compulsory subject in a specific stream). Whichever
+ * of the two shapes below `filter[field]` already has, stream-scoped access
+ * is folded in as an additional way to match — never as a way to see LESS
+ * than a plain classId grant already would.
+ *
  * @param {import('express').Request} req
  * @param {string} module   — key from MODULE_SCOPE above
  * @param {object} filter   — the MongoDB filter being built
@@ -58,7 +82,7 @@ function applyToFilter(req, module, filter) {
   const mapping = MODULE_SCOPE[module];
   if (!mapping) return filter;                                 // unknown module: no filter
 
-  const { field, source } = mapping;
+  const { field, source, streamAware } = mapping;
 
   // timetable: scope by the teacher's own userId, not a list of IDs
   if (source === 'userId') {
@@ -66,10 +90,12 @@ function applyToFilter(req, module, filter) {
     return filter;
   }
 
-  const allowed = scope[source] ?? [];
+  const allowed   = scope[source] ?? [];
+  const streamIds = streamAware ? (scope.streamIds ?? []) : [];
 
-  if (allowed.length === 0) {
-    // Strict deny: teacher has no assignments → guaranteed empty result set
+  if (allowed.length === 0 && streamIds.length === 0) {
+    // Strict deny: teacher has no assignments at all (whole-class or
+    // stream-scoped) → guaranteed empty result set
     filter[field] = { $in: [] };
     return filter;
   }
@@ -78,21 +104,58 @@ function applyToFilter(req, module, filter) {
 
   if (existing === undefined) {
     // No caller-provided filter on this field: apply full scope
-    filter[field] = { $in: allowed };
+    if (streamIds.length) {
+      filter.$or = [{ [field]: { $in: allowed } }, { streamId: { $in: streamIds } }];
+    } else {
+      filter[field] = { $in: allowed };
+    }
 
   } else if (typeof existing === 'string') {
     // Caller requested a specific ID (e.g. ?classId=cls_4a)
-    // Validate it is within scope; deny silently if not
-    filter[field] = allowed.includes(existing) ? existing : '__no_match__';
+    if (allowed.includes(existing)) {
+      // Whole-class grant covers it — unchanged, full access to this class
+    } else if (streamIds.length) {
+      // No whole-class grant, but this user does have stream-level access
+      // somewhere — keep the requested class filter AND further narrow to
+      // the user's own streams. Resolves correctly to zero results if none
+      // of their streams belong to this particular class, since streamIds
+      // are globally unique per class (see streams.js) — no separate
+      // class↔stream cross-check needed here.
+      _narrowToOwnStreams(filter, streamIds);
+    } else {
+      filter[field] = '__no_match__';
+    }
 
   } else if (existing?.$in) {
-    // Caller already restricted to a list: intersect with scope
-    const intersection = existing.$in.filter(id => allowed.includes(id));
-    filter[field] = { $in: intersection };
+    // Caller already restricted to a list (e.g. multiple equivalent id-forms
+    // for one class): a whole-class grant on ANY form covers the whole
+    // class, since they all denote the same class.
+    const wholeClassGrant = existing.$in.some(id => allowed.includes(id));
+    if (wholeClassGrant) {
+      // unchanged — full access
+    } else if (streamIds.length) {
+      _narrowToOwnStreams(filter, streamIds);
+    } else {
+      filter[field] = { $in: [] };
+    }
   }
   // Any other shape (e.g. { $ne: ... }) is left unchanged — caller's intent
 
   return filter;
+}
+
+/* Narrow an already-classId-filtered query to the caller's own streams,
+   intersecting with any streamId filter the caller already supplied rather
+   than silently overwriting it. */
+function _narrowToOwnStreams(filter, streamIds) {
+  const existingStream = filter.streamId;
+  if (existingStream === undefined) {
+    filter.streamId = { $in: streamIds };
+  } else if (typeof existingStream === 'string') {
+    filter.streamId = streamIds.includes(existingStream) ? existingStream : '__no_match__';
+  } else if (existingStream?.$in) {
+    filter.streamId = { $in: existingStream.$in.filter(id => streamIds.includes(id)) };
+  }
 }
 
 /**
@@ -110,7 +173,12 @@ function hasNoAssignments(req, module) {
   const mapping = MODULE_SCOPE[module];
   if (!mapping || mapping.source === 'userId') return false;
   const allowed = scope[mapping.source] ?? [];
-  return (scope.level === 'assigned' || scope.level === 'section') && allowed.length === 0;
+  // A stream-only assignment (compulsory subject, a specific stream) is a
+  // real assignment even though it never contributes to `classIds` — a
+  // teacher in that position has something to see, just narrower than a
+  // whole class, so this must not report them as having no assignments.
+  const streamCount = mapping.streamAware ? (scope.streamIds ?? []).length : 0;
+  return (scope.level === 'assigned' || scope.level === 'section') && allowed.length === 0 && streamCount === 0;
 }
 
 /**

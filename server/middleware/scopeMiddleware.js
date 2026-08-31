@@ -101,12 +101,21 @@ async function invalidateScopeCacheForRole(schoolId, role) {
 async function _loadAssigned(userId, schoolId) {
   const rows = await _model('teaching_assignments')
     .find({ schoolId, teacherId: userId })
-    .select('classId subjectId')
+    .select('classId subjectId streamId')
     .lean();
 
+  // A row with no streamId is a whole-class grant (an elective, or a
+  // compulsory subject in a class with no streams) — contributes to
+  // classIds as before. A row WITH a streamId (a compulsory subject in a
+  // specific stream — see teaching-assignments.js) does NOT contribute to
+  // classIds: that would silently hand back whole-class visibility and
+  // defeat the entire point of assigning it to one stream. It contributes
+  // to streamIds instead, which ScopeEngine's streamAware modules fold in
+  // as a narrower, additional way to match.
   return {
-    classIds:   [...new Set(rows.map(r => r.classId).filter(Boolean))],
+    classIds:   [...new Set(rows.filter(r => !r.streamId).map(r => r.classId).filter(Boolean))],
     subjectIds: [...new Set(rows.map(r => r.subjectId).filter(Boolean))],
+    streamIds:  [...new Set(rows.filter(r => r.streamId).map(r => r.streamId).filter(Boolean))],
   };
 }
 
@@ -178,17 +187,18 @@ async function scopeMiddleware(req, res, next) {
     let scope;
 
     if (level === 'assigned') {
-      const { classIds, subjectIds } = await _loadAssigned(userId, schoolId);
-      scope = { level, userId, classIds, subjectIds, houseIds: [], departmentIds: [], unrestrictedModules: [...SCOPE_EXEMPT] };
+      const { classIds, subjectIds, streamIds } = await _loadAssigned(userId, schoolId);
+      scope = { level, userId, classIds, subjectIds, streamIds, houseIds: [], departmentIds: [], unrestrictedModules: [...SCOPE_EXEMPT] };
 
     } else if (level === 'section') {
       const { classIds } = await _loadSection(userId, schoolId);
-      // Section heads see all subjects in their section
-      scope = { level, userId, classIds, subjectIds: [], houseIds: [], departmentIds: [], unrestrictedModules: [...SCOPE_EXEMPT] };
+      // Section heads see all subjects and every stream in their section —
+      // whole-class grants only, no stream-level narrowing applies to them.
+      scope = { level, userId, classIds, subjectIds: [], streamIds: [], houseIds: [], departmentIds: [], unrestrictedModules: [...SCOPE_EXEMPT] };
 
     } else {
       // guardian / self — handled at route level; inject minimal scope
-      scope = { level, userId, classIds: [], subjectIds: [], houseIds: [], departmentIds: [], unrestrictedModules: [] };
+      scope = { level, userId, classIds: [], subjectIds: [], streamIds: [], houseIds: [], departmentIds: [], unrestrictedModules: [] };
     }
 
     _setCache(userId, schoolId, scope);
@@ -199,7 +209,7 @@ async function scopeMiddleware(req, res, next) {
     // Fail safe: restrict to nothing rather than grant everything
     req.scope = {
       level: 'assigned', userId: req.jwtUser?.userId,
-      classIds: [], subjectIds: [], houseIds: [], departmentIds: [],
+      classIds: [], subjectIds: [], streamIds: [], houseIds: [], departmentIds: [],
       unrestrictedModules: [],
     };
     next();
