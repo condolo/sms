@@ -4,9 +4,26 @@
    per cell, with room conflicts highlighted.
 
    Props:
-     slots   []          — ALL active timetable slots (school-wide)
-     rooms   []          — room registry from /api/rooms
-     bell    []          — bell schedule periods
+     slots     []        — ALL active timetable slots (school-wide)
+     rooms     []        — room registry from /api/rooms
+     bell      []        — bell schedule periods (for THIS view's grid
+                            layout only — see conflicts note below)
+     conflicts []        — GET /timetable/conflicts' own room_double_booked
+                            entries. This grid used to decide "conflict"
+                            purely by two slots sharing the same period
+                            NUMBER — but a room shared across sections
+                            (e.g. Primary + Secondary both booking it for
+                            their own "Period 1") can have genuinely
+                            different clock times for the same period
+                            label, since each section runs its own bell
+                            schedule. That produced false "double-booked"
+                            flags here even when GET /conflicts — which
+                            compares each slot's own real startTime/
+                            endTime — correctly found no actual overlap.
+                            Now sourced from that same, already-correct
+                            computation instead of re-deriving a weaker
+                            one, so this view can never disagree with the
+                            top-level "No conflicts" indicator again.
    ============================================================ */
 import { useState } from 'react';
 import { motion } from 'framer-motion';
@@ -30,42 +47,48 @@ function buildRoomMap(slots) {
 }
 
 /* ── Single occupancy cell ───────────────────────────────────── */
-function RoomCell({ entries }) {
+function RoomCell({ entries, conflictSlotIds }) {
   if (!entries || entries.length === 0) {
     return <div className="h-full min-h-[68px]" />;
   }
 
-  const isConflict = entries.length > 1;
+  // A cell can legitimately hold >1 entry without being a real conflict —
+  // e.g. two different sections' own "Period 1" sharing this room label
+  // but not actually overlapping in clock time. Only flag entries the
+  // server's own time-overlap-aware check actually confirmed.
+  const slotId = s => s.id ?? String(s._id ?? '');
+  const firstConflictIdx = entries.findIndex(s => conflictSlotIds.has(slotId(s)));
 
   return (
     <div className="h-full min-h-[68px] space-y-1">
       {entries.map((s, i) => {
         const col = slotColor(s.subject ?? '');
+        const thisEntryConflicts = conflictSlotIds.has(slotId(s));
         return (
           <div
             key={i}
             className={`rounded-md border px-2 py-1 ${
-              isConflict
+              thisEntryConflicts
                 ? 'bg-red-50 border-red-300'
                 : `${col.bg} ${col.border}`
             }`}
           >
-            {isConflict && i === 0 && (
+            {thisEntryConflicts && i === firstConflictIdx && (
               <div className="flex items-center gap-1 mb-0.5">
                 <AlertTriangle size={9} className="text-red-500 shrink-0" />
                 <span className="text-[9px] font-semibold text-red-600">Double-booked</span>
               </div>
             )}
-            <p className={`text-[11px] font-semibold leading-tight truncate ${isConflict ? 'text-red-800' : col.text}`}>
+            <p className={`text-[11px] font-semibold leading-tight truncate ${thisEntryConflicts ? 'text-red-800' : col.text}`}>
               {s.subject || '—'}
             </p>
             {s.teacherName && (
-              <p className={`text-[10px] truncate ${isConflict ? 'text-red-600' : col.sub} opacity-80`}>
+              <p className={`text-[10px] truncate ${thisEntryConflicts ? 'text-red-600' : col.sub} opacity-80`}>
                 {s.teacherName}
               </p>
             )}
             {s.className && (
-              <p className={`text-[10px] truncate ${isConflict ? 'text-red-500' : col.sub} opacity-60`}>
+              <p className={`text-[10px] truncate ${thisEntryConflicts ? 'text-red-500' : col.sub} opacity-60`}>
                 {s.className}
               </p>
             )}
@@ -77,12 +100,13 @@ function RoomCell({ entries }) {
 }
 
 /* ── Room grid for one room ──────────────────────────────────── */
-function RoomGrid({ roomName, slotMap, bell }) {
-  const periodBells = bell.filter(b => !b.isBreak);
-  const conflictCount = periodBells.reduce((acc, b) => {
-    DAYS.forEach(day => {
-      const entries = slotMap[roomName]?.[day]?.[String(b.p)];
-      if (entries && entries.length > 1) acc++;
+function RoomGrid({ roomName, slotMap, bell, conflictSlotIds }) {
+  // Count grid cells that actually contain a server-confirmed conflict —
+  // matches exactly what the grid below highlights in red, so the badge
+  // and the grid can never tell a different story from each other.
+  const conflictCount = Object.values(slotMap[roomName] ?? {}).reduce((acc, dayEntries) => {
+    Object.values(dayEntries).forEach(entries => {
+      if (entries.some(s => conflictSlotIds.has(s.id ?? String(s._id ?? '')))) acc++;
     });
     return acc;
   }, 0);
@@ -153,7 +177,7 @@ function RoomGrid({ roomName, slotMap, bell }) {
                       className={`flex-1 p-1.5 ${i < DAYS.length - 1 ? 'border-r border-slate-100' : ''}`}
                       style={{ minWidth: 0 }}
                     >
-                      <RoomCell entries={entries} />
+                      <RoomCell entries={entries} conflictSlotIds={conflictSlotIds} />
                     </div>
                   );
                 })}
@@ -167,8 +191,18 @@ function RoomGrid({ roomName, slotMap, bell }) {
 }
 
 /* ── Main export ─────────────────────────────────────────────── */
-export default function RoomView({ slots = [], rooms = [], bell = DEFAULT_BELL }) {
+export default function RoomView({ slots = [], rooms = [], bell = DEFAULT_BELL, conflicts = [] }) {
   const [selectedRoom, setSelectedRoom] = useState('');
+
+  // Slot ids GET /timetable/conflicts already confirmed are a genuine
+  // room double-booking (real clock-time overlap, not just a shared
+  // period label) — same room-name normalization (lowercase + trim) that
+  // route uses, so this can't drift from what it actually matched.
+  const conflictSlotIds = new Set(
+    conflicts
+      .filter(c => c.type === 'room_double_booked' && (c.room || '').toLowerCase().trim() === selectedRoom.toLowerCase().trim())
+      .flatMap(c => c.slotIds ?? []),
+  );
 
   /* Build set of room names that actually appear in slots */
   const usedRoomNames = new Set(
@@ -231,6 +265,7 @@ export default function RoomView({ slots = [], rooms = [], bell = DEFAULT_BELL }
             roomName={selectedRoom}
             slotMap={slotMap}
             bell={bell}
+            conflictSlotIds={conflictSlotIds}
           />
         </motion.div>
       )}

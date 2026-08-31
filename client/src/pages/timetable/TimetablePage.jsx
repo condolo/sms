@@ -692,7 +692,7 @@ export default function TimetablePage() {
             </div>
             {/* Right: room occupancy view */}
             <div className="xl:col-span-2">
-              <RoomView slots={allSlots} rooms={roomList} bell={bell} />
+              <RoomView slots={allSlots} rooms={roomList} bell={bell} conflicts={conflicts} />
             </div>
           </div>
         )}
