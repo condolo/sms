@@ -113,11 +113,24 @@ router.post('/:type', authMiddleware, PLAN, rbac('growth_profile', 'create'), _t
     const { data, error } = _validate(RecordSchema, req.body);
     if (error) return E.validation(res, error);
 
+    // Denormalize classId/streamId from the student, same convention as
+    // attendance/grades/assessment — this collection never stored either
+    // before (RecordSchema has no classId field at all, so MODULE_SCOPE's
+    // existing 'growth_records' entry has had nothing to match against
+    // since it was added), so this doesn't change any behavior today, but
+    // makes future scope enforcement here possible without a data
+    // migration. No new scope CHECK is added in this pass — this route has
+    // none today (a separate, pre-existing gap, not introduced here).
+    const growthStudent = await tenantModel('students', tenantContext(req))
+      .findOne({ schoolId, id: data.studentId }).select('classId streamId').lean();
+
     const doc = await tenantModel(col, tenantContext(req)).create({
       ...data,
       id:                 uuidv4(),
       schoolId,
       type:               req.params.type,
+      classId:            growthStudent?.classId  ?? null,
+      streamId:           growthStudent?.streamId ?? null,
       verificationStatus: 'pending_verification',
       createdBy:          userId,
       updatedBy:          userId,

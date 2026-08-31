@@ -81,6 +81,9 @@ beforeEach(() => {
     growth_leadership:      makeStore([{ id: 'gl_1', schoolId: SCHOOL, studentId: 'stu_1', title: 'Head Boy' }]),
     growth_projects:        makeStore([{ id: 'gp_1', schoolId: SCHOOL, studentId: 'stu_1', title: 'Science Fair' }]),
     growth_recommendations: makeStore([]),
+    // Resolved by growth-records.js's POST to denormalize classId/streamId
+    // (Milestone 2); no test here cares about actual values.
+    students:                makeStore([]),
   };
 });
 

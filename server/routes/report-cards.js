@@ -738,6 +738,15 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'),
           admissionNo:    stu.admissionNumber || stu.admissionNo || '',
           studentPhotoUrl: stu.photo || null,
           // RCE1 — cover-page fields, resolved once per distinct id above.
+          // streamId itself (not just the display name) denormalized here
+          // too — same convention as attendance/grades/assessment — so
+          // report-card reads can eventually be stream-scoped the same way
+          // once that read-side gap (Security Baseline Register
+          // AUTHZ-19/20/21, pre-existing and separately tracked, not
+          // touched by this change) is closed. Safe to add unconditionally:
+          // _hashSnapshot uses an explicit field allowlist, so this doesn't
+          // touch the integrity hash, same as streamName/templateId already don't.
+          streamId:       stu.streamId || null,
           streamName:     stu.streamId ? (streamNameById[stu.streamId] || '') : '',
           houseName:      stu.houseId  ? (houseNameById[stu.houseId]   || '') : '',
           classId,        className:   className   || '',
