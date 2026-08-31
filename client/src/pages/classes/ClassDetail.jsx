@@ -54,6 +54,22 @@ export default function ClassDetail() {
   });
   const streamRows = streamData?.data ?? [];
 
+  // The class's own roster (GET /classes/:id/students — already scope-safe,
+  // already used by the Students module) — NOT filtered by stream. Streams
+  // are an optional layer: a class with zero streams still has real,
+  // directly-enrolled students, and the header count above needs to reflect
+  // them too instead of the stream-only sum, which is 0 for any class that
+  // doesn't use streams.
+  const { data: rosterData, isLoading: rosterLoading } = useQuery({
+    queryKey: ['classes', classId, 'students'],
+    queryFn:  () => classesApi.students(classId, { limit: 500, status: 'active' }),
+    staleTime: 30_000,
+    enabled:  !!classId,
+  });
+  const classRoster       = rosterData?.data ?? [];
+  const classStudentTotal = rosterData?.pagination?.total ?? classRoster.length;
+  const unstreamedRoster  = classRoster.filter(s => !s.streamId);
+
   const { mutate: deleteStream, isPending: deleting } = useMutation({
     mutationFn: id => streamsApi.remove(id),
     onSuccess:  () => { setDeleteTarget(null); qc.invalidateQueries({ queryKey: ['streams', { classId }] }); },
@@ -119,7 +135,7 @@ export default function ClassDetail() {
                 )}
                 <p className="text-xs text-slate-400 mt-1">
                   {streamRows.length} stream{streamRows.length !== 1 ? 's' : ''} ·{' '}
-                  {streamRows.reduce((sum, s) => sum + (s.studentCount ?? 0), 0).toLocaleString()} students
+                  {classStudentTotal.toLocaleString()} student{classStudentTotal !== 1 ? 's' : ''}
                 </p>
               </div>
             </div>
@@ -154,12 +170,13 @@ export default function ClassDetail() {
             <p className="text-sm text-slate-500">Failed to load streams</p>
             <button onClick={refetchStreams} className="text-xs font-medium text-slate-700 underline">Retry</button>
           </div>
-        ) : streamRows.length === 0 ? (
+        ) : streamRows.length === 0 && unstreamedRoster.length === 0 && !rosterLoading ? (
           <div className="flex flex-col items-center justify-center py-24 text-slate-400">
             <Layers size={36} className="mb-3 opacity-40" />
-            <p className="text-sm font-medium text-slate-600">No streams yet</p>
+            <p className="text-sm font-medium text-slate-600">No streams or students yet</p>
             <p className="text-xs mt-1 text-center">
-              Streams are teaching groups within <span className="font-medium">{cls.name}</span> (e.g. A, B, East)
+              Streams are optional teaching groups within <span className="font-medium">{cls.name}</span> (e.g. A, B, East) —
+              add students to this class first, then organize them into streams if you need to.
             </p>
             {canManage && (
               <button onClick={() => setShowAdd(true)} className="mt-4 flex items-center gap-1.5 text-sm font-medium text-violet-600 hover:text-violet-800 transition">
@@ -167,6 +184,18 @@ export default function ClassDetail() {
               </button>
             )}
           </div>
+        ) : streamRows.length === 0 ? (
+          /* No streams configured for this class — streams are optional, so
+             show the class's own roster directly instead of a dead end that
+             implies (falsely) that the class has no students. */
+          <ClassRosterCard
+            title={cls.name}
+            subtitle="This class doesn't use streams — showing all enrolled students."
+            students={unstreamedRoster}
+            loading={rosterLoading}
+            canManage={canManage}
+            onAddStream={() => setShowAdd(true)}
+          />
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {streamRows.map(s => {
@@ -267,6 +296,23 @@ export default function ClassDetail() {
             })}
           </div>
         )}
+
+        {/* Students enrolled in this class but not yet placed in any of
+            its streams — invisible everywhere else on this page (each
+            stream card only counts its own students), so without this a
+            teacher/admin has no way to see who still needs assigning. */}
+        {streamRows.length > 0 && !rosterLoading && unstreamedRoster.length > 0 && (
+          <div className="mt-6">
+            <ClassRosterCard
+              title="Not yet in a stream"
+              subtitle={`${unstreamedRoster.length} student${unstreamedRoster.length !== 1 ? 's' : ''} in ${cls.name} ${unstreamedRoster.length !== 1 ? "haven't" : "hasn't"} been assigned to a stream yet.`}
+              students={unstreamedRoster}
+              loading={false}
+              canManage={false}
+              compact
+            />
+          </div>
+        )}
       </div>
 
       <AnimatePresence>
@@ -308,6 +354,60 @@ export default function ClassDetail() {
           />
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+/* ── Class Roster Card ─────────────────────────────────────
+   Shows students enrolled directly on the class (no streamId).
+   Used both as the primary view for a class with no streams at all,
+   and as a secondary "not yet in a stream" section for a class that
+   has streams but still has some unassigned students. */
+function ClassRosterCard({ title, subtitle, students, loading, canManage, onAddStream, compact = false }) {
+  if (loading) {
+    return (
+      <div className="bg-white rounded-xl border border-slate-200 p-5 animate-pulse space-y-2">
+        {[...Array(3)].map((_, i) => <div key={i} className="h-10 bg-slate-100 rounded-lg" />)}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`bg-white rounded-xl border border-slate-200 ${compact ? '' : 'overflow-hidden'}`}>
+      <div className={`px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3 ${compact ? 'bg-amber-50/40' : ''}`}>
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+          {subtitle && <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>}
+        </div>
+        {!compact && canManage && onAddStream && (
+          <button
+            onClick={onAddStream}
+            className="flex items-center gap-1.5 text-xs font-medium text-violet-600 hover:text-violet-800 transition shrink-0"
+          >
+            <Plus size={13} /> Organize into streams
+          </button>
+        )}
+      </div>
+
+      {students.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-14 text-slate-400">
+          <Users size={26} className="mb-2 opacity-40" />
+          <p className="text-sm text-slate-500">No students enrolled in this class yet</p>
+        </div>
+      ) : (
+        <div className="divide-y divide-slate-50 max-h-96 overflow-y-auto">
+          {students.map(st => (
+            <div key={st.id ?? st._id} className="flex items-center justify-between gap-3 px-5 py-2.5">
+              <div>
+                <p className="text-sm font-medium text-slate-800">{st.firstName} {st.lastName}</p>
+                <p className="text-[11px] text-slate-400">
+                  {[st.admissionNumber, st.gender].filter(Boolean).join(' · ')}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
