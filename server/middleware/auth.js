@@ -3,6 +3,8 @@ const jwt                  = require('jsonwebtoken');
 const { verify }           = require('../utils/jwt');
 const { getTokenVersion, getIdentityTokenVersion } = require('../utils/token-version');
 const { _model }           = require('../utils/model');
+const SessionService       = require('../services/sessionService');
+const AuditService         = require('../services/audit');
 
 /* Standard error envelope — matches { success, error: { code, message } } used everywhere */
 function _unauth(res, code, message) {
@@ -60,6 +62,38 @@ async function authMiddleware(req, res, next) {
       const currentIdentityVersion = await getIdentityTokenVersion(payload.identityId);
       if (payload.itv < currentIdentityVersion) {
         return _unauth(res, 'UNAUTHENTICATED', 'Session has been revoked. Please sign in again.');
+      }
+    }
+
+    // PLAT-01 remediation — impersonation revocation, checked on every
+    // request, not just at /auth/ping like a normal session. A normal
+    // session's live status is only re-checked when the client happens to
+    // call /ping (infrequent, client-initiated) — fine for a user ending
+    // their own session, but the acceptance bar here is different: a
+    // platform operator or the impersonated school's own admin revoking
+    // an active impersonation must take effect on the very next request,
+    // not "eventually". Deliberately does NOT reuse the `tv` (tokenVersion)
+    // mechanism above — tv is per-userId, and bumping it would also log out
+    // the real admin's own concurrent session if they have one open; this
+    // checks the exact session record by id instead, touching nothing else
+    // belonging to that user. Scoped to impersonated tokens only (an extra
+    // DB read per request is acceptable for the rare case, not something to
+    // add to every single authenticated request platform-wide).
+    if (payload.impersonated && payload.sessionId) {
+      const session = await SessionService.getImpersonationSession(payload.sessionId);
+      if (!session || session.status !== 'active') {
+        AuditService.log({
+          action: 'platform.impersonate_denied',
+          actor: { userId: payload.userId, role: payload.role, email: payload.email },
+          schoolId: payload.schoolId,
+          target: { type: 'school', id: payload.schoolId, label: null },
+          details: {
+            impersonationId: payload.impersonationId ?? payload.sessionId,
+            reason: !session ? 'session_not_found' : 'session_revoked_or_expired',
+          },
+          req,
+        });
+        return _unauth(res, 'IMPERSONATION_ENDED', 'This impersonation session has ended.');
       }
     }
 

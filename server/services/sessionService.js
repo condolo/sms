@@ -139,6 +139,86 @@ async function terminateCurrentSession(sessionId, logoutReason = 'USER_LOGOUT') 
   ).catch(() => {});
 }
 
+/* ─────────────────────────────────────────────────────────────────
+   PLAT-01 remediation — impersonation sessions.
+
+   Reuses this exact collection and status/expiry machinery rather
+   than a second session mechanism, per the register's own decision:
+   same TTL index, same 'active'/'revoked' status field, same
+   absoluteExpiry contract authMiddleware already understands. Two
+   things make an impersonation session different from a normal one,
+   both additive fields on the same document shape:
+     - impersonation: true — how authMiddleware knows to also check
+       this specific session's live status on every request (a normal
+       session is only checked at /auth/ping, an infrequent, client-
+       initiated poll — impersonation needs revocation to take effect
+       on the very next request, not eventually).
+     - impersonatedBy / reason — who granted this and why, so the
+       session document alone (not just the audit log) carries the
+       full PLAT-02 record.
+   ───────────────────────────────────────────────────────────────── */
+
+/* createImpersonationSession(userId, schoolId, role, ip, ua, meta)
+   meta: { impersonatedBy: {operatorId, tier, email}, reason, timeoutMs }
+   Returns: { sessionId, absoluteExpiry } — sessionId doubles as the
+   impersonationId; unlike the old code, there is no longer a second,
+   unrelated uuid for the "same" grant. */
+async function createImpersonationSession(userId, schoolId, role, ip, ua, meta = {}) {
+  const { device, browser } = _parseUA(ua);
+  const now            = new Date();
+  const timeoutMs      = meta.timeoutMs || ABSOLUTE_TIMEOUT_MS;
+  const absoluteExpiry = new Date(now.getTime() + timeoutMs);
+
+  const doc = await _model('sessions').create({
+    id:              uuidv4(),
+    schoolId,
+    userId,
+    role,
+    ip,
+    userAgent:       ua || '',
+    device,
+    browser,
+    startedAt:       now,
+    lastActivity:    now,
+    absoluteExpiry,
+    status:          'active',
+    expiresAt:       new Date(absoluteExpiry.getTime() + SESSION_TTL_BUFFER_MS),
+    impersonation:   true,
+    impersonatedBy:  meta.impersonatedBy || null,
+    reason:          meta.reason || null,
+  });
+
+  return {
+    sessionId:       doc.id,
+    absoluteExpiry:  absoluteExpiry.toISOString(),
+  };
+}
+
+/* getImpersonationSession(sessionId) — used by both the per-request
+   authMiddleware check and the revoke routes. Returns null for a
+   non-impersonation session id too (impersonation: true is part of
+   the query, not just a field to inspect after) so a normal session
+   id can never accidentally be treated as an impersonation grant. */
+async function getImpersonationSession(sessionId) {
+  if (!sessionId) return null;
+  return _model('sessions').findOne({ id: sessionId, impersonation: true }).lean();
+}
+
+/* revokeImpersonationSession(sessionId, revokedBy, revokeReason)
+   revokedBy: {userId, role, email} of whoever ended it — either the
+   platform operator who granted it, or the impersonated school's own
+   admin ending it from their side (see platform.js / settings.js).
+   Returns true only if an ACTIVE impersonation session was actually
+   found and revoked — false for an unknown id or one already ended,
+   so callers can tell "nothing to do" from "not authorized to see it". */
+async function revokeImpersonationSession(sessionId, revokedBy, revokeReason) {
+  const result = await _model('sessions').updateOne(
+    { id: sessionId, status: 'active', impersonation: true },
+    { $set: { status: 'revoked', revokedAt: new Date(), revokedBy, revokeReason: revokeReason || null } },
+  );
+  return result.modifiedCount > 0;
+}
+
 module.exports = {
   createSession,
   refreshSession,
@@ -146,4 +226,7 @@ module.exports = {
   terminateSession,
   revokeAllUserSessions,
   terminateCurrentSession,
+  createImpersonationSession,
+  getImpersonationSession,
+  revokeImpersonationSession,
 };
