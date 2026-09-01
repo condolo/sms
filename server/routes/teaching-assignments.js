@@ -357,3 +357,9 @@ router.delete('/:id', authMiddleware, async (req, res) => { // rbac: canManage()
 });
 
 module.exports = router;
+// test-only access — same pattern as settings.js's _deriveApiPerms export.
+// Role Architecture Audit 2026-08: proves extraRoles' authorization path
+// (a narrow grant on this route specifically, not a general RBAC grant)
+// resolves exactly as documented.
+module.exports.canManage = canManage;
+module.exports._effectiveRoles = _effectiveRoles;

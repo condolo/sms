@@ -267,3 +267,5 @@ function _buildSnapshotPDF(doc, snapshot, student, sections) {
 router._helpers = { getWeeksForStudent, getSnapshotDetail, streamSnapshotPdf };
 
 module.exports = router;
+// test-only access — Role Architecture Audit 2026-08.
+module.exports._effectiveRoles = _effectiveRoles;

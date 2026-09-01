@@ -716,3 +716,7 @@ router.get('/pending-teachers', authMiddleware, PLAN, MODGATE, async (req, res) 
 });
 
 module.exports = router;
+// test-only access — Role Architecture Audit 2026-08.
+module.exports.isHodOrAdmin = isHodOrAdmin;
+module.exports.isAdmin = isAdmin;
+module.exports.isTeacher = isTeacher;
