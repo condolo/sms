@@ -1161,10 +1161,19 @@ async function runOrphanCleanup() {
 }
 
 /* ── Impersonate ────────────────────────────────────────── */
+// Security Baseline Register, PLAT-01 remediation — this modal used to
+// have no reason input at all, yet the API has required and recorded one
+// since PLAT-02 (see server/routes/platform.js's impersonate route). That
+// meant every impersonation attempt through this exact console — the only
+// UI that calls this endpoint — 400'd, every time. Fixed to actually
+// collect and send it, matching the reject-reason modal's own pattern
+// just above.
 function confirmImpersonate(schoolId, schoolName) {
   showModal(
     `Log in as ${schoolName}`,
-    `You are about to impersonate the Super Admin of <strong>${schoolName}</strong>. You will be redirected to their portal and signed in automatically.`,
+    `<p style="margin-bottom:12px">You are about to impersonate the Super Admin of <strong>${schoolName}</strong>. This grants full access to their account for up to an hour, is logged, and the school's admin is notified. A reason is required:</p>
+     <textarea id="impersonate-reason" placeholder="e.g. Support ticket #123 — investigating a fee balance discrepancy" required
+       style="width:100%;height:80px;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical"></textarea>`,
     [
       { label:'Cancel', cls:'pa-btn', action:'closeModal()' },
       { label:'Log In as Admin', cls:'pa-btn primary', action:`doImpersonate('${schoolId}')` }
@@ -1173,9 +1182,14 @@ function confirmImpersonate(schoolId, schoolName) {
 }
 
 async function doImpersonate(schoolId) {
+  const reason = document.getElementById('impersonate-reason')?.value.trim() || '';
+  if (!reason) {
+    toast('A reason is required to impersonate a school.', 'error');
+    return;
+  }
   closeModal();
   try {
-    const data = await api('POST', `/schools/${schoolId}/impersonate`);
+    const data = await api('POST', `/schools/${schoolId}/impersonate`, { reason });
 
     // ── Wipe ALL legacy app keys so stale demo data never bleeds into the new school ──
     const LEGACY_KEYS = [
@@ -1243,7 +1257,8 @@ async function doImpersonate(schoolId) {
     };
     localStorage.setItem('msingi_session', JSON.stringify(sessionPayload));
 
-    toast('Redirecting to school portal…', 'success');
+    const expiryNote = data.expiresAt ? ` — access ends by ${new Date(data.expiresAt).toLocaleTimeString()}` : '';
+    toast('Redirecting to school portal…' + expiryNote, 'success');
     setTimeout(() => { window.location.href = '/login'; }, 800);
   } catch (err) {
     toast('Impersonation failed: ' + err.message, 'error');
