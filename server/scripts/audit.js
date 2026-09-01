@@ -26,6 +26,15 @@
      14. Role permissions gaps (schools with no role_permissions seeded)
      15. Classes with no students enrolled
      16. Teachers with no userId (breaks timetable FK)
+     17. Legacy 'deputy' role in live use (Role Architecture Audit
+         2026-08 §4) — users still on the pre-rename role key, and
+         role_permissions documents keyed 'deputy' that diverge from
+         the school's 'deputy_principal' document (a split-brain: an
+         admin edits Deputy Principal in Settings, and any account
+         still resolving through the stale 'deputy' document never
+         sees it). See server/scripts/migrate-legacy-deputy-role.js —
+         run that (dry run by default) once this check reports
+         anything, before considering removing the alias itself.
    ============================================================ */
 
 require('dotenv').config();
@@ -421,6 +430,44 @@ async function checkRolePermissionsGaps(schoolIds) {
   }
 }
 
+async function checkLegacyDeputyRole(schoolIds) {
+  log('check: legacy deputy role in live use');
+  for (const schoolId of schoolIds) {
+    const legacyUsers = await _model('users').find({
+      schoolId,
+      $or: [{ role: 'deputy' }, { roles: 'deputy' }],
+    }).lean();
+
+    if (legacyUsers.length > 0) {
+      issue('legacy_deputy_role_users', 'MEDIUM', {
+        schoolId, count: legacyUsers.length,
+        message: `${legacyUsers.length} user(s) still have role 'deputy' (pre-rename to 'deputy_principal') — run server/scripts/migrate-legacy-deputy-role.js`,
+        names: legacyUsers.map(u => u.email).slice(0, 10),
+      });
+    }
+
+    const [deputyDoc, deputyPrincipalDoc] = await Promise.all([
+      _model('role_permissions').findOne({ schoolId, roleKey: 'deputy' }).lean(),
+      _model('role_permissions').findOne({ schoolId, roleKey: 'deputy_principal' }).lean(),
+    ]);
+    if (deputyDoc) {
+      const diverges = deputyPrincipalDoc &&
+        JSON.stringify(deputyDoc.permissions ?? {}) !== JSON.stringify(deputyPrincipalDoc.permissions ?? {});
+      if (diverges) {
+        issue('legacy_deputy_permissions_diverge', 'HIGH', {
+          schoolId,
+          message: `role_permissions has BOTH 'deputy' and 'deputy_principal' documents for this school, and they grant different things — any account still resolving through 'deputy' silently ignores edits made to Deputy Principal. Needs a human decision (see migrate-legacy-deputy-role.js's manual_review output), not an automated fix.`,
+        });
+      } else {
+        warn('legacy_deputy_permissions_redundant', {
+          schoolId,
+          message: `role_permissions has a 'deputy' document that is safe to migrate (either identical to 'deputy_principal' or no 'deputy_principal' document exists yet) — run migrate-legacy-deputy-role.js --apply`,
+        });
+      }
+    }
+  }
+}
+
 /* ── Main ───────────────────────────────────────────────────── */
 async function run() {
   log('connecting to MongoDB…');
@@ -454,6 +501,7 @@ async function run() {
   await checkTeachersWithNoUserId(schoolIds);
   await checkClassesWithNoStudents(schoolIds);
   await checkRolePermissionsGaps(schoolIds);
+  await checkLegacyDeputyRole(schoolIds);
 
   await mongoose.disconnect();
   log('disconnected.');
