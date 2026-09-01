@@ -30,7 +30,7 @@ const { peekAdmissionCounter, setAdmissionCounter } = require('../utils/counters
 const { MODULE_REGISTRY, MODULE_KEYS } = require('../config/moduleRegistry');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
 const { isIdentityCutoverEnabled } = require('../utils/identity-cutover');
-const { validateAssignableRole } = require('../utils/role-validation');
+const { validateAssignableRole, SYSTEM_ROLES } = require('../utils/role-validation');
 
 const router = express.Router();
 
@@ -1298,15 +1298,20 @@ router.delete('/school/smtp', authMiddleware, rbac('settings', 'update'), async 
 // custom roles that really do teach/co-teach a subset of classes.
 const CUSTOM_ROLE_SCOPE_LEVELS = new Set(['school', 'assigned']);
 
-const BUILT_IN_ROLE_KEYS = new Set([
-  'superadmin','admin',
-  'deputy_principal','deputy',          // deputy is the legacy alias
-  'section_head','teacher',
-  'exams_officer','timetabler',
-  'admissions_officer','finance','hr',
-  'discipline_committee',
-  'parent','guardian','student',
-]);
+// Role Architecture Audit 2026-08 §5: this used to be its own locally-
+// defined list, independently maintained from role-validation.js's
+// SYSTEM_ROLES — exactly the kind of drift that file's own header
+// comment exists to end ("One list, one validator... so a fourth copy
+// can't quietly reintroduce this gap somewhere else"). It had drifted:
+// missing 'principal' entirely, so a school could create a custom role
+// literally keyed 'principal' and collide with the real system role's
+// role_permissions document. Sourced from SYSTEM_ROLES now instead of
+// a parallel copy. 'superadmin' is added on top — SYSTEM_ROLES
+// deliberately excludes it (per that file's own comment, it's never
+// ASSIGNABLE via these school-level routes) but it must still be
+// reserved from custom-role key reuse for the same collision reason
+// as every other real system role.
+const BUILT_IN_ROLE_KEYS = new Set([...SYSTEM_ROLES, 'superadmin']);
 
 router.get('/custom-roles', authMiddleware, rbac('settings', 'read'), async (req, res) => {
   try {
