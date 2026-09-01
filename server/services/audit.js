@@ -181,6 +181,17 @@ const ACTIONS = {
   'behaviour.points_reset':        { severity: 'warn' },
   // Platform (operator-level)
   'platform.impersonate':       { severity: 'critical' },
+  // PLAT-01 remediation — the other two lifecycle events a real, tracked
+  // impersonation session now has: explicit early revocation (by either
+  // the platform operator or the impersonated school's own admin — same
+  // action name either way, actor.role distinguishes which), and a
+  // denied attempt to use a session that's already revoked or expired
+  // (authMiddleware's per-request check — see middleware/auth.js).
+  // 'warn', not 'critical': both are expected, working-as-intended
+  // outcomes of a session ending, not an anomaly on their own the way the
+  // impersonation grant itself is.
+  'platform.impersonate_revoked': { severity: 'warn' },
+  'platform.impersonate_denied':  { severity: 'warn' },
   'platform.school_deleted':    { severity: 'critical' },
   'platform.backup_restored':   { severity: 'critical' },
   'platform.superadmin_added':  { severity: 'warn' },

@@ -14,8 +14,10 @@ const { invalidatePlanCache } = require('../middleware/plan');
 const { invalidatePermCache }  = require('../middleware/rbac');
 const { revokeUserTokens, revokeIdentityTokens } = require('../utils/token-version');
 const AuditService      = require('../services/audit');
+const SessionService    = require('../services/sessionService');
 const { sign } = require('../utils/jwt');
 const email    = require('../utils/email');
+const { dispatchNotification } = require('../utils/notify-dispatch');
 const { tenantModel } = require('../utils/tenant-model');
 const { provisionOrganizationForSchool } = require('../utils/provision-organizations');
 const { provisionMembershipForUser } = require('../utils/provision-memberships');
@@ -1296,6 +1298,16 @@ router.delete('/schools/:id/entitlements/:key', async (req, res) => {
   }
 });
 
+// PLAT-01 remediation — impersonation now gets its own, deliberately
+// shorter, session lifetime than the normal 8-hour login. A support
+// investigation this codebase's own conventions size around (assessment
+// unlock windows, OTP codes, etc.) rarely needs a full workday; a shorter
+// cap shrinks the exposure window for free. Configurable the same way
+// ABSOLUTE_TIMEOUT_MS is (utils/jwt.js), so an operator who genuinely
+// needs longer must explicitly re-authorize (call the route again with a
+// fresh reason) rather than the window silently growing.
+const IMPERSONATION_TIMEOUT_MS = parseInt(process.env.IMPERSONATION_TIMEOUT_MS || '', 10) || 60 * 60 * 1000; // 1 hour
+
 /* POST /api/platform/schools/:id/impersonate — get a JWT for any school's superadmin */
 router.post('/schools/:id/impersonate', async (req, res) => {
   /* Gate: disabled in production unless ALLOW_IMPERSONATION=true is explicitly set */
@@ -1355,31 +1367,77 @@ router.post('/schools/:id/impersonate', async (req, res) => {
     const authRouter    = require('./auth');
     const tokenPayload  = await authRouter._buildTokenPayload(admin, resolvedSchoolId);
     tokenPayload.impersonated = true;
-    // Security Baseline Register, PLAT-03 — a fresh id per impersonation
-    // grant, carried on the token for the impersonated session's entire
-    // lifetime. AuditService.log() (see server/services/audit.js) reads
-    // actor.impersonated/actor.impersonationId off whatever `actor` object
-    // a call site passes — which is req.jwtUser at virtually every call
-    // site already — so every security-sensitive action taken during this
-    // session (voiding an invoice, editing payroll, anything) is now
-    // automatically tagged as impersonated and correlated back to THIS
-    // exact grant: who requested it, which school, when, and why (reason,
-    // logged below). Preserves both identities without requiring every one
-    // of this codebase's ~50+ existing AuditService.log call sites to be
-    // individually touched.
-    const impersonationId = uuidv4();
-    tokenPayload.impersonationId = impersonationId;
-    const token = sign(tokenPayload);
+
+    // PLAT-01 remediation — a genuinely tracked session, not just an id
+    // stamped on the token. The old code minted a bare uuidv4() with
+    // nothing behind it: no record anywhere that could be looked up,
+    // listed, or revoked. This reuses SessionService (the exact machinery
+    // every real login already goes through) so an impersonation grant is
+    // a real, queryable, revocable row — sessionId doubles as the
+    // impersonationId now; there is no longer a second, disconnected id
+    // for the "same" grant.
+    const operatorActor = _platformActor(req);
+    const { sessionId, absoluteExpiry } = await SessionService.createImpersonationSession(
+      admin.id, resolvedSchoolId, tokenPayload.role,
+      req.headers['cf-connecting-ip'] || req.ip, req.headers['user-agent'] || '',
+      {
+        impersonatedBy: { operatorId: operatorActor.userId, tier: req.platformOperatorTier, email: operatorActor.email },
+        reason,
+        timeoutMs: IMPERSONATION_TIMEOUT_MS,
+      },
+    );
+    // Security Baseline Register, PLAT-03 — carried on the token for the
+    // impersonated session's entire lifetime. AuditService.log() (see
+    // server/services/audit.js) reads actor.impersonated/actor.
+    // impersonationId off whatever `actor` object a call site passes —
+    // which is req.jwtUser at virtually every call site already — so
+    // every security-sensitive action taken during this session (voiding
+    // an invoice, editing payroll, anything) is automatically tagged as
+    // impersonated and correlated back to THIS exact grant: who requested
+    // it, which school, when, and why (reason, logged below). Preserves
+    // both identities without requiring every one of this codebase's
+    // ~50+ existing AuditService.log call sites to be individually touched.
+    tokenPayload.impersonationId = sessionId;
+    tokenPayload.sessionId       = sessionId;
+    tokenPayload.absoluteExpiry  = absoluteExpiry;
+    // The JWT's own exp claim now matches the shorter impersonation
+    // window too, not the 8h sign() default — belt and suspenders with
+    // the absoluteExpiry field authMiddleware already checks, and with
+    // the per-request session-status check added there for impersonated
+    // tokens specifically.
+    const token = sign(tokenPayload, { expiresIn: Math.floor(IMPERSONATION_TIMEOUT_MS / 1000) + 's' });
     const availableSchools = await authRouter._availableSchools(tokenPayload);
 
-    AuditService.log({ action: 'platform.impersonate', actor: _platformActor(req), schoolId: resolvedSchoolId, target: { type: 'school', id: resolvedSchoolId, label: school.name }, details: { targetEmail: admin.email, reason, impersonationId }, req });
+    AuditService.log({ action: 'platform.impersonate', actor: operatorActor, schoolId: resolvedSchoolId, target: { type: 'school', id: resolvedSchoolId, label: school.name }, details: { targetEmail: admin.email, reason, impersonationId: sessionId, expiresAt: absoluteExpiry }, req });
+
+    // PLAT-01 remediation — tell the impersonated admin, not just the
+    // audit log. Reuses the existing notify-dispatch/notif-settings
+    // machinery (platform_impersonation, alwaysOn: true — a school can
+    // never silence this) rather than a parallel notification path.
+    // Fire-and-forget: a notification failure must never block granting
+    // (or already-granted) access, same "never break the caller's own
+    // request" posture as AuditService.log() itself.
+    dispatchNotification({
+      ctx: { schoolId: resolvedSchoolId },
+      schoolId: resolvedSchoolId,
+      eventKey: 'platform_impersonation',
+      actorUserId: 'platform',
+      recipients: [{ userId: admin.id, name: admin.name || admin.email, email: admin.email }],
+      inAppSubject: 'Msingi support accessed your account',
+      inAppBody: `A Msingi platform operator (${operatorActor.email || operatorActor.role}) signed in as your account. Reason: ${reason}. Access ends by ${absoluteExpiry}.`,
+      sendEmail: (r) => email.sendImpersonationNotice({
+        name: r.name, email: r.email, schoolName: school.name, schoolEmail: school.email, schoolId: resolvedSchoolId,
+        operatorName: operatorActor.email || `platform ${req.platformOperatorTier || 'operator'}`,
+        reason, startedAt: new Date().toISOString(), expiresAt: absoluteExpiry,
+      }),
+    }).catch(err => console.error('[platform/impersonate] notification dispatch failed (non-fatal):', err.message));
 
     /* Set HttpOnly cookie so the React SPA's authMiddleware accepts subsequent requests */
     res.cookie('token', token, {
       httpOnly: true,
       secure:   process.env.NODE_ENV === 'production',
       sameSite: 'strict',
-      maxAge:   8 * 60 * 60 * 1000,
+      maxAge:   IMPERSONATION_TIMEOUT_MS,
     });
 
     /* Merge schoolName into the user object so the React SPA sidebar can display it.
@@ -1389,6 +1447,8 @@ router.post('/schools/:id/impersonate', async (req, res) => {
        badge falling all the way through to the literal 'core' fallback). */
     res.json({
       token,
+      impersonationId: sessionId,
+      expiresAt: absoluteExpiry,
       user: {
         ...admin,
         password:   undefined,
@@ -1403,6 +1463,44 @@ router.post('/schools/:id/impersonate', async (req, res) => {
       moduleRegistry: MODULE_REGISTRY,
       ...(availableSchools.length ? { availableSchools } : {}),
     });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* POST /api/platform/impersonation-sessions/:sessionId/revoke — end an
+   active impersonation grant immediately. Owner-tier only (mutating verb,
+   covered by the router-level gate above), independent of which operator
+   originally granted it — any owner-tier operator can end any active
+   impersonation, the same "the power to grant implies the power to
+   revoke" posture platform-wide access already has. The school's own
+   admin has a separate, parallel route for ending a session targeting
+   THEM specifically — see settings.js's POST /impersonation/:sessionId/revoke. */
+router.post('/impersonation-sessions/:sessionId/revoke', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const session = await SessionService.getImpersonationSession(sessionId);
+    if (!session) return res.status(404).json({ error: 'Impersonation session not found.' });
+    if (session.status !== 'active') {
+      return res.status(409).json({ error: `This impersonation session is already ${session.status}.` });
+    }
+
+    const operatorActor = _platformActor(req);
+    const revoked = await SessionService.revokeImpersonationSession(
+      sessionId,
+      { userId: operatorActor.userId, role: operatorActor.role, email: operatorActor.email },
+      (req.body?.reason || '').trim() || 'Ended by platform operator',
+    );
+    if (!revoked) return res.status(409).json({ error: 'This impersonation session is already ended.' });
+
+    AuditService.log({
+      action: 'platform.impersonate_revoked',
+      actor: operatorActor,
+      schoolId: session.schoolId,
+      target: { type: 'school', id: session.schoolId, label: null },
+      details: { impersonationId: sessionId, targetUserId: session.userId, reason: (req.body?.reason || '').trim() || null },
+      req,
+    });
+
+    return res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

@@ -46,7 +46,8 @@ jest.mock('../../middleware/auth', () => ({
 jest.mock('../../middleware/plan', () => ({ invalidatePlanCache: jest.fn() }));
 jest.mock('../../services/audit', () => ({ log: jest.fn() }));
 jest.mock('../../utils/jwt', () => ({ sign: jest.fn((p) => 'signed:' + JSON.stringify(p)) }));
-jest.mock('../../utils/email', () => ({}));
+jest.mock('../../utils/email', () => ({ sendImpersonationNotice: jest.fn() }));
+jest.mock('../../utils/notify-dispatch', () => ({ dispatchNotification: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('../../utils/provision-organizations', () => ({
   provisionOrganizationForSchool: jest.fn(),
 }));
@@ -54,6 +55,20 @@ jest.mock('../../utils/tenant-model', () => ({
   tenantModel: jest.fn(() => ({ updateOne: jest.fn(), find: () => ({ lean: () => Promise.resolve([]) }) })),
 }));
 jest.mock('bcryptjs', () => ({ hash: jest.fn() }));
+
+// PLAT-01 remediation — impersonation now creates a real, tracked session
+// (server/services/sessionService.js's createImpersonationSession) instead
+// of a bare uuidv4() with nothing behind it. Mocked here with a real
+// in-memory counter so sessionId is still verifiably unique per call,
+// same property the old raw-uuid test coverage relied on.
+let mockSessionCounter = 0;
+const mockCreateImpersonationSession = jest.fn(async () => {
+  mockSessionCounter += 1;
+  return { sessionId: `sess_mock_impersonation_session_${mockSessionCounter}`, absoluteExpiry: '2026-01-01T01:00:00.000Z' };
+});
+jest.mock('../../services/sessionService', () => ({
+  createImpersonationSession: (...args) => mockCreateImpersonationSession(...args),
+}));
 
 // Mirrors auth.js's real _buildTokenPayload/_availableSchools contract
 // closely enough to exercise platform.js's reuse of them, without pulling
@@ -114,13 +129,14 @@ describe('POST /api/platform/schools/:id/impersonate', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockSessionCounter = 0;
     process.env.ALLOW_IMPERSONATION = 'true';
     mockSchoolDoc = {
       id: 'sch_trinitas', slug: 'trinitas-tis', name: 'Trinitas International SChool',
       plan: 'family', logoUrl: null, primaryColor: '#4f46e5', moduleConfig: { library: true },
     };
     mockAdminDoc = {
-      id: 'usr_admin1', role: 'superadmin', email: 'admin@trinitas-tis.example', schoolId: 'sch_trinitas',
+      id: 'usr_admin1', name: 'Head Teacher', role: 'superadmin', email: 'admin@trinitas-tis.example', schoolId: 'sch_trinitas',
     };
   });
   afterAll(() => {
@@ -223,6 +239,54 @@ describe('POST /api/platform/schools/:id/impersonate', () => {
       const id1 = JSON.parse(res1.body.token.replace(/^signed:/, '')).impersonationId;
       const id2 = JSON.parse(res2.body.token.replace(/^signed:/, '')).impersonationId;
       expect(id1).not.toBe(id2);
+    });
+  });
+
+  /* ── PLAT-01 remediation — tracked session, shorter lifetime, notification ── */
+  describe('tracked session + notification (PLAT-01)', () => {
+    test('creates a real tracked session via SessionService, not a bare uuid', async () => {
+      const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate').send({ reason: 'Ticket #99' });
+      expect(res.status).toBe(200);
+      expect(mockCreateImpersonationSession).toHaveBeenCalledWith(
+        'usr_admin1', 'sch_trinitas', 'superadmin',
+        expect.anything(), expect.anything(),
+        expect.objectContaining({
+          reason: 'Ticket #99',
+          timeoutMs: expect.any(Number),
+          impersonatedBy: expect.objectContaining({ tier: 'owner' }),
+        }),
+      );
+    });
+
+    test('sessionId doubles as impersonationId — no second, disconnected id', async () => {
+      const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate').send({ reason: 'Ticket #100' });
+      const signedPayload = JSON.parse(res.body.token.replace(/^signed:/, ''));
+      expect(signedPayload.impersonationId).toBe(signedPayload.sessionId);
+      expect(res.body.impersonationId).toBe(signedPayload.sessionId);
+    });
+
+    test('response includes expiresAt, matching the session\'s own shorter lifetime', async () => {
+      const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate').send({ reason: 'Ticket #101' });
+      expect(res.body.expiresAt).toBe('2026-01-01T01:00:00.000Z');
+    });
+
+    test('the impersonated admin is notified — both in-app and email, via the existing dispatch mechanism, not a parallel one', async () => {
+      const { dispatchNotification } = require('../../utils/notify-dispatch');
+      const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate').send({ reason: 'Ticket #102' });
+      expect(res.status).toBe(200);
+      expect(dispatchNotification).toHaveBeenCalledWith(expect.objectContaining({
+        schoolId: 'sch_trinitas',
+        eventKey: 'platform_impersonation',
+        recipients: [expect.objectContaining({ userId: 'usr_admin1', email: 'admin@trinitas-tis.example' })],
+      }));
+    });
+
+    test('a notification dispatch failure does not block the response — access is already granted, must not be undone by a side effect failing', async () => {
+      const { dispatchNotification } = require('../../utils/notify-dispatch');
+      dispatchNotification.mockRejectedValueOnce(new Error('email service down'));
+      const res = await supertest(app()).post('/api/platform/schools/sch_trinitas/impersonate').send({ reason: 'Ticket #103' });
+      expect(res.status).toBe(200);
+      expect(res.body.token).toBeDefined();
     });
   });
 });
