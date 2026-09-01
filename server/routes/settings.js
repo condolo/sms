@@ -26,6 +26,7 @@ const { rbac, invalidatePermCache } = require('../middleware/rbac');
 const { invalidateModuleConfigCache } = require('../middleware/module-gate');
 const { invalidateScopeCache, invalidateScopeCacheForRole } = require('../middleware/scopeMiddleware');
 const AuditService           = require('../services/audit');
+const SessionService         = require('../services/sessionService');
 const { peekAdmissionCounter, setAdmissionCounter } = require('../utils/counters');
 const { MODULE_REGISTRY, MODULE_KEYS } = require('../config/moduleRegistry');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
@@ -1064,6 +1065,66 @@ router.post('/users/:id/reset-password', authMiddleware, rbac('settings', 'updat
   } catch (err) {
     console.error('[settings] POST /users/:id/reset-password error:', err);
     return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to set password.' } });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   PLAT-01 remediation — the school-side half of impersonation
+   revocation. platform.js has the platform-operator-side route for
+   the same action (POST /api/platform/impersonation-sessions/:id/
+   revoke) — this is deliberately a second, independent route rather
+   than one shared route, because the two callers authenticate
+   completely differently (platformSession cookie vs. this school's
+   own normal login) and the authorization question is different too:
+   "is this operator allowed to end ANY impersonation" vs. "is this
+   admin allowed to end a session targeting THEIR OWN school". A school
+   admin can only ever discover and revoke a session scoped to their
+   own schoolId — checked explicitly below, not merely implied by the
+   route being under /settings.
+   ══════════════════════════════════════════════════════════════ */
+
+/* POST /api/settings/impersonation/:sessionId/revoke — end an active
+   impersonation session targeting this school right now. The real
+   admin calls this from their OWN normal login (impersonation mints a
+   second, separate token for the same identity — it never locks the
+   real admin out of logging in themselves), typically after seeing
+   the notification or Audit Log entry it's referenced in. */
+router.post('/impersonation/:sessionId/revoke', authMiddleware, rbac('settings', 'update'), async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const session = await SessionService.getImpersonationSession(sessionId);
+    // Same 404 whether the id is unknown or belongs to another school —
+    // never confirm/deny a session id's existence for a tenant this
+    // caller has no business knowing about.
+    if (!session || session.schoolId !== req.jwtUser.schoolId) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Impersonation session not found.' } });
+    }
+    if (session.status !== 'active') {
+      return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: `This session is already ${session.status}.` } });
+    }
+
+    const revoked = await SessionService.revokeImpersonationSession(
+      sessionId,
+      { userId: req.jwtUser.userId, role: req.jwtUser.role, email: req.jwtUser.email },
+      'Ended by school administrator',
+    );
+    if (!revoked) {
+      return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: 'This session is already ended.' } });
+    }
+
+    AuditService.log({
+      action: 'platform.impersonate_revoked',
+      actor: req.jwtUser,
+      schoolId: req.jwtUser.schoolId,
+      target: { type: 'school', id: req.jwtUser.schoolId, label: null },
+      details: { impersonationId: sessionId, endedBy: 'school_admin' },
+      req,
+    });
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[settings] POST /impersonation/:sessionId/revoke error:', err);
+    return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Failed to end impersonation session.' } });
   }
 });
 
