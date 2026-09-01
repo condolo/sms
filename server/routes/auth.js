@@ -1320,6 +1320,27 @@ const switchSchoolLimiter = rateLimit({
 
 router.post('/switch-school', authMiddleware, switchSchoolLimiter, async (req, res) => {
   try {
+    // PLAT-01 remediation — an impersonated session is locked to the one
+    // school it was granted for. This route mints a completely fresh
+    // token (line ~1399 below) via the same _buildTokenPayload() call
+    // impersonation itself uses — which means it would NOT carry forward
+    // impersonated/impersonationId/sessionId, silently dropping the PLAT-03
+    // attribution on the very next action taken. Preserving that context
+    // through this path would mean duplicating the impersonation-session
+    // machinery here too — more surface area for the exact "another route
+    // added later, forgot to check" drift this whole remediation exists to
+    // close. Blocking outright is the one-line, unambiguous alternative:
+    // a legitimate reason to look at a second school is a new, separately
+    // authorized, separately reasoned, separately audited impersonation
+    // grant for THAT school — never a silent hop from one to another.
+    // Inert for a genuinely dormant feature today (switch-school itself
+    // fails closed below for every org that hasn't opted into
+    // multiSchoolEnabled — currently none have), but cheap to close now
+    // rather than the moment that changes.
+    if (req.jwtUser.impersonated) {
+      return res.status(403).json({ error: 'An impersonated session cannot switch schools. Start a new impersonation session for the other school instead.' });
+    }
+
     const { schoolId: targetSchoolId } = req.body;
     if (!targetSchoolId || typeof targetSchoolId !== 'string') {
       return res.status(400).json({ error: 'schoolId is required' });

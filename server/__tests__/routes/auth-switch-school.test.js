@@ -28,6 +28,12 @@ jest.mock('../../services/sessionService', () => ({
     sessionId: 'sess_switch_001',
     absoluteExpiry: new Date(Date.now() + 86_400_000).toISOString(),
   }),
+  // The auth middleware's own per-request impersonation check (PLAT-01)
+  // calls this for any token carrying `impersonated` — must resolve to
+  // an active session for the impersonation-block tests below to
+  // actually reach the switch-school route's own logic, not just fail
+  // earlier in the auth middleware with an unrelated 401.
+  getImpersonationSession: jest.fn(() => Promise.resolve({ id: 'sess_imp_1', status: 'active', schoolId: 'sch_a' })),
 }));
 
 jest.mock('../../services/audit', () => ({ log: jest.fn().mockResolvedValue(undefined) }));
@@ -69,7 +75,11 @@ jest.mock('../../utils/model', () => ({
         )),
       };
     }
-    return { findOne: jest.fn(() => mockChain(() => null)), find: jest.fn(() => mockChain(() => [])) };
+    // 'sessions' (authMiddleware's fire-and-forget _touchActivity, only
+    // reached when a payload carries sessionId — the impersonation-block
+    // tests below are the first in this file to do that) and any other
+    // unlisted collection.
+    return { findOne: jest.fn(() => mockChain(() => null)), find: jest.fn(() => mockChain(() => [])), updateOne: jest.fn().mockResolvedValue({}) };
   }),
 }));
 
@@ -273,5 +283,38 @@ describe('POST /api/auth/switch-school', () => {
     const payload = verify(tokenCookie.split(';')[0].split('=')[1]);
     expect(payload.schoolId).toBe('sch_b');
     expect(payload.userId).toBe('usr_2'); // resolved id, not the session's original 'usr_1'
+  });
+});
+
+/* ── PLAT-01 remediation — an impersonated session cannot switch schools ──
+   Checked at the very top of the route, before any school/org/identity
+   resolution — no fixtures needed for these, the block fires first. */
+describe('POST /api/auth/switch-school — blocked for impersonated sessions', () => {
+  test('an impersonated token is rejected outright, before any school lookup happens', async () => {
+    const res = await supertest(buildApp())
+      .post('/api/auth/switch-school')
+      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a', role: 'superadmin', roles: ['superadmin'], impersonated: true, sessionId: 'sess_imp_1', identityId: 'idn_1' }))
+      .send({ schoolId: 'sch_b' });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/impersonat/i);
+  });
+
+  test('a NORMAL (non-impersonated) token for the same user is unaffected by this check', async () => {
+    mockSchoolDocs = {
+      sch_a: { id: 'sch_a', organizationId: 'org_1' },
+      sch_b: { id: 'sch_b', organizationId: 'org_1' },
+    };
+    mockOrgDocs = { org_1: { id: 'org_1', multiSchoolEnabled: true } };
+    mockEligibleUserDocs = [{ id: 'usr_2', schoolId: 'sch_b', identityId: 'idn_1', isActive: true }];
+    mockTargetUserDoc = { id: 'usr_2', schoolId: 'sch_b', role: 'teacher', isActive: true };
+
+    const res = await supertest(buildApp())
+      .post('/api/auth/switch-school')
+      .set('Cookie', authCookie({ userId: 'usr_1', schoolId: 'sch_a', role: 'teacher', roles: ['teacher'], identityId: 'idn_1' })) // no `impersonated`
+      .send({ schoolId: 'sch_b' });
+    // Not blocked by the impersonation check — reaches the real
+    // resolution logic (may still succeed or fail on its own terms,
+    // but never with the impersonation-specific 403).
+    expect(res.status).not.toBe(403);
   });
 });
