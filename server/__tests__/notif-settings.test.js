@@ -73,3 +73,24 @@ describe('isEnabled — unaffected by the new event/frequency additions', () => 
     expect(await isEnabled(SCHOOL, 'behaviour_incident', 'email')).toBe(true);
   });
 });
+
+describe('platform_impersonation event registration (PLAT-01)', () => {
+  test('is registered, implemented, alwaysOn, grouped under account', () => {
+    expect(EVENT_REGISTRY.platform_impersonation).toBeDefined();
+    expect(EVENT_REGISTRY.platform_impersonation.implemented).toBe(true);
+    expect(EVENT_REGISTRY.platform_impersonation.alwaysOn).toBe(true);
+    expect(EVENT_REGISTRY.platform_impersonation.group).toBe('account');
+    expect(EVENT_REGISTRY.platform_impersonation.channels).toEqual({ email: true, inApp: true });
+  });
+
+  test('THE CRITICAL PROPERTY: a school cannot silence it — isEnabled ignores an explicit saved {email:false, inApp:false}', async () => {
+    mockSchoolDoc = { notificationSettings: { platform_impersonation: { email: false, inApp: false } } };
+    expect(await isEnabled(SCHOOL, 'platform_impersonation', 'email')).toBe(true);
+    expect(await isEnabled(SCHOOL, 'platform_impersonation', 'inApp')).toBe(true);
+  });
+
+  test('stays enabled with no saved settings at all', async () => {
+    mockSchoolDoc = null;
+    expect(await isEnabled(SCHOOL, 'platform_impersonation', 'email')).toBe(true);
+  });
+});

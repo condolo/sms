@@ -542,6 +542,29 @@ async function sendRoleChanged({ name, email, schoolName, schoolEmail, schoolId 
   return _sendAsSchool(email, `Your role has changed — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
 }
 
+/* PLAT-01 remediation — impersonation notice, sent to the impersonated
+   admin's own account the moment a platform operator's session is
+   granted (not after the fact) — see server/routes/platform.js's
+   impersonate route, which calls this via notify-dispatch.js the same
+   way every other event in this file is triggered. */
+async function sendImpersonationNotice({ name, email, schoolName, schoolEmail, schoolId = null, operatorName, reason, startedAt, expiresAt }) {
+  const support = schoolEmail || SUPPORT_EMAIL;
+  const html = _wrap(`
+    <h2>🔐 Msingi support accessed your account</h2>
+    <p>Hi ${name},</p>
+    <p>A Msingi platform operator signed in as your account on <strong>${schoolName}</strong> to provide support.</p>
+    <div class="info">
+      <p><strong>Accessed by:</strong> ${operatorName}</p>
+      <p><strong>Reason given:</strong> ${reason}</p>
+      <p><strong>Started:</strong> ${startedAt}</p>
+      <p><strong>Access ends by:</strong> ${expiresAt}</p>
+    </div>
+    <p>This access is recorded in your school's Audit Log (Settings → Audit Log) and ends automatically at the time above — sooner if you end it yourself from that same entry.</p>
+    <p style="font-size:13px;color:#6b7280">If you did not expect this, contact us immediately at <a href="mailto:${support}">${support}</a>.</p>
+  `, schoolName);
+  return _sendAsSchool(email, `Msingi support accessed your account — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+}
+
 /* 13. In-app message / announcement notification */
 async function sendMessageNotification({ recipientName, recipientEmail, senderName, subject, preview, schoolName, schoolEmail, schoolId = null, isDirect, appUrl }) {
   const url   = appUrl || APP_URL;
@@ -910,6 +933,7 @@ module.exports = {
   sendPasswordExpirySoon,
   sendPasswordChanged,
   sendRoleChanged,
+  sendImpersonationNotice,
   sendSystemUpdateNotice,
   sendMessageNotification,
   sendInvoiceEmail,

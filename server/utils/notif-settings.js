@@ -194,6 +194,19 @@ const EVENT_REGISTRY = {
     alwaysOn:    true,
     implemented: true,
   },
+  platform_impersonation: {
+    label:       'Msingi Support Access',
+    desc:        'Notifies your school\'s administrator when a Msingi platform operator signs in as their account for support',
+    group:       'account',
+    audience:    ['staff'],
+    channels:    { email: true, inApp: true },
+    // PLAT-01 remediation — a school must never be able to silence this.
+    // Same reasoning as role_changed/password_expiry above, for the same
+    // "you should always know this happened to your own account" class of
+    // event, just for platform-operator access instead of a role change.
+    alwaysOn:    true,
+    implemented: true,
+  },
 };
 
 /* ── Default channel state when school has no saved setting ── */
