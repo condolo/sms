@@ -1,5 +1,9 @@
 # PLAT-01 — Platform Impersonation Lifecycle Audit — 2026-09-01
 
+> **Status (2026-09-02): 🟢 Code remediation complete and deployed · 🟡 Production
+> lifecycle verification pending authorized platform-operator credentials.**
+> See §6 for the full breakdown and the outstanding production checklist.
+
 Investigation only, as instructed. **No application code was changed to produce
 this document.** Every claim below is cited to a specific file:line, or was
 confirmed by reading the actual code path end to end — never assumed from a
@@ -328,7 +332,9 @@ by the reviewer for a future decision).
    path. Currently inert (no organization has `multiSchoolEnabled` yet) but
    cheap to close now rather than risk forgetting later.
 
-### What was proven
+### Final status — three buckets, not one blended claim
+
+**🟢 Implemented and tested**
 
 - **The reviewer's exact acceptance test, run for real, not simulated**:
   "platform operator starts impersonation → access works → impersonation is
@@ -353,23 +359,53 @@ by the reviewer for a future decision).
   saves an explicit `{email:false, inApp:false}` school setting and confirms
   `isEnabled()` still returns `true` for both channels.
 
-### What remains unverified
+**🟢 Deployed**
 
-- **No live production verification of the grant→revoke lifecycle.** This
-  environment has no platform-operator credentials for the deployed site
-  (unlike the RBAC batch, where the site's own demo *school* credentials
-  were usable for live smoke-testing). Everything above is proven at the
-  code/test level — real middleware, real session service, real JWT
-  signing/verification, against a faked DB only — not against the actual
-  production database and deployed process.
-- **Email delivery itself was not exercised.** `sendImpersonationNotice()`
-  is proven to be *called* with the right arguments; whether the configured
-  email provider actually delivers it in production is outside what this
-  batch could verify.
-- **Dual-control approval was explicitly not implemented**, per the
-  reviewer's own instruction — not a gap, a deliberate deferral.
-- **The `switch-school` block is currently untested in a live multi-school
-  org** because no organization has `multiSchoolEnabled` today; the
-  invariant is unit-tested (mutation-tested, in fact) but has never fired
-  against a real impersonated multi-school session in production, because
-  that scenario doesn't yet exist anywhere to test against.
+- All 7 remediation commits pushed to `origin/main` (`8102a68..edcb3f2`,
+  2026-09-02). Working tree was clean at push time — no uncommitted drift.
+- Production school-side smoke testing earlier in this security workstream
+  (the RBAC batch, using the site's own public demo school credentials)
+  already confirmed the broader deployment pipeline and live app are
+  working; that is evidence the deploy mechanism itself is sound, but it is
+  **not** evidence for the impersonation lifecycle specifically — no
+  platform-operator credentials were exercised in that pass, and none have
+  been exercised since.
+
+**🟡 Production behavior not yet directly verified**
+
+No platform-operator credential (a named `platform_operators` account, or
+`PLATFORM_ADMIN_KEY`) is available in this environment, and none was
+requested, guessed, or extracted from the codebase/database — consistent
+with instruction not to obtain, guess, expose, or request it in chat. What
+we can honestly say today stops at: *the code implementing this lifecycle
+is correct and heavily tested; its behavior against the live production
+database and deployed process has not been directly observed.*
+
+### Outstanding production verification checklist
+
+To run once authorized platform-operator credentials are available, against
+a **designated test/demo tenant only** — not an actual school's production
+account unless explicitly designated for this test:
+
+1. Platform owner can initiate impersonation through the actual platform UI.
+2. A reason is mandatory.
+3. The target is restricted to the intended school administrator.
+4. The school administrator receives the impersonation notification.
+5. The audit trail records the start, reason, operator identity, and
+   impersonation ID.
+6. The impersonated session can perform the intended administrator actions.
+7. Revoke the impersonation session.
+8. Immediately attempt another authenticated request using the revoked
+   session and confirm it is rejected.
+9. Confirm the revocation and the denied attempt are recorded against the
+   same impersonation ID.
+10. Confirm ordinary administrator sessions and other schools are
+    unaffected.
+
+Any item that cannot be safely verified when this is next attempted should
+be reported as not verified — not inferred from the code-level tests above,
+regardless of how strong that evidence is.
+
+**PLAT-01 code-level remediation is closed.** No further architectural
+changes are planned under this item; the only remaining action is the
+operational verification pass above, once credentials exist.
