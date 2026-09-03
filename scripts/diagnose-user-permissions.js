@@ -2,26 +2,22 @@
  * diagnose-user-permissions.js — READ-ONLY diagnostic
  *
  * Reports the exact evidence needed to distinguish role-assignment,
- * role-permissions, module-setting, frontend-visibility, and
- * backend-authorization problems for one user, without guessing.
+ * role-permissions, module-setting, and authorization problems for one
+ * user, without guessing.
  *
  * WHY THIS EXISTS
- * There are TWO independent implementations of "merge a per-user
- * override on top of a role's permissions":
- *   - server/middleware/rbac.js's _mergeUserOverrides — fixed in the
- *     2026-08 RBAC remediation to floor the coarse module grant at the
- *     role's own value (per-user overrides can only ADD, never suppress
- *     a module the role already grants).
- *   - server/routes/auth.js's _loadMergedPermissions — feeds the LOGIN
- *     RESPONSE and GET /api/auth/permissions (what the sidebar actually
- *     renders from) — still does a plain `{...roleResult, ...userDoc.
- *     permissions}` spread, which CAN let a stale per-user override
- *     document silently overwrite (not merge with) the role's grant.
- * This script runs BOTH implementations against the real documents for
- * one user and reports if/where they diverge — the exact evidence to
- * tell "she's not seeing it" (frontend visibility) apart from "she
- * genuinely can't do it" (backend authorization), before any fix is
- * attempted.
+ * Traces users.role → role_permissions (role) → per-user override →
+ * computed effective permissions → module-enabled status for one user,
+ * against the REAL current merge logic (imported from
+ * server/middleware/rbac.js's _mergeUserOverrides, not a hand-copied
+ * duplicate — a version of this script used to keep its own copy of
+ * that function "mirroring it exactly" in a comment, which went stale
+ * the moment the real one was fixed on 2026-09-02 and kept reporting
+ * the pre-fix result even after the fix shipped; this script must never
+ * repeat that mistake). server/routes/auth.js's _loadMergedPermissions
+ * (the sidebar/login-snapshot path) now delegates to this exact same
+ * function too, so there is one merge implementation to report on, not
+ * two that could diverge.
  *
  * WHAT THIS SCRIPT DOES (and does NOT do)
  * Purely read-only — makes zero writes.
@@ -59,26 +55,17 @@ function _model(col) {
   return mongoose.model(name, schema, col);
 }
 
-// ── Mirrors server/middleware/rbac.js's _mergeUserOverrides exactly (FIXED version) ──
-function mergeUserOverrides_rbacFixed(rolePerms, userPerms) {
-  const merged = { ...rolePerms, ...userPerms };
-  const touchedModules = new Set(
-    Object.keys(userPerms).filter(k => k.includes('__')).map(k => k.split('__')[0])
-  );
-  for (const mod of touchedModules) {
-    const actions = new Set(Array.isArray(rolePerms[mod]) ? rolePerms[mod] : []);
-    for (const [key, arr] of Object.entries(merged)) {
-      if (key.startsWith(`${mod}__`) && Array.isArray(arr)) arr.forEach(a => actions.add(a));
-    }
-    merged[mod] = [...actions];
-  }
-  return merged;
-}
-
-// ── Mirrors server/routes/auth.js's _loadMergedPermissions's per-user step exactly (UNFIXED version) ──
-function mergeUserOverrides_authUnfixed(roleResult, userDocPermissions) {
-  return { ...roleResult, ...userDocPermissions };
-}
+// 2026-09 — this file used to keep its OWN hand-copied duplicate of
+// rbac.js's _mergeUserOverrides here, "mirroring it exactly" in a
+// comment. That duplicate went stale the moment the real function was
+// fixed (this diagnostic kept reporting the pre-fix result even after
+// the fix shipped) — the exact class of drift this whole investigation
+// was about. Importing the real, current function instead, so this
+// script can never again silently disagree with what the app actually
+// does. auth.js now delegates to this same function too (see the
+// 2026-09 fix in routes/auth.js), so there is only one implementation
+// left to report on, not two to compare.
+const { _mergeUserOverrides } = require('../server/middleware/rbac');
 
 async function run() {
   // Mirrors server/config/db.js exactly — without an explicit dbName, the
@@ -134,21 +121,11 @@ async function run() {
   const rolePermsObj = roleDoc?.permissions ?? {};
   const userPermsObj = userDoc?.permissions ?? null;
 
-  console.log('── 3. Computed effective admissions permissions — BOTH implementations ──');
-  const viaRbacFixed = userPermsObj
-    ? mergeUserOverrides_rbacFixed(rolePermsObj, userPermsObj)
-    : rolePermsObj;
-  console.log(`  rbac.js (FIXED, used for actual API authorization):`);
-  console.log(`    effective.${MODULE} = ${JSON.stringify(viaRbacFixed[MODULE] ?? [])}`);
-
-  const viaAuthUnfixed = userPermsObj
-    ? mergeUserOverrides_authUnfixed(rolePermsObj, userPermsObj)
-    : rolePermsObj;
-  console.log(`  auth.js (_loadMergedPermissions, UNFIXED, feeds sidebar/session):`);
-  console.log(`    effective.${MODULE} = ${JSON.stringify(viaAuthUnfixed[MODULE] ?? [])}`);
-
-  const diverge = JSON.stringify(viaRbacFixed[MODULE] ?? []) !== JSON.stringify(viaAuthUnfixed[MODULE] ?? []);
-  console.log(`\n  ${diverge ? '⚠️  THESE DIVERGE — confirms the frontend-visibility bug for this exact user/module.' : '✓ These agree — the two-implementation bug is NOT the cause here for this module.'}\n`);
+  console.log('── 3. Computed effective admissions permissions ──');
+  console.log('  (Since the 2026-09 fix, auth.js\'s sidebar/session snapshot delegates to');
+  console.log('   this exact same function — there is only one implementation to report on now.)');
+  const effective = userPermsObj ? _mergeUserOverrides(rolePermsObj, userPermsObj) : rolePermsObj;
+  console.log(`    effective.${MODULE} = ${JSON.stringify(effective[MODULE] ?? [])}\n`);
 
   console.log('── 4. Is the module enabled for this school? ──');
   const school = await Schools.findOne({ id: schoolId }).select('moduleConfig').lean();
