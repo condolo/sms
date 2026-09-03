@@ -163,9 +163,9 @@ publish them?** — so the analysis is combined.
 |---|---|---|---|---|---|---|
 | `view_grades` | 🔴 DECORATIVE | COARSE | See marks | Teachers, HOD, Principal | grades read routes | Foundational. |
 | `enter_marks` | 🔴 DECORATIVE | COARSE (kept as the base "can do gradebook work" action) | Enter/edit marks for own classes | Class/subject teacher | grades write routes | |
-| `mark_submissions` (Review/Approve) | 🔴 **DECORATIVE — separation-of-duties defeat** | **REAL** | Approve or reject a teacher's submitted marks | HOD, exams_officer — **explicitly not the submitting teacher** | `mark-submissions.js:196` (`/:id/review`) — currently coarse `rbac('grades','update')`, **the exact same action string as recalling, locking, or unlocking a submission** | This is the single clearest separation-of-duties case in the entire audit: a teacher who can `enter_marks` and a reviewer who can `mark_submissions` are, by definition, meant to be different people for the check to mean anything. Currently `enter_marks` and `review` are indistinguishable at the RBAC layer — anyone with `grades:update` can do both. Tagged DECORATIVE rather than BYPASS because there's no separate hidden gate elsewhere — it's simply not gated independently at all. **Before implementing:** confirm whether `mark-submissions.js`'s `/:id/review` handler already contains an in-code check preventing a submitter from reviewing their own submission (not confirmed in this pass) — if it doesn't, that's a correctness gap independent of RBAC granularity. |
+| `mark_submissions` (Review/Approve) | 🟢 **REAL — FIXED 2026-09-03 (commit `b9f5d85`)** | **REAL** | Approve or reject a teacher's submitted marks | HOD, exams_officer, or anyone explicitly granted — **the submitting teacher is excluded by construction, since ordinary `grades:update` alone is deliberately not sufficient** | `mark-submissions.js:196` (`/:id/review`) | **Correction (2026-09-03): this row was originally misclassified DECORATIVE.** Tracing the handler body (not just the `rbac()` call signature, which is all the original pass checked) found it already had a hardcoded `if (!['admin','principal','section_head'].includes(role))` — genuinely **BYPASS**, the same class as `report_generate`, not "ungated." Fixed: the floor role list stays, and `grades.mark_submissions` is now additionally grantable via Settings, using the same strict `hasExplicitSubGrant` (no coarse-`grades:update` fallback) as `report_generate` — required for the same reason: any teacher holding plain `grades:update` (needed to enter their own marks) must not automatically gain reviewer authority. 6 tests, mutation-tested. **`mark-submissions.js` also has `/:id/lock` and `/:id/unlock` routes with their own separate hardcoded `admin`/`principal` checks (also BYPASS) — NOT fixed in this pass, deliberately deferred: `/unlock` has a second, independent approval mechanism (`workflow_configs('marks_unlock')`, entirely outside `role_permissions`/Settings) that any fix must not disturb. Tracked as a separate, not-yet-scoped follow-up finding, intentionally kept apart from the `exams.js` `lock`/`unlock` item below — the two files' lock/unlock use materially different authorization architectures and should not be assumed to need the same fix.** |
 | `comment_banks` | 🔴 DECORATIVE | COARSE | Manage report-card comment templates | HOD, Principal | `comment-banks.js` (not traced in this pass) | Lower stakes than mark approval; template text, not grades themselves. |
-| `report_generate` (Generate/Publish) | 🟠 **BYPASS — see correction below, this is the real gate, not `report_cards.publication_policy`** | **REAL** | Actually publish report cards to parents | Principal, Deputy Principal — schools should be able to name who, not be stuck at literally `admin`/`superadmin` | `report-cards.js:487-489` (`POST /publish`) — coarse `rbac('grades','create')` PLUS a hardcoded `if (!['admin','superadmin'].includes(role))` | **Correction (2026-09-03): an earlier version of this document conflated this row with `report_cards.publication_policy` below as "the same action" — they are not.** `publication_policy` governs a genuinely different, already-correctly-gated feature (moderation-bypass config, `_loadPublicationPolicy`/`GET+PATCH /publication-policy`). This row, `grades.report_generate`, is the actual "who can click Publish" gate, and it's the one that's hardcoded. See below for the implementation. |
+| `report_generate` (Generate/Publish) | 🟢 **REAL — FIXED 2026-09-03 (commit `2d23079`)** | **REAL** | Actually publish report cards to parents | Principal, Deputy Principal — schools should be able to name who, not be stuck at literally `admin`/`superadmin` | `report-cards.js:487-489` (`POST /publish`) — coarse `rbac('grades','create')` PLUS a hardcoded `if (!['admin','superadmin'].includes(role))` | **Correction (2026-09-03): an earlier version of this document conflated this row with `report_cards.publication_policy` below as "the same action" — they are not.** `publication_policy` governs a genuinely different, already-correctly-gated feature (moderation-bypass config, `_loadPublicationPolicy`/`GET+PATCH /publication-policy`). This row, `grades.report_generate`, is the actual "who can click Publish" gate, and it's the one that's hardcoded. See below for the implementation. |
 | `export` (Export Grades CSV) | ⚪ **NOT BUILT** | N/A until built | Bulk-download marks | — | **None.** Not in `import-export.js`'s `EXPORT_MODULE` map, no dedicated export route found in `grades.js`. | Same situation as Admissions' `export` row — build the feature first, or drop the row. |
 
 ### Exams (5 rows)
@@ -174,9 +174,29 @@ publish them?** — so the analysis is combined.
 |---|---|---|---|---|---|---|
 | `view` | 🔴 DECORATIVE | COARSE | See exam list/results | Teachers, exams_officer | `exams.js:301,363,577,591,792` | |
 | `create` | 🔴 DECORATIVE | COARSE | Create/edit an exam definition | exams_officer, HOD | `exams.js:390,408` | |
-| `lock` / `unlock` | 🔴 **DECORATIVE — separation-of-duties defeat** | **REAL** | Freeze an exam so results can no longer be edited (and reverse it) | exams_officer, Principal — **deliberately not the teacher entering results** | `exams.js:516,543` — **currently coarse `rbac('exams','update')`, indistinguishable from editing the exam's own metadata** | The entire point of an exam lock is that the person who can enter results should not also be the person who decides when entry closes. Currently identical RBAC action to any other exam edit — this defeats the control's purpose exactly the way the `mark_submissions` case does above. Same DECORATIVE-not-BYPASS reasoning: no hidden alternate gate, just no independent gate at all. |
+| `lock` / `unlock` | 🟠 **BYPASS — corrected 2026-09-03, NOT YET FIXED** | **REAL, pending design approval** | Freeze an exam so results can no longer be edited (and reverse it) | exams_officer, Principal — **deliberately not the teacher entering results** | `exams.js:516,543` (dedicated `/lock`/`/unlock`) **and** `exams.js:408-432` (`PUT /:id` with `data.status`) | **Correction (2026-09-03): originally misclassified DECORATIVE — full handler trace found three separate, overlapping layers, not "no gate at all."** See §4a below for the complete authorization trace and the proposed design, presented for approval before any code changes — this is materially more entangled than `mark_submissions` was and must not be assumed to need the same fix shape. |
 | `results` (Enter Exam Results) | 🔴 DECORATIVE | COARSE (kept as the base "can enter results" action) | Enter results for own subject/class | Teacher | `exams.js:624` | |
 | `delete` | 🔴 DECORATIVE | **REAL** | Permanently remove an exam and its results | exams_officer/Principal only | `exams.js:498` | Standard delete-separation case, and exam results are the kind of record a school cannot casually lose. |
+
+### 4a. `exams.lock`/`unlock` — complete authorization trace (2026-09-03)
+
+**No code changed. This is the full trace requested before any implementation, per instruction — proposed design at the end is for approval, not yet built.**
+
+Four separate, overlapping mechanisms currently apply to locking/unlocking an exam, not one:
+
+1. **Router-level `rbac('exams','update')`** (`exams.js:516,543,408`) — the ordinary, Settings-controlled coarse gate. Present on all three routes below. Works correctly today, unrelated to this finding.
+2. **A hardcoded floor in each dedicated route.** `POST /:id/lock` (`exams.js:519`): `if (!['admin','superadmin'].includes(role))`. `POST /:id/unlock` (`exams.js:546`): the identical check. This is the BYPASS — invisible to and unconfigurable from Settings, same class as `report_generate`/`mark_submissions`.
+3. **A separate, DATA-DRIVEN role list inside the exam status state machine** (`exams.js:71-80`, `TRANSITION_ROLES`) — `TRANSITION_ROLES.locked = ['admin','superadmin']` and `TRANSITION_ROLES.approved = ['admin','superadmin']` (the "approved" entry governs unlocking too, since locked→approved *is* the unlock transition in this state machine). Checked by `_checkTransition(fromStatus, toStatus, userRole)` (`exams.js:174-184`), a **synchronous, plain function** — no access to `req`, no async permission lookup possible without changing its signature.
+4. **A second, EQUIVALENT route to lock/unlock an exam**: the generic `PUT /:id` (`exams.js:408-432`) accepts `data.status` and, when it changes, calls the *same* `_checkTransition` (layer 3) — meaning `PUT /:id { status: 'locked' }` is a fully working alternate path to `/lock`, gated only by `TRANSITION_ROLES`, and `PUT /:id { status: 'approved' }` (when the exam is currently `locked`) is an alternate path to `/unlock` — gated the same way, but **without** `/unlock`'s own extra requirements: `/unlock` requires a non-empty `reason` (`exams.js:548-549`) and writes a `mark_audit_log` entry (`exams.js:566-569`); the generic `PUT /:id` path enforces neither — `reason` is optional there and no audit-log entry is written, only an in-document `statusHistory` push. **This asymmetry exists independent of role_permissions and is a real, separate finding** — an admin can already unlock an exam today with no reason and no audit-log entry, simply by using `PUT /:id` instead of the dedicated endpoint. Flagged here for awareness; not proposed for fixing as part of this permission item, since it's a correctness gap in the existing admin-only behavior, not a granularity question.
+
+**Why this can't be fixed the same way as `report_generate`/`mark_submissions`:** those each had exactly one hardcoded check, in one route, with no equivalent alternate path. Here, fixing only the two dedicated routes' hardcoded checks (layer 2) while leaving `TRANSITION_ROLES` (layer 3) untouched would produce a real inconsistency: a person newly granted `exams.lock` via Settings could lock/unlock through the dedicated endpoints but would still be blocked doing the *identical* operation through `PUT /:id` — the same capability behaving differently depending on which of two equivalent routes is called.
+
+**Proposed design, for approval — two options:**
+
+- **Option A (narrower):** Fix only the two dedicated routes (layer 2), matching the `report_generate`/`mark_submissions` shape exactly — `hasExplicitSubGrant(req, 'exams', 'lock', 'update')` as an additional grant alongside the admin/superadmin floor, in `/lock` and `/unlock` only. `PUT /:id`'s `TRANSITION_ROLES`-gated path is explicitly left untouched and the inconsistency it creates is documented as a known, accepted limitation (a newly-granted person must use the dedicated endpoints; the generic PUT path stays admin/superadmin-only for status changes into/out of `locked`). Lower risk, smaller diff, matches the deferral pattern already applied to `mark-submissions.js`'s lock/unlock.
+- **Option B (consistent):** Also make `_checkTransition` permission-aware for the `locked`/`approved` transitions specifically — requires making it async (or pre-resolving the explicit-grant boolean before calling it) and touching both of its call sites (`/lock` and `PUT /:id`). Removes the inconsistency entirely, but touches shared state-machine logic used by every other status transition too, and is a larger, more invasive change for one edge case.
+
+Given the pattern already agreed for `mark-submissions.js`'s lock/unlock (defer the more entangled case rather than rush a fix that touches shared logic), **Option A is the recommended default** unless there's a specific reason to prefer consistency across both routes right now. Awaiting a decision before any code changes.
 
 ### Report Cards Settings (3 rows)
 
@@ -186,16 +206,16 @@ publish them?** — so the analysis is combined.
 | `workflow` (Configure Approval Workflow) | 🔴 DECORATIVE | COARSE (the workflow config itself is low-frequency, admin-level already by nature) | Define the approval steps | Principal/Admin | (not traced) | |
 | `publication_policy` (Configure Publication Policy) | 🔵 **COARSE — already correct, not a finding** | COARSE (leave as-is) | Configure moderation-bypass rules for publishing (default: moderation required) | Principal, Academic Head | `report-cards.js:1197,1207` (`GET`/`PATCH /publication-policy`) — coarse `rbac('report_cards','read'/'update')` | **Correction (2026-09-03):** this row does NOT govern who can click Publish (see `grades.report_generate` above, which does, and is the real BYPASS). This row governs `_loadPublicationPolicy` — moderation-check bypass settings — and is already correctly gated at the coarse `report_cards` module level with no separate finding. Left coarse deliberately: this is infrequent, admin-level configuration, not a day-to-day action needing separation from other Report Cards Settings rows. |
 
-**Grades/Exams/Report Cards summary:** The real finding here isn't "add
-5 more sub-keys" — it's that **`mark_submissions` review and `exams`
-lock/unlock are both currently indistinguishable from routine editing**,
-which quietly defeats the actual purpose of having a review/lock step at
-all, and **`grades.report_generate` (who can publish) is already gated,
-but by a hardcoded role check the admin cannot see or configure through
-Settings — not `report_cards.publication_policy`, which is a separate,
-already-correctly-coarse-gated feature.** These three deserve priority
-over Finance's `fee_structure`/`import` rows if only one batch can be
-done first.
+**Grades/Exams/Report Cards summary (updated 2026-09-03):**
+`grades.report_generate` (who can publish, commit `2d23079`) and
+`grades.mark_submissions` (who can review, commit `b9f5d85`) are both
+now **fixed** — each was a hardcoded role check invisible to Settings,
+not a from-scratch DECORATIVE row as originally assessed; both now stay
+admin-floored while additionally being grantable through Settings via
+`hasExplicitSubGrant`. `exams.lock`/`unlock` is the one still open — see
+§4a above for the full trace (three overlapping enforcement layers plus
+an equivalent alternate route, materially more entangled than the other
+two) and the two proposed designs awaiting a decision.
 
 ---
 
@@ -314,17 +334,35 @@ than an honestly-coarse permission:
 
 **Priority 0 — Correctness / security-boundary fixes (not new features)**
 
-- `grades.report_generate` — reconnect the already-working
-  admin/superadmin-only publish gate to `role_permissions`/Settings
-  instead of the hardcoded role-name check in `report-cards.js:489`.
-  (Not `report_cards.publication_policy` — corrected above; that row
-  governs a separate, already-correctly-gated feature.)
-- `grades.mark_submissions` — separate mark review/approval from
-  `enter_marks` (`mark-submissions.js:196`); confirm whether a
-  same-person self-approval guard exists independent of RBAC while
-  this is touched.
-- `exams.lock`/`unlock` — separate from routine exam editing
-  (`exams.js:516,543`).
+- ✅ **DONE (2026-09-03, `2d23079`)** `grades.report_generate` —
+  reconnected the admin/superadmin-only publish gate to
+  `role_permissions`/Settings via `hasExplicitSubGrant`, floor
+  preserved. (Not `report_cards.publication_policy` — corrected above;
+  that row governs a separate, already-correctly-gated feature.)
+- ✅ **DONE (2026-09-03, `b9f5d85`)** `grades.mark_submissions` —
+  reconnected `mark-submissions.js:196`'s `/:id/review` the same way.
+  Found, deliberately **NOT** fixed in the same pass: `/:id/lock` and
+  `/:id/unlock` in the same file each have their own hardcoded
+  admin/principal check too, and `/unlock` additionally has a separate
+  `workflow_configs`-based approval mechanism outside Settings entirely
+  — tracked as its own follow-up, intentionally not assumed to need the
+  same fix shape as `/review`.
+- ⏳ **Traced, not yet implemented** `exams.lock`/`unlock` — see §4a for
+  the complete authorization trace (four overlapping mechanisms,
+  including an alternate `PUT /:id` route with weaker requirements) and
+  two proposed designs (Option A: fix only the two dedicated routes,
+  matching `report_generate`/`mark_submissions`'s shape and leaving the
+  `PUT /:id` alternate path's stricter admin-only gate as a documented,
+  accepted inconsistency; Option B: also make the shared
+  `TRANSITION_ROLES` state-machine check permission-aware, removing the
+  inconsistency but touching logic every other status transition also
+  uses). Awaiting a decision before any code changes.
+- `mark-submissions.js`'s `/:id/lock`/`/:id/unlock` — new follow-up
+  finding (found while fixing `mark_submissions` above), not yet
+  scoped or designed. Do not assume it needs the same fix as
+  `exams.lock`/`unlock` — the `workflow_configs` interaction on
+  `/unlock` makes this a different authorization shape than either of
+  the other two lock/unlock cases in this document.
 - `hr.leave_view` — give `hr.js:186`'s `GET /leave` an actual
   `rbac()` call instead of its current undocumented in-handler check.
 - `extraRoles[]` / `sectionAssigned` visibility (§7) — so an admin can

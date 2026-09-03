@@ -87,16 +87,28 @@ that module).
 | **timetable** | rooms 🟢 (via `server/routes/rooms.js:76,107,136`) | view 🔴, edit 🔴, bell_schedule 🔴, assignments 🔴, import 🔴, export 🔴 | Only "Manage Rooms" is independently gated; the other 6 rows shown for Timetable all collapse into the module's shared coarse grant. |
 | **growth_profile** | aspirations 🟢 (via `server/routes/growth-recommendations.js:155,181`) | view 🔴, add_records 🔴, edit_records 🔴, delete_records 🔴, projects 🔴, recommendations 🔴, verify 🔴 | Only 1 of 8 declared rows is real. |
 | **settings** | *(see note)* | school 🔴\*, users 🔴, permissions 🔴, system 🔴 | \*A `rbac('settings', action, 'school')` sub-key genuinely exists — but it's used exclusively by `server/routes/sections.js:194,224,262` (Classes → Sections), an unrelated feature that happens to reuse the `settings`/`school` key pair. **None of Settings' own routes** — `PUT /school` (`settings.js:316`), `PUT/POST /users/*`, custom roles, SMTP, notifications — pass any sub-key; all are coarse `rbac('settings', action)`. So every row an admin actually sees under "Settings" in the R&P grid is decorative for what it visibly labels. |
+| **grades** | report_generate 🟢, mark_submissions 🟢 | view_grades 🔴, enter_marks 🔴, comment_banks 🔴, export 🔴 (export: not built at all, see `PERMISSION_GRANULARITY_PLAN_2026-09.md` §4) | **Update (2026-09-03):** originally listed fully decorative below — both `report_generate` and `mark_submissions` were actually BYPASS (hardcoded role checks in `report-cards.js:489` and `mark-submissions.js:199`, invisible to Settings), found and fixed while implementing the Permission Granularity Plan's Priority 0 (commits `2d23079`, `b9f5d85`). See that document for the full trace and fix design. |
 
 ### 🔴 Fully decorative (every declared row collapses into the coarse grant)
 
-**students, teachers, classes, attendance, subjects, lessons, grades,
+**students, teachers, classes, attendance, subjects, lessons,
 exams, assessment, report_cards, elearning, admissions, behaviour,
 finance, messages, events, resources, weekly_snapshot, reports,
-analytics** — 20 modules, confirmed by an exhaustive sweep of every
+analytics** — 19 modules (originally 20; `grades` moved to Partial
+2026-09-03, see above), confirmed by an exhaustive sweep of every
 `rbac(...)` call across the entire `server/` tree: none of these
 modules' names appear anywhere with a third (sub-key) argument in
 production code.
+
+**`exams`** deserves its own note: `lock`/`unlock` are traced in full
+in `PERMISSION_GRANULARITY_PLAN_2026-09.md` §4a and found to be BYPASS,
+not decorative — a hardcoded admin/superadmin check exists, just
+invisible to Settings, the same as `grades.report_generate` was. Not
+yet fixed (the fix design is more involved — see that document) — still
+listed here as fully decorative for `exams` since no *sub-row* is yet
+independently enforced, but "decorative" undersells it: there is
+real, working authorization here today, Settings just can't see or
+configure it.
 
 Notable because it's easy to assume otherwise: **`finance`** has 9
 declared rows (`invoices`, `create_invoice`, `void_invoice`, `payments`,
@@ -117,12 +129,17 @@ session's original question. All 7 are decorative for both modules.
 
 ### Summary count
 
+**Update (2026-09-03):** counts below reflect the original audit;
+`grades.report_generate` and `grades.mark_submissions` are now fixed
+(see the `grades` row above) — `grades` moved from Fully decorative to
+Partial.
+
 - 🟢 Fully real: **2 modules** (medical, inventory)
-- 🟡 Partial: **7 modules** (hr, library, hostel, transport, timetable,
-  growth_profile, settings)
-- 🔴 Fully decorative: **20 modules**
-- **Total sub-rows across the registry: 143. Independently enforced: 21
-  (14.7%).**
+- 🟡 Partial: **8 modules** (hr, library, hostel, transport, timetable,
+  growth_profile, settings, grades)
+- 🔴 Fully decorative: **19 modules**
+- **Total sub-rows across the registry: 143. Independently enforced: 23
+  (16.1%, up from 14.7% at the original audit).**
 
 ---
 
@@ -256,10 +273,11 @@ isolation:
 - **Finance** (all 9): View Invoices, Create Invoice, **Void Invoice**,
   View Payments, Record Payment, Print Receipts, Manage Fee Structures,
   Import, Configure M-Pesa
-- **Grades** (all 6): including "Review/Approve Mark Submissions" and
-  "Generate/Publish Report Cards" — both sound like exactly the kind of
-  sensitive, separately-gateable action a school would want isolated;
-  neither is
+- **Grades** (4 of 6 remaining: View Grades, Enter/Edit Marks, Manage
+  Comment Banks, Export — the last not built at all). ~~"Review/Approve
+  Mark Submissions" and "Generate/Publish Report Cards"~~ — **fixed
+  2026-09-03**, both are now genuinely independently enforced (see the
+  `grades` row in §3 above); no longer misleading
 - **Admissions** (all 6): including "Move Pipeline Stage" and "Delete
   Applicant"
 - **Behaviour** (all 4), **Exams** (all 5), **Attendance** (all 4),
