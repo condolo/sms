@@ -210,6 +210,47 @@ async function hasPermission(req, mod, action, subKey) {
   }
 }
 
+/**
+ * hasExplicitSubGrant(req, mod, subKey, action)
+ * Permission Granularity Plan 2026-09, Priority 0 — a STRICT sub-key
+ * check with NO fallback to the module's coarse grant. Deliberately
+ * different from hasPermission()/rbac()'s subKey behavior: those two
+ * exist to let a sub-row be checked independently, but fall back to the
+ * coarse module grant whenever the sub-key hasn't been explicitly
+ * customized yet — correct for "is this sub-feature enabled," wrong for
+ * "has someone deliberately opted this specific person/role into an
+ * action that's normally reserved" (e.g. report-card publishing, today
+ * hardcoded to admin/superadmin). Using the ordinary fallback there
+ * would mean the FIRST role that happens to hold the module's coarse
+ * action (e.g. any role with grades:create, which most teaching/exam
+ * roles have for entering marks) gets treated as "explicitly granted"
+ * the moment the hardcoded floor is loosened at all — reintroducing a
+ * real access-control regression instead of fixing one. This checks
+ * ONLY the exact `${mod}__${subKey}` grant; an absent or unpopulated
+ * sub-key resolves to false, full stop, independent of the coarse
+ * grant. Intended for exactly one shape of call site: "always allow
+ * role X (a fixed floor), OR allow anyone this sub-key was deliberately
+ * granted to" — never as a replacement for rbac()'s normal subKey
+ * fallback behavior elsewhere.
+ */
+async function hasExplicitSubGrant(req, mod, subKey, action) {
+  try {
+    const { userId, schoolId, role, roles = [] } = req.jwtUser || {};
+    if (!schoolId || !role) return false;
+    if (_isSuperRole(role, roles)) return true;
+
+    const rolePerms = await _loadPerms(schoolId, role);
+    const userPerms = await _loadUserPerms(schoolId, userId);
+    const perms = userPerms ? _mergeUserOverrides(rolePerms, userPerms) : rolePerms;
+
+    const subFullKey = `${mod}__${subKey}`;
+    return Array.isArray(perms[subFullKey]) && perms[subFullKey].includes(action);
+  } catch (err) {
+    console.error('[RBAC] hasExplicitSubGrant lookup failed:', err.message);
+    return false;
+  }
+}
+
 function rbac(mod, action, subKey) {
   return async (req, res, next) => {
     try {
@@ -238,4 +279,4 @@ function rbac(mod, action, subKey) {
   };
 }
 
-module.exports = { rbac, hasPermission, invalidatePermCache, _mergeUserOverrides };
+module.exports = { rbac, hasPermission, hasExplicitSubGrant, invalidatePermCache, _mergeUserOverrides };

@@ -29,7 +29,7 @@ const crypto    = require('crypto');
 
 const { authMiddleware } = require('../middleware/auth');
 const { moduleGate }     = require('../middleware/module-gate');
-const { rbac }           = require('../middleware/rbac');
+const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
@@ -486,7 +486,24 @@ router.post('/generate', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
    ══════════════════════════════════════════════════════════════ */
 router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), async (req, res) => {
   const { schoolId, userId, role } = req.jwtUser;
-  if (!['admin', 'superadmin'].includes(role)) return E.forbidden(res, 'Only admins can publish report cards');
+  // Permission Granularity Plan 2026-09, Priority 0 — this used to be an
+  // unconditional `if (!['admin','superadmin'].includes(role))`, completely
+  // invisible to and unconfigurable from Settings (the exact BYPASS finding
+  // the Plan documents). admin/superadmin remain an unconditional floor —
+  // never removed, never weakened — but a school can now additionally grant
+  // this specific ability (e.g. to a Deputy Principal) via Settings → Roles
+  // & Permissions → Grades → "Generate / Publish Report Cards", WITHOUT
+  // that grant also reaching every other 'grades' create-shaped action.
+  // Deliberately uses hasExplicitSubGrant, not the ordinary subKey-with-
+  // coarse-fallback rbac() behavior — falling back to the coarse 'grades'
+  // create grant here would hand publish rights to any role that merely
+  // has grades:create (most teaching/exam roles, for entering marks) the
+  // moment the hardcoded floor loosens at all, reintroducing the exact
+  // class of regression this fix exists to avoid.
+  const isAdminLevel = ['admin', 'superadmin'].includes(role);
+  if (!isAdminLevel && !(await hasExplicitSubGrant(req, 'grades', 'report_generate', 'create'))) {
+    return E.forbidden(res, 'You do not have permission to publish report cards.');
+  }
 
   const { data, error } = _validate(PublishSchema, req.body);
   if (error) return E.validation(res, error);
