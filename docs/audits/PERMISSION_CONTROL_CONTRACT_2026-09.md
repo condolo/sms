@@ -88,27 +88,18 @@ that module).
 | **growth_profile** | aspirations 🟢 (via `server/routes/growth-recommendations.js:155,181`) | view 🔴, add_records 🔴, edit_records 🔴, delete_records 🔴, projects 🔴, recommendations 🔴, verify 🔴 | Only 1 of 8 declared rows is real. |
 | **settings** | *(see note)* | school 🔴\*, users 🔴, permissions 🔴, system 🔴 | \*A `rbac('settings', action, 'school')` sub-key genuinely exists — but it's used exclusively by `server/routes/sections.js:194,224,262` (Classes → Sections), an unrelated feature that happens to reuse the `settings`/`school` key pair. **None of Settings' own routes** — `PUT /school` (`settings.js:316`), `PUT/POST /users/*`, custom roles, SMTP, notifications — pass any sub-key; all are coarse `rbac('settings', action)`. So every row an admin actually sees under "Settings" in the R&P grid is decorative for what it visibly labels. |
 | **grades** | report_generate 🟢, mark_submissions 🟢 | view_grades 🔴, enter_marks 🔴, comment_banks 🔴, export 🔴 (export: not built at all, see `PERMISSION_GRANULARITY_PLAN_2026-09.md` §4) | **Update (2026-09-03):** originally listed fully decorative below — both `report_generate` and `mark_submissions` were actually BYPASS (hardcoded role checks in `report-cards.js:489` and `mark-submissions.js:199`, invisible to Settings), found and fixed while implementing the Permission Granularity Plan's Priority 0 (commits `2d23079`, `b9f5d85`). See that document for the full trace and fix design. |
+| **exams** | lock 🟢, unlock 🟢 | view 🔴, create 🔴, results 🔴, delete 🔴 | **Update (2026-09-03):** originally listed fully decorative below — `lock`/`unlock` were actually BYPASS, traced in full in `PERMISSION_GRANULARITY_PLAN_2026-09.md` §4a (four overlapping mechanisms: the coarse gate, a hardcoded admin/superadmin check, a data-driven `TRANSITION_ROLES` state-machine list, and an alternate `PUT /:id` route reaching the same transitions). Fixed for the two dedicated routes only (`lock`/`unlock` split into two independently-grantable rows — the old registry had one combined key); the `PUT /:id` alternate path is explicitly **not** fixed, tracked as a separate open finding — do not read `exams` as fully resolved. |
 
 ### 🔴 Fully decorative (every declared row collapses into the coarse grant)
 
 **students, teachers, classes, attendance, subjects, lessons,
-exams, assessment, report_cards, elearning, admissions, behaviour,
+assessment, report_cards, elearning, admissions, behaviour,
 finance, messages, events, resources, weekly_snapshot, reports,
-analytics** — 19 modules (originally 20; `grades` moved to Partial
-2026-09-03, see above), confirmed by an exhaustive sweep of every
-`rbac(...)` call across the entire `server/` tree: none of these
+analytics** — 18 modules (originally 20; `grades` and `exams` moved to
+Partial 2026-09-03, see above), confirmed by an exhaustive sweep of
+every `rbac(...)` call across the entire `server/` tree: none of these
 modules' names appear anywhere with a third (sub-key) argument in
 production code.
-
-**`exams`** deserves its own note: `lock`/`unlock` are traced in full
-in `PERMISSION_GRANULARITY_PLAN_2026-09.md` §4a and found to be BYPASS,
-not decorative — a hardcoded admin/superadmin check exists, just
-invisible to Settings, the same as `grades.report_generate` was. Not
-yet fixed (the fix design is more involved — see that document) — still
-listed here as fully decorative for `exams` since no *sub-row* is yet
-independently enforced, but "decorative" undersells it: there is
-real, working authorization here today, Settings just can't see or
-configure it.
 
 Notable because it's easy to assume otherwise: **`finance`** has 9
 declared rows (`invoices`, `create_invoice`, `void_invoice`, `payments`,
@@ -131,15 +122,18 @@ session's original question. All 7 are decorative for both modules.
 
 **Update (2026-09-03):** counts below reflect the original audit;
 `grades.report_generate` and `grades.mark_submissions` are now fixed
-(see the `grades` row above) — `grades` moved from Fully decorative to
-Partial.
+(see the `grades`/`exams` rows above) — both moved from Fully
+decorative to Partial. `exams` also gained one row: the registry's
+single combined `lock` key was split into independent `lock`/`unlock`
+rows as part of that fix, so the total sub-row count itself grew by one.
 
 - 🟢 Fully real: **2 modules** (medical, inventory)
-- 🟡 Partial: **8 modules** (hr, library, hostel, transport, timetable,
-  growth_profile, settings, grades)
-- 🔴 Fully decorative: **19 modules**
-- **Total sub-rows across the registry: 143. Independently enforced: 23
-  (16.1%, up from 14.7% at the original audit).**
+- 🟡 Partial: **9 modules** (hr, library, hostel, transport, timetable,
+  growth_profile, settings, grades, exams)
+- 🔴 Fully decorative: **18 modules**
+- **Total sub-rows across the registry: 144 (was 143 — `exams.lock`
+  split into `lock`+`unlock`). Independently enforced: 25
+  (17.4%, up from 14.7% at the original audit).**
 
 ---
 
@@ -280,7 +274,9 @@ isolation:
   `grades` row in §3 above); no longer misleading
 - **Admissions** (all 6): including "Move Pipeline Stage" and "Delete
   Applicant"
-- **Behaviour** (all 4), **Exams** (all 5), **Attendance** (all 4),
+- **Behaviour** (all 4), **Exams** (4 remaining: View, Create/Edit, Enter
+  Results, Delete — ~~"Lock/Unlock Exam"~~ **fixed 2026-09-03**, now two
+  genuinely independent rows), **Attendance** (all 4),
   **Classes** (all 7), **Messages** (all 3), **Events** (all 5),
   **Report Cards Settings** (all 3, including the approval-workflow row),
   **Assessment Scheduling** (its 1 row), **eLearning** (all 5),
