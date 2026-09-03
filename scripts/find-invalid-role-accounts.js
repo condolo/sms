@@ -64,7 +64,12 @@ function _model(col) {
 }
 
 async function run() {
-  await mongoose.connect(process.env.MONGODB_URI || process.env.MONGO_URI);
+  // Mirrors server/config/db.js exactly — without an explicit dbName, the
+  // driver defaults to the "test" database, not the app's real one, when
+  // the connection string's own path segment is empty.
+  await mongoose.connect(process.env.MONGODB_URI || process.env.MONGO_URI, {
+    dbName: process.env.MONGODB_DB_NAME || 'innolearn',
+  });
   console.log('Connected [READ-ONLY — this script makes no writes]\n');
 
   const Schools     = _model('schools');
