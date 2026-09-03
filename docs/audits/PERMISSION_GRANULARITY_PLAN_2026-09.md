@@ -165,7 +165,7 @@ publish them?** — so the analysis is combined.
 | `enter_marks` | 🔴 DECORATIVE | COARSE (kept as the base "can do gradebook work" action) | Enter/edit marks for own classes | Class/subject teacher | grades write routes | |
 | `mark_submissions` (Review/Approve) | 🔴 **DECORATIVE — separation-of-duties defeat** | **REAL** | Approve or reject a teacher's submitted marks | HOD, exams_officer — **explicitly not the submitting teacher** | `mark-submissions.js:196` (`/:id/review`) — currently coarse `rbac('grades','update')`, **the exact same action string as recalling, locking, or unlocking a submission** | This is the single clearest separation-of-duties case in the entire audit: a teacher who can `enter_marks` and a reviewer who can `mark_submissions` are, by definition, meant to be different people for the check to mean anything. Currently `enter_marks` and `review` are indistinguishable at the RBAC layer — anyone with `grades:update` can do both. Tagged DECORATIVE rather than BYPASS because there's no separate hidden gate elsewhere — it's simply not gated independently at all. **Before implementing:** confirm whether `mark-submissions.js`'s `/:id/review` handler already contains an in-code check preventing a submitter from reviewing their own submission (not confirmed in this pass) — if it doesn't, that's a correctness gap independent of RBAC granularity. |
 | `comment_banks` | 🔴 DECORATIVE | COARSE | Manage report-card comment templates | HOD, Principal | `comment-banks.js` (not traced in this pass) | Lower stakes than mark approval; template text, not grades themselves. |
-| `report_generate` (Generate/Publish) | 🟠 **BYPASS — see Report Cards below, same action** | **REAL — see Report Cards below, same action** | | | | |
+| `report_generate` (Generate/Publish) | 🟠 **BYPASS — see correction below, this is the real gate, not `report_cards.publication_policy`** | **REAL** | Actually publish report cards to parents | Principal, Deputy Principal — schools should be able to name who, not be stuck at literally `admin`/`superadmin` | `report-cards.js:487-489` (`POST /publish`) — coarse `rbac('grades','create')` PLUS a hardcoded `if (!['admin','superadmin'].includes(role))` | **Correction (2026-09-03): an earlier version of this document conflated this row with `report_cards.publication_policy` below as "the same action" — they are not.** `publication_policy` governs a genuinely different, already-correctly-gated feature (moderation-bypass config, `_loadPublicationPolicy`/`GET+PATCH /publication-policy`). This row, `grades.report_generate`, is the actual "who can click Publish" gate, and it's the one that's hardcoded. See below for the implementation. |
 | `export` (Export Grades CSV) | ⚪ **NOT BUILT** | N/A until built | Bulk-download marks | — | **None.** Not in `import-export.js`'s `EXPORT_MODULE` map, no dedicated export route found in `grades.js`. | Same situation as Admissions' `export` row — build the feature first, or drop the row. |
 
 ### Exams (5 rows)
@@ -184,16 +184,18 @@ publish them?** — so the analysis is combined.
 |---|---|---|---|---|---|---|
 | `draft_comments` | 🔴 DECORATIVE | COARSE | Manage draft comment workflow config | HOD | (not traced) | |
 | `workflow` (Configure Approval Workflow) | 🔴 DECORATIVE | COARSE (the workflow config itself is low-frequency, admin-level already by nature) | Define the approval steps | Principal/Admin | (not traced) | |
-| `publication_policy` — governs `POST /publish` | 🟠 **BYPASS — highest-priority finding in this document** | Already enforced; needs to be reconnected to Settings, not "made real" from scratch | Actually publish report cards to parents | **Currently hardcoded**: `report-cards.js:489` — `if (!['admin','superadmin'].includes(role)) return E.forbidden(...)`, in addition to the coarse `rbac('grades','create')` gate | — | Publishing report cards is *already* restricted — but by a literal hardcoded role-name check in the route handler, completely bypassing `role_permissions`, Settings, and every mechanism this whole Contract is about. A school cannot grant a Deputy Principal or Head of Academics the ability to publish report cards without also making them `admin` in the system, and Settings' "Publication Policy" row has no connection to this check at all — toggling it does nothing to who can actually publish. This is BYPASS, not DECORATIVE: there genuinely is a working gate, an admin just cannot see or change it from Settings. |
+| `publication_policy` (Configure Publication Policy) | 🔵 **COARSE — already correct, not a finding** | COARSE (leave as-is) | Configure moderation-bypass rules for publishing (default: moderation required) | Principal, Academic Head | `report-cards.js:1197,1207` (`GET`/`PATCH /publication-policy`) — coarse `rbac('report_cards','read'/'update')` | **Correction (2026-09-03):** this row does NOT govern who can click Publish (see `grades.report_generate` above, which does, and is the real BYPASS). This row governs `_loadPublicationPolicy` — moderation-check bypass settings — and is already correctly gated at the coarse `report_cards` module level with no separate finding. Left coarse deliberately: this is infrequent, admin-level configuration, not a day-to-day action needing separation from other Report Cards Settings rows. |
 
 **Grades/Exams/Report Cards summary:** The real finding here isn't "add
 5 more sub-keys" — it's that **`mark_submissions` review and `exams`
 lock/unlock are both currently indistinguishable from routine editing**,
 which quietly defeats the actual purpose of having a review/lock step at
-all, and **report card publishing is already gated, but by code the
-admin cannot see or configure through Settings.** These three deserve
-priority over Finance's `fee_structure`/`import` rows if only one batch
-can be done first.
+all, and **`grades.report_generate` (who can publish) is already gated,
+but by a hardcoded role check the admin cannot see or configure through
+Settings — not `report_cards.publication_policy`, which is a separate,
+already-correctly-coarse-gated feature.** These three deserve priority
+over Finance's `fee_structure`/`import` rows if only one batch can be
+done first.
 
 ---
 
@@ -312,9 +314,11 @@ than an honestly-coarse permission:
 
 **Priority 0 — Correctness / security-boundary fixes (not new features)**
 
-- `report_cards.publication_policy` — reconnect the already-working
+- `grades.report_generate` — reconnect the already-working
   admin/superadmin-only publish gate to `role_permissions`/Settings
   instead of the hardcoded role-name check in `report-cards.js:489`.
+  (Not `report_cards.publication_policy` — corrected above; that row
+  governs a separate, already-correctly-gated feature.)
 - `grades.mark_submissions` — separate mark review/approval from
   `enter_marks` (`mark-submissions.js:196`); confirm whether a
   same-person self-approval guard exists independent of RBAC while
