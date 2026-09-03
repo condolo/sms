@@ -80,6 +80,40 @@ describe('_mergeUserOverrides — unit', () => {
     const merged = _mergeUserOverrides(rolePerms, userPerms);
     expect(merged.finance).toEqual([]);
   });
+
+  /* THE REAL PRODUCTION BUG (2026-09, Ann Wanjiku / admissions_officer) —
+     a legacy, pre-2026-08 per-user override document with a BARE coarse
+     key and NO accompanying mod__sub key at all. The current UI can only
+     ever write mod__sub keys, so this shape only exists in documents
+     saved before that fix — but nothing has ever migrated them, and
+     until this test, _mergeUserOverrides silently let the stale bare
+     value win, because "touched module" was computed only from mod__sub
+     keys. */
+  test('THE 2026-09 BUG: a bare stale zero-filled coarse key with NO sub-key touched no longer suppresses the role\'s real grant', () => {
+    const rolePerms = {
+      admissions: ['read', 'create', 'update', 'delete'],
+      admissions__view: ['read', 'create', 'update', 'delete'],
+      admissions__edit: ['read', 'create', 'update', 'delete'],
+    };
+    // Exactly the shape a pre-fix _deriveUserOverridePerms left behind:
+    // a bare, zero-filled key for a module the admin never touched via
+    // Per User, with no admissions__* sibling anywhere in the document.
+    const userPerms = { admissions: [], attendance: ['read'], 'attendance__view': ['read'] };
+    const merged = _mergeUserOverrides(rolePerms, userPerms);
+    expect(merged.admissions.sort()).toEqual(['create', 'delete', 'read', 'update']);
+    expect(merged.admissions__view).toEqual(['read', 'create', 'update', 'delete']);
+  });
+
+  test('a bare key with genuinely narrower real content than the role (legacy, touched pre-fix) still floors at the role, never below it', () => {
+    // Legacy pre-fix shape for a module the admin DID touch — bare key
+    // and subs both present, subs carrying the real intent.
+    const rolePerms = { hr: ['read', 'create', 'update', 'delete'], hr__documents: ['read', 'create', 'update', 'delete'] };
+    const userPerms = { hr: ['read'], hr__documents: ['read'] }; // legacy narrower bare value
+    const merged = _mergeUserOverrides(rolePerms, userPerms);
+    // Floor from the role's own coarse grant is never dropped below —
+    // matches this file's existing "never narrower than the role" invariant.
+    expect(merged.hr.sort()).toEqual(['create', 'delete', 'read', 'update']);
+  });
 });
 
 describe('hasPermission — end to end through the real merge', () => {
@@ -125,5 +159,30 @@ describe('hasPermission — end to end through the real merge', () => {
     ];
     const john = { jwtUser: { userId: 'u_john', schoolId: SCHOOL, role: 'deputy_principal', roles: ['deputy_principal'] } };
     expect(await hasPermission(john, 'finance', 'delete')).toBe(true);
+  });
+
+  test('THE REAL 2026-09 PRODUCTION CASE, end to end: a legacy per-user doc with a bare zero-filled "admissions" key and no admissions__* sub-key no longer blocks admissions access for a full-grant role', async () => {
+    mockRolePerms = [
+      {
+        schoolId: SCHOOL, roleKey: 'admissions_officer',
+        permissions: {
+          admissions: ['read', 'create', 'update', 'delete'],
+          admissions__view: ['read', 'create', 'update', 'delete'],
+        },
+      },
+      // A trimmed real shape of Ann's actual document — a stale bare
+      // "admissions": [] with no admissions__* sibling, alongside
+      // genuine, deliberate grants for other modules that DO have
+      // matching sub-keys touched.
+      {
+        schoolId: SCHOOL, userId: 'u_ann',
+        permissions: { admissions: [], attendance: ['read'], attendance__view: ['read'] },
+      },
+    ];
+    const ann = { jwtUser: { userId: 'u_ann', schoolId: SCHOOL, role: 'admissions_officer', roles: ['admissions_officer'] } };
+
+    expect(await hasPermission(ann, 'admissions', 'read')).toBe(true);
+    expect(await hasPermission(ann, 'admissions', 'create')).toBe(true);
+    expect(await hasPermission(ann, 'attendance', 'read')).toBe(true);
   });
 });

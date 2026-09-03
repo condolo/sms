@@ -15,6 +15,7 @@ const AuditService         = require('../services/audit');
 const { provisionIdentityForUser } = require('../utils/provision-identities');
 const { isIdentityCutoverEnabled } = require('../utils/identity-cutover');
 const { MODULE_REGISTRY } = require('../config/moduleRegistry');
+const { _mergeUserOverrides } = require('../middleware/rbac');
 
 const router = express.Router();
 
@@ -604,11 +605,22 @@ async function _loadMergedPermissions(schoolId, roles, userId = null) {
     Object.entries(merged).map(([mod, set]) => [mod, [...set]])
   );
 
-  // Apply per-user overrides on top of role permissions (user overrides win per module)
+  // Apply per-user overrides on top of role permissions.
+  // 2026-09 fix — this used to be its own `{...roleResult, ...userDoc.
+  // permissions}` spread, a second, independent implementation of the
+  // exact merge rbac.js's _isAllowed uses for real API authorization.
+  // The two drifted: rbac.js was fixed (2026-08, then again 2026-09 to
+  // close the bare-coarse-key gap that broke Ann Wanjiku's admissions
+  // access) but this sidebar/login-snapshot path never was — a stale
+  // per-user override document could silently hide a module here while
+  // the backend would still (now correctly) grant it, or vice versa.
+  // Reusing rbac.js's _mergeUserOverrides directly, rather than keeping
+  // a second copy in sync by hand, is the actual fix: one merge
+  // implementation, not two that can quietly disagree again later.
   if (userId) {
     const userDoc = await RolePerms.findOne({ schoolId, userId }).lean();
     if (userDoc?.permissions) {
-      return { ...roleResult, ...userDoc.permissions };
+      return _mergeUserOverrides(roleResult, userDoc.permissions);
     }
   }
   return roleResult;
@@ -1740,7 +1752,8 @@ async function _completeOrgLoginSession(req, res, user, school, identity) {
 // convention as qa-health.js's _identityMigrationStatus (no HTTP round trip,
 // same server, lazily required to avoid loading auth.js's dependency graph
 // into every module that merely requires platform.js).
-router._buildTokenPayload = _buildTokenPayload;
-router._availableSchools  = _availableSchools;
+router._buildTokenPayload    = _buildTokenPayload;
+router._availableSchools     = _availableSchools;
+router._loadMergedPermissions = _loadMergedPermissions; // test-only access, same pattern as the two exports above
 
 module.exports = router;
