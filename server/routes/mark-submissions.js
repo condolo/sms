@@ -18,7 +18,7 @@ const { v4: uuidv4 }    = require('uuid');
 const { z }              = require('zod');
 const { authMiddleware } = require('../middleware/auth');
 const { moduleGate }     = require('../middleware/module-gate');
-const { rbac }           = require('../middleware/rbac');
+const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
@@ -196,8 +196,20 @@ router.post('/:id/recall', authMiddleware, PLAN, MODGATE, rbac('grades', 'update
 router.post('/:id/review', authMiddleware, PLAN, MODGATE, rbac('grades', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
-    if (!['admin', 'principal', 'section_head'].includes(role)) {
-      return E.forbidden(res, 'Only admins and section heads can review submissions.');
+    // Permission Granularity Plan 2026-09, Priority 0 — this was an
+    // unconditional hardcoded role list, invisible to and unconfigurable
+    // from Settings (a BYPASS finding — found while implementing this
+    // fix, not originally documented at this precision in the Plan).
+    // admin/principal/section_head remain an unconditional floor, and a
+    // school can additionally grant grades.mark_submissions to another
+    // role/person via Settings. Uses hasExplicitSubGrant (no coarse
+    // fallback) for the same reason as report-card publishing: falling
+    // back to plain grades:update would hand reviewer authority to any
+    // teacher who can edit their own marks — the exact separation of
+    // duties this permission exists to enforce.
+    const isFloorRole = ['admin', 'principal', 'section_head'].includes(role);
+    if (!isFloorRole && !(await hasExplicitSubGrant(req, 'grades', 'mark_submissions', 'update'))) {
+      return E.forbidden(res, 'Only admins, principals, section heads, or explicitly granted reviewers can review submissions.');
     }
     const { data, error } = _validate(ReviewSchema, req.body);
     if (error) return E.validation(res, error);
