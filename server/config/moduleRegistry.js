@@ -115,7 +115,19 @@ const MODULE_REGISTRY = [
   { key: 'exams', label: 'Exams', section: 'Academic Management', navGroupKey: 'grades', subs: [
     { key: 'view',    label: 'View Exams & Results' },
     { key: 'create',  label: 'Create / Edit Exam' },
-    { key: 'lock',    label: 'Lock / Unlock Exam' },
+    // Permission Granularity Plan 2026-09, Priority 0 — split from a single
+    // combined 'lock' row ("Lock / Unlock Exam") into two independently
+    // grantable rows, so locking and unlocking can be granted separately
+    // (e.g. an exams_officer who can lock but a Principal-only unlock).
+    // SEMANTIC CHANGE for any pre-existing role_permissions doc: 'lock'
+    // used to represent BOTH operations combined; as of this split it
+    // means Lock ONLY — an existing exams__lock grant does NOT carry
+    // forward to the new, separate 'unlock' key. Audited against real
+    // production data before this shipped (see PERMISSION_GRANULARITY_
+    // PLAN_2026-09.md §4a) — every school with a saved exams__lock grant
+    // gains only the narrower "lock" meaning, never an implicit unlock.
+    { key: 'lock',    label: 'Lock Exam' },
+    { key: 'unlock',  label: 'Unlock Exam' },
     { key: 'results', label: 'Enter Exam Results' },
     { key: 'delete',  label: 'Delete Exam' },
   ]},

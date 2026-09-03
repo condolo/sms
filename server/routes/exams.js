@@ -12,7 +12,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
 const { moduleGate }     = require('../middleware/module-gate');
-const { rbac }           = require('../middleware/rbac');
+const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
@@ -516,7 +516,19 @@ router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('exams', 'delete'), as
 router.post('/:id/lock', authMiddleware, PLAN, MODGATE, rbac('exams', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
-    if (!['admin', 'superadmin'].includes(role)) return E.forbidden(res, 'Only admins can lock exams');
+    // Permission Granularity Plan 2026-09, Priority 0 — Option A. The
+    // admin/superadmin floor stays (never weakened); a school can now
+    // additionally grant exams.lock via Settings. Uses hasExplicitSubGrant
+    // (no coarse-grant fallback), same reasoning as report_generate/
+    // mark_submissions: falling back to plain exams:update would hand
+    // lock authority to anyone who can merely create/edit exams. Does
+    // NOT touch TRANSITION_ROLES/_checkTransition (shared state-machine
+    // logic, out of scope for this fix) or PUT /:id (a separate,
+    // documented, not-yet-resolved alternate path — see the Plan §4a).
+    const isFloorRole = ['admin', 'superadmin'].includes(role);
+    if (!isFloorRole && !(await hasExplicitSubGrant(req, 'exams', 'lock', 'update'))) {
+      return E.forbidden(res, 'Only admins, superadmins, or explicitly granted staff can lock exams');
+    }
 
     const exam = await tenantModel('exams', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!exam) return E.notFound(res, 'Exam not found');
@@ -543,7 +555,14 @@ router.post('/:id/lock', authMiddleware, PLAN, MODGATE, rbac('exams', 'update'),
 router.post('/:id/unlock', authMiddleware, PLAN, MODGATE, rbac('exams', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
-    if (!['admin', 'superadmin'].includes(role)) return E.forbidden(res, 'Only admins can unlock exams');
+    // Same design as /lock above, using the separate exams.unlock grant —
+    // deliberately independent (a role granted lock is not automatically
+    // granted unlock, and vice versa; see the Plan §4a for why these are
+    // two rows, not one).
+    const isFloorRole = ['admin', 'superadmin'].includes(role);
+    if (!isFloorRole && !(await hasExplicitSubGrant(req, 'exams', 'unlock', 'update'))) {
+      return E.forbidden(res, 'Only admins, superadmins, or explicitly granted staff can unlock exams');
+    }
 
     const reason = (req.body.reason || '').trim();
     if (!reason) return E.badRequest(res, 'A reason is required when unlocking an exam');
