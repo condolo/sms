@@ -29,10 +29,20 @@ export const PRIORITY_CONFIG = {
 export const EMPTY_FORM = {
   firstName: '', lastName: '', middleName: '', dateOfBirth: '',
   gender: '',
+  allergies: '',
+  houseId: '', houseName: '',
   applyingForClass: '', applyingForClassName: '',
   applyingForStream: '', applyingForStreamName: '',
   applyingForYear: '',
+  // Mother/Father — the actual inputs now (2026-09). primaryContact
+  // selects which one feeds parentName/Email/Phone below, which stay in
+  // the form state (server-derived, but keeping them here too means a
+  // response round-trip reflects immediately without a refetch).
+  primaryContact: 'mother',
+  motherName: '', motherEmail: '', motherPhone: '', motherIdNumber: '',
+  fatherName: '', fatherEmail: '', fatherPhone: '', fatherIdNumber: '',
   parentName: '', parentEmail: '', parentPhone: '',
+  emergencyContactName: '', emergencyContactPhone: '', emergencyContactRelation: '',
   priority: 'normal', notes: '', stage: 'enquiry',
 };
 

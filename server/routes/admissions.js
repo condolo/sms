@@ -29,8 +29,16 @@ const ApplicationSchema = z.object({
   firstName:      z.string().min(1).max(100).trim(),
   lastName:       z.string().min(1).max(100).trim(),
   middleName:     z.string().max(100).trim().optional(),
-  dateOfBirth:    z.string().optional(),
-  gender:         z.enum(['male', 'female', 'other', 'prefer_not_to_say']).optional(),
+  // Required (2026-09 field update) — were previously optional.
+  dateOfBirth:    z.string().min(1),
+  gender:         z.enum(['male', 'female', 'other', 'prefer_not_to_say']),
+  allergies:      z.string().max(1000).optional(),
+
+  // House — same denormalized id+name pattern as applyingForClass/Stream
+  // below, so the display name survives without a lookup and stays
+  // consistent if the house is later renamed in Settings.
+  houseId:        z.string().nullish(),
+  houseName:      z.string().nullish(),
 
   // Admission details
   applyingForYear:       z.string().optional(),          // academic year name, e.g. "2026-2027"
@@ -42,12 +50,42 @@ const ApplicationSchema = z.object({
   academicYearId:    z.string().optional(),
   intakeTerm:        z.string().optional(),
 
-  // Parent / guardian
+  // Parent / guardian — kept exactly as-is. parentName/Email/Phone are the
+  // single "primary contact" this system has always used everywhere else
+  // (parent portal login — students.js's POST /:id/parent-account uses
+  // student.parentEmail as the login email — and birthday emails,
+  // birthdays.js). NOT hand-typed on this form anymore; derived below
+  // from whichever of Mother/Father is marked primaryContact, so those
+  // two existing consumers keep working unchanged. Still independently
+  // settable via a direct API call/import, for anything that doesn't go
+  // through the Mother/Father split.
   parentName:        z.string().max(200).trim().optional(),
   parentEmail:       z.string().email().optional().or(z.literal('')),
   parentPhone:       z.string().max(30).optional(),
   parentAddress:     z.string().max(500).optional(),
   parentRelationship: z.string().max(50).optional(),
+
+  // Mother / Father — 2026-09 field update. One of these two must be
+  // provided (enforced below, not by zod, since it's an either/or rule
+  // across two optional field groups). primaryContact selects which one
+  // feeds the legacy parentName/Email/Phone fields above.
+  motherName:        z.string().max(200).trim().optional(),
+  motherEmail:       z.string().email().optional().or(z.literal('')),
+  motherPhone:       z.string().max(30).optional(),
+  motherIdNumber:    z.string().max(50).trim().optional(),
+  fatherName:        z.string().max(200).trim().optional(),
+  fatherEmail:       z.string().email().optional().or(z.literal('')),
+  fatherPhone:       z.string().max(30).optional(),
+  fatherIdNumber:    z.string().max(50).trim().optional(),
+  primaryContact:    z.enum(['mother', 'father']).optional(), // which parent's info populates parentName/Email/Phone
+
+  // Emergency contact — 2026-09 field update. Independent of Mother/
+  // Father (may be a relative, neighbour, etc. — the same "not
+  // necessarily a parent" convention students.js's MedicalInfoSchema
+  // already uses for this exact concept).
+  emergencyContactName:     z.string().max(200).trim().optional(),
+  emergencyContactPhone:    z.string().max(30).optional(),
+  emergencyContactRelation: z.string().max(100).optional(),
 
   // Previous school
   previousSchool:    z.string().max(200).optional(),
@@ -81,6 +119,53 @@ function _validate(schema, data) {
   const r = schema.safeParse(data);
   if (!r.success) return { error: r.error.issues.map(i => ({ field: i.path.join('.'), message: i.message })) };
   return { data: r.data };
+}
+
+/* ── Mother/Father → legacy primary-contact fields ─────────────
+   2026-09 field update. parentName/Email/Phone/Relationship are the
+   ONLY fields this system's other consumers actually read — the parent
+   portal login (students.js's POST /:id/parent-account, which uses
+   student.parentEmail as the account's login email) and birthday
+   emails (birthdays.js). Rather than touch either of those files, this
+   derives the same three fields from whichever of Mother/Father is
+   marked primaryContact, so both keep working completely unchanged —
+   a single shared portal account, fed by whichever parent the school
+   designates, exactly matching how the portal already works today (one
+   account per student; nothing stops both parents using the same
+   login).
+   `merged` should already combine the incoming request with whatever
+   existing values apply (the caller's job — see POST/PUT below) so a
+   partial PUT that only touches, say, fatherPhone still resolves
+   correctly against the mother/father data already on file. */
+function _resolvePrimaryContact(merged) {
+  let primary = merged.primaryContact;
+  if (primary !== 'mother' && primary !== 'father') {
+    primary = merged.motherName ? 'mother' : (merged.fatherName ? 'father' : null);
+  }
+  if (!primary) return null;
+  return {
+    parentName:         (primary === 'father' ? merged.fatherName  : merged.motherName)  || '',
+    parentEmail:        (primary === 'father' ? merged.fatherEmail : merged.motherEmail) || '',
+    parentPhone:        (primary === 'father' ? merged.fatherPhone : merged.motherPhone) || '',
+    parentRelationship: primary === 'father' ? 'Father' : 'Mother',
+  };
+}
+
+/* At least one parent must be identified — an application with neither
+   Mother nor Father filled in has no one the school can actually reach,
+   and no one the eventual parent-portal account (see above) could ever
+   be created for. Mirrors the same "must be reachable somehow" spirit
+   as the pre-existing phone-or-email rule, just at the parent level
+   instead of the field level. Checked on the MERGED view (request +
+   existing, for PUT) so a partial update that doesn't touch guardian
+   fields at all never trips this on an already-valid record. */
+function _validateGuardianRequirement(merged) {
+  const hasMother = !!(merged.motherName && (merged.motherPhone || merged.motherEmail));
+  const hasFather = !!(merged.fatherName && (merged.fatherPhone || merged.fatherEmail));
+  if (!hasMother && !hasFather) {
+    return [{ field: 'motherName', message: 'At least one parent (name + phone or email) is required — Mother or Father' }];
+  }
+  return null;
 }
 
 /* ── GET /api/admissions ─ Paginated pipeline ───────────────── */
@@ -171,6 +256,10 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('admissions', 'create'), as
     const { data, error } = _validate(ApplicationSchema, req.body);
     if (error) return E.validation(res, error);
 
+    const guardianError = _validateGuardianRequirement(data);
+    if (guardianError) return E.validation(res, guardianError);
+    Object.assign(data, _resolvePrimaryContact(data));
+
     // Generate a unique application reference using school's configured academic year
     const schoolDoc  = await _model('schools').findOne({ id: schoolId }, { academicYear: 1, academicYearStartMonth: 1 }).lean();
     const yearLabel  = schoolDoc?.academicYear ?? String(new Date().getFullYear());
@@ -203,6 +292,20 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('admissions', 'update'), 
     const Apps    = tenantModel('admissions', tenantContext(req));
     const existing = await Apps.findOne({ id: req.params.id, schoolId }).lean();
     if (!existing) return E.notFound(res, 'Application not found');
+
+    // Only re-validate/re-derive the guardian fields if THIS request
+    // actually touches one of them — a partial update to something
+    // unrelated (e.g. moving pipeline stage) must never re-run this
+    // against a merged view and risk tripping the "at least one parent"
+    // rule, or silently overwrite an already-correct parentName/Email/
+    // Phone derived from a value that isn't even changing.
+    const GUARDIAN_FIELDS = ['primaryContact', 'motherName', 'motherEmail', 'motherPhone', 'fatherName', 'fatherEmail', 'fatherPhone'];
+    if (GUARDIAN_FIELDS.some(k => data[k] !== undefined)) {
+      const merged = { ...existing, ...data };
+      const guardianError = _validateGuardianRequirement(merged);
+      if (guardianError) return E.validation(res, guardianError);
+      Object.assign(data, _resolvePrimaryContact(merged));
+    }
 
     const update = { ...data, updatedBy: userId };
 
@@ -257,5 +360,8 @@ router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('admissions', 'delete'
     return ok(res, { id: req.params.id, withdrawn: true });
   } catch (err) { console.error('[admissions DELETE/:id]', err); return E.serverError(res); }
 });
+
+router._resolvePrimaryContact = _resolvePrimaryContact; // test-only access
+router._validateGuardianRequirement = _validateGuardianRequirement; // test-only access
 
 module.exports = router;

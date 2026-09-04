@@ -7,7 +7,7 @@ import { motion } from 'framer-motion';
 import { X, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import {
   admissions as admissionsApi, academicConfig as academicConfigApi,
-  classes as classesApi, streams as streamsApi,
+  classes as classesApi, streams as streamsApi, settings as settingsApi,
 } from '@/api/client.js';
 import { EMPTY_FORM, PIPELINE } from '../constants.js';
 import { Section, Field, inputCls } from './AdmissionsPrimitives.jsx';
@@ -51,6 +51,22 @@ export default function AddSlideOver({ onClose, onCreated }) {
   });
   const streamList = streamData?.data ?? [];
 
+  /* Houses — same source/shape as the Students form (StudentProfile.jsx):
+     school.houses, each {id|name, color}. Color itself lives on the house
+     in Settings, not per-applicant — picking the house is enough. */
+  const { data: settingsData } = useQuery({
+    queryKey: ['settings', 'school'],
+    queryFn:  () => settingsApi.school.get(),
+    staleTime: 5 * 60_000,
+  });
+  const houses = Array.isArray(settingsData?.data?.houses) ? settingsData.data.houses : [];
+
+  function onHouseChange(houseId) {
+    const h = houses.find(h => (h.id ?? h.name) === houseId);
+    set('houseId', houseId);
+    set('houseName', h?.name ?? '');
+  }
+
   function onClassChange(classId) {
     const c = classList.find(c => (c.id ?? c._id) === classId);
     setForm(f => ({
@@ -80,10 +96,17 @@ export default function AddSlideOver({ onClose, onCreated }) {
 
   function validate() {
     const e = {};
-    if (!form.firstName.trim())  e.firstName  = 'Required';
-    if (!form.lastName.trim())   e.lastName   = 'Required';
-    if (!form.parentName.trim()) e.parentName = 'Required';
-    if (!form.parentPhone.trim() && !form.parentEmail.trim()) e.parentPhone = 'Phone or email required';
+    if (!form.firstName.trim())   e.firstName   = 'Required';
+    if (!form.lastName.trim())    e.lastName    = 'Required';
+    if (!form.dateOfBirth.trim()) e.dateOfBirth = 'Required';
+    if (!form.gender.trim())      e.gender      = 'Required';
+    // Mirrors the server's own guardian requirement (admissions.js's
+    // _validateGuardianRequirement) — at least one parent, name + a way
+    // to reach them, so this fails fast client-side instead of round-
+    // tripping to the API first.
+    const motherOk = form.motherName.trim() && (form.motherPhone.trim() || form.motherEmail.trim());
+    const fatherOk = form.fatherName.trim() && (form.fatherPhone.trim() || form.fatherEmail.trim());
+    if (!motherOk && !fatherOk) e.motherName = 'At least one parent (name + phone or email) is required';
     return e;
   }
 
@@ -139,11 +162,11 @@ export default function AddSlideOver({ onClose, onCreated }) {
               </Field>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <Field label="Date of Birth">
-                <input type="date" value={form.dateOfBirth} onChange={e => set('dateOfBirth', e.target.value)} className={inputCls()} />
+              <Field label="Date of Birth *" error={errors.dateOfBirth}>
+                <input type="date" value={form.dateOfBirth} onChange={e => set('dateOfBirth', e.target.value)} className={inputCls(errors.dateOfBirth)} />
               </Field>
-              <Field label="Gender">
-                <select value={form.gender} onChange={e => set('gender', e.target.value)} className={inputCls()}>
+              <Field label="Gender *" error={errors.gender}>
+                <select value={form.gender} onChange={e => set('gender', e.target.value)} className={inputCls(errors.gender)}>
                   <option value="">Select…</option>
                   <option value="male">Male</option>
                   <option value="female">Female</option>
@@ -170,29 +193,73 @@ export default function AddSlideOver({ onClose, onCreated }) {
                 </select>
               </Field>
             </div>
-            <Field label="Academic Year">
-              <select value={form.applyingForYear} onChange={e => set('applyingForYear', e.target.value)} className={inputCls()}>
-                <option value="">Select year…</option>
-                {years.map(y => (
-                  <option key={y.id ?? y._id} value={y.name}>
-                    {y.name}{y.isCurrent ? ' (current)' : ''}
-                  </option>
-                ))}
-              </select>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Academic Year">
+                <select value={form.applyingForYear} onChange={e => set('applyingForYear', e.target.value)} className={inputCls()}>
+                  <option value="">Select year…</option>
+                  {years.map(y => (
+                    <option key={y.id ?? y._id} value={y.name}>
+                      {y.name}{y.isCurrent ? ' (current)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="House">
+                <select value={form.houseId} onChange={e => onHouseChange(e.target.value)} className={inputCls()}>
+                  <option value="">{houses.length ? 'Select house…' : 'No houses configured'}</option>
+                  {houses.map(h => <option key={h.id ?? h.name} value={h.id ?? h.name}>{h.name}</option>)}
+                </select>
+              </Field>
+            </div>
+            <Field label="Allergies">
+              <input value={form.allergies} onChange={e => set('allergies', e.target.value)} placeholder="e.g. Peanuts, none if none known" className={inputCls()} />
             </Field>
           </Section>
 
-          {/* Parent/Guardian */}
+          {/* Mother / Father */}
           <Section label="Parent / Guardian">
-            <Field label="Full Name *" error={errors.parentName}>
-              <input value={form.parentName} onChange={e => set('parentName', e.target.value)} placeholder="Parent or guardian name" className={inputCls(errors.parentName)} />
+            <Field label="Primary Contact" error={errors.motherName}>
+              <select value={form.primaryContact} onChange={e => set('primaryContact', e.target.value)} className={inputCls(errors.motherName)}>
+                <option value="mother">Mother</option>
+                <option value="father">Father</option>
+              </select>
+              <p className="text-[11px] text-slate-400 mt-1">
+                Used for the parent portal login and school communications — the other parent's details are still kept on file.
+              </p>
+            </Field>
+
+            <p className="text-xs font-medium text-slate-500 mt-4 mb-1">Mother</p>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Full Name"><input value={form.motherName} onChange={e => set('motherName', e.target.value)} placeholder="Mother's name" className={inputCls()} /></Field>
+              <Field label="ID / Passport No."><input value={form.motherIdNumber} onChange={e => set('motherIdNumber', e.target.value)} className={inputCls()} /></Field>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Phone"><input value={form.motherPhone} onChange={e => set('motherPhone', e.target.value)} placeholder="+254 …" className={inputCls()} /></Field>
+              <Field label="Email"><input type="email" value={form.motherEmail} onChange={e => set('motherEmail', e.target.value)} placeholder="mother@email.com" className={inputCls()} /></Field>
+            </div>
+
+            <p className="text-xs font-medium text-slate-500 mt-4 mb-1">Father</p>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Full Name"><input value={form.fatherName} onChange={e => set('fatherName', e.target.value)} placeholder="Father's name" className={inputCls()} /></Field>
+              <Field label="ID / Passport No."><input value={form.fatherIdNumber} onChange={e => set('fatherIdNumber', e.target.value)} className={inputCls()} /></Field>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Phone"><input value={form.fatherPhone} onChange={e => set('fatherPhone', e.target.value)} placeholder="+254 …" className={inputCls()} /></Field>
+              <Field label="Email"><input type="email" value={form.fatherEmail} onChange={e => set('fatherEmail', e.target.value)} placeholder="father@email.com" className={inputCls()} /></Field>
+            </div>
+          </Section>
+
+          {/* Emergency contact */}
+          <Section label="Emergency Contact">
+            <Field label="Full Name">
+              <input value={form.emergencyContactName} onChange={e => set('emergencyContactName', e.target.value)} placeholder="If different from parents above" className={inputCls()} />
             </Field>
             <div className="grid grid-cols-2 gap-4">
-              <Field label="Phone" error={errors.parentPhone}>
-                <input value={form.parentPhone} onChange={e => set('parentPhone', e.target.value)} placeholder="+254 …" className={inputCls(errors.parentPhone)} />
+              <Field label="Phone">
+                <input value={form.emergencyContactPhone} onChange={e => set('emergencyContactPhone', e.target.value)} placeholder="+254 …" className={inputCls()} />
               </Field>
-              <Field label="Email">
-                <input type="email" value={form.parentEmail} onChange={e => set('parentEmail', e.target.value)} placeholder="parent@email.com" className={inputCls()} />
+              <Field label="Relationship">
+                <input value={form.emergencyContactRelation} onChange={e => set('emergencyContactRelation', e.target.value)} placeholder="e.g. Aunt, Family friend" className={inputCls()} />
               </Field>
             </div>
           </Section>
