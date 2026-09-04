@@ -93,8 +93,19 @@ beforeEach(() => {
   };
 });
 
+// 2026-09 field update — dateOfBirth, gender, and at least one parent
+// (here, the legacy parentName+parentPhone columns, proving old-format
+// CSV rows built before Mother/Father existed still work unchanged)
+// are now required. Set as sane defaults here so every pre-existing
+// test below keeps testing what it was actually written to test,
+// without each one having to know about this unrelated field update.
 function row(overrides = {}) {
-  return { firstName: 'Amara', lastName: 'Osei', ...overrides };
+  return {
+    firstName: 'Amara', lastName: 'Osei',
+    dateOfBirth: '2015-03-14', gender: 'female',
+    parentName: 'Kofi Osei', parentPhone: '+254712345678',
+    ...overrides,
+  };
 }
 
 describe('POST /api/import-export/students — status validation', () => {

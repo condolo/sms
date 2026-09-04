@@ -93,6 +93,24 @@ const StudentCreateSchema = z.object({
   parentName:     z.string().max(200).trim().optional(),
   parentEmail:    z.string().email().optional().or(z.literal('')),
   parentPhone:    z.string().max(30).optional(),
+  parentRelationship: z.string().max(50).optional(),
+  // Mother / Father — 2026-09 field update. Declared here (not just
+  // accepted implicitly) so bulk import's per-parent detail survives any
+  // future edit through this same schema instead of being silently
+  // stripped — zod drops unknown keys by default. See
+  // server/utils/guardian-contact.js for the parentName/Email/Phone
+  // derivation these feed; this schema itself does not derive anything,
+  // it only accepts the raw values (import-export.js's _importStudents
+  // does the derivation before these documents are ever built).
+  motherName:      z.string().max(200).trim().optional(),
+  motherEmail:     z.string().email().optional().or(z.literal('')),
+  motherPhone:     z.string().max(30).optional(),
+  motherIdNumber:  z.string().max(50).trim().optional(),
+  fatherName:      z.string().max(200).trim().optional(),
+  fatherEmail:     z.string().email().optional().or(z.literal('')),
+  fatherPhone:     z.string().max(30).optional(),
+  fatherIdNumber:  z.string().max(50).trim().optional(),
+  primaryContact:  z.enum(['mother', 'father']).optional(),
   address:        z.string().max(500).optional(),
   medicalNotes:   z.string().max(2000).optional(), // legacy free-text field — see MedicalInfoSchema above for the Medical tab's actual shape
   medical:        MedicalInfoSchema.optional(),

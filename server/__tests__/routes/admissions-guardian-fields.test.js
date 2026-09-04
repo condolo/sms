@@ -72,7 +72,7 @@ jest.mock('../../utils/tenant-model', () => ({
 const express   = require('express');
 const supertest = require('supertest');
 const admissionsRouter = require('../../routes/admissions');
-const { _resolvePrimaryContact, _validateGuardianRequirement } = admissionsRouter;
+const { resolvePrimaryContact: _resolvePrimaryContact, validateGuardianRequirement: _validateGuardianRequirement } = require('../../utils/guardian-contact');
 
 function buildApp() {
   const app = express();

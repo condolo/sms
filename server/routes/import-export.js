@@ -26,6 +26,7 @@ const { rbac }                = require('../middleware/rbac');
 const { planGate }            = require('../middleware/plan');
 const { _model }              = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
+const { resolvePrimaryContact, validateGuardianRequirement } = require('../utils/guardian-contact');
 const {
   reserveAdmissionNumbers,
   reserveStaffIds,
@@ -144,7 +145,17 @@ const TEMPLATES = {
       'className',    // resolved to classId on import
       'streamName',   // optional — resolved to streamId on import (must match a stream in that class)
       'houseName',    // optional — resolved to houseId on import (must match a house in Settings)
-      'parentName', 'parentEmail', 'parentPhone',
+      'allergies',
+      // Mother/Father — 2026-09 field update, same shape and derivation as
+      // Admissions (server/utils/guardian-contact.js): primaryContact
+      // selects which parent's details populate the legacy parentName/
+      // parentEmail/parentPhone columns below — the only three fields the
+      // parent portal account route and birthday emails actually read.
+      'motherName', 'motherEmail', 'motherPhone', 'motherIdNumber',
+      'fatherName', 'fatherEmail', 'fatherPhone', 'fatherIdNumber',
+      'primaryContact', // mother | father — optional, defaults to whichever parent has a name filled in
+      'parentName', 'parentEmail', 'parentPhone', // derived if left blank and Mother/Father are provided instead
+      'emergencyContactName', 'emergencyContactPhone', 'emergencyContactRelation',
       'schoolEmail',
       'address', 'enrollmentDate', 'status', 'medicalNotes',
       // Opening fee columns — optional, for migration from another system.
@@ -164,7 +175,12 @@ const TEMPLATES = {
         firstName: 'Amara', lastName: 'Osei', middleName: 'Kweku',
         dateOfBirth: '2015-03-14', gender: 'female',
         className: 'Grade 3', streamName: 'A', houseName: 'Baobab',
-        parentName: 'Kofi Osei', parentEmail: 'kofi.osei@example.com', parentPhone: '+254712345678',
+        allergies: '',
+        motherName: 'Adjoa Osei', motherEmail: 'adjoa.osei@example.com', motherPhone: '+254712345678', motherIdNumber: '',
+        fatherName: 'Kofi Osei', fatherEmail: 'kofi.osei@example.com', fatherPhone: '+254712345679', fatherIdNumber: '',
+        primaryContact: 'mother',
+        parentName: '', parentEmail: '', parentPhone: '',
+        emergencyContactName: '', emergencyContactPhone: '', emergencyContactRelation: '',
         schoolEmail: 'amara.osei@school.ac.ke',
         address: 'Nairobi, Kenya', enrollmentDate: '2026-01-15', status: 'active', medicalNotes: '',
         openingFeeTitle: 'Term 2 2025 Fees', openingFeeAmount: '45000', openingFeePaid: '20000', openingFeeDueDate: '2025-06-30',
@@ -174,26 +190,40 @@ const TEMPLATES = {
         firstName: 'Tomas', lastName: 'Muriuki', middleName: '',
         dateOfBirth: '2016-07-22', gender: 'male',
         className: 'Grade 2', streamName: 'B', houseName: '',
-        parentName: 'Mary Muriuki', parentEmail: 'mary.m@example.com', parentPhone: '+254798765432',
+        allergies: 'Peanuts',
+        motherName: 'Mary Muriuki', motherEmail: 'mary.m@example.com', motherPhone: '+254798765432', motherIdNumber: '',
+        fatherName: '', fatherEmail: '', fatherPhone: '', fatherIdNumber: '',
+        primaryContact: '',
+        parentName: '', parentEmail: '', parentPhone: '',
+        emergencyContactName: 'Grace Muriuki', emergencyContactPhone: '+254798765400', emergencyContactRelation: 'Aunt',
         schoolEmail: '',
-        address: 'Mombasa, Kenya', enrollmentDate: '2026-01-15', status: 'active', medicalNotes: 'Allergic to peanuts',
+        address: 'Mombasa, Kenya', enrollmentDate: '2026-01-15', status: 'active', medicalNotes: '',
         openingFeeTitle: '', openingFeeAmount: '', openingFeePaid: '', openingFeeDueDate: '',
       },
     ],
     notes: [
       '# STUDENT IMPORT TEMPLATE — Msingi School Management',
       '# Instructions:',
-      '#   firstName, lastName  — REQUIRED',
+      '#   firstName, lastName, dateOfBirth, gender  — REQUIRED',
       '#   admissionNumber      — OPTIONAL. Leave blank to auto-generate using your school prefix.',
       '#                          Fill in when migrating from another system to preserve existing numbers.',
+      '#                          Never required as input — it is always assigned by Msingi, at the latest',
+      '#                          when the student record is created (this import IS that creation step).',
       '#   dateOfBirth          — format YYYY-MM-DD (e.g. 2015-03-14)',
       '#   gender               — male | female | other | prefer_not_to_say',
       '#   className            — exact class name as shown in your Msingi classes list',
       '#   streamName           — optional — stream within that class (e.g. A, B, East). Create streams first.',
       '#   houseName            — optional — exact house name as shown in Settings -> School. Create houses first.',
+      '#   allergies            — optional free text (e.g. "Peanuts", or leave blank if none known)',
+      '#   motherName/fatherName — at least ONE parent (name + phone or email) is REQUIRED per student.',
+      '#   primaryContact        — mother | father. Optional — defaults to whichever parent has a name filled',
+      '#                           in. Selects which parent\'s details become this student\'s parentName/Email/',
+      '#                           Phone — the fields used for the parent portal login (one shared account per',
+      '#                           student — nothing stops both parents using the same login) and birthday',
+      '#                           emails. Leave parentName/Email/Phone blank to have them derived automatically.',
       '#   enrollmentDate       — format YYYY-MM-DD',
       '#   status               — active | inactive | suspended | graduated | transferred | withdrawn (default: active)',
-      '#   parentEmail          — must be a valid email if provided',
+      '#   parentEmail, motherEmail, fatherEmail — must be a valid email if provided',
       '#   schoolEmail          — school-issued email for student portal login (optional)',
       '#',
       '#   Imported students are automatically enrolled in your school\'s CURRENT',
@@ -514,13 +544,41 @@ async function _importStudents(rows, schoolId, userId, req) {
     if (r.firstName?.startsWith('#')) continue;
 
     // Required fields
-    if (!r.firstName?.trim()) { results.errors.push({ row, field: 'firstName', message: 'First name is required' }); results.skipped++; continue; }
-    if (!r.lastName?.trim())  { results.errors.push({ row, field: 'lastName',  message: 'Last name is required' });  results.skipped++; continue; }
+    if (!r.firstName?.trim())   { results.errors.push({ row, field: 'firstName',   message: 'First name is required' });    results.skipped++; continue; }
+    if (!r.lastName?.trim())    { results.errors.push({ row, field: 'lastName',    message: 'Last name is required' });     results.skipped++; continue; }
+    // 2026-09 field update — dateOfBirth/gender are now required here too,
+    // matching the same rule on the Admissions application form (both
+    // were previously optional on import).
+    if (!r.dateOfBirth?.trim()) { results.errors.push({ row, field: 'dateOfBirth', message: 'Date of birth is required' }); results.skipped++; continue; }
+    if (!r.gender?.trim())      { results.errors.push({ row, field: 'gender',      message: 'Gender is required' });        results.skipped++; continue; }
 
     // Field coercions / validations
     const gender = r.gender?.trim().toLowerCase();
     if (gender && !VALID_GENDER.has(gender)) {
       results.errors.push({ row, field: 'gender', message: `Invalid gender '${r.gender}'. Use: male, female, other, prefer_not_to_say` });
+      results.skipped++; continue;
+    }
+
+    // At least one parent identifiable — EITHER the legacy parentName (+
+    // phone or email) columns, OR the newer Mother/Father columns (2026-09
+    // field update). Accepting either keeps existing customer CSV files
+    // (built before Mother/Father existed) working unchanged, while
+    // requiring the same guardian-reachability guarantee Admissions now
+    // enforces for anyone using the new columns.
+    const hasLegacyParent = !!(r.parentName?.trim() && (r.parentPhone?.trim() || r.parentEmail?.trim()));
+    if (!hasLegacyParent && validateGuardianRequirement(r)) {
+      results.errors.push({ row, field: 'motherName', message: 'At least one parent is required — Mother/Father (name + phone or email), or the legacy parentName + phone/email columns' });
+      results.skipped++; continue;
+    }
+
+    const motherEmail = r.motherEmail?.trim();
+    if (motherEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(motherEmail)) {
+      results.errors.push({ row, field: 'motherEmail', message: `Invalid email '${motherEmail}'` });
+      results.skipped++; continue;
+    }
+    const fatherEmail = r.fatherEmail?.trim();
+    if (fatherEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fatherEmail)) {
+      results.errors.push({ row, field: 'fatherEmail', message: `Invalid email '${fatherEmail}'` });
       results.skipped++; continue;
     }
 
@@ -612,33 +670,69 @@ async function _importStudents(rows, schoolId, userId, req) {
     : [];
   let autoIdx = 0;
 
-  const toInsert = validRows.map(({ r, gender, status, parentEmail, schoolEmail, classId, className, streamId, streamName, houseId, manualAdmNo }) => ({
-    id:              uuidv4(),
-    schoolId,
-    admissionNumber: manualAdmNo || autoNos[autoIdx++],
-    firstName:       r.firstName.trim(),
-    lastName:        r.lastName.trim(),
-    middleName:      r.middleName?.trim() || undefined,
-    dateOfBirth:     r.dateOfBirth?.trim() || undefined,
-    gender:          gender || undefined,
-    classId:         classId    || undefined,
-    className:       className  || undefined,
-    houseId:         houseId    || undefined,
-    enrollmentAcademicYearId: currentPeriod.academicYearId || undefined,
-    enrollmentTermId:         currentPeriod.termId || undefined,
-    streamId:        streamId   || undefined,
-    streamName:      streamName || undefined,
-    parentName:      r.parentName?.trim() || undefined,
-    parentEmail:     parentEmail || undefined,
-    parentPhone:     r.parentPhone?.trim() || undefined,
-    schoolEmail:     schoolEmail || undefined,
-    address:         r.address?.trim() || undefined,
-    enrollmentDate:  r.enrollmentDate?.trim() || undefined,
-    status,
-    medicalNotes:    r.medicalNotes?.trim() || undefined,
-    createdBy:       userId,
-    updatedBy:       userId,
-  }));
+  const toInsert = validRows.map(({ r, gender, status, parentEmail, schoolEmail, classId, className, streamId, streamName, houseId, manualAdmNo }) => {
+    // Mother/Father → legacy parentName/Email/Phone, same derivation
+    // Admissions uses (server/utils/guardian-contact.js). Only overrides
+    // the raw parentName/Email/Phone columns when Mother/Father data is
+    // actually present — a row using only the old columns (no Mother/
+    // Father at all) passes through completely unchanged, so existing
+    // customer CSV files built before this field update keep working.
+    const derived = resolvePrimaryContact(r);
+    const emergencyProvided = r.emergencyContactName?.trim() || r.emergencyContactPhone?.trim() || r.emergencyContactRelation?.trim();
+    const allergiesProvided = r.allergies?.trim();
+
+    return {
+      id:              uuidv4(),
+      schoolId,
+      admissionNumber: manualAdmNo || autoNos[autoIdx++],
+      firstName:       r.firstName.trim(),
+      lastName:        r.lastName.trim(),
+      middleName:      r.middleName?.trim() || undefined,
+      dateOfBirth:     r.dateOfBirth?.trim() || undefined,
+      gender:          gender || undefined,
+      classId:         classId    || undefined,
+      className:       className  || undefined,
+      houseId:         houseId    || undefined,
+      enrollmentAcademicYearId: currentPeriod.academicYearId || undefined,
+      enrollmentTermId:         currentPeriod.termId || undefined,
+      streamId:        streamId   || undefined,
+      streamName:      streamName || undefined,
+      parentName:      derived?.parentName  || r.parentName?.trim()  || undefined,
+      parentEmail:     derived?.parentEmail || parentEmail           || undefined,
+      parentPhone:     derived?.parentPhone || r.parentPhone?.trim() || undefined,
+      parentRelationship: derived?.parentRelationship || undefined,
+      // Raw Mother/Father fields — preserved alongside the derived legacy
+      // fields above, same as Admissions, so the detail isn't lost even
+      // though only one parent feeds the portal/communications fields.
+      motherName:      r.motherName?.trim()   || undefined,
+      motherEmail:      r.motherEmail?.trim() ? r.motherEmail.trim() : undefined,
+      motherPhone:      r.motherPhone?.trim() || undefined,
+      motherIdNumber:   r.motherIdNumber?.trim() || undefined,
+      fatherName:       r.fatherName?.trim()   || undefined,
+      fatherEmail:       r.fatherEmail?.trim() ? r.fatherEmail.trim() : undefined,
+      fatherPhone:       r.fatherPhone?.trim() || undefined,
+      fatherIdNumber:    r.fatherIdNumber?.trim() || undefined,
+      schoolEmail:     schoolEmail || undefined,
+      address:         r.address?.trim() || undefined,
+      enrollmentDate:  r.enrollmentDate?.trim() || undefined,
+      status,
+      medicalNotes:    r.medicalNotes?.trim() || undefined,
+      // Allergies/Emergency Contact — nested under `medical`, matching the
+      // exact shape the Student Profile's own Medical tab already reads/
+      // writes (MedicalInfoSchema, StudentProfile.jsx's onSave({medical:
+      // form})) — NOT a new, disconnected top-level field.
+      ...((allergiesProvided || emergencyProvided) ? {
+        medical: {
+          ...(allergiesProvided ? { allergies: r.allergies.trim() } : {}),
+          ...(r.emergencyContactName?.trim()     ? { emergencyName:     r.emergencyContactName.trim() }     : {}),
+          ...(r.emergencyContactPhone?.trim()    ? { emergencyPhone:    r.emergencyContactPhone.trim() }    : {}),
+          ...(r.emergencyContactRelation?.trim() ? { emergencyRelation: r.emergencyContactRelation.trim() } : {}),
+        },
+      } : {}),
+      createdBy:       userId,
+      updatedBy:       userId,
+    };
+  });
 
   // Track which indices failed so we only create invoices for confirmed inserts
   const failedStudentIndices = new Set();
@@ -1620,10 +1714,11 @@ router.get('/export/:type', authMiddleware, /* rbac: dynamic — checked via EXP
         filter.$or = [{ firstName: rx }, { lastName: rx }, { admissionNumber: rx }];
       }
 
-      const [docs, classes, streams] = await Promise.all([
+      const [docs, classes, streams, school] = await Promise.all([
         Students.find(filter).sort({ lastName: 1, firstName: 1 }).lean(),
         Classes.find({ schoolId }).select('id name sectionKey').lean(),
         Streams.find({ schoolId }).select('id name').lean(),
+        _model('schools').findOne({ id: schoolId }).select('houses').lean(),
       ]);
 
       const classById  = {};
@@ -1638,10 +1733,22 @@ router.get('/export/:type', authMiddleware, /* rbac: dynamic — checked via EXP
       const headers = [
         'admissionNumber', 'firstName', 'lastName', 'middleName',
         'dateOfBirth', 'gender',
-        'section', 'className', 'streamName',
-        'parentName', 'parentEmail', 'parentPhone',
+        'section', 'className', 'streamName', 'houseName',
+        'allergies',
+        'motherName', 'motherEmail', 'motherPhone', 'motherIdNumber',
+        'fatherName', 'fatherEmail', 'fatherPhone', 'fatherIdNumber',
+        'primaryContact', 'parentName', 'parentEmail', 'parentPhone',
+        'emergencyContactName', 'emergencyContactPhone', 'emergencyContactRelation',
         'schoolEmail', 'address', 'enrollmentDate', 'status', 'medicalNotes', 'createdAt',
       ];
+
+      // Same house lookup shape the import side already builds (houseMap
+      // in _importStudents) — export needs the reverse direction, id -> name.
+      const houseNameById = {};
+      for (const h of (school?.houses ?? [])) {
+        if (h?.id) houseNameById[h.id] = h.name;
+        if (h?.name) houseNameById[h.name] = h.name; // legacy docs stored the name itself as the "id"
+      }
 
       const rows = docs.map(d => ({
         admissionNumber: d.admissionNumber || '',
@@ -1653,9 +1760,23 @@ router.get('/export/:type', authMiddleware, /* rbac: dynamic — checked via EXP
         section:         d.classId ? (sectionByClassId[d.classId] || '') : '',
         className:       d.classId ? (classById[d.classId] || '') : '',
         streamName:      d.streamId ? (streamById[d.streamId] || '') : '',
+        houseName:       d.houseId ? (houseNameById[d.houseId] || '') : '',
+        allergies:       d.medical?.allergies || '',
+        motherName:      d.motherName || '',
+        motherEmail:     d.motherEmail || '',
+        motherPhone:     d.motherPhone || '',
+        motherIdNumber:  d.motherIdNumber || '',
+        fatherName:      d.fatherName || '',
+        fatherEmail:     d.fatherEmail || '',
+        fatherPhone:     d.fatherPhone || '',
+        fatherIdNumber:  d.fatherIdNumber || '',
+        primaryContact:  d.primaryContact || '',
         parentName:      d.parentName || '',
         parentEmail:     d.parentEmail || '',
         parentPhone:     d.parentPhone || '',
+        emergencyContactName:     d.medical?.emergencyName     || '',
+        emergencyContactPhone:    d.medical?.emergencyPhone    || '',
+        emergencyContactRelation: d.medical?.emergencyRelation || '',
         schoolEmail:     d.schoolEmail || '',
         address:         d.address || '',
         enrollmentDate:  d.enrollmentDate || '',

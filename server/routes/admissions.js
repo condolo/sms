@@ -15,6 +15,7 @@ const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
+const { resolvePrimaryContact, validateGuardianRequirement } = require('../utils/guardian-contact');
 
 const router = express.Router();
 const PLAN   = planGate('admissions');
@@ -121,53 +122,6 @@ function _validate(schema, data) {
   return { data: r.data };
 }
 
-/* ── Mother/Father → legacy primary-contact fields ─────────────
-   2026-09 field update. parentName/Email/Phone/Relationship are the
-   ONLY fields this system's other consumers actually read — the parent
-   portal login (students.js's POST /:id/parent-account, which uses
-   student.parentEmail as the account's login email) and birthday
-   emails (birthdays.js). Rather than touch either of those files, this
-   derives the same three fields from whichever of Mother/Father is
-   marked primaryContact, so both keep working completely unchanged —
-   a single shared portal account, fed by whichever parent the school
-   designates, exactly matching how the portal already works today (one
-   account per student; nothing stops both parents using the same
-   login).
-   `merged` should already combine the incoming request with whatever
-   existing values apply (the caller's job — see POST/PUT below) so a
-   partial PUT that only touches, say, fatherPhone still resolves
-   correctly against the mother/father data already on file. */
-function _resolvePrimaryContact(merged) {
-  let primary = merged.primaryContact;
-  if (primary !== 'mother' && primary !== 'father') {
-    primary = merged.motherName ? 'mother' : (merged.fatherName ? 'father' : null);
-  }
-  if (!primary) return null;
-  return {
-    parentName:         (primary === 'father' ? merged.fatherName  : merged.motherName)  || '',
-    parentEmail:        (primary === 'father' ? merged.fatherEmail : merged.motherEmail) || '',
-    parentPhone:        (primary === 'father' ? merged.fatherPhone : merged.motherPhone) || '',
-    parentRelationship: primary === 'father' ? 'Father' : 'Mother',
-  };
-}
-
-/* At least one parent must be identified — an application with neither
-   Mother nor Father filled in has no one the school can actually reach,
-   and no one the eventual parent-portal account (see above) could ever
-   be created for. Mirrors the same "must be reachable somehow" spirit
-   as the pre-existing phone-or-email rule, just at the parent level
-   instead of the field level. Checked on the MERGED view (request +
-   existing, for PUT) so a partial update that doesn't touch guardian
-   fields at all never trips this on an already-valid record. */
-function _validateGuardianRequirement(merged) {
-  const hasMother = !!(merged.motherName && (merged.motherPhone || merged.motherEmail));
-  const hasFather = !!(merged.fatherName && (merged.fatherPhone || merged.fatherEmail));
-  if (!hasMother && !hasFather) {
-    return [{ field: 'motherName', message: 'At least one parent (name + phone or email) is required — Mother or Father' }];
-  }
-  return null;
-}
-
 /* ── GET /api/admissions ─ Paginated pipeline ───────────────── */
 router.get('/', authMiddleware, PLAN, MODGATE, rbac('admissions', 'read'), async (req, res) => {
   try {
@@ -256,9 +210,9 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('admissions', 'create'), as
     const { data, error } = _validate(ApplicationSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const guardianError = _validateGuardianRequirement(data);
+    const guardianError = validateGuardianRequirement(data);
     if (guardianError) return E.validation(res, guardianError);
-    Object.assign(data, _resolvePrimaryContact(data));
+    Object.assign(data, resolvePrimaryContact(data));
 
     // Generate a unique application reference using school's configured academic year
     const schoolDoc  = await _model('schools').findOne({ id: schoolId }, { academicYear: 1, academicYearStartMonth: 1 }).lean();
@@ -302,9 +256,9 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('admissions', 'update'), 
     const GUARDIAN_FIELDS = ['primaryContact', 'motherName', 'motherEmail', 'motherPhone', 'fatherName', 'fatherEmail', 'fatherPhone'];
     if (GUARDIAN_FIELDS.some(k => data[k] !== undefined)) {
       const merged = { ...existing, ...data };
-      const guardianError = _validateGuardianRequirement(merged);
+      const guardianError = validateGuardianRequirement(merged);
       if (guardianError) return E.validation(res, guardianError);
-      Object.assign(data, _resolvePrimaryContact(merged));
+      Object.assign(data, resolvePrimaryContact(merged));
     }
 
     const update = { ...data, updatedBy: userId };
@@ -360,8 +314,5 @@ router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('admissions', 'delete'
     return ok(res, { id: req.params.id, withdrawn: true });
   } catch (err) { console.error('[admissions DELETE/:id]', err); return E.serverError(res); }
 });
-
-router._resolvePrimaryContact = _resolvePrimaryContact; // test-only access
-router._validateGuardianRequirement = _validateGuardianRequirement; // test-only access
 
 module.exports = router;
