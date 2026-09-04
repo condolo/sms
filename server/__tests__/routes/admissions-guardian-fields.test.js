@@ -110,11 +110,21 @@ describe('_resolvePrimaryContact — unit', () => {
 });
 
 describe('_validateGuardianRequirement — unit', () => {
-  test('passes with mother name + phone only', () => {
-    expect(_validateGuardianRequirement({ motherName: 'Adjoa', motherPhone: '0700' })).toBeNull();
+  test('passes with mother name + email (phone optional, not provided)', () => {
+    expect(_validateGuardianRequirement({ motherName: 'Adjoa', motherEmail: 'adjoa@example.com' })).toBeNull();
   });
   test('passes with father name + email only', () => {
     expect(_validateGuardianRequirement({ fatherName: 'Kwame', fatherEmail: 'k@example.com' })).toBeNull();
+  });
+  test('THE TIGHTENED RULE (separated-parents follow-up): a name WITH a phone but NO email is now rejected — phone is no longer a substitute for email', () => {
+    const result = _validateGuardianRequirement({ motherName: 'Adjoa', motherPhone: '0700' });
+    expect(result).not.toBeNull();
+    expect(result[0].field).toBe('motherEmail');
+  });
+  test('the same tightened rule applies to Father independently of Mother', () => {
+    const result = _validateGuardianRequirement({ fatherName: 'Kwame', fatherPhone: '0711' });
+    expect(result).not.toBeNull();
+    expect(result[0].field).toBe('fatherEmail');
   });
   test('fails when a name is given but no phone AND no email for either parent', () => {
     expect(_validateGuardianRequirement({ motherName: 'Adjoa' })).not.toBeNull();

@@ -48,16 +48,40 @@ function resolvePrimaryContact(merged) {
 
 /**
  * validateGuardianRequirement(merged)
- * At least one parent must be identified — a record with neither
- * Mother nor Father filled in has no one the school can actually
- * reach, and no one the eventual parent-portal account could ever be
- * created for. Returns a zod-issue-shaped error array, or null if ok.
+ *
+ * Two rules, deliberately in this order:
+ *
+ * 1. EMAIL IS MANDATORY FOR ANY NAMED PARENT (2026-09, separated-
+ *    parents follow-up) — not "phone or email" anymore. Each parent —
+ *    Mother and Father independently, not just whichever is
+ *    primaryContact — can eventually get their OWN, separate portal
+ *    login (students.js's per-parent account creation), not just the
+ *    single shared account this system started with. A parent entered
+ *    with a name but no email can never get that account later, so a
+ *    name without an email is now rejected outright, for either
+ *    parent, regardless of which one is primary. Phone remains
+ *    optional — a nice-to-have contact method, never a substitute for
+ *    the one thing an actual login requires.
+ * 2. At least one parent must be identified at all — a record with
+ *    neither Mother nor Father filled in has no one the school can
+ *    reach.
+ *
+ * Returns a zod-issue-shaped error array, or null if ok.
  */
 function validateGuardianRequirement(merged) {
-  const hasMother = !!(merged.motherName && (merged.motherPhone || merged.motherEmail));
-  const hasFather = !!(merged.fatherName && (merged.fatherPhone || merged.fatherEmail));
+  const errors = [];
+  if (merged.motherName && !merged.motherEmail) {
+    errors.push({ field: 'motherEmail', message: "Mother's email is required whenever her name is provided — needed for her own portal account later" });
+  }
+  if (merged.fatherName && !merged.fatherEmail) {
+    errors.push({ field: 'fatherEmail', message: "Father's email is required whenever his name is provided — needed for his own portal account later" });
+  }
+  if (errors.length) return errors;
+
+  const hasMother = !!(merged.motherName && merged.motherEmail);
+  const hasFather = !!(merged.fatherName && merged.fatherEmail);
   if (!hasMother && !hasFather) {
-    return [{ field: 'motherName', message: 'At least one parent (name + phone or email) is required — Mother or Father' }];
+    return [{ field: 'motherName', message: 'At least one parent (name + email) is required — Mother or Father' }];
   }
   return null;
 }

@@ -100,13 +100,19 @@ export default function AddSlideOver({ onClose, onCreated }) {
     if (!form.lastName.trim())    e.lastName    = 'Required';
     if (!form.dateOfBirth.trim()) e.dateOfBirth = 'Required';
     if (!form.gender.trim())      e.gender      = 'Required';
-    // Mirrors the server's own guardian requirement (admissions.js's
-    // _validateGuardianRequirement) — at least one parent, name + a way
-    // to reach them, so this fails fast client-side instead of round-
-    // tripping to the API first.
-    const motherOk = form.motherName.trim() && (form.motherPhone.trim() || form.motherEmail.trim());
-    const fatherOk = form.fatherName.trim() && (form.fatherPhone.trim() || form.fatherEmail.trim());
-    if (!motherOk && !fatherOk) e.motherName = 'At least one parent (name + phone or email) is required';
+    // Mirrors the server's own guardian requirement exactly (server/utils/
+    // guardian-contact.js's validateGuardianRequirement). Email — not
+    // phone — is mandatory for ANY named parent, independent of which one
+    // is primaryContact: each parent can eventually get their own,
+    // separate portal login, and a name without an email can never
+    // become one later. Phone stays optional.
+    if (form.motherName.trim() && !form.motherEmail.trim()) e.motherEmail = "Required when Mother's name is provided";
+    if (form.fatherName.trim() && !form.fatherEmail.trim()) e.fatherEmail = "Required when Father's name is provided";
+    const motherOk = form.motherName.trim() && form.motherEmail.trim();
+    const fatherOk = form.fatherName.trim() && form.fatherEmail.trim();
+    if (!e.motherEmail && !e.fatherEmail && !motherOk && !fatherOk) {
+      e.motherName = 'At least one parent (name + email) is required';
+    }
     return e;
   }
 
@@ -235,7 +241,9 @@ export default function AddSlideOver({ onClose, onCreated }) {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <Field label="Phone"><input value={form.motherPhone} onChange={e => set('motherPhone', e.target.value)} placeholder="+254 …" className={inputCls()} /></Field>
-              <Field label="Email"><input type="email" value={form.motherEmail} onChange={e => set('motherEmail', e.target.value)} placeholder="mother@email.com" className={inputCls()} /></Field>
+              <Field label={form.motherName.trim() ? 'Email *' : 'Email'} error={errors.motherEmail}>
+                <input type="email" value={form.motherEmail} onChange={e => set('motherEmail', e.target.value)} placeholder="mother@email.com" className={inputCls(errors.motherEmail)} />
+              </Field>
             </div>
 
             <p className="text-xs font-medium text-slate-500 mt-4 mb-1">Father</p>
@@ -245,7 +253,9 @@ export default function AddSlideOver({ onClose, onCreated }) {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <Field label="Phone"><input value={form.fatherPhone} onChange={e => set('fatherPhone', e.target.value)} placeholder="+254 …" className={inputCls()} /></Field>
-              <Field label="Email"><input type="email" value={form.fatherEmail} onChange={e => set('fatherEmail', e.target.value)} placeholder="father@email.com" className={inputCls()} /></Field>
+              <Field label={form.fatherName.trim() ? 'Email *' : 'Email'} error={errors.fatherEmail}>
+                <input type="email" value={form.fatherEmail} onChange={e => set('fatherEmail', e.target.value)} placeholder="father@email.com" className={inputCls(errors.fatherEmail)} />
+              </Field>
             </div>
           </Section>
 

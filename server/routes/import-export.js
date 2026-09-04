@@ -566,9 +566,16 @@ async function _importStudents(rows, schoolId, userId, req) {
     // requiring the same guardian-reachability guarantee Admissions now
     // enforces for anyone using the new columns.
     const hasLegacyParent = !!(r.parentName?.trim() && (r.parentPhone?.trim() || r.parentEmail?.trim()));
-    if (!hasLegacyParent && validateGuardianRequirement(r)) {
-      results.errors.push({ row, field: 'motherName', message: 'At least one parent is required — Mother/Father (name + phone or email), or the legacy parentName + phone/email columns' });
-      results.skipped++; continue;
+    if (!hasLegacyParent) {
+      // Propagate the ACTUAL error from the shared validator — not a
+      // generic stand-in — so a specific problem (e.g. "motherEmail
+      // required because motherName is set") is reported as that
+      // specific field, not folded into a vague catch-all message.
+      const guardianErrors = validateGuardianRequirement(r);
+      if (guardianErrors) {
+        results.errors.push({ row, field: guardianErrors[0].field, message: guardianErrors[0].message });
+        results.skipped++; continue;
+      }
     }
 
     const motherEmail = r.motherEmail?.trim();

@@ -124,10 +124,17 @@ describe('guardian requirement — backward compatible with legacy-only CSV file
     expect(mockStores.students._docs()).toHaveLength(0);
   });
 
-  test('Mother-only (no legacy parentName at all) is accepted', async () => {
+  test('Mother-only (no legacy parentName at all) is accepted, given her email', async () => {
+    const res = await supertest(buildApp()).post('/api/import-export/students')
+      .send({ rows: [{ ...BASE, motherName: 'Adjoa Osei', motherPhone: '+254700000001', motherEmail: 'adjoa@example.com' }] });
+    expect(res.status).toBe(201);
+  });
+
+  test('THE TIGHTENED RULE: Mother\'s name with a phone but no email is rejected — email is mandatory per parent, not phone-or-email', async () => {
     const res = await supertest(buildApp()).post('/api/import-export/students')
       .send({ rows: [{ ...BASE, motherName: 'Adjoa Osei', motherPhone: '+254700000001' }] });
-    expect(res.status).toBe(201);
+    expect(res.body.data.errors[0].field).toBe('motherEmail');
+    expect(mockStores.students._docs()).toHaveLength(0);
   });
 });
 
@@ -148,8 +155,8 @@ describe('Mother/Father derivation — same shared logic as Admissions', () => {
     const res = await supertest(buildApp()).post('/api/import-export/students').send({
       rows: [{
         ...BASE, primaryContact: 'father',
-        motherName: 'Adjoa Osei', motherPhone: '+254700000001',
-        fatherName: 'Kofi Osei', fatherPhone: '+254712345678',
+        motherName: 'Adjoa Osei', motherPhone: '+254700000001', motherEmail: 'adjoa@example.com',
+        fatherName: 'Kofi Osei', fatherPhone: '+254712345678', fatherEmail: 'kofi@example.com',
       }],
     });
     expect(res.status).toBe(201);
