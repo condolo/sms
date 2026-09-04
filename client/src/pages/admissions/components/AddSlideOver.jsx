@@ -230,7 +230,7 @@ export default function AddSlideOver({ onClose, onCreated }) {
                 <option value="father">Father</option>
               </select>
               <p className="text-[11px] text-slate-400 mt-1">
-                Used for the parent portal login and school communications — the other parent's details are still kept on file.
+                Used for school communications and as the default contact on record. Once enrolled, Mother and Father can each get their own separate portal login from the student's profile — this selection doesn't limit that.
               </p>
             </Field>
 

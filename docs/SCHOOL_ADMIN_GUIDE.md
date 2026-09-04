@@ -257,7 +257,7 @@ Available from **Students → Import**. Upload a CSV of up to 500 students per b
 
 ### Student portal accounts
 
-Each student can have a **student login** (signs in with their admission number) and, if a parent email is on file, a **parent login** — created individually from that student's profile (**Students → [student] → Portal** tab) or in bulk:
+Each student can have a **student login** (signs in with their admission number) and, once a parent's email is on file, a **parent login** — created individually from that student's profile (**Students → [student] → Portal** tab) or in bulk:
 
 1. From the **Students** list, select the students who need portal access (checkbox column).
 2. Click **Grant Portal Access**. Any number of students works in one click — the system batches large selections automatically.
@@ -265,7 +265,9 @@ Each student can have a **student login** (signs in with their admission number)
 4. Every account requires a password change on first login, so a slip changing hands after the student has already logged in poses no risk.
 5. If a student loses their credentials before ever logging in, reset just that one account from their Profile → Portal tab rather than re-running the bulk action.
 
-Siblings share one parent account automatically: put the same parent email on each sibling's profile, then create the parent account from each sibling's Portal tab in turn — the second and later clicks link that child to the existing account (and reset its password) instead of creating a duplicate. The parent must log out and back in to see a newly linked child.
+**Separated parents each get their own login (2026-09).** If both a Mother's and a Father's name+email are on the student's record, the Profile → Portal tab shows two independent account cards — **Mother's Portal Account** and **Father's Portal Account** — created and reset separately. Neither parent needs to share a password with the other to see the child's information. A record that only ever had one combined parent contact (no Mother/Father split) still shows the single, original **Parent Portal Account** card — nothing changes for those.
+
+Siblings share one parent account automatically, per parent: put the same parent's email on each sibling's profile, then create that parent's account from each sibling's Portal tab in turn — the second and later clicks link that child to the parent's existing account (and reset its password) instead of creating a duplicate. This works independently for Mother and Father — e.g. Mother's account can cover all her children while Father's covers only his, if that's how a family is actually set up. The parent must log out and back in to see a newly linked child.
 
 ### Deactivating a student
 

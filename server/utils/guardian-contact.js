@@ -10,16 +10,24 @@
    vs. server/routes/auth.js's permission merge). One implementation,
    used by both.
 
-   parentName/parentEmail/parentPhone/parentRelationship are the ONLY
-   guardian fields this system's other, unrelated consumers actually
-   read — the parent portal account route (students.js's POST
-   /:id/parent-account, which uses parentEmail as the literal login
-   email) and birthday emails (birthdays.js). Deriving them from
-   whichever parent is primaryContact means both keep working
-   completely unchanged — a single shared portal account, fed by
-   whichever parent the school designates, exactly matching how the
-   portal already works today (one account per student; nothing stops
-   both parents using the same login — confirmed with the school).
+   parentName/parentEmail/parentPhone/parentRelationship are the fields
+   birthday emails (birthdays.js) read, and the fallback the parent
+   portal route (students.js's POST /:id/parent-account) still uses
+   when called with no `guardian`. Deriving them from whichever parent
+   is primaryContact keeps that legacy, single-shared-account path
+   working completely unchanged for anyone not using the newer
+   per-parent flow below.
+
+   PER-PARENT ACCOUNTS (2026-09, separated-parents follow-up) — the
+   single-shared-account model above is no longer the whole picture.
+   students.js's POST /:id/parent-account also accepts an explicit
+   `guardian: 'mother' | 'father'`, in which case it reads
+   motherEmail/motherName or fatherEmail/fatherName DIRECTLY (not
+   through this derivation) and creates that parent's own, independent
+   login. This is exactly why validateGuardianRequirement() below
+   requires an email for EITHER named parent, not just whichever is
+   primaryContact — a parent who can't become primaryContact must
+   still be able to get their own account later.
    ============================================================ */
 'use strict';
 

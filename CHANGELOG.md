@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.56.0] — 2026-09-04 — feat(students): separated parents each get their own portal login
+
+Follow-up to the 2026-09 Admissions Mother/Father split. A school flagged a real gap: separated parents cannot always share one login, and the portal only ever supported one shared parent account per student. Closed in two steps, in order — the second depends on the first.
+
+### Changed
+- `server/utils/guardian-contact.js`'s `validateGuardianRequirement` — email is now mandatory for ANY named parent (Mother or Father independently), not "phone or email" as before. A parent entered with a name but no email could never get their own login later, so that gap is now closed at validation time on both the Admissions application form and the student bulk-import template. Phone stays optional. Applies to the new Mother/Father fields only — legacy `parentName` + phone/email CSV columns are untouched.
+- Fixed a real bug this tightening's own test suite caught: `import-export.js`'s `_importStudents` was discarding the specific error from `validateGuardianRequirement()` and reporting a hardcoded generic `motherName` field on every guardian rejection. Now propagates the actual field/message (e.g. `motherEmail` when a name lacks an email).
+
+### Added
+- `server/routes/students.js`'s `POST /:id/parent-account` now accepts an optional `guardian: 'mother' | 'father'`. Omitted, it's the original behaviour unchanged (derived `parentEmail`/`parentName`, sets `hasParentAccount`) — every existing caller keeps working. Given, it reads `motherEmail`/`motherName` or `fatherEmail`/`fatherName` directly and creates/resets **that parent's own, independent login**, tracked via new `hasMotherAccount`/`hasFatherAccount` flags on the student record.
+- Sibling-awareness — already true for the shared legacy account — now applies **per parent**: a second call for the same guardian email (another child of that same mother, say) adds to her existing account's `studentIds`/`guardianOf` instead of creating a duplicate, independently of whatever the father's own account looks like.
+- `client/src/pages/students/StudentProfile.jsx` — the Portal tab shows two separate account cards (**Mother's Portal Account** / **Father's Portal Account**) whenever a record has the Mother/Father split, each with its own status pill and Create/Resend button. A legacy record with only the original combined parent contact still shows the single card it always had.
+
+### Verified
+- Full server suite: 191/191 suites, 1801/1801 tests passing (8 new tests for the per-parent route: independent creation, sibling-linking per guardian, rejection when that guardian's email is missing, `guardian` value validation). `verify-rbac-coverage.js` 100% (no regression). `security-scan.js` clean.
+
+---
+
 ## [v5.55.0] — 2026-08-12 — feat(weekly-snapshot): auto-generated weekly student digest, delivered per-school-timezone
 
 New **Weekly Student Snapshot** module (Student Services section) — a per-student, per-week digest of everything that happened across the system: topics covered, assignments and scores, attendance, the full behaviour record, medical visits, library activity, and new growth/co-curricular entries. Generated automatically every Saturday, frozen once written, retrievable forever.

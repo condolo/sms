@@ -929,26 +929,45 @@ router.delete('/:id/portal-account', authMiddleware, PLAN, MODGATE, rbac('studen
 
 /* ── POST /api/students/:id/parent-account ───────────────────────
    Create or reset a parent portal login account.
-   Uses student.parentEmail as the login email.
-   If a parent account already exists for this email, adds this student to their studentIds.
    Sends welcome email with credentials.
 
-   DEPENDENCY NOTE (2026-09 field update) — this route is UNCHANGED,
-   but where parentEmail/parentName now COME FROM has widened: as of
-   the Mother/Father split (server/utils/guardian-contact.js), both
-   fields are usually DERIVED from whichever parent is marked
-   primaryContact, not hand-typed directly. This route doesn't need to
-   know that — it only ever reads the two final fields, which is
-   exactly why the derivation was designed to feed them rather than
-   replace them. One shared portal account per student either way,
-   confirmed with the school as the intended behavior — nothing here
-   stops both parents from using the same login.
+   PER-PARENT ACCOUNTS (2026-09, separated-parents follow-up) —
+   optional `req.body.guardian: 'mother' | 'father'` selects WHICH
+   parent's own name/email this call acts on:
+     - omitted  → legacy behaviour, completely unchanged: uses the
+       derived student.parentEmail/parentName (whichever parent is
+       primaryContact, or the pre-split legacy fields), sets
+       hasParentAccount. This is the path every existing caller and
+       the pre-split UI already uses — nothing here breaks it.
+     - 'mother' → uses student.motherEmail/motherName, sets
+       hasMotherAccount.
+     - 'father' → uses student.fatherEmail/fatherName, sets
+       hasFatherAccount.
+   Each is looked up/created by ITS OWN email, so a school can now
+   give separated parents two fully independent logins for the same
+   child instead of one shared account — the real-world gap this
+   whole 2026-09 guardian-email-mandatory change exists to close.
+
+   SIBLING-AWARE either way: if an account already exists for that
+   email — e.g. this parent has another child already enrolled — this
+   call just $addToSet's the new student onto their existing
+   studentIds/guardianOf instead of creating a duplicate account. That
+   was already true for the legacy shared account; it now applies
+   independently to Mother's and Father's own accounts too, so a
+   parent with three children at the school still logs in once and
+   sees all three, no matter which of their children's profiles the
+   account was created from.
    ──────────────────────────────────────────────────────────────── */
 router.post('/:id/parent-account', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
     const allowed = ['superadmin', 'admin', 'principal', 'deputy_principal'];
     if (!allowed.includes(role)) return E.forbidden(res, 'Only admin or principal can create parent portal accounts.');
+
+    const guardian = req.body?.guardian;
+    if (guardian !== undefined && guardian !== 'mother' && guardian !== 'father') {
+      return E.badRequest(res, "guardian must be 'mother' or 'father' when provided.");
+    }
 
     const Students = tenantModel('students', tenantContext(req));
     const Users    = tenantModel('users', tenantContext(req));
@@ -959,7 +978,17 @@ router.post('/:id/parent-account', authMiddleware, PLAN, MODGATE, rbac('students
       try { student = await Students.findOne({ _id: req.params.id, schoolId }).lean(); } catch (_) {}
     }
     if (!student) return E.notFound(res, 'Student not found.');
-    if (!student.parentEmail) return E.badRequest(res, 'Student has no parent email on record. Add a parent email first.');
+
+    const rawEmail = guardian === 'mother' ? student.motherEmail
+                    : guardian === 'father' ? student.fatherEmail
+                    : student.parentEmail;
+    const rawName  = guardian === 'mother' ? student.motherName
+                    : guardian === 'father' ? student.fatherName
+                    : student.parentName;
+    if (!rawEmail) {
+      const who = guardian === 'mother' ? "Mother's" : guardian === 'father' ? "Father's" : 'parent';
+      return E.badRequest(res, `Student has no ${who} email on record. Add it first.`);
+    }
 
     const school = await Schools.findOne({ id: schoolId }).lean();
     if (!_portalAllowed(school, 'parent')) {
@@ -967,13 +996,14 @@ router.post('/:id/parent-account', authMiddleware, PLAN, MODGATE, rbac('students
     }
 
     const studentDocId = student.id || String(student._id);
-    const parentEmail = student.parentEmail.toLowerCase().trim();
-    const parentName  = student.parentName || 'Parent';
+    const parentEmail = rawEmail.toLowerCase().trim();
+    const parentName  = rawName || 'Parent';
     const now         = new Date().toISOString();
     const tempPassword = _genTempPassword();
     const hash        = await bcrypt.hash(tempPassword, 12);
 
-    // Check if parent account already exists for this email in this school
+    // Check if a parent account already exists for THIS email in this
+    // school — sibling-aware for whichever guardian this call is for.
     let existing = await Users.findOne({ email: parentEmail, schoolId, role: 'parent' }).lean();
 
     if (existing) {
@@ -1013,8 +1043,13 @@ router.post('/:id/parent-account', authMiddleware, PLAN, MODGATE, rbac('students
       }
     }
 
-    // Mark student as having a parent portal account
-    await Students.updateOne({ _id: student._id }, { $set: { hasParentAccount: true, updatedAt: now } });
+    // Mark student as having this guardian's portal account. Legacy
+    // hasParentAccount stays untouched by mother/father calls, and
+    // vice versa — each flag tracks its own account independently.
+    const flagField = guardian === 'mother' ? 'hasMotherAccount'
+                     : guardian === 'father' ? 'hasFatherAccount'
+                     : 'hasParentAccount';
+    await Students.updateOne({ _id: student._id }, { $set: { [flagField]: true, updatedAt: now } });
 
     // Send welcome email to parent
     const emailUtil = require('../utils/email');
@@ -1028,11 +1063,12 @@ router.post('/:id/parent-account', authMiddleware, PLAN, MODGATE, rbac('students
       slug:        school.slug,
     }).catch(err => console.error('[parent-account] Email send failed:', err.message));
 
-    console.log(`[students] Parent account ${existing ? 'updated' : 'created'} for ${parentEmail} (student: ${studentDocId}) by ${userId}`);
+    console.log(`[students] Parent account (${guardian || 'legacy'}) ${existing ? 'updated' : 'created'} for ${parentEmail} (student: ${studentDocId}) by ${userId}`);
     return ok(res, {
       email:     parentEmail,
       name:      parentName,
       studentId: studentDocId,
+      guardian:  guardian || null,
       action:    existing ? 'updated' : 'created',
       emailSent: true,
     });

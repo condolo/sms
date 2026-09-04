@@ -1370,20 +1370,24 @@ function PortalTab({ student, canEdit }) {
 
   const [studentAccResult, setStudentAccResult] = useState(null);
   const [parentAccResult,  setParentAccResult]  = useState(null);
+  const [motherAccResult,  setMotherAccResult]  = useState(null);
+  const [fatherAccResult,  setFatherAccResult]  = useState(null);
   const [deactivating,     setDeactivating]     = useState(false);
   const [working,          setWorking]          = useState('');
   const [error,            setError]            = useState('');
 
   const isAdmin = ['superadmin','admin','principal','deputy_principal'].includes(role);
 
-  async function _call(method, path, setResult) {
-    setWorking(path); setError('');
+  async function _call(method, path, setResult, body, workingKey) {
+    const key = workingKey || path;
+    setWorking(key); setError('');
     try {
       const sid = student.id || student._id;
       const res  = await fetch(`/api/students/${sid}${path}`, {
         method,
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
+        ...(body ? { body: JSON.stringify(body) } : {}),
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error?.message || 'Request failed');
@@ -1466,44 +1470,134 @@ function PortalTab({ student, canEdit }) {
         )}
       </div>
 
-      {/* ── Parent portal account ────────────────────────── */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5">
-        <div className="flex items-center gap-3 mb-4 pb-3 border-b border-slate-100">
-          <div className="w-8 h-8 rounded-lg bg-violet-50 flex items-center justify-center">
-            <Users size={14} className="text-violet-600" />
+      {/* ── Parent portal account(s) ─────────────────────────
+          A record with the Mother/Father split (motherEmail and/or
+          fatherEmail on file) gets one card PER parent — each an
+          independent login, since separated parents can't share one
+          account. A legacy record (only the old combined parentEmail/
+          parentName, never split) keeps the single shared-account card
+          it always had. ──────────────────────────────────────── */}
+      {(student.motherEmail || student.fatherEmail) ? (
+        <>
+          {(student.motherName || student.motherEmail) && (
+            <div className="bg-white border border-slate-200 rounded-xl p-5">
+              <div className="flex items-center gap-3 mb-4 pb-3 border-b border-slate-100">
+                <div className="w-8 h-8 rounded-lg bg-violet-50 flex items-center justify-center">
+                  <Users size={14} className="text-violet-600" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-800">Mother's Portal Account</h3>
+                  <p className="text-[11px] text-slate-400">
+                    {student.motherEmail ? `Login: ${student.motherEmail}` : 'No email on record — add it in Overview first'}
+                    {' · Family tier required'}
+                  </p>
+                </div>
+                <span className={`ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full ${student.hasMotherAccount ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                  {student.hasMotherAccount ? 'Active' : 'Not created'}
+                </span>
+              </div>
+
+              {motherAccResult && (
+                <div className="mb-4 p-3.5 bg-violet-50 border border-violet-200 rounded-xl">
+                  <p className="text-xs font-semibold text-violet-800 mb-1">
+                    Account {motherAccResult.action} — credentials sent to <span className="font-mono">{motherAccResult.email}</span>
+                  </p>
+                  <p className="text-[10px] text-slate-500">She'll receive a welcome email with her login details. If she already has an account for another child here, this just adds this child to it.</p>
+                </div>
+              )}
+
+              {isAdmin && student.motherEmail && !isWithdrawn && (
+                <button
+                  onClick={() => _call('POST', '/parent-account', setMotherAccResult, { guardian: 'mother' }, '/parent-account:mother')}
+                  disabled={!!working}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-violet-600 text-white text-sm font-semibold rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors"
+                >
+                  {working === '/parent-account:mother' ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />}
+                  {student.hasMotherAccount ? 'Resend Mother\'s Credentials' : "Create Mother's Account"}
+                </button>
+              )}
+            </div>
+          )}
+
+          {(student.fatherName || student.fatherEmail) && (
+            <div className="bg-white border border-slate-200 rounded-xl p-5">
+              <div className="flex items-center gap-3 mb-4 pb-3 border-b border-slate-100">
+                <div className="w-8 h-8 rounded-lg bg-violet-50 flex items-center justify-center">
+                  <Users size={14} className="text-violet-600" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-800">Father's Portal Account</h3>
+                  <p className="text-[11px] text-slate-400">
+                    {student.fatherEmail ? `Login: ${student.fatherEmail}` : 'No email on record — add it in Overview first'}
+                    {' · Family tier required'}
+                  </p>
+                </div>
+                <span className={`ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full ${student.hasFatherAccount ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                  {student.hasFatherAccount ? 'Active' : 'Not created'}
+                </span>
+              </div>
+
+              {fatherAccResult && (
+                <div className="mb-4 p-3.5 bg-violet-50 border border-violet-200 rounded-xl">
+                  <p className="text-xs font-semibold text-violet-800 mb-1">
+                    Account {fatherAccResult.action} — credentials sent to <span className="font-mono">{fatherAccResult.email}</span>
+                  </p>
+                  <p className="text-[10px] text-slate-500">He'll receive a welcome email with his login details. If he already has an account for another child here, this just adds this child to it.</p>
+                </div>
+              )}
+
+              {isAdmin && student.fatherEmail && !isWithdrawn && (
+                <button
+                  onClick={() => _call('POST', '/parent-account', setFatherAccResult, { guardian: 'father' }, '/parent-account:father')}
+                  disabled={!!working}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-violet-600 text-white text-sm font-semibold rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors"
+                >
+                  {working === '/parent-account:father' ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />}
+                  {student.hasFatherAccount ? 'Resend Father\'s Credentials' : "Create Father's Account"}
+                </button>
+              )}
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="bg-white border border-slate-200 rounded-xl p-5">
+          <div className="flex items-center gap-3 mb-4 pb-3 border-b border-slate-100">
+            <div className="w-8 h-8 rounded-lg bg-violet-50 flex items-center justify-center">
+              <Users size={14} className="text-violet-600" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-slate-800">Parent Portal Account</h3>
+              <p className="text-[11px] text-slate-400">
+                {student.parentEmail ? `Login: ${student.parentEmail}` : 'No parent email on record — add it in Overview first'}
+                {' · Family tier required'}
+              </p>
+            </div>
+            <span className={`ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full ${student.hasParentAccount ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+              {student.hasParentAccount ? 'Active' : 'Not created'}
+            </span>
           </div>
-          <div>
-            <h3 className="text-sm font-semibold text-slate-800">Parent Portal Account</h3>
-            <p className="text-[11px] text-slate-400">
-              {student.parentEmail ? `Login: ${student.parentEmail}` : 'No parent email on record — add it in Overview first'}
-              {' · Family tier required'}
-            </p>
-          </div>
-          <span className={`ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full ${student.hasParentAccount ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-            {student.hasParentAccount ? 'Active' : 'Not created'}
-          </span>
+
+          {parentAccResult && (
+            <div className="mb-4 p-3.5 bg-violet-50 border border-violet-200 rounded-xl">
+              <p className="text-xs font-semibold text-violet-800 mb-1">
+                Account {parentAccResult.action} — credentials sent to <span className="font-mono">{parentAccResult.email}</span>
+              </p>
+              <p className="text-[10px] text-slate-500">Parent will receive a welcome email with their login details.</p>
+            </div>
+          )}
+
+          {isAdmin && student.parentEmail && !isWithdrawn && (
+            <button
+              onClick={() => _call('POST', '/parent-account', setParentAccResult)}
+              disabled={!!working}
+              className="flex items-center gap-2 px-4 py-2.5 bg-violet-600 text-white text-sm font-semibold rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors"
+            >
+              {working === '/parent-account' ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />}
+              {student.hasParentAccount ? 'Resend Parent Credentials' : 'Create Parent Account'}
+            </button>
+          )}
         </div>
-
-        {parentAccResult && (
-          <div className="mb-4 p-3.5 bg-violet-50 border border-violet-200 rounded-xl">
-            <p className="text-xs font-semibold text-violet-800 mb-1">
-              Account {parentAccResult.action} — credentials sent to <span className="font-mono">{parentAccResult.email}</span>
-            </p>
-            <p className="text-[10px] text-slate-500">Parent will receive a welcome email with their login details.</p>
-          </div>
-        )}
-
-        {isAdmin && student.parentEmail && !isWithdrawn && (
-          <button
-            onClick={() => _call('POST', '/parent-account', setParentAccResult)}
-            disabled={!!working}
-            className="flex items-center gap-2 px-4 py-2.5 bg-violet-600 text-white text-sm font-semibold rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors"
-          >
-            {working === '/parent-account' ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />}
-            {student.hasParentAccount ? 'Resend Parent Credentials' : 'Create Parent Account'}
-          </button>
-        )}
-      </div>
+      )}
 
       {/* ── Deactivate student ───────────────────────────── */}
       {isAdmin && !isWithdrawn && (
