@@ -932,6 +932,17 @@ router.delete('/:id/portal-account', authMiddleware, PLAN, MODGATE, rbac('studen
    Uses student.parentEmail as the login email.
    If a parent account already exists for this email, adds this student to their studentIds.
    Sends welcome email with credentials.
+
+   DEPENDENCY NOTE (2026-09 field update) — this route is UNCHANGED,
+   but where parentEmail/parentName now COME FROM has widened: as of
+   the Mother/Father split (server/utils/guardian-contact.js), both
+   fields are usually DERIVED from whichever parent is marked
+   primaryContact, not hand-typed directly. This route doesn't need to
+   know that — it only ever reads the two final fields, which is
+   exactly why the derivation was designed to feed them rather than
+   replace them. One shared portal account per student either way,
+   confirmed with the school as the intended behavior — nothing here
+   stops both parents from using the same login.
    ──────────────────────────────────────────────────────────────── */
 router.post('/:id/parent-account', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), async (req, res) => {
   try {

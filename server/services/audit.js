@@ -128,6 +128,11 @@ const ACTIONS = {
   'student.promoted':        { severity: 'info' },
   'student.medical_updated': { severity: 'warn' }, // Medical Centre milestone 1 — sensitive data, distinct from a routine profile edit
   'student.medical_consent_recorded': { severity: 'critical' }, // Medical Centre milestone 2 — parent consent has real legal/compliance weight
+  // Admissions — clean application-to-enrollment flow (2026-09 field
+  // update, Phase 3). Creates a real Student record and a permanent
+  // admission number — worth its own trail distinct from an ordinary
+  // application edit.
+  'admissions.enrolled':     { severity: 'info' },
   // Medical Centre milestone 3 — Clinic Visits
   'medical.visit_logged':  { severity: 'info' },
   'medical.visit_deleted': { severity: 'warn' },

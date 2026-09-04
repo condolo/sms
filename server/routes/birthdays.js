@@ -163,6 +163,11 @@ router.post('/notify', rbac('students', 'read'), async (req, res) => {
 
     const todayMD  = _todayStr().slice(5);
     const Students = tenantModel('students', tenantContext(req));
+    // DEPENDENCY NOTE (2026-09 field update) — parentEmail/parentName are
+    // usually DERIVED now (server/utils/guardian-contact.js), from
+    // whichever of Mother/Father is primaryContact, not hand-typed. This
+    // route is unaffected either way — it only ever reads these two
+    // final fields, same as before.
     const allStudents = await Students.find({ schoolId, status: 'active' })
       .select('id firstName lastName dateOfBirth gender className schoolEmail parentEmail parentName')
       .lean();

@@ -355,6 +355,7 @@ export const admissions = {
   ..._resource('admissions'),
   changeStage: (id, data) => _patch(`/admissions/${id}/stage`, data),
   stats:       (params)   => _get('/admissions/stats', params),
+  enroll:      (id)       => _post(`/admissions/${id}/enroll`, {}), // 2026-09 — creates the real Student record
 };
 
 export const timetable = {

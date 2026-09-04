@@ -7,13 +7,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
   X, Loader2, AlertCircle, Edit2, Save, ArrowRight, ChevronRight,
-  GraduationCap, Users, Calendar, Flag, Phone, Mail, Printer,
+  GraduationCap, Users, Calendar, Flag, Phone, Mail, Printer, GraduationCap as EnrollIcon,
 } from 'lucide-react';
 import {
   admissions as admissionsApi, academicConfig as academicConfigApi,
   classes as classesApi, streams as streamsApi,
 } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
+import { useToast } from '@/hooks/useToast.jsx';
 import { stageMeta, avatarColor, initials, formatDate, PRIORITY_CONFIG, applicantClassLabel } from '../constants.js';
 import { Section, Field, inputCls, DetailSection, DetailRow } from './AdmissionsPrimitives.jsx';
 
@@ -151,6 +152,25 @@ export default function DetailPanel({ applicant, onClose, onStageChange }) {
       qc.invalidateQueries({ queryKey: ['admissions'] });
       setEditing(false);
     },
+  });
+
+  // 2026-09 — application-to-enrollment flow. Creates the real Student
+  // record (see server/routes/admissions.js's POST /:id/enroll) and
+  // refreshes both the admissions list (studentId/stage now set on this
+  // application) and the students list (a new student now exists), so
+  // switching to Students immediately shows them without a manual refresh.
+  const { toast } = useToast();
+  const enrollMut = useMutation({
+    mutationFn: () => admissionsApi.enroll(a.id ?? a._id),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['admissions'] });
+      qc.invalidateQueries({ queryKey: ['students'] });
+      const student = res?.data?.student;
+      toast.success(student?.admissionNumber
+        ? `Enrolled — admission number ${student.admissionNumber}`
+        : 'Enrolled successfully.');
+    },
+    onError: err => toast.error(err?.message ?? 'Failed to enroll applicant.'),
   });
 
   function setF(field, val) { setEditForm(f => ({ ...f, [field]: val })); }
@@ -352,6 +372,21 @@ export default function DetailPanel({ applicant, onClose, onStageChange }) {
             <>
               {/* Actions */}
               <div className="px-6 py-4 border-b border-slate-100 space-y-2">
+                {a.studentId ? (
+                  <div className="w-full flex items-center gap-2 bg-emerald-50 text-emerald-700 text-sm font-medium px-4 py-2.5 rounded-xl">
+                    <EnrollIcon size={14} />
+                    Enrolled — a Student record has been created
+                  </div>
+                ) : (a.stage === 'acceptance' || a.stage === 'enrolled') && (
+                  <button
+                    onClick={() => enrollMut.mutate()}
+                    disabled={enrollMut.isPending}
+                    className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-colors"
+                  >
+                    {enrollMut.isPending ? <Loader2 size={14} className="animate-spin" /> : <EnrollIcon size={14} />}
+                    Enroll Student
+                  </button>
+                )}
                 <button
                   onClick={onStageChange}
                   className="w-full flex items-center justify-between bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-colors"
