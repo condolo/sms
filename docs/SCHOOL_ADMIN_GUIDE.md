@@ -220,6 +220,8 @@ If a staff member never received their welcome email, has forgotten their passwo
 | **Parent** | Read-only: their children's data, events, messaging |
 | **Student** | Read-only: own profile, events, timetable |
 
+Dedicated, role-specific guides exist for the four specialist roles above — hand the relevant one to whoever holds that role instead of this general guide: [Finance Guide](FINANCE_GUIDE.md), [HR Guide](HR_GUIDE.md), [Exams Officer Guide](EXAMS_OFFICER_GUIDE.md), [Timetabler Guide](TIMETABLER_GUIDE.md). For the full admissions-to-enrollment workflow (not just the summary in §7 below), see the [Admissions Guide](ADMISSIONS_GUIDE.md).
+
 ### Assigning multiple roles
 
 A user can have more than one role (e.g. a teacher who is also section head). In Settings → Users, click the user and add additional roles. Permissions are the **union** of all assigned roles.
