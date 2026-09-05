@@ -24,6 +24,21 @@ Follow-up to the 2026-09 Admissions Mother/Father split. A school flagged a real
 
 ---
 
+## [v5.57.0] — 2026-09-05 — fix(admissions): enroll no longer silently drops DOB/gender for pre-2026-09 applications
+
+Found while answering a direct question about what test coverage can and can't prove: `POST /:id/enroll` builds the new Student document straight from the application and writes it without ever running it through `StudentCreateSchema`. Because this platform's collections are schema-less (`strict: false`, nothing enforced at the DB layer — `server/utils/model.js`), an application created before Gender/DOB became required (v5.56.0 and earlier admissions phases) could already be sitting at stage `acceptance`/`enrolled` with either field missing — and would enroll today into an incomplete Student record with no error, no warning. No test caught this because every fixture already had a complete post-change application to enroll from; only re-reading the live code path against what real legacy data could look like surfaced it.
+
+### Fixed
+- `server/routes/admissions.js`'s `POST /:id/enroll` now rejects with a clear 400 (`This application is missing required field(s): dateOfBirth, gender. Update the application (PUT) before enrolling.`) when the source application lacks either field, checked **before** reserving an admission number — a rejected attempt never burns one. The application itself is left completely untouched (no stage change, no `studentId` set) when this fires.
+
+### Added
+- `scripts/audit-legacy-admissions-students-fields.js` — read-only diagnostic, makes zero writes. Scans every school's live `admissions`/`students` collections for the three concrete risks pre-2026-09 data can carry: enrollable applications missing DOB/gender, applications with a named parent but no email for them (rejected on the next guardian-field edit), and students in the same situation (blocking that parent's own portal account). Run it from your own terminal (`node scripts/audit-legacy-admissions-students-fields.js`) — this environment has no live DB connection to run it here.
+
+### Verified
+- Full server suite: 191/191 suites, 1805/1805 tests passing (4 new tests covering the missing-DOB case, missing-gender case, no-admission-number-burned, and application-left-untouched). `verify-rbac-coverage.js` 100% (no regression). `security-scan.js` clean.
+
+---
+
 ## [v5.55.0] — 2026-08-12 — feat(weekly-snapshot): auto-generated weekly student digest, delivered per-school-timezone
 
 New **Weekly Student Snapshot** module (Student Services section) — a per-student, per-week digest of everything that happened across the system: topics covered, assignments and scores, attendance, the full behaviour record, medical visits, library activity, and new growth/co-curricular entries. Generated automatically every Saturday, frozen once written, retrievable forever.

@@ -360,6 +360,23 @@ router.post('/:id/enroll',
         return E.badRequest(res, `Cannot enroll an application at stage "${app.stage}" — the offer must be accepted first.`);
       }
 
+      // Gender/DOB became required on NEW applications in the 2026-09
+      // field update, but this platform's collections are schema-less
+      // (server/utils/model.js — strict: false, nothing enforced at the
+      // DB layer), so an application created before that change can
+      // still be sitting here with either field missing. Without this
+      // guard, enroll would silently write an incomplete Student record
+      // — caught only by re-reading this code, not by any test, since
+      // every test fixture already had a complete post-change
+      // application to enroll from. Checked BEFORE reserving an
+      // admission number so a rejected attempt never burns one.
+      const missingRequired = [];
+      if (!app.dateOfBirth) missingRequired.push('dateOfBirth');
+      if (!app.gender) missingRequired.push('gender');
+      if (missingRequired.length) {
+        return E.badRequest(res, `This application is missing required field(s): ${missingRequired.join(', ')}. Update the application (PUT) before enrolling.`);
+      }
+
       const schoolDoc = await _model('schools').findOne({ id: schoolId }, { admissionConfig: 1 }).lean();
       const [admissionNumber] = await reserveAdmissionNumbers(schoolId, 1, schoolDoc?.admissionConfig || {});
 

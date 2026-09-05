@@ -158,6 +158,43 @@ describe('POST /api/admissions/:id/enroll — stage guard', () => {
   });
 });
 
+describe('POST /api/admissions/:id/enroll — legacy-data guard (missing required fields)', () => {
+  /* Gender/DOB became required on NEW applications in the 2026-09 field
+     update, but this platform's collections are schema-less — an
+     application created before that change can still be sitting at
+     'acceptance' with either field missing. Enrolling it must not
+     silently create an incomplete Student record. */
+  test('rejects enrolling an application with no dateOfBirth on file', async () => {
+    mockAppDocs = [app({ dateOfBirth: '' })];
+    const res = await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/dateOfBirth/);
+    expect(mockStudentDocs).toHaveLength(0);
+  });
+
+  test('rejects enrolling an application with no gender on file', async () => {
+    mockAppDocs = [app({ gender: '' })];
+    const res = await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/gender/);
+    expect(mockStudentDocs).toHaveLength(0);
+  });
+
+  test('does not burn an admission number on a rejected legacy-data enroll attempt', async () => {
+    const { reserveAdmissionNumbers } = require('../../utils/counters');
+    mockAppDocs = [app({ dateOfBirth: '', gender: '' })];
+    await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
+    expect(reserveAdmissionNumbers).not.toHaveBeenCalled();
+  });
+
+  test('the application itself is left untouched (no stage/studentId change) when enroll is rejected', async () => {
+    mockAppDocs = [app({ dateOfBirth: '' })];
+    await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
+    expect(mockAppDocs[0].stage).toBe('acceptance');
+    expect(mockAppDocs[0].studentId).toBeUndefined();
+  });
+});
+
 describe('POST /api/admissions/:id/enroll — permission gate', () => {
   test('rejected with admissions:update only, no students:create', async () => {
     mockRolePermsDocs = [{ schoolId: SCHOOL, roleKey: 'admin', permissions: { admissions: ['read', 'update'], students: ['read'] } }];
