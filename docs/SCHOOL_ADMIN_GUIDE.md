@@ -16,9 +16,11 @@
 8. [Role Permissions](#8-role-permissions)
 9. [Your Subscription Plan](#9-your-subscription-plan)
 10. [Branding & School Profile](#10-branding--school-profile)
-11. [Data Export & Backup](#11-data-export--backup)
-12. [Demo School (Msingi)](#12-demo-school-msingi)
-13. [Getting Help](#13-getting-help)
+11. [eLearning Settings — Emergency Online Learning Mode](#11-elearning-settings--emergency-online-learning-mode)
+12. [Custom Email Sending (SMTP)](#12-custom-email-sending-smtp)
+13. [Data Export & Backup](#13-data-export--backup)
+14. [Demo School (Msingi)](#14-demo-school-msingi)
+15. [Getting Help](#15-getting-help)
 
 ---
 
@@ -151,7 +153,7 @@ Each subject needs:
 - **Curriculum** (Cambridge / IB / National / Custom)
 - **Applicable sections** (which school divisions offer this subject)
 
-Subjects are then linked to classes via the **Timetable** module (Standard plan and above).
+Subjects are then linked to classes via the **Timetable** module.
 
 ---
 
@@ -211,9 +213,9 @@ If a staff member never received their welcome email, has forgotten their passwo
 | **Teacher** | Their classes, attendance, gradebook, timetable |
 | **Exams Officer** | Exams and gradebook management |
 | **Admissions Officer** | Admissions module |
-| **Finance** | Finance module only (Standard plan) |
-| **HR** | HR & Payroll module (Premium plan) |
-| **Timetabler** | Timetable builder only (Standard plan) |
+| **Finance** | Finance module only |
+| **HR** | HR & Payroll module only |
+| **Timetabler** | Timetable builder only |
 | **Discipline Committee** | Behaviour & Pastoral module |
 | **Parent** | Read-only: their children's data, events, messaging |
 | **Student** | Read-only: own profile, events, timetable |
@@ -246,14 +248,23 @@ HR-managed fields (department, contract type, employment status, national ID, NS
 
 ### Via Admissions
 
-For a formal application workflow:
-1. **Admissions module** → New Application
-2. Track through stages: Applied → Interview → Accepted → Enrolled
-3. On acceptance, convert to a full student record
+For a formal application workflow, **Admissions → New Application** tracks a child through nine pipeline stages: Enquiry → Application → Assessment → Interview → Offer → Acceptance → Enrolled (Withdrawn/Rejected close the pipeline at any point). Required on every application: **Full Names, Gender, Date of Birth**, and **at least one parent** (Mother or Father — see below). Optional: House selection, Allergies, Emergency Contact, ID/Passport numbers for either parent, previous school.
+
+**Mother and Father are entered separately**, each with their own name, email, phone, and ID/Passport number — not a single combined "parent" field. **Email is required for any parent you name** (phone is optional) — this is what lets that parent get their own portal login later (see Student portal accounts, below); a parent entered with a name but no email will be rejected at save time. Pick which parent is the **Primary Contact** — that one drives the "Registration Date"/"Start Date" style school communications; it doesn't limit which parent can later get a portal account.
+
+**Enrolling an applicant.** Once an application reaches **Acceptance**, its detail panel shows an **Enroll Student** button — a deliberate, explicit click, not an automatic effect of changing the stage dropdown, because it creates a real, permanent Student record. Enrolling:
+- Assigns the student's **permanent admission number** at that exact moment — admission numbers are never assigned earlier, on the application itself.
+- Carries every field across automatically: names, DOB, gender, class/stream/house, Mother/Father details, Allergies and Emergency Contact (filed under the student's Medical tab).
+- Is safe to click twice — enrolling an already-enrolled application returns the same student record rather than creating a duplicate.
+- Is blocked with a clear error if the application is missing Date of Birth or Gender (only possible on an application started before your school's Msingi setup) — update the application first, then enroll.
+
+The application and the resulting student record stay linked, so you can always trace an enrolled student back to their original application.
 
 ### Bulk import (CSV)
 
 Available from **Students → Import**. Upload a CSV of up to 500 students per batch — the system validates every row first and reports which rows succeeded and which were skipped (with a reason) before anything is saved. Rows that don't supply their own admission number are auto-assigned the next number in your school's sequence.
+
+The template mirrors the Admissions form field-for-field: **Date of Birth and Gender are required on every row**, and the same Mother/Father-with-mandatory-email rule applies (or use the older combined `parentName`+phone/email columns instead, if that's what your existing records use — either is accepted, but at least one must be filled in). House, Allergies, and Emergency Contact columns are optional and land in the same places as on the Admissions form. Opening fee columns are optional and only needed when migrating student balances from another system — download the template from the Import screen for the full column list with example rows.
 
 ### Student portal accounts
 
@@ -337,7 +348,7 @@ These settings are used across reports, letters, and the app header.
 
 ---
 
-## 10b. eLearning Settings — Emergency Online Learning Mode *(Standard plan)*
+## 11. eLearning Settings — Emergency Online Learning Mode
 
 Go to **Settings → School Profile** and scroll to the **Emergency Online Learning Mode** section.
 
@@ -358,7 +369,7 @@ Toggle **Emergency Online Learning Mode** and click **Save Settings**. The chang
 
 ---
 
-## 11. Custom Email Sending (SMTP) — Standard plan and above
+## 12. Custom Email Sending (SMTP)
 
 By default, all system emails from your school (welcome messages, password resets, attendance alerts, report card notifications, etc.) are sent from the Msingi platform address (`support@msingi.io`) with your school's name as the display name.
 
@@ -409,7 +420,7 @@ Click **Remove Custom SMTP** at the bottom of the SMTP section to revert to the 
 
 ---
 
-## 12. Data Export & Backup
+## 13. Data Export & Backup
 
 ### Exporting data
 
@@ -435,7 +446,7 @@ This export can be re-imported if you ever need to restore.
 
 ---
 
-## 13. Demo School (Msingi)
+## 14. Demo School (Msingi)
 
 **Msingi Demo School** is the built-in demo environment at `demo.msingi.io`. It contains realistic sample data including 20 students, 9+ teachers, timetables, behaviour records, finance records, and admissions.
 
@@ -460,7 +471,7 @@ Password for all demo accounts: **`Demo2025!`**
 
 ---
 
-## 14. Getting Help
+## 15. Getting Help
 
 ### In-app Help Centre
 
@@ -488,4 +499,4 @@ Email support@msingi.io with:
 
 ---
 
-*Last updated: 2026-06-09 — Msingi v4.30.0*
+*Last reviewed: 2026-09-05 — checked directly against the live server code (plan tiers, Admissions/Mother-Father fields, portal accounts), not carried forward from a prior draft.*
