@@ -295,22 +295,17 @@ Each role has a permission matrix — you can customise what each role can **Vie
 
 Go to **Settings → Billing & Plan** to view your current plan.
 
+**Plans differ by WHO can log in, not which modules you have.** Every plan — Base, Student, or Family — includes the full ERP: Finance & Invoicing, HR & Payroll, M-Pesa integration, Timetable Builder, Behaviour & Pastoral, everything. The tier only decides whether students and/or parents also get their own portal login. This is enforced server-side in `server/middleware/plan.js`'s `FEATURE_PLAN` — every ERP module is gated at the base tier; only `student_portal` and `parent_portal` sit above it. (Source of truth for pricing: `server/config/pricing.js`.)
+
 ### Plan comparison
 
-| Feature | Core | Standard | Premium | Enterprise |
-|---|---|---|---|---|
-| Students, Classes, Subjects | ✅ | ✅ | ✅ | ✅ |
-| Admissions, Attendance, Exams | ✅ | ✅ | ✅ | ✅ |
-| Reports & Analytics | ✅ | ✅ | ✅ | ✅ |
-| Communication & Events | ✅ | ✅ | ✅ | ✅ |
-| **Timetable Builder** | ❌ | ✅ | ✅ | ✅ |
-| **Behaviour & Pastoral** | ❌ | ✅ | ✅ | ✅ |
-| **Finance & Invoicing** | ❌ | ❌ | ✅ | ✅ |
-| **HR & Payroll** | ❌ | ❌ | ✅ | ✅ |
-| **M-Pesa Integration** | ❌ | ❌ | ✅ | ✅ |
-| **White-label / Custom Domain** | ❌ | ❌ | ❌ | ✅ |
-| **LMS Integration** | ❌ | ❌ | ❌ | ✅ |
-| Price (KES/month) | 15,000 | 35,000 | 65,000 | Custom |
+| Tier | Rate | Adds | Includes |
+|---|---|---|---|
+| **Base** | KSh 250 / student / term | Admin + teacher dashboards | The full ERP — students, classes, admissions, attendance, exams, timetable, behaviour, finance & invoicing, HR & payroll, M-Pesa, library, transport, hostel, report cards, messaging |
+| **Student** | KSh 300 / student / term | + Student portal | Everything in Base, plus student login (admission number or school email): lessons progress, timetable, report cards, attendance, fee balance |
+| **Family** | KSh 350 / student / term | + Parent portal | Everything in Student, plus parent login accounts: child progress, curriculum coverage, fees, parent–teacher messaging |
+
+A one-time setup fee (KSh 45,000–75,000, by student headcount) applies separately at onboarding. Enterprise-only platform features (API access, SSO, white-label, multi-campus, advanced analytics) are negotiated individually and aren't part of the per-student tiers above.
 
 ### Free trial
 

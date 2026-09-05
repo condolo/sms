@@ -191,7 +191,7 @@ Direct the school to: `https://innolearn-ecosystem.onrender.com/onboard`
 They fill the 4-step wizard:
 1. School name, type, country, URL slug, curriculum (CBE / IB / British / American), sections
 2. Admin account details + password
-3. Plan selection (Core · Standard · Premium · Enterprise — all with 30-day free trial)
+3. Plan selection (Base · Student · Family — differ by portal access only, not modules; all with 30-day free trial). See `server/config/pricing.js` for current rates.
 4. Review + accept Terms of Service → Submit
 
 **What happens automatically:**

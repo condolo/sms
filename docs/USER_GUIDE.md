@@ -38,7 +38,7 @@ If your school is not yet on Msingi, visit [msingi.io](https://msingi.io) and cl
 
 1. **School Details** — name, type, country, URL slug, curriculum, sections
 2. **Admin Account** — your name and email address (no password needed — see below)
-3. **Choose Plan** — Core, Standard, Premium, or Enterprise (30-day free trial on all plans)
+3. **Choose Plan** — Base, Student, or Family (differ only by who can log in — students and/or parents; every plan includes the full ERP. 30-day free trial on all plans)
 4. **Review & Launch** — confirm your details and click **Launch My School** to submit
 
 > **Curriculum options**: CBE (Kenya — Competency Based Education), IB (International Baccalaureate), British (Cambridge / Edexcel), American (US Common Core / AP)
@@ -85,7 +85,9 @@ Click any role card to log in instantly — no password typing needed:
 
 ### Comparing Plans
 
-Visit **[msingi.io/plans](https://msingi.io/plans)** to see a full feature-by-feature comparison across all four plans (Core, Standard, Premium, Enterprise). Each plan column has a **Get Started** button that takes you directly to the contact form pre-filled for that plan.
+Visit **[msingi.io/plans](https://msingi.io/plans)** to compare Base, Student, and Family — they differ only by who gets a portal login (staff only / + students / + parents), not by which modules are included; every plan has the full ERP. Each plan column has a **Get Started** button that takes you directly to the contact form pre-filled for that plan.
+
+> **Note**: msingi.io is an external marketing site, outside this codebase — if its pricing ever looks off, the authoritative source is `server/config/pricing.js` in the app repo, not this guide or that page.
 
 > **Note**: You cannot log in while your school is pending. If you try, you will see a clear "Application Under Review" screen.
 
