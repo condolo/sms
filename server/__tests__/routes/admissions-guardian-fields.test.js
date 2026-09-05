@@ -116,7 +116,7 @@ describe('_validateGuardianRequirement — unit', () => {
   test('passes with father name + email only', () => {
     expect(_validateGuardianRequirement({ fatherName: 'Kwame', fatherEmail: 'k@example.com' })).toBeNull();
   });
-  test('THE TIGHTENED RULE (separated-parents follow-up): a name WITH a phone but NO email is now rejected — phone is no longer a substitute for email', () => {
+  test('THE TIGHTENED RULE (2026-09 per-parent-account follow-up): a name WITH a phone but NO email is now rejected — phone is no longer a substitute for email', () => {
     const result = _validateGuardianRequirement({ motherName: 'Adjoa', motherPhone: '0700' });
     expect(result).not.toBeNull();
     expect(result[0].field).toBe('motherEmail');

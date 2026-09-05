@@ -71,7 +71,7 @@ Everything else — middle name, House, Allergies, Emergency Contact, ID/Passpor
 
 There is no single "parent" field. Mother and Father each get their own **name, email, phone, and ID/Passport number**.
 
-**Email is required for any parent you name** — phone is optional, but a parent entered with a name and no email will be rejected when you try to save. This is deliberate: email is what lets that parent get their own independent portal login later, once the child is enrolled (see the School Administrator Guide, §7, "Separated parents each get their own login"). A parent you never plan to give portal access to still needs an email on file to satisfy this rule — use any address they check, even if they'll never log in.
+**Email is required for any parent you name** — phone is optional, but a parent entered with a name and no email will be rejected when you try to save. This is deliberate: email is what lets that parent get their own independent portal login later, once the child is enrolled (see the School Administrator Guide, §7, "Mother and Father can each have their own independent login"). A parent you never plan to give portal access to still needs an email on file to satisfy this rule — use any address they check, even if they'll never log in.
 
 **Primary Contact** picks which parent drives day-to-day school communications (letters, the "registration" contact). It does **not** limit which parent can later get a portal account — both can, independently, once enrolled, regardless of which one is Primary Contact.
 

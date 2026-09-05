@@ -931,9 +931,9 @@ router.delete('/:id/portal-account', authMiddleware, PLAN, MODGATE, rbac('studen
    Create or reset a parent portal login account.
    Sends welcome email with credentials.
 
-   PER-PARENT ACCOUNTS (2026-09, separated-parents follow-up) —
-   optional `req.body.guardian: 'mother' | 'father'` selects WHICH
-   parent's own name/email this call acts on:
+   PER-PARENT ACCOUNTS (2026-09) — optional `req.body.guardian:
+   'mother' | 'father'` selects WHICH parent's own name/email this
+   call acts on:
      - omitted  → legacy behaviour, completely unchanged: uses the
        derived student.parentEmail/parentName (whichever parent is
        primaryContact, or the pre-split legacy fields), sets
@@ -944,7 +944,7 @@ router.delete('/:id/portal-account', authMiddleware, PLAN, MODGATE, rbac('studen
      - 'father' → uses student.fatherEmail/fatherName, sets
        hasFatherAccount.
    Each is looked up/created by ITS OWN email, so a school can now
-   give separated parents two fully independent logins for the same
+   give each parent their own fully independent login for the same
    child instead of one shared account — the real-world gap this
    whole 2026-09 guardian-email-mandatory change exists to close.
 

@@ -24,9 +24,9 @@ Found while writing `docs/EXAMS_OFFICER_GUIDE.md` and tracing what that role can
 
 ---
 
-## [v5.56.0] — 2026-09-04 — feat(students): separated parents each get their own portal login
+## [v5.56.0] — 2026-09-04 — feat(students): Mother and Father can each get their own portal login
 
-Follow-up to the 2026-09 Admissions Mother/Father split. A school flagged a real gap: separated parents cannot always share one login, and the portal only ever supported one shared parent account per student. Closed in two steps, in order — the second depends on the first.
+Follow-up to the 2026-09 Admissions Mother/Father split. A school flagged a real gap: some families don't want to share one login, and the portal only ever supported one shared parent account per student. Closed in two steps, in order — the second depends on the first.
 
 ### Changed
 - `server/utils/guardian-contact.js`'s `validateGuardianRequirement` — email is now mandatory for ANY named parent (Mother or Father independently), not "phone or email" as before. A parent entered with a name but no email could never get their own login later, so that gap is now closed at validation time on both the Admissions application form and the student bulk-import template. Phone stays optional. Applies to the new Mother/Father fields only — legacy `parentName` + phone/email CSV columns are untouched.

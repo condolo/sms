@@ -161,7 +161,7 @@ const SECTIONS = [
       },
       {
         q: 'How do I set up a parent portal account?',
-        a: "From the student's profile → Portal tab. If the student has separate Mother and Father details on file, you'll see two independent cards — 'Mother's Portal Account' and 'Father's Portal Account' — each created and reset on its own, so separated parents don't have to share one login. A student with only the older, single combined parent contact shows one 'Create Parent Account' button instead. Either way, parents see their child's attendance, grades, fees, report cards, and can message teachers.",
+        a: "From the student's profile → Portal tab. If the student has separate Mother and Father details on file, you'll see two independent cards — 'Mother's Portal Account' and 'Father's Portal Account' — each created and reset on its own, so no one has to share a password to see their child's information. A student with only the older, single combined parent contact shows one 'Create Parent Account' button instead. Either way, parents see their child's attendance, grades, fees, report cards, and can message teachers.",
       },
       {
         q: 'Can I grant portal access to many students at once?',

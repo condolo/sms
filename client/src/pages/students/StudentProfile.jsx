@@ -1472,11 +1472,11 @@ function PortalTab({ student, canEdit }) {
 
       {/* ── Parent portal account(s) ─────────────────────────
           A record with the Mother/Father split (motherEmail and/or
-          fatherEmail on file) gets one card PER parent — each an
-          independent login, since separated parents can't share one
-          account. A legacy record (only the old combined parentEmail/
-          parentName, never split) keeps the single shared-account card
-          it always had. ──────────────────────────────────────── */}
+          fatherEmail on file) gets one card PER parent — each its own
+          independent login, so neither parent has to share a password
+          with the other. A legacy record (only the old combined
+          parentEmail/parentName, never split) keeps the single
+          shared-account card it always had. ──────────────────── */}
       {(student.motherEmail || student.fatherEmail) ? (
         <>
           {(student.motherName || student.motherEmail) && (

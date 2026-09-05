@@ -18,8 +18,8 @@
    working completely unchanged for anyone not using the newer
    per-parent flow below.
 
-   PER-PARENT ACCOUNTS (2026-09, separated-parents follow-up) — the
-   single-shared-account model above is no longer the whole picture.
+   PER-PARENT ACCOUNTS (2026-09) — the single-shared-account model
+   above is no longer the whole picture.
    students.js's POST /:id/parent-account also accepts an explicit
    `guardian: 'mother' | 'father'`, in which case it reads
    motherEmail/motherName or fatherEmail/fatherName DIRECTLY (not
@@ -59,8 +59,8 @@ function resolvePrimaryContact(merged) {
  *
  * Two rules, deliberately in this order:
  *
- * 1. EMAIL IS MANDATORY FOR ANY NAMED PARENT (2026-09, separated-
- *    parents follow-up) — not "phone or email" anymore. Each parent —
+ * 1. EMAIL IS MANDATORY FOR ANY NAMED PARENT (2026-09) — not "phone
+ *    or email" anymore. Each parent —
  *    Mother and Father independently, not just whichever is
  *    primaryContact — can eventually get their OWN, separate portal
  *    login (students.js's per-parent account creation), not just the

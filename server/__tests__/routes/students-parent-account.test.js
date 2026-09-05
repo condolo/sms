@@ -1,6 +1,5 @@
 /* ============================================================
-   POST /api/students/:id/parent-account — per-parent accounts
-   (2026-09, separated-parents follow-up)
+   POST /api/students/:id/parent-account — per-parent accounts (2026-09)
 
    Covers:
      1. Legacy behaviour (no `guardian` in the body) is completely
