@@ -49,7 +49,7 @@ After your school is created, complete these steps before inviting staff:
 - [ ] **Confirm/edit sections** — Settings → Sections (KG, Primary, Secondary, A-Level are pre-created — edit to match your school)
 - [ ] **Add classes** — Classes module → Add your year groups / form levels
 - [ ] **Add subjects** — Subjects module → Add your curriculum subjects
-- [ ] **Create staff accounts** — Settings → Users → Add Staff
+- [ ] **Add staff** — HR → Staff → Add Staff, then Create Login Account (see §6) — or Settings → Users → Invite User for a bare login with no HR profile
 - [ ] **Assign roles** — Assign each staff member an appropriate role
 - [ ] **Enroll students** — Students module → Enroll or import via Admissions
 
@@ -174,13 +174,20 @@ To customise for your school's structure:
 
 > **Staff Type vs Roles & Responsibilities** — Staff Type (Teacher, Administrator, Librarian, etc.) is the HR/payroll employment category and is a single value per person. Roles & Responsibilities are functional duties — a person can hold several at once (e.g. a teacher who is also HOD and Form Tutor).
 
-### Inviting a staff member
+### Adding a staff member — two things, not one
 
-1. Go to **Settings → Users**
-2. Click **Invite User** (top right)
-3. Enter full name (optional), email address, and assign a role
-4. Click **Send Invite** — Msingi generates a secure password and emails it to the staff member automatically
-5. The staff member can log in immediately with those credentials
+A staff member has two separate records: an **HR profile** (department, staff type, qualifications, national ID, next of kin — everything HR tracks) and a **login account** (what lets them actually sign in). Creating one doesn't automatically create the other. Two ways to add someone, depending on which you need:
+
+**The full way — via HR (recommended for anyone who's actual staff):**
+1. Go to **HR → Staff → Add Staff** and fill in their personal/employment details. This creates their HR profile — they now appear in the staff directory, but **cannot sign in yet**.
+2. Open their profile — it shows an amber **"No login account"** notice with a **Create Login Account** button. Click it, confirm their email and role, and send.
+3. Msingi generates a secure password and emails it to them automatically. They can log in immediately.
+
+**The quick way — via Settings (a bare login, no HR profile):**
+1. Go to **Settings → Users → Invite User**
+2. Enter full name (optional), email address, and assign a role
+3. Click **Send Invite** — same automatic secure-password email as above
+4. The staff member can log in immediately, but has **no HR profile** — nothing shows up under HR → Staff for them. Use this only for accounts that genuinely don't need HR tracking; if you invite someone this way whose email already has an HR profile, Msingi blocks it and tells you to use Create Login Account from their profile instead, so the two records don't end up disconnected.
 
 > **If the email doesn't arrive** — use the Set Password flow below to generate or type a new password you can share directly.
 
@@ -501,4 +508,4 @@ Email support@msingi.io with:
 
 ---
 
-*Last reviewed: 2026-09-05 — checked directly against the live server code (plan tiers, Admissions/Mother-Father fields, portal accounts), not carried forward from a prior draft.*
+*Last reviewed: 2026-09-05 — checked directly against the live server code (plan tiers, Admissions/Mother-Father fields, portal accounts), not carried forward from a prior draft. §2 and §6 corrected same day — staff creation via HR → Staff had been omitted entirely in favor of Settings → Users alone, and the Settings button name itself was wrong ("Add Staff" — the real button is "Invite User").*

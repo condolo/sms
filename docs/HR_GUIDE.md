@@ -25,11 +25,22 @@ The HR module has four tabs: **Staff, Leave, Payroll, Documents.**
 
 ## 2. Staff Records
 
-Go to **HR → Staff**. This is the same staff roster as Settings → Users, scoped to the HR module's own view.
+Go to **HR → Staff**. This is the staff **directory** — everyone's HR profile (department, staff type, employment details, qualifications). It is a **different list from Settings → Users** (login accounts) — a person can be in one, the other, or both, and creating one doesn't create the other. See below.
 
-- **Inviting a new staff member**, **setting a password**, and **assigning roles** are covered in the School Administrator Guide (§6) — those actions live under Settings → Users, not here.
+### Adding a staff member (the HR way — this is the recommended path)
+
+1. Click **Add Staff** and fill in their personal and employment details. This creates their HR profile — they now appear in this directory, but **cannot sign in yet**.
+2. Open their profile. If they have no login, you'll see an amber **"No login account"** notice with a **Create Login Account** button, pre-filled with their name and email from the profile you just created.
+3. Click it, confirm their role, and send — Msingi generates a secure password and emails it to them automatically, the same as Settings → Users' Invite User flow. They can log in immediately.
+4. Once they have a login, that same panel instead shows a green **"Has a login account"** notice.
+
+**Import Staff** (next to Add Staff) does the same thing in bulk from a CSV — one row per staff member, HR profiles created for everyone in the file.
+
+This is genuinely the fuller path: it's the only way to capture department, staff type, qualifications, and the HR fields below in the same flow. **Settings → Users → Invite User** (School Administrator Guide, §6) works too, but only ever creates a bare login with no HR profile behind it — use that only for an account that deliberately doesn't need HR tracking. If you try to invite someone that way whose email already has an HR profile here, Msingi blocks it and points you back to this Create Login Account button instead, so the two records never end up silently disconnected.
+
 - HR-managed fields — department, contract type, employment status, national ID, NSSF/SHA/KRA numbers — are edited from a staff member's HR record and are **not** visible on their own self-edit Profile page. That's deliberate: a staff member can update their own address or next-of-kin, but only HR changes their employment data.
 - **Staff Type vs. Roles & Responsibilities:** Staff Type (Teacher, Administrator, Librarian, etc.) is a single HR/payroll category per person. Roles & Responsibilities (Head of Department, Class Teacher, Timetabler, Exam Officer, Deputy, Principal, or any custom role your school has added) are functional duties — one person can hold several.
+- **Setting a password** for someone who already has a login (forgotten password, welcome email never arrived) is done from **Settings → Users**, not here — see the School Administrator Guide, §6.
 
 ---
 
@@ -87,4 +98,4 @@ Every staff member — not just HR — has their own **My Leaves** and **My Pays
 
 ---
 
-*Last reviewed: 2026-09-05 — checked directly against `client/src/pages/hr/HRPage.jsx` and `server/routes/hr.js`.*
+*Last reviewed: 2026-09-05 — checked directly against `client/src/pages/hr/HRPage.jsx`, `client/src/pages/hr/StaffDetailPanel.jsx`, and `server/routes/settings.js`'s `/users/invite`. §2 corrected same day — it originally, incorrectly, said staff creation lives only under Settings → Users; it also has its own Add Staff / Create Login Account flow, and is in fact the fuller of the two.*
