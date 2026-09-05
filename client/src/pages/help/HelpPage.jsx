@@ -161,7 +161,7 @@ const SECTIONS = [
       },
       {
         q: 'How do I set up a parent portal account?',
-        a: "From the student's profile → Portal tab → click 'Create Parent Account'. This creates a login linked to the student's parent email. Parents see their child's attendance, grades, fees, report cards, and can message teachers.",
+        a: "From the student's profile → Portal tab. If the student has separate Mother and Father details on file, you'll see two independent cards — 'Mother's Portal Account' and 'Father's Portal Account' — each created and reset on its own, so separated parents don't have to share one login. A student with only the older, single combined parent contact shows one 'Create Parent Account' button instead. Either way, parents see their child's attendance, grades, fees, report cards, and can message teachers.",
       },
       {
         q: 'Can I grant portal access to many students at once?',
@@ -225,11 +225,11 @@ const SECTIONS = [
       },
       {
         q: 'How do I create a new application?',
-        a: "Go to Admissions → 'New Application'. Fill in the applicant's details, select the target class and academic year, and submit. A unique application reference is generated automatically.",
+        a: "Go to Admissions → 'New Application'. Fill in the applicant's details (Full Names, Gender, and Date of Birth are required), select the target class and academic year, and add at least one parent — Mother and/or Father, entered separately with their own name and email (email is required for any parent you name, so they can get their own portal login later). A unique application reference is generated automatically.",
       },
       {
         q: 'How do I enrol an accepted applicant as a student?',
-        a: "Open the application and move it to 'Acceptance' or 'Enrolled'. Click 'Enrol as Student' — this creates a student record pre-filled from the application.",
+        a: "Once an application reaches 'Acceptance', open it and click 'Enroll Student' — a deliberate, one-time action that creates a real student record pre-filled from the application and assigns the permanent admission number at that exact moment. Safe to click twice: an already-enrolled application returns the same student rather than creating a duplicate.",
       },
       {
         q: 'Can I track notes and communication per application?',
