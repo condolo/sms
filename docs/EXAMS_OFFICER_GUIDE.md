@@ -12,7 +12,7 @@
 4. [Markbook](#4-markbook)
 5. [Configuration](#5-configuration)
 6. [Reminders](#6-reminders)
-7. [A Known Limit on This Role Today](#7-a-known-limit-on-this-role-today)
+7. [Locking and Unlocking — the One Step That Needs a Grant](#7-locking-and-unlocking--the-one-step-that-needs-a-grant)
 
 ---
 
@@ -33,14 +33,14 @@ Every exam moves through a fixed sequence of statuses, each unlocking the next a
 | **Draft** | Being set up, not yet scheduled | — |
 | **Scheduled** | Date/class/subject confirmed | Start Exam |
 | **In Progress** | Being sat | Mark Completed |
-| **Completed** | Sat, marks being entered | Moderate, Lock *(admin only — see §7)* |
-| **Moderated** | Reviewed for consistency | Approve, Reopen *(admin only)* |
-| **Approved** | Signed off | Lock *(admin only)* |
-| **Locked** | Marks frozen — no further edits | Publish Results, Unlock *(admin only)* |
-| **Published** | Visible to students/parents | Archive *(admin only)* |
+| **Completed** | Sat, marks being entered | Moderate, Lock *(needs a grant — see §7)* |
+| **Moderated** | Reviewed for consistency | Approve, Reopen |
+| **Approved** | Signed off | Lock *(needs a grant — see §7)* |
+| **Locked** | Marks frozen — no further edits | Publish Results, Unlock *(needs a grant — see §7)* |
+| **Published** | Visible to students/parents | Archive |
 | **Archived** | Read-only, historical | — |
 
-You can move an exam from **Scheduled → In Progress → Completed** yourself. Everything from **Moderate onward is currently restricted to Admin/Superadmin** in the app's interface — see §7.
+As an Exams Officer, you can drive the exam through **every one of these transitions yourself** — Start, Complete, Moderate, Approve, Publish, Archive, and Cancel — the same as Admin/Superadmin. **Locking and unlocking are the one exception**, kept deliberately more restrictive since they freeze/unfreeze results outright — see §7.
 
 ---
 
@@ -74,12 +74,14 @@ Go to **Exams → Reminders** for upcoming exam dates and outstanding marking/mo
 
 ---
 
-## 7. A Known Limit on This Role Today
+## 7. Locking and Unlocking — the One Step That Needs a Grant
 
-Confirmed directly in the app's code, not assumed: although the Exams Officer role is granted full create/update/delete permission on Exams at the system level, the **Moderate, Lock, Approve, Unlock, Publish, and Archive** buttons are currently shown only to users with the literal **Admin** or **Superadmin** role — not to Exams Officer, regardless of permission grants in Settings → Roles & Permissions. In practice, an Exams Officer can schedule exams, run them, and enter marks, but finishing the pipeline (moderating, locking, and publishing results) needs an Admin or Superadmin today.
+Locking an exam freezes its results permanently against further edits; unlocking reverses that. Because of how consequential that is, it's held to a higher bar than the rest of the pipeline: by default, only **Admin** and **Superadmin** can lock or unlock an exam.
 
-If your school wants Exams Officers to complete that final stage themselves, flag it to your Msingi contact — it's a real, addressable gap in the interface, not something you're missing in Settings.
+**Your school can extend that to you specifically.** From **Settings → Roles & Permissions**, an admin can grant the **Exams Officer** role (or you individually) the `exams.lock` and/or `exams.unlock` permission — they're independent, so a grant of one doesn't imply the other. Once granted, the **Lock**/**Unlock** buttons appear for you exactly where you'd expect them (on a Completed/Approved exam, and on a Locked one), both from the exam's detail panel and via a direct status change — either way is respected identically.
+
+Without that grant, you can still do everything else in the pipeline — Moderate, Approve, Publish, Archive — up to the point of actually locking; ask your admin to lock/unlock those specific exams, or request the grant if this is a routine part of your work.
 
 ---
 
-*Last reviewed: 2026-09-05 — checked directly against `client/src/pages/exams/ExamsPage.jsx`, `client/src/pages/grades/components/ConfigTab.jsx`, and `server/utils/repairPermissions.js`.*
+*Last reviewed: 2026-09-05 — checked directly against `client/src/pages/exams/ExamsPage.jsx` and `server/routes/exams.js` (TRANSITION_ROLES, `_checkTransition`, `POST /:id/lock`), after fixing the gap this guide originally documented.*

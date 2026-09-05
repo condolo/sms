@@ -67,16 +67,24 @@ const EXAM_TRANSITIONS = {
   cancelled:   [],
 };
 
-/* Roles allowed to drive each transition */
+/* Roles allowed to drive each transition.
+   2026-09 Exams Officer fix: this list previously excluded 'exams_officer'
+   from EVERY entry, despite that role holding full exams:RCUD
+   (server/utils/repairPermissions.js) — an Exams Officer could create exams
+   and enter marks but could not move a single exam through its own
+   lifecycle, not even Start Exam. Added here for every transition except
+   'locked' and 'approved', which are handled separately in _checkTransition
+   below (see the comment there for why 'approved' can't just be added to
+   this list too — it's ambiguous between the Approve and Unlock actions). */
 const TRANSITION_ROLES = {
-  in_progress: ['teacher', 'admin', 'superadmin'],
-  completed:   ['teacher', 'admin', 'superadmin'],
-  cancelled:   ['admin', 'superadmin'],
-  moderated:   ['admin', 'superadmin'],
-  approved:    ['admin', 'superadmin'],
-  locked:      ['admin', 'superadmin'],
-  published:   ['admin', 'superadmin'],
-  archived:    ['admin', 'superadmin'],
+  in_progress: ['teacher', 'exams_officer', 'admin', 'superadmin'],
+  completed:   ['teacher', 'exams_officer', 'admin', 'superadmin'],
+  cancelled:   ['exams_officer', 'admin', 'superadmin'],
+  moderated:   ['exams_officer', 'admin', 'superadmin'],
+  approved:    ['exams_officer', 'admin', 'superadmin'],  // this list only ever governs moderated->approved (ordinary Approve) — locked->approved (unlock) is caught by its own earlier, stricter branch in _checkTransition before this list is even consulted
+  locked:      ['admin', 'superadmin'],  // see _checkTransition — the real floor is the admin/superadmin-or-explicit-grant check there, not this list
+  published:   ['exams_officer', 'admin', 'superadmin'],
+  archived:    ['exams_officer', 'admin', 'superadmin'],
 };
 
 /* Mark states — distinct from absent boolean for backward compat */
@@ -170,11 +178,51 @@ async function _resolveAssessmentType(schoolId, data) {
   return null;
 }
 
-/** Validate exam status transition — returns error string or null */
-function _checkTransition(fromStatus, toStatus, userRole) {
+/**
+ * Validate exam status transition — returns error string or null.
+ *
+ * 2026-09 Exams Officer fix — `grants` carries PRE-RESOLVED
+ * hasExplicitSubGrant() booleans for 'lock'/'unlock' (the caller resolves
+ * these async, before calling this function, so this stays a plain
+ * synchronous function — matching the Permission Granularity Plan's §4a
+ * "Option A" note that this was achievable without making _checkTransition
+ * itself async). Two targets are handled OUTSIDE the plain TRANSITION_ROLES
+ * list because a flat toStatus-keyed list can't express what they actually
+ * need:
+ *   - toStatus === 'locked': must require the admin/superadmin floor OR an
+ *     explicit exams.lock grant — exactly what POST /:id/lock already
+ *     enforces. Before this fix, POST /:id/lock computed that grant check
+ *     correctly but then called this function unchanged, which re-rejected
+ *     a legitimately-granted non-floor caller anyway (the grant check was
+ *     real but silently overridden one line later) — the tracked-open item
+ *     from the Permission Granularity Plan's §4a. Fixed by having both
+ *     call sites pass their already-computed grant through.
+ *   - fromStatus 'locked' -> toStatus 'approved' IS the unlock transition
+ *     (this state machine reuses the 'approved' status for both "reviewed
+ *     and signed off" and "unlocked"). It needs the SAME floor-or-grant
+ *     check as POST /:id/unlock. The much more common 'moderated' ->
+ *     'approved' transition (the ordinary post-moderation Approve action)
+ *     is a different, less sensitive action that happens to share the same
+ *     target status — it stays governed by TRANSITION_ROLES like every
+ *     other transition, now including exams_officer. Blanket-adding
+ *     exams_officer to TRANSITION_ROLES.approved instead of handling this
+ *     split would have silently also granted them (and anyone else on that
+ *     list) the unlock transition via PUT /:id, bypassing the explicit
+ *     exams.lock/exams.unlock grant system entirely.
+ */
+function _checkTransition(fromStatus, toStatus, userRole, grants = {}) {
   const allowed = EXAM_TRANSITIONS[fromStatus] || [];
   if (!allowed.includes(toStatus)) {
     return `Cannot transition from "${fromStatus}" to "${toStatus}". Allowed next states: [${allowed.join(', ')}]`;
+  }
+  const isFloorRole = ['admin', 'superadmin'].includes(userRole);
+  if (toStatus === 'locked') {
+    if (isFloorRole || grants.lock) return null;
+    return `Your role ("${userRole}") cannot set status to "locked" — ask your admin to grant exams.lock in Settings, or use an admin/superadmin account`;
+  }
+  if (fromStatus === 'locked' && toStatus === 'approved') {
+    if (isFloorRole || grants.unlock) return null;
+    return `Your role ("${userRole}") cannot unlock this exam — ask your admin to grant exams.unlock in Settings, or use an admin/superadmin account`;
   }
   const roleOk = TRANSITION_ROLES[toStatus] || [];
   if (roleOk.length && !roleOk.includes(userRole)) {
@@ -428,7 +476,21 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('exams', 'update'), async
 
     // Validate status transition if status is being changed
     if (data.status && data.status !== existing.status) {
-      const transitionError = _checkTransition(existing.status, data.status, role);
+      // Only resolve the exams.lock/exams.unlock grants when this transition
+      // could actually need them (into 'locked', or 'locked'->'approved' i.e.
+      // unlock) — an extra DB read on every other status change (Start Exam,
+      // Mark Completed, Moderate, Approve, Publish, Archive) would be waste.
+      // This is what closes the previously tracked-open gap: PUT /:id now
+      // respects the same Settings-granted exams.lock/exams.unlock as the
+      // dedicated endpoints, instead of being blind to them (see
+      // _checkTransition's own comment for the full reasoning).
+      const grants = {};
+      if (data.status === 'locked') {
+        grants.lock = await hasExplicitSubGrant(req, 'exams', 'lock', 'update');
+      } else if (existing.status === 'locked' && data.status === 'approved') {
+        grants.unlock = await hasExplicitSubGrant(req, 'exams', 'unlock', 'update');
+      }
+      const transitionError = _checkTransition(existing.status, data.status, role, grants);
       if (transitionError) return E.badRequest(res, transitionError);
 
       // Log the transition in audit
@@ -516,24 +578,32 @@ router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('exams', 'delete'), as
 router.post('/:id/lock', authMiddleware, PLAN, MODGATE, rbac('exams', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
-    // Permission Granularity Plan 2026-09, Priority 0 — Option A. The
-    // admin/superadmin floor stays (never weakened); a school can now
-    // additionally grant exams.lock via Settings. Uses hasExplicitSubGrant
-    // (no coarse-grant fallback), same reasoning as report_generate/
-    // mark_submissions: falling back to plain exams:update would hand
-    // lock authority to anyone who can merely create/edit exams. Does
-    // NOT touch TRANSITION_ROLES/_checkTransition (shared state-machine
-    // logic, out of scope for this fix) or PUT /:id (a separate,
-    // documented, not-yet-resolved alternate path — see the Plan §4a).
+    // Permission Granularity Plan 2026-09, Priority 0 — Option A, completed
+    // 2026-09-05. The admin/superadmin floor stays (never weakened); a
+    // school can additionally grant exams.lock via Settings. Uses
+    // hasExplicitSubGrant (no coarse-grant fallback), same reasoning as
+    // report_generate/mark_submissions: falling back to plain exams:update
+    // would hand lock authority to anyone who can merely create/edit exams.
+    //
+    // BUG FIXED HERE (was the tracked-open item from the Plan §4a): this
+    // grant check was computed correctly but then _checkTransition() below
+    // was called WITHOUT it, so it re-rejected the very caller this check
+    // had just approved — TRANSITION_ROLES.locked never included anyone but
+    // admin/superadmin, so an explicitly-granted Exams Officer got PAST this
+    // check only to be silently blocked one line later. _checkTransition now
+    // takes this same boolean and honours it — no other behavior here
+    // changed (the floor is still never weakened, and this is still the
+    // only place a plain exams:update grant is insufficient on its own).
     const isFloorRole = ['admin', 'superadmin'].includes(role);
-    if (!isFloorRole && !(await hasExplicitSubGrant(req, 'exams', 'lock', 'update'))) {
+    const hasLockGrant = await hasExplicitSubGrant(req, 'exams', 'lock', 'update');
+    if (!isFloorRole && !hasLockGrant) {
       return E.forbidden(res, 'Only admins, superadmins, or explicitly granted staff can lock exams');
     }
 
     const exam = await tenantModel('exams', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!exam) return E.notFound(res, 'Exam not found');
 
-    const transitionError = _checkTransition(exam.status, 'locked', role);
+    const transitionError = _checkTransition(exam.status, 'locked', role, { lock: hasLockGrant });
     if (transitionError) return E.badRequest(res, transitionError);
 
     const now = new Date().toISOString();

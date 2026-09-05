@@ -127,6 +127,25 @@ decorative to Partial. `exams` also gained one row: the registry's
 single combined `lock` key was split into independent `lock`/`unlock`
 rows as part of that fix, so the total sub-row count itself grew by one.
 
+**Update (2026-09-05):** the `exams.lock`/`unlock` fix above was found
+to have shipped incomplete — see PERMISSION_GRANULARITY_PLAN_2026-09.md
+§4a's "RESOLVED" addendum for the full trace — and is now actually
+complete for both the dedicated endpoints and the `PUT /:id` alternate
+path (the reason/audit-log request-shape gap on that alternate path
+remains separately open, by design, unrelated to permission
+granularity). Separately, §4b of the same document documents and fixes
+a distinct, larger finding from the same review: the `exams_officer`
+role was excluded from every entry in `exams.js`'s `TRANSITION_ROLES`
+list, not just lock/unlock — meaning that role could create exams and
+enter marks but could not otherwise progress an exam through its own
+lifecycle at all, despite holding full `exams:RCUD`. Fixed for the
+ordinary pipeline (Start/Complete/Moderate/Approve/Publish/Archive/
+Cancel); lock/unlock correctly stay on the stricter floor-or-grant
+standard. No row/count changes to this document's table — both fixes
+are inside existing rows (`exams.lock`, `exams.unlock`) or govern a
+capability (status transitions generally) that was never modeled as
+its own separate registry row.
+
 - 🟢 Fully real: **2 modules** (medical, inventory)
 - 🟡 Partial: **9 modules** (hr, library, hostel, transport, timetable,
   growth_profile, settings, grades, exams)

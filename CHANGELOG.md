@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.58.0] — 2026-09-05 — fix(rbac): Exams Officer can now actually run the exam lifecycle
+
+Found while writing `docs/EXAMS_OFFICER_GUIDE.md` and tracing what that role can really do, not what its permission grant implies — the same discipline applied to the plan/pricing docs and the enroll-flow fix earlier today. Two related but distinct bugs, both in `server/routes/exams.js`.
+
+### Fixed
+- **`TRANSITION_ROLES` excluded `exams_officer` from every entry.** Despite holding full `exams:RCUD` (`server/utils/repairPermissions.js`), an Exams Officer could create an exam and enter marks but could not move it through `PUT /:id` at all — not even Start Exam. Added `exams_officer` to `in_progress`, `completed`, `cancelled`, `moderated`, `published`, and `archived`, giving parity with admin/superadmin for the ordinary pipeline. Deliberately NOT added to `locked`/`approved`'s static lists — see next fix.
+- **`_checkTransition` is now fromStatus-aware for the ambiguous `approved` target**, distinguishing the ordinary `moderated → approved` (Approve, now open to exams_officer) from `locked → approved` (Unlock, which stays behind the same floor-or-explicit-grant standard as the dedicated endpoint) — so opening up ordinary Approve authority can never accidentally also open the Unlock transition through the generic path.
+- **A real bug in the 2026-09-03 exams.lock/unlock fix, found by re-tracing it rather than trusting its own test:** `POST /:id/lock` computed its `hasExplicitSubGrant` check correctly, then called `_checkTransition` without passing it through — so `TRANSITION_ROLES.locked`'s hardcoded admin/superadmin list silently re-rejected the very caller the grant check had just approved. The existing test only asserted `res.status !== 403`, which the resulting 400 also satisfies, masking this completely. Fixed by threading the already-computed grant through; also extended `PUT /:id`'s equivalent alternate path to resolve and respect the same `exams.lock`/`exams.unlock` grants — closing the "PUT /:id not resolved" item explicitly tracked open since that fix (see `docs/audits/PERMISSION_GRANULARITY_PLAN_2026-09.md` §4a's "RESOLVED" addendum and new §4b).
+- `client/src/pages/exams/ExamsPage.jsx` — Moderate/Reopen/Approve/Publish/Archive buttons now check `exams_officer` alongside admin/superadmin; Lock/Unlock buttons check the real `exams__lock`/`exams__unlock` grant via the client's existing `can()` helper, instead of a second, independent hardcoded role guess that didn't match what the server actually enforced.
+
+### Not changed, deliberately
+- `PUT /:id`'s unlock path still doesn't require a `reason` or write a `mark_audit_log` entry the way the dedicated `/unlock` endpoint does — a separate, previously-flagged request-shape correctness gap, not a permission question, left untouched.
+
+### Verified
+- 20 new tests (`server/__tests__/routes/exams-officer-transitions.test.js`): every newly-opened transition, the `locked`/`approved` floor still rejecting an ungranted Exams Officer, both succeeding with the grant, independence between `exams.lock` and `exams.unlock` grants, and a `teacher`-role regression guard. Existing `exams-lock-unlock-permission.test.js` re-run unchanged (12/12 still passing). Full server suite: 192/192 suites, 1825/1825 tests. `verify-rbac-coverage.js` 100% (no regression). `security-scan.js` clean. Client production build passes.
+
+---
+
 ## [v5.56.0] — 2026-09-04 — feat(students): separated parents each get their own portal login
 
 Follow-up to the 2026-09 Admissions Mother/Father split. A school flagged a real gap: separated parents cannot always share one login, and the portal only ever supported one shared parent account per student. Closed in two steps, in order — the second depends on the first.

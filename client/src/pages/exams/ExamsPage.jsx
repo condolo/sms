@@ -1378,7 +1378,19 @@ const STATUS_ACTIONS = {
 function ResultsSlideOver({ exam, onClose, onChanged }) {
   const qc = useQueryClient();
   const role = useAuthStore(s => s.session?.user?.role ?? '');
+  const can  = useAuthStore(s => s.can);
   const isAdmin = ['admin', 'superadmin'].includes(role);
+  // Exams Officer has full exams:RCUD (server/utils/repairPermissions.js) and
+  // can now drive the exam status lifecycle just like admin — EXCEPT lock/
+  // unlock, which stay deliberately more restrictive (see below): locking
+  // freezes results, so it requires the admin/superadmin floor OR an explicit
+  // exams.lock/exams.unlock grant from Settings, matching exactly what
+  // server/routes/exams.js's _checkTransition and POST /:id/lock enforce —
+  // this button visibility is not a separate decision, it mirrors the server.
+  const isExamsOfficer = role === 'exams_officer';
+  const canManageLifecycle = isAdmin || isExamsOfficer;
+  const canLockExams   = isAdmin || can('exams__lock',   'update');
+  const canUnlockExams = isAdmin || can('exams__unlock', 'update');
   const [toast, setToast] = useState(null);
   const [rows, setRows] = useState({}); // studentId -> { score, markState }
   const [showUnlock, setShowUnlock] = useState(false);
@@ -1482,7 +1494,12 @@ function ResultsSlideOver({ exam, onClose, onChanged }) {
     transition({ to: action.to, kind: action.kind });
   }
 
-  const availableActions = (STATUS_ACTIONS[exam.status] ?? []).filter(a => !a.adminOnly || isAdmin);
+  const availableActions = (STATUS_ACTIONS[exam.status] ?? []).filter(a => {
+    if (!a.adminOnly) return true;
+    if (a.kind === 'lock')   return canLockExams;
+    if (a.kind === 'unlock') return canUnlockExams;
+    return canManageLifecycle; // Moderate, Reopen, Approve, Publish Results, Archive
+  });
 
   return (
     <>
