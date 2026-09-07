@@ -205,7 +205,12 @@ const TEMPLATES = {
     notes: [
       '# STUDENT IMPORT TEMPLATE — Msingi School Management',
       '# Instructions:',
-      '#   firstName, lastName, dateOfBirth, gender  — REQUIRED',
+      '#   firstName, lastName — always REQUIRED.',
+      '#   dateOfBirth, gender, and parent info — see "Your school currently requires" below;',
+      '#   these are set per-school at Settings -> School Profile -> Admission Requirements.',
+      '#',
+      '#REQUIREMENT_NOTES_PLACEHOLDER#',
+      '#',
       '#   admissionNumber      — OPTIONAL. Leave blank to auto-generate using your school prefix.',
       '#                          Fill in when migrating from another system to preserve existing numbers.',
       '#                          Never required as input — it is always assigned by Msingi, at the latest',
@@ -216,12 +221,15 @@ const TEMPLATES = {
       '#   streamName           — optional — stream within that class (e.g. A, B, East). Create streams first.',
       '#   houseName            — optional — exact house name as shown in Settings -> School. Create houses first.',
       '#   allergies            — optional free text (e.g. "Peanuts", or leave blank if none known)',
-      '#   motherName/fatherName — at least ONE parent (name + phone or email) is REQUIRED per student.',
+      '#   motherName/fatherName — each independent, with their own email/phone/ID. Whether at least one',
+      '#                           is required, and whether a named parent needs an email, is set per-school —',
+      '#                           see "Your school currently requires" above. Email (not phone) is what lets',
+      '#                           that parent get their own portal login later.',
       '#   primaryContact        — mother | father. Optional — defaults to whichever parent has a name filled',
       '#                           in. Selects which parent\'s details become this student\'s parentName/Email/',
-      '#                           Phone — the fields used for the parent portal login (one shared account per',
-      '#                           student — nothing stops both parents using the same login) and birthday',
-      '#                           emails. Leave parentName/Email/Phone blank to have them derived automatically.',
+      '#                           Phone — the fields birthday emails read, and the fallback the parent portal',
+      '#                           route uses if you don\'t create Mother\'s/Father\'s own accounts separately.',
+      '#                           Leave parentName/Email/Phone blank to have them derived automatically.',
       '#   enrollmentDate       — format YYYY-MM-DD',
       '#   status               — active | inactive | suspended | graduated | transferred | withdrawn (default: active)',
       '#   parentEmail, motherEmail, fatherEmail — must be a valid email if provided',
@@ -471,6 +479,20 @@ async function _buildTeacherMap(schoolId) {
   return map;
 }
 
+/* Renders the "Your school currently requires" block for the students
+   template, from this school's ACTUAL resolved settings — found and
+   fixed 2026-09-07 alongside the Settings toggles themselves: this
+   template's notes previously said "REQUIRED" unconditionally, which
+   would have been flatly wrong the moment any school turned one off. */
+function _studentRequirementNotes(requiredFields) {
+  const label = { dateOfBirth: 'Date of Birth', gender: 'Gender', guardianRequired: 'at least one parent named', guardianEmailRequired: "a named parent's email" };
+  const on  = Object.keys(label).filter(k => requiredFields[k]).map(k => label[k]);
+  const off = Object.keys(label).filter(k => !requiredFields[k]).map(k => label[k]);
+  const lines = [`#   Your school currently REQUIRES: ${on.length ? on.join(', ') : 'none of these'}.`];
+  if (off.length) lines.push(`#   Your school does NOT require: ${off.join(', ')}. (Settings -> School Profile -> Admission Requirements)`);
+  return lines;
+}
+
 /* ─────────────────────────────────────────────────────────────
    GET /api/import-export/template/:type
    Download a demo CSV template with example rows and instructions
@@ -479,8 +501,16 @@ router.get('/template/:type', authMiddleware, async (req, res) => { // rbac: sta
   const tpl = TEMPLATES[req.params.type];
   if (!tpl) return E.notFound(res, `No template for type '${req.params.type}'. Valid types: ${Object.keys(TEMPLATES).join(', ')}`);
 
+  let notes = tpl.notes;
+  if (req.params.type === 'students') {
+    const schoolDoc      = await _model('schools').findOne({ id: req.jwtUser.schoolId }, { admissionConfig: 1 }).lean();
+    const requiredFields = resolveRequiredFields(schoolDoc?.admissionConfig);
+    const idx = notes.indexOf('#REQUIREMENT_NOTES_PLACEHOLDER#');
+    if (idx !== -1) notes = [...notes.slice(0, idx), ..._studentRequirementNotes(requiredFields), ...notes.slice(idx + 1)];
+  }
+
   const lines = [
-    ...tpl.notes,
+    ...notes,
     tpl.headers.join(','),
     ...tpl.examples.map(row => tpl.headers.map(h => {
       const v = String(row[h] ?? '');
