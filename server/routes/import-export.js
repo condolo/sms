@@ -28,6 +28,7 @@ const { _model }              = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { resolvePrimaryContact, validateGuardianRequirement } = require('../utils/guardian-contact');
 const { resolveRequiredFields } = require('../utils/admission-requirements');
+const { PURCHASE_ORIGINS } = require('../utils/purchase-origin');
 const {
   reserveAdmissionNumbers,
   reserveStaffIds,
@@ -420,6 +421,70 @@ const TEMPLATES = {
       '#   dueDate         — format YYYY-MM-DD (optional)',
       '#',
       '#   Each row creates ONE invoice with ONE line item for the given student.',
+      '#   Rows beginning with # are ignored.',
+      '#   Maximum 500 rows per import file.',
+      '#',
+    ],
+  },
+
+  inventory: {
+    plan:    'inventory',
+    rbacRes: 'inventory',
+    headers: ['itemCode', 'name', 'categoryName', 'quantity', 'unit', 'location', 'status', 'purchaseDate', 'origin', 'supplier', 'purchaseValue'],
+    examples: [
+      { itemCode: 'ICT-001', name: 'Dell Laptop', categoryName: 'ICT', quantity: '10', unit: 'pcs', location: 'ICT Store Room', status: 'active', purchaseDate: '2026-01-15', origin: 'imported_china', supplier: 'Nairobi Office Supplies Ltd', purchaseValue: '650000' },
+      { itemCode: 'LAB-014', name: 'Microscope',  categoryName: 'Laboratory', quantity: '5', unit: 'pcs', location: 'Science Lab', status: 'active', purchaseDate: '', origin: 'local', supplier: '', purchaseValue: '' },
+    ],
+    notes: [
+      '# INVENTORY IMPORT TEMPLATE — Msingi School Management',
+      '# Instructions:',
+      '#   itemCode      — REQUIRED, unique per school, e.g. "ICT-001"',
+      '#   name          — REQUIRED, e.g. "Dell Laptop"',
+      '#   categoryName  — REQUIRED, exact category name as shown in Inventory -> Categories. Create it first if missing.',
+      '#   quantity      — OPTIONAL opening quantity (whole number). Default: 0.',
+      '#   unit          — OPTIONAL, e.g. pcs, boxes, litres. Default: pcs.',
+      '#   location      — OPTIONAL store/location reference',
+      '#   status        — OPTIONAL: active | inactive | discontinued. Default: active.',
+      '#   purchaseDate  — OPTIONAL, format YYYY-MM-DD',
+      '#   origin        — OPTIONAL: local | imported_china | imported_other',
+      '#   supplier      — OPTIONAL, company/vendor name (free text)',
+      '#   purchaseValue — OPTIONAL, what was paid for this item, e.g. 45000',
+      '#',
+      '#   An itemCode that already exists for this school is skipped, not updated.',
+      '#   Rows beginning with # are ignored.',
+      '#   Maximum 500 rows per import file.',
+      '#',
+    ],
+  },
+
+  library: {
+    plan:    'library',
+    rbacRes: 'library',
+    headers: ['title', 'author', 'isbn', 'category', 'publisher', 'publishYear', 'copies', 'location', 'purchaseDate', 'origin', 'supplier', 'purchaseValue'],
+    examples: [
+      { title: 'Things Fall Apart', author: 'Chinua Achebe', isbn: '9780385474542', category: 'Fiction', publisher: 'Anchor Books', publishYear: '1994', copies: '5', location: 'Shelf F2', purchaseDate: '2026-02-01', origin: 'local', supplier: 'Text Book Centre', purchaseValue: '3500' },
+      { title: 'KLB Mathematics Form 3', author: '', isbn: '', category: 'Textbook', publisher: 'KLB', publishYear: '2022', copies: '40', location: 'Shelf T1', purchaseDate: '', origin: '', supplier: '', purchaseValue: '' },
+    ],
+    notes: [
+      '# LIBRARY IMPORT TEMPLATE — Msingi School Management',
+      '# Instructions:',
+      '#   title         — REQUIRED, e.g. "Things Fall Apart"',
+      '#   author        — OPTIONAL',
+      '#   isbn          — OPTIONAL',
+      '#   category      — OPTIONAL free text, e.g. General | Textbook | Fiction | Reference | Periodical / Magazine',
+      '#                   (matches Library -> Settings categories, but any text is accepted — not a hard list)',
+      '#   publisher     — OPTIONAL',
+      '#   publishYear   — OPTIONAL, 4-digit year',
+      '#   copies        — OPTIONAL total copies. Default: 1.',
+      '#   location      — OPTIONAL shelf/section reference',
+      '#   purchaseDate  — OPTIONAL, format YYYY-MM-DD',
+      '#   origin        — OPTIONAL: local | imported_china | imported_other',
+      '#   supplier      — OPTIONAL, company/vendor name (free text)',
+      '#   purchaseValue — OPTIONAL, what was paid for this book/batch, e.g. 3500',
+      '#',
+      '#   Every row creates a NEW book record — there is no duplicate-title check',
+      '#   (two schools may legitimately own multiple distinct copies catalogued',
+      '#   separately, or the same title from different publishers/years).',
       '#   Rows beginning with # are ignored.',
       '#   Maximum 500 rows per import file.',
       '#',
@@ -1274,6 +1339,188 @@ async function _importClasses(rows, schoolId, userId) {
   return results;
 }
 
+/* ── Inventory items import handler (2026-09) ────────────────
+   Mirrors _importClasses' shape closely — categoryName is the one
+   lookup (categoryId, matching how className→classId works for
+   students/timetable), everything else is a plain optional field
+   straight onto the item, same as ItemSchema itself. ──────────── */
+async function _importInventoryItems(rows, schoolId, userId) {
+  const Items      = tenantModel('inventory_items', { schoolId });
+  const Categories = tenantModel('inventory_categories', { schoolId });
+
+  const [existingItems, categoryDocs] = await Promise.all([
+    Items.find({ schoolId }).select('itemCode').lean(),
+    Categories.find({ schoolId }).select('id _id name').lean(),
+  ]);
+  const knownCodes = new Set(existingItems.map(i => i.itemCode?.toLowerCase().trim()).filter(Boolean));
+  const categoryMap = {};
+  for (const c of categoryDocs) categoryMap[c.name.toLowerCase().trim()] = { id: c.id || c._id?.toString(), name: c.name };
+
+  const results  = { created: 0, skipped: 0, errors: [] };
+  const toInsert = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const r   = rows[i];
+    const row = i + 1;
+
+    if (r.itemCode?.startsWith('#')) continue;
+
+    if (!r.itemCode?.trim()) { results.errors.push({ row, field: 'itemCode', message: 'itemCode is required' }); results.skipped++; continue; }
+    if (!r.name?.trim())     { results.errors.push({ row, field: 'name',     message: 'name is required' });     results.skipped++; continue; }
+    if (!r.categoryName?.trim()) { results.errors.push({ row, field: 'categoryName', message: 'categoryName is required' }); results.skipped++; continue; }
+
+    const codeKey = r.itemCode.trim().toLowerCase();
+    if (knownCodes.has(codeKey)) {
+      results.skipped++; continue; // silent skip for duplicates — same convention as _importClasses
+    }
+    knownCodes.add(codeKey); // prevent within-batch duplicates
+
+    const category = categoryMap[r.categoryName.trim().toLowerCase()];
+    if (!category) { results.errors.push({ row, field: 'categoryName', message: `Category '${r.categoryName}' not found. Create it first in Inventory -> Categories, then re-import.` }); results.skipped++; continue; }
+
+    let quantity;
+    if (r.quantity?.trim()) {
+      quantity = parseInt(r.quantity, 10);
+      if (isNaN(quantity) || quantity < 0) { results.errors.push({ row, field: 'quantity', message: `quantity must be a non-negative whole number. Got: '${r.quantity}'` }); results.skipped++; continue; }
+    }
+
+    let purchaseValue;
+    if (r.purchaseValue?.trim()) {
+      purchaseValue = Number(r.purchaseValue);
+      if (isNaN(purchaseValue) || purchaseValue < 0) { results.errors.push({ row, field: 'purchaseValue', message: `purchaseValue must be a non-negative number. Got: '${r.purchaseValue}'` }); results.skipped++; continue; }
+    }
+
+    const origin = r.origin?.trim().toLowerCase();
+    if (origin && !PURCHASE_ORIGINS.includes(origin)) {
+      results.errors.push({ row, field: 'origin', message: `origin must be one of: ${PURCHASE_ORIGINS.join(', ')}. Got: '${r.origin}'` });
+      results.skipped++; continue;
+    }
+
+    toInsert.push({
+      id:            uuidv4(),
+      schoolId,
+      itemCode:      r.itemCode.trim(),
+      name:          r.name.trim(),
+      categoryId:    category.id,
+      categoryName:  category.name,
+      quantity:      quantity ?? 0,
+      unit:          r.unit?.trim() || 'pcs',
+      location:      r.location?.trim() || undefined,
+      status:        r.status?.trim() || 'active',
+      purchaseDate:  r.purchaseDate?.trim() || undefined,
+      origin:        origin || undefined,
+      supplier:      r.supplier?.trim() || undefined,
+      purchaseValue: purchaseValue,
+      createdBy:     userId,
+      updatedBy:     userId,
+    });
+  }
+
+  if (toInsert.length > 0) {
+    try {
+      await Items.insertMany(toInsert, { ordered: false });
+      results.created = toInsert.length;
+    } catch (err) {
+      if (err.writeErrors) {
+        const failed = err.writeErrors.length;
+        results.created = toInsert.length - failed;
+        err.writeErrors.forEach(we => {
+          results.errors.push({ row: we.index + 1, message: we.errmsg || 'Duplicate or invalid record' });
+          results.skipped++;
+        });
+      } else throw err;
+    }
+  }
+
+  return results;
+}
+
+/* ── Library books import handler (2026-09) ──────────────────
+   No lookup — category is free text on a book (see BookSchema's own
+   comment), and there is deliberately no duplicate-title check: two
+   schools may legitimately catalogue multiple distinct copies of the
+   same title, or the same title from a different publisher/year. ── */
+async function _importLibraryBooks(rows, schoolId, userId) {
+  const Books = tenantModel('library_books', { schoolId });
+
+  const results  = { created: 0, skipped: 0, errors: [] };
+  const toInsert = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const r   = rows[i];
+    const row = i + 1;
+
+    if (r.title?.startsWith('#')) continue;
+    if (!r.title?.trim()) { results.errors.push({ row, field: 'title', message: 'title is required' }); results.skipped++; continue; }
+
+    let publishYear;
+    if (r.publishYear?.trim()) {
+      publishYear = parseInt(r.publishYear, 10);
+      if (isNaN(publishYear) || publishYear < 1000 || publishYear > new Date().getFullYear() + 1) {
+        results.errors.push({ row, field: 'publishYear', message: `publishYear must be a valid 4-digit year. Got: '${r.publishYear}'` });
+        results.skipped++; continue;
+      }
+    }
+
+    let copies = 1;
+    if (r.copies?.trim()) {
+      copies = parseInt(r.copies, 10);
+      if (isNaN(copies) || copies < 1) { results.errors.push({ row, field: 'copies', message: `copies must be a positive whole number. Got: '${r.copies}'` }); results.skipped++; continue; }
+    }
+
+    let purchaseValue;
+    if (r.purchaseValue?.trim()) {
+      purchaseValue = Number(r.purchaseValue);
+      if (isNaN(purchaseValue) || purchaseValue < 0) { results.errors.push({ row, field: 'purchaseValue', message: `purchaseValue must be a non-negative number. Got: '${r.purchaseValue}'` }); results.skipped++; continue; }
+    }
+
+    const origin = r.origin?.trim().toLowerCase();
+    if (origin && !PURCHASE_ORIGINS.includes(origin)) {
+      results.errors.push({ row, field: 'origin', message: `origin must be one of: ${PURCHASE_ORIGINS.join(', ')}. Got: '${r.origin}'` });
+      results.skipped++; continue;
+    }
+
+    toInsert.push({
+      id:            uuidv4(),
+      schoolId,
+      title:         r.title.trim(),
+      author:        r.author?.trim() || undefined,
+      isbn:          r.isbn?.trim() || undefined,
+      category:      r.category?.trim() || 'General',
+      publisher:     r.publisher?.trim() || undefined,
+      publishYear:   publishYear,
+      copies,
+      available:     copies, // all copies available on creation — same as POST /books
+      location:      r.location?.trim() || undefined,
+      purchaseDate:  r.purchaseDate?.trim() || undefined,
+      origin:        origin || undefined,
+      supplier:      r.supplier?.trim() || undefined,
+      purchaseValue: purchaseValue,
+      createdBy:     userId,
+      createdAt:     new Date().toISOString(),
+      updatedAt:     new Date().toISOString(),
+    });
+  }
+
+  if (toInsert.length > 0) {
+    try {
+      await Books.insertMany(toInsert, { ordered: false });
+      results.created = toInsert.length;
+    } catch (err) {
+      if (err.writeErrors) {
+        const failed = err.writeErrors.length;
+        results.created = toInsert.length - failed;
+        err.writeErrors.forEach(we => {
+          results.errors.push({ row: we.index + 1, message: we.errmsg || 'Invalid record' });
+          results.skipped++;
+        });
+      } else throw err;
+    }
+  }
+
+  return results;
+}
+
 /* ── Timetable import handler ──────────────────────────────── */
 async function _importTimetable(rows, schoolId, userId) {
   const [classMap, teacherMap, streamMap] = await Promise.all([
@@ -1638,6 +1885,8 @@ router.post('/:type', authMiddleware, rawText, /* rbac: dynamic — checked via 
     if (type === 'classes')   results = await _importClasses(rows, schoolId, userId);
     if (type === 'timetable') results = await _importTimetable(rows, schoolId, userId);
     if (type === 'finance')   results = await _importFinance(rows, schoolId, userId, req);
+    if (type === 'inventory') results = await _importInventoryItems(rows, schoolId, userId);
+    if (type === 'library')   results = await _importLibraryBooks(rows, schoolId, userId);
 
     if (!results) return E.notFound(res, `No handler for type '${type}'`);
 
@@ -1689,6 +1938,8 @@ const EXPORT_MODULE = {
   timetable: 'timetable',
   finance:   'finance',
   payroll:   { module: 'hr', action: 'read', subKey: 'payroll_export' },
+  inventory: 'inventory',
+  library:   'library',
 };
 
 router.get('/export/:type', authMiddleware, /* rbac: dynamic — checked via EXPORT_MODULE map inside handler */ async (req, res) => {
@@ -1984,8 +2235,61 @@ router.get('/export/:type', authMiddleware, /* rbac: dynamic — checked via EXP
       csv = toCSV(headers, rows);
       res.setHeader('Content-Disposition', `attachment; filename="${parts.join('_')}.csv"`);
 
+    } else if (type === 'inventory') {
+      const Items = tenantModel('inventory_items', tenantContext(req));
+      const docs  = await Items.find({ schoolId }).sort({ name: 1 }).lean();
+
+      const headers = [
+        'itemCode', 'name', 'categoryName', 'quantity', 'unit', 'location', 'status',
+        'purchaseDate', 'origin', 'supplier', 'purchaseValue', 'createdAt',
+      ];
+      const rows = docs.map(d => ({
+        itemCode:      d.itemCode || '',
+        name:          d.name || '',
+        categoryName:  d.categoryName || '',
+        quantity:      d.quantity ?? '',
+        unit:          d.unit || '',
+        location:      d.location || '',
+        status:        d.status || '',
+        purchaseDate:  d.purchaseDate || '',
+        origin:        d.origin || '',
+        supplier:      d.supplier || '',
+        purchaseValue: d.purchaseValue ?? '',
+        createdAt:     d.createdAt ? new Date(d.createdAt).toISOString().slice(0, 10) : '',
+      }));
+
+      csv = toCSV(headers, rows);
+      res.setHeader('Content-Disposition', `attachment; filename="msingi_inventory_${_dateStamp()}.csv"`);
+
+    } else if (type === 'library') {
+      const Books = tenantModel('library_books', tenantContext(req));
+      const docs  = await Books.find({ schoolId }).sort({ title: 1 }).lean();
+
+      const headers = [
+        'title', 'author', 'isbn', 'category', 'publisher', 'publishYear', 'copies', 'location',
+        'purchaseDate', 'origin', 'supplier', 'purchaseValue', 'createdAt',
+      ];
+      const rows = docs.map(d => ({
+        title:         d.title || '',
+        author:        d.author || '',
+        isbn:          d.isbn || '',
+        category:      d.category || '',
+        publisher:     d.publisher || '',
+        publishYear:   d.publishYear ?? '',
+        copies:        d.copies ?? '',
+        location:      d.location || '',
+        purchaseDate:  d.purchaseDate || '',
+        origin:        d.origin || '',
+        supplier:      d.supplier || '',
+        purchaseValue: d.purchaseValue ?? '',
+        createdAt:     d.createdAt ? new Date(d.createdAt).toISOString().slice(0, 10) : '',
+      }));
+
+      csv = toCSV(headers, rows);
+      res.setHeader('Content-Disposition', `attachment; filename="msingi_library_${_dateStamp()}.csv"`);
+
     } else {
-      return E.notFound(res, `Unsupported export type '${type}'. Valid types: students, teachers, classes, timetable, finance, payroll`);
+      return E.notFound(res, `Unsupported export type '${type}'. Valid types: students, teachers, classes, timetable, finance, payroll, inventory, library`);
     }
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');

@@ -8,14 +8,25 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Boxes, Tag, Search, Plus, X, Loader2, AlertTriangle, Trash2, Edit2,
   ChevronLeft, ChevronRight, ArrowLeftRight, ArrowDownCircle, ArrowUpCircle,
-  RotateCcw, SlidersHorizontal, ClipboardList,
+  RotateCcw, SlidersHorizontal, ClipboardList, ImagePlus, Upload,
 } from 'lucide-react';
 import { inventory as inventoryApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
+import { resizeImageToDataUrl } from '@/utils/imageResize.js';
+import BulkImportSlideOver from '@/components/import/BulkImportSlideOver.jsx';
 import RequisitionsTab from './components/RequisitionsTab.jsx';
 
 const LIMIT = 20;
 const STATUSES = ['active', 'inactive', 'discontinued'];
+// Mirrors server/utils/purchase-origin.js's PURCHASE_ORIGINS/LABELS —
+// shared server-side between Inventory and Library; kept as a small
+// hand-matched constant here since client and server bundles don't
+// share code, same as STATUSES above.
+const ORIGINS = [
+  { value: 'local',           label: 'Local' },
+  { value: 'imported_china',  label: 'Imported — China' },
+  { value: 'imported_other',  label: 'Imported — Other' },
+];
 
 export default function InventoryPage() {
   const [tab, setTab] = useState('items');
@@ -82,6 +93,7 @@ function ItemsTab({ canManage }) {
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [showImport, setShowImport] = useState(false);
 
   const { data: catData } = useQuery({
     queryKey: ['inventory', 'categories'],
@@ -119,6 +131,14 @@ function ItemsTab({ canManage }) {
         </div>
         {canManage && (
           <button
+            onClick={() => setShowImport(true)}
+            className="flex items-center gap-1.5 border border-slate-200 hover:border-slate-300 bg-white text-slate-600 text-sm font-medium px-3 py-2 rounded-lg transition"
+          >
+            <Upload size={13} /> Import / Export
+          </button>
+        )}
+        {canManage && (
+          <button
             onClick={() => { setEditing(null); setShowForm(true); }}
             className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-3 py-2 rounded-lg transition"
           >
@@ -126,6 +146,16 @@ function ItemsTab({ canManage }) {
           </button>
         )}
       </div>
+
+      {showImport && (
+        <BulkImportSlideOver
+          type="inventory"
+          label="Inventory Items"
+          showExport
+          onClose={() => setShowImport(false)}
+          onImported={() => qc.invalidateQueries({ queryKey: ['inventory', 'items'] })}
+        />
+      )}
 
       {showForm && (
         <ItemForm
@@ -167,7 +197,14 @@ function ItemsTab({ canManage }) {
               {rows.map(item => (
                 <tr key={item.id} className="hover:bg-slate-50 transition-colors">
                   <td className="px-4 py-3 font-mono text-xs text-slate-500">{item.itemCode}</td>
-                  <td className="px-4 py-3 font-medium text-slate-800">{item.name}</td>
+                  <td className="px-4 py-3 font-medium text-slate-800">
+                    <div className="flex items-center gap-2.5">
+                      {item.photo
+                        ? <img src={item.photo} alt="" className="w-7 h-7 rounded-md object-cover border border-slate-200 shrink-0" />
+                        : null}
+                      {item.name}
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-slate-600 hidden sm:table-cell">{item.categoryName}</td>
                   <td className="px-4 py-3 text-right text-slate-700">{item.quantity} <span className="text-slate-400">{item.unit}</span></td>
                   <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{item.location ?? '—'}</td>
@@ -214,20 +251,45 @@ function StatusBadge({ status }) {
 
 function ItemForm({ categories, initial, onClose, onSaved }) {
   const [form, setForm] = useState({
-    itemCode:   initial?.itemCode   ?? '',
-    name:       initial?.name       ?? '',
-    categoryId: initial?.categoryId ?? (categories[0]?.id ?? ''),
-    quantity:   initial?.quantity   ?? 0,
-    unit:       initial?.unit       ?? 'pcs',
-    location:   initial?.location   ?? '',
-    status:     initial?.status     ?? 'active',
+    itemCode:      initial?.itemCode      ?? '',
+    name:          initial?.name          ?? '',
+    categoryId:    initial?.categoryId    ?? (categories[0]?.id ?? ''),
+    quantity:      initial?.quantity      ?? 0,
+    unit:          initial?.unit          ?? 'pcs',
+    location:      initial?.location      ?? '',
+    status:        initial?.status        ?? 'active',
+    purchaseDate:  initial?.purchaseDate  ?? '',
+    origin:        initial?.origin        ?? '',
+    supplier:      initial?.supplier      ?? '',
+    purchaseValue: initial?.purchaseValue ?? '',
+    photo:         initial?.photo         ?? '',
   });
+  const [photoError, setPhotoError] = useState('');
+  const [photoBusy,  setPhotoBusy]  = useState(false);
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
 
+  async function onPhotoPick(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { setPhotoError('Image must be under 5 MB'); return; }
+    setPhotoError(''); setPhotoBusy(true);
+    try {
+      set('photo', await resizeImageToDataUrl(file, { maxW: 400, maxH: 400 }));
+    } catch (err) {
+      setPhotoError(err?.message ?? 'Failed to read image');
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
   const mutation = useMutation({
-    mutationFn: () => initial
-      ? inventoryApi.items.update(initial.id, form)
-      : inventoryApi.items.create(form),
+    mutationFn: () => {
+      const payload = { ...form, purchaseValue: form.purchaseValue === '' ? undefined : Number(form.purchaseValue) };
+      if (!payload.origin) delete payload.origin;
+      return initial
+        ? inventoryApi.items.update(initial.id, payload)
+        : inventoryApi.items.create(payload);
+    },
     onSuccess: onSaved,
   });
 
@@ -273,6 +335,45 @@ function ItemForm({ categories, initial, onClose, onSaved }) {
       {initial && (
         <p className="text-[11px] text-slate-400">Quantity changes only through Stock Transactions, not here — coming in the next milestone.</p>
       )}
+
+      {/* ── Purchase details — 2026-09, optional ── */}
+      <div className="pt-3 border-t border-slate-100">
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Purchase Details <span className="font-normal normal-case text-slate-400">(optional)</span></p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FField label="Date of purchase">
+            <input type="date" className={iCls()} value={form.purchaseDate} onChange={e => set('purchaseDate', e.target.value)} />
+          </FField>
+          <FField label="Where bought">
+            <select className={iCls()} value={form.origin} onChange={e => set('origin', e.target.value)}>
+              <option value="">Select…</option>
+              {ORIGINS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </FField>
+          <FField label="Supplier / Company">
+            <input className={iCls()} value={form.supplier} onChange={e => set('supplier', e.target.value)} placeholder="e.g. Nairobi Office Supplies Ltd" />
+          </FField>
+          <FField label="Value paid">
+            <input type="number" min={0} step="any" className={iCls()} value={form.purchaseValue} onChange={e => set('purchaseValue', e.target.value)} placeholder="e.g. 45000" />
+          </FField>
+        </div>
+        <FField label="Photo">
+          <div className="flex items-center gap-3">
+            {form.photo
+              ? <img src={form.photo} alt="" className="w-14 h-14 rounded-lg object-cover border border-slate-200" />
+              : <div className="w-14 h-14 rounded-lg border border-dashed border-slate-300 flex items-center justify-center text-slate-300"><ImagePlus size={18} /></div>}
+            <label className="flex items-center gap-1.5 border border-slate-200 hover:border-slate-300 bg-white text-slate-600 text-xs font-medium px-3 py-2 rounded-lg cursor-pointer transition">
+              {photoBusy ? <Loader2 size={13} className="animate-spin" /> : <ImagePlus size={13} />}
+              {form.photo ? 'Change photo' : 'Add photo'}
+              <input type="file" accept="image/*" className="hidden" onChange={onPhotoPick} disabled={photoBusy} />
+            </label>
+            {form.photo && (
+              <button type="button" onClick={() => set('photo', '')} className="text-xs text-slate-400 hover:text-red-600">Remove</button>
+            )}
+          </div>
+          {photoError && <p className="text-[11px] text-red-600 mt-1">{photoError}</p>}
+        </FField>
+      </div>
+
       <button
         type="submit"
         disabled={mutation.isPending}

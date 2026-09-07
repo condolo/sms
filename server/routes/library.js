@@ -25,6 +25,7 @@ const { moduleGate }     = require('../middleware/module-gate');
 const { rbac, hasPermission } = require('../middleware/rbac');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
+const { PURCHASE_ORIGINS } = require('../utils/purchase-origin');
 
 const router = express.Router();
 const PLAN   = planGate('library');
@@ -70,7 +71,20 @@ const BookSchema = z.object({
   copies:       z.coerce.number().int().min(1).default(1),
   location:     z.string().max(100).trim().optional().default(''),  // shelf/section reference
   description:  z.string().max(1000).trim().optional().default(''),
-  coverUrl:     z.string().url().optional().or(z.literal('')).default(''),
+  coverUrl:     z.string().url().optional().or(z.literal('')).default(''), // legacy — a pasted image link; still shown if set
+  // Purchase details — 2026-09, school-requested, same fields and same
+  // reasoning as inventory.js's ItemSchema: a single snapshot on the
+  // book itself, not a purchase history. See utils/purchase-origin.js
+  // for the shared origin list (kept identical to Inventory's on purpose).
+  purchaseDate:  z.string().optional(),
+  origin:        z.enum(PURCHASE_ORIGINS).optional(),
+  supplier:      z.string().max(200).trim().optional(),
+  purchaseValue: z.coerce.number().min(0).optional(),
+  // Uploaded cover photo — base64 data URI, same pattern as student/
+  // staff photos. Distinct from the legacy coverUrl above: a book can
+  // have one, the other, both (photo takes display priority — see the
+  // client), or neither.
+  photo:         z.string().optional(),
 });
 
 const LoanSchema = z.object({

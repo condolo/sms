@@ -6,6 +6,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.60.0] — 2026-09-07 — feat(inventory, library): purchase details, photos, and CSV import/export
+
+Direct school request: richer Add Item fields (date of purchase, where bought — local vs. China-imported — supplier/company, value, a photo) and the same for Library books, plus CSV import/export for both modules — neither had any bulk import/export before this at all.
+
+### Added
+- `server/utils/purchase-origin.js` — new shared module: `PURCHASE_ORIGINS` (`local` / `imported_china` / `imported_other`) and their display labels, used identically by Inventory and Library so the two can't drift on values or wording.
+- `server/routes/inventory.js`'s `ItemSchema` and `server/routes/library.js`'s `BookSchema` both gain `purchaseDate`, `origin`, `supplier` (free text — not a linked Suppliers entity, by explicit choice), `purchaseValue`, and `photo` (base64 data URI, same pattern as student/staff photos — no separate file storage). Deliberately a single snapshot per item/book, not a purchase history — an inventory `receive` transaction still only ever moves `quantity`.
+- `client/src/utils/imageResize.js` — new shared client helper (downscale + JPEG-encode a picked file client-side before it's stored), used by the two new upload sites; the two pre-existing ones (student/staff photos) were left as they were.
+- `TEMPLATES.inventory` and `TEMPLATES.library` in `server/routes/import-export.js`, plus `_importInventoryItems` and `_importLibraryBooks` handlers — same shape as the existing Students/Teachers/Classes/Finance importers (downloadable template with notes, per-row validation, `results.errors`/`skipped`/`created`). Inventory resolves `categoryName` → `categoryId` the same way Students resolves `className`; a duplicate `itemCode` is silently skipped, matching `_importClasses`' own convention. Library has no duplicate-title check — two schools may legitimately catalogue multiple copies or editions of the same title.
+- `GET /api/import-export/export/inventory` and `/export/library` — CSV export for both, added to `EXPORT_MODULE`. `photo` is deliberately never a export column — a base64 image has no place in a spreadsheet.
+- Inventory's Add Item form and Library's Add Book form both gained a "Purchase Details (optional)" section with the four new fields plus photo upload; both list views show a small thumbnail next to the item/book name when a photo is set. Both pages gained an "Import / Export" button reusing the existing generic `BulkImportSlideOver` component — no new UI component needed.
+
+### Verified
+- 18 new tests (`server/__tests__/routes/import-inventory-library.test.js`) covering both templates, both importers (required fields, categoryName resolution, duplicate handling, origin/numeric validation), and both export branches (correct headers, confirming `photo` is excluded). Full server suite: 195/195 suites, 1879/1879 tests. `verify-rbac-coverage.js` 100% (no regression). `security-scan.js` clean. Client production build passes.
+
+### Scope, confirmed with the user before building
+- Supplier is a free-text field, not a full Suppliers/Vendors module (like Zoho) — that was considered and explicitly deferred.
+- Purchase details are one snapshot on the item/book itself, not tracked per restock transaction.
+- Images use this app's only existing pattern (base64, no file server) — same as student/staff photos.
+
+---
+
 ## [v5.59.0] — 2026-09-07 — feat(admissions): required-field rules move from hardcoded to per-school Settings
 
 Direct request: Gender, Date of Birth, and the guardian rules (at least one parent, and email for any named parent) were hardcoded as required across the Admissions form, the student bulk-import CSV, and the enroll guard — no school could turn any of them off, even if their own admission process didn't need it. Each is now an independent Settings toggle, applied identically everywhere all three already checked it, rather than three places that could quietly drift apart.

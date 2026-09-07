@@ -4,10 +4,23 @@ import { KpiCard } from '@/components/ui/KpiCard.jsx';
 import {
   BookOpen, Plus, Search, BookMarked, Users, AlertTriangle,
   ChevronRight, X, Check, RefreshCw, Trash2, Edit2, ArrowLeft,
+  ImagePlus, Upload, Loader2,
 } from 'lucide-react';
 import { library as libApi, classes as classesApi, students as studentsApi, teachers as teachersApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { useToast } from '@/hooks/useToast.jsx';
+import { resizeImageToDataUrl } from '@/utils/imageResize.js';
+import BulkImportSlideOver from '@/components/import/BulkImportSlideOver.jsx';
+
+// Mirrors server/utils/purchase-origin.js's PURCHASE_ORIGINS/LABELS —
+// shared server-side between Inventory and Library; hand-matched here
+// since client and server bundles don't share code (same as Inventory's
+// own copy of this constant).
+const ORIGINS = [
+  { value: 'local',           label: 'Local' },
+  { value: 'imported_china',  label: 'Imported — China' },
+  { value: 'imported_other',  label: 'Imported — Other' },
+];
 
 /* KpiCard — shared themed component (see @/components/ui/KpiCard.jsx) */
 
@@ -35,12 +48,33 @@ function BookModal({ book, onClose, onSave }) {
     location:    book?.location    ?? '',
     description: book?.description ?? '',
     coverUrl:    book?.coverUrl    ?? '',
+    purchaseDate:  book?.purchaseDate  ?? '',
+    origin:        book?.origin        ?? '',
+    supplier:      book?.supplier      ?? '',
+    purchaseValue: book?.purchaseValue ?? '',
+    photo:         book?.photo         ?? '',
   });
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState('');
+  const [photoError, setPhotoError] = useState('');
+  const [photoBusy,  setPhotoBusy]  = useState(false);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   function toggleClass(id) { set('classIds', form.classIds.includes(id) ? form.classIds.filter(x => x !== id) : [...form.classIds, id]); }
+
+  async function onPhotoPick(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { setPhotoError('Image must be under 5 MB'); return; }
+    setPhotoError(''); setPhotoBusy(true);
+    try {
+      set('photo', await resizeImageToDataUrl(file, { maxW: 240, maxH: 360 })); // book-cover-ish aspect
+    } catch (err) {
+      setPhotoError(err?.message ?? 'Failed to read image');
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
 
   const { data: cfgData } = useQuery({
     queryKey: ['library', 'config'],
@@ -58,7 +92,9 @@ function BookModal({ book, onClose, onSave }) {
     e.preventDefault();
     setSaving(true); setError('');
     try {
-      await onSave(form);
+      const payload = { ...form, purchaseValue: form.purchaseValue === '' ? undefined : Number(form.purchaseValue) };
+      if (!payload.origin) delete payload.origin; // empty string isn't a valid enum value server-side — omit rather than send ''
+      await onSave(payload);
       onClose();
     } catch (err) {
       setError(err.message ?? 'Failed to save book');
@@ -139,6 +175,54 @@ function BookModal({ book, onClose, onSave }) {
             <textarea rows={2} value={form.description} onChange={e => set('description', e.target.value)}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
           </div>
+
+          {/* ── Purchase details — 2026-09, optional ── */}
+          <div className="pt-2 border-t border-slate-100">
+            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-2">Purchase Details <span className="font-normal normal-case text-slate-400">(optional)</span></p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Date of purchase</label>
+                <input type="date" value={form.purchaseDate} onChange={e => set('purchaseDate', e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Where bought</label>
+                <select value={form.origin} onChange={e => set('origin', e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">Select…</option>
+                  {ORIGINS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Supplier / Company</label>
+                <input value={form.supplier} onChange={e => set('supplier', e.target.value)} placeholder="e.g. Text Book Centre"
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Value paid</label>
+                <input type="number" min={0} step="any" value={form.purchaseValue} onChange={e => set('purchaseValue', e.target.value)} placeholder="e.g. 3500"
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </div>
+            <div className="mt-3">
+              <label className="block text-xs font-medium text-slate-700 mb-1">Cover photo</label>
+              <div className="flex items-center gap-3">
+                {form.photo
+                  ? <img src={form.photo} alt="" className="w-12 h-16 rounded-md object-cover border border-slate-200" />
+                  : <div className="w-12 h-16 rounded-md border border-dashed border-slate-300 flex items-center justify-center text-slate-300"><ImagePlus size={16} /></div>}
+                <label className="flex items-center gap-1.5 border border-slate-200 hover:border-slate-300 bg-white text-slate-600 text-xs font-medium px-3 py-2 rounded-lg cursor-pointer transition">
+                  {photoBusy ? <Loader2 size={13} className="animate-spin" /> : <ImagePlus size={13} />}
+                  {form.photo ? 'Change photo' : 'Add photo'}
+                  <input type="file" accept="image/*" className="hidden" onChange={onPhotoPick} disabled={photoBusy} />
+                </label>
+                {form.photo && (
+                  <button type="button" onClick={() => set('photo', '')} className="text-xs text-slate-400 hover:text-red-600">Remove</button>
+                )}
+              </div>
+              {photoError && <p className="text-[11px] text-red-600 mt-1">{photoError}</p>}
+            </div>
+          </div>
+
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-slate-200 hover:bg-slate-50">Cancel</button>
             <button type="submit" disabled={saving}
@@ -366,6 +450,7 @@ export default function LibraryPage() {
   const [bookModal, setBookModal] = useState(null);   // null | 'new' | book-object
   const [loanModal, setLoanModal] = useState(false);
   const [deletingBook, setDeletingBook] = useState(null);
+  const [showImport, setShowImport] = useState(false);
 
   /* ── Queries ─────────────────────────────────────────────── */
   const { data: summaryRaw } = useQuery({
@@ -498,6 +583,10 @@ export default function LibraryPage() {
               className="flex items-center gap-2 px-3 py-2 text-sm rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700">
               <BookOpen size={15} /> Issue Book
             </button>
+            <button onClick={() => setShowImport(true)}
+              className="flex items-center gap-2 px-3 py-2 text-sm rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700">
+              <Upload size={15} /> Import / Export
+            </button>
             <button onClick={() => setBookModal('new')}
               className="flex items-center gap-2 px-3 py-2 text-sm rounded-xl bg-blue-600 text-white hover:bg-blue-700">
               <Plus size={15} /> Add Book
@@ -505,6 +594,16 @@ export default function LibraryPage() {
           </div>
         )}
       </div>
+
+      {showImport && (
+        <BulkImportSlideOver
+          type="library"
+          label="Library Books"
+          showExport
+          onClose={() => setShowImport(false)}
+          onImported={() => qc.invalidateQueries({ queryKey: ['library-books'] })}
+        />
+      )}
 
       {/* KPIs — librarian/admin only (GET /summary is gated server-side) */}
       {canEdit && (
@@ -559,8 +658,15 @@ export default function LibraryPage() {
                   {books.map(book => (
                     <tr key={book.id ?? book._id} className="hover:bg-slate-50 transition">
                       <td className="px-4 py-3">
-                        <div className="font-medium text-slate-800 line-clamp-1">{book.title}</div>
-                        {book.isbn && <div className="text-xs text-slate-400 font-mono">{book.isbn}</div>}
+                        <div className="flex items-center gap-2.5">
+                          {(book.photo || book.coverUrl)
+                            ? <img src={book.photo || book.coverUrl} alt="" className="w-8 h-10 rounded object-cover border border-slate-200 shrink-0" />
+                            : null}
+                          <div>
+                            <div className="font-medium text-slate-800 line-clamp-1">{book.title}</div>
+                            {book.isbn && <div className="text-xs text-slate-400 font-mono">{book.isbn}</div>}
+                          </div>
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-slate-600 hidden sm:table-cell">{book.author || '—'}</td>
                       <td className="px-4 py-3 hidden md:table-cell">

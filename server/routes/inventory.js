@@ -26,6 +26,7 @@ const { rbac, hasPermission } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
+const { PURCHASE_ORIGINS } = require('../utils/purchase-origin');
 const AuditService = require('../services/audit');
 const {
   getWorkflowConfig, saveWorkflowConfig, resolveStep, resolveAssigneeLabel,
@@ -136,6 +137,17 @@ const ItemSchema = z.object({
   unit:         z.string().max(30).trim().default('pcs'),
   location:     z.string().max(200).optional(), // store/location
   status:       z.enum(ITEM_STATUSES).default('active'),
+  // Purchase details — 2026-09, school-requested. Deliberately a single
+  // snapshot on the item itself (its most recent/original purchase), not
+  // tracked per restock — matches this module's existing "deliberately
+  // lightweight" scope (see the file header: no depreciation, no per-
+  // batch cost history). A restock via a 'receive' transaction below
+  // still only ever moves `quantity`; it never touches these fields.
+  purchaseDate:  z.string().optional(),                    // ISO date (YYYY-MM-DD) the item was bought
+  origin:        z.enum(PURCHASE_ORIGINS).optional(),      // where it was sourced from — shared list, see utils/purchase-origin.js
+  supplier:      z.string().max(200).trim().optional(),    // company/vendor bought from — free text, not a linked entity (by design, for now)
+  purchaseValue: z.coerce.number().min(0).optional(),       // what was paid, in the school's own currency (Settings) — no separate currency field here, same convention Finance already uses
+  photo:         z.string().optional(),                     // base64 data URI — same pattern as student/staff photos, no separate file storage
 });
 
 router.get('/items', authMiddleware, PLAN, MODGATE, rbac('inventory', 'read', 'view'), async (req, res) => {
