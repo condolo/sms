@@ -31,6 +31,8 @@
    ============================================================ */
 'use strict';
 
+const { DEFAULT_REQUIRED_FIELDS } = require('./admission-requirements');
+
 /**
  * resolvePrimaryContact(merged)
  * `merged` should already combine the incoming request with whatever
@@ -55,39 +57,57 @@ function resolvePrimaryContact(merged) {
 }
 
 /**
- * validateGuardianRequirement(merged)
+ * validateGuardianRequirement(merged, requiredFields)
  *
- * Two rules, deliberately in this order:
+ * `requiredFields` — a RESOLVED config (see server/utils/
+ * admission-requirements.js's resolveRequiredFields()), i.e. every
+ * key already defaulted. Omit it entirely and this behaves exactly as
+ * before this option existed (both rules fully enforced) — every
+ * existing caller that hasn't been updated to pass a school's config
+ * keeps working unchanged.
  *
- * 1. EMAIL IS MANDATORY FOR ANY NAMED PARENT (2026-09) — not "phone
- *    or email" anymore. Each parent —
- *    Mother and Father independently, not just whichever is
- *    primaryContact — can eventually get their OWN, separate portal
- *    login (students.js's per-parent account creation), not just the
- *    single shared account this system started with. A parent entered
- *    with a name but no email can never get that account later, so a
- *    name without an email is now rejected outright, for either
- *    parent, regardless of which one is primary. Phone remains
- *    optional — a nice-to-have contact method, never a substitute for
- *    the one thing an actual login requires.
- * 2. At least one parent must be identified at all — a record with
- *    neither Mother nor Father filled in has no one the school can
- *    reach.
+ * Two rules, deliberately in this order, each independently toggled
+ * by a school via Settings → School Profile → Admission Requirements:
+ *
+ * 1. guardianEmailRequired (default true) — EMAIL IS MANDATORY FOR ANY
+ *    NAMED PARENT, not "phone or email". Each parent — Mother and
+ *    Father independently, not just whichever is primaryContact — can
+ *    eventually get their OWN, separate portal login (students.js's
+ *    per-parent account creation), not just the single shared account
+ *    this system started with. A parent entered with a name but no
+ *    email can never get that account later, so a name without an
+ *    email is rejected outright when this is on, for either parent,
+ *    regardless of which one is primary. Phone remains optional either
+ *    way — a nice-to-have contact method, never a substitute for the
+ *    one thing an actual login requires. Turning this off means a
+ *    school accepts phone-only parents again — and accepts that such a
+ *    parent may never be able to get their own login later.
+ * 2. guardianRequired (default true) — at least one parent must be
+ *    identified at all. Turning this off means an application/row
+ *    with NEITHER Mother nor Father filled in is accepted — the school
+ *    has decided that's fine for their process (e.g. capturing
+ *    enquiries before guardian details are finalized).
  *
  * Returns a zod-issue-shaped error array, or null if ok.
  */
-function validateGuardianRequirement(merged) {
-  const errors = [];
-  if (merged.motherName && !merged.motherEmail) {
-    errors.push({ field: 'motherEmail', message: "Mother's email is required whenever her name is provided — needed for her own portal account later" });
-  }
-  if (merged.fatherName && !merged.fatherEmail) {
-    errors.push({ field: 'fatherEmail', message: "Father's email is required whenever his name is provided — needed for his own portal account later" });
-  }
-  if (errors.length) return errors;
+function validateGuardianRequirement(merged, requiredFields = DEFAULT_REQUIRED_FIELDS) {
+  const { guardianRequired, guardianEmailRequired } = requiredFields;
 
-  const hasMother = !!(merged.motherName && merged.motherEmail);
-  const hasFather = !!(merged.fatherName && merged.fatherEmail);
+  if (guardianEmailRequired) {
+    const errors = [];
+    if (merged.motherName && !merged.motherEmail) {
+      errors.push({ field: 'motherEmail', message: "Mother's email is required whenever her name is provided — needed for her own portal account later" });
+    }
+    if (merged.fatherName && !merged.fatherEmail) {
+      errors.push({ field: 'fatherEmail', message: "Father's email is required whenever his name is provided — needed for his own portal account later" });
+    }
+    if (errors.length) return errors;
+  }
+
+  if (!guardianRequired) return null;
+
+  const hasMother = !!(merged.motherName && (guardianEmailRequired ? merged.motherEmail : true));
+  const hasFather = !!(merged.fatherName && (guardianEmailRequired ? merged.fatherEmail : true));
   if (!hasMother && !hasFather) {
     return [{ field: 'motherName', message: 'At least one parent (name + email) is required — Mother or Father' }];
   }

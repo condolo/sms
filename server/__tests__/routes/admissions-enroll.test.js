@@ -50,10 +50,11 @@ function mockMatchFilter(doc, filter) {
 }
 function mockChain(result) { return { select: () => mockChain(result), lean: () => Promise.resolve(result) }; }
 
+let mockSchoolDoc; // mutable per-test — lets tests set admissionConfig.requiredFields
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((collection) => {
     if (collection === 'role_permissions') return { findOne: (filter) => mockChain(mockRolePermsDocs.find((d) => mockMatchFilter(d, filter)) ?? null) };
-    if (collection === 'schools') return { findOne: () => mockChain({ admissionConfig: {} }) };
+    if (collection === 'schools') return { findOne: () => mockChain(mockSchoolDoc) };
     return { findOne: () => mockChain(null), find: () => mockChain([]) };
   }),
 }));
@@ -119,6 +120,7 @@ beforeEach(() => {
   mockAppDocs = [];
   mockStudentDocs = [];
   mockNextAdmNo = 'ADM-2026-0001';
+  mockSchoolDoc = { admissionConfig: {} };
 });
 
 function app(overrides = {}) {
@@ -192,6 +194,32 @@ describe('POST /api/admissions/:id/enroll — legacy-data guard (missing require
     await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
     expect(mockAppDocs[0].stage).toBe('acceptance');
     expect(mockAppDocs[0].studentId).toBeUndefined();
+  });
+});
+
+describe('POST /api/admissions/:id/enroll — respects a school that has turned a required field OFF (2026-09)', () => {
+  test('a school with dateOfBirth turned off can enroll an application missing it', async () => {
+    mockSchoolDoc = { admissionConfig: { requiredFields: { dateOfBirth: false } } };
+    mockAppDocs = [app({ dateOfBirth: '' })];
+    const res = await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
+    expect(res.status).toBe(201);
+    expect(mockStudentDocs).toHaveLength(1);
+  });
+
+  test('turning off dateOfBirth does not also relax gender for that same school', async () => {
+    mockSchoolDoc = { admissionConfig: { requiredFields: { dateOfBirth: false } } };
+    mockAppDocs = [app({ dateOfBirth: '', gender: '' })];
+    const res = await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/gender/);
+    expect(res.body.error.message).not.toMatch(/dateOfBirth/);
+  });
+
+  test('a school that has NOT touched this setting still gets the strict, pre-existing behaviour', async () => {
+    mockSchoolDoc = { admissionConfig: {} }; // unchanged from beforeEach — no requiredFields key
+    mockAppDocs = [app({ dateOfBirth: '' })];
+    const res = await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
+    expect(res.status).toBe(400);
   });
 });
 

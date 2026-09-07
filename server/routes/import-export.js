@@ -27,6 +27,7 @@ const { planGate }            = require('../middleware/plan');
 const { _model }              = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { resolvePrimaryContact, validateGuardianRequirement } = require('../utils/guardian-contact');
+const { resolveRequiredFields } = require('../utils/admission-requirements');
 const {
   reserveAdmissionNumbers,
   reserveStaffIds,
@@ -511,6 +512,11 @@ async function _importStudents(rows, schoolId, userId, req) {
   // Load school's admission number config + houses once for the whole batch
   const schoolDoc = await _model('schools').findOne({ id: schoolId }, { admissionConfig: 1, houses: 1 }).lean();
   const admCfg    = schoolDoc?.admissionConfig || {};
+  // Same per-school toggles the Admissions application form now respects
+  // (server/utils/admission-requirements.js) — kept in sync deliberately,
+  // not re-implemented, so a school's Settings choice applies identically
+  // whether a student arrives via the pipeline or bulk import.
+  const requiredFields = resolveRequiredFields(admCfg);
   const houseMap  = {};
   for (const h of (schoolDoc?.houses ?? [])) {
     if (h?.name) houseMap[h.name.toLowerCase().trim()] = h.id ?? h.name;
@@ -546,11 +552,13 @@ async function _importStudents(rows, schoolId, userId, req) {
     // Required fields
     if (!r.firstName?.trim())   { results.errors.push({ row, field: 'firstName',   message: 'First name is required' });    results.skipped++; continue; }
     if (!r.lastName?.trim())    { results.errors.push({ row, field: 'lastName',    message: 'Last name is required' });     results.skipped++; continue; }
-    // 2026-09 field update — dateOfBirth/gender are now required here too,
-    // matching the same rule on the Admissions application form (both
-    // were previously optional on import).
-    if (!r.dateOfBirth?.trim()) { results.errors.push({ row, field: 'dateOfBirth', message: 'Date of birth is required' }); results.skipped++; continue; }
-    if (!r.gender?.trim())      { results.errors.push({ row, field: 'gender',      message: 'Gender is required' });        results.skipped++; continue; }
+    // 2026-09 field update — dateOfBirth/gender are required by default,
+    // matching the Admissions application form, but now a per-school
+    // Settings toggle (requiredFields, resolved above) rather than a
+    // fixed rule — a school that has relaxed either in Settings can
+    // import rows missing it.
+    if (requiredFields.dateOfBirth && !r.dateOfBirth?.trim()) { results.errors.push({ row, field: 'dateOfBirth', message: 'Date of birth is required' }); results.skipped++; continue; }
+    if (requiredFields.gender && !r.gender?.trim())           { results.errors.push({ row, field: 'gender',      message: 'Gender is required' });        results.skipped++; continue; }
 
     // Field coercions / validations
     const gender = r.gender?.trim().toLowerCase();
@@ -571,7 +579,7 @@ async function _importStudents(rows, schoolId, userId, req) {
       // generic stand-in — so a specific problem (e.g. "motherEmail
       // required because motherName is set") is reported as that
       // specific field, not folded into a vague catch-all message.
-      const guardianErrors = validateGuardianRequirement(r);
+      const guardianErrors = validateGuardianRequirement(r, requiredFields);
       if (guardianErrors) {
         results.errors.push({ row, field: guardianErrors[0].field, message: guardianErrors[0].message });
         results.skipped++; continue;

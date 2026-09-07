@@ -233,3 +233,43 @@ describe('POST /api/import-export/students — opening-fee invoice creation is n
     expect(mockAuditLog).not.toHaveBeenCalled();
   });
 });
+
+describe('per-school required-field settings (2026-09) — dateOfBirth/gender toggles', () => {
+  test('dateOfBirth: false lets a row missing it import successfully', async () => {
+    mockStores.schools = makeStore([{ id: SCHOOL, admissionConfig: { requiredFields: { dateOfBirth: false } }, houses: [] }]);
+    const { dateOfBirth, ...withoutDob } = row();
+    const res = await supertest(buildApp())
+      .post('/api/import-export/students').set('Content-Type', 'application/json')
+      .send({ rows: [withoutDob] });
+    expect(res.status).toBe(201);
+  });
+
+  test('gender: false lets a row missing it import successfully', async () => {
+    mockStores.schools = makeStore([{ id: SCHOOL, admissionConfig: { requiredFields: { gender: false } }, houses: [] }]);
+    const { gender, ...withoutGender } = row();
+    const res = await supertest(buildApp())
+      .post('/api/import-export/students').set('Content-Type', 'application/json')
+      .send({ rows: [withoutGender] });
+    expect(res.status).toBe(201);
+  });
+
+  test('turning dateOfBirth off does not also relax gender for the same school', async () => {
+    mockStores.schools = makeStore([{ id: SCHOOL, admissionConfig: { requiredFields: { dateOfBirth: false } }, houses: [] }]);
+    const { dateOfBirth, gender, ...withoutBoth } = row();
+    const res = await supertest(buildApp())
+      .post('/api/import-export/students').set('Content-Type', 'application/json')
+      .send({ rows: [withoutBoth] });
+    expect(res.status).toBe(422);
+    expect(res.body.data.errors[0].field).toBe('gender');
+  });
+
+  test('a school that has NOT touched this setting keeps requiring dateOfBirth (unchanged behaviour)', async () => {
+    // beforeEach's default admissionConfig: {} — no requiredFields key at all
+    const { dateOfBirth, ...withoutDob } = row();
+    const res = await supertest(buildApp())
+      .post('/api/import-export/students').set('Content-Type', 'application/json')
+      .send({ rows: [withoutDob] });
+    expect(res.status).toBe(422);
+    expect(res.body.data.errors[0].field).toBe('dateOfBirth');
+  });
+});

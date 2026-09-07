@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.59.0] — 2026-09-07 — feat(admissions): required-field rules move from hardcoded to per-school Settings
+
+Direct request: Gender, Date of Birth, and the guardian rules (at least one parent, and email for any named parent) were hardcoded as required across the Admissions form, the student bulk-import CSV, and the enroll guard — no school could turn any of them off, even if their own admission process didn't need it. Each is now an independent Settings toggle, applied identically everywhere all three already checked it, rather than three places that could quietly drift apart.
+
+### Added
+- `server/utils/admission-requirements.js` — new shared module. `resolveRequiredFields(admissionConfig)` reads `school.admissionConfig.requiredFields` (a new sub-object, alongside the existing admission-number prefix/padding settings) and defaults every key to `true` (required) when unset — so **no existing school's behaviour changes** unless they explicitly open Settings and relax something. `validateRequiredAdmissionFields()` checks Date of Birth/Gender against that resolved config.
+- `client/src/pages/settings/SettingsPage.jsx` — new **Admission Requirements** panel (Settings → School Profile), four independent toggles: Date of Birth, Gender, "at least one parent," and "named parent's email." Uses the same save path as the existing Admission Numbers settings — no new endpoint needed.
+
+### Changed
+- `server/utils/guardian-contact.js`'s `validateGuardianRequirement` now takes an optional resolved `requiredFields` argument — omit it and behaviour is identical to before this feature existed (fully strict), so nothing else calling it needed to change. `guardianEmailRequired` and `guardianRequired` are independently toggleable: a school can require an email whenever a parent IS named without requiring that one be named at all, or vice versa.
+- `server/routes/admissions.js` — `dateOfBirth`/`gender` are now Zod-optional, enforced instead by a manual check against the school's resolved config (POST only; PUT was never strict on these — unchanged). The enroll guard (`POST /:id/enroll`) now only blocks on a field the school actually requires, reusing the same `admissionConfig` fetch it already made for admission-number reservation — no extra query.
+- `server/routes/import-export.js`'s `_importStudents` resolves the same config from the single `schoolDoc` fetch it already made for admission-number settings and houses, and applies it row-by-row — the bulk-import CSV and the Admissions form can never enforce different rules for the same school.
+- `client/src/pages/admissions/components/AddSlideOver.jsx` — required-field asterisks and client-side validation now read the school's live settings instead of being hardcoded, so the form's "*" markers always match what the server will actually enforce.
+
+### Verified
+- New unit suite `server/__tests__/admission-requirements.test.js` (10 tests) plus extensions to `admissions-guardian-fields.test.js` (+11), `admissions-enroll.test.js` (+3), `import-students-guardian-fields.test.js` (+3), and `import-students-fields.test.js` (+4) — 31 new tests total, proving each toggle independently, that toggles don't leak into each other (e.g. turning off Date of Birth doesn't relax Gender), and that a school which has never touched this setting gets byte-for-byte the same behaviour as before. Full server suite: 193/193 suites, 1856/1856 tests. `verify-rbac-coverage.js` 100% (no regression). `security-scan.js` clean. Client production build passes.
+- No live browser click-through of the new Settings panel — this environment has no live database connection; verified via the full server test suite plus a clean production build instead.
+
+---
+
 ## [v5.58.0] — 2026-09-05 — fix(rbac): Exams Officer can now actually run the exam lifecycle
 
 Found while writing `docs/EXAMS_OFFICER_GUIDE.md` and tracing what that role can really do, not what its permission grant implies — the same discipline applied to the plan/pricing docs and the enroll-flow fix earlier today. Two related but distinct bugs, both in `server/routes/exams.js`.

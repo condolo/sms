@@ -16,6 +16,7 @@ const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { resolvePrimaryContact, validateGuardianRequirement } = require('../utils/guardian-contact');
+const { resolveRequiredFields, validateRequiredAdmissionFields } = require('../utils/admission-requirements');
 const { reserveAdmissionNumbers } = require('../utils/counters');
 const { resolveAcademicPeriod }   = require('../utils/academic-period');
 const AuditService = require('../services/audit');
@@ -33,9 +34,14 @@ const ApplicationSchema = z.object({
   firstName:      z.string().min(1).max(100).trim(),
   lastName:       z.string().min(1).max(100).trim(),
   middleName:     z.string().max(100).trim().optional(),
-  // Required (2026-09 field update) — were previously optional.
-  dateOfBirth:    z.string().min(1),
-  gender:         z.enum(['male', 'female', 'other', 'prefer_not_to_say']),
+  // Required BY DEFAULT (2026-09 field update), but a per-school Settings
+  // toggle (school.admissionConfig.requiredFields — see server/utils/
+  // admission-requirements.js) — enforced manually in POST below, not by
+  // Zod, since that check needs the school's own config, not a static
+  // rule. Optional here so a school that has turned either off can still
+  // save without it.
+  dateOfBirth:    z.string().optional(),
+  gender:         z.enum(['male', 'female', 'other', 'prefer_not_to_say']).optional(),
   allergies:      z.string().max(1000).optional(),
 
   // House — same denormalized id+name pattern as applyingForClass/Stream
@@ -220,12 +226,20 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('admissions', 'create'), as
     if (error) return E.validation(res, error);
     delete data.studentId; // system-managed — see POST /:id/enroll
 
-    const guardianError = validateGuardianRequirement(data);
+    // Fetched once, used for BOTH this school's required-field settings
+    // and (below) the academic-year label for the application reference —
+    // one query, not two.
+    const schoolDoc      = await _model('schools').findOne({ id: schoolId }, { academicYear: 1, academicYearStartMonth: 1, admissionConfig: 1 }).lean();
+    const requiredFields = resolveRequiredFields(schoolDoc?.admissionConfig);
+
+    const fieldErrors = validateRequiredAdmissionFields(data, requiredFields);
+    if (fieldErrors) return E.validation(res, fieldErrors);
+
+    const guardianError = validateGuardianRequirement(data, requiredFields);
     if (guardianError) return E.validation(res, guardianError);
     Object.assign(data, resolvePrimaryContact(data));
 
     // Generate a unique application reference using school's configured academic year
-    const schoolDoc  = await _model('schools').findOne({ id: schoolId }, { academicYear: 1, academicYearStartMonth: 1 }).lean();
     const yearLabel  = schoolDoc?.academicYear ?? String(new Date().getFullYear());
     // Extract leading 4-digit year from label ("2025/2026" → "2025", "2026" → "2026")
     const yearCode   = yearLabel.match(/\d{4}/)?.[0] ?? String(new Date().getFullYear());
@@ -266,7 +280,9 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('admissions', 'update'), 
     const GUARDIAN_FIELDS = ['primaryContact', 'motherName', 'motherEmail', 'motherPhone', 'fatherName', 'fatherEmail', 'fatherPhone'];
     if (GUARDIAN_FIELDS.some(k => data[k] !== undefined)) {
       const merged = { ...existing, ...data };
-      const guardianError = validateGuardianRequirement(merged);
+      const schoolDoc      = await _model('schools').findOne({ id: schoolId }, { admissionConfig: 1 }).lean();
+      const requiredFields = resolveRequiredFields(schoolDoc?.admissionConfig);
+      const guardianError  = validateGuardianRequirement(merged, requiredFields);
       if (guardianError) return E.validation(res, guardianError);
       Object.assign(data, resolvePrimaryContact(merged));
     }
@@ -360,24 +376,28 @@ router.post('/:id/enroll',
         return E.badRequest(res, `Cannot enroll an application at stage "${app.stage}" — the offer must be accepted first.`);
       }
 
-      // Gender/DOB became required on NEW applications in the 2026-09
-      // field update, but this platform's collections are schema-less
-      // (server/utils/model.js — strict: false, nothing enforced at the
-      // DB layer), so an application created before that change can
-      // still be sitting here with either field missing. Without this
-      // guard, enroll would silently write an incomplete Student record
-      // — caught only by re-reading this code, not by any test, since
-      // every test fixture already had a complete post-change
-      // application to enroll from. Checked BEFORE reserving an
-      // admission number so a rejected attempt never burns one.
+      // Fetched once, used for BOTH the required-field check below and
+      // (further down) admission-number reservation — one query.
+      const schoolDoc      = await _model('schools').findOne({ id: schoolId }, { admissionConfig: 1 }).lean();
+      const requiredFields = resolveRequiredFields(schoolDoc?.admissionConfig);
+
+      // Gender/DOB are required on NEW applications by default (2026-09
+      // field update), but that's now a per-school Settings toggle — and
+      // regardless of the school's current setting, this platform's
+      // collections are schema-less (server/utils/model.js — strict:
+      // false, nothing enforced at the DB layer), so an application
+      // created under a stricter or looser configuration than the
+      // school's CURRENT one can still be sitting here in any shape.
+      // Without this guard, enroll would silently write an incomplete
+      // Student record. Checked BEFORE reserving an admission number so
+      // a rejected attempt never burns one.
       const missingRequired = [];
-      if (!app.dateOfBirth) missingRequired.push('dateOfBirth');
-      if (!app.gender) missingRequired.push('gender');
+      if (requiredFields.dateOfBirth && !app.dateOfBirth) missingRequired.push('dateOfBirth');
+      if (requiredFields.gender && !app.gender) missingRequired.push('gender');
       if (missingRequired.length) {
         return E.badRequest(res, `This application is missing required field(s): ${missingRequired.join(', ')}. Update the application (PUT) before enrolling.`);
       }
 
-      const schoolDoc = await _model('schools').findOne({ id: schoolId }, { admissionConfig: 1 }).lean();
       const [admissionNumber] = await reserveAdmissionNumbers(schoolId, 1, schoolDoc?.admissionConfig || {});
 
       // Use the application's own applyingForYear/academicYearId if it

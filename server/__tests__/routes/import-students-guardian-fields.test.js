@@ -198,3 +198,24 @@ describe('Allergies / Emergency Contact — land under medical.*, matching the S
     expect(mockStores.students._docs()[0].medical).toBeUndefined();
   });
 });
+
+describe('per-school required-field settings (2026-09) — same config the Admissions form respects', () => {
+  test('guardianRequired: false — a row with no parent info at all is accepted on import', async () => {
+    mockStores.schools = makeStore([{ id: SCHOOL, admissionConfig: { requiredFields: { guardianRequired: false } }, houses: [] }]);
+    const res = await supertest(buildApp()).post('/api/import-export/students').send({ rows: [{ ...BASE }] });
+    expect(res.status).toBe(201);
+  });
+
+  test('guardianEmailRequired: false — a phone-only mother is accepted on import again', async () => {
+    mockStores.schools = makeStore([{ id: SCHOOL, admissionConfig: { requiredFields: { guardianEmailRequired: false } }, houses: [] }]);
+    const res = await supertest(buildApp()).post('/api/import-export/students')
+      .send({ rows: [{ ...BASE, motherName: 'Adjoa Osei', motherPhone: '+254700000001' }] });
+    expect(res.status).toBe(201);
+  });
+
+  test('a school that has NOT touched this setting keeps the strict, pre-existing behaviour', async () => {
+    // beforeEach's default admissionConfig: {} — no requiredFields key at all
+    const res = await supertest(buildApp()).post('/api/import-export/students').send({ rows: [{ ...BASE }] });
+    expect(res.status).toBe(422); // no legacy parent, no mother/father — rejected as before
+  });
+});

@@ -43,9 +43,10 @@ function mockMatchFilter(doc, filter) {
 function mockChain(result) { return { select: () => mockChain(result), lean: () => Promise.resolve(result) }; }
 
 let mockAppDocs;
+let mockSchoolDoc; // mutable per-test — lets tests set admissionConfig.requiredFields
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((collection) => {
-    if (collection === 'schools') return { findOne: () => mockChain({ academicYear: '2026' }) };
+    if (collection === 'schools') return { findOne: () => mockChain(mockSchoolDoc) };
     return { findOne: () => mockChain(null), find: () => mockChain([]) };
   }),
 }));
@@ -81,7 +82,7 @@ function buildApp() {
   return app;
 }
 
-beforeEach(() => { mockAppDocs = []; });
+beforeEach(() => { mockAppDocs = []; mockSchoolDoc = { academicYear: '2026' }; });
 
 const BASE = {
   firstName: 'Amara', lastName: 'Osei', gender: 'female', dateOfBirth: '2018-04-02',
@@ -131,6 +132,36 @@ describe('_validateGuardianRequirement — unit', () => {
   });
   test('fails when neither parent is filled at all', () => {
     expect(_validateGuardianRequirement({})).not.toBeNull();
+  });
+
+  describe('per-school requiredFields override (2026-09)', () => {
+    test('guardianRequired: false — an empty record passes even with no parent at all', () => {
+      const requiredFields = { guardianRequired: false, guardianEmailRequired: true };
+      expect(_validateGuardianRequirement({}, requiredFields)).toBeNull();
+    });
+
+    test('guardianEmailRequired: false — a name with only a phone is accepted again', () => {
+      const requiredFields = { guardianRequired: true, guardianEmailRequired: false };
+      expect(_validateGuardianRequirement({ motherName: 'Adjoa', motherPhone: '0700' }, requiredFields)).toBeNull();
+    });
+
+    test('guardianEmailRequired: false still enforces "at least one parent" when guardianRequired stays true', () => {
+      const requiredFields = { guardianRequired: true, guardianEmailRequired: false };
+      const result = _validateGuardianRequirement({}, requiredFields);
+      expect(result).not.toBeNull();
+      expect(result[0].field).toBe('motherName');
+    });
+
+    test('both relaxed — completely empty record passes', () => {
+      const requiredFields = { guardianRequired: false, guardianEmailRequired: false };
+      expect(_validateGuardianRequirement({}, requiredFields)).toBeNull();
+    });
+
+    test('omitting requiredFields entirely behaves exactly as before this option existed (fully strict)', () => {
+      const result = _validateGuardianRequirement({ motherName: 'Adjoa', motherPhone: '0700' });
+      expect(result).not.toBeNull();
+      expect(result[0].field).toBe('motherEmail');
+    });
   });
 });
 
@@ -198,5 +229,53 @@ describe('PUT /api/admissions/:id — partial updates and re-derivation', () => 
     mockAppDocs = [{ id: 'app_3', schoolId: SCHOOL, ...BASE }];
     const res = await supertest(buildApp()).put('/api/admissions/app_3').send({ motherName: '', motherPhone: '', motherEmail: '' });
     expect(res.status).toBe(422);
+  });
+});
+
+describe('POST /api/admissions — per-school required-field settings (2026-09)', () => {
+  test('a school with dateOfBirth/gender turned OFF accepts an application missing both', async () => {
+    mockSchoolDoc = { academicYear: '2026', admissionConfig: { requiredFields: { dateOfBirth: false, gender: false } } };
+    const { gender, dateOfBirth, ...withoutRequired } = BASE;
+    const res = await supertest(buildApp()).post('/api/admissions').send(withoutRequired);
+    expect(res.status).toBe(201);
+  });
+
+  test('turning OFF dateOfBirth does not also relax gender — still enforced independently', async () => {
+    mockSchoolDoc = { academicYear: '2026', admissionConfig: { requiredFields: { dateOfBirth: false } } };
+    const { gender, dateOfBirth, ...withoutRequired } = BASE;
+    const res = await supertest(buildApp()).post('/api/admissions').send(withoutRequired);
+    expect(res.status).toBe(422);
+    expect(res.body.error.issues.map(e => e.field)).toEqual(['gender']);
+  });
+
+  test('a school with guardianRequired turned OFF accepts an application with no parent at all', async () => {
+    mockSchoolDoc = { academicYear: '2026', admissionConfig: { requiredFields: { guardianRequired: false } } };
+    const { motherName, motherPhone, motherEmail, ...noParent } = BASE;
+    const res = await supertest(buildApp()).post('/api/admissions').send(noParent);
+    expect(res.status).toBe(201);
+  });
+
+  test('a school with guardianEmailRequired turned OFF accepts a phone-only parent again', async () => {
+    mockSchoolDoc = { academicYear: '2026', admissionConfig: { requiredFields: { guardianEmailRequired: false } } };
+    const { motherEmail, ...phoneOnly } = BASE;
+    const res = await supertest(buildApp()).post('/api/admissions').send(phoneOnly);
+    expect(res.status).toBe(201);
+    expect(res.body.data.parentPhone).toBe('+254700000001');
+  });
+
+  test('a school that has NOT touched Settings gets identical behaviour to before this feature — still fully strict', async () => {
+    mockSchoolDoc = { academicYear: '2026' }; // no admissionConfig.requiredFields at all
+    const { gender, dateOfBirth, ...withoutRequired } = BASE;
+    const res = await supertest(buildApp()).post('/api/admissions').send(withoutRequired);
+    expect(res.status).toBe(422);
+  });
+});
+
+describe('PUT /api/admissions/:id — per-school required-field settings respected on guardian re-check', () => {
+  test('guardianRequired: false allows a partial update that clears both parents', async () => {
+    mockSchoolDoc = { academicYear: '2026', admissionConfig: { requiredFields: { guardianRequired: false } } };
+    mockAppDocs = [{ id: 'app_4', schoolId: SCHOOL, ...BASE }];
+    const res = await supertest(buildApp()).put('/api/admissions/app_4').send({ motherName: '', motherPhone: '', motherEmail: '' });
+    expect(res.status).toBe(200);
   });
 });

@@ -54,16 +54,18 @@ A unique **application reference** is generated automatically on save — you do
 
 ## 5. Required Fields
 
-Only four things are mandatory to save any application:
+**First Name** and **Last Name** are always mandatory. Beyond that, your school decides:
 
-- **First Name** and **Last Name**
 - **Gender**
 - **Date of Birth**
-- **At least one parent** — Mother or Father, each with a name **and email** (see §6)
+- **At least one parent** — Mother or Father named at all
+- **A named parent's email** — Mother or Father, once named, given an email (see §6)
 
-Everything else — middle name, House, Allergies, Emergency Contact, ID/Passport numbers, previous school, target class/stream, intake term — is optional and can be filled in later by editing the application.
+All four are **on by default** — this is the same behaviour Msingi has always had. To change any of them for your school, go to **Settings → School Profile → Admission Requirements**. Each is an independent toggle: you can, for example, require Date of Birth but not Gender, or accept a phone-only parent contact while still requiring at least one to be named. Whatever you choose applies identically here, on the student bulk-import CSV, and at the enroll step — one setting, everywhere.
 
-> If you're editing an application that predates your school's Msingi setup and it's missing Date of Birth or Gender, you'll need to fill those in before that application can be enrolled (§8) — the enroll step blocks with a clear error naming exactly what's missing, rather than creating an incomplete student record.
+Everything else — middle name, House, Allergies, Emergency Contact, ID/Passport numbers, previous school, target class/stream, intake term — is always optional and can be filled in later by editing the application.
+
+> If you're editing an application that predates a change to these settings (or predates your school's Msingi setup entirely) and it's missing something your school currently requires, you'll need to fill that in before the application can be enrolled (§8) — the enroll step blocks with a clear error naming exactly what's missing, rather than creating an incomplete student record.
 
 ---
 
@@ -71,7 +73,7 @@ Everything else — middle name, House, Allergies, Emergency Contact, ID/Passpor
 
 There is no single "parent" field. Mother and Father each get their own **name, email, phone, and ID/Passport number**.
 
-**Email is required for any parent you name** — phone is optional, but a parent entered with a name and no email will be rejected when you try to save. This is deliberate: email is what lets that parent get their own independent portal login later, once the child is enrolled (see the School Administrator Guide, §7, "Mother and Father can each have their own independent login"). A parent you never plan to give portal access to still needs an email on file to satisfy this rule — use any address they check, even if they'll never log in.
+**By default, email is required for any parent you name** — phone is optional, but a parent entered with a name and no email will be rejected when you try to save (unless your school has turned this off in Settings — see §5). This is deliberate: email is what lets that parent get their own independent portal login later, once the child is enrolled (see the School Administrator Guide, §7, "Mother and Father can each have their own independent login"). A parent you never plan to give portal access to still needs an email on file to satisfy this rule, unless it's been relaxed — use any address they check, even if they'll never log in.
 
 **Primary Contact** picks which parent drives day-to-day school communications (letters, the "registration" contact). It does **not** limit which parent can later get a portal account — both can, independently, once enrolled, regardless of which one is Primary Contact.
 
@@ -112,4 +114,4 @@ The Dashboard's **Admissions Pipeline** bar chart shows applicant counts by stag
 
 ---
 
-*Last reviewed: 2026-09-05 — checked directly against `server/routes/admissions.js`, `server/utils/guardian-contact.js`, and `client/src/pages/admissions/`.*
+*Last reviewed: 2026-09-07 — §5 updated for the new per-school Admission Requirements settings (`server/utils/admission-requirements.js`), checked directly against `server/routes/admissions.js`, `server/utils/guardian-contact.js`, and `client/src/pages/admissions/`.*

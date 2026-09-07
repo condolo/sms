@@ -61,6 +61,19 @@ export default function AddSlideOver({ onClose, onCreated }) {
   });
   const houses = Array.isArray(settingsData?.data?.houses) ? settingsData.data.houses : [];
 
+  // Same per-school toggles the server enforces (server/utils/
+  // admission-requirements.js's resolveRequiredFields) — mirrored here so
+  // the form only shows a field as required, and only blocks submission on
+  // it, when this school has actually chosen to require it. Absent/unset
+  // means required, exactly matching the server's own default.
+  const rf = settingsData?.data?.admissionConfig?.requiredFields ?? {};
+  const requiredFields = {
+    dateOfBirth:           rf.dateOfBirth           !== false,
+    gender:                rf.gender                !== false,
+    guardianRequired:      rf.guardianRequired      !== false,
+    guardianEmailRequired: rf.guardianEmailRequired !== false,
+  };
+
   function onHouseChange(houseId) {
     const h = houses.find(h => (h.id ?? h.name) === houseId);
     set('houseId', houseId);
@@ -98,20 +111,25 @@ export default function AddSlideOver({ onClose, onCreated }) {
     const e = {};
     if (!form.firstName.trim())   e.firstName   = 'Required';
     if (!form.lastName.trim())    e.lastName    = 'Required';
-    if (!form.dateOfBirth.trim()) e.dateOfBirth = 'Required';
-    if (!form.gender.trim())      e.gender      = 'Required';
+    if (requiredFields.dateOfBirth && !form.dateOfBirth.trim()) e.dateOfBirth = 'Required';
+    if (requiredFields.gender && !form.gender.trim())           e.gender      = 'Required';
     // Mirrors the server's own guardian requirement exactly (server/utils/
-    // guardian-contact.js's validateGuardianRequirement). Email — not
-    // phone — is mandatory for ANY named parent, independent of which one
-    // is primaryContact: each parent can eventually get their own,
+    // guardian-contact.js's validateGuardianRequirement, given this
+    // school's requiredFields). Email — not phone — is mandatory for ANY
+    // named parent when guardianEmailRequired is on, independent of which
+    // one is primaryContact: each parent can eventually get their own,
     // separate portal login, and a name without an email can never
-    // become one later. Phone stays optional.
-    if (form.motherName.trim() && !form.motherEmail.trim()) e.motherEmail = "Required when Mother's name is provided";
-    if (form.fatherName.trim() && !form.fatherEmail.trim()) e.fatherEmail = "Required when Father's name is provided";
-    const motherOk = form.motherName.trim() && form.motherEmail.trim();
-    const fatherOk = form.fatherName.trim() && form.fatherEmail.trim();
-    if (!e.motherEmail && !e.fatherEmail && !motherOk && !fatherOk) {
-      e.motherName = 'At least one parent (name + email) is required';
+    // become one later. Phone stays optional either way.
+    if (requiredFields.guardianEmailRequired) {
+      if (form.motherName.trim() && !form.motherEmail.trim()) e.motherEmail = "Required when Mother's name is provided";
+      if (form.fatherName.trim() && !form.fatherEmail.trim()) e.fatherEmail = "Required when Father's name is provided";
+    }
+    if (requiredFields.guardianRequired) {
+      const motherOk = form.motherName.trim() && (!requiredFields.guardianEmailRequired || form.motherEmail.trim());
+      const fatherOk = form.fatherName.trim() && (!requiredFields.guardianEmailRequired || form.fatherEmail.trim());
+      if (!e.motherEmail && !e.fatherEmail && !motherOk && !fatherOk) {
+        e.motherName = 'At least one parent (name + email) is required';
+      }
     }
     return e;
   }
@@ -168,10 +186,10 @@ export default function AddSlideOver({ onClose, onCreated }) {
               </Field>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <Field label="Date of Birth *" error={errors.dateOfBirth}>
+              <Field label={`Date of Birth${requiredFields.dateOfBirth ? ' *' : ''}`} error={errors.dateOfBirth}>
                 <input type="date" value={form.dateOfBirth} onChange={e => set('dateOfBirth', e.target.value)} className={inputCls(errors.dateOfBirth)} />
               </Field>
-              <Field label="Gender *" error={errors.gender}>
+              <Field label={`Gender${requiredFields.gender ? ' *' : ''}`} error={errors.gender}>
                 <select value={form.gender} onChange={e => set('gender', e.target.value)} className={inputCls(errors.gender)}>
                   <option value="">Select…</option>
                   <option value="male">Male</option>
@@ -241,7 +259,7 @@ export default function AddSlideOver({ onClose, onCreated }) {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <Field label="Phone"><input value={form.motherPhone} onChange={e => set('motherPhone', e.target.value)} placeholder="+254 …" className={inputCls()} /></Field>
-              <Field label={form.motherName.trim() ? 'Email *' : 'Email'} error={errors.motherEmail}>
+              <Field label={requiredFields.guardianEmailRequired && form.motherName.trim() ? 'Email *' : 'Email'} error={errors.motherEmail}>
                 <input type="email" value={form.motherEmail} onChange={e => set('motherEmail', e.target.value)} placeholder="mother@email.com" className={inputCls(errors.motherEmail)} />
               </Field>
             </div>
@@ -253,7 +271,7 @@ export default function AddSlideOver({ onClose, onCreated }) {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <Field label="Phone"><input value={form.fatherPhone} onChange={e => set('fatherPhone', e.target.value)} placeholder="+254 …" className={inputCls()} /></Field>
-              <Field label={form.fatherName.trim() ? 'Email *' : 'Email'} error={errors.fatherEmail}>
+              <Field label={requiredFields.guardianEmailRequired && form.fatherName.trim() ? 'Email *' : 'Email'} error={errors.fatherEmail}>
                 <input type="email" value={form.fatherEmail} onChange={e => set('fatherEmail', e.target.value)} placeholder="father@email.com" className={inputCls(errors.fatherEmail)} />
               </Field>
             </div>

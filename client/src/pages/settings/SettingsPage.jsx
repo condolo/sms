@@ -789,6 +789,80 @@ function AdmissionNumbersSection({ form: f, set }) {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   ADMISSION REQUIREMENTS SECTION (2026-09)
+   Lives inside SchoolTab, beside Admission Numbers. Each toggle maps
+   directly to server/utils/admission-requirements.js's
+   resolveRequiredFields() — every key defaults to required (ON) when
+   never touched, matching this feature's behaviour before it existed,
+   so no existing school sees any change until they open this panel.
+   Applies identically to the Admissions application form, the student
+   bulk-import CSV, and the enroll step — one config, one place.
+   ══════════════════════════════════════════════════════════════ */
+function AdmissionRequirementsSection({ form: f, set }) {
+  const ac = f.admissionConfig ?? {};
+  const rf = ac.requiredFields ?? {};
+
+  // Absent/undefined means required (true) — mirrors the server's own
+  // resolveRequiredFields() default exactly, so the toggle a school sees
+  // here always matches what's actually enforced.
+  const dateOfBirth           = rf.dateOfBirth           !== false;
+  const gender                = rf.gender                !== false;
+  const guardianRequired      = rf.guardianRequired      !== false;
+  const guardianEmailRequired = rf.guardianEmailRequired !== false;
+
+  function setField(key, value) {
+    set('admissionConfig', { ...ac, requiredFields: { ...rf, [key]: value } });
+  }
+
+  const ROWS = [
+    {
+      key: 'dateOfBirth', value: dateOfBirth,
+      label: 'Date of Birth',
+      desc: 'Require a date of birth on every application and import row.',
+    },
+    {
+      key: 'gender', value: gender,
+      label: 'Gender',
+      desc: 'Require gender on every application and import row.',
+    },
+    {
+      key: 'guardianRequired', value: guardianRequired,
+      label: 'At least one parent',
+      desc: 'Require a Mother or Father (or legacy parent contact) to be named at all.',
+    },
+    {
+      key: 'guardianEmailRequired', value: guardianEmailRequired,
+      label: "Named parent's email",
+      desc: 'Whenever a parent IS named — even if naming one isn’t required above — require an email for them. Turning this off means that parent may never be able to get their own portal login later.',
+    },
+  ];
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+      <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+        <ClipboardList size={14} className="text-indigo-500" />
+        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Admission Requirements</h3>
+      </div>
+      <p className="text-[11px] text-slate-400 leading-relaxed">
+        Choose which fields your school requires when a student applies, is imported in bulk, or is enrolled. Applies everywhere the same way — nothing here is hardcoded per module.
+      </p>
+
+      <div className="divide-y divide-slate-100">
+        {ROWS.map(r => (
+          <div key={r.key} className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-slate-700">{r.label}</p>
+              <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">{r.desc}</p>
+            </div>
+            <Toggle checked={r.value} disabled={r.disabled} onChange={v => setField(r.key, v)} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
    STAFF RESPONSIBILITIES PANEL — standalone component
    Placed inside SchoolTab (HR section). Manages the per-school
    list of responsibility options shown in the Add/Edit Staff form.
@@ -1510,6 +1584,11 @@ function SchoolTab() {
             </p>
           </div>
         </div>
+      </div>
+
+      {/* ── Row 6: Admission Requirements ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        <AdmissionRequirementsSection form={f} set={set} />
       </div>
 
       {/* ── Sticky Save Bar ── */}
