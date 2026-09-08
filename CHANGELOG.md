@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.61.0] — 2026-09-08 — feat(finance): refundable fee-type flag + standard fee-item catalogue
+
+Part 1 of 4 for a school-driven Finance request (standardize Admission/Caution/Ambulance/etc. fee items across all Msingi schools). Caution Money is a refundable deposit, not ordinary fee revenue — Msingi didn't distinguish the two.
+
+### Added
+- `FeeTypeSchema.refundable` (`server/routes/finance.js`) — a school can flag any fee type in its catalogue (Settings → Finance → Fee Types) as refundable, e.g. Caution Money.
+- `LineItemSchema.refundable` — snapshotted onto a fee-structure/invoice line item the moment a refundable fee type is picked (same snapshot pattern as everything else on an invoice; changing the catalogue later never touches line items already created).
+- `DEFAULT_FEE_TYPES` extended with the school's requested standard items: Admission Fee, Caution Money (refundable), Ambulance Cover, Extra-Curricular, Swimming, Digital Learning, Hymn Book, Reading Diary, Workbook — every school gets these out of the box (still fully editable/removable per school). Transport and School Trip already existed and were left as-is.
+- `FeeSettingsModal.jsx`'s Fee Type catalogue editor gained a "Refundable" checkbox per row; `FeeStructureSlideOver.jsx`'s line-item editor auto-fills `refundable` when a fee type is picked.
+
+### Not built yet (deliberately, later parts of this request)
+- No refund/liability ledger — this is a visibility flag only, not an accounting mechanism, per explicit scope decision.
+- Discount types beyond sibling, admission-triggered draft invoicing — parts 2–4, incoming as separate commits.
+
+### Verified
+- 4 new tests (`server/__tests__/routes/finance-fee-config.test.js`). Full finance suite 37/37. Client production build passes.
+
+---
+
 ## [v5.60.0] — 2026-09-07 — feat(inventory, library): purchase details, photos, and CSV import/export
 
 Direct school request: richer Add Item fields (date of purchase, where bought — local vs. China-imported — supplier/company, value, a photo) and the same for Library books, plus CSV import/export for both modules — neither had any bulk import/export before this at all.

@@ -59,6 +59,12 @@ const LineItemSchema = z.object({
   quantity:    z.number().positive().default(1),
   unitPrice:   z.number().min(0),
   feeType:     z.string().optional(),    // 'tuition', 'uniform', 'trip', etc.
+  // 2026-09: snapshotted from the matching fee-type catalogue entry at the
+  // moment the line item is added (see FeeTypeSchema.refundable below) —
+  // a deposit like Caution Money isn't ordinary revenue. Not itself a
+  // refund workflow; just keeps the distinction visible on the invoice
+  // for whenever Finance needs it.
+  refundable:  z.boolean().optional(),
 });
 
 const InvoiceCreateSchema = z.object({
@@ -421,19 +427,31 @@ router.post('/payments', authMiddleware, PLAN, MODGATE, rbac('finance', 'create'
    the UI, not a hard FK constraint.
    ══════════════════════════════════════════════════════════════ */
 const DEFAULT_FEE_TYPES = [
-  { key: 'tuition',      label: 'Tuition Fees' },
-  { key: 'transport',    label: 'Transport' },
-  { key: 'lunch',        label: 'Lunch' },
-  { key: 'library',      label: 'Library' },
+  { key: 'tuition',          label: 'Tuition Fees' },
+  { key: 'admission',        label: 'Admission Fee' },
+  { key: 'caution',          label: 'Caution Money', refundable: true },
+  { key: 'transport',        label: 'Transport' },
+  { key: 'lunch',            label: 'Lunch' },
+  { key: 'library',          label: 'Library' },
   { key: 'online_subscription', label: 'Online Subscription' },
-  { key: 'uniform',      label: 'Uniform' },
-  { key: 'trip',         label: 'Trip / Excursion' },
-  { key: 'other',        label: 'Other' },
+  { key: 'uniform',          label: 'Uniform' },
+  { key: 'trip',             label: 'Trip / Excursion' },
+  { key: 'ambulance',        label: 'Ambulance Cover' },
+  { key: 'extracurricular',  label: 'Extra-Curricular' },
+  { key: 'swimming',         label: 'Swimming' },
+  { key: 'digital_learning', label: 'Digital Learning' },
+  { key: 'hymn_book',        label: 'Hymn Book' },
+  { key: 'reading_diary',    label: 'Reading Diary' },
+  { key: 'workbook',         label: 'Workbook' },
+  { key: 'other',            label: 'Other' },
 ];
 
 const FeeTypeSchema = z.object({
   key:   z.string().min(1).max(50).regex(/^[a-z][a-z0-9_]*$/, 'key must be lowercase, start with a letter'),
   label: z.string().min(1).max(100),
+  // 2026-09: Caution Money-style deposits get refunded, not recognized as
+  // revenue — see LineItemSchema.refundable above, which snapshots this.
+  refundable: z.boolean().optional().default(false),
 });
 const FeeConfigSchema = z.object({
   feeTypes: z.array(FeeTypeSchema).max(40).optional(),

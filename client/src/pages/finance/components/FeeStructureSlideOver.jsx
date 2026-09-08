@@ -101,9 +101,17 @@ export default function FeeStructureSlideOver({ fmtCurrency, onClose, onCreated 
   });
 
   function updateItem(i, field, val) {
-    setItems(prev => prev.map((item, idx) =>
-      idx === i ? { ...item, [field]: (field === 'description' || field === 'feeType') ? val : Number(val) } : item
-    ));
+    setItems(prev => prev.map((item, idx) => {
+      if (idx !== i) return item;
+      const next = { ...item, [field]: (field === 'description' || field === 'feeType') ? val : Number(val) };
+      // Snapshot refundable from the matching catalogue entry (e.g. Caution
+      // Money) at pick time — see LineItemSchema.refundable server-side.
+      if (field === 'feeType') {
+        const matched = feeTypeOptions.find(t => t.key === val);
+        next.refundable = matched?.refundable || undefined;
+      }
+      return next;
+    }));
   }
   function addItem()     { setItems(prev => [...prev, { description: '', quantity: 1, unitPrice: 0, feeType: '' }]); }
   function removeItem(i) { setItems(prev => prev.filter((_, idx) => idx !== i)); }

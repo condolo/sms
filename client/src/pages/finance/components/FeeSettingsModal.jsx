@@ -34,6 +34,9 @@ function FeeTypeCatalogueEditor({ types, onChange }) {
   function updateLabel(i, label) {
     onChange(types.map((t, idx) => idx === i ? { ...t, label } : t));
   }
+  function toggleRefundable(i) {
+    onChange(types.map((t, idx) => idx === i ? { ...t, refundable: !t.refundable } : t));
+  }
   function removeType(i) {
     onChange(types.filter((_, idx) => idx !== i));
   }
@@ -48,12 +51,19 @@ function FeeTypeCatalogueEditor({ types, onChange }) {
       <h4 className="text-sm font-semibold text-slate-800">Fee Types</h4>
       <p className="text-xs text-slate-500 mt-0.5 mb-2.5">
         Picker options for invoice and fee-structure line items (Tuition, Transport, Lunch, …).
+        Mark a type "Refundable" for deposits like Caution Money — items using it will be flagged
+        on the invoice as a deposit, not ordinary fee revenue.
       </p>
       <div className="space-y-1.5">
         {types.map((t, i) => (
           <div key={t.key} className="flex items-center gap-2">
             <input value={t.label} onChange={e => updateLabel(i, e.target.value)} className={fCls} />
             <span className="shrink-0 rounded-md bg-slate-100 px-2 py-1 text-[10px] font-mono text-slate-400">{t.key}</span>
+            <label className="shrink-0 flex items-center gap-1 text-[11px] text-slate-500 cursor-pointer select-none">
+              <input type="checkbox" checked={!!t.refundable} onChange={() => toggleRefundable(i)}
+                className="rounded border-slate-300 text-violet-600 focus:ring-violet-400/40" />
+              Refundable
+            </label>
             <button onClick={() => removeType(i)}
               className="shrink-0 text-slate-400 hover:text-red-600 p-1"><Trash2 size={13} /></button>
           </div>
