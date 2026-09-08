@@ -6,6 +6,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.63.0] — 2026-09-08 — feat(finance): Early Payment discount
+
+Part 3 of 4 for the school-driven Finance request. Early Payment is mechanically different from every other discount type here: whether a family qualifies depends on WHEN they pay, which isn't known at invoice-generation time — it can only be resolved once a real payment is recorded.
+
+### Added
+- `discount_policies.type` gains `early_payment` — flat `flatPct`, plus `daysBeforeDue` (pay on or before dueDate − daysBeforeDue to qualify).
+- `POST /fee-structures/:id/generate` stamps *eligibility* onto each invoice at creation (`earlyPaymentPct`, `earlyPaymentDeadline`, `earlyPaymentApplied: false`) — but does not apply it. Skipped entirely if the fee structure carries no `dueDate` (nothing to count back from), or if the rate wouldn't beat whatever sibling/director/referral discount the student already has (still "only one discount, highest wins").
+- `POST /api/finance/payments` now resolves it: if a payment lands on/before the deadline and the rate is genuinely higher than what's on the invoice, the invoice is recalculated (new discountPct/subtotal/total/balance) before the payment's own balance math runs — applied at most once (`earlyPaymentApplied` guards a concurrent double-apply via an atomic `findOneAndUpdate` filter), audited as `finance.early_payment_discount_applied`.
+- `FeeSettingsModal.jsx`'s discount policy editor gained the Early Payment type, with its flat rate plus a "days before due date" field.
+
+### Verified
+- 11 new tests across `finance-early-payment-discount.test.js` (applies once on a qualifying payment, inclusive deadline boundary, never applied late/twice/when-not-an-improvement) and `finance-discount-policies.test.js` (generation-time eligibility stamping, including the no-dueDate and beaten-by-sibling-discount cases). Full finance suite 56/56. `verify-rbac-coverage.js` 100% (no regression). `security-scan.js` clean. Client production build passes.
+
+---
+
 ## [v5.62.0] — 2026-09-08 — feat(finance): Director's and Referral discount policies
 
 Part 2 of 4 for the school-driven Finance request. The school's discount list (Early Payment, sibling tiers, Director's, Referral) comes with an explicit rule: "only one discount applies per child." Msingi's discount engine only modeled sibling discounts — Director's and Referral had no mechanism at all.

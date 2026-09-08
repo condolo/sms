@@ -348,6 +348,42 @@ router.post('/payments', authMiddleware, PLAN, MODGATE, rbac('finance', 'create'
       return E.badRequest(res, `Academic year is locked — a payment cannot be recorded against this invoice.`);
     }
 
+    const effectivePaidAt = data.paidAt || new Date().toISOString();
+
+    // Early Payment discount — stamped onto the invoice at generation time
+    // (see POST /fee-structures/:id/generate) as "eligible if paid by X",
+    // never yet applied. Whether a family actually qualifies is only known
+    // once a real payment lands, so this is the one place it's resolved —
+    // applied AT MOST ONCE (earlyPaymentApplied guards both the read here
+    // and the update below against a concurrent double-apply), and only
+    // if it's genuinely higher than whatever auto-discount already sits on
+    // the invoice, matching the "only one discount, highest wins" rule the
+    // rest of _resolveAutoDiscounts() already follows.
+    if (invoice.earlyPaymentPct && !invoice.earlyPaymentApplied && invoice.earlyPaymentDeadline
+        && effectivePaidAt.slice(0, 10) <= invoice.earlyPaymentDeadline
+        && invoice.earlyPaymentPct > (invoice.discountPct || 0)) {
+      const newTotals = _calcInvoiceTotals(invoice.lineItems, invoice.earlyPaymentPct, invoice.taxPct);
+      const updated = await Invoices.findOneAndUpdate(
+        { id: invoice.id, schoolId, earlyPaymentApplied: { $ne: true } },
+        { $set: { discountPct: invoice.earlyPaymentPct, ...newTotals, earlyPaymentApplied: true, balance: _round(newTotals.total - (invoice.amountPaid || 0)) } },
+        { new: true }
+      ).lean();
+      if (updated) {
+        Object.assign(invoice, updated);
+        AuditService.log({
+          action: 'finance.early_payment_discount_applied', actor: req.jwtUser, schoolId,
+          target: { type: 'invoice', id: invoice.id, label: invoice.invoiceNumber },
+          details: { discountPct: invoice.earlyPaymentPct, newTotal: newTotals.total }, req,
+        });
+      } else {
+        // A concurrent request won the race and already applied it — our
+        // local `invoice` is stale on discountPct/total/balance. Re-read
+        // rather than proceed with numbers that no longer match the DB.
+        const fresh = await Invoices.findOne({ id: invoice.id, schoolId }).lean();
+        if (fresh) Object.assign(invoice, fresh);
+      }
+    }
+
     // Validate payment amount doesn't exceed outstanding balance
     const maxPayable = _round(invoice.balance || (invoice.total - (invoice.amountPaid || 0)));
     if (_round(data.amount) > _round(maxPayable + 0.01)) { // 1p tolerance for rounding
@@ -609,17 +645,23 @@ async function _resolveScopeStudents(Students, schoolId, fs, ctx) {
    active, or a policy retired for next year) but only ONE policy per
    `type` may be `active` at a time.
 
-   Three types (2026-09 — 'director'/'referral' added alongside the
-   original 'sibling'):
+   Four types (2026-09 — 'director'/'referral'/'early_payment' added
+   alongside the original 'sibling'):
      'sibling'  — tiered by nthChild (enrollment order within a family).
      'director'/'referral' — flat-rate, gated by a boolean flag on the
        student record (isDirectorFamily/isReferralFamily) rather than
        any computed ranking — a school-made administrative decision,
        not something Msingi can infer.
+     'early_payment' — flat-rate, but NOT resolved here at all: whether
+       a family pays early is unknown at invoice-generation time. See
+       the "Early Payment Discount" block below POST /payments instead.
 
    "Only one discount applies per child" (a real requirement from the
    school that prompted this): _resolveAutoDiscounts() below computes
-   all three for a student and keeps only the highest, never sums them.
+   sibling/director/referral for a student and keeps only the highest,
+   never sums them. Early Payment, resolved later at payment time,
+   still only replaces that discount if it's actually higher — see
+   POST /payments.
    ══════════════════════════════════════════════════════════════ */
 const DiscountTierSchema = z.object({
   // 1st-enrolled child in a family never appears in a tier (pays full
@@ -629,12 +671,15 @@ const DiscountTierSchema = z.object({
 });
 const DiscountPolicySchema = z.object({
   name:    z.string().min(1).max(200),
-  type:    z.enum(['sibling', 'director', 'referral']).default('sibling'),
+  type:    z.enum(['sibling', 'director', 'referral', 'early_payment']).default('sibling'),
   active:  z.boolean().default(false),
   // 'sibling' only:
   tiers:   z.array(DiscountTierSchema).optional(),
-  // 'director' / 'referral' only — a single flat percentage:
+  // 'director' / 'referral' / 'early_payment' — a single flat percentage:
   flatPct: z.number().min(0).max(100).optional(),
+  // 'early_payment' only: pay on or before (invoice dueDate − this many
+  // days) to qualify. 0 means "by the due date itself".
+  daysBeforeDue: z.number().int().min(0).max(60).optional(),
 });
 function _validateTiers(tiers) {
   const nths = tiers.map(t => t.nthChild);
@@ -642,16 +687,29 @@ function _validateTiers(tiers) {
   return null;
 }
 /* Full-shape check for a policy at creation time — a 'sibling' policy
-   needs tiers, a flat-rate one needs flatPct. Partial (PUT) updates
-   don't re-run this: they validate only whatever field is actually
-   being changed (see PUT handler), matching how `active` is handled. */
+   needs tiers, a flat-rate one needs flatPct (early_payment also needs
+   daysBeforeDue). Partial (PUT) updates don't re-run this: they
+   validate only whatever field is actually being changed (see PUT
+   handler), matching how `active` is handled. */
 function _validatePolicyShape(data) {
   if (data.type === 'sibling') {
     if (!data.tiers?.length) return 'sibling policies require at least one tier';
     return _validateTiers(data.tiers);
   }
   if (data.flatPct === undefined) return `${data.type} policies require flatPct`;
+  if (data.type === 'early_payment' && data.daysBeforeDue === undefined) return 'early_payment policies require daysBeforeDue';
   return null;
+}
+/* dueDate minus daysBeforeDue, as a YYYY-MM-DD string — the last date a
+   payment may land on to still qualify. Returns null when the fee
+   structure carries no dueDate at all (nothing to count back from), in
+   which case Early Payment simply never applies to that invoice. */
+function _computeEarlyPaymentDeadline(dueDate, daysBeforeDue) {
+  if (!dueDate) return null;
+  const d = new Date(dueDate);
+  if (isNaN(d.getTime())) return null;
+  d.setDate(d.getDate() - (daysBeforeDue ?? 0));
+  return d.toISOString().slice(0, 10);
 }
 
 /* ── GET /api/finance/discount-policies ──────────────────────── */
@@ -993,6 +1051,17 @@ router.post('/fee-structures/:id/generate', authMiddleware, PLAN, MODGATE, rbac(
     const targetStudentIds = targets.map(s => s.id ?? s._id?.toString());
     const autoDiscounts = await _resolveAutoDiscounts(schoolId, tenantContext(req), targetStudentIds);
 
+    // Early Payment discount (if active) can't be resolved yet — whether a
+    // family pays early is unknown until they actually do. Stamp the
+    // eligibility onto the invoice now (same deadline for every invoice
+    // this run, since they share fs.dueDate); POST /payments applies it
+    // later, only if it's actually higher than what's already applied.
+    const DiscountPolicies = tenantModel('discount_policies', tenantContext(req));
+    const earlyPaymentPolicy = await DiscountPolicies.findOne({ schoolId, type: 'early_payment', active: true }).lean();
+    const earlyPaymentDeadline = earlyPaymentPolicy
+      ? _computeEarlyPaymentDeadline(fs.dueDate, earlyPaymentPolicy.daysBeforeDue)
+      : null;
+
     const created_docs = [];
 
     for (const student of targets) {
@@ -1000,6 +1069,7 @@ router.post('/fee-structures/:id/generate', authMiddleware, PLAN, MODGATE, rbac(
       const discountPct = autoDiscounts.get(sid) ?? 0;
       const totals = _calcInvoiceTotals(fs.lineItems, discountPct);
       const invNum = await nextInvoiceNumber(schoolId);
+      const earlyPaymentEligible = earlyPaymentDeadline && earlyPaymentPolicy.flatPct > discountPct;
       const inv = await Invoices.create({
         id:             uuidv4(),
         schoolId,
@@ -1018,6 +1088,11 @@ router.post('/fee-structures/:id/generate', authMiddleware, PLAN, MODGATE, rbac(
         balance:    totals.total,
         status:     'unpaid',
         createdBy:  userId,
+        ...(earlyPaymentEligible ? {
+          earlyPaymentPct:      earlyPaymentPolicy.flatPct,
+          earlyPaymentDeadline: earlyPaymentDeadline,
+          earlyPaymentApplied:  false,
+        } : {}),
       });
       created_docs.push(inv.toObject ? inv.toObject() : inv);
     }

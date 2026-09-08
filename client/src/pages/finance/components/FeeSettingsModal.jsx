@@ -78,17 +78,20 @@ function FeeTypeCatalogueEditor({ types, onChange }) {
 }
 
 function emptyTier() { return { nthChild: 2, discountPct: 0 }; }
-function emptyPolicyForm() { return { name: '', type: 'sibling', active: false, tiers: [emptyTier()], flatPct: 0 }; }
+function emptyPolicyForm() { return { name: '', type: 'sibling', active: false, tiers: [emptyTier()], flatPct: 0, daysBeforeDue: 7 }; }
 const ORDINALS = { 2: '2nd', 3: '3rd', 4: '4th', 5: '5th', 6: '6th', 7: '7th', 8: '8th', 9: '9th', 10: '10th' };
 const POLICY_TYPES = {
-  sibling:  { label: 'Sibling',    hint: 'By birth-enrollment order within a family (2nd child, 3rd child, …).' },
-  director: { label: "Director's", hint: "Flat rate for families flagged “Director's family” on the student's profile." },
-  referral: { label: 'Referral',   hint: 'Flat rate for families flagged "Referred family" on the student\'s profile.' },
+  sibling:       { label: 'Sibling',       hint: 'By birth-enrollment order within a family (2nd child, 3rd child, …).' },
+  director:      { label: "Director's",    hint: "Flat rate for families flagged “Director's family” on the student's profile." },
+  referral:      { label: 'Referral',      hint: 'Flat rate for families flagged "Referred family" on the student\'s profile.' },
+  early_payment: { label: 'Early Payment', hint: 'Flat rate applied automatically the moment a parent pays in full on or before the deadline below.' },
 };
 
 /* ── Discount policy form (create or edit) — 'sibling' is tiered by
-   nthChild, 'director'/'referral' are a single flat rate gated by a
-   student flag (see StudentProfile.jsx's Fee Discounts section). ── */
+   nthChild; 'director'/'referral' are a flat rate gated by a student
+   flag (see StudentProfile.jsx's Fee Discounts section); 'early_payment'
+   is a flat rate gated by when the parent actually pays, resolved later
+   by POST /payments — not by anything decided here. ── */
 function PolicyForm({ initial, onCancel, onSave, saving }) {
   const [form, setForm] = useState(initial);
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
@@ -104,6 +107,7 @@ function PolicyForm({ initial, onCancel, onSave, saving }) {
   function removeTier(i) { setForm(f => ({ ...f, tiers: f.tiers.filter((_, idx) => idx !== i) })); }
 
   const isSibling = form.type === 'sibling';
+  const isEarlyPayment = form.type === 'early_payment';
   const nths = form.tiers.map(t => t.nthChild);
   const invalid = !form.name.trim() || (isSibling
     ? (form.tiers.length === 0 || new Set(nths).size !== nths.length)
@@ -147,11 +151,22 @@ function PolicyForm({ initial, onCancel, onSave, saving }) {
           )}
         </>
       ) : (
-        <div className="flex items-center gap-1.5">
-          <input type="number" min="0" max="100" value={form.flatPct}
-            onChange={e => set('flatPct', Number(e.target.value))}
-            className={`${fCls} w-20 text-right`} />
-          <Percent size={12} className="text-slate-400" />
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            <input type="number" min="0" max="100" value={form.flatPct}
+              onChange={e => set('flatPct', Number(e.target.value))}
+              className={`${fCls} w-20 text-right`} />
+            <Percent size={12} className="text-slate-400" />
+          </div>
+          {isEarlyPayment && (
+            <div className="flex items-center gap-1.5 text-xs text-slate-600">
+              <span>paid</span>
+              <input type="number" min="0" max="60" value={form.daysBeforeDue}
+                onChange={e => set('daysBeforeDue', Number(e.target.value))}
+                className={`${fCls} w-16 text-right`} />
+              <span>day{form.daysBeforeDue === 1 ? '' : 's'} or more before the due date</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -202,6 +217,8 @@ function DiscountPoliciesSection() {
   function save(form) {
     const payload = form.type === 'sibling'
       ? { name: form.name.trim(), type: form.type, active: form.active, tiers: form.tiers }
+      : form.type === 'early_payment'
+      ? { name: form.name.trim(), type: form.type, active: form.active, flatPct: form.flatPct, daysBeforeDue: form.daysBeforeDue }
       : { name: form.name.trim(), type: form.type, active: form.active, flatPct: form.flatPct };
     if (editingId === 'new') createMut.mutate(payload);
     else updateMut.mutate({ id: editingId, data: payload });
@@ -233,7 +250,7 @@ function DiscountPoliciesSection() {
           {policies.map(p => {
             const id = p.id ?? p._id;
             return editingId === id ? (
-              <PolicyForm key={id} initial={{ name: p.name, type: p.type ?? 'sibling', active: p.active, tiers: p.tiers?.length ? p.tiers : [emptyTier()], flatPct: p.flatPct ?? 0 }}
+              <PolicyForm key={id} initial={{ name: p.name, type: p.type ?? 'sibling', active: p.active, tiers: p.tiers?.length ? p.tiers : [emptyTier()], flatPct: p.flatPct ?? 0, daysBeforeDue: p.daysBeforeDue ?? 7 }}
                 onCancel={() => setEditingId(null)} onSave={save} saving={updateMut.isPending} />
             ) : (
               <div key={id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2.5">
@@ -250,6 +267,8 @@ function DiscountPoliciesSection() {
                   <p className="text-xs text-slate-400 mt-0.5">
                     {p.type === 'sibling' || !p.type
                       ? p.tiers.map(t => `${ORDINALS[t.nthChild] ?? `${t.nthChild}th`} child ${t.discountPct}%`).join(' · ')
+                      : p.type === 'early_payment'
+                      ? `${p.flatPct}% if paid ${p.daysBeforeDue ?? 0}+ day${p.daysBeforeDue === 1 ? '' : 's'} before due date`
                       : `${p.flatPct}% flat`}
                   </p>
                 </div>

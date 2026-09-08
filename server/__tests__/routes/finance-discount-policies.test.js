@@ -16,6 +16,10 @@
         _resolveAutoDiscounts()'s "highest wins" rule across all three
         types — a real school requirement ("only one discount applies
         per child"), not a simplification of convenience.
+     5. (2026-09) 'early_payment' policy type — generation-time
+        ELIGIBILITY stamping only (earlyPaymentPct/earlyPaymentDeadline
+        on the invoice). Actually applying it happens later, at
+        POST /payments — see finance-early-payment-discount.test.js.
 
    All DB calls are mocked — no MongoDB required.
    ============================================================ */
@@ -371,5 +375,90 @@ describe('fee-structures/:id/generate — director/referral flat discounts (2026
     const res = await supertest(buildApp()).post('/api/finance/fee-structures/fs_inactive/generate');
     expect(res.status).toBe(201);
     expect(res.body.data.invoices[0].discountPct).toBe(0);
+  });
+});
+
+describe('discount policies — early_payment shape validation (2026-09)', () => {
+  test('POST rejects an early_payment policy missing daysBeforeDue', async () => {
+    const res = await supertest(buildApp()).post('/api/finance/discount-policies').send({
+      name: 'Early Bird', type: 'early_payment', flatPct: 5,
+    });
+    expect(res.status).toBe(400);
+    expect(mockDiscountPolicies.create).not.toHaveBeenCalled();
+  });
+
+  test('POST accepts a complete early_payment policy', async () => {
+    const res = await supertest(buildApp()).post('/api/finance/discount-policies').send({
+      name: 'Early Bird', type: 'early_payment', active: true, flatPct: 5, daysBeforeDue: 14,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.data.daysBeforeDue).toBe(14);
+  });
+});
+
+describe('fee-structures/:id/generate — early_payment eligibility stamping (2026-09)', () => {
+  test('an active early_payment policy stamps eligibility onto every generated invoice', async () => {
+    mockFeeStructures = makeFakeCollection([{
+      id: 'fs_ep', schoolId: SCHOOL_A, name: 'Term 1 Fees', scopeType: 'all', dueDate: '2026-05-01',
+      lineItems: [{ description: 'Tuition', quantity: 1, unitPrice: 1000 }],
+    }]);
+    mockStudents = makeFakeCollection([
+      { id: 's_a', schoolId: SCHOOL_A, status: 'active', firstName: 'A', lastName: 'Kid' },
+    ]);
+    mockDiscountPolicies = makeFakeCollection([
+      { id: 'dp_ep', schoolId: SCHOOL_A, type: 'early_payment', active: true, name: 'Early Bird', flatPct: 5, daysBeforeDue: 14 },
+    ]);
+
+    const res = await supertest(buildApp()).post('/api/finance/fee-structures/fs_ep/generate');
+    expect(res.status).toBe(201);
+    const inv = res.body.data.invoices[0];
+    expect(inv.earlyPaymentPct).toBe(5);
+    expect(inv.earlyPaymentDeadline).toBe('2026-04-17'); // 2026-05-01 minus 14 days
+    expect(inv.earlyPaymentApplied).toBe(false);
+    expect(inv.discountPct).toBe(0); // NOT applied yet — only eligibility is stamped
+  });
+
+  test('no dueDate on the fee structure → no deadline to count back from, so no stamping', async () => {
+    mockFeeStructures = makeFakeCollection([{
+      id: 'fs_nodue', schoolId: SCHOOL_A, name: 'Term 1 Fees', scopeType: 'all',
+      lineItems: [{ description: 'Tuition', quantity: 1, unitPrice: 1000 }],
+    }]);
+    mockStudents = makeFakeCollection([{ id: 's_a', schoolId: SCHOOL_A, status: 'active', firstName: 'A', lastName: 'Kid' }]);
+    mockDiscountPolicies = makeFakeCollection([
+      { id: 'dp_ep', schoolId: SCHOOL_A, type: 'early_payment', active: true, name: 'Early Bird', flatPct: 5, daysBeforeDue: 14 },
+    ]);
+
+    const res = await supertest(buildApp()).post('/api/finance/fee-structures/fs_nodue/generate');
+    expect(res.status).toBe(201);
+    expect(res.body.data.invoices[0].earlyPaymentPct).toBeUndefined();
+  });
+
+  test('early_payment is not stamped when it would not beat a sibling discount already applied', async () => {
+    mockFeeStructures = makeFakeCollection([{
+      id: 'fs_ep2', schoolId: SCHOOL_A, name: 'Term 1 Fees', scopeType: 'all', dueDate: '2026-05-01',
+      lineItems: [{ description: 'Tuition', quantity: 1, unitPrice: 1000 }],
+    }]);
+    mockStudents = makeFakeCollection([
+      { id: 's_eldest', schoolId: SCHOOL_A, status: 'active', firstName: 'E', lastName: 'Kid', enrollmentDate: '2020-01-01' },
+      { id: 's_youngest', schoolId: SCHOOL_A, status: 'active', firstName: 'Y', lastName: 'Kid', enrollmentDate: '2021-01-01' },
+    ]);
+    mockUsers = makeFakeCollection([
+      { id: 'guardian_1', schoolId: SCHOOL_A, role: 'parent', studentIds: ['s_eldest', 's_youngest'] },
+    ]);
+    mockDiscountPolicies = makeFakeCollection([
+      { id: 'dp_sib', schoolId: SCHOOL_A, type: 'sibling', active: true, name: 'Sibling', tiers: [{ nthChild: 2, discountPct: 10 }] },
+      { id: 'dp_ep',  schoolId: SCHOOL_A, type: 'early_payment', active: true, name: 'Early Bird', flatPct: 5, daysBeforeDue: 14 },
+    ]);
+
+    const res = await supertest(buildApp()).post('/api/finance/fee-structures/fs_ep2/generate');
+    expect(res.status).toBe(201);
+    const byId = Object.fromEntries(res.body.data.invoices.map(i => [i.studentId, i]));
+    // Youngest already has 10% sibling discount — 5% early-payment would
+    // never be an improvement, so it's not even stamped as eligible.
+    expect(byId.s_youngest.discountPct).toBe(10);
+    expect(byId.s_youngest.earlyPaymentPct).toBeUndefined();
+    // Eldest has 0% — 5% early-payment IS an improvement, so it is stamped.
+    expect(byId.s_eldest.discountPct).toBe(0);
+    expect(byId.s_eldest.earlyPaymentPct).toBe(5);
   });
 });
