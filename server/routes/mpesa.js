@@ -291,12 +291,22 @@ router.post('/callback', async (req, res) => {
     let receiptNum = mpesaCode;
     try { receiptNum = await nextReceiptNumber(txn.schoolId); } catch {}
 
+    // Denormalized, same as POST /api/finance/payments does — without
+    // it, PaymentsTab.jsx falls back to showing the raw studentId.
+    let studentName = invoice.studentName;
+    if (!studentName) {
+      const student = await tenantModel('students', { schoolId: txn.schoolId })
+        .findOne({ id: invoice.studentId, schoolId: txn.schoolId }).select('firstName lastName').lean();
+      if (student) studentName = `${student.firstName} ${student.lastName}`.trim();
+    }
+
     const Payments = tenantModel('payments', { schoolId: txn.schoolId });
     await Payments.create({
       id:            _uid(),
       schoolId:      txn.schoolId,
       invoiceId:     txn.invoiceId,
       studentId:     invoice.studentId,
+      studentName,
       receiptNumber: receiptNum,
       amount,
       method:        'mpesa',
@@ -404,12 +414,22 @@ router.post('/c2b/confirmation', async (req, res) => {
     let receiptNum = TransID;
     try { receiptNum = await nextReceiptNumber(school.id); } catch {}
 
+    // Denormalized, same as POST /api/finance/payments does — without
+    // it, PaymentsTab.jsx falls back to showing the raw studentId.
+    let studentName = invoice.studentName;
+    if (!studentName) {
+      const student = await tenantModel('students', { schoolId: school.id })
+        .findOne({ id: invoice.studentId, schoolId: school.id }).select('firstName lastName').lean();
+      if (student) studentName = `${student.firstName} ${student.lastName}`.trim();
+    }
+
     const Payments = tenantModel('payments', { schoolId: school.id });
     await Payments.create({
       id:            _uid(),
       schoolId:      school.id,
       invoiceId:     invoice.id,
       studentId:     invoice.studentId,
+      studentName,
       receiptNumber: receiptNum,
       amount,
       method:        'mpesa',

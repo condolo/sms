@@ -76,6 +76,13 @@ jest.mock('../../utils/model', () => ({
     if (collection === 'payments') {
       return { create: mockPaymentsCreate, find: mockPaymentsFind };
     }
+    if (collection === 'students') {
+      // studentName fallback lookup (2026-09) — INVOICE has no
+      // studentName, so the handler falls through to this; resolving to
+      // "no student found" is fine, this test isn't about names.
+      const chain = { select: () => chain, lean: jest.fn().mockResolvedValue(null) };
+      return { findOne: jest.fn(() => chain) };
+    }
     return {
       findOne: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }),
       updateOne: jest.fn().mockResolvedValue({}),

@@ -797,6 +797,11 @@ async function seedDemoData() {
 
       await upsert(Invoice, invId, {
         studentId:     s.id,
+        // Denormalized, same as every real invoice-creating route sets it
+        // (finance.js's POST /invoices, /fee-structures/:id/generate) —
+        // without it, PaymentsTab.jsx and InvoicesTab.jsx fall back to
+        // showing the raw studentId ('std_demo_1') instead of a name.
+        studentName:   `${s.firstName} ${s.lastName}`,
         title:         `${term} ${yearS} — School Fees`,
         feeType:       'tuition',
         // `total`, not `amount` — `total` is the canonical field every
@@ -820,6 +825,7 @@ async function seedDemoData() {
         await upsert(Payment, `pay_demo_${s.id}`, {
           invoiceId:     invId,
           studentId:     s.id,
+          studentName:   `${s.firstName} ${s.lastName}`,
           amount:        s.paid,
           method:        ['mpesa', 'bank_transfer', 'cash', 'cheque'][idx % 4],
           receiptNumber: rcpNum,

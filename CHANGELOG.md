@@ -6,6 +6,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.68.0] — 2026-09-08 — fix(finance): Payments list showed raw student IDs instead of names
+
+Reported from a demo account: the Payments tab showed `std_demo_1` instead of a student's name. Traced every real payment-creation path (not just the demo seed) to check whether this was demo-only or systemic.
+
+### Root cause
+`PaymentsTab.jsx` (and the payment-received notification/print template) fall back to the raw `studentId` when a payment record has no `studentName` — by design, since payments never carried a denormalized name of their own (see the comment above `POST /api/finance/payments`). Every real payment-creation path is supposed to resolve it, but two didn't:
+
+- **Both M-Pesa callback handlers** (`server/routes/mpesa.js` — STK push and C2B/Paybill confirmation) built the Payment record from `invoice.studentId` only, never `studentName`, even though `POST /api/finance/payments` (the manual path) always resolves it. For a school where M-Pesa is the primary payment method, this was a live, everyday bug — not a demo artifact.
+- **The demo seed script** (`server/scripts/seed-demo-data.js`) inserts `invoices`/`payments` directly, bypassing every real route entirely, and never set `studentName` on either. This is what the report actually showed — the demo school's `payments` collection has no way to run through the fixed logic below, so the fix applies at the seed source.
+
+### Fixed
+- Both M-Pesa callback handlers now resolve `studentName` the same way `POST /api/finance/payments` does: prefer the invoice's own `studentName`, fall back to a direct Students lookup, leave it unset (never crash) if neither is available.
+- `seed-demo-data.js` now sets `studentName` on both seeded invoices and payments, from the same `STUDENTS` fixture data already used everywhere else in the seed.
+- Audited every other payment-creation site in the codebase (`import-export.js`'s two CSV-import paths) — both already set `studentName` correctly; no further gaps found.
+
+### Verified
+- 5 new tests (`mpesa-payment-studentname.test.js`): both STK and C2B paths — copies the invoice's studentName when present, falls back to a Students lookup when absent, never crashes when neither exists. Fixed a pre-existing test (`mpesa-idempotency.test.js`) whose mock didn't support the new fallback query chain. Full server suite 1946/1946. `verify-rbac-coverage.js` 100% (no regression, no new routes). `security-scan.js` clean. Client production build passes.
+
+Re-seed a demo school (`node server/scripts/seed-demo-data.js`) to see corrected names in an existing demo account — this fix doesn't retroactively touch already-seeded data.
+
+---
+
 ## [v5.67.0] — 2026-09-08 — fix(admissions): guardian-linking email match now requires uniqueness
 
 Reviewed before pushing v5.66.0: `linkExistingGuardians()`'s email-match path found every guardian account matching any of a student's mother/father/parent emails and linked all of them, with no check that a given email actually identified exactly one account. Two 'parent' accounts sharing an email (a data anomaly — accounts should be unique per email+school) would have silently connected a new student's billing to an unrelated family's guardian record.
