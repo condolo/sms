@@ -1,7 +1,8 @@
 /* ============================================================
-   FeeSettingsModal — Fee Types catalogue + sibling Discount
-   Policies. Mirrors hr/PayrollSettingsModal.jsx's structure
-   (type-catalogue editor + a policy list with its own save action).
+   FeeSettingsModal — Fee Types catalogue + Discount Policies
+   (sibling, director, referral). Mirrors hr/PayrollSettingsModal.jsx's
+   structure (type-catalogue editor + a policy list with its own save
+   action).
 
    Props:
      onClose  fn
@@ -77,10 +78,17 @@ function FeeTypeCatalogueEditor({ types, onChange }) {
 }
 
 function emptyTier() { return { nthChild: 2, discountPct: 0 }; }
-function emptyPolicyForm() { return { name: '', active: false, tiers: [emptyTier()] }; }
+function emptyPolicyForm() { return { name: '', type: 'sibling', active: false, tiers: [emptyTier()], flatPct: 0 }; }
 const ORDINALS = { 2: '2nd', 3: '3rd', 4: '4th', 5: '5th', 6: '6th', 7: '7th', 8: '8th', 9: '9th', 10: '10th' };
+const POLICY_TYPES = {
+  sibling:  { label: 'Sibling',    hint: 'By birth-enrollment order within a family (2nd child, 3rd child, …).' },
+  director: { label: "Director's", hint: "Flat rate for families flagged “Director's family” on the student's profile." },
+  referral: { label: 'Referral',   hint: 'Flat rate for families flagged "Referred family" on the student\'s profile.' },
+};
 
-/* ── Sibling discount policy form (create or edit) ─────────────── */
+/* ── Discount policy form (create or edit) — 'sibling' is tiered by
+   nthChild, 'director'/'referral' are a single flat rate gated by a
+   student flag (see StudentProfile.jsx's Fee Discounts section). ── */
 function PolicyForm({ initial, onCancel, onSave, saving }) {
   const [form, setForm] = useState(initial);
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
@@ -95,36 +103,56 @@ function PolicyForm({ initial, onCancel, onSave, saving }) {
   }
   function removeTier(i) { setForm(f => ({ ...f, tiers: f.tiers.filter((_, idx) => idx !== i) })); }
 
+  const isSibling = form.type === 'sibling';
   const nths = form.tiers.map(t => t.nthChild);
-  const invalid = !form.name.trim() || form.tiers.length === 0 || new Set(nths).size !== nths.length;
+  const invalid = !form.name.trim() || (isSibling
+    ? (form.tiers.length === 0 || new Set(nths).size !== nths.length)
+    : !(form.flatPct > 0));
   const fCls = 'rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40';
 
   return (
     <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-3 space-y-3">
-      <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="Policy name, e.g. Sibling Discount 2026"
-        className={`${fCls} w-full`} />
-
-      <div className="space-y-1.5">
-        {form.tiers.map((t, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <select value={t.nthChild} onChange={e => updateTier(i, 'nthChild', e.target.value)} className={fCls}>
-              {Object.entries(ORDINALS).map(([n, label]) => <option key={n} value={n}>{label} child</option>)}
-            </select>
-            <div className="flex items-center gap-1.5">
-              <input type="number" min="0" max="100" value={t.discountPct}
-                onChange={e => updateTier(i, 'discountPct', e.target.value)}
-                className={`${fCls} w-20 text-right`} />
-              <Percent size={12} className="text-slate-400" />
-            </div>
-            <button onClick={() => removeTier(i)} disabled={form.tiers.length <= 1}
-              className="text-slate-400 hover:text-red-600 p-1 disabled:opacity-30 disabled:cursor-not-allowed"><Trash2 size={13} /></button>
-          </div>
-        ))}
+      <div className="flex items-center gap-2">
+        <select value={form.type} onChange={e => set('type', e.target.value)} className={fCls}>
+          {Object.entries(POLICY_TYPES).map(([k, t]) => <option key={k} value={k}>{t.label}</option>)}
+        </select>
+        <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="Policy name, e.g. Sibling Discount 2026"
+          className={`${fCls} flex-1`} />
       </div>
-      {form.tiers.length < 10 && (
-        <button onClick={addTier} className="text-xs font-semibold text-violet-600 hover:underline flex items-center gap-1">
-          <Plus size={12} /> Add tier
-        </button>
+      <p className="text-[11px] text-slate-500 -mt-1.5">{POLICY_TYPES[form.type].hint}</p>
+
+      {isSibling ? (
+        <>
+          <div className="space-y-1.5">
+            {form.tiers.map((t, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <select value={t.nthChild} onChange={e => updateTier(i, 'nthChild', e.target.value)} className={fCls}>
+                  {Object.entries(ORDINALS).map(([n, label]) => <option key={n} value={n}>{label} child</option>)}
+                </select>
+                <div className="flex items-center gap-1.5">
+                  <input type="number" min="0" max="100" value={t.discountPct}
+                    onChange={e => updateTier(i, 'discountPct', e.target.value)}
+                    className={`${fCls} w-20 text-right`} />
+                  <Percent size={12} className="text-slate-400" />
+                </div>
+                <button onClick={() => removeTier(i)} disabled={form.tiers.length <= 1}
+                  className="text-slate-400 hover:text-red-600 p-1 disabled:opacity-30 disabled:cursor-not-allowed"><Trash2 size={13} /></button>
+              </div>
+            ))}
+          </div>
+          {form.tiers.length < 10 && (
+            <button onClick={addTier} className="text-xs font-semibold text-violet-600 hover:underline flex items-center gap-1">
+              <Plus size={12} /> Add tier
+            </button>
+          )}
+        </>
+      ) : (
+        <div className="flex items-center gap-1.5">
+          <input type="number" min="0" max="100" value={form.flatPct}
+            onChange={e => set('flatPct', Number(e.target.value))}
+            className={`${fCls} w-20 text-right`} />
+          <Percent size={12} className="text-slate-400" />
+        </div>
       )}
 
       <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
@@ -172,7 +200,9 @@ function DiscountPoliciesSection() {
   });
 
   function save(form) {
-    const payload = { name: form.name.trim(), active: form.active, tiers: form.tiers };
+    const payload = form.type === 'sibling'
+      ? { name: form.name.trim(), type: form.type, active: form.active, tiers: form.tiers }
+      : { name: form.name.trim(), type: form.type, active: form.active, flatPct: form.flatPct };
     if (editingId === 'new') createMut.mutate(payload);
     else updateMut.mutate({ id: editingId, data: payload });
   }
@@ -181,10 +211,11 @@ function DiscountPoliciesSection() {
     <div>
       <div className="flex items-start justify-between gap-4 mb-1">
         <div>
-          <h4 className="text-sm font-semibold text-slate-800">Sibling Discount Policies</h4>
+          <h4 className="text-sm font-semibold text-slate-800">Discount Policies</h4>
           <p className="text-xs text-slate-500 mt-0.5 max-w-md">
-            Discount tiers by birth-enrollment order within a family (2nd child, 3rd child, …). Only one policy
-            can be active at a time — it's applied automatically when you Generate Invoices from a fee structure.
+            Sibling (tiered), Director's, and Referral (flat-rate) discounts. Only one policy per type can be
+            active at a time, and only the single highest discount a student qualifies for is ever applied —
+            they're never stacked. Applied automatically when you Generate Invoices from a fee structure.
           </p>
         </div>
         {editingId === null && (
@@ -202,12 +233,13 @@ function DiscountPoliciesSection() {
           {policies.map(p => {
             const id = p.id ?? p._id;
             return editingId === id ? (
-              <PolicyForm key={id} initial={{ name: p.name, active: p.active, tiers: p.tiers }}
+              <PolicyForm key={id} initial={{ name: p.name, type: p.type ?? 'sibling', active: p.active, tiers: p.tiers?.length ? p.tiers : [emptyTier()], flatPct: p.flatPct ?? 0 }}
                 onCancel={() => setEditingId(null)} onSave={save} saving={updateMut.isPending} />
             ) : (
               <div key={id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2.5">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
+                    <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">{POLICY_TYPES[p.type ?? 'sibling']?.label ?? p.type}</span>
                     <span className="text-sm font-medium text-slate-800 truncate">{p.name}</span>
                     {p.active && (
                       <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
@@ -216,7 +248,9 @@ function DiscountPoliciesSection() {
                     )}
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    {p.tiers.map(t => `${ORDINALS[t.nthChild] ?? `${t.nthChild}th`} child ${t.discountPct}%`).join(' · ')}
+                    {p.type === 'sibling' || !p.type
+                      ? p.tiers.map(t => `${ORDINALS[t.nthChild] ?? `${t.nthChild}th`} child ${t.discountPct}%`).join(' · ')
+                      : `${p.flatPct}% flat`}
                   </p>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
@@ -231,7 +265,7 @@ function DiscountPoliciesSection() {
             <PolicyForm initial={emptyPolicyForm()} onCancel={() => setEditingId(null)} onSave={save} saving={createMut.isPending} />
           )}
           {policies.length === 0 && editingId !== 'new' && (
-            <p className="text-xs text-slate-400 py-2">No discount policies yet — siblings are invoiced at full price.</p>
+            <p className="text-xs text-slate-400 py-2">No discount policies yet — every invoice is generated at full price.</p>
           )}
         </div>
       )}

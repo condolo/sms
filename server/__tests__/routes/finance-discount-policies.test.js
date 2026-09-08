@@ -1,9 +1,9 @@
 /* ============================================================
-   Discount policies (sibling discounts) — server/routes/finance.js
+   Discount policies — server/routes/finance.js
 
    Covers:
      1. /discount-policies CRUD — active-exclusivity (only one active
-        'sibling' policy per school) and duplicate-nthChild rejection.
+        policy per TYPE per school) and duplicate-nthChild rejection.
      2. The sections-scope regression fix in _resolveScopeStudents():
         a fee structure scoped to sections must resolve students via
         classes.sectionKey → classId, not a nonexistent
@@ -11,6 +11,11 @@
      3. _resolveSiblingDiscounts(), exercised through
         POST /fee-structures/:id/generate — sibling ranking by
         enrollmentDate and tiered discount application.
+     4. (2026-09) 'director'/'referral' flat-rate policy types, gated by
+        isDirectorFamily/isReferralFamily student flags, and
+        _resolveAutoDiscounts()'s "highest wins" rule across all three
+        types — a real school requirement ("only one discount applies
+        per child"), not a simplification of convenience.
 
    All DB calls are mocked — no MongoDB required.
    ============================================================ */
@@ -241,5 +246,130 @@ describe('fee-structures/:id/generate — sibling discount application', () => {
       expect(inv.discountPct).toBe(0);
       expect(inv.total).toBe(1000);
     }
+  });
+});
+
+describe('discount policies — director/referral shape validation (2026-09)', () => {
+  test('POST rejects a sibling policy with no tiers', async () => {
+    const res = await supertest(buildApp()).post('/api/finance/discount-policies').send({
+      name: 'Bad sibling policy', type: 'sibling', tiers: [],
+    });
+    expect(res.status).toBe(400);
+    expect(mockDiscountPolicies.create).not.toHaveBeenCalled();
+  });
+
+  test('POST rejects a director policy with no flatPct', async () => {
+    const res = await supertest(buildApp()).post('/api/finance/discount-policies').send({
+      name: 'Director Discount', type: 'director',
+    });
+    expect(res.status).toBe(400);
+    expect(mockDiscountPolicies.create).not.toHaveBeenCalled();
+  });
+
+  test('POST accepts a referral policy with flatPct and no tiers', async () => {
+    const res = await supertest(buildApp()).post('/api/finance/discount-policies').send({
+      name: 'Referral Discount', type: 'referral', active: true, flatPct: 5,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.data.type).toBe('referral');
+    expect(res.body.data.flatPct).toBe(5);
+  });
+
+  test('activating a new director policy deactivates the old one, but leaves an active referral policy alone (exclusivity is per-type)', async () => {
+    mockDiscountPolicies = makeFakeCollection([
+      { id: 'dp_dir_old', schoolId: SCHOOL_A, type: 'director', active: true, name: 'Old Director', flatPct: 10 },
+      { id: 'dp_ref',     schoolId: SCHOOL_A, type: 'referral', active: true, name: 'Referral',      flatPct: 5 },
+    ]);
+    const res = await supertest(buildApp()).post('/api/finance/discount-policies').send({
+      name: 'New Director', type: 'director', active: true, flatPct: 15,
+    });
+    expect(res.status).toBe(201);
+    const docs = mockDiscountPolicies._docs();
+    expect(docs.find(d => d.id === 'dp_dir_old').active).toBe(false);
+    expect(docs.find(d => d.id === 'dp_ref').active).toBe(true);
+  });
+});
+
+describe('fee-structures/:id/generate — director/referral flat discounts (2026-09)', () => {
+  test('a student flagged isDirectorFamily gets the active director policy flatPct', async () => {
+    mockFeeStructures = makeFakeCollection([{
+      id: 'fs_dir', schoolId: SCHOOL_A, name: 'Term 1 Fees', scopeType: 'all',
+      lineItems: [{ description: 'Tuition', quantity: 1, unitPrice: 1000 }],
+    }]);
+    mockStudents = makeFakeCollection([
+      { id: 's_director', schoolId: SCHOOL_A, status: 'active', firstName: 'D', lastName: 'Kid', isDirectorFamily: true },
+      { id: 's_plain',    schoolId: SCHOOL_A, status: 'active', firstName: 'P', lastName: 'Kid' },
+    ]);
+    mockDiscountPolicies = makeFakeCollection([
+      { id: 'dp_dir', schoolId: SCHOOL_A, type: 'director', active: true, name: "Director's Discount", flatPct: 10 },
+    ]);
+
+    const res = await supertest(buildApp()).post('/api/finance/fee-structures/fs_dir/generate');
+    expect(res.status).toBe(201);
+    const byId = Object.fromEntries(res.body.data.invoices.map(i => [i.studentId, i]));
+    expect(byId.s_director.discountPct).toBe(10);
+    expect(byId.s_plain.discountPct).toBe(0);
+  });
+
+  test('a student flagged isReferralFamily gets the active referral policy flatPct', async () => {
+    mockFeeStructures = makeFakeCollection([{
+      id: 'fs_ref', schoolId: SCHOOL_A, name: 'Term 1 Fees', scopeType: 'all',
+      lineItems: [{ description: 'Tuition', quantity: 1, unitPrice: 1000 }],
+    }]);
+    mockStudents = makeFakeCollection([
+      { id: 's_referred', schoolId: SCHOOL_A, status: 'active', firstName: 'R', lastName: 'Kid', isReferralFamily: true },
+    ]);
+    mockDiscountPolicies = makeFakeCollection([
+      { id: 'dp_ref', schoolId: SCHOOL_A, type: 'referral', active: true, name: 'Referral Discount', flatPct: 5 },
+    ]);
+
+    const res = await supertest(buildApp()).post('/api/finance/fee-structures/fs_ref/generate');
+    expect(res.status).toBe(201);
+    expect(res.body.data.invoices[0].discountPct).toBe(5);
+  });
+
+  test('only the highest of sibling/director/referral applies — never stacked', async () => {
+    mockFeeStructures = makeFakeCollection([{
+      id: 'fs_stack', schoolId: SCHOOL_A, name: 'Term 1 Fees', scopeType: 'all',
+      lineItems: [{ description: 'Tuition', quantity: 1, unitPrice: 1000 }],
+    }]);
+    // Youngest of 2 siblings (10% tier) who is ALSO flagged director (15%
+    // flat) and referral (5% flat) — highest (15%, director) must win,
+    // not 10 + 15 + 5.
+    mockStudents = makeFakeCollection([
+      { id: 's_eldest', schoolId: SCHOOL_A, status: 'active', firstName: 'E', lastName: 'Kid', enrollmentDate: '2020-01-01' },
+      { id: 's_stack',  schoolId: SCHOOL_A, status: 'active', firstName: 'S', lastName: 'Kid', enrollmentDate: '2021-01-01', isDirectorFamily: true, isReferralFamily: true },
+    ]);
+    mockUsers = makeFakeCollection([
+      { id: 'guardian_1', schoolId: SCHOOL_A, role: 'parent', studentIds: ['s_eldest', 's_stack'] },
+    ]);
+    mockDiscountPolicies = makeFakeCollection([
+      { id: 'dp_sib', schoolId: SCHOOL_A, type: 'sibling',  active: true, name: 'Sibling',  tiers: [{ nthChild: 2, discountPct: 10 }] },
+      { id: 'dp_dir', schoolId: SCHOOL_A, type: 'director', active: true, name: 'Director', flatPct: 15 },
+      { id: 'dp_ref', schoolId: SCHOOL_A, type: 'referral', active: true, name: 'Referral', flatPct: 5 },
+    ]);
+
+    const res = await supertest(buildApp()).post('/api/finance/fee-structures/fs_stack/generate');
+    expect(res.status).toBe(201);
+    const byId = Object.fromEntries(res.body.data.invoices.map(i => [i.studentId, i]));
+    expect(byId.s_stack.discountPct).toBe(15);
+    expect(byId.s_stack.total).toBe(850);
+  });
+
+  test('an inactive director policy is ignored even if the student is flagged', async () => {
+    mockFeeStructures = makeFakeCollection([{
+      id: 'fs_inactive', schoolId: SCHOOL_A, name: 'Term 1 Fees', scopeType: 'all',
+      lineItems: [{ description: 'Tuition', quantity: 1, unitPrice: 1000 }],
+    }]);
+    mockStudents = makeFakeCollection([
+      { id: 's_x', schoolId: SCHOOL_A, status: 'active', firstName: 'X', lastName: 'Kid', isDirectorFamily: true },
+    ]);
+    mockDiscountPolicies = makeFakeCollection([
+      { id: 'dp_dir_off', schoolId: SCHOOL_A, type: 'director', active: false, name: 'Old Director', flatPct: 10 },
+    ]);
+
+    const res = await supertest(buildApp()).post('/api/finance/fee-structures/fs_inactive/generate');
+    expect(res.status).toBe(201);
+    expect(res.body.data.invoices[0].discountPct).toBe(0);
   });
 });

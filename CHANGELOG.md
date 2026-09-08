@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.62.0] — 2026-09-08 — feat(finance): Director's and Referral discount policies
+
+Part 2 of 4 for the school-driven Finance request. The school's discount list (Early Payment, sibling tiers, Director's, Referral) comes with an explicit rule: "only one discount applies per child." Msingi's discount engine only modeled sibling discounts — Director's and Referral had no mechanism at all.
+
+### Added
+- `discount_policies.type` extended from a fixed `sibling` to `sibling | director | referral`. Director's and Referral are flat-rate (`flatPct`), not tiered — eligibility is a direct flag on the student, not a computed ranking.
+- `students.isDirectorFamily` / `students.isReferralFamily` — new optional boolean fields, editable from a Student's Fee Discounts section (`StudentProfile.jsx`), same edit flow as any other student field.
+- `_resolveAutoDiscounts()` (`server/routes/finance.js`) replaces the sibling-only `_resolveSiblingDiscounts()` as the entry point `POST /fee-structures/:id/generate` calls: it computes sibling, director, and referral eligibility per student and keeps only the **highest** — matching the school's "only one discount" rule directly, never summed.
+- `FeeSettingsModal.jsx`'s discount policy editor gained a type selector; sibling policies still show the tier editor, director/referral show a single flat-percentage field. Exclusivity (only one *active* policy) is enforced per type, so an active Sibling policy and an active Director's policy can coexist.
+
+### Not built yet (deliberately, part 3 of this request)
+- Early Payment discount — mechanically different (depends on *when* the parent pays, not known at invoice-generation time) and handled separately.
+
+### Verified
+- 8 new tests in `finance-discount-policies.test.js` (shape validation, per-type exclusivity, flat discounts, highest-wins across all three types, inactive-policy-ignored). Full finance suite 45/45. Client production build passes.
+
+---
+
 ## [v5.61.0] — 2026-09-08 — feat(finance): refundable fee-type flag + standard fee-item catalogue
 
 Part 1 of 4 for a school-driven Finance request (standardize Admission/Caution/Ambulance/etc. fee items across all Msingi schools). Caution Money is a refundable deposit, not ordinary fee revenue — Msingi didn't distinguish the two.

@@ -118,6 +118,12 @@ const StudentCreateSchema = z.object({
   schoolEmail:    z.string().email().optional().or(z.literal('')),
   enrollmentDate: z.string().optional(),
   status:         z.enum(['active', 'inactive', 'suspended', 'graduated', 'transferred', 'withdrawn']).default('active'),
+  // 2026-09 — flat-rate discount eligibility flags, resolved by
+  // finance.js's _resolveAutoDiscounts() at invoice-generation time
+  // against any active 'director'/'referral' discount_policies (the same
+  // mechanism enrollmentDate feeds for sibling discounts).
+  isDirectorFamily: z.boolean().optional(),
+  isReferralFamily: z.boolean().optional(),
   customFields:   z.record(z.unknown()).optional(),
 });
 

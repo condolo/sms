@@ -620,6 +620,25 @@ function OverviewTab({ student, houses, houseName, editing, saving, onSave, onCa
           </FField>
         </div>
 
+        {/* Fee Discounts — 2026-09: flat-rate discount policies (Finance →
+            Fee Settings) resolve against these two flags the same way the
+            sibling discount resolves against enrollmentDate; see
+            _resolveAutoDiscounts() in server/routes/finance.js. */}
+        <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Fee Discounts</h3>
+          <p className="text-[11px] text-slate-400 -mt-2">Applied automatically at invoice generation if the school has an active Director's or Referral discount policy — see Finance → Fee Settings.</p>
+          <div className="flex flex-wrap gap-4">
+            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+              <input type="checkbox" checked={!!form.isDirectorFamily} onChange={e => set('isDirectorFamily', e.target.checked)} className="rounded border-slate-300 text-violet-600 focus:ring-violet-500/20" />
+              Director's family
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+              <input type="checkbox" checked={!!form.isReferralFamily} onChange={e => set('isReferralFamily', e.target.checked)} className="rounded border-slate-300 text-violet-600 focus:ring-violet-500/20" />
+              Referred family
+            </label>
+          </div>
+        </div>
+
         {/* Guardian */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
           <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Guardian</h3>

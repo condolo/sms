@@ -604,11 +604,22 @@ async function _resolveScopeStudents(Students, schoolId, fs, ctx) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   DISCOUNT POLICIES — sibling-discount tiers, applied at bulk
-   invoice generation time. One school can have several policies
-   (e.g. draft vs. active, or a policy retired for next year) but
-   only ONE 'sibling' policy may be `active` at a time — that is
-   the one _resolveSiblingDiscounts() looks up.
+   DISCOUNT POLICIES — applied at bulk invoice generation time.
+   One school can have several policies per type (e.g. draft vs.
+   active, or a policy retired for next year) but only ONE policy per
+   `type` may be `active` at a time.
+
+   Three types (2026-09 — 'director'/'referral' added alongside the
+   original 'sibling'):
+     'sibling'  — tiered by nthChild (enrollment order within a family).
+     'director'/'referral' — flat-rate, gated by a boolean flag on the
+       student record (isDirectorFamily/isReferralFamily) rather than
+       any computed ranking — a school-made administrative decision,
+       not something Msingi can infer.
+
+   "Only one discount applies per child" (a real requirement from the
+   school that prompted this): _resolveAutoDiscounts() below computes
+   all three for a student and keeps only the highest, never sums them.
    ══════════════════════════════════════════════════════════════ */
 const DiscountTierSchema = z.object({
   // 1st-enrolled child in a family never appears in a tier (pays full
@@ -617,14 +628,29 @@ const DiscountTierSchema = z.object({
   discountPct: z.number().min(0).max(100),
 });
 const DiscountPolicySchema = z.object({
-  name:   z.string().min(1).max(200),
-  type:   z.literal('sibling').default('sibling'),
-  active: z.boolean().default(false),
-  tiers:  z.array(DiscountTierSchema).min(1),
+  name:    z.string().min(1).max(200),
+  type:    z.enum(['sibling', 'director', 'referral']).default('sibling'),
+  active:  z.boolean().default(false),
+  // 'sibling' only:
+  tiers:   z.array(DiscountTierSchema).optional(),
+  // 'director' / 'referral' only — a single flat percentage:
+  flatPct: z.number().min(0).max(100).optional(),
 });
 function _validateTiers(tiers) {
   const nths = tiers.map(t => t.nthChild);
   if (new Set(nths).size !== nths.length) return 'tiers contains duplicate nthChild values';
+  return null;
+}
+/* Full-shape check for a policy at creation time — a 'sibling' policy
+   needs tiers, a flat-rate one needs flatPct. Partial (PUT) updates
+   don't re-run this: they validate only whatever field is actually
+   being changed (see PUT handler), matching how `active` is handled. */
+function _validatePolicyShape(data) {
+  if (data.type === 'sibling') {
+    if (!data.tiers?.length) return 'sibling policies require at least one tier';
+    return _validateTiers(data.tiers);
+  }
+  if (data.flatPct === undefined) return `${data.type} policies require flatPct`;
   return null;
 }
 
@@ -647,8 +673,8 @@ router.post('/discount-policies', authMiddleware, PLAN, MODGATE, rbac('finance',
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(DiscountPolicySchema, req.body);
     if (error) return E.validation(res, error);
-    const tierErr = _validateTiers(data.tiers);
-    if (tierErr) return E.badRequest(res, tierErr);
+    const shapeErr = _validatePolicyShape(data);
+    if (shapeErr) return E.badRequest(res, shapeErr);
 
     const DiscountPolicies = tenantModel('discount_policies', tenantContext(req));
     if (data.active) {
@@ -710,10 +736,10 @@ router.delete('/discount-policies/:id', authMiddleware, PLAN, MODGATE, rbac('fin
 });
 
 /* Resolves per-student sibling-discount percentages for a batch of
-   target students, keyed by studentId — the single place this logic
-   lives, called once per /generate run (never per-student: ranking a
-   family's children requires each guardian's FULL child list, not
-   just whichever of their kids are in this batch).
+   target students, keyed by studentId — called once per /generate run
+   (never per-student: ranking a family's children requires each
+   guardian's FULL child list, not just whichever of their kids are in
+   this batch).
 
    Family grouping: `users` docs with role 'parent' carry a
    `studentIds` array (the reverse of the Link Parent relationship —
@@ -773,6 +799,47 @@ async function _resolveSiblingDiscounts(schoolId, ctx, studentIds) {
       const pct = tierByNth.get(nth) ?? (nth > maxTierNth ? maxTierPct : 0);
       if (pct > 0) result.set(s.id, pct);
     });
+  }
+  return result;
+}
+
+/* Resolves a flat-rate discount ('director' or 'referral') for a batch
+   of target students, keyed by studentId. Unlike sibling discounts,
+   eligibility here is a direct boolean flag on the student record
+   (isDirectorFamily / isReferralFamily) — an administrative decision a
+   school makes, not something derivable from enrollment data. */
+async function _resolveFlatDiscount(schoolId, ctx, studentIds, type, flagField) {
+  const result = new Map();
+  if (!studentIds?.length) return result;
+
+  const DiscountPolicies = tenantModel('discount_policies', ctx);
+  const policy = await DiscountPolicies.findOne({ schoolId, type, active: true }).lean();
+  if (!policy?.flatPct) return result;
+
+  const Students = tenantModel('students', ctx);
+  const flagged = await Students.find({ schoolId, id: { $in: studentIds }, [flagField]: true }).select('id').lean();
+  for (const s of flagged) result.set(s.id, policy.flatPct);
+  return result;
+}
+
+/* Single entry point for every automatic discount: computes sibling,
+   director, and referral eligibility for a batch of students and keeps
+   only the HIGHEST per student — "only one discount applies per child"
+   was an explicit requirement, not a simplification of convenience.
+   Discounts that require Accounts to apply manually (e.g. Early
+   Payment, which depends on when the parent actually pays — see
+   `earlyPaymentPct` handling in POST /payments) are not part of this
+   generation-time resolution at all. */
+async function _resolveAutoDiscounts(schoolId, ctx, studentIds) {
+  const [sibling, director, referral] = await Promise.all([
+    _resolveSiblingDiscounts(schoolId, ctx, studentIds),
+    _resolveFlatDiscount(schoolId, ctx, studentIds, 'director', 'isDirectorFamily'),
+    _resolveFlatDiscount(schoolId, ctx, studentIds, 'referral', 'isReferralFamily'),
+  ]);
+  const result = new Map();
+  for (const sid of studentIds) {
+    const best = Math.max(sibling.get(sid) ?? 0, director.get(sid) ?? 0, referral.get(sid) ?? 0);
+    if (best > 0) result.set(sid, best);
   }
   return result;
 }
@@ -920,17 +987,17 @@ router.post('/fee-structures/:id/generate', authMiddleware, PLAN, MODGATE, rbac(
 
     if (targets.length === 0) return ok(res, { created: 0, message: 'Invoices already generated for all students in this structure' });
 
-    // Sibling discount (if an active policy exists) — resolved once for
-    // every target student, not per-student, since it needs each
-    // guardian's FULL child list to rank correctly.
+    // Auto discounts (sibling/director/referral, highest wins) — resolved
+    // once for every target student, not per-student, since sibling
+    // ranking needs each guardian's FULL child list to rank correctly.
     const targetStudentIds = targets.map(s => s.id ?? s._id?.toString());
-    const siblingDiscounts = await _resolveSiblingDiscounts(schoolId, tenantContext(req), targetStudentIds);
+    const autoDiscounts = await _resolveAutoDiscounts(schoolId, tenantContext(req), targetStudentIds);
 
     const created_docs = [];
 
     for (const student of targets) {
       const sid = student.id ?? student._id?.toString();
-      const discountPct = siblingDiscounts.get(sid) ?? 0;
+      const discountPct = autoDiscounts.get(sid) ?? 0;
       const totals = _calcInvoiceTotals(fs.lineItems, discountPct);
       const invNum = await nextInvoiceNumber(schoolId);
       const inv = await Invoices.create({
