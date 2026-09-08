@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.64.0] — 2026-09-08 — feat(finance, admissions): admission-triggered draft invoices
+
+Part 4 of 4 for the school-driven Finance request. Today, an admission's fee items only get billed if Finance types up an invoice by hand, or via a Fee Structure Finance generates in bulk — nothing connects the moment a student is actually enrolled to billing them for the admission package (Admission Fee, Caution Money, Ambulance Cover, T-shirt, Hymn Book, …).
+
+### Added
+- `fee_structures.autoGenerateOnEnroll` — a fee structure can be marked to fire automatically the moment a student is enrolled through Admissions. Deliberately limited to `scopeType: 'all'` — a single newly-enrolled student's class/section membership isn't resolved here, only whether the school wants every admission billed this way.
+- `server/utils/admission-billing.js` (`generateEnrollmentInvoices`) — called from `POST /api/admissions/:id/enroll` right after the student record is created. Produces a **draft** invoice, never issued automatically — Finance still reviews it. Idempotent (safe to call twice for the same student/structure) and never allowed to fail the enrollment itself — a billing hiccup is logged, not surfaced to the admissions officer. Applies the same sibling/director/referral auto-discounts a bulk-generated invoice gets.
+- `PATCH /api/finance/invoices/:id/issue` — the only way out of `draft`, flips it to `unpaid` (issuedAt/issuedBy stamped, audited, guardian-notified same as any other new invoice). `POST /payments` now refuses a draft invoice outright — issue it first.
+- `GET /api/finance/summary` excludes `draft` invoices from totals — an unissued admission invoice isn't a real receivable yet.
+- `FeeStructureSlideOver.jsx` gains the "Automatically invoice on enrollment" checkbox (only shown at scope "All active students"); `InvoicesTab.jsx` gains a Draft status filter/badge and an "Issue" action button.
+- `server/utils/invoice-math.js` and `server/utils/discount-resolution.js` — extracted the totals math and the sibling/director/referral resolution out of `finance.js` so the new admission-billing hook reuses the exact same logic instead of a second copy that could drift. `finance.js` now imports both; behavior unchanged (all 45 pre-existing discount/finance tests still pass unmodified).
+
+### Fixed in passing
+- `financeApi.invoices.void()` (`client/src/api/client.js`) called a `PATCH .../void` route that has never existed server-side — the real void action is `DELETE /finance/invoices/:id`. The "Void invoice" button has been silently 404ing; fixed to call the correct route.
+
+### Verified
+- 15 new tests: `admission-billing.test.js` (7 — matching structure creates one draft invoice, wrong scope/flag ignored, idempotent, locked-year skip, auto-discount applies, multiple structures), `finance-draft-invoices.test.js` (5 — issue lifecycle, payment-on-draft rejected, summary exclusion), plus 3 new integration cases in `admissions-enroll.test.js` covering the route end-to-end. Full server suite 1917/1917. `verify-rbac-coverage.js` 100% (483/483, the new `/issue` route included). `security-scan.js` clean. Client production build passes.
+
+---
+
 ## [v5.63.0] — 2026-09-08 — feat(finance): Early Payment discount
 
 Part 3 of 4 for the school-driven Finance request. Early Payment is mechanically different from every other discount type here: whether a family qualifies depends on WHEN they pay, which isn't known at invoice-generation time — it can only be resolved once a real payment is recorded.

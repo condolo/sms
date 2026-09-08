@@ -97,6 +97,7 @@ This is a deliberate, explicit action, not something that happens automatically 
 - Carries every field across automatically: names, DOB, gender, class/stream/house, both parents' full details, Allergies and Emergency Contact (filed under the new student's Medical tab).
 - Is safe to click more than once — enrolling an already-enrolled application returns the same student record rather than creating a duplicate, so a double-click or a retried request can't create two students for one applicant.
 - Is blocked with a clear error if the application is missing Date of Birth or Gender (see the note in §5) — fix the application, then enroll.
+- If your school has a Finance → Fee Structure (e.g. "New Admission Package" — Admission Fee, Caution Money, etc.) marked to auto-generate on enrollment, a **draft invoice** is created for the new student at the same moment. It's a draft, not a live invoice — Finance still reviews it and issues it (visible to the parent) from the Invoices tab. Nothing changes here if your school hasn't set one up.
 
 The application and the resulting student stay linked (the application records the new student's ID), so you can always trace an enrolled student back to their original application and its full stage history.
 
@@ -114,4 +115,4 @@ The Dashboard's **Admissions Pipeline** bar chart shows applicant counts by stag
 
 ---
 
-*Last reviewed: 2026-09-07 — §5 updated for the new per-school Admission Requirements settings (`server/utils/admission-requirements.js`), checked directly against `server/routes/admissions.js`, `server/utils/guardian-contact.js`, and `client/src/pages/admissions/`.*
+*Last reviewed: 2026-09-08 — §8 updated to note that enrolling can now auto-generate a draft admission invoice (`server/utils/admission-billing.js`), checked directly against `server/routes/admissions.js`.*

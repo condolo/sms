@@ -1591,12 +1591,14 @@ The InnoLearn International School demo seed has students, teachers, and classes
 | `GET /api/growth-profile/:studentId/behaviour` | standard | All-time behaviour history grouped by academic year — no reset-window applied, the permanent record |
 | `GET/POST /api/exams` | standard | `GET /api/exams/:id/results` with class stats, `POST /api/exams/:id/results` bulk-upsert |
 | `GET /api/grades/report` | standard | Weighted average per student per subject via aggregation |
-| `GET/POST /api/admissions` | premium | `applicationRef` auto-generated, `stageHistory` append-only, `PATCH .../stage`, `GET .../stats` funnel |
+| `GET/POST /api/admissions` | premium | `applicationRef` auto-generated, `stageHistory` append-only, `PATCH .../stage`, `GET .../stats` funnel, `POST .../:id/enroll` (idempotent — also retries `utils/admission-billing.js`'s `generateEnrollmentInvoices()` on an already-enrolled application) |
 | `GET/POST /api/timetable` | standard | Slot collision detection (409), `GET /api/timetable/class/:classId`, `POST .../bulk` |
 | `POST /api/elearning/sessions` | standard | Schedule online session — no external API; stores teacher's PMI link; creates `elearning_sessions` + `events` record atomically |
 | `GET /api/elearning/sessions` | standard | List all sessions for the school; sorted by scheduledAt desc |
 | `DELETE /api/elearning/sessions/:id` | standard | Cancel session — deletes both `elearning_sessions` and linked `events` document |
 | `GET /api/student-portal/dashboard` | — | Student-scoped payload including today's timetable; when `emergencyOnlineMode` is true, enriches each slot with `meetingLink`, `meetingPasscode`, `platform` by joining `teachers` collection |
+
+**Finance shared utilities (2026-09):** `server/utils/invoice-math.js` (`calcInvoiceTotals`/`round`) and `server/utils/discount-resolution.js` (`resolveAutoDiscounts` — sibling/director/referral, highest wins) were extracted out of `finance.js` so `server/utils/admission-billing.js` could reuse the exact same math and discount logic for an enrollment-triggered invoice, rather than a second implementation that could drift. `finance.js` itself still owns Early Payment resolution (`_computeEarlyPaymentDeadline`, applied in `POST /payments`) since it depends on payment timing, not anything these shared modules need.
 
 ### Middleware Chain
 

@@ -19,6 +19,7 @@ const { resolvePrimaryContact, validateGuardianRequirement } = require('../utils
 const { resolveRequiredFields, validateRequiredAdmissionFields } = require('../utils/admission-requirements');
 const { reserveAdmissionNumbers } = require('../utils/counters');
 const { resolveAcademicPeriod }   = require('../utils/academic-period');
+const { generateEnrollmentInvoices } = require('../utils/admission-billing');
 const AuditService = require('../services/audit');
 
 const router = express.Router();
@@ -365,7 +366,16 @@ router.post('/:id/enroll',
       // second, duplicate one.
       if (app.studentId) {
         const existing = await tenantModel('students', ctx).findOne({ id: app.studentId, schoolId }).lean();
-        if (existing) return ok(res, { student: existing, application: app, alreadyEnrolled: true });
+        if (existing) {
+          // Retrying an already-enrolled application is exactly the case
+          // generateEnrollmentInvoices() is idempotent against — never a
+          // duplicate invoice, but it DOES retry billing if the first
+          // attempt failed non-fatally (see try/catch below) or a
+          // qualifying fee structure was added after this student enrolled.
+          try { await generateEnrollmentInvoices(schoolId, ctx, existing, userId, req); }
+          catch (billingErr) { console.error('[admissions POST/:id/enroll — billing retry]', billingErr); }
+          return ok(res, { student: existing, application: app, alreadyEnrolled: true });
+        }
         // studentId is set but the student record itself is gone (e.g.
         // manually deleted) — fall through and enroll again rather than
         // permanently 404 on this application.
@@ -462,6 +472,13 @@ router.post('/:id/enroll',
       };
 
       const student = await tenantModel('students', ctx).create(studentDoc);
+
+      // Admission-triggered billing (2026-09) — never allowed to fail the
+      // enrollment itself; a billing hiccup shouldn't block a student from
+      // being enrolled, same treatment as every other post-enroll side
+      // effect in this codebase (guardian notification, etc.).
+      try { await generateEnrollmentInvoices(schoolId, ctx, student, userId, req); }
+      catch (billingErr) { console.error('[admissions POST/:id/enroll — billing]', billingErr); }
 
       const stageUnchanged = app.stage === 'enrolled';
       const appUpdate = {

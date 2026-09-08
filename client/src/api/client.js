@@ -216,7 +216,13 @@ export const attendance = {
 export const finance = {
   invoices: {
     ..._resource('finance/invoices'),
-    void: (id) => _patch(`/finance/invoices/${id}/void`),
+    // Pre-existing bug fixed in passing (2026-09): this called a PATCH
+    // .../void route that has never existed server-side — the server's
+    // void action is DELETE /finance/invoices/:id (see _resource's own
+    // `remove` above, which already hits the right route). The "Void
+    // invoice" button in InvoicesTab.jsx was silently 404ing.
+    void: (id) => _delete(`/finance/invoices/${id}`),
+    issue: (id) => _patch(`/finance/invoices/${id}/issue`),
   },
   payments: {
     list:   (params) => _get('/finance/payments', params),

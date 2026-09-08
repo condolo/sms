@@ -28,21 +28,10 @@ const PLAN   = planGate('finance');
 const MODGATE = moduleGate('finance');
 
 /* ── Helpers ────────────────────────────────────────────────── */
-/** Round to 2 decimal places to avoid floating-point drift */
-function _round(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
-
-/**
- * Recalculate invoice totals from line items.
- * Returns: { subtotal, discountAmount, taxAmount, total }
- */
-function _calcInvoiceTotals(lineItems = [], discountPct = 0, taxPct = 0) {
-  const subtotal       = _round(lineItems.reduce((s, i) => s + _round((i.unitPrice || 0) * (i.quantity || 1)), 0));
-  const discountAmount = _round(subtotal * (Math.min(Math.max(discountPct, 0), 100) / 100));
-  const taxableAmount  = _round(subtotal - discountAmount);
-  const taxAmount      = _round(taxableAmount * (Math.min(Math.max(taxPct, 0), 100) / 100));
-  const total          = _round(taxableAmount + taxAmount);
-  return { subtotal, discountAmount, taxAmount, total };
-}
+// _round/_calcInvoiceTotals moved to utils/invoice-math.js (2026-09) so
+// utils/admission-billing.js can reuse the exact same totals math for an
+// enrollment-triggered draft invoice — one implementation, not two.
+const { round: _round, calcInvoiceTotals: _calcInvoiceTotals } = require('../utils/invoice-math');
 
 /**
  * Recalculate balance due on an invoice given existing payments.
@@ -290,6 +279,36 @@ router.delete('/invoices/:id', authMiddleware, PLAN, MODGATE, rbac('finance', 'd
   }
 });
 
+/* ── PATCH /api/finance/invoices/:id/issue ─ Draft → issued ───
+   The only exit from 'draft' — see utils/admission-billing.js, which
+   is the only thing that ever creates a 'draft' invoice today (an
+   enrollment-triggered admission package, held for Finance to review
+   before a parent ever sees it). Once issued it behaves exactly like
+   any other invoice generated the normal way — same 'unpaid' status,
+   same reminder/overdue cron eligibility. */
+router.patch('/invoices/:id/issue', authMiddleware, PLAN, MODGATE, rbac('finance', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const Invoices = tenantModel('invoices', tenantContext(req));
+    const doc = await Invoices.findOne({ id: req.params.id, schoolId }).lean();
+    if (!doc) return E.notFound(res, 'Invoice not found');
+    if (doc.status !== 'draft') return E.badRequest(res, `Only a draft invoice can be issued (this one is "${doc.status}")`);
+
+    const updated = await Invoices.findOneAndUpdate(
+      { id: req.params.id, schoolId },
+      { status: 'unpaid', issuedAt: new Date().toISOString(), issuedBy: userId },
+      { new: true }
+    ).lean();
+
+    AuditService.log({ action: 'finance.invoice_issued', actor: req.jwtUser, schoolId, target: { type: 'invoice', id: req.params.id, label: doc.invoiceNumber }, details: { studentId: doc.studentId, total: doc.total }, req });
+    _notifyInvoiceCreated(req, updated).catch(err => console.error('[finance/invoices issue notify]', err));
+    return ok(res, updated);
+  } catch (err) {
+    console.error('[finance PATCH /invoices/:id/issue]', err);
+    return E.serverError(res);
+  }
+});
+
 /* ══════════════════════════════════════════════════════════════
    PAYMENTS
    ══════════════════════════════════════════════════════════════ */
@@ -341,6 +360,7 @@ router.post('/payments', authMiddleware, PLAN, MODGATE, rbac('finance', 'create'
     const invoice  = await Invoices.findOne({ id: data.invoiceId, schoolId }).lean();
     if (!invoice) return E.notFound(res, 'Invoice not found');
     if (invoice.status === 'voided') return E.badRequest(res, 'Cannot record payment on a voided invoice');
+    if (invoice.status === 'draft') return E.badRequest(res, 'This invoice is still a draft — issue it first (PATCH /invoices/:id/issue) before recording a payment');
 
     // Academic Year & Term Dependency Map, finding #5. Payments carry no
     // academicYearId of their own — scoped via the invoice they belong to.
@@ -609,6 +629,17 @@ const FeeStructureSchema = z.object({
   lineItems:   z.array(LineItemSchema).min(1),
   dueDate:     z.string().optional(),
   notes:       z.string().max(500).optional(),
+  // 2026-09: the school's "admission package" (Admission Fee, Caution
+  // Money, Ambulance Cover, …) as ONE fee structure that fires
+  // automatically the moment a new student is enrolled — see
+  // utils/admission-billing.js, called from admissions.js's /:id/enroll.
+  // Deliberately limited to scopeType 'all': a single newly-enrolled
+  // student's class/section/individual-list membership isn't resolved
+  // here, only whether the school wants every admission billed this way.
+  // A structure with autoGenerateOnEnroll: true on any other scopeType
+  // is simply never picked up by the enroll hook (client disables the
+  // checkbox outside scope 'all' to avoid that silent no-op).
+  autoGenerateOnEnroll: z.boolean().optional().default(false),
 });
 
 /* Resolves which students a fee structure's scope actually targets —
@@ -793,114 +824,14 @@ router.delete('/discount-policies/:id', authMiddleware, PLAN, MODGATE, rbac('fin
   }
 });
 
-/* Resolves per-student sibling-discount percentages for a batch of
-   target students, keyed by studentId — called once per /generate run
-   (never per-student: ranking a family's children requires each
-   guardian's FULL child list, not just whichever of their kids are in
-   this batch).
-
-   Family grouping: `users` docs with role 'parent' carry a
-   `studentIds` array (the reverse of the Link Parent relationship —
-   see notify-students.js). A student can have >1 guardian, and two
-   guardians of the same family may not list identical studentIds
-   (e.g. one parent linked before a younger sibling enrolled), so
-   families are merged via union-find over shared studentIds rather
-   than assumed to match one guardian's list exactly.
-
-   Ranking: within a merged family, children are ordered by
-   enrollmentDate (earliest = 1st child, pays full price); a tier's
-   discount applies from the matching nthChild onward using the
-   highest tier for any child beyond the last defined tier. */
-async function _resolveSiblingDiscounts(schoolId, ctx, studentIds) {
-  const result = new Map();
-  if (!studentIds?.length) return result;
-
-  const DiscountPolicies = tenantModel('discount_policies', ctx);
-  const policy = await DiscountPolicies.findOne({ schoolId, type: 'sibling', active: true }).lean();
-  if (!policy?.tiers?.length) return result;
-
-  const Users = tenantModel('users', ctx);
-  const guardians = await Users.find({ schoolId, role: 'parent', studentIds: { $in: studentIds }, isActive: { $ne: false } })
-    .select('studentIds').lean();
-  if (!guardians.length) return result;
-
-  // Union-find: merge every guardian's children into one family group.
-  const parentOf = new Map();
-  function find(x) { while (parentOf.get(x) !== x) x = parentOf.get(x); return x; }
-  function union(a, b) { const ra = find(a), rb = find(b); if (ra !== rb) parentOf.set(ra, rb); }
-  for (const g of guardians) {
-    const kids = (g.studentIds || []).filter(Boolean);
-    for (const k of kids) if (!parentOf.has(k)) parentOf.set(k, k);
-    for (let i = 1; i < kids.length; i++) union(kids[0], kids[i]);
-  }
-  if (parentOf.size === 0) return result;
-
-  const families = new Map(); // root id -> [studentId, ...]
-  for (const sid of parentOf.keys()) {
-    const root = find(sid);
-    if (!families.has(root)) families.set(root, []);
-    families.get(root).push(sid);
-  }
-
-  const tierByNth = new Map(policy.tiers.map(t => [t.nthChild, t.discountPct]));
-  const maxTierNth = Math.max(...policy.tiers.map(t => t.nthChild));
-  const maxTierPct = tierByNth.get(maxTierNth);
-
-  const Students = tenantModel('students', ctx);
-  for (const familyIds of families.values()) {
-    if (familyIds.length < 2) continue; // only child — no sibling discount
-    const siblings = await Students.find({ schoolId, id: { $in: familyIds } }).select('id enrollmentDate createdAt').lean();
-    siblings.sort((a, b) => new Date(a.enrollmentDate || a.createdAt || 0) - new Date(b.enrollmentDate || b.createdAt || 0));
-    siblings.forEach((s, idx) => {
-      const nth = idx + 1;
-      if (nth === 1 || !studentIds.includes(s.id)) return;
-      const pct = tierByNth.get(nth) ?? (nth > maxTierNth ? maxTierPct : 0);
-      if (pct > 0) result.set(s.id, pct);
-    });
-  }
-  return result;
-}
-
-/* Resolves a flat-rate discount ('director' or 'referral') for a batch
-   of target students, keyed by studentId. Unlike sibling discounts,
-   eligibility here is a direct boolean flag on the student record
-   (isDirectorFamily / isReferralFamily) — an administrative decision a
-   school makes, not something derivable from enrollment data. */
-async function _resolveFlatDiscount(schoolId, ctx, studentIds, type, flagField) {
-  const result = new Map();
-  if (!studentIds?.length) return result;
-
-  const DiscountPolicies = tenantModel('discount_policies', ctx);
-  const policy = await DiscountPolicies.findOne({ schoolId, type, active: true }).lean();
-  if (!policy?.flatPct) return result;
-
-  const Students = tenantModel('students', ctx);
-  const flagged = await Students.find({ schoolId, id: { $in: studentIds }, [flagField]: true }).select('id').lean();
-  for (const s of flagged) result.set(s.id, policy.flatPct);
-  return result;
-}
-
-/* Single entry point for every automatic discount: computes sibling,
-   director, and referral eligibility for a batch of students and keeps
-   only the HIGHEST per student — "only one discount applies per child"
-   was an explicit requirement, not a simplification of convenience.
-   Discounts that require Accounts to apply manually (e.g. Early
-   Payment, which depends on when the parent actually pays — see
-   `earlyPaymentPct` handling in POST /payments) are not part of this
-   generation-time resolution at all. */
-async function _resolveAutoDiscounts(schoolId, ctx, studentIds) {
-  const [sibling, director, referral] = await Promise.all([
-    _resolveSiblingDiscounts(schoolId, ctx, studentIds),
-    _resolveFlatDiscount(schoolId, ctx, studentIds, 'director', 'isDirectorFamily'),
-    _resolveFlatDiscount(schoolId, ctx, studentIds, 'referral', 'isReferralFamily'),
-  ]);
-  const result = new Map();
-  for (const sid of studentIds) {
-    const best = Math.max(sibling.get(sid) ?? 0, director.get(sid) ?? 0, referral.get(sid) ?? 0);
-    if (best > 0) result.set(sid, best);
-  }
-  return result;
-}
+// _resolveSiblingDiscounts / _resolveFlatDiscount / _resolveAutoDiscounts
+// moved to utils/discount-resolution.js (2026-09) so
+// utils/admission-billing.js can apply the exact same "only one
+// discount, highest wins" logic to an enrollment-triggered invoice —
+// one implementation, not two. Early Payment stays here (see POST
+// /payments) since it depends on when a family actually pays, not
+// anything resolvable at invoice-creation time.
+const { resolveAutoDiscounts: _resolveAutoDiscounts } = require('../utils/discount-resolution');
 
 /* ── GET /api/finance/fee-structures ─────────────────────────── */
 router.get('/fee-structures', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), async (req, res) => {
@@ -1113,8 +1044,11 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, rbac('finance', 'read'), a
     // Excludes voided invoices — a voided invoice's total/balance/amountPaid
     // are left untouched by the void action (server/routes/finance.js's
     // void handler only flips `status`), so including it here would count
-    // stale, cancelled amounts toward the school's real totals.
-    const filter = { schoolId, status: { $ne: 'voided' } };
+    // stale, cancelled amounts toward the school's real totals. Also
+    // excludes 'draft' (2026-09) — an enrollment-triggered admission
+    // invoice Finance hasn't issued yet isn't a real receivable until
+    // PATCH .../issue moves it to 'unpaid'.
+    const filter = { schoolId, status: { $nin: ['voided', 'draft'] } };
     const _ay2 = strParam(req.query.academicYearId);
     if (_ay2) filter.academicYearId = _ay2;
 

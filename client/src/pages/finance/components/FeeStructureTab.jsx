@@ -183,6 +183,7 @@ export default function FeeStructureTab({ fmtCurrency, canCreate }) {
                         : fs.classIds?.length > 0
                         ? `Applies to ${fs.classIds.length} class${fs.classIds.length !== 1 ? 'es' : ''}` // pre-scopeType structures
                         : 'Applies to all active students'}
+                      {fs.autoGenerateOnEnroll && ' · Auto-invoiced (draft) on every new admission'}
                     </p>
                   </div>
                 )}

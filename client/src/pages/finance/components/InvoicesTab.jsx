@@ -6,7 +6,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence } from 'framer-motion';
-import { AlertTriangle, FileText, Search, X, Ban, Printer, Upload } from 'lucide-react';
+import { AlertTriangle, FileText, Search, X, Ban, Printer, Upload, Send } from 'lucide-react';
 import { finance as financeApi } from '@/api/client.js';
 import { Pagination } from '@/components/ui/Pagination.jsx';
 import { RowSkeleton, EmptyOrError } from './FinancePrimitives.jsx';
@@ -97,6 +97,13 @@ ${itemRows ? `<table><thead><tr><th>Description</th><th style="text-align:center
     onSuccess:  () => qc.invalidateQueries({ queryKey: ['finance'] }),
   });
 
+  // 2026-09: an enrollment-triggered admission invoice sits as 'draft'
+  // until Finance reviews it — this is the review action.
+  const { mutate: issueInvoice, variables: issuingId } = useMutation({
+    mutationFn: id => financeApi.invoices.issue(id),
+    onSuccess:  () => qc.invalidateQueries({ queryKey: ['finance'] }),
+  });
+
   function onSearch(v) {
     setSearch(v);
     clearTimeout(timer[0]);
@@ -127,6 +134,7 @@ ${itemRows ? `<table><thead><tr><th>Description</th><th style="text-align:center
           className="text-sm px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-700"
         >
           <option value="">All statuses</option>
+          <option value="draft">Draft</option>
           <option value="unpaid">Unpaid</option>
           <option value="partial">Partial</option>
           <option value="paid">Paid</option>
@@ -205,6 +213,16 @@ ${itemRows ? `<table><thead><tr><th>Description</th><th style="text-align:center
                         >
                           <Printer size={13} />
                         </button>
+                        {canCreate && inv.status === 'draft' && (
+                          <button
+                            onClick={() => issueInvoice(id)}
+                            disabled={issuingId === id}
+                            className="p-1.5 text-violet-500 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition disabled:opacity-40"
+                            title="Issue invoice — makes it visible to the parent"
+                          >
+                            <Send size={13} />
+                          </button>
+                        )}
                         {canCreate && inv.status !== 'void' && inv.status !== 'paid' && (
                           <button
                             onClick={() => confirm('Void this invoice? This cannot be undone.') && voidInvoice(id)}

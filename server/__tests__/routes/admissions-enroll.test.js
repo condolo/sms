@@ -61,6 +61,14 @@ jest.mock('../../utils/model', () => ({
 
 let mockAppDocs;
 let mockStudentDocs;
+// Admission-triggered billing (2026-09) — fee_structures/invoices/
+// discount_policies support generateEnrollmentInvoices() end-to-end
+// through the real HTTP route. Empty by default (no auto-billing
+// structure configured), matching every pre-existing test in this file
+// that never touches billing at all.
+let mockFeeStructureDocs;
+let mockInvoiceDocs;
+function mockChainArr(arr) { return { select: () => mockChainArr(arr), lean: () => Promise.resolve(arr) }; }
 jest.mock('../../utils/tenant-model', () => ({
   tenantModel: jest.fn((collection) => {
     if (collection === 'admissions') {
@@ -82,6 +90,16 @@ jest.mock('../../utils/tenant-model', () => ({
         create:  (doc) => { const d = { ...doc }; mockStudentDocs.push(d); return Promise.resolve(d); },
       };
     }
+    if (collection === 'fee_structures') {
+      return { find: (filter) => mockChainArr(mockFeeStructureDocs.filter((d) => mockMatchFilter(d, filter))) };
+    }
+    if (collection === 'invoices') {
+      return {
+        findOne: (filter) => mockChain(mockInvoiceDocs.find((d) => mockMatchFilter(d, filter)) ?? null),
+        create:  (doc) => { const d = { ...doc }; mockInvoiceDocs.push(d); return Promise.resolve(d); },
+      };
+    }
+    if (collection === 'discount_policies') return { findOne: () => mockChain(null) };
     return { findOne: () => mockChain(null), find: () => mockChain([]) };
   }),
   tenantContext: jest.fn((req) => ({ schoolId: req.jwtUser.schoolId })),
@@ -90,6 +108,7 @@ jest.mock('../../utils/tenant-model', () => ({
 let mockNextAdmNo;
 jest.mock('../../utils/counters', () => ({
   reserveAdmissionNumbers: jest.fn(() => Promise.resolve([mockNextAdmNo])),
+  nextInvoiceNumber: jest.fn(() => Promise.resolve('INV-1')),
 }));
 jest.mock('../../utils/academic-period', () => ({
   resolveAcademicPeriod: jest.fn(() => Promise.resolve({ academicYearId: 'ay_2026', termId: 'term_1' })),
@@ -119,6 +138,8 @@ beforeEach(() => {
   mockRolePermsDocs = [ADMIN_ROLE_DOC];
   mockAppDocs = [];
   mockStudentDocs = [];
+  mockFeeStructureDocs = [];
+  mockInvoiceDocs = [];
   mockNextAdmNo = 'ADM-2026-0001';
   mockSchoolDoc = { admissionConfig: {} };
 });
@@ -298,5 +319,46 @@ describe('POST /api/admissions/:id/enroll — idempotency', () => {
     expect(res.status).toBe(201);
     // stage was already 'enrolled' -> no new stageHistory push, count unchanged
     expect(res.body.data.application.stageHistory).toHaveLength(1);
+  });
+});
+
+describe('POST /api/admissions/:id/enroll — admission-triggered billing (2026-09)', () => {
+  test('a fee structure marked autoGenerateOnEnroll creates a draft invoice for the newly enrolled student', async () => {
+    mockFeeStructureDocs = [{
+      id: 'fs_admission', schoolId: SCHOOL, name: 'New Admission Package', scopeType: 'all', autoGenerateOnEnroll: true,
+      lineItems: [{ description: 'Admission Fee', quantity: 1, unitPrice: 15000 }],
+    }];
+    mockAppDocs = [app()];
+    const res = await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
+    expect(res.status).toBe(201);
+    expect(mockInvoiceDocs).toHaveLength(1);
+    expect(mockInvoiceDocs[0].studentId).toBe(res.body.data.student.id);
+    expect(mockInvoiceDocs[0].status).toBe('draft');
+    expect(mockAuditLog).toHaveBeenCalledWith(expect.objectContaining({ action: 'finance.enrollment_invoice_drafted' }));
+  });
+
+  test('no matching fee structure -> enrollment still succeeds, no invoice created (default behaviour, unaffected)', async () => {
+    mockAppDocs = [app()];
+    const res = await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
+    expect(res.status).toBe(201);
+    expect(mockInvoiceDocs).toHaveLength(0);
+  });
+
+  test('re-enrolling an already-enrolled application retries billing but never duplicates the invoice', async () => {
+    mockFeeStructureDocs = [{
+      id: 'fs_admission', schoolId: SCHOOL, name: 'New Admission Package', scopeType: 'all', autoGenerateOnEnroll: true,
+      lineItems: [{ description: 'Admission Fee', quantity: 1, unitPrice: 15000 }],
+    }];
+    mockStudentDocs = [{ id: 'stu_existing', schoolId: SCHOOL, firstName: 'Amara', lastName: 'Osei', admissionNumber: 'ADM-2026-0000' }];
+    mockAppDocs = [app({ stage: 'enrolled', studentId: 'stu_existing' })];
+
+    const res = await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
+    expect(res.status).toBe(200);
+    expect(res.body.data.alreadyEnrolled).toBe(true);
+    expect(mockInvoiceDocs).toHaveLength(1); // billing retried and succeeded this time
+
+    // Enroll again — must not create a second invoice for the same student+structure
+    await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
+    expect(mockInvoiceDocs).toHaveLength(1);
   });
 });

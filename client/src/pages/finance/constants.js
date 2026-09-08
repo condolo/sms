@@ -21,6 +21,9 @@ export const INV_STATUS_BADGE = {
   partial: 'bg-blue-50    text-blue-700   ring-1 ring-blue-200',
   void:    'bg-slate-100  text-slate-400',
   overdue: 'bg-red-50     text-red-600    ring-1 ring-red-200',
+  // 2026-09: enrollment-triggered admission invoices sit here until
+  // Finance reviews and issues them — see PATCH /invoices/:id/issue.
+  draft:   'bg-violet-50  text-violet-600 ring-1 ring-violet-200',
 };
 
 /** Build a currency formatter from the school object */

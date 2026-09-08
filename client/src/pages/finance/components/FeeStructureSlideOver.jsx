@@ -57,6 +57,16 @@ export default function FeeStructureSlideOver({ fmtCurrency, onClose, onCreated 
   const [errors,  setErrors]  = useState({});
 
   const [scopeType,  setScopeType]  = useState('all');
+  // 2026-09: auto-generate a DRAFT invoice from this structure the moment
+  // a new student is enrolled (Admissions -> Enroll) — the school's
+  // "admission package" (Admission Fee, Caution Money, …). Only takes
+  // effect at scopeType 'all' (see finance.js's schema comment for why),
+  // so switching scope away from 'all' clears it to avoid a silent no-op.
+  const [autoGenerateOnEnroll, setAutoGenerateOnEnroll] = useState(false);
+  function changeScopeType(id) {
+    setScopeType(id);
+    if (id !== 'all') setAutoGenerateOnEnroll(false);
+  }
   const [classIds,   setClassIds]   = useState([]);
   const [sectionIds, setSectionIds] = useState([]);
   const [studentIds, setStudentIds] = useState([]);       // selected {id, name}
@@ -140,6 +150,7 @@ export default function FeeStructureSlideOver({ fmtCurrency, onClose, onCreated 
       classIds:   scopeType === 'classes'  ? classIds : undefined,
       sectionIds: scopeType === 'sections' ? sectionIds : undefined,
       studentIds: scopeType === 'students' ? studentIds.map(s => s.id) : undefined,
+      autoGenerateOnEnroll: scopeType === 'all' ? autoGenerateOnEnroll : undefined,
     });
   }
 
@@ -219,7 +230,7 @@ export default function FeeStructureSlideOver({ fmtCurrency, onClose, onCreated 
                 <button
                   key={opt.id}
                   type="button"
-                  onClick={() => setScopeType(opt.id)}
+                  onClick={() => changeScopeType(opt.id)}
                   className={`rounded-full px-3 py-1.5 text-xs font-semibold border transition-colors ${
                     scopeType === opt.id ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'
                   }`}
@@ -229,6 +240,14 @@ export default function FeeStructureSlideOver({ fmtCurrency, onClose, onCreated 
               ))}
             </div>
             {errors.scope && <p className="text-[11px] text-red-500 mt-1.5">{errors.scope}</p>}
+
+            {scopeType === 'all' && (
+              <label className="mt-2.5 flex items-start gap-2 text-xs text-slate-600 cursor-pointer">
+                <input type="checkbox" checked={autoGenerateOnEnroll} onChange={e => setAutoGenerateOnEnroll(e.target.checked)}
+                  className="mt-0.5 rounded border-slate-300 text-violet-600 focus:ring-violet-400/40" />
+                <span>Automatically invoice this fee the moment a new student is enrolled (Admissions → Enroll), as a draft — you still review and issue it in Invoices.</span>
+              </label>
+            )}
 
             {scopeType === 'classes' && (
               <div className="mt-2.5 flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
