@@ -159,6 +159,39 @@ test('idempotent — calling twice for the same student never duplicates student
   expect(doc.guardianOf).toEqual(['stu_elder', 'stu_new']);
 });
 
+test('an email matching TWO different guardian accounts is not auto-linked — ambiguous, logged, never guessed', async () => {
+  mockUsers = makeFakeCollection([
+    { id: 'guardian_real',    schoolId: SCHOOL, role: 'parent', email: 'shared@example.com', studentIds: ['stu_elder'] },
+    { id: 'guardian_unrelated', schoolId: SCHOOL, role: 'parent', email: 'shared@example.com', studentIds: ['stu_other_family'] },
+  ]);
+  const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+  const linked = await linkExistingGuardians(SCHOOL, {}, { id: 'stu_new', motherEmail: 'shared@example.com' });
+  expect(linked).toEqual([]);
+  expect(mockUsers._docs()[0].studentIds).toEqual(['stu_elder']);   // unchanged
+  expect(mockUsers._docs()[1].studentIds).toEqual(['stu_other_family']); // unchanged
+  expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('ambiguous'));
+  errSpy.mockRestore();
+});
+
+test('an ambiguous email does not block linking via a DIFFERENT, unambiguous email on the same application', async () => {
+  mockUsers = makeFakeCollection([
+    { id: 'guardian_dup_a', schoolId: SCHOOL, role: 'parent', email: 'shared@example.com', studentIds: ['stu_x'] },
+    { id: 'guardian_dup_b', schoolId: SCHOOL, role: 'parent', email: 'shared@example.com', studentIds: ['stu_y'] },
+    { id: 'guardian_dad',   schoolId: SCHOOL, role: 'parent', email: 'dad@example.com',    studentIds: ['stu_elder'] },
+  ]);
+  const linked = await linkExistingGuardians(SCHOOL, {}, { id: 'stu_new', motherEmail: 'shared@example.com', fatherEmail: 'dad@example.com' });
+  expect(linked).toEqual(['guardian_dad']); // the unambiguous match still links normally
+});
+
+test('siblingStudentId legitimately resolving to TWO guardians (mother + father, each with their own account) links both — not ambiguity', async () => {
+  mockUsers = makeFakeCollection([
+    { id: 'guardian_mum', schoolId: SCHOOL, role: 'parent', email: 'mum@example.com', studentIds: ['stu_elder'] },
+    { id: 'guardian_dad', schoolId: SCHOOL, role: 'parent', email: 'dad@example.com', studentIds: ['stu_elder'] },
+  ]);
+  const linked = await linkExistingGuardians(SCHOOL, {}, { id: 'stu_new', siblingStudentId: 'stu_elder' });
+  expect(linked.sort()).toEqual(['guardian_dad', 'guardian_mum']);
+});
+
 test('an inactive guardian account is not linked', async () => {
   mockUsers = makeFakeCollection([
     { id: 'guardian_gone', schoolId: SCHOOL, role: 'parent', email: 'mum@example.com', studentIds: ['stu_elder'], isActive: false },

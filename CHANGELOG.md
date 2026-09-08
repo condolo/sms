@@ -6,6 +6,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.67.0] — 2026-09-08 — fix(admissions): guardian-linking email match now requires uniqueness
+
+Reviewed before pushing v5.66.0: `linkExistingGuardians()`'s email-match path found every guardian account matching any of a student's mother/father/parent emails and linked all of them, with no check that a given email actually identified exactly one account. Two 'parent' accounts sharing an email (a data anomaly — accounts should be unique per email+school) would have silently connected a new student's billing to an unrelated family's guardian record.
+
+### Fixed
+- `server/utils/guardian-linking.js` — the email-match signal is now checked **per email**: an email is only auto-linked when it resolves to exactly one existing guardian account. An email matching two or more accounts is treated as a data anomaly and skipped — logged (`console.error`, "ambiguous"), never guessed. A different, unambiguous email on the same application (e.g. father's, when mother's happens to be a duplicate) still links normally — one ambiguous signal doesn't block the others.
+- `siblingStudentId` is unaffected by this change and intentionally so: it's an explicit staff-confirmed reference, so resolving to two guardians (mother's account and father's own account, both legitimately guardians of that sibling) is the normal case, not ambiguity — every guardian it finds is still linked.
+
+### Verified
+- 3 new tests in `guardian-linking.test.js`: an email matching two accounts links neither and logs the anomaly; a different unambiguous email on the same application still links; siblingStudentId resolving to two real guardians still links both. Full server suite 1941/1941. `verify-rbac-coverage.js` 100% (no regression). `security-scan.js` clean. Client production build passes.
+
+---
+
 ## [v5.66.0] — 2026-09-08 — fix(admissions, finance): billing-sequence fix — establish guardian/discount data before generating the admission invoice
 
 Resolves the limitation flagged (not fixed) in v5.65.0's self-audit: sibling discount effectively never applied to an admission-triggered invoice on a student's first enrollment, because nothing established the guardian relationship (or director/referral eligibility) before billing ran. Per explicit direction: fix the sequencing, not by building an invoice-edit UI or a generic rules engine — early-payment discount stays a separate, payment-time mechanism, untouched.

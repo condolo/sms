@@ -23,11 +23,22 @@
      1. `siblingStudentId` — if staff recorded which sibling this is
         (the application's existing, previously-unused `sibling`/
         `siblingStudentId` fields), link every guardian of THAT
-        student directly. The strongest signal when it's given.
+        student directly. An explicit staff-confirmed reference, so
+        every guardian it resolves to is linked — a sibling
+        legitimately having two guardians (mother's account AND
+        father's own account) is the normal case, not ambiguity.
      2. Email match — motherEmail/fatherEmail/parentEmail against an
         existing `users` doc with role 'parent'. The automatic path
-        that needs no staff action at all.
-   Both may find the same guardian; results are deduped by user id.
+        that needs no staff action at all. Checked PER EMAIL: only an
+        email that resolves to exactly one existing guardian account
+        is auto-linked. An email matching more than one account is a
+        data anomaly (accounts should be unique per email+school — see
+        students.js's own POST /:id/parent-account), not proof of which
+        family is correct, so it's skipped and logged rather than
+        guessed — this must never silently connect a child's billing
+        to the wrong family.
+   Both signals may resolve to the same guardian; results are deduped
+   by user id.
    ============================================================ */
 'use strict';
 
@@ -39,10 +50,10 @@ function _emails(student) {
 }
 
 /* Links `student` onto every existing guardian account it can find via
-   siblingStudentId and/or email match. Never creates a new guardian
-   account. Returns the list of guardian user ids linked (for logging/
-   tests) — empty when no existing guardian account matched anything,
-   which is the ordinary case for a family's first child. */
+   siblingStudentId and/or a per-email unique match. Never creates a new
+   guardian account. Returns the list of guardian user ids linked (for
+   logging/tests) — empty when no existing guardian account matched
+   anything, which is the ordinary case for a family's first child. */
 async function linkExistingGuardians(schoolId, ctx, student) {
   const Users = tenantModel('users', ctx);
   const studentId = student.id ?? student._id?.toString();
@@ -61,8 +72,15 @@ async function linkExistingGuardians(schoolId, ctx, student) {
   if (emails.length) {
     const emailGuardians = await Users.find({
       schoolId, role: 'parent', email: { $in: emails }, isActive: { $ne: false },
-    }).select('id').lean();
-    for (const g of emailGuardians) candidateIds.add(g.id ?? String(g._id));
+    }).select('id email').lean();
+    for (const email of emails) {
+      const matches = emailGuardians.filter(g => g.email?.toLowerCase().trim() === email);
+      if (matches.length === 1) {
+        candidateIds.add(matches[0].id ?? String(matches[0]._id));
+      } else if (matches.length > 1) {
+        console.error(`[guardian-linking] ambiguous: ${matches.length} 'parent' accounts share email "${email}" in school ${schoolId} — not auto-linking student ${studentId}. Resolve the duplicate accounts, then link manually.`);
+      }
+    }
   }
 
   if (candidateIds.size === 0) return [];
