@@ -44,6 +44,10 @@ export const EMPTY_FORM = {
   parentName: '', parentEmail: '', parentPhone: '',
   emergencyContactName: '', emergencyContactPhone: '', emergencyContactRelation: '',
   priority: 'normal', notes: '', stage: 'enquiry',
+  // 2026-09 — Director's/Referral fee-discount eligibility, established
+  // here so it's known BEFORE the admission invoice is generated at
+  // enroll time (see server/routes/admissions.js's billing-sequence fix).
+  isDirectorFamily: false, isReferralFamily: false,
 };
 
 /** Display label for an applicant's class — prefers the denormalized name

@@ -46,9 +46,11 @@ Go to **Admissions**. Two ways to work:
 
 ## 4. Creating a New Application
 
-Click **New Application**. The form is organised into: Applicant Details, House (optional), Mother/Father, Emergency Contact, and Previous School (optional).
+Click **New Application**. The form is organised into: Applicant Details, House (optional), Mother/Father, Emergency Contact, Previous School (optional), Pipeline, and Fee Discounts.
 
 A unique **application reference** is generated automatically on save — you don't set this yourself.
+
+**Fee Discounts** (Director's family / Referred family): tick either that applies now, at application stage, rather than after enrolling — if your school has an active Director's or Referral discount policy in Finance, ticking here means it's already reflected on the admission draft invoice, not something Accounts has to notice and correct later. Sibling discounts don't need a checkbox at all — if the same parent email is already on file for an older sibling, Msingi links the family and applies the discount automatically the moment you enroll.
 
 ---
 
@@ -97,7 +99,7 @@ This is a deliberate, explicit action, not something that happens automatically 
 - Carries every field across automatically: names, DOB, gender, class/stream/house, both parents' full details, Allergies and Emergency Contact (filed under the new student's Medical tab).
 - Is safe to click more than once — enrolling an already-enrolled application returns the same student record rather than creating a duplicate, so a double-click or a retried request can't create two students for one applicant.
 - Is blocked with a clear error if the application is missing Date of Birth or Gender (see the note in §5) — fix the application, then enroll.
-- If your school has a Finance → Fee Structure (e.g. "New Admission Package" — Admission Fee, Caution Money, etc.) marked to auto-generate on enrollment, a **draft invoice** is created for the new student at the same moment. It's a draft, not a live invoice — Finance still reviews it and issues it (visible to the parent) from the Invoices tab. Nothing changes here if your school hasn't set one up.
+- If your school has a Finance → Fee Structure (e.g. "New Admission Package" — Admission Fee, Caution Money, etc.) marked to auto-generate on enrollment, a **draft invoice** is created for the new student at the same moment — already correctly discounted if they're a sibling, or Director's/Referral family (see §4), not left at full price for Accounts to notice and fix. It's a draft, not a live invoice — Finance still reviews it and issues it (visible to the parent) from the Invoices tab. Nothing changes here if your school hasn't set one up.
 
 The application and the resulting student stay linked (the application records the new student's ID), so you can always trace an enrolled student back to their original application and its full stage history.
 
@@ -115,4 +117,4 @@ The Dashboard's **Admissions Pipeline** bar chart shows applicant counts by stag
 
 ---
 
-*Last reviewed: 2026-09-08 — §8 updated to note that enrolling can now auto-generate a draft admission invoice (`server/utils/admission-billing.js`), checked directly against `server/routes/admissions.js`.*
+*Last reviewed: 2026-09-08 — §4 and §8 updated for the billing-sequence fix: Fee Discounts (Director's/Referral) are now set on the application itself, and sibling discounts link automatically before the draft admission invoice is generated (`server/utils/guardian-linking.js`, `server/utils/admission-billing.js`), checked directly against `server/routes/admissions.js`.*

@@ -68,7 +68,24 @@ let mockStudentDocs;
 // that never touches billing at all.
 let mockFeeStructureDocs;
 let mockInvoiceDocs;
+// Billing-sequence fix (2026-09) — 'users' (guardian accounts) and a
+// seedable 'discount_policies' support full business-flow scenarios
+// (first/second/third child, director/referral, competing discounts)
+// through the real HTTP route. Empty/no-policy by default, matching
+// every pre-existing test in this file that never touches this at all.
+let mockUserDocs;
+let mockDiscountPolicyDocs;
 function mockChainArr(arr) { return { select: () => mockChainArr(arr), lean: () => Promise.resolve(arr) }; }
+function mockMatchArrayAware(doc, filter) {
+  return Object.entries(filter || {}).every(([k, v]) => {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      if ('$ne' in v) return doc[k] !== v.$ne;
+      if ('$in' in v) return Array.isArray(doc[k]) ? v.$in.some(x => doc[k].includes(x)) : v.$in.includes(doc[k]);
+    }
+    if (Array.isArray(doc[k])) return doc[k].includes(v); // real Mongo semantics: array field == value means "contains"
+    return doc[k] === v;
+  });
+}
 jest.mock('../../utils/tenant-model', () => ({
   tenantModel: jest.fn((collection) => {
     if (collection === 'admissions') {
@@ -87,6 +104,7 @@ jest.mock('../../utils/tenant-model', () => ({
     if (collection === 'students') {
       return {
         findOne: (filter) => mockChain(mockStudentDocs.find((d) => mockMatchFilter(d, filter)) ?? null),
+        find:    (filter) => mockChainArr(mockStudentDocs.filter((d) => mockMatchArrayAware(d, filter))),
         create:  (doc) => { const d = { ...doc }; mockStudentDocs.push(d); return Promise.resolve(d); },
       };
     }
@@ -99,7 +117,26 @@ jest.mock('../../utils/tenant-model', () => ({
         create:  (doc) => { const d = { ...doc }; mockInvoiceDocs.push(d); return Promise.resolve(d); },
       };
     }
-    if (collection === 'discount_policies') return { findOne: () => mockChain(null) };
+    if (collection === 'users') {
+      return {
+        find: (filter) => mockChainArr(mockUserDocs.filter((d) => mockMatchArrayAware(d, filter))),
+        findOneAndUpdate: (filter, update) => {
+          const d = mockUserDocs.find((x) => mockMatchArrayAware(x, filter));
+          if (!d) return mockChain(null);
+          if (update.$addToSet) {
+            for (const [field, val] of Object.entries(update.$addToSet)) {
+              d[field] = Array.isArray(d[field]) ? d[field] : [];
+              if (!d[field].includes(val)) d[field].push(val);
+            }
+          }
+          if (update.$set) Object.assign(d, update.$set);
+          return mockChain({ ...d });
+        },
+      };
+    }
+    if (collection === 'discount_policies') {
+      return { findOne: (filter) => mockChain(mockDiscountPolicyDocs.find((d) => mockMatchFilter(d, filter)) ?? null) };
+    }
     return { findOne: () => mockChain(null), find: () => mockChain([]) };
   }),
   tenantContext: jest.fn((req) => ({ schoolId: req.jwtUser.schoolId })),
@@ -140,6 +177,8 @@ beforeEach(() => {
   mockStudentDocs = [];
   mockFeeStructureDocs = [];
   mockInvoiceDocs = [];
+  mockUserDocs = [];
+  mockDiscountPolicyDocs = [];
   mockNextAdmNo = 'ADM-2026-0001';
   mockSchoolDoc = { admissionConfig: {} };
 });
@@ -365,5 +404,112 @@ describe('POST /api/admissions/:id/enroll — admission-triggered billing (2026-
     // Enroll again — must not create a second invoice for the same student+structure
     await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
     expect(mockInvoiceDocs).toHaveLength(1);
+  });
+});
+
+describe('POST /api/admissions/:id/enroll — business-flow: discount is correct on the FIRST-ever draft invoice (2026-09 billing-sequence fix)', () => {
+  const ADMISSION_STRUCTURE = () => ({
+    id: 'fs_admission', schoolId: SCHOOL, name: 'New Admission Package', scopeType: 'all', autoGenerateOnEnroll: true,
+    lineItems: [{ description: 'Admission Fee', quantity: 1, unitPrice: 1000 }],
+  });
+  const SIBLING_POLICY = () => ({
+    id: 'dp_sib', schoolId: SCHOOL, type: 'sibling', active: true,
+    tiers: [{ nthChild: 2, discountPct: 10 }, { nthChild: 3, discountPct: 15 }],
+  });
+
+  test('first child in the family — no existing guardian, no siblings — invoiced at 0% (nothing to discount, no account created)', async () => {
+    mockFeeStructureDocs = [ADMISSION_STRUCTURE()];
+    mockDiscountPolicyDocs = [SIBLING_POLICY()];
+    mockAppDocs = [app()]; // default motherEmail matches nobody yet
+    const res = await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
+    expect(res.status).toBe(201);
+    expect(mockInvoiceDocs[0].discountPct).toBe(0);
+    expect(mockUserDocs).toHaveLength(0); // no guardian account auto-created
+  });
+
+  test('second child — an existing guardian (from an already-enrolled elder sibling) is linked BEFORE the invoice is calculated, so it shows 10% on the very first invoice', async () => {
+    mockFeeStructureDocs = [ADMISSION_STRUCTURE()];
+    mockDiscountPolicyDocs = [SIBLING_POLICY()];
+    mockStudentDocs = [{ id: 'stu_elder', schoolId: SCHOOL, firstName: 'Kofi', lastName: 'Osei', enrollmentDate: '2020-01-01', status: 'active' }];
+    mockUserDocs = [{ id: 'guardian_1', schoolId: SCHOOL, role: 'parent', email: 'adjoa@example.com', studentIds: ['stu_elder'], guardianOf: ['stu_elder'] }];
+    mockAppDocs = [app({ motherEmail: 'adjoa@example.com' })]; // matches the existing guardian's email
+
+    const res = await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
+
+    expect(res.status).toBe(201);
+    const newStudentId = res.body.data.student.id;
+    // Guardian relationship established BEFORE billing ran, in the same request:
+    expect(mockUserDocs[0].studentIds).toEqual(['stu_elder', newStudentId]);
+    // ...so the FIRST draft invoice already reflects it — no manual correction needed:
+    expect(mockInvoiceDocs[0].discountPct).toBe(10);
+    expect(mockInvoiceDocs[0].total).toBe(900);
+  });
+
+  test('third child — ranks correctly against BOTH existing siblings, gets the 3rd-child tier', async () => {
+    mockFeeStructureDocs = [ADMISSION_STRUCTURE()];
+    mockDiscountPolicyDocs = [SIBLING_POLICY()];
+    mockStudentDocs = [
+      { id: 'stu_a', schoolId: SCHOOL, firstName: 'A', lastName: 'Osei', enrollmentDate: '2019-01-01', status: 'active' },
+      { id: 'stu_b', schoolId: SCHOOL, firstName: 'B', lastName: 'Osei', enrollmentDate: '2021-01-01', status: 'active' },
+    ];
+    mockUserDocs = [{ id: 'guardian_1', schoolId: SCHOOL, role: 'parent', email: 'adjoa@example.com', studentIds: ['stu_a', 'stu_b'], guardianOf: ['stu_a', 'stu_b'] }];
+    mockAppDocs = [app({ motherEmail: 'adjoa@example.com' })];
+
+    const res = await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
+    expect(res.status).toBe(201);
+    expect(mockInvoiceDocs[0].discountPct).toBe(15);
+  });
+
+  test('director-family flag on the APPLICATION establishes eligibility before enrollment even happens', async () => {
+    mockFeeStructureDocs = [ADMISSION_STRUCTURE()];
+    mockDiscountPolicyDocs = [{ id: 'dp_dir', schoolId: SCHOOL, type: 'director', active: true, flatPct: 20 }];
+    mockAppDocs = [app({ isDirectorFamily: true })];
+
+    const res = await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
+    expect(res.status).toBe(201);
+    expect(mockStudentDocs[0].isDirectorFamily).toBe(true);
+    expect(mockInvoiceDocs[0].discountPct).toBe(20);
+  });
+
+  test('referral-family flag on the APPLICATION establishes eligibility before enrollment even happens', async () => {
+    mockFeeStructureDocs = [ADMISSION_STRUCTURE()];
+    mockDiscountPolicyDocs = [{ id: 'dp_ref', schoolId: SCHOOL, type: 'referral', active: true, flatPct: 5 }];
+    mockAppDocs = [app({ isReferralFamily: true })];
+
+    const res = await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
+    expect(res.status).toBe(201);
+    expect(mockInvoiceDocs[0].discountPct).toBe(5);
+  });
+
+  test('competing discounts — sibling (10%) vs director (25%) — only the highest applies, never stacked', async () => {
+    mockFeeStructureDocs = [ADMISSION_STRUCTURE()];
+    mockDiscountPolicyDocs = [SIBLING_POLICY(), { id: 'dp_dir', schoolId: SCHOOL, type: 'director', active: true, flatPct: 25 }];
+    mockStudentDocs = [{ id: 'stu_elder', schoolId: SCHOOL, firstName: 'Kofi', lastName: 'Osei', enrollmentDate: '2020-01-01', status: 'active' }];
+    mockUserDocs = [{ id: 'guardian_1', schoolId: SCHOOL, role: 'parent', email: 'adjoa@example.com', studentIds: ['stu_elder'] }];
+    mockAppDocs = [app({ motherEmail: 'adjoa@example.com', isDirectorFamily: true })];
+
+    const res = await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
+    expect(res.status).toBe(201);
+    expect(mockInvoiceDocs[0].discountPct).toBe(25); // director's 25% beats sibling's 10%
+    expect(mockInvoiceDocs).toHaveLength(1); // one invoice, one discount — never two line items or a stacked total
+  });
+
+  test('enrollment retry — re-enrolling never double-links the guardian and never creates a second invoice', async () => {
+    mockFeeStructureDocs = [ADMISSION_STRUCTURE()];
+    mockDiscountPolicyDocs = [SIBLING_POLICY()];
+    mockStudentDocs = [{ id: 'stu_elder', schoolId: SCHOOL, firstName: 'Kofi', lastName: 'Osei', enrollmentDate: '2020-01-01', status: 'active' }];
+    mockUserDocs = [{ id: 'guardian_1', schoolId: SCHOOL, role: 'parent', email: 'adjoa@example.com', studentIds: ['stu_elder'], guardianOf: ['stu_elder'] }];
+    mockAppDocs = [app({ motherEmail: 'adjoa@example.com' })];
+
+    const first = await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
+    expect(first.status).toBe(201);
+    const newStudentId = first.body.data.student.id;
+
+    const second = await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
+    expect(second.status).toBe(200);
+    expect(second.body.data.alreadyEnrolled).toBe(true);
+
+    expect(mockInvoiceDocs).toHaveLength(1); // never duplicated
+    expect(mockUserDocs[0].studentIds.filter(id => id === newStudentId)).toHaveLength(1); // never double-linked
   });
 });

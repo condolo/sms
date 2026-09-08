@@ -312,6 +312,25 @@ export default function AddSlideOver({ onClose, onCreated }) {
               <textarea value={form.notes} onChange={e => set('notes', e.target.value)} rows={3} placeholder="Any additional notes…" className={`${inputCls()} resize-none`} />
             </Field>
           </Section>
+
+          {/* Fee Discounts — 2026-09: established here so it's known
+              BEFORE the admission invoice is generated at enroll time,
+              not only settable afterwards on the Student record. See
+              server/routes/admissions.js's billing-sequence fix. */}
+          <Section label="Fee Discounts">
+            <div className="flex flex-wrap gap-4">
+              <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                <input type="checkbox" checked={form.isDirectorFamily} onChange={e => set('isDirectorFamily', e.target.checked)}
+                  className="rounded border-slate-300 text-violet-600 focus:ring-violet-400/40" />
+                Director's family
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                <input type="checkbox" checked={form.isReferralFamily} onChange={e => set('isReferralFamily', e.target.checked)}
+                  className="rounded border-slate-300 text-violet-600 focus:ring-violet-400/40" />
+                Referred family
+              </label>
+            </div>
+          </Section>
         </form>
 
         {/* Footer */}

@@ -6,6 +6,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.66.0] — 2026-09-08 — fix(admissions, finance): billing-sequence fix — establish guardian/discount data before generating the admission invoice
+
+Resolves the limitation flagged (not fixed) in v5.65.0's self-audit: sibling discount effectively never applied to an admission-triggered invoice on a student's first enrollment, because nothing established the guardian relationship (or director/referral eligibility) before billing ran. Per explicit direction: fix the sequencing, not by building an invoice-edit UI or a generic rules engine — early-payment discount stays a separate, payment-time mechanism, untouched.
+
+New `/:id/enroll` order: create student → **link guardian relationship → establish discount eligibility** → generate draft invoice → return to Admissions → Accounts reviews/issues. Previously discount resolution ran immediately after student creation with none of that data in place.
+
+### Added
+- `server/utils/guardian-linking.js` (`linkExistingGuardians`) — links a newly-enrolled student onto any guardian account that already exists, so `discount-resolution.js`'s family grouping is complete before `generateEnrollmentInvoices()` runs. Two signals, tried together: the application's own `siblingStudentId` (if staff recorded it — previously an orphaned field, never read anywhere), and email match (mother/father/parent) against an existing `role: 'parent'` account. Deliberately does **not** create a new guardian account, and never touches password/isActive/mustChangePassword — that stays `students.js`'s `POST /:id/parent-account`, a bigger, explicit, credential-issuing action. A family with no existing guardian account has no sibling to discount anyway, so nothing is lost.
+- `ApplicationSchema` gains `isDirectorFamily`/`isReferralFamily` (optional booleans) — set at the application stage now, not only after enrollment on the Student record, so eligibility is known before the invoice is calculated. Carried onto the new Student record at enroll time, same as every other application field. Exposed as two checkboxes in the New Application form ("Fee Discounts" section).
+- `POST /admissions/:id/enroll` now calls `linkExistingGuardians()` right after creating the student, before `generateEnrollmentInvoices()` — in both the fresh-enroll path and the already-enrolled idempotent-retry path (a retry is exactly the case where the link may not have existed on the first attempt). Both steps are best-effort, same as billing itself: a family that can't be auto-linked still gets an invoice, just at 0% — never a failed enrollment.
+
+### Verified
+- 10 new unit tests (`guardian-linking.test.js`): links via siblingStudentId, links via email match (mother/father/legacy parentEmail), dedupes when both signals resolve to the same guardian, links two different guardians independently, never creates a new account, never touches credentials, idempotent, inactive accounts skipped.
+- 7 new business-flow tests in `admissions-enroll.test.js`, each hitting the real `/enroll` HTTP route end-to-end (admissions action → DB state → billing calculation → invoice): first child (0%, no account created), **second child correctly discounted on its very first invoice**, third child (correct tier), Director's-family and Referral-family flags from the application, competing discounts (highest wins, never stacked), and enrollment retry (no duplicate invoice, no duplicate guardian link).
+- Full server suite 1938/1938 (was 1921). `verify-rbac-coverage.js` 100% (483/483, unchanged — no new routes). `security-scan.js` clean. Client production build passes.
+
+### Explicitly not touched, per instruction
+- Early Payment discount stays payment-time (a different concept: eligibility depends on *when* money is paid, not knowable before invoicing — unlike sibling/director/referral, which are normally known before the invoice is issued).
+- No invoice-edit UI, no generic billing/rules engine, no discount stacking, no transport zones, no activity-based billing, no refund ledger.
+
+---
+
 ## [v5.65.0] — 2026-09-08 — fix(finance, admissions): self-audit of the 4-part fee-item feature
 
 A deliberate re-check of everything built in v5.61.0–v5.64.0, looking specifically for assumptions the earlier work made without verifying them.

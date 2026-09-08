@@ -20,6 +20,7 @@ const { resolveRequiredFields, validateRequiredAdmissionFields } = require('../u
 const { reserveAdmissionNumbers } = require('../utils/counters');
 const { resolveAcademicPeriod }   = require('../utils/academic-period');
 const { generateEnrollmentInvoices } = require('../utils/admission-billing');
+const { linkExistingGuardians } = require('../utils/guardian-linking');
 const AuditService = require('../services/audit');
 
 const router = express.Router();
@@ -115,6 +116,14 @@ const ApplicationSchema = z.object({
   // Flags
   sibling:        z.boolean().default(false),
   siblingStudentId: z.string().optional(),
+  // 2026-09 — Director's/Referral fee-discount eligibility, set here
+  // (rather than only after enrollment, on the Student record) so it's
+  // known BEFORE the admission invoice is generated at enroll time —
+  // see the billing-sequence fix in POST /:id/enroll below. Carried
+  // verbatim onto the new Student record, mirroring every other
+  // application field.
+  isDirectorFamily: z.boolean().optional(),
+  isReferralFamily: z.boolean().optional(),
   specialNeeds:   z.boolean().default(false),
   specialNeedsDetails: z.string().max(1000).optional(),
   documents:      z.array(z.object({ name: z.string(), url: z.string().optional() })).optional(),
@@ -372,6 +381,12 @@ router.post('/:id/enroll',
           // duplicate invoice, but it DOES retry billing if the first
           // attempt failed non-fatally (see try/catch below) or a
           // qualifying fee structure was added after this student enrolled.
+          // Billing sequence fix (2026-09): (re-)establish guardian
+          // relationships BEFORE retrying billing, same ordering as the
+          // fresh-enroll path below — a retry is exactly the case where
+          // the guardian link may not have existed on the first attempt.
+          try { await linkExistingGuardians(schoolId, ctx, existing); }
+          catch (linkErr) { console.error('[admissions POST/:id/enroll — guardian link retry]', linkErr); }
           let invoicesDrafted = [];
           try { invoicesDrafted = await generateEnrollmentInvoices(schoolId, ctx, existing, userId, req); }
           catch (billingErr) { console.error('[admissions POST/:id/enroll — billing retry]', billingErr); }
@@ -457,6 +472,17 @@ router.post('/:id/enroll',
         address:         app.parentAddress || undefined,
         enrollmentDate:  now.slice(0, 10),
         status:          'active',
+        // Billing sequence fix (2026-09) — carried across so
+        // linkExistingGuardians() and generateEnrollmentInvoices() (both
+        // called right after this record is created, below) see them
+        // immediately: siblingStudentId is the strongest guardian-match
+        // signal when staff recorded it; isDirectorFamily/isReferralFamily
+        // establish flat-discount eligibility before the invoice is
+        // calculated, instead of only being settable after the fact on
+        // the Student record.
+        siblingStudentId:  app.siblingStudentId || undefined,
+        isDirectorFamily:  app.isDirectorFamily || undefined,
+        isReferralFamily:  app.isReferralFamily || undefined,
         // Allergies/Emergency Contact — same medical.* nesting Phase 2
         // established for bulk import, matching the Student Profile's
         // own Medical tab shape exactly.
@@ -474,13 +500,22 @@ router.post('/:id/enroll',
 
       const student = await tenantModel('students', ctx).create(studentDoc);
 
-      // Admission-triggered billing (2026-09) — never allowed to fail the
-      // enrollment itself; a billing hiccup shouldn't block a student from
-      // being enrolled, same treatment as every other post-enroll side
-      // effect in this codebase (guardian notification, etc.). Surfaced
-      // in the response (invoicesDrafted) so the Admissions Officer
-      // actually sees it happened, rather than it silently sitting in
-      // Finance with no visible link back to this enrollment.
+      // Billing sequence fix (2026-09): establish family/discount data
+      // BEFORE generating the admission invoice, not after — the whole
+      // point being that generateEnrollmentInvoices() below can only
+      // compute a correct sibling discount if the guardian relationship
+      // already exists at the moment it runs. Both are best-effort and
+      // never allowed to fail the enrollment itself, same treatment as
+      // every other post-enroll side effect in this codebase (guardian
+      // notification, etc.) — a family that can't be linked automatically
+      // just gets an invoice at 0% discount, exactly what happened before
+      // this fix, not a failed enrollment.
+      try { await linkExistingGuardians(schoolId, ctx, student); }
+      catch (linkErr) { console.error('[admissions POST/:id/enroll — guardian link]', linkErr); }
+
+      // Surfaced in the response (invoicesDrafted) so the Admissions
+      // Officer actually sees it happened, rather than it silently
+      // sitting in Finance with no visible link back to this enrollment.
       let invoicesDrafted = [];
       try { invoicesDrafted = await generateEnrollmentInvoices(schoolId, ctx, student, userId, req); }
       catch (billingErr) { console.error('[admissions POST/:id/enroll — billing]', billingErr); }
