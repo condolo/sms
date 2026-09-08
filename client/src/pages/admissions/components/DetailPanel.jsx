@@ -165,10 +165,21 @@ export default function DetailPanel({ applicant, onClose, onStageChange }) {
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['admissions'] });
       qc.invalidateQueries({ queryKey: ['students'] });
+      qc.invalidateQueries({ queryKey: ['finance'] });
       const student = res?.data?.student;
-      toast.success(student?.admissionNumber
+      const base = student?.admissionNumber
         ? `Enrolled — admission number ${student.admissionNumber}`
-        : 'Enrolled successfully.');
+        : 'Enrolled successfully.';
+      // 2026-09 — surface an admission-triggered draft invoice, if one was
+      // created (server/utils/admission-billing.js), so this doesn't sit
+      // silently in Finance with no visible link back to the enrollment.
+      const invoices = res?.data?.invoicesDrafted ?? [];
+      const billingNote = invoices.length === 1
+        ? ` Draft invoice created (${invoices[0].currency} ${invoices[0].total}) — review it in Finance → Invoices.`
+        : invoices.length > 1
+        ? ` ${invoices.length} draft invoices created — review them in Finance → Invoices.`
+        : '';
+      toast.success(base + billingNote);
     },
     onError: err => toast.error(err?.message ?? 'Failed to enroll applicant.'),
   });

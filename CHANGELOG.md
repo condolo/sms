@@ -6,6 +6,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.65.0] — 2026-09-08 — fix(finance, admissions): self-audit of the 4-part fee-item feature
+
+A deliberate re-check of everything built in v5.61.0–v5.64.0, looking specifically for assumptions the earlier work made without verifying them.
+
+### Fixed
+- **Missing `currency` on every generated invoice.** `POST /fee-structures/:id/generate` (pre-existing, since before this feature) and the new `admission-billing.js` never set `currency` on a created invoice — only `POST /invoices` (manual create) resolved it from the school's setting. `_notifyInvoiceCreated`/`_notifyPaymentReceived` interpolate `invoice.currency` directly into guardian-facing notification text, so every one of these invoices sent a guardian a notification reading "undefined 25,000". Both paths now resolve the school's currency once per run, same as `POST /invoices` already did.
+- **Silent admission-triggered invoice.** `POST /admissions/:id/enroll`'s response never mentioned an invoice was drafted — an Admissions Officer had no way to know one existed unless they separately checked Finance. The response now includes `invoicesDrafted`, and the enroll success toast (`DetailPanel.jsx`) surfaces it: "Draft invoice created (KES 25,000) — review it in Finance → Invoices."
+
+### Found, not fixed — flagged instead
+- **Sibling discount effectively never applies to an admission-triggered invoice on the first enroll.** `_resolveAutoDiscounts()`'s sibling calculation depends on a guardian's `studentIds` array already including the new student — but that link is only created by `POST /students/:id/parent-account`, a separate step admissions.js's `/enroll` never calls. Since billing fires in the same request as enrollment, the guardian link essentially can never exist yet, so a genuine 2nd/3rd sibling will be invoiced at 0% discount on the initial admission invoice. (Director's/Referral discounts have the identical problem for a different reason: those flags live on the student record and can only be set *after* the student exists, so they're also never set at the moment of a first enrollment.) The draft-then-review workflow exists partly to let Finance catch exactly this — `PUT /invoices/:id` already supports editing `discountPct` before issuing — but there's no client UI to edit an existing invoice at all today, so the correction currently has no path through the app. Not fixed here: doing so properly means a product decision (reorder guardian-linking ahead of billing? build an invoice-edit UI? apply the discount retroactively on issue instead of on generate?), not a code guess.
+
+### Verified
+- 4 new tests (currency resolution, 2 each in `admission-billing.test.js` and `finance-discount-policies.test.js`), plus `invoicesDrafted` assertions added to the existing enrollment-billing cases in `admissions-enroll.test.js`. Full server suite 1921/1921 (was 1917). `verify-rbac-coverage.js` 100% (483/483, unchanged). `security-scan.js` clean. Client production build passes.
+
+---
+
 ## [v5.64.0] — 2026-09-08 — feat(finance, admissions): admission-triggered draft invoices
 
 Part 4 of 4 for the school-driven Finance request. Today, an admission's fee items only get billed if Finance types up an invoice by hand, or via a Fee Structure Finance generates in bulk — nothing connects the moment a student is actually enrolled to billing them for the admission package (Admission Fee, Caution Money, Ambulance Cover, T-shirt, Hymn Book, …).

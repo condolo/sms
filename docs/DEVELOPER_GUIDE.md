@@ -1600,6 +1600,8 @@ The InnoLearn International School demo seed has students, teachers, and classes
 
 **Finance shared utilities (2026-09):** `server/utils/invoice-math.js` (`calcInvoiceTotals`/`round`) and `server/utils/discount-resolution.js` (`resolveAutoDiscounts` — sibling/director/referral, highest wins) were extracted out of `finance.js` so `server/utils/admission-billing.js` could reuse the exact same math and discount logic for an enrollment-triggered invoice, rather than a second implementation that could drift. `finance.js` itself still owns Early Payment resolution (`_computeEarlyPaymentDeadline`, applied in `POST /payments`) since it depends on payment timing, not anything these shared modules need.
 
+**Known limitation (2026-09, found during self-audit, not yet resolved):** `resolveAutoDiscounts()`'s sibling calculation depends on the guardian's `studentIds` array already listing the student — that link is created by `POST /students/:id/parent-account`, which `admissions.js`'s `/:id/enroll` never calls. Since `generateEnrollmentInvoices()` runs in the same request as enrollment, a genuine sibling is essentially always invoiced at 0% discount on the initial admission invoice; Director's/Referral discounts have the same problem (the flags live on the student record, settable only after it exists). The draft-then-review workflow lets Finance catch this in principle (`PUT /invoices/:id` already accepts `discountPct`), but there is no client UI to edit an existing invoice at all today — see CHANGELOG.md's v5.65.0 entry before touching this.
+
 ### Middleware Chain
 
 ```

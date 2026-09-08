@@ -49,7 +49,13 @@ function makeFakeCollection(seed = []) {
   };
 }
 
-let mockFeeStructures, mockInvoices, mockDiscountPolicies, mockStudents, mockUsers;
+let mockFeeStructures, mockInvoices, mockDiscountPolicies, mockStudents, mockUsers, mockSchoolDoc;
+jest.mock('../utils/model', () => ({
+  _model: jest.fn((c) => {
+    if (c === 'schools') return { findOne: jest.fn(() => mockChainObj(mockSchoolDoc)) };
+    return { find: jest.fn(() => mockChainArr([])), findOne: jest.fn(() => mockChainObj(null)) };
+  }),
+}));
 jest.mock('../utils/tenant-model', () => ({
   tenantModel: jest.fn((c) => {
     if (c === 'fee_structures')     return mockFeeStructures;
@@ -77,6 +83,7 @@ beforeEach(() => {
   mockDiscountPolicies  = makeFakeCollection([]);
   mockStudents          = makeFakeCollection([STUDENT]);
   mockUsers             = makeFakeCollection([]);
+  mockSchoolDoc         = { currency: 'KES' };
 });
 
 test('a matching fee structure (autoGenerateOnEnroll + scopeType all) produces one draft invoice', async () => {
@@ -92,8 +99,29 @@ test('a matching fee structure (autoGenerateOnEnroll + scopeType all) produces o
   expect(inv.studentId).toBe('stu_new');
   expect(inv.status).toBe('draft');
   expect(inv.total).toBe(25000);
+  expect(inv.currency).toBe('KES');
   expect(inv.feeStructureId).toBe('fs_admission');
   expect(mockAuditLog).toHaveBeenCalledWith(expect.objectContaining({ action: 'finance.enrollment_invoice_drafted' }));
+});
+
+test('uses the school\'s own currency, not a hardcoded one', async () => {
+  mockSchoolDoc = { currency: 'UGX' };
+  mockFeeStructures = makeFakeCollection([{
+    id: 'fs_admission', schoolId: SCHOOL, name: 'New Admission Package', scopeType: 'all', autoGenerateOnEnroll: true,
+    lineItems: [{ description: 'Admission Fee', quantity: 1, unitPrice: 15000 }],
+  }]);
+  const result = await generateEnrollmentInvoices(SCHOOL, {}, STUDENT, 'usr_admin', {});
+  expect(result[0].currency).toBe('UGX');
+});
+
+test('falls back to KES when the school has no currency set', async () => {
+  mockSchoolDoc = {};
+  mockFeeStructures = makeFakeCollection([{
+    id: 'fs_admission', schoolId: SCHOOL, name: 'New Admission Package', scopeType: 'all', autoGenerateOnEnroll: true,
+    lineItems: [{ description: 'Admission Fee', quantity: 1, unitPrice: 15000 }],
+  }]);
+  const result = await generateEnrollmentInvoices(SCHOOL, {}, STUDENT, 'usr_admin', {});
+  expect(result[0].currency).toBe('KES');
 });
 
 test('a structure scoped to classes (not "all") is never picked up', async () => {

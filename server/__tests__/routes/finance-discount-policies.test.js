@@ -108,6 +108,7 @@ const mockInvoices = {
   findOneAndUpdate: jest.fn(() => mockChainObj({})),
 };
 
+let mockSchoolDoc;
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((c) => {
     if (c === 'discount_policies') return mockDiscountPolicies;
@@ -117,6 +118,7 @@ jest.mock('../../utils/model', () => ({
     if (c === 'classes')           return mockClasses;
     if (c === 'invoices')          return mockInvoices;
     if (c === 'audit_logs')        return { create: jest.fn().mockResolvedValue({}) };
+    if (c === 'schools')           return { findOne: jest.fn(() => mockChainObj(mockSchoolDoc)) };
     return { find: jest.fn(() => mockChainArr([])), findOne: jest.fn(() => mockChainObj(null)) };
   }),
 }));
@@ -139,6 +141,7 @@ beforeEach(() => {
   mockStudents         = makeFakeCollection();
   mockUsers            = makeFakeCollection();
   mockClasses          = makeFakeCollection();
+  mockSchoolDoc        = { currency: 'KES' };
 });
 
 describe('discount policies — CRUD', () => {
@@ -196,6 +199,31 @@ describe('fee-structures/:id/generate — sections scope regression (classes.sec
     expect(res.body.data.created).toBe(2);
     const invoicedIds = res.body.data.invoices.map(i => i.studentId).sort();
     expect(invoicedIds).toEqual(['s1', 's2']);
+  });
+});
+
+describe('fee-structures/:id/generate — sets currency on every generated invoice (2026-09 fix)', () => {
+  test('uses the school\'s own currency, not undefined', async () => {
+    mockSchoolDoc = { currency: 'UGX' };
+    mockFeeStructures = makeFakeCollection([{
+      id: 'fs_currency', schoolId: SCHOOL_A, name: 'Term 1 Fees', scopeType: 'all',
+      lineItems: [{ description: 'Tuition', quantity: 1, unitPrice: 1000 }],
+    }]);
+    mockStudents = makeFakeCollection([{ id: 's_a', schoolId: SCHOOL_A, status: 'active', firstName: 'A', lastName: 'Kid' }]);
+    const res = await supertest(buildApp()).post('/api/finance/fee-structures/fs_currency/generate');
+    expect(res.status).toBe(201);
+    expect(res.body.data.invoices[0].currency).toBe('UGX');
+  });
+
+  test('falls back to KES when the school has no currency set', async () => {
+    mockSchoolDoc = {};
+    mockFeeStructures = makeFakeCollection([{
+      id: 'fs_nocurrency', schoolId: SCHOOL_A, name: 'Term 1 Fees', scopeType: 'all',
+      lineItems: [{ description: 'Tuition', quantity: 1, unitPrice: 1000 }],
+    }]);
+    mockStudents = makeFakeCollection([{ id: 's_a', schoolId: SCHOOL_A, status: 'active', firstName: 'A', lastName: 'Kid' }]);
+    const res = await supertest(buildApp()).post('/api/finance/fee-structures/fs_nocurrency/generate');
+    expect(res.body.data.invoices[0].currency).toBe('KES');
   });
 });
 

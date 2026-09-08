@@ -993,6 +993,17 @@ router.post('/fee-structures/:id/generate', authMiddleware, PLAN, MODGATE, rbac(
       ? _computeEarlyPaymentDeadline(fs.dueDate, earlyPaymentPolicy.daysBeforeDue)
       : null;
 
+    // Pre-existing gap found and fixed while auditing this feature
+    // (2026-09): bulk-generated invoices never set `currency` at all —
+    // POST /invoices (manual create) always resolves the school's
+    // currency when the client doesn't specify one, but this endpoint
+    // never did, so every guardian notification for one of these
+    // invoices rendered as "undefined 25,000" (_notifyInvoiceCreated
+    // interpolates invoice.currency directly). Resolved once per run,
+    // same as the auto-discount and early-payment lookups above.
+    const schoolDoc = await _model('schools').findOne({ id: schoolId }, { currency: 1 }).lean();
+    const invoiceCurrency = schoolDoc?.currency || 'KES';
+
     const created_docs = [];
 
     for (const student of targets) {
@@ -1014,6 +1025,7 @@ router.post('/fee-structures/:id/generate', authMiddleware, PLAN, MODGATE, rbac(
         academicYearId: fs.academicYearId,
         termId:         fs.termId,
         feeStructureId: fs.id,
+        currency:       invoiceCurrency,
         ...totals,
         amountPaid: 0,
         balance:    totals.total,

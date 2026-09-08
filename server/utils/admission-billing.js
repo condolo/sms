@@ -33,6 +33,7 @@
 'use strict';
 
 const { v4: uuidv4 } = require('uuid');
+const { _model } = require('./model');
 const { tenantModel } = require('./tenant-model');
 const { nextInvoiceNumber } = require('./counters');
 const { isYearArchived } = require('./archival');
@@ -49,6 +50,14 @@ async function generateEnrollmentInvoices(schoolId, ctx, student, userId, req) {
 
   const studentId = student.id ?? student._id?.toString();
   const created = [];
+
+  // Same gap POST /fee-structures/:id/generate had (fixed alongside this
+  // file, 2026-09): without an explicit currency, every guardian
+  // notification for this invoice (_notifyInvoiceCreated in finance.js)
+  // would interpolate "undefined 25,000" instead of the school's real
+  // currency.
+  const schoolDoc = await _model('schools').findOne({ id: schoolId }, { currency: 1 }).lean();
+  const invoiceCurrency = schoolDoc?.currency || 'KES';
 
   for (const fs of structures) {
     // Academic Year & Term Dependency Map, finding #5 — same guard
@@ -69,6 +78,7 @@ async function generateEnrollmentInvoices(schoolId, ctx, student, userId, req) {
       studentId, studentName: `${student.firstName} ${student.lastName}`,
       title: fs.name, lineItems: fs.lineItems, dueDate: fs.dueDate,
       academicYearId: fs.academicYearId, termId: fs.termId, feeStructureId: fs.id,
+      currency: invoiceCurrency,
       ...totals, amountPaid: 0, balance: totals.total,
       status: 'draft', createdBy: userId,
     });

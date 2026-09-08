@@ -372,9 +372,10 @@ router.post('/:id/enroll',
           // duplicate invoice, but it DOES retry billing if the first
           // attempt failed non-fatally (see try/catch below) or a
           // qualifying fee structure was added after this student enrolled.
-          try { await generateEnrollmentInvoices(schoolId, ctx, existing, userId, req); }
+          let invoicesDrafted = [];
+          try { invoicesDrafted = await generateEnrollmentInvoices(schoolId, ctx, existing, userId, req); }
           catch (billingErr) { console.error('[admissions POST/:id/enroll — billing retry]', billingErr); }
-          return ok(res, { student: existing, application: app, alreadyEnrolled: true });
+          return ok(res, { student: existing, application: app, alreadyEnrolled: true, invoicesDrafted });
         }
         // studentId is set but the student record itself is gone (e.g.
         // manually deleted) — fall through and enroll again rather than
@@ -476,8 +477,12 @@ router.post('/:id/enroll',
       // Admission-triggered billing (2026-09) — never allowed to fail the
       // enrollment itself; a billing hiccup shouldn't block a student from
       // being enrolled, same treatment as every other post-enroll side
-      // effect in this codebase (guardian notification, etc.).
-      try { await generateEnrollmentInvoices(schoolId, ctx, student, userId, req); }
+      // effect in this codebase (guardian notification, etc.). Surfaced
+      // in the response (invoicesDrafted) so the Admissions Officer
+      // actually sees it happened, rather than it silently sitting in
+      // Finance with no visible link back to this enrollment.
+      let invoicesDrafted = [];
+      try { invoicesDrafted = await generateEnrollmentInvoices(schoolId, ctx, student, userId, req); }
       catch (billingErr) { console.error('[admissions POST/:id/enroll — billing]', billingErr); }
 
       const stageUnchanged = app.stage === 'enrolled';
@@ -501,7 +506,7 @@ router.post('/:id/enroll',
         req,
       });
 
-      return created(res, { student: student.toObject ? student.toObject() : student, application: updatedApp });
+      return created(res, { student: student.toObject ? student.toObject() : student, application: updatedApp, invoicesDrafted });
     } catch (err) { console.error('[admissions POST/:id/enroll]', err); return E.serverError(res); }
   }
 );

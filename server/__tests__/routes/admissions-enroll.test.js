@@ -335,6 +335,10 @@ describe('POST /api/admissions/:id/enroll — admission-triggered billing (2026-
     expect(mockInvoiceDocs[0].studentId).toBe(res.body.data.student.id);
     expect(mockInvoiceDocs[0].status).toBe('draft');
     expect(mockAuditLog).toHaveBeenCalledWith(expect.objectContaining({ action: 'finance.enrollment_invoice_drafted' }));
+    // Surfaced in the response — not left for the caller to discover only
+    // by separately checking Finance.
+    expect(res.body.data.invoicesDrafted).toHaveLength(1);
+    expect(res.body.data.invoicesDrafted[0].total).toBe(15000);
   });
 
   test('no matching fee structure -> enrollment still succeeds, no invoice created (default behaviour, unaffected)', async () => {
@@ -342,6 +346,7 @@ describe('POST /api/admissions/:id/enroll — admission-triggered billing (2026-
     const res = await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
     expect(res.status).toBe(201);
     expect(mockInvoiceDocs).toHaveLength(0);
+    expect(res.body.data.invoicesDrafted).toEqual([]);
   });
 
   test('re-enrolling an already-enrolled application retries billing but never duplicates the invoice', async () => {
