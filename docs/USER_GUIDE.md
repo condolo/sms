@@ -790,18 +790,15 @@ Click **+ Add Staff Member**. All new staff accounts are also created in the use
 ## 15. Reports & Analytics
 
 ### Available Reports
-Navigate to **Reports**. Report types include:
-- **Attendance Report**: class or school-wide, by date range
-- **Academic Report**: grade distribution, subject averages, top performers
-- **Behaviour Report**: incidents by type, house standings, at-risk students
-- **Finance Report**: collection summary, outstanding balances, payment trends
-- **Admissions Report**: pipeline conversion rates, source analysis
+Navigate to **Reports**. Each is its own tab, loading live as soon as you open it — there's no separate "Generate" step:
+- **Overview**: student gender/class breakdown
+- **Attendance**: by class, by date range
+- **Academic** *(2026-09)*: average score and pass rate per subject, filterable by class and subject, with a toggle to compare the current period against last term or the same term last year. What you see here depends on your role: school leadership sees the whole school; a teacher sees only their own assigned classes — labeled clearly at the top of the tab either way.
+- **Behaviour**: incidents by type, house standings
+- **Finance**: collection summary, outstanding balances, invoice status
+- **Enrollment**: recent admissions, class sizes
 
-### Generating a Report
-1. Select report type.
-2. Set filters (date range, class, section).
-3. Click **Generate**.
-4. Export as **PDF** or **CSV**.
+Use the **CSV** export button on the current tab to download what you're looking at.
 
 ### Report Cards *(fully redesigned in v4.6)*
 Student-level term reports are generated from **Reports → Report Cards**. Each card includes:

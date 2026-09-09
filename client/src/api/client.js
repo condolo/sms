@@ -346,6 +346,11 @@ export const assessment = {
   // Report
   report:       (params)     => _get('/assessment/report', params),
 
+  // Analytics — school-wide (or scoped-to-teacher) average-per-subject,
+  // with a previous-term/previous-year comparison. See ReportsPage.jsx's
+  // Academic tab.
+  analytics:    (params)     => _get('/assessment/analytics', params),
+
   // Reminders
   reminders:    (params)     => _get('/assessment/reminders', params),
   notify:       (data)       => _post('/assessment/reminders/notify', data),

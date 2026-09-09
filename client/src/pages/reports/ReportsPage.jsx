@@ -94,6 +94,12 @@ const TABS = [
 export default function ReportsPage() {
   const [tab, setTab]       = useState('overview');
   const [acSort, setAcSort] = useState({ col: 'subject', dir: 'asc' });
+  // Academic tab filters (2026-09) — classId/subjectId are further
+  // restricted server-side by role (ScopeEngine): a teacher only ever
+  // gets back their own assigned classes here, whatever they pick.
+  const [acClassId,   setAcClassId]   = useState('');
+  const [acSubjectId, setAcSubjectId] = useState('');
+  const [acCompareTo, setAcCompareTo] = useState('previousTerm'); // 'previousTerm' | 'previousYear' | 'none'
   const school         = useAuthStore(s => s.session?.school);
   const sym            = school?.currencySymbol ?? 'KSh';
 
@@ -102,9 +108,16 @@ export default function ReportsPage() {
   const { data: finSummary } = useQuery({ queryKey: ['finance','summary'],   queryFn: () => financeApi.summary({}),             select: r => r?.data ?? r });
   const { data: attSummary } = useQuery({ queryKey: ['attendance','summary'],queryFn: () => attendanceApi.summary({}),          select: r => r?.data ?? r });
   const { data: behSummary } = useQuery({ queryKey: ['behaviour','summary'], queryFn: () => behaviourApi.incidents.summary({}), select: r => r?.data ?? r });
-  const { data: marksSummary, isLoading: marksLoading } = useQuery({
-    queryKey: ['assessment', 'marks-summary-report'],
-    queryFn:  () => assessmentApi.marksSummary({ limit: 200 }),
+  // subjectId is deliberately NOT sent to the server — it doesn't affect
+  // scope/RBAC (unlike classId), so narrowing to one subject is done
+  // client-side below. That also keeps the subject dropdown's own option
+  // list from collapsing to whichever one subject is currently selected.
+  const { data: academicData, isLoading: marksLoading } = useQuery({
+    queryKey: ['assessment', 'analytics', { classId: acClassId, compareTo: acCompareTo }],
+    queryFn:  () => assessmentApi.analytics({
+      classId:    acClassId || undefined,
+      compareTo:  acCompareTo,
+    }),
     select:   r => r?.data ?? r,
     enabled:  tab === 'academic',
     staleTime: 5 * 60_000,
@@ -151,49 +164,45 @@ export default function ReportsPage() {
     { name: 'Unpaid',  value: _fin.countUnpaid  ?? 0 },
   ];
 
-  /* ── Academic: aggregate marks by subject ── */
-  const _marks = Array.isArray(marksSummary) ? marksSummary : [];
-  const _bySubject = {};
-  _marks.forEach(m => {
-    const key = m.subjectName || m.subject?.name || String(m.subjectId || 'Unknown');
-    if (!_bySubject[key]) _bySubject[key] = { scores: [], maxScores: [], passMarks: [] };
-    if (m.score != null) {
-      _bySubject[key].scores.push(+m.score);
-      _bySubject[key].maxScores.push(+(m.maxScore ?? m.outOf ?? 100));
-      _bySubject[key].passMarks.push(+(m.passMark ?? 50));
-    }
-  });
-  const rawSubjectRows = Object.entries(_bySubject).map(([subject, { scores, maxScores, passMarks }]) => {
-    if (!scores.length) return null;
-    const avg     = scores.reduce((a, b) => a + b, 0) / scores.length;
-    const avgMax  = maxScores.reduce((a, b) => a + b, 0) / maxScores.length;
-    const passRate = scores.filter((s, i) => s >= (passMarks[i] ?? 50)).length / scores.length * 100;
-    return {
-      subject,
-      count:    scores.length,
-      avg:      Math.round(avg * 10) / 10,
-      avgPct:   avgMax > 0 ? Math.round((avg / avgMax) * 100) : 0,
-      highest:  Math.round(Math.max(...scores)),
-      lowest:   Math.round(Math.min(...scores)),
-      passRate: Math.round(passRate),
-    };
-  }).filter(Boolean);
+  /* ── Academic: subject rows come pre-aggregated from the server
+     (GET /assessment/analytics — school-wide or role-scoped, with the
+     previous-period comparison already computed). This just flattens
+     for the sortable table and derives the chart/KPI views. ── */
+  const ac              = academicData ?? {};
+  const acSubjectsRaw    = ac.subjects ?? [];
+  const acAvailableClasses = ac.availableClasses ?? [];
+  const acIsWholeSchool  = ac.scope === 'whole_school';
+  // Subject filter options come from the unfiltered response itself —
+  // every subject with marks in the current scope/period.
+  const acSubjectOptions = acSubjectsRaw.map(s => ({ id: s.subjectId, name: s.subject }));
+  const acSubjectsFiltered = acSubjectId ? acSubjectsRaw.filter(s => s.subjectId === acSubjectId) : acSubjectsRaw;
+
+  const rawSubjectRows = acSubjectsFiltered.map(s => ({
+    subjectId: s.subjectId,
+    subject:   s.subject,
+    count:     s.current.count,
+    avgPct:    s.current.avgPct,
+    passRate:  s.current.passRate,
+    prevAvgPct: s.previous?.avgPct ?? null,
+    delta:     s.delta,
+  }));
 
   const subjectRows = [...rawSubjectRows].sort((a, b) => {
     const { col, dir } = acSort;
     const av = a[col], bv = b[col];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;  // nulls (no prior-period data) sort last regardless of direction
+    if (bv == null) return -1;
     const cmp = typeof av === 'string' ? av.localeCompare(bv) : av - bv;
     return dir === 'asc' ? cmp : -cmp;
   });
 
-  const acOverallAvg = _marks.length
-    ? Math.round(_marks.filter(m => m.score != null).reduce((s, m) => s + +m.score, 0) / _marks.filter(m => m.score != null).length * 10) / 10
-    : 0;
-  const acOverallPass = rawSubjectRows.length
-    ? Math.round(rawSubjectRows.reduce((s, r) => s + r.passRate, 0) / rawSubjectRows.length)
-    : 0;
+  const acOverallAvg  = ac.overall?.avgPct  ?? 0;
+  const acOverallPass = ac.overall?.passRate ?? 0;
 
-  const chartSubjectData = subjectRows.slice(0, 10).map(r => ({ name: r.subject, avg: r.avgPct, passRate: r.passRate }));
+  const chartSubjectData = subjectRows.slice(0, 10).map(r => ({
+    name: r.subject, avg: r.avgPct, prevAvg: r.prevAvgPct ?? undefined,
+  }));
 
   function sortAc(col) {
     setAcSort(prev => prev.col === col ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'desc' });
@@ -252,8 +261,8 @@ export default function ReportsPage() {
       ];
     } else if (tab === 'academic' && subjectRows.length > 0) {
       rows = [
-        ['Subject','Entries','Average Score','Average %','Highest','Lowest','Pass Rate %'],
-        ...subjectRows.map(r => [r.subject, r.count, r.avg, r.avgPct, r.highest, r.lowest, r.passRate]),
+        ['Subject','Entries','Average %','Previous Period Average %','Change','Pass Rate %'],
+        ...subjectRows.map(r => [r.subject, r.count, r.avgPct, r.prevAvgPct ?? '—', r.delta ?? '—', r.passRate]),
       ];
       filename = `report_academic_${date}.csv`;
     } else if (tab === 'attendance' && attSummary) {
@@ -567,6 +576,59 @@ export default function ReportsPage() {
       {/* ── ACADEMIC TAB ── */}
       {tab === 'academic' && (
         <div className="space-y-6">
+          {/* Scope badge + filters — visible to everyone so a teacher
+              never mistakes "your classes" for "whole school". */}
+          <div className="flex flex-wrap items-center gap-3">
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
+              acIsWholeSchool ? 'bg-violet-100 text-violet-700' : 'bg-sky-100 text-sky-700'
+            }`}>
+              {acIsWholeSchool ? 'Whole school' : 'Your classes only'}
+            </span>
+
+            <select
+              value={acClassId}
+              onChange={e => setAcClassId(e.target.value)}
+              className="text-sm px-3 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-700"
+            >
+              <option value="">{acIsWholeSchool ? 'All classes' : 'All my classes'}</option>
+              {acAvailableClasses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+
+            <select
+              value={acSubjectId}
+              onChange={e => setAcSubjectId(e.target.value)}
+              className="text-sm px-3 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-700"
+            >
+              <option value="">All subjects</option>
+              {acSubjectOptions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+
+            <div className="flex items-center rounded-xl border border-slate-200 bg-white p-0.5 text-xs font-semibold">
+              {[
+                { id: 'previousTerm', label: 'vs Last Term' },
+                { id: 'previousYear', label: 'vs Last Year' },
+                { id: 'none',         label: 'This period only' },
+              ].map(opt => (
+                <button
+                  key={opt.id}
+                  onClick={() => setAcCompareTo(opt.id)}
+                  className={`px-3 py-1.5 rounded-lg transition-colors ${
+                    acCompareTo === opt.id ? 'bg-violet-600 text-white' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            {ac.currentPeriod && (
+              <span className="text-xs text-slate-400 ml-auto">
+                {ac.currentPeriod.academicYearName} · Term {ac.currentPeriod.termNumber}
+                {ac.previousPeriod && ` — vs ${ac.previousPeriod.academicYearName} · Term ${ac.previousPeriod.termNumber}`}
+              </span>
+            )}
+          </div>
+
           {marksLoading ? (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               {[...Array(4)].map((_, i) => (
@@ -576,27 +638,35 @@ export default function ReportsPage() {
                 </div>
               ))}
             </div>
+          ) : !ac.currentPeriod ? (
+            <p className="text-center text-slate-400 text-sm py-12">
+              No academic year is configured yet for this school. Set one up in Settings → Academic Years.
+            </p>
           ) : (
             <>
-              {/* KPI row */}
+              {/* KPI row — these reflect the class/school scope above,
+                  not the subject filter (which only narrows the table
+                  and chart below). */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <Stat label="Subjects Tracked"  value={rawSubjectRows.length}                Icon={BookOpen}  colorIndex={0} />
-                <Stat label="Marks Entered"      value={_marks.filter(m => m.score != null).length.toLocaleString()} Icon={BarChart3} colorIndex={2}   />
-                <Stat label="Overall Avg Score"  value={acOverallAvg > 0 ? `${acOverallAvg}` : '—'} Icon={TrendingUp}  colorIndex={1}  />
+                <Stat label="Subjects Tracked"  value={acSubjectsRaw.length}                Icon={BookOpen}  colorIndex={0} />
+                <Stat label="Marks Entered"      value={(ac.overall?.count ?? 0).toLocaleString()} Icon={BarChart3} colorIndex={2}   />
+                <Stat label="Overall Avg Score"  value={acOverallAvg > 0 ? `${acOverallAvg}%` : '—'} Icon={TrendingUp}  colorIndex={1}  />
                 <Stat label="Avg Pass Rate"      value={acOverallPass > 0 ? `${acOverallPass}%` : '—'} Icon={Scale} colorIndex={3}  />
               </div>
 
               {/* Bar chart */}
               {chartSubjectData.length > 0 && (
-                <Card title="Average Score % by Subject">
+                <Card title={acCompareTo === 'none' ? 'Average Score % by Subject' : 'Average Score % by Subject — current vs previous period'}>
                   <ResponsiveContainer width="100%" height={240}>
                     <BarChart data={chartSubjectData} margin={{ left: -10 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                       <XAxis dataKey="name" tick={{ fontSize: 10 }} />
                       <YAxis tick={{ fontSize: 10 }} domain={[0, 100]} unit="%" />
                       <Tooltip content={<ChartTip />} />
-                      <Bar dataKey="avg" name="Avg %" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="passRate" name="Pass Rate %" fill="#10b981" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="avg" name="Current %" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                      {acCompareTo !== 'none' && (
+                        <Bar dataKey="prevAvg" name="Previous %" fill="#c4b5fd" radius={[4, 4, 0, 0]} />
+                      )}
                     </BarChart>
                   </ResponsiveContainer>
                 </Card>
@@ -606,7 +676,7 @@ export default function ReportsPage() {
               <Card title="Subject Performance Breakdown">
                 {subjectRows.length === 0 ? (
                   <p className="text-center text-slate-400 text-sm py-12">
-                    No assessment marks recorded yet. Enter marks via the Assessment module.
+                    No assessment marks recorded yet for this period. Enter marks via the Assessment module.
                   </p>
                 ) : (
                   <div className="overflow-x-auto">
@@ -614,12 +684,11 @@ export default function ReportsPage() {
                       <thead>
                         <tr className="border-b border-slate-100">
                           {[
-                            { col: 'subject',  label: 'Subject'    },
-                            { col: 'count',    label: 'Entries'    },
-                            { col: 'avgPct',   label: 'Avg %'      },
-                            { col: 'highest',  label: 'Highest'    },
-                            { col: 'lowest',   label: 'Lowest'     },
-                            { col: 'passRate', label: 'Pass Rate'  },
+                            { col: 'subject',    label: 'Subject'    },
+                            { col: 'count',      label: 'Entries'    },
+                            { col: 'avgPct',     label: 'Avg %'      },
+                            ...(acCompareTo !== 'none' ? [{ col: 'delta', label: 'Change' }] : []),
+                            { col: 'passRate',   label: 'Pass Rate'  },
                           ].map(({ col, label }) => (
                             <th
                               key={col}
@@ -636,7 +705,7 @@ export default function ReportsPage() {
                       </thead>
                       <tbody>
                         {subjectRows.map((row, i) => (
-                          <tr key={row.subject} className={`border-b border-slate-50 ${i % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
+                          <tr key={row.subjectId} className={`border-b border-slate-50 ${i % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
                             <td className="py-2.5 px-3 font-medium text-slate-800">{row.subject}</td>
                             <td className="py-2.5 px-3 text-slate-600">{row.count}</td>
                             <td className="py-2.5 px-3">
@@ -650,8 +719,20 @@ export default function ReportsPage() {
                                 <span className="text-slate-700 font-medium">{row.avgPct}%</span>
                               </div>
                             </td>
-                            <td className="py-2.5 px-3 text-emerald-600 font-medium">{row.highest}</td>
-                            <td className="py-2.5 px-3 text-red-500 font-medium">{row.lowest}</td>
+                            {acCompareTo !== 'none' && (
+                              <td className="py-2.5 px-3">
+                                {row.delta == null ? (
+                                  <span className="text-slate-300">No prior data</span>
+                                ) : (
+                                  <span className={`inline-flex items-center gap-1 font-medium ${
+                                    row.delta > 0 ? 'text-emerald-600' : row.delta < 0 ? 'text-red-500' : 'text-slate-400'
+                                  }`}>
+                                    {row.delta > 0 ? <TrendingUp size={13} /> : row.delta < 0 ? <TrendingDown size={13} /> : null}
+                                    {row.delta > 0 ? '+' : ''}{row.delta}%
+                                  </span>
+                                )}
+                              </td>
+                            )}
                             <td className="py-2.5 px-3">
                               <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
                                 row.passRate >= 80 ? 'bg-emerald-100 text-emerald-700'

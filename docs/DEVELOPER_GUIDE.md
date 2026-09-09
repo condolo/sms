@@ -2812,8 +2812,9 @@ buildSubjectReport({ marks, weights })
 | POST | `/api/assessment/marks` | grades:create | Enter/upsert single mark |
 | POST | `/api/assessment/marks/bulk` | grades:create | Bulk upsert (whole class) |
 | DELETE | `/api/assessment/marks/:id` | grades:delete | Remove a mark |
-| GET | `/api/assessment/marks/summary` | grades:read | Class completion grid |
+| GET | `/api/assessment/marks/summary` | grades:read | Class completion grid — requires `classId`, one class's per-student grid, NOT for school-wide reporting (see `/analytics` below, which is) |
 | GET | `/api/assessment/report` | grades:read | Computed report card + grade scale |
+| GET | `/api/assessment/analytics` | grades:read | (2026-09) Average-per-subject, school-wide or role-scoped (`ScopeEngine`/`scopeMiddleware` — a `teacher` sees only their assigned classes, `scope: 'assigned'` in the response; a management-tier role sees everything, `scope: 'whole_school'`), with a previous-term/previous-year comparison (`compareTo`). Replaces the Reports page's Academic tab, which had been silently broken — it called `/marks/summary` with no `classId`, which that endpoint requires, and the resulting error was swallowed client-side into a misleading empty state. Source: `assessment_marks` (the Continuous Assessment module), not the separate formal Exams module's `exam_results` — a deliberate scope choice, see the route's own header comment for the reasoning. |
 | GET | `/api/assessment/reminders` | grades:read | Upcoming/open/overdue list |
 | POST | `/api/assessment/reminders/notify` | settings:update | Trigger email + in-app notifications |
 

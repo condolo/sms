@@ -26,10 +26,12 @@ const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, E } = require('../utils/response');
 const email              = require('../utils/email');
-const { mergeConfig }    = require('./academic-config');
+const { mergeConfig, resolveCurrentPeriod } = require('./academic-config');
 const { aggregateAssessmentMarks, computeFinalScores } = require('../utils/academic-calc');
 const { isYearArchived, firstArchivedYear } = require('../utils/archival');
 const { canWriteSubject, unassignedPairs } = require('../utils/subject-scope');
+const ScopeEngine         = require('../utils/scopeEngine');
+const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 
 const router = express.Router();
 const PLAN   = planGate('grades');
@@ -1352,6 +1354,210 @@ router.get('/report', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), asy
     return _ok(res, result);
   } catch (err) {
     console.error('[assessment/report GET]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   ANALYTICS  —  GET /api/assessment/analytics
+   (2026-09 — replaces the Reports page's Academic tab, which called
+   GET /marks/summary with no classId and always got rejected — see
+   CHANGELOG.md. That endpoint's shape — one class's per-student grid —
+   was never the right one for this anyway; this is school-wide,
+   subject-grouped, and role-scoped from the start.)
+
+   Whole-school (or whole-class, if classId given) average-per-subject,
+   with an optional comparison against the previous term or the same
+   term last year. Source: assessment_marks (the Continuous Assessment
+   module — CA/HW/MT/ET-style marks — NOT the separate formal Exams
+   module's exam_results, a deliberate choice for this view).
+
+   Visibility: a management-tier role (see scopeEngine.js) sees the
+   whole school; anyone else sees only the classes they hold a
+   teaching_assignments record for (`scope: 'assigned'` in the
+   response — the client uses this to label the view correctly rather
+   than implying "whole school" to someone who isn't seeing it).
+   Passing a classId outside that scope is rejected the same way every
+   other scoped module already handles it (ScopeEngine.applyToFilter).
+
+   Query params:
+     classId          — optional, narrows to one class (still subject
+                         to scope above)
+     subjectId         — optional, narrows to one subject
+     academicYearId, termNumber — the "current" period; both default to
+                         the live-resolved current period when omitted
+     compareTo         — 'previousTerm' (default) | 'previousYear' | 'none'
+   ══════════════════════════════════════════════════════════════ */
+
+/* Given the school's academic_years (sorted by startDate) and a
+   {year, termNumber} anchor, resolves the comparison period:
+     'previousTerm' — termNumber-1 in the same year; the same year's
+                       last term is used when the anchor is term 1... i.e.
+                       falls back to the previous YEAR's last term.
+     'previousYear' — the previous year's SAME termNumber (null if that
+                       year doesn't have that many terms).
+   Returns null when there is no earlier period to compare against
+   (e.g. the school's very first recorded year/term). */
+function _resolvePreviousPeriod(sortedYears, year, termNumber, mode) {
+  if (!year || !termNumber || mode === 'none') return null;
+  const yearIdx = sortedYears.findIndex(y => (y.id ?? String(y._id)) === (year.id ?? String(year._id)));
+
+  if (mode === 'previousYear') {
+    const prevYear = yearIdx > 0 ? sortedYears[yearIdx - 1] : null;
+    if (!prevYear) return null;
+    const terms = Array.isArray(prevYear.terms) ? prevYear.terms : [];
+    if (termNumber > terms.length) return null; // that year didn't run this many terms
+    return { year: prevYear, termNumber };
+  }
+
+  // 'previousTerm' (default)
+  if (termNumber > 1) return { year, termNumber: termNumber - 1 };
+  const prevYear = yearIdx > 0 ? sortedYears[yearIdx - 1] : null;
+  if (!prevYear) return null;
+  const terms = Array.isArray(prevYear.terms) ? prevYear.terms : [];
+  if (terms.length === 0) return null;
+  return { year: prevYear, termNumber: terms.length };
+}
+
+function _periodLabel(p) {
+  if (!p) return null;
+  const yearId = p.year.id ?? String(p.year._id);
+  return { academicYearId: yearId, academicYearName: p.year.name ?? yearId, termNumber: p.termNumber };
+}
+
+/* One aggregation, faceted into per-subject rows and a school/class-wide
+   overall — avoids a second round trip for the "overall" KPI row. */
+async function _aggregateAnalyticsPeriod(Marks, baseFilter, academicYearId, termNumber, passMark) {
+  if (!academicYearId || !termNumber) return { bySubject: [], overall: null };
+  const filter = { ...baseFilter, academicYearId, termNumber };
+  const [result] = await Marks.aggregate([
+    { $match: filter },
+    { $facet: {
+        bySubject: [
+          { $group: {
+              _id: '$subjectId',
+              avgPct:    { $avg: '$rawScore' },
+              count:     { $sum: 1 },
+              passCount: { $sum: { $cond: [{ $gte: ['$rawScore', passMark] }, 1, 0] } },
+          }},
+          { $project: {
+              subjectId: '$_id', _id: 0,
+              avgPct:    { $round: ['$avgPct', 1] },
+              count:     1,
+              passRate:  { $round: [{ $multiply: [{ $divide: ['$passCount', '$count'] }, 100] }, 1] },
+          }},
+        ],
+        overall: [
+          { $group: {
+              _id: null,
+              avgPct:    { $avg: '$rawScore' },
+              count:     { $sum: 1 },
+              passCount: { $sum: { $cond: [{ $gte: ['$rawScore', passMark] }, 1, 0] } },
+          }},
+          { $project: {
+              _id: 0,
+              avgPct:    { $round: ['$avgPct', 1] },
+              count:     1,
+              passRate:  { $round: [{ $multiply: [{ $divide: ['$passCount', '$count'] }, 100] }, 1] },
+          }},
+        ],
+    }},
+  ]);
+  return { bySubject: result?.bySubject ?? [], overall: result?.overall?.[0] ?? null };
+}
+
+router.get('/analytics', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMiddleware, async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const ctx = tenantContext(req);
+    const { classId: qClassId, subjectId, academicYearId: qYearId, termNumber: qTermNumber } = req.query;
+    const compareTo = ['previousTerm', 'previousYear', 'none'].includes(req.query.compareTo)
+      ? req.query.compareTo : 'previousTerm';
+
+    const [years, academicCfg] = await Promise.all([
+      tenantModel('academic_years', ctx).find({ schoolId }).sort({ startDate: 1 }).lean(),
+      tenantModel('academic_config', ctx).findOne({ schoolId }).select('passMark').lean(),
+    ]);
+    const passMark = academicCfg?.passMark ?? 40;
+
+    let currentYear, currentTermNumber;
+    if (qYearId) {
+      currentYear = years.find(y => (y.id ?? String(y._id)) === qYearId);
+      if (!currentYear) return E.badRequest(res, `academicYearId "${qYearId}" does not match any academic year for this school`);
+      currentTermNumber = qTermNumber ? Number(qTermNumber) : resolveCurrentPeriod(years).termNumber;
+    } else {
+      const current = resolveCurrentPeriod(years);
+      currentYear = current.year;
+      currentTermNumber = qTermNumber ? Number(qTermNumber) : current.termNumber;
+    }
+
+    // A brand-new school with no academic years configured yet — same
+    // "don't error, just return an empty picture" treatment
+    // resolveAcademicPeriod() gives every other caller of this pattern.
+    if (!currentYear || !currentTermNumber) {
+      return _ok(res, {
+        scope: ScopeEngine.isUnrestricted(req, 'assessment') ? 'whole_school' : 'assigned',
+        currentPeriod: null, previousPeriod: null, passMark,
+        overall: null, subjects: [], availableClasses: [],
+      });
+    }
+
+    const currentYearId = currentYear.id ?? String(currentYear._id);
+    const previous = _resolvePreviousPeriod(years, currentYear, currentTermNumber, compareTo);
+
+    /* Base filter — classId scoping happens BEFORE ScopeEngine.applyToFilter
+       so an explicitly-requested classId outside the caller's scope is
+       rejected (replaced with an impossible match), not silently widened. */
+    const baseFilter = { schoolId, isPublished: true };
+    if (qClassId) baseFilter.classId = qClassId;
+    ScopeEngine.applyToFilter(req, 'assessment', baseFilter);
+    if (subjectId) baseFilter.subjectId = subjectId;
+
+    const Marks = tenantModel('assessment_marks', ctx);
+    const [currentAgg, previousAgg] = await Promise.all([
+      _aggregateAnalyticsPeriod(Marks, baseFilter, currentYearId, currentTermNumber, passMark),
+      previous ? _aggregateAnalyticsPeriod(Marks, baseFilter, previous.year.id ?? String(previous.year._id), previous.termNumber, passMark) : Promise.resolve({ bySubject: [], overall: null }),
+    ]);
+
+    // Resolve subject display names for everything either period touched
+    const allSubjectIds = new Set([...currentAgg.bySubject.map(r => r.subjectId), ...previousAgg.bySubject.map(r => r.subjectId)]);
+    const subjectDocs = allSubjectIds.size
+      ? await tenantModel('subjects', ctx).find({ schoolId, id: { $in: [...allSubjectIds] } }).select('id name').lean()
+      : [];
+    const subjectNameMap = Object.fromEntries(subjectDocs.map(s => [s.id, s.name]));
+    const prevBySubject = Object.fromEntries(previousAgg.bySubject.map(r => [r.subjectId, r]));
+
+    const subjects = currentAgg.bySubject
+      .map(cur => {
+        const prev = prevBySubject[cur.subjectId] ?? null;
+        return {
+          subjectId: cur.subjectId,
+          subject:   subjectNameMap[cur.subjectId] ?? cur.subjectId,
+          current:   { avgPct: cur.avgPct, count: cur.count, passRate: cur.passRate },
+          previous:  prev ? { avgPct: prev.avgPct, count: prev.count, passRate: prev.passRate } : null,
+          delta:     prev ? Math.round((cur.avgPct - prev.avgPct) * 10) / 10 : null,
+        };
+      })
+      .sort((a, b) => a.current.avgPct - b.current.avgPct); // weakest subject first
+
+    // Classes available to filter by — every class in the school for an
+    // unrestricted (leadership) caller, or only the caller's assigned
+    // classes otherwise. Names resolved so the client never needs a
+    // second "my classes" call just to populate this dropdown.
+    const classesFilter = ScopeEngine.applyToFilter(req, 'classes', { schoolId });
+    const classDocs = await tenantModel('classes', ctx).find(classesFilter).select('id name').lean();
+
+    return _ok(res, {
+      scope:            ScopeEngine.isUnrestricted(req, 'assessment') ? 'whole_school' : 'assigned',
+      currentPeriod:    _periodLabel({ year: currentYear, termNumber: currentTermNumber }),
+      previousPeriod:   _periodLabel(previous),
+      passMark,
+      overall:          currentAgg.overall,
+      subjects,
+      availableClasses: classDocs.map(c => ({ id: c.id ?? String(c._id), name: c.name })),
+    });
+  } catch (err) {
+    console.error('[assessment/analytics GET]', err);
     return E.serverError(res);
   }
 });

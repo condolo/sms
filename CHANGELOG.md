@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.69.0] — 2026-09-09 — feat(assessment, reports): school-wide academic analytics, and the Academic tab it was meant to be
+
+Prompted by a direct request for live filterable academic analytics (per class, per subject, whole-school), scoped down to: Assessment-module marks as the data source, fix the currently-broken Academic tab first, compare current vs. last term/year as average-per-subject, and role-scoped visibility (leadership: whole school; teacher: own classes/subjects).
+
+### Found while scoping this
+The Reports page's Academic tab was **silently broken**: it called `GET /assessment/marks/summary` with no `classId`, but that endpoint requires one and rejects the request — the error was swallowed client-side into a misleading "No assessment marks recorded yet" empty state, regardless of how much real data existed. That endpoint's shape (one class's per-student grid) was never right for a school-wide view anyway, so this wasn't a one-line fix — the whole tab needed the endpoint it should have had from the start.
+
+### Added
+- `GET /api/assessment/analytics` (`server/routes/assessment.js`) — average score % and pass rate per subject, from `assessment_marks` (the Continuous Assessment module — CA/HW/MT/ET-style marks, not the separate formal Exams module). Filterable by `classId`/`subjectId`; compares the current period against `compareTo=previousTerm` (default — same year, one term back, wrapping to the prior year's last term at term 1), `previousYear` (same term, prior year), or `none`.
+- **Role-scoped visibility**, reusing the app's existing scope infrastructure (`ScopeEngine`/`scopeMiddleware` — already wired for `grades`, `attendance`, etc., just not `assessment` until now): a management-tier role gets `scope: 'whole_school'` and every class; a teacher gets `scope: 'assigned'` and only the classes they hold a `teaching_assignments` record for. Requesting a `classId` outside that scope returns empty, not another class's real data or an error.
+- `client/src/pages/reports/ReportsPage.jsx`'s Academic tab rebuilt on the new endpoint: a visible scope badge ("Whole school" / "Your classes only"), class and subject filter dropdowns, and a current/previous comparison toggle. The bar chart and table both show current vs. previous average % with a delta indicator (▲/▼) per subject.
+
+### Verified
+- 12 new tests (`assessment-analytics.test.js`): whole-school vs. scoped-teacher views, out-of-scope classId rejected safely, all three comparison modes (including the term-1 year-wrap case and "nothing earlier to compare" case), no-academic-years-configured edge case, invalid academicYearId rejected, subject filtering, passMark read from `academic_config`. Full server suite 1958/1958. `verify-rbac-coverage.js` 100% (484/484, new route included). `security-scan.js` clean. Client production build passes.
+
+### Deliberately not built yet
+- The formal Exams module (`exam_results`) isn't a data source here — confirmed as out of scope for this pass, per the answered question.
+- No new UI for setting a specific historical `academicYearId`/`termNumber` beyond the live-resolved current one — the comparison toggle covers the "vs last term/year" ask directly; a manual period picker can follow if actually needed.
+
+---
+
 ## [v5.68.0] — 2026-09-08 — fix(finance): Payments list showed raw student IDs instead of names
 
 Reported from a demo account: the Payments tab showed `std_demo_1` instead of a student's name. Traced every real payment-creation path (not just the demo seed) to check whether this was demo-only or systemic.
