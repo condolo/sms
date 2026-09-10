@@ -311,14 +311,18 @@ const TEMPLATES = {
       '#                                 account can access: teacher | admin | principal |',
       '#                                 deputy_principal | section_head | exams_officer |',
       '#                                 timetabler | admissions_officer | finance | hr |',
-      '#                                 discipline_committee — or the exact key of a custom',
-      '#                                 role your school has created in Settings -> Roles &',
-      '#                                 Permissions. Leave blank to default to "teacher".',
+      '#                                 discipline_committee — or a custom role your school',
+      '#                                 has created in Settings -> Roles & Permissions',
+      '#                                 (either its key or its exact name both work, e.g.',
+      '#                                 "Kitchen Assistant" or "kitchen_assistant"). Case',
+      '#                                 does not matter ("Teacher" and "teacher" both work).',
+      '#                                 Leave blank to default to "teacher".',
       '#                                 This is NOT a free-text job title — every staff member',
       '#                                 is a member of staff first (see qualifications/title for',
       '#                                 the descriptive job title); staffType is specifically what',
       '#                                 controls system access, so it must be one of the real',
-      '#                                 roles above, not any other text.',
+      '#                                 roles above (or a role you have already created in',
+      '#                                 Settings), not any other text.',
       '#   extraRoles                  — optional, comma-separated, on top of staffType:',
       '#                                 hod | class_teacher | timetabler | exam_officer |',
       '#                                 deputy | principal, or a custom responsibility key',
@@ -1026,8 +1030,37 @@ async function _importTeachers(rows, schoolId, userId, req) {
   // Pre-fetch existing emails, valid roles, and departments once for the whole batch
   const existing     = await Teachers.find({ schoolId }).select('email').lean();
   const knownEmails  = new Set(existing.map(t => t.email.toLowerCase()));
-  const customRoles  = await tenantModel('custom_roles', { schoolId }).find({ schoolId }).select('key').lean();
-  const validRoleSet = new Set([...SYSTEM_ROLES, ...customRoles.map(cr => cr.key)]);
+  const customRoles  = await tenantModel('custom_roles', { schoolId }).find({ schoolId }).select('key label').lean();
+  // staffType lookup (2026-09 fix) — resolves whatever a real CSV
+  // actually contains to the canonical role key. Found live: a school
+  // filled staffType with the human-readable name shown everywhere else
+  // in the UI ("Teacher", "Deputy Principal", "Kitchen Assistant" — the
+  // exact label they'd just created in Settings -> Roles & Permissions),
+  // and every one of those rows was rejected — the importer only ever
+  // matched the exact-case machine key ('teacher', 'deputy_principal',
+  // 'kitchen_assistant'), the same string settings.js's custom-role
+  // creation derives from a label but never surfaces back to the CSV
+  // author. Three forms now resolve to the same canonical key:
+  //   1. the machine key itself, any case ('teacher', 'TEACHER')
+  //   2. a built-in role's spaced-out human form, any case
+  //      ('Deputy Principal' -> deputy_principal) — a deterministic
+  //      reversal of the key's own underscore formatting, not a new
+  //      alias with its own meaning, so it can't collide with anything
+  //   3. a custom role's actual label as shown in Settings, any case
+  //      ('Kitchen Assistant' -> kitchen_assistant)
+  // A role like "Director" or "Administrator" that isn't a built-in and
+  // has no matching custom role yet still correctly fails — it must
+  // exist in Settings -> Roles & Permissions first; this only removes
+  // the exact-string-match trap for roles that already do exist.
+  const roleLookup = new Map();
+  for (const k of SYSTEM_ROLES) {
+    roleLookup.set(k, k);
+    roleLookup.set(k.replace(/_/g, ' '), k);
+  }
+  for (const cr of customRoles) {
+    roleLookup.set(cr.key.toLowerCase(), cr.key);
+    if (cr.label) roleLookup.set(cr.label.toLowerCase().trim(), cr.key);
+  }
   // extraRoles: the 6 built-ins, plus whatever custom responsibilities this
   // school has defined (Settings → Staff Roles & Responsibilities) — a
   // hardcoded list here rejected every custom one outright, the same gap
@@ -1082,9 +1115,10 @@ async function _importTeachers(rows, schoolId, userId, req) {
     // (as before) blindly hardcoding 'teacher' regardless of what was
     // given — an admin-role row from a non-superadmin caller is rejected
     // the same way every other role-assigning route in the app rejects it.
-    const staffType = r.staffType?.trim() || 'teacher';
-    if (!validRoleSet.has(staffType)) {
-      results.errors.push({ row, field: 'staffType', message: `Invalid staffType '${staffType}'. Use a real system role or a custom role key from Settings -> Roles & Permissions.` });
+    const rawStaffType = r.staffType?.trim() || 'teacher';
+    const staffType = roleLookup.get(rawStaffType.toLowerCase());
+    if (!staffType) {
+      results.errors.push({ row, field: 'staffType', message: `Invalid staffType '${rawStaffType}'. Use a real system role or a custom role name from Settings -> Roles & Permissions.` });
       results.skipped++; continue;
     }
     if (staffType === 'admin' && !isSuperAdmin) {

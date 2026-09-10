@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.71.0] — 2026-09-10 — fix(hr): Staff import rejected every role that wasn't typed as the exact machine key
+
+Reported directly: importing HR staff rejected nearly every row with `Invalid staffType 'Teacher'` (and 'Finance', 'Deputy Principal', 'Kitchen Assistant', etc.) even though those roles genuinely existed — several as real system roles, others created by the school in Settings → Roles & Permissions moments earlier.
+
+### Root cause
+`staffType` was matched with an exact, case-sensitive string comparison against the internal machine role key (`teacher`, `deputy_principal`, `kitchen_assistant`) — never against the human-readable name shown anywhere in the product, including the exact label a school just typed into Settings → Roles & Permissions to create a custom role. Nobody filling in a CSV by hand would know that key even exists; they'd type what they see on screen ("Teacher", "Deputy Principal", "Kitchen Assistant"), and every one of those was rejected.
+
+### Fixed
+- `_importTeachers` (`server/routes/import-export.js`) now resolves `staffType` against three equivalent forms, matched case-insensitively: the machine key itself (`teacher`), a built-in role's human-readable spaced form (`Deputy Principal` → `deputy_principal` — a deterministic reversal of the key's own underscore formatting, not a new alias, so it can't collide with anything or grant unintended access), and a custom role's actual label as shown in Settings (`Kitchen Assistant` → `kitchen_assistant`). The resolved **canonical key** is what gets stored and used as the login account's role — never the raw text typed.
+- A role that genuinely doesn't exist yet (`Director`, `Administrator`, `Co-Teacher`, and others from the reported list, if not yet created as custom roles) still correctly fails — this only removes the exact-string-match trap for roles that already exist; it doesn't invent new ones. Create the missing ones in Settings → Roles & Permissions first, using the same name, then re-import.
+- Template notes updated to say plainly that a custom role's name or key both work, and that matching is case-insensitive.
+
+### Verified
+- 4 new tests in `import-teachers-role-validation.test.js`: a system role's display name (`Teacher`) resolves case-insensitively; a system role's spaced human form (`Deputy Principal`) resolves to its underscore key; a custom role's label (`front office`, any case) resolves to its key; the resolved value stored on the record and the login account is always the canonical key. Full server suite 1966/1966. `verify-rbac-coverage.js` 100% (no regression). `security-scan.js` clean.
+
+---
+
 ## [v5.70.0] — 2026-09-10 — fix(students): duplicate admission numbers on import are now caught, not silently duplicated
 
 Prompted by a question about how to tell which imported students succeeded vs. were rejected. Answering it surfaced that the existing student-import result panel (created count, skipped count, row-by-row error detail) already covers genuine validation failures — but tracing "does re-importing update an existing student" found a real gap: `students_admission` is a lookup index, not a unique one, so a CSV row whose admission number matched an existing student silently created a SECOND student record under the same number, with no warning at all.

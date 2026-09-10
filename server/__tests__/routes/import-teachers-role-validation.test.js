@@ -128,6 +128,40 @@ describe('POST /api/import-export/teachers — staffType drives the created logi
     expect(mockStores.users._docs()[0].role).toBe('front_office');
   });
 
+  test('a system role name is matched case-insensitively, not just its exact-case machine key (2026-09 fix)', async () => {
+    const res = await supertest(buildApp())
+      .post('/api/import-export/teachers')
+      .set('Content-Type', 'application/json')
+      .send({ rows: [row({ staffType: 'Teacher' })] });
+
+    expect(res.status).toBe(201);
+    // Resolved to the CANONICAL key, not stored as the raw "Teacher" typed —
+    // it's used directly as the login account's role string downstream.
+    expect(mockStores.teachers._docs()[0].staffType).toBe('teacher');
+    expect(mockStores.users._docs()[0].role).toBe('teacher');
+  });
+
+  test('a system role\'s human-readable spaced form is matched, not just its underscore key (2026-09 fix)', async () => {
+    const res = await supertest(buildApp())
+      .post('/api/import-export/teachers')
+      .set('Content-Type', 'application/json')
+      .send({ rows: [row({ staffType: 'Deputy Principal' })] });
+
+    expect(res.status).toBe(201);
+    expect(mockStores.users._docs()[0].role).toBe('deputy_principal');
+  });
+
+  test('a custom role\'s LABEL (as shown in Settings), not just its machine key, is matched — any case (2026-09 fix)', async () => {
+    const res = await supertest(buildApp())
+      .post('/api/import-export/teachers')
+      .set('Content-Type', 'application/json')
+      .send({ rows: [row({ staffType: 'front office' })] }); // label is 'Front Office'
+
+    expect(res.status).toBe(201);
+    expect(mockStores.teachers._docs()[0].staffType).toBe('front_office'); // resolved to the key
+    expect(mockStores.users._docs()[0].role).toBe('front_office');
+  });
+
   test('an invalid staffType is rejected — no teacher record and no login account are created for that row', async () => {
     const res = await supertest(buildApp())
       .post('/api/import-export/teachers')
