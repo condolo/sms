@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.72.0] — 2026-09-10 — feat(settings): built-in roles can now be renamed, not just custom ones
+
+Requested directly: "I would like to be able to edit the name of the system existing roles. I have realised you can only edit the custom added roles." Confirmed — a custom role has always had a real, stored, editable `label`; a built-in role's name (Teacher, Finance, Deputy Principal, ...) was a hardcoded client-side constant with no override mechanism at all.
+
+Scoped deliberately as a **display-name-only** change: a rename never touches a role's machine key, its permissions, or who currently holds it — it only changes what's shown. Follows the exact same precedent already established for `hiddenSystemRoles` (a school-level array override for built-in role *visibility* in the invite form) — this is the same shape, for a role's *name* instead.
+
+### Added
+- `schools.roleLabels` — a new, optional `{ [systemRoleKey]: displayLabel }` field on the school document, alongside the existing `hiddenSystemRoles`. Validated server-side on `PUT /api/settings/school`: unknown role keys are dropped, non-string values are dropped, labels are trimmed and capped at 60 characters — never a hard failure for the whole save, matching how every other free-shape settings field here is handled.
+- `GET /api/settings/school` now returns `roleLabels` for both the full (admin) response and the restricted non-admin "safe" projection — it used to be omitted from the latter entirely.
+- Settings → Roles & Permissions: hovering a built-in role now shows a pencil (rename) icon alongside the existing eye-off (hide) icon — previously only custom roles had any edit affordance at all. A new lightweight rename dialog (`EditSystemRoleLabelModal`) supports save and "reset to default"; the role's key, permissions, and colour stay fixed, only the name is editable.
+- The rename propagates everywhere a built-in role's name is shown in Settings: the Roles & Permissions role list, the Users list's role pills and per-user role-change dropdown, the Invite-user role dropdown, and the current user's own Account tab.
+
+### Verified
+- 7 new tests (`settings-role-labels.test.js`): a valid rename is saved and read back (including through the non-admin projection), an unknown role key is stripped, a non-string value is stripped, a label is trimmed and capped at 60 chars, and an empty object clears every override ("reset to default"). Full server suite 1973/1973. `verify-rbac-coverage.js` 100% (no regression — reuses the existing `PUT/GET /settings/school` endpoints, no new routes). `security-scan.js` clean. Client production build passes.
+
+### Explicitly out of scope for this pass
+- `staffType` on a Teacher/HR record (a separate, deliberately free-text job-title field — see the staffType/role separation audit referenced throughout `import-export.js`/`teachers.js`) is not wired to this rename — HR's own staff-list display of a person's role would need its own follow-up if that consistency is wanted too.
+
+---
+
 ## [v5.71.0] — 2026-09-10 — fix(hr): Staff import rejected every role that wasn't typed as the exact machine key
 
 Reported directly: importing HR staff rejected nearly every row with `Invalid staffType 'Teacher'` (and 'Finance', 'Deputy Principal', 'Kitchen Assistant', etc.) even though those roles genuinely existed — several as real system roles, others created by the school in Settings → Roles & Permissions moments earlier.

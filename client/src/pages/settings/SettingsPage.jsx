@@ -57,6 +57,14 @@ const SYSTEM_ROLE_LABELS = {
   parent:               'Parent',
   student:              'Student',
 };
+// A school's own rename of a built-in role's DISPLAY NAME (2026-09) —
+// `roleLabels` is the school doc's `{ [systemRoleKey]: label }` override
+// (see RolesTab), always optional. The role's machine key never changes —
+// this only ever affects what's shown, everywhere a system role's label
+// would otherwise come from SYSTEM_ROLE_LABELS directly.
+function roleLabel(key, overrides) {
+  return overrides?.[key] || SYSTEM_ROLE_LABELS[key] || key.replace(/_/g, ' ');
+}
 const SYSTEM_ROLE_COLORS = {
   superadmin:           { sel:'bg-red-600 text-white ring-red-600',          idle:'ring-slate-200 bg-white text-red-700'        },
   admin:                { sel:'bg-violet-600 text-white ring-violet-600',     idle:'ring-slate-200 bg-white text-violet-700'     },
@@ -91,7 +99,7 @@ const ROLE_PILL = {
   parent:               'bg-emerald-50 text-emerald-700 border-emerald-200',
   student:              'bg-amber-50 text-amber-700 border-amber-200',
 };
-function RolePill({ role, customRoles = [] }) {
+function RolePill({ role, customRoles = [], roleLabels = {} }) {
   // Check if this is a custom role first
   const cr = customRoles.find(r => r.key === role);
   if (cr) {
@@ -104,7 +112,7 @@ function RolePill({ role, customRoles = [] }) {
       </span>
     );
   }
-  const label = SYSTEM_ROLE_LABELS[role] ?? role.replace(/_/g, ' ');
+  const label = roleLabel(role, roleLabels);
   const cls   = ROLE_PILL[role] ?? 'bg-slate-100 text-slate-600 border-slate-200';
   return (
     <span className={`inline-flex px-2 py-0.5 text-[11px] font-medium rounded border capitalize ${cls}`}>
@@ -1911,6 +1919,7 @@ function UsersTab() {
     staleTime: 60_000,
   });
   const hiddenSystemRoles = schoolData?.data?.hiddenSystemRoles ?? [];
+  const roleLabels        = schoolData?.data?.roleLabels ?? {};
 
   /* Fetch custom roles so filter + pills stay in sync */
   const { data: crData } = useQuery({
@@ -1920,9 +1929,10 @@ function UsersTab() {
   });
   const customRoles = crData?.data ?? [];
 
-  /* Merge built-in role groups + custom roles for the filter dropdown */
+  /* Merge built-in role groups (school's own renames applied) + custom
+     roles for the filter dropdown */
   const roleGroups = [
-    ...USER_ROLE_GROUPS,
+    ...USER_ROLE_GROUPS.map(g => g.value ? { ...g, label: roleLabel(g.value, roleLabels) } : g),
     ...customRoles.map(cr => ({ value: cr.key, label: cr.label })),
   ];
 
@@ -1966,7 +1976,7 @@ function UsersTab() {
 
   // Roles available to assign — excludes superadmin (only platform-level)
   const assignableRoles = [
-    ...SYSTEM_ROLES.filter(r => r !== 'superadmin').map(r => ({ value: r, label: SYSTEM_ROLE_LABELS[r] ?? r })),
+    ...SYSTEM_ROLES.filter(r => r !== 'superadmin').map(r => ({ value: r, label: roleLabel(r, roleLabels) })),
     ...customRoles.map(cr => ({ value: cr.key, label: cr.label })),
   ];
 
@@ -2127,7 +2137,7 @@ function UsersTab() {
                           className={canManage && !PROTECTED_ROLES.has(u.role) ? 'cursor-pointer hover:opacity-80 transition' : 'cursor-default'}
                           title={canManage && !PROTECTED_ROLES.has(u.role) ? 'Click to change role' : undefined}
                         >
-                          <RolePill role={u.role} customRoles={customRoles} />
+                          <RolePill role={u.role} customRoles={customRoles} roleLabels={roleLabels} />
                         </button>
                       )}
                     </td>
@@ -2172,6 +2182,7 @@ function UsersTab() {
           <InviteSlideOver
             customRoles={customRoles}
             hiddenSystemRoles={hiddenSystemRoles}
+            roleLabels={roleLabels}
             onClose={() => setShowInvite(false)}
             onInvited={() => {
               setShowInvite(false);
@@ -2192,7 +2203,7 @@ function UsersTab() {
   );
 }
 
-function InviteSlideOver({ customRoles = [], hiddenSystemRoles = [], onClose, onInvited }) {
+function InviteSlideOver({ customRoles = [], hiddenSystemRoles = [], roleLabels = {}, onClose, onInvited }) {
   const [email, setEmail] = useState('');
   const [role,  setRole]  = useState('teacher');
   const [name,  setName]  = useState('');
@@ -2250,7 +2261,7 @@ function InviteSlideOver({ customRoles = [], hiddenSystemRoles = [], onClose, on
               {SYSTEM_ROLES
                 .filter(r => r !== 'superadmin' && !hiddenSystemRoles.includes(r))
                 .map(r => (
-                  <option key={r} value={r}>{SYSTEM_ROLE_LABELS[r] ?? r}</option>
+                  <option key={r} value={r}>{roleLabel(r, roleLabels)}</option>
                 ))
               }
               {customRoles.length > 0 && (
@@ -2936,6 +2947,13 @@ function AccountTab() {
   });
   const customRoles = crData?.data ?? [];
 
+  const { data: schoolData } = useQuery({
+    queryKey: ['settings', 'school'],
+    queryFn:  () => settingsApi.school.get(),
+    staleTime: 120_000,
+  });
+  const roleLabels = schoolData?.data?.roleLabels ?? {};
+
   const { mutate: saveName, isPending: savingName } = useMutation({
     mutationFn: () => settingsApi.update({ name }),
     onSuccess: () => {
@@ -2988,7 +3006,7 @@ function AccountTab() {
             <p className="text-sm font-semibold text-slate-800">{user?.name ?? user?.email ?? '—'}</p>
             <p className="text-xs text-slate-400">{user?.email}</p>
           </div>
-          <RolePill role={user?.role} customRoles={customRoles} />
+          <RolePill role={user?.role} customRoles={customRoles} roleLabels={roleLabels} />
         </div>
       </div>
 
@@ -3251,6 +3269,68 @@ function EditCustomRoleModal({ role, onClose, onSaved }) {
             className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-semibold transition">
             {isPending ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
             {isPending ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Rename a BUILT-IN role's display name (2026-09) — the system-role
+   counterpart to EditCustomRoleModal above, deliberately much smaller:
+   a built-in role's key, colour, and permission template are fixed —
+   only its name is a school-level customization. */
+function EditSystemRoleLabelModal({ roleKey, currentLabel, hasOverride, onSave, onReset, onClose, saving }) {
+  const [label, setLabel] = useState(currentLabel);
+  const [error, setError] = useState('');
+
+  function submit() {
+    if (!label.trim()) { setError('Display name is required.'); return; }
+    onSave(label.trim());
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-bold text-slate-900">Rename Role</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition">
+            <X size={16} />
+          </button>
+        </div>
+
+        <p className="text-[11px] text-slate-400 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+          Key: <code className="font-mono text-slate-600">{roleKey}</code>
+          {' '}— permanent, and what actually controls access. Renaming only changes what's
+          displayed everywhere in the app — it never changes what this role can do.
+        </p>
+
+        {error && (
+          <div className="text-sm text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded-lg flex items-center gap-2">
+            <AlertTriangle size={13} />{error}
+          </div>
+        )}
+
+        <FField label="Display name">
+          <input value={label} onChange={e => setLabel(e.target.value)} className={iCls()} autoFocus maxLength={60} />
+        </FField>
+
+        <div className="flex gap-2 pt-1">
+          {hasOverride && (
+            <button onClick={onReset} disabled={saving}
+              className="py-2.5 px-3 rounded-xl border border-slate-200 text-xs font-medium text-slate-500 hover:bg-slate-50 disabled:opacity-40 transition">
+              Reset to default
+            </button>
+          )}
+          <button onClick={onClose}
+            className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition">
+            Cancel
+          </button>
+          <button onClick={submit} disabled={saving || !label.trim()}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-semibold transition">
+            {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+            {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
       </div>
@@ -3730,6 +3810,7 @@ function RolesTab() {
   const [hasNewModules,  setHasNewModules]  = useState(false);
   const [showCreateRole, setShowCreateRole] = useState(false);
   const [editingRole,    setEditingRole]    = useState(null);   // null | custom_role doc
+  const [renamingRole,   setRenamingRole]   = useState(null);   // null | system role key
 
   /* Load school data (holds saved modulePermissions) */
   const { data: schoolData } = useQuery({
@@ -3773,6 +3854,11 @@ function RolesTab() {
 
   /* Hidden system roles — read from school doc */
   const hiddenSystemRoles = schoolData?.data?.hiddenSystemRoles ?? [];
+  /* Display-name overrides for built-in roles — read from school doc
+     (2026-09). A custom role already has its own real, editable label
+     field; this is the equivalent for a built-in one — the machine key
+     never changes, only what's shown for it everywhere in the app. */
+  const roleLabels = schoolData?.data?.roleLabels ?? {};
 
   /* Hide a system role (non-destructive — just adds to hiddenSystemRoles list) */
   const { mutate: hideRoleMutate } = useMutation({
@@ -3799,10 +3885,41 @@ function RolesTab() {
   });
 
   function confirmHideRole(roleKey) {
-    const label = SYSTEM_ROLE_LABELS[roleKey] ?? roleKey;
+    const label = roleLabel(roleKey, roleLabels);
     if (!window.confirm(`Hide the "${label}" role? It will no longer appear in the invite form. Existing users keep their access.`)) return;
     hideRoleMutate(roleKey);
   }
+
+  /* Rename a built-in role's display name — a plain school-doc field
+     update, same shape as hide/restore above. Renaming never touches
+     the role's permissions or its machine key. */
+  const { mutate: renameRoleMutate, isPending: renamingSaving } = useMutation({
+    mutationFn: ({ roleKey, label }) => settingsApi.school.update({
+      roleLabels: { ...roleLabels, [roleKey]: label },
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings','school'] });
+      qc.invalidateQueries({ queryKey: ['settings','users'] }); // refresh role pills
+      setToast({ msg: 'Role name updated.', type: 'success' });
+      setRenamingRole(null);
+    },
+    onError: err => setToast({ msg: err?.message ?? 'Failed to rename role.', type: 'error' }),
+  });
+
+  /* Reset a built-in role back to its default name */
+  const { mutate: resetRoleLabelMutate, isPending: resettingLabel } = useMutation({
+    mutationFn: (roleKey) => {
+      const { [roleKey]: _drop, ...rest } = roleLabels;
+      return settingsApi.school.update({ roleLabels: rest });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings','school'] });
+      qc.invalidateQueries({ queryKey: ['settings','users'] });
+      setToast({ msg: 'Role name reset to default.', type: 'success' });
+      setRenamingRole(null);
+    },
+    onError: err => setToast({ msg: err?.message ?? 'Failed to reset role name.', type: 'error' }),
+  });
 
   /* Load users for Per-User mode */
   const { data: usersData, isLoading: usersLoading } = useQuery({
@@ -3949,19 +4066,30 @@ function RolesTab() {
                     <button onClick={() => setSelRole(r)}
                       className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold text-left transition ring-1 ${
                         selRole===r ? c.sel : c.idle
-                      } ${!isProtect && isAdmin ? 'pr-7' : ''}`}
+                      } ${isAdmin ? (isProtect ? 'pr-7' : 'pr-12') : ''}`}
                     >
                       <ShieldCheck size={12} className="shrink-0" />
-                      <span className="flex-1 truncate">{SYSTEM_ROLE_LABELS[r]}</span>
+                      <span className="flex-1 truncate">{roleLabel(r, roleLabels)}</span>
                     </button>
-                    {isAdmin && !isProtect && (
-                      <button
-                        onClick={e => { e.stopPropagation(); confirmHideRole(r); }}
-                        title="Hide role from invite form"
-                        className="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1 rounded text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition"
-                      >
-                        <EyeOff size={11} />
-                      </button>
+                    {isAdmin && (
+                      <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 flex items-center gap-0.5">
+                        <button
+                          onClick={e => { e.stopPropagation(); setRenamingRole(r); }}
+                          title="Rename role"
+                          className="p-1 rounded text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition"
+                        >
+                          <Pencil size={11} />
+                        </button>
+                        {!isProtect && (
+                          <button
+                            onClick={e => { e.stopPropagation(); confirmHideRole(r); }}
+                            title="Hide role from invite form"
+                            className="p-1 rounded text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition"
+                          >
+                            <EyeOff size={11} />
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 );
@@ -3973,7 +4101,7 @@ function RolesTab() {
                   <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wide px-1 mb-1">Hidden</p>
                   {hiddenSystemRoles.map(r => (
                     <div key={r} className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-slate-50 group">
-                      <span className="flex-1 text-[11px] text-slate-400 truncate">{SYSTEM_ROLE_LABELS[r] ?? r}</span>
+                      <span className="flex-1 text-[11px] text-slate-400 truncate">{roleLabel(r, roleLabels)}</span>
                       <button
                         onClick={() => restoreRoleMutate(r)}
                         title="Restore role"
@@ -4143,6 +4271,19 @@ function RolesTab() {
             setEditingRole(null);
             setToast({ msg: `Role "${updated?.label}" updated.`, type: 'success' });
           }}
+        />
+      )}
+
+      {/* Rename system role modal */}
+      {renamingRole && (
+        <EditSystemRoleLabelModal
+          roleKey={renamingRole}
+          currentLabel={roleLabel(renamingRole, roleLabels)}
+          hasOverride={!!roleLabels[renamingRole]}
+          saving={renamingSaving || resettingLabel}
+          onSave={label => renameRoleMutate({ roleKey: renamingRole, label })}
+          onReset={() => resetRoleLabelMutate(renamingRole)}
+          onClose={() => setRenamingRole(null)}
         />
       )}
 

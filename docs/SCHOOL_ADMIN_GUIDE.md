@@ -311,6 +311,10 @@ Each role has a permission matrix — you can customise what each role can **Vie
 2. Toggle permissions per module
 3. Save — takes effect immediately (no logout required)
 
+### Renaming a role *(2026-09)*
+
+Hover a role in the list and click the pencil icon — this works for both custom roles and Msingi's own built-in roles (Teacher, Finance, Deputy Principal, etc.). Renaming only changes the **name shown throughout the app**; it never changes what that role can access, and staff already assigned to it keep their access unaffected. A built-in role's rename can be reset back to its default name from the same dialog. A custom role can also be deleted entirely (trash icon); a built-in role can only be **hidden** from the invite form (eye icon) — existing staff already on it keep their access, and it can be restored at any time.
+
 ---
 
 ## 9. Your Subscription Plan
@@ -510,4 +514,4 @@ Email support@msingi.io with:
 
 ---
 
-*Last reviewed: 2026-09-10 — Bulk import (CSV) section updated: a duplicate admission number is now reported as "already exists" rather than silently creating a second student record, checked directly against `server/routes/import-export.js`. Earlier: 2026-09-07 — §7 updated for the new per-school Admission Requirements settings (Settings → School Profile). Also checked directly against the live server code (plan tiers, Admissions/Mother-Father fields, portal accounts), not carried forward from a prior draft. §2 and §6 corrected 2026-09-05 — staff creation via HR → Staff had been omitted entirely in favor of Settings → Users alone, and the Settings button name itself was wrong ("Add Staff" — the real button is "Invite User").*
+*Last reviewed: 2026-09-10 — §8 gained a "Renaming a role" subsection: built-in roles (Teacher, Finance, etc.) can now be renamed, not just custom ones, checked directly against `client/src/pages/settings/SettingsPage.jsx` and `server/routes/settings.js`. Earlier the same day: Bulk import (CSV) section updated: a duplicate admission number is now reported as "already exists" rather than silently creating a second student record, checked directly against `server/routes/import-export.js`. Earlier: 2026-09-07 — §7 updated for the new per-school Admission Requirements settings (Settings → School Profile). Also checked directly against the live server code (plan tiers, Admissions/Mother-Father fields, portal accounts), not carried forward from a prior draft. §2 and §6 corrected 2026-09-05 — staff creation via HR → Staff had been omitted entirely in favor of Settings → Users alone, and the Settings button name itself was wrong ("Add Staff" — the real button is "Invite User").*

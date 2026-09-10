@@ -135,6 +135,11 @@ const SCHOOL_UPDATABLE = [
   'moduleConfig',
   'mpesa',
   'hiddenSystemRoles',   // array of system role keys hidden from invite form / R&P sidebar
+  'roleLabels',          // { [systemRoleKey]: displayLabel } — school's own rename of a
+                          // built-in role's DISPLAY NAME only (e.g. teacher -> "Educator").
+                          // Purely cosmetic: never touched by rbac.js/scopeEngine.js, which
+                          // still address every role by its unchanging machine key — the same
+                          // separation staffType/role already has (see role-validation.js).
   'emergencyOnlineMode', // boolean — when true timetable embeds teacher meeting links for students
   'portalConfig',        // object — student/parent portal visibility toggles
   'admissionConfig',     // object — prefix, padding, yearInPrefix for admission numbers
@@ -297,6 +302,7 @@ router.get('/school', authMiddleware, async (req, res) => { // rbac: inline admi
         termsPerYear: school.termsPerYear || null,
         houses: school.houses || [],
         staffResponsibilities: school.staffResponsibilities || [],
+        roleLabels: school.roleLabels || {},
       };
       return res.json({ success: true, data: safe });
     }
@@ -315,6 +321,26 @@ router.get('/school', authMiddleware, async (req, res) => { // rbac: inline admi
 /* PUT /api/settings/school — admin only */
 router.put('/school', authMiddleware, rbac('settings', 'update'), async (req, res) => {
   try {
+    // roleLabels — a display-name override for a BUILT-IN role only (a
+    // custom role already has its own real `label` field, no override
+    // mechanism needed for those). Only recognized system role keys and
+    // non-empty, sane-length strings are accepted; anything else is
+    // dropped from the write rather than failing the whole save, same
+    // tolerance every other free-shape settings object here gets.
+    if (req.body.roleLabels !== undefined) {
+      const raw = req.body.roleLabels;
+      const clean = {};
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        for (const [roleKey, label] of Object.entries(raw)) {
+          if (!SYSTEM_ROLES.has(roleKey)) continue; // superadmin is never in SYSTEM_ROLES — see role-validation.js
+          if (typeof label !== 'string') continue;
+          const trimmed = label.trim().slice(0, 60);
+          if (trimmed) clean[roleKey] = trimmed;
+        }
+      }
+      req.body.roleLabels = clean;
+    }
+
     const Schools = _model('schools');
     const update  = {};
     SCHOOL_UPDATABLE.forEach(k => {
