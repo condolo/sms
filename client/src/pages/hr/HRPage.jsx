@@ -751,9 +751,17 @@ export default function HRPage() {
     ? schoolSettingsData.staffResponsibilities
     : DEFAULT_RESPONSIBILITIES;
 
-  // Unified role list: built-in staff roles + school's custom roles
+  // School's own rename of a built-in role's display name (Settings ->
+  // Roles & Permissions -> pencil icon on a system role). Never touches
+  // custom-role labels, which are already the school's own text.
+  const roleLabels = schoolSettingsData?.roleLabels ?? {};
+
+  // Unified role list: built-in staff roles + school's custom roles.
+  // Built-in labels go through the school's roleLabels override first, so a
+  // rename made in Settings -> Roles & Permissions shows up everywhere here
+  // too (staff list badges, the role filter, the login-creation dropdown).
   const allStaffRoles = [
-    ...BUILT_IN_STAFF_ROLES,
+    ...BUILT_IN_STAFF_ROLES.map(r => ({ ...r, label: roleLabels[r.key] || r.label })),
     ...customRolesList.map(cr => ({ key: cr.key, label: cr.label, color: 'bg-slate-100 text-slate-600' })),
   ];
   const roleColorMap = Object.fromEntries(allStaffRoles.map(r => [r.key, r.color]));

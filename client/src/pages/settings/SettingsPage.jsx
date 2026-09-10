@@ -25,6 +25,7 @@ import { academicConfig as academicConfigApi } from '@/api/client.js';
 import { billing as billingApi, mpesa as mpesaApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { deriveNavModules, buildModuleConfigMap } from '@/config/moduleNav.js';
+import { SYSTEM_ROLE_LABELS, roleLabel } from '@/utils/roleLabels.js';
 
 /* ── Tab config ─────────────────────────────────────────────── */
 const TABS = [
@@ -39,32 +40,11 @@ const TABS = [
   { id: 'account',        label: 'Account',             Icon: User,           adminOnly: false },
 ];
 
-/* ── Role display constants (must be before RolePill + USER_ROLE_GROUPS) ── */
-const SYSTEM_ROLE_LABELS = {
-  superadmin:           'Super Admin',
-  admin:                'Admin',
-  principal:            'Principal',
-  deputy_principal:     'Deputy Principal',
-  deputy:               'Deputy',               // legacy alias
-  section_head:         'Section Head',
-  teacher:              'Teacher',
-  exams_officer:        'Exams Officer',
-  timetabler:           'Timetabler',
-  admissions_officer:   'Admissions Officer',
-  finance:              'Finance',
-  hr:                   'HR',
-  discipline_committee: 'Discipline Committee',
-  parent:               'Parent',
-  student:              'Student',
-};
-// A school's own rename of a built-in role's DISPLAY NAME (2026-09) —
-// `roleLabels` is the school doc's `{ [systemRoleKey]: label }` override
-// (see RolesTab), always optional. The role's machine key never changes —
-// this only ever affects what's shown, everywhere a system role's label
-// would otherwise come from SYSTEM_ROLE_LABELS directly.
-function roleLabel(key, overrides) {
-  return overrides?.[key] || SYSTEM_ROLE_LABELS[key] || key.replace(/_/g, ' ');
-}
+/* ── Role display constants (must be before RolePill + USER_ROLE_GROUPS) ──
+   SYSTEM_ROLE_LABELS/roleLabel now live in utils/roleLabels.js (2026-09)
+   so HR and a user's own Profile page read the exact same defaults and
+   the exact same school-level rename override, instead of each keeping
+   an independent copy. ── */
 const SYSTEM_ROLE_COLORS = {
   superadmin:           { sel:'bg-red-600 text-white ring-red-600',          idle:'ring-slate-200 bg-white text-red-700'        },
   admin:                { sel:'bg-violet-600 text-white ring-violet-600',     idle:'ring-slate-200 bg-white text-violet-700'     },

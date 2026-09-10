@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { Camera, Trash2, Save, Lock, User, CheckCircle, AlertCircle, Briefcase, Video, ExternalLink, Info } from 'lucide-react';
 import useAuthStore from '@/store/auth.js';
-import { auth as authApi, profile as profileApi } from '@/api/client.js';
+import { auth as authApi, profile as profileApi, settings as settingsApi } from '@/api/client.js';
+import { roleLabel as resolveRoleLabel } from '@/utils/roleLabels.js';
 
 /* ── client-side image resize using Canvas ────────────────────────────────── */
 function resizeImageToBase64(file, maxPx = 256, quality = 0.82) {
@@ -105,12 +106,25 @@ export default function ProfilePage() {
   const [meetSaving,     setMeetSaving]     = useState(false);
   const [meetBanner,     setMeetBanner]     = useState({ type: '', msg: '' });
 
+  /* the school's own rename of built-in role display names (Settings ->
+     Roles & Permissions) — kept in sync so this page's role text matches
+     everywhere else (Settings, HR) instead of always showing the default. */
+  const [roleLabels, setRoleLabels] = useState({});
+
   /* fetch fresh photo url on mount if user has one */
   useEffect(() => {
     if (user?.id) {
       setPhotoUrl(`/api/users/${user.id}/photo?schoolId=${encodeURIComponent(user.schoolId)}&t=${Date.now()}`);
     }
   }, [user?.id]);
+
+  /* fetch the school's role-label overrides once, so the role text below
+     matches any rename made in Settings -> Roles & Permissions */
+  useEffect(() => {
+    settingsApi.school.get()
+      .then(json => setRoleLabels(json?.data?.roleLabels || {}))
+      .catch(() => {}); // purely cosmetic — fall back to default labels on any error
+  }, []);
 
   /* fetch staff record on mount — also pre-populate meeting links from user doc as fallback */
   useEffect(() => {
@@ -288,7 +302,7 @@ export default function ProfilePage() {
   }
 
   const initials = (user?.name || 'U').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-  const roleLabel = (user?.primaryRole || user?.role || 'user').replace(/_/g, ' ');
+  const roleLabel = resolveRoleLabel(user?.primaryRole || user?.role || 'user', roleLabels);
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">

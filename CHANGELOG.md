@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.73.0] — 2026-09-10 — feat(settings, hr, profile): built-in role renames now show consistently everywhere
+
+Requested directly, as a follow-up to v5.72.0's built-in role rename feature: "the rename of staff roles should be consistent everywhere including hr and users profile." Correct — v5.72.0 deliberately scoped the rename to Settings only and called out HR as a known follow-up; a school renaming "Teacher" to "Educator" saw it in Settings but not in HR's staff list or on a user's own Profile page.
+
+### Root cause
+Three independent, hardcoded role-label lists existed on the client, none of which knew about a school's `roleLabels` override: `SettingsPage.jsx`'s own `SYSTEM_ROLE_LABELS` (the most complete), `HRPage.jsx`'s `BUILT_IN_STAFF_ROLES`, and `ProfilePage.jsx`'s inline `role.replace(/_/g, ' ')`. This is the same "two lists that quietly drift apart" pattern already called out in `role-validation.js` for server-side role sets.
+
+### Fixed
+- Extracted the shared default label map and its resolution order (school override → default label → readable fallback) into a single new module, [client/src/utils/roleLabels.js](client/src/utils/roleLabels.js), consumed by `SettingsPage.jsx` in place of its own local copy.
+- `HRPage.jsx`'s `allStaffRoles` (staff-list role badges, the role filter dropdown, and the login-creation role dropdown) now applies the school's `roleLabels` override to every built-in role before display — a rename made in Settings shows up in HR immediately, with no separate save step.
+- `ProfilePage.jsx`'s own role text (top-of-page header and the Account Details section) now fetches the school's `roleLabels` (`GET /api/settings/school`, already returned to every authenticated user, not just admins) and resolves through the same shared helper, instead of a raw, un-renamed machine key.
+
+### Verified
+- Full server suite 1973/1973 (client-only change — no server routes or data model touched beyond what v5.72.0 already added). `verify-rbac-coverage.js` 100% (no regression). `security-scan.js` clean. Client production build passes.
+
+---
+
 ## [v5.72.0] — 2026-09-10 — feat(settings): built-in roles can now be renamed, not just custom ones
 
 Requested directly: "I would like to be able to edit the name of the system existing roles. I have realised you can only edit the custom added roles." Confirmed — a custom role has always had a real, stored, editable `label`; a built-in role's name (Teacher, Finance, Deputy Principal, ...) was a hardcoded client-side constant with no override mechanism at all.
