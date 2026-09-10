@@ -216,12 +216,68 @@ async function reserveInvoiceNumbers(schoolId, count) {
   );
 }
 
+/**
+ * Reserve `count` admission numbers, skipping any that collide with an
+ * already-used one. Needed because the counter and real usage can drift
+ * apart: a manually-supplied admission number (an existing student
+ * imported with their real-world number, or a manual override on
+ * individual enrollment) never advances this counter — see
+ * setAdmissionCounter's own comment ("only sets... for migrations"). Left
+ * unchecked, the counter can later hand out a number that's already taken,
+ * producing a genuine duplicate student record (students_admission is a
+ * lookup index, not a unique one, so nothing at the DB layer would stop it).
+ *
+ * Reserves the full range in one round-trip in the common case (no
+ * collisions); only takes extra rounds — walking further past the
+ * counter's current position — when a reserved number turns out to
+ * already be in use, which also self-heals the drift for next time.
+ *
+ * @param {string} schoolId
+ * @param {number} count
+ * @param {object} cfg        admissionConfig from the school document
+ * @param {(admissionNumber: string) => boolean|Promise<boolean>} isTaken
+ *        Checked against existing students. Pass a Set.has bound function
+ *        when the caller already loaded every existing number (bulk
+ *        import); pass an async DB lookup for a single-record create.
+ * @returns {Promise<string[]>}
+ */
+async function reserveFreeAdmissionNumbers(schoolId, count, cfg, isTaken) {
+  const out = [];
+  let remaining = count;
+  let round = 0;
+  // Bounded rather than infinite: each round only repeats because a
+  // collision was found, so this only loops long if the counter is
+  // drifting deep into already-used territory — 20 rounds is far more
+  // than any realistic amount of drift would ever need.
+  while (remaining > 0 && round < 20) {
+    round++;
+    const batch = await reserveAdmissionNumbers(schoolId, remaining, cfg);
+    for (const candidate of batch) {
+      if (await isTaken(candidate)) continue; // already used — walk past it
+      out.push(candidate);
+    }
+    remaining = count - out.length;
+  }
+  if (out.length < count) {
+    throw new Error('Could not reserve enough free admission numbers — check admissionConfig/counter state');
+  }
+  return out;
+}
+
+/** Single-number convenience wrapper around reserveFreeAdmissionNumbers. */
+async function nextFreeAdmissionNumber(schoolId, cfg, isTaken) {
+  const [num] = await reserveFreeAdmissionNumbers(schoolId, 1, cfg, isTaken);
+  return num;
+}
+
 module.exports = {
   nextId,
   peekAdmissionCounter,
   setAdmissionCounter,
   peekId,
   nextAdmissionNumber,
+  nextFreeAdmissionNumber,
+  reserveFreeAdmissionNumbers,
   nextStaffId,
   nextInvoiceNumber,
   nextReceiptNumber,

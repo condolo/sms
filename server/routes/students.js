@@ -17,7 +17,7 @@ const { scopeMiddleware }       = require('../middleware/scopeMiddleware');
 const ScopeEngine               = require('../utils/scopeEngine');
 const { _model }                = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
-const { nextAdmissionNumber, reserveAdmissionNumbers } = require('../utils/counters');
+const { nextFreeAdmissionNumber, reserveFreeAdmissionNumbers } = require('../utils/counters');
 const { ok, created, fail, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
 const AuditService            = require('../services/audit');
@@ -362,10 +362,28 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('students', 'create'), asyn
     const { data, error } = _validate(StudentCreateSchema, req.body);
     if (error) return E.validation(res, error);
 
-    // Use manually supplied number or auto-generate from school config
-    const admCfg         = await _getAdmConfig(schoolId);
-    const manualAdmNo    = data.admissionNumber?.trim();
-    const admissionNumber = manualAdmNo || await nextAdmissionNumber(schoolId, admCfg);
+    const Students = tenantModel('students', tenantContext(req));
+
+    // Use manually supplied number or auto-generate from school config.
+    // Either way, checked against existing students first — nothing at
+    // the DB layer stops a duplicate (students_admission is a lookup
+    // index, not a unique one), and the counter alone can't be trusted:
+    // a manually-supplied number (this field, or an existing student
+    // imported with their real-world number) never advances it, so
+    // auto-generation can otherwise walk straight into an already-used
+    // number. See reserveFreeAdmissionNumbers' own comment for the full
+    // story.
+    const admCfg      = await _getAdmConfig(schoolId);
+    const manualAdmNo = data.admissionNumber?.trim();
+    let admissionNumber;
+    if (manualAdmNo) {
+      const taken = await Students.exists({ schoolId, admissionNumber: manualAdmNo });
+      if (taken) return E.conflict(res, `Admission number '${manualAdmNo}' is already in use by another student.`);
+      admissionNumber = manualAdmNo;
+    } else {
+      admissionNumber = await nextFreeAdmissionNumber(schoolId, admCfg,
+        n => Students.exists({ schoolId, admissionNumber: n }));
+    }
     delete data.admissionNumber;
 
     // Enrollment forms (StudentList.jsx's Add Student modal) still capture
@@ -377,7 +395,6 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('students', 'create'), asyn
       data.medical = { ...data.medical, notes: data.medicalNotes };
     }
 
-    const Students = tenantModel('students', tenantContext(req));
     const doc = await Students.create({
       ...data,
       id:              uuidv4(),
@@ -602,18 +619,36 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('students', 'create'), 
     const toInsert = [];
     const admCfg   = await _getAdmConfig(schoolId);
 
+    // Every admission number handed out here — manual or auto-generated —
+    // is checked against this so nothing collides with an existing
+    // student. Kept in sync as rows are processed so two rows in the same
+    // batch can't collide with each other either. See
+    // reserveFreeAdmissionNumbers' comment for why the counter alone
+    // can't be trusted to avoid this on its own.
+    const existingAdmNos = new Set(
+      (await Students.find({ schoolId }).select('admissionNumber').lean())
+        .map(s => s.admissionNumber?.trim()).filter(Boolean)
+    );
+
     // Validate all rows first; collect those needing auto-generated numbers
     const validated = [];
     for (let i = 0; i < students.length; i++) {
       const { data, error } = _validate(StudentCreateSchema, students[i]);
       if (error) { results.errors.push({ row: i + 1, issues: error }); results.skipped++; continue; }
+      const manualNo = data.admissionNumber?.trim();
+      if (manualNo && existingAdmNos.has(manualNo)) {
+        results.errors.push({ row: i + 1, field: 'admissionNumber', message: `Admission number '${manualNo}' is already in use by another student.` });
+        results.skipped++;
+        continue;
+      }
+      if (manualNo) existingAdmNos.add(manualNo); // claim it so a later row in this same batch can't reuse it
       validated.push({ row: i + 1, data });
     }
 
     // Reserve a block of numbers for rows that don't supply their own
     const needsAuto  = validated.filter(v => !v.data.admissionNumber?.trim());
     const autoNos    = needsAuto.length
-      ? await reserveAdmissionNumbers(schoolId, needsAuto.length, admCfg)
+      ? await reserveFreeAdmissionNumbers(schoolId, needsAuto.length, admCfg, n => existingAdmNos.has(n))
       : [];
     let autoIdx = 0;
 

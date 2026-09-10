@@ -36,8 +36,8 @@ jest.mock('../../middleware/auth', () => ({
 jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../utils/counters', () => ({
-  nextAdmissionNumber:     jest.fn().mockResolvedValue('ADM-001'),
-  reserveAdmissionNumbers: jest.fn().mockResolvedValue(['ADM-001']),
+  nextFreeAdmissionNumber:     jest.fn().mockResolvedValue('ADM-001'),
+  reserveFreeAdmissionNumbers: jest.fn().mockResolvedValue(['ADM-001']),
 }));
 jest.mock('../../utils/provision-identities', () => ({
   provisionIdentityForUser: jest.fn().mockResolvedValue(null),

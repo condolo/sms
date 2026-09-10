@@ -144,7 +144,7 @@ jest.mock('../../utils/tenant-model', () => ({
 
 let mockNextAdmNo;
 jest.mock('../../utils/counters', () => ({
-  reserveAdmissionNumbers: jest.fn(() => Promise.resolve([mockNextAdmNo])),
+  reserveFreeAdmissionNumbers: jest.fn(() => Promise.resolve([mockNextAdmNo])),
   nextInvoiceNumber: jest.fn(() => Promise.resolve('INV-1')),
 }));
 jest.mock('../../utils/academic-period', () => ({
@@ -243,10 +243,10 @@ describe('POST /api/admissions/:id/enroll — legacy-data guard (missing require
   });
 
   test('does not burn an admission number on a rejected legacy-data enroll attempt', async () => {
-    const { reserveAdmissionNumbers } = require('../../utils/counters');
+    const { reserveFreeAdmissionNumbers } = require('../../utils/counters');
     mockAppDocs = [app({ dateOfBirth: '', gender: '' })];
     await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
-    expect(reserveAdmissionNumbers).not.toHaveBeenCalled();
+    expect(reserveFreeAdmissionNumbers).not.toHaveBeenCalled();
   });
 
   test('the application itself is left untouched (no stage/studentId change) when enroll is rejected', async () => {

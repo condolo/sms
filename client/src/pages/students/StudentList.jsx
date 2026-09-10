@@ -868,6 +868,7 @@ const selectCls = 'w-full text-sm px-3 py-2 bg-white border border-slate-200 rou
    ADD STUDENT SLIDE-OVER
    ══════════════════════════════════════════════════════════ */
 const EMPTY = {
+  admissionNumber: '',
   firstName: '', lastName: '', middleName: '', dateOfBirth: '',
   gender: '', classId: '', streamId: '', parentName: '', parentEmail: '',
   parentPhone: '', address: '', medicalNotes: '', status: 'active',
@@ -913,7 +914,16 @@ export function AddStudentSlideOver({ classList, onClose, onCreated }) {
   const mutation = useMutation({
     mutationFn: data => studentsApi.create(data),
     onSuccess:  onCreated,
-    onError:    err => setErrors({ _server: err?.message ?? 'Failed to create student' }),
+    onError:    err => {
+      // A manually-entered admission number that's already taken comes
+      // back as a 409 — point the error at that field specifically
+      // instead of a generic banner, since it's the one thing to fix.
+      if (err?.code === 'CONFLICT' && form.admissionNumber.trim()) {
+        setErrors({ admissionNumber: err.message });
+      } else {
+        setErrors({ _server: err?.message ?? 'Failed to create student' });
+      }
+    },
   });
 
   function set(field, val) {
@@ -954,7 +964,7 @@ export function AddStudentSlideOver({ classList, onClose, onCreated }) {
         <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
           <div>
             <h2 className="text-base font-semibold text-slate-900">Enrol New Student</h2>
-            <p className="text-xs text-slate-400 mt-0.5">An admission number will be auto-generated</p>
+            <p className="text-xs text-slate-400 mt-0.5">Admission number is auto-generated unless you enter one below</p>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition">
             <X size={18} />
@@ -980,6 +990,15 @@ export function AddStudentSlideOver({ classList, onClose, onCreated }) {
             </div>
             <FormField label="Middle Name">
               <input value={form.middleName} onChange={e => set('middleName', e.target.value)} placeholder="Middle name (optional)" className={inputCls()} />
+            </FormField>
+            <FormField label="Admission Number" error={errors.admissionNumber}>
+              <input
+                value={form.admissionNumber}
+                onChange={e => set('admissionNumber', e.target.value)}
+                placeholder="Leave blank to auto-generate"
+                className={inputCls(errors.admissionNumber)}
+              />
+              <p className="text-[11px] text-slate-400 mt-1">Only fill this in if the student already has one — from a physical register, a previous system, or elsewhere.</p>
             </FormField>
             <div className="grid grid-cols-2 gap-4">
               <FormField label="Date of Birth">

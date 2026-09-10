@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.75.0] — 2026-09-10 — fix(students): a manually-imported admission number could be silently re-issued to a new student
+
+Reported directly, with a screenshot of two identical student rows sharing one admission number: "the system did not recognise the double entry." Also reported in the same message: "Tried to enrol and admit. The forms to fill are different. On enrol, it picks an automatic ADM no, and there's no field to add the one they have."
+
+### Root cause
+The atomic admission-number counter and real usage can drift apart. A manually-supplied admission number — an existing student imported with their real-world number, which is common when a school switches to Msingi mid-year — never advances the counter (`setAdmissionCounter`'s own comment already said as much: "only sets... for migrations"). Left unchecked, the counter can later auto-generate a number that a manually-imported student already has. Nothing at the DB layer would catch it either — `students_admission` is a lookup index, not a unique one (the same fact behind v5.70.0's CSV-duplicate fix) — and that fix only ever checked a CSV row's own manually-typed number against existing students; it never checked the auto-generated numbers in that same import, nor anything created outside a CSV (the "Enrol Student" form, or Admissions → Enroll Student).
+
+### Fixed
+- `reserveFreeAdmissionNumbers`/`nextFreeAdmissionNumber` (`server/utils/counters.js`) — every admission-number auto-generation site now checks each candidate against real existing students before handing it out, walking past any that are already taken (self-healing the drift, not just detecting it once). Applied everywhere a number is auto-generated: `POST /api/students` (Students → Enrol Student), `POST /api/admissions/:id/enroll` (Admissions → Enroll Student), the CSV bulk import (`_importStudents`), and the otherwise-unused `POST /api/students/bulk` route.
+- `POST /api/students` now also checks a **manually**-supplied admission number against existing students (it never did before) and rejects a duplicate with a clear 409 rather than silently creating one.
+- Students → **Enrol Student** now has an optional **Admission Number** field — left blank, it still auto-generates as before; filled in, it's used exactly as given (checked for a collision first). This is the field the report asked for directly ("there's no field to add the one they have") — the API already silently accepted a manual override, it just had no field in this form to reach it. Admissions → Enroll Student stays auto-generate-only, unchanged: admission numbers are deliberately never assigned before actual enrollment (see the existing "Enrolling an applicant" behaviour), so a manual field there would work against that design rather than with it.
+
+### Verified
+- 5 new unit tests (`admission-number-collision.test.js`) against the real counter-walking logic: hands out the next free number when nothing collides, skips a run of already-taken numbers, a batch reservation skips collisions while still returning the full count with no duplicates, throws rather than looping forever if nothing is ever free, and two schools never share a sequence. 2 new integration tests in `students.test.js`: a manual admission number matching an existing student is rejected with 409 and never reaches `Students.create`; a manual admission number that's free is used exactly as given, not silently replaced by an auto-generated one. Full server suite 1980/1980. `verify-rbac-coverage.js` 100% (no regression — no new routes, existing ones unchanged in shape). `security-scan.js` clean. Client production build passes.
+
+---
+
 ## [v5.74.0] — 2026-09-10 — fix(hr): bulk staff import result was hidden the instant any row succeeded
 
 Reported directly: "I imported staff in hr module and only 52 out of 56 entries were updated and no errors or communication at all." The other 4 rows were genuinely rejected (duplicate emails) and the server reported them correctly — the admin just never got to see it.

@@ -31,8 +31,8 @@ jest.mock('../../middleware/plan', () => ({
 }));
 
 jest.mock('../../utils/counters', () => ({
-  nextAdmissionNumber:     jest.fn().mockResolvedValue('ADM-001'),
-  reserveAdmissionNumbers: jest.fn().mockResolvedValue(['ADM-001', 'ADM-002', 'ADM-003']),
+  nextFreeAdmissionNumber:     jest.fn().mockResolvedValue('ADM-001'),
+  reserveFreeAdmissionNumbers: jest.fn().mockResolvedValue(['ADM-001', 'ADM-002', 'ADM-003']),
 }));
 
 /* ── Mock _model — returns per-collection mock objects ─────── */
@@ -43,6 +43,7 @@ const mockStudentsUpdateOne = jest.fn();
 const mockStudentsFindOneAndUpdate = jest.fn();
 const mockStudentsCountDocuments = jest.fn();
 const mockStudentsAggregate = jest.fn();
+const mockStudentsExists = jest.fn().mockResolvedValue(false); // default: admission number is free
 
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((collection) => {
@@ -55,6 +56,7 @@ jest.mock('../../utils/model', () => ({
         findOneAndUpdate:  mockStudentsFindOneAndUpdate,
         countDocuments:    mockStudentsCountDocuments,
         aggregate:         mockStudentsAggregate,
+        exists:            mockStudentsExists,
       };
     }
     // Default empty mock for any other collection
@@ -273,6 +275,43 @@ describe('POST /api/students', () => {
     expect(createArg).toHaveProperty('id');
     expect(typeof createArg.id).toBe('string');
     expect(createArg.id.length).toBeGreaterThan(0);
+  });
+
+  /* ── Manual admission number — collision check (2026-09) ──────
+     Reported directly: two students ended up with the exact same
+     admission number, auto-generated with no error at all. The API has
+     always accepted a manual admissionNumber override (the field the
+     "Enrol Student" form now exposes), but it was never checked against
+     existing students before this fix — students_admission is a lookup
+     index, not a unique one, so nothing at the DB layer would catch it
+     either. */
+  test('a manually-supplied admission number matching an existing student is rejected with 409', async () => {
+    mockStudentsExists.mockResolvedValueOnce(true); // already in use
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/students')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ ...validPayload, admissionNumber: '00042' });
+
+    expect(res.status).toBe(409);
+    expect(mockStudentsCreate).not.toHaveBeenCalled();
+  });
+
+  test('a manually-supplied admission number that is free is used as-is, not overwritten by auto-generation', async () => {
+    mockStudentsExists.mockResolvedValueOnce(false); // free
+    const createdDoc = makeStudent({ admissionNumber: '00042' });
+    mockStudentsCreate.mockResolvedValue({ toObject: () => createdDoc });
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/students')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ ...validPayload, admissionNumber: '00042' });
+
+    expect(res.status).toBe(201);
+    const createArg = mockStudentsCreate.mock.calls[0][0];
+    expect(createArg.admissionNumber).toBe('00042');
   });
 
   test('returns 422 for missing required firstName (Zod validation)', async () => {

@@ -30,7 +30,7 @@ const { resolvePrimaryContact, validateGuardianRequirement } = require('../utils
 const { resolveRequiredFields } = require('../utils/admission-requirements');
 const { PURCHASE_ORIGINS } = require('../utils/purchase-origin');
 const {
-  reserveAdmissionNumbers,
+  reserveFreeAdmissionNumbers,
   reserveStaffIds,
   reserveInvoiceNumbers,
 } = require('../utils/counters');
@@ -800,10 +800,14 @@ async function _importStudents(rows, schoolId, userId, req) {
     validRows.push({ r, row, gender, status, parentEmail, schoolEmail, classId, className, streamId, streamName, houseId, manualAdmNo });
   }
 
-  // Reserve admission numbers only for rows that don't supply their own
+  // Reserve admission numbers only for rows that don't supply their own —
+  // checked against knownAdmNos (every existing student, plus every
+  // manual number already claimed above) so an out-of-sync counter can't
+  // hand out a number a manually-imported student already has. See
+  // reserveFreeAdmissionNumbers' own comment for the full story.
   const needsAuto = validRows.filter(v => !v.manualAdmNo);
   const autoNos   = needsAuto.length > 0
-    ? await reserveAdmissionNumbers(schoolId, needsAuto.length, admCfg)
+    ? await reserveFreeAdmissionNumbers(schoolId, needsAuto.length, admCfg, n => knownAdmNos.has(n))
     : [];
   let autoIdx = 0;
 

@@ -17,7 +17,7 @@ const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { resolvePrimaryContact, validateGuardianRequirement } = require('../utils/guardian-contact');
 const { resolveRequiredFields, validateRequiredAdmissionFields } = require('../utils/admission-requirements');
-const { reserveAdmissionNumbers } = require('../utils/counters');
+const { reserveFreeAdmissionNumbers } = require('../utils/counters');
 const { resolveAcademicPeriod }   = require('../utils/academic-period');
 const { generateEnrollmentInvoices } = require('../utils/admission-billing');
 const { linkExistingGuardians } = require('../utils/guardian-linking');
@@ -424,7 +424,15 @@ router.post('/:id/enroll',
         return E.badRequest(res, `This application is missing required field(s): ${missingRequired.join(', ')}. Update the application (PUT) before enrolling.`);
       }
 
-      const [admissionNumber] = await reserveAdmissionNumbers(schoolId, 1, schoolDoc?.admissionConfig || {});
+      // Checked against real existing students, not just handed out
+      // blind — the counter alone can drift out of sync with a manually
+      // supplied admission number (an existing student imported with
+      // their real-world number) and later hand out one that's already
+      // taken. See reserveFreeAdmissionNumbers' own comment for the full
+      // story.
+      const Students = tenantModel('students', ctx);
+      const [admissionNumber] = await reserveFreeAdmissionNumbers(schoolId, 1, schoolDoc?.admissionConfig || {},
+        n => Students.exists({ schoolId, admissionNumber: n }));
 
       // Use the application's own applyingForYear/academicYearId if it
       // recorded one; otherwise resolve the live current period — the
@@ -498,7 +506,7 @@ router.post('/:id/enroll',
         updatedBy: userId,
       };
 
-      const student = await tenantModel('students', ctx).create(studentDoc);
+      const student = await Students.create(studentDoc);
 
       // Billing sequence fix (2026-09): establish family/discount data
       // BEFORE generating the admission invoice, not after — the whole
