@@ -216,6 +216,9 @@ const TEMPLATES = {
       '#                          Fill in when migrating from another system to preserve existing numbers.',
       '#                          Never required as input — it is always assigned by Msingi, at the latest',
       '#                          when the student record is created (this import IS that creation step).',
+      '#                          If it matches a student who already exists in Msingi, that row is NOT',
+      '#                          created or changed — it is reported separately as "already exists", not',
+      '#                          as an error. This import never updates an existing student.',
       '#   dateOfBirth          — format YYYY-MM-DD (e.g. 2015-03-14)',
       '#   gender               — male | female | other | prefer_not_to_say',
       '#   className            — exact class name as shown in your Msingi classes list',
@@ -634,7 +637,19 @@ async function _importStudents(rows, schoolId, userId, req) {
   // as "invalid status" even though it's a legitimate value everywhere else.
   const VALID_STATUS  = new Set(['active', 'inactive', 'suspended', 'graduated', 'transferred', 'withdrawn']);
 
-  const results   = { created: 0, skipped: 0, errors: [] };
+  // A manually-supplied admissionNumber matching an EXISTING student is
+  // reported as its own outcome (2026-09) — not an error, and not a
+  // second student silently created under the same number (there was no
+  // check for this at all before: students_admission is a lookup index,
+  // not a unique one, so a repeat number previously just created a
+  // duplicate record with no warning). Deliberately NOT auto-updated —
+  // decided with the user: report which admission numbers already
+  // exist, alongside the created count, and keep row-level error DETAIL
+  // reserved for genuine validation failures.
+  const existingStudents = await Students.find({ schoolId }).select('admissionNumber').lean();
+  const knownAdmNos = new Set(existingStudents.map(s => s.admissionNumber?.trim()).filter(Boolean));
+
+  const results   = { created: 0, skipped: 0, alreadyExists: 0, errors: [] };
   const validRows = []; // collect valid rows before touching counters
 
   for (let i = 0; i < rows.length; i++) {
@@ -770,6 +785,14 @@ async function _importStudents(rows, schoolId, userId, req) {
     }
 
     const manualAdmNo = r.admissionNumber?.trim() || null;
+    if (manualAdmNo && knownAdmNos.has(manualAdmNo)) {
+      // Already exists — reported separately from results.errors/skipped;
+      // see results.alreadyExists comment above.
+      results.alreadyExists++;
+      continue;
+    }
+    if (manualAdmNo) knownAdmNos.add(manualAdmNo); // prevent within-batch duplicates too
+
     validRows.push({ r, row, gender, status, parentEmail, schoolEmail, classId, className, streamId, streamName, houseId, manualAdmNo });
   }
 
@@ -1895,7 +1918,9 @@ router.post('/:type', authMiddleware, rawText, /* rbac: dynamic — checked via 
       : 201;
 
     return res.status(status).json({
-      success: results.created > 0,
+      // A batch where every row already existed (created: 0, but nothing
+      // failed either) is still a success — not "0 records imported".
+      success: results.created > 0 || (results.alreadyExists ?? 0) > 0,
       data: {
         created:  results.created,
         skipped:  results.skipped,
@@ -1903,6 +1928,10 @@ router.post('/:type', authMiddleware, rawText, /* rbac: dynamic — checked via 
         errors:   results.errors,
         // timetable-specific: break down new vs updated
         ...(type === 'timetable' ? { inserted: results.inserted, updated: results.updated } : {}),
+        // students: rows whose admission number already belonged to an
+        // existing student — reported as their own outcome, not an error
+        // (see _importStudents' own comment for the reasoning)
+        ...(type === 'students' && results.alreadyExists ? { alreadyExists: results.alreadyExists } : {}),
         // students: opening fee invoices created alongside new student records
         ...(type === 'students' && results.invoicesCreated ? { invoicesCreated: results.invoicesCreated } : {}),
         // finance: opening balance payment records created

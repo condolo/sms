@@ -273,3 +273,78 @@ describe('per-school required-field settings (2026-09) — dateOfBirth/gender to
     expect(res.body.data.errors[0].field).toBe('dateOfBirth');
   });
 });
+
+describe('POST /api/import-export/students — duplicate admission number (2026-09)', () => {
+  test('a row whose admissionNumber matches an EXISTING student is reported separately, not created and not an error', async () => {
+    mockStores.students = makeStore([
+      { id: 'stu_existing', schoolId: SCHOOL, admissionNumber: 'ADM-EXIST-001', firstName: 'Old', lastName: 'Kid' },
+    ]);
+    const res = await supertest(buildApp())
+      .post('/api/import-export/students').set('Content-Type', 'application/json')
+      .send({ rows: [row({ admissionNumber: 'ADM-EXIST-001' })] });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true); // nothing NEW created, but nothing failed either — already-exists is a success outcome
+    expect(res.body.data.created).toBe(0);
+    expect(res.body.data.alreadyExists).toBe(1);
+    expect(res.body.data.errors).toHaveLength(0); // NOT reported as a validation error
+    expect(mockStores.students._docs()).toHaveLength(1); // still just the one original student — no duplicate created
+  });
+
+  test('mixing a duplicate row with a genuinely new row: one created, one already-exists, no errors', async () => {
+    mockStores.students = makeStore([
+      { id: 'stu_existing', schoolId: SCHOOL, admissionNumber: 'ADM-EXIST-001', firstName: 'Old', lastName: 'Kid' },
+    ]);
+    const res = await supertest(buildApp())
+      .post('/api/import-export/students').set('Content-Type', 'application/json')
+      .send({ rows: [
+        row({ admissionNumber: 'ADM-EXIST-001' }),
+        row({ admissionNumber: 'ADM-NEW-001', firstName: 'Brand', lastName: 'New' }),
+      ] });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.created).toBe(1);
+    expect(res.body.data.alreadyExists).toBe(1);
+    expect(mockStores.students._docs()).toHaveLength(2); // 1 original + 1 newly created
+  });
+
+  test('two rows in the SAME file reusing the same admission number: only the first is created, the second counts as already-exists', async () => {
+    const res = await supertest(buildApp())
+      .post('/api/import-export/students').set('Content-Type', 'application/json')
+      .send({ rows: [
+        row({ admissionNumber: 'ADM-DUP-001' }),
+        row({ admissionNumber: 'ADM-DUP-001', firstName: 'Second', lastName: 'Copy' }),
+      ] });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.created).toBe(1);
+    expect(res.body.data.alreadyExists).toBe(1);
+    expect(mockStores.students._docs()).toHaveLength(1);
+  });
+
+  test('a batch where EVERY row already exists is still reported as a success (201), not "import failed"', async () => {
+    mockStores.students = makeStore([
+      { id: 'stu_existing', schoolId: SCHOOL, admissionNumber: 'ADM-EXIST-001' },
+    ]);
+    const res = await supertest(buildApp())
+      .post('/api/import-export/students').set('Content-Type', 'application/json')
+      .send({ rows: [row({ admissionNumber: 'ADM-EXIST-001' })] });
+
+    expect(res.status).toBe(201); // not 422 — nothing actually failed
+    expect(res.body.success).toBe(true); // treated as a success outcome, not "0 records imported"
+  });
+
+  test('rows with no manually-supplied admissionNumber (auto-generated) are never treated as already-existing', async () => {
+    mockStores.students = makeStore([
+      { id: 'stu_existing', schoolId: SCHOOL, admissionNumber: 'ADM-1' }, // matches auto-generated pattern from the mock
+    ]);
+    const res = await supertest(buildApp())
+      .post('/api/import-export/students').set('Content-Type', 'application/json')
+      .send({ rows: [row()] }); // row() has no admissionNumber override — auto-generated
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.created).toBe(1);
+    expect(res.body.data.alreadyExists ?? 0).toBe(0);
+  });
+});

@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.70.0] — 2026-09-10 — fix(students): duplicate admission numbers on import are now caught, not silently duplicated
+
+Prompted by a question about how to tell which imported students succeeded vs. were rejected. Answering it surfaced that the existing student-import result panel (created count, skipped count, row-by-row error detail) already covers genuine validation failures — but tracing "does re-importing update an existing student" found a real gap: `students_admission` is a lookup index, not a unique one, so a CSV row whose admission number matched an existing student silently created a SECOND student record under the same number, with no warning at all.
+
+### Decided with the user
+A duplicate admission number should not create a second record, but also isn't a validation failure worth alarming row-level detail — it's its own outcome: report the total separately, alongside how many were genuinely created, and reserve detailed row-by-row error messages for actual rejections.
+
+### Fixed
+- `_importStudents` (`server/routes/import-export.js`) now checks every manually-supplied `admissionNumber` against both existing students in the school and other rows already processed in the same file. A match is counted in a new `alreadyExists` total — never inserted, never added to `errors`. Rows with no admission number given (auto-generated) are unaffected — a fresh number can never collide.
+- The import response's `success` flag now accounts for this: a batch where every row already existed (created: 0, but nothing failed) is `success: true`, not a false "0 records imported".
+- `BulkImportSlideOver.jsx`'s result panel shows the `alreadyExists` count as its own line ("N rows matched a student who already exists — left unchanged"), and no longer mislabels a batch as "Import failed" just because `created` was 0 — the same fix also corrects this for every other import type (Classes, Inventory, etc.) that legitimately skips an all-duplicates file with zero real errors, which was showing the same false "failed" message before this.
+- The downloadable Students CSV template's notes now say plainly that a matching admission number is reported as "already exists," not updated and not an error.
+
+### Verified
+- 5 new tests in `import-students-fields.test.js`: an existing student's admission number is neither duplicated nor flagged as an error; a mixed batch (one duplicate, one new) reports both correctly; two rows in the same file reusing one number only creates the first; an all-duplicates batch is still `success: true`/201; auto-generated numbers are never treated as duplicates. Full server suite 1963/1963. `verify-rbac-coverage.js` 100% (no regression, no new routes). `security-scan.js` clean. Client production build passes.
+
+### Explicitly not built
+- No update-existing-student behavior (upsert) — the user's own words: report the outcome, don't silently rewrite a student's data on a re-import.
+
+---
+
 ## [v5.69.0] — 2026-09-09 — feat(assessment, reports): school-wide academic analytics, and the Academic tab it was meant to be
 
 Prompted by a direct request for live filterable academic analytics (per class, per subject, whole-school), scoped down to: Assessment-module marks as the data source, fix the currently-broken Academic tab first, compare current vs. last term/year as average-per-subject, and role-scoped visibility (leadership: whole school; teacher: own classes/subjects).

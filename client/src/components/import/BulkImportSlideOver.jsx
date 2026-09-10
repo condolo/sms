@@ -262,28 +262,43 @@ export default function BulkImportSlideOver({
             )}
 
             {/* Done state — result summary */}
-            {isDone && result && (
+            {isDone && result && (() => {
+              // A batch where every row already existed (created: 0,
+              // alreadyExists: N, no errors) is a success, not a failure —
+              // "no records created" used to be the only thing this
+              // checked, which also mislabeled a Classes/Inventory import
+              // that legitimately skipped an all-duplicates file as
+              // "Import failed" even though nothing was actually wrong.
+              const hasErrors = result.errors?.length > 0;
+              const totalProcessed = (result.created ?? 0) + (result.alreadyExists ?? 0);
+              const isHardFailure = hasErrors && totalProcessed === 0;
+              return (
               <div className="space-y-3">
                 <div className={`flex items-start gap-2.5 rounded-lg px-4 py-3 text-sm border ${
-                  result.errors?.length > 0 && result.created === 0
+                  isHardFailure
                     ? 'bg-red-50 border-red-200 text-red-700'
-                    : result.errors?.length > 0
+                    : hasErrors
                     ? 'bg-amber-50 border-amber-200 text-amber-700'
                     : 'bg-emerald-50 border-emerald-200 text-emerald-700'
                 }`}>
-                  {result.errors?.length > 0 && result.created === 0
+                  {isHardFailure
                     ? <AlertTriangle size={15} className="mt-0.5 shrink-0" />
                     : <CheckCircle2 size={15} className="mt-0.5 shrink-0" />
                   }
                   <div>
                     <p className="font-medium">
-                      {result.created === 0
+                      {isHardFailure
                         ? 'Import failed — no records created'
                         : `${result.created} record${result.created !== 1 ? 's' : ''} imported successfully`
                       }
                     </p>
+                    {result.alreadyExists > 0 && (
+                      <p className="text-xs mt-0.5 opacity-80">
+                        {result.alreadyExists} row{result.alreadyExists !== 1 ? 's' : ''} matched a student who already exists (admission number already in use) — left unchanged
+                      </p>
+                    )}
                     {result.skipped > 0 && (
-                      <p className="text-xs mt-0.5 opacity-80">{result.skipped} row{result.skipped !== 1 ? 's' : ''} skipped</p>
+                      <p className="text-xs mt-0.5 opacity-80">{result.skipped} row{result.skipped !== 1 ? 's' : ''} rejected — see detail below</p>
                     )}
                     {result.updated > 0 && (
                       <p className="text-xs mt-0.5 opacity-80">{result.inserted} new · {result.updated} updated</p>
@@ -330,7 +345,8 @@ export default function BulkImportSlideOver({
                   <RotateCcw size={12} /> Import another file
                 </button>
               </div>
-            )}
+              );
+            })()}
           </section>
 
           {/* Tips */}
