@@ -6,6 +6,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.74.0] — 2026-09-10 — fix(hr): bulk staff import result was hidden the instant any row succeeded
+
+Reported directly: "I imported staff in hr module and only 52 out of 56 entries were updated and no errors or communication at all." The other 4 rows were genuinely rejected (duplicate emails) and the server reported them correctly — the admin just never got to see it.
+
+### Root cause
+`HRPage.jsx`'s `onImported` callback was the only one of the seven pages using the shared `BulkImportSlideOver` (Admissions, Classes, Finance, Inventory, Library, Timetable all leave it alone) that called `setShowStaffImport(false)` as soon as the import fired its `onImported` callback — which happens on ANY partial success (`created > 0`), not just a fully clean batch. That unmounted the whole import panel, taking its result summary and per-row error table down with it, before the admin could read either. The import itself was never silent — the "52 created, 4 rejected" result and the 4 rows' rejection reasons were computed and returned correctly; they were just torn off-screen instantly.
+
+### Fixed
+- `HRPage.jsx` no longer closes the import panel from `onImported` — it now behaves like every other import screen in the app: the result summary and error table stay visible until the admin clicks "Close" themselves.
+
+### Verified
+- Full server suite 1973/1973 (this was a client-only display-lifecycle fix — no server logic changed). `verify-rbac-coverage.js` 100% (no regression, no route changes). `security-scan.js` clean. Client production build passes.
+
+---
+
 ## [v5.73.0] — 2026-09-10 — feat(settings, hr, profile): built-in role renames now show consistently everywhere
 
 Requested directly, as a follow-up to v5.72.0's built-in role rename feature: "the rename of staff roles should be consistent everywhere including hr and users profile." Correct — v5.72.0 deliberately scoped the rename to Settings only and called out HR as a known follow-up; a school renaming "Teacher" to "Educator" saw it in Settings but not in HR's staff list or on a user's own Profile page.

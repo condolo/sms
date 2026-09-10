@@ -1859,7 +1859,14 @@ export default function HRPage() {
             showExport
             onClose={() => setShowStaffImport(false)}
             onImported={() => {
-              setShowStaffImport(false);
+              // Deliberately does NOT close the panel — every other
+              // BulkImportSlideOver caller (Students, Classes, Finance,
+              // Inventory, Library, Timetable) leaves it open too, so the
+              // admin can actually read the result summary and the
+              // per-row error list before dismissing it themselves. This
+              // one used to close immediately on any partial success
+              // (created > 0), so a batch like "52 created, 4 rejected"
+              // vanished before anyone could see which 4 or why.
               qc.invalidateQueries({ queryKey: ['teachers'] });
               qc.invalidateQueries({ queryKey: ['hr', 'summary'] });
               qc.invalidateQueries({ queryKey: ['settings-users'] });
