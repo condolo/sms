@@ -166,6 +166,22 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('admissions', 'read'), async
     if (_at)    filter.assignedTo     = _at;
     if (req.query.sibling === 'true') filter.sibling = true;
 
+    // A fully-enrolled application (stage 'enrolled' AND a linked
+    // studentId) is now a real Student record — the Admissions board is
+    // for applications still moving through the pipeline, not a second,
+    // duplicate view of students who already exist there (requested
+    // directly, 2026-09: "once moved to enroll, student should be
+    // active not listed here under admission"). Hidden by default here,
+    // never deleted — pass ?includeCompleted=true to see them (e.g. a
+    // full historical export). An application AT 'enrolled' that's
+    // still missing its studentId link (the exact bug this same session
+    // found and fixed) is deliberately NOT hidden by this — it still
+    // needs the Enroll Student action re-run, and hiding it would make
+    // that broken state invisible again.
+    if (req.query.includeCompleted !== 'true') {
+      filter.$nor = [{ stage: 'enrolled', studentId: { $exists: true } }];
+    }
+
     // Each word matched independently, ALL required (2026-09 fix — see
     // the identical bug/fix in students.js GET /): firstName and
     // lastName are separate fields, so a single regex built from "John
@@ -206,9 +222,17 @@ router.get('/stats', authMiddleware, PLAN, MODGATE, rbac('admissions', 'read'), 
       if (req.query.dateTo)   filter.enquiryDate.$lte = req.query.dateTo;
     }
 
+    // Same exclusion as GET / above, and for the same reason: the
+    // Enrolled count on the board should reflect applications still
+    // needing attention here, not every enrollment this school has ever
+    // completed — those are real students now, counted in Students'
+    // own totals instead.
+    const excludeCompleted = req.query.includeCompleted !== 'true';
+
     const Apps = tenantModel('admissions', tenantContext(req));
     const pipeline = await Apps.aggregate([
       { $match: filter },
+      ...(excludeCompleted ? [{ $match: { $nor: [{ stage: 'enrolled', studentId: { $exists: true } }] } }] : []),
       { $group: {
         _id:   '$stage',
         count: { $sum: 1 },

@@ -6,6 +6,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.84.0] — 2026-09-11 — feat(admissions): a fully-enrolled application no longer shows in Admissions
+
+Requested directly, looking at the same three Trinitas cards from v5.82.0/v5.83.0: "once a student is enrolled, goes to the list of all students... it will cause confusion. once moved to enroll, student should be active not listed here under admission... do this globally." A deliberate design from earlier this session (Admissions §3: "Enrolled... stays in that column forever, the same way a 'Closed Won' column works") was reconsidered and reversed after seeing it cause exactly the confusion it wasn't meant to — a fully-enrolled child showing in both Admissions and Students at once looks like two different records for one person, not one person tracked in two places.
+
+### Changed
+- `GET /api/admissions` and `GET /api/admissions/stats` now exclude, by default, any application at stage `enrolled` that already has a linked `studentId` — the Admissions board, applicant list, and its stage counts (including the header "Total") now only ever show applications still moving through the pipeline. The application record itself is never deleted, only hidden from the default view — pass `?includeCompleted=true` to see everything, same escape-hatch shape as Students' own `status=all`.
+- An application at `enrolled` with **no** studentId yet — the exact broken state v5.82.0/v5.83.0 closed off going forward — is deliberately **not** hidden by this: it still needs the Enroll Student action run, and hiding it would make that state invisible again, undoing this session's own fix.
+
+### Verified
+- 4 new integration tests in `admissions-enroll.test.js`: the list route's default filter excludes completed enrollments, `?includeCompleted=true` removes that filter, the stats aggregation applies the same exclusion before counting, and `?includeCompleted=true` skips it there too. Full server suite 2017/2017. `verify-rbac-coverage.js` 100% (no regression — no new routes). `security-scan.js` clean. Client production build passes (no client changes needed — the board and list already just render whatever the existing endpoints return).
+
+---
+
 ## [v5.83.0] — 2026-09-11 — fix(admissions): closed the third, last write path around "Enrolled" — and confirmed the bug's real reach
 
 Requested directly, after v5.82.0 shipped: "the bug was systemic, not specific to Trinitas — fix this bug." Correct to push on this — v5.82.0 closed two of three write paths onto the `admissions` collection; a third, `POST /api/admissions` (creating a brand-new application), could also be handed `stage: "enrolled"` directly in the create payload, with the exact same missing consequences (no Student, no admission number, nothing). A full audit confirmed `admissions.js` is the *only* file in the codebase that ever writes to this collection — no import route, no platform/bulk route touches it — so these three routes are now the complete, closed set.

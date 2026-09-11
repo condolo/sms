@@ -60,6 +60,8 @@ jest.mock('../../utils/model', () => ({
 }));
 
 let mockAppDocs;
+let mockAdmissionsFindFilter;
+let mockAdmissionsAggregatePipeline;
 let mockStudentDocs;
 // Admission-triggered billing (2026-09) — fee_structures/invoices/
 // discount_policies support generateEnrollmentInvoices() end-to-end
@@ -75,7 +77,15 @@ let mockInvoiceDocs;
 // every pre-existing test in this file that never touches this at all.
 let mockUserDocs;
 let mockDiscountPolicyDocs;
-function mockChainArr(arr) { return { select: () => mockChainArr(arr), lean: () => Promise.resolve(arr) }; }
+function mockChainArr(arr) {
+  return {
+    select: () => mockChainArr(arr),
+    sort:   () => mockChainArr(arr),
+    skip:   () => mockChainArr(arr),
+    limit:  () => mockChainArr(arr),
+    lean:   () => Promise.resolve(arr),
+  };
+}
 function mockMatchArrayAware(doc, filter) {
   return Object.entries(filter || {}).every(([k, v]) => {
     if (v && typeof v === 'object' && !Array.isArray(v)) {
@@ -100,6 +110,8 @@ jest.mock('../../utils/tenant-model', () => ({
           return mockChain({ ...d });
         },
         create: (doc) => { const d = { ...doc }; mockAppDocs.push(d); return Promise.resolve(d); },
+        find: (filter) => { mockAdmissionsFindFilter = filter; return mockChainArr([]); },
+        aggregate: (pipeline) => { mockAdmissionsAggregatePipeline = pipeline; return Promise.resolve([]); },
       };
     }
     if (collection === 'students') {
@@ -527,6 +539,50 @@ describe('POST /api/admissions/:id/enroll — business-flow: discount is correct
    Neither quick-update route may set stage to 'enrolled' anymore —
    only the dedicated enroll endpoint may.
 ══════════════════════════════════════════════════════════════ */
+
+/* ══════════════════════════════════════════════════════════════
+   GET /api/admissions and /stats — completed enrollments hidden by
+   default (2026-09, requested directly)
+
+   "once a student is enrolled, goes to the list of all
+   students...once moved to enroll, student should be active not
+   listed here under admission." A fully-enrolled application (stage
+   'enrolled' with a linked studentId) is now a real Student record —
+   showing it here too, alongside its own Student entry, was exactly
+   the double-bookkeeping that made the "Enrolled" bug above so easy
+   to overlook. Hidden by default (never deleted); an application at
+   'enrolled' still MISSING its studentId link stays visible, since it
+   still needs the Enroll Student action re-run.
+══════════════════════════════════════════════════════════════ */
+describe('GET /api/admissions — completed enrollments excluded by default', () => {
+  test('excludes stage=enrolled+studentId-linked applications by default', async () => {
+    await supertest(buildApp()).get('/api/admissions').send();
+    expect(mockAdmissionsFindFilter.$nor).toEqual([{ stage: 'enrolled', studentId: { $exists: true } }]);
+  });
+
+  test('?includeCompleted=true drops the exclusion', async () => {
+    await supertest(buildApp()).get('/api/admissions?includeCompleted=true').send();
+    expect(mockAdmissionsFindFilter).not.toHaveProperty('$nor');
+  });
+});
+
+describe('GET /api/admissions/stats — same exclusion applied before counting', () => {
+  test('the completed-enrollment $match runs before $group by default', async () => {
+    await supertest(buildApp()).get('/api/admissions/stats').send();
+    expect(mockAdmissionsAggregatePipeline).toEqual(
+      expect.arrayContaining([{ $match: { $nor: [{ stage: 'enrolled', studentId: { $exists: true } }] } }]),
+    );
+  });
+
+  test('?includeCompleted=true skips that extra $match stage', async () => {
+    await supertest(buildApp()).get('/api/admissions/stats?includeCompleted=true').send();
+    const hasExclusion = mockAdmissionsAggregatePipeline.some(
+      stage => stage.$match?.$nor?.[0]?.stage === 'enrolled',
+    );
+    expect(hasExclusion).toBe(false);
+  });
+});
+
 describe('POST /api/admissions — enrolled is blocked at creation too', () => {
   test('rejects creating a brand-new application already at "enrolled"', async () => {
     mockAppDocs = [];
