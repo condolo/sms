@@ -128,6 +128,7 @@ export default function StudentList() {
   const [deactivateTarget, setDeactivateTarget] = useState(null);
   const [showPromote, setShowPromote] = useState(false);
   const [showDuplicates, setShowDuplicates] = useState(false);
+  const [showActivateAllConfirm, setShowActivateAllConfirm] = useState(false);
 
   /* React to URL param changes */
   useEffect(() => {
@@ -289,6 +290,28 @@ export default function StudentList() {
     }
   }
 
+  /* Activate portal accounts for EVERY eligible student in one request —
+     no manual selection (2026-09, for onboarding a school whose students
+     were just imported/enrolled). Same eligibility rule as bulkGrantPortal
+     above, resolved server-side; an already-active account is never
+     touched. */
+  async function activateAllEligiblePortal() {
+    setBulkPortalLoading(true);
+    setBulkPortalResult(null);
+    setShowActivateAllConfirm(false);
+    try {
+      const res  = await studentsApi.activateAllPortalAccounts();
+      const data = res.data ?? res;
+      setBulkPortalResult(data);
+      if (data.credentials?.length > 0) downloadCredentialsCsv(data.credentials);
+      qc.invalidateQueries({ queryKey: ['students'] });
+    } catch (err) {
+      toast.error(err?.message ?? 'Failed to activate portal accounts.');
+    } finally {
+      setBulkPortalLoading(false);
+    }
+  }
+
   /* One-time credentials CSV — passwords are never retrievable again after
      this download, so it fires automatically and stays re-downloadable from
      the result banner until it's dismissed. */
@@ -427,6 +450,17 @@ export default function StudentList() {
               >
                 <Copy size={14} />
                 {duplicateGroups.length} Duplicate{duplicateGroups.length === 1 ? '' : 's'}
+              </button>
+            )}
+            {canDelete && (
+              <button
+                onClick={() => setShowActivateAllConfirm(true)}
+                disabled={bulkPortalLoading}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-violet-200 text-violet-700 hover:bg-violet-50 hover:border-violet-400 disabled:opacity-50 transition-colors"
+                title="Create a portal account for every active student who doesn't have one yet"
+              >
+                {bulkPortalLoading ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
+                Activate All Portals
               </button>
             )}
             {canDelete && (
@@ -675,6 +709,25 @@ export default function StudentList() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* ── Activate-all confirm banner ─────────────────── */}
+        {showActivateAllConfirm && (
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-violet-50 border border-violet-200 rounded-xl text-sm text-violet-900">
+            <span>Create a portal account for <span className="font-semibold">every active student who doesn't already have one</span> — up to 1,000 in one go. Already-active accounts are never touched. Credentials download automatically as a CSV once this finishes.</span>
+            <div className="flex items-center gap-3 shrink-0">
+              <button onClick={() => setShowActivateAllConfirm(false)} className="text-xs font-medium text-violet-700 hover:text-violet-900">
+                Cancel
+              </button>
+              <button
+                onClick={activateAllEligiblePortal}
+                className="flex items-center gap-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+              >
+                <KeyRound size={12} />
+                Activate All
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ── Portal access result banner ───────────────── */}
         {bulkPortalResult && (

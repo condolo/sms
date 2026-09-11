@@ -186,6 +186,7 @@ export const students = {
   bulkImport:         (data)       => _post('/students/bulk', data),
   purge:              (ids)        => _req('DELETE', '/students/purge', { ids }),
   bulkPortalAccounts: (ids)        => _post('/students/bulk-portal-accounts', { studentIds: ids }),
+  activateAllPortalAccounts: ()    => _post('/students/bulk-portal-accounts', { all: true }),
   deactivate:         (id, data)   => _req('PATCH', `/students/${id}/deactivate`, data),
   reactivate:         (id)         => _req('PATCH', `/students/${id}/reactivate`, {}),
   promote:            (data)       => _post('/students/promote', data),

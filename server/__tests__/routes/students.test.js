@@ -51,6 +51,10 @@ const mockInvoicesUpdateMany = jest.fn().mockResolvedValue({ modifiedCount: 0 })
 const mockPaymentsAggregate  = jest.fn().mockResolvedValue([]);
 const mockPaymentsDeleteMany = jest.fn().mockResolvedValue({ deletedCount: 0 });
 const mockPaymentsUpdateMany = jest.fn().mockResolvedValue({ modifiedCount: 0 });
+const mockUsersFind     = jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) });
+const mockUsersFindOne  = jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }); // default: no existing account
+const mockUsersUpdateOne = jest.fn().mockResolvedValue({});
+const mockUsersCreate    = jest.fn().mockResolvedValue({ id: 'usr_new', schoolId: 'school_test_001', role: 'student' });
 
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((collection) => {
@@ -72,6 +76,9 @@ jest.mock('../../utils/model', () => ({
     }
     if (collection === 'payments') {
       return { aggregate: mockPaymentsAggregate, deleteMany: mockPaymentsDeleteMany, updateMany: mockPaymentsUpdateMany };
+    }
+    if (collection === 'users') {
+      return { find: mockUsersFind, findOne: mockUsersFindOne, updateOne: mockUsersUpdateOne, create: mockUsersCreate };
     }
     // Default empty mock for any other collection — covers every other
     // studentId-referencing collection student-merge.js walks through
@@ -809,5 +816,108 @@ describe('POST /api/students — legacy medicalNotes mirrors into medical.notes'
 
     const createArg = mockStudentsCreate.mock.calls[0][0];
     expect(createArg.medical.notes).toBe('Deliberately different note');
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════
+   POST /api/students/bulk-portal-accounts (2026-09 — "all" mode)
+   Requested directly, for onboarding a school whose students were just
+   imported: "bulk reset to be done to all users when onboarding...
+   instead of activating per user." The explicit-studentIds path already
+   existed (an admin manually selects students); this adds a one-request
+   "every eligible student" mode so a school doesn't need to page
+   through hundreds of rows checking boxes. Same eligibility rule
+   either way, and an already-active account is still never touched.
+══════════════════════════════════════════════════════════════ */
+describe('POST /api/students/bulk-portal-accounts', () => {
+  test('explicit studentIds — creates a new portal account and returns the one-time credential', async () => {
+    mockStudentsFind.mockReturnValue({
+      lean: jest.fn().mockResolvedValue([makeStudent({ admissionNumber: 'ADM-100', hasPortalAccount: false })]),
+    });
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/students/bulk-portal-accounts')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ studentIds: ['stu_demo_001'] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.created).toBe(1);
+    expect(res.body.data.credentials).toHaveLength(1);
+    expect(res.body.data.credentials[0].username).toBe('adm-100');
+    expect(mockUsersCreate).toHaveBeenCalledTimes(1);
+    // studentsCollection flagged so it's never picked up again
+    expect(mockStudentsUpdateOne).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: '507f1f77bcf86cd799439011' }),
+      { $set: expect.objectContaining({ hasPortalAccount: true }) },
+    );
+  });
+
+  test('explicit studentIds — a student who already has a portal account is skipped, not reset', async () => {
+    mockStudentsFind.mockReturnValue({
+      lean: jest.fn().mockResolvedValue([makeStudent({ admissionNumber: 'ADM-100', hasPortalAccount: true })]),
+    });
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/students/bulk-portal-accounts')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ studentIds: ['stu_demo_001'] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.created).toBe(0);
+    expect(res.body.data.skipped).toBe(1);
+    expect(mockUsersCreate).not.toHaveBeenCalled();
+  });
+
+  test('all:true — queries for every eligible student instead of requiring an explicit list', async () => {
+    mockStudentsFind.mockReturnValue({
+      lean: jest.fn().mockResolvedValue([
+        makeStudent({ id: 'stu_a', admissionNumber: 'ADM-A', hasPortalAccount: false }),
+        makeStudent({ id: 'stu_b', admissionNumber: 'ADM-B', hasPortalAccount: false }),
+      ]),
+    });
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/students/bulk-portal-accounts')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ all: true });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.created).toBe(2);
+    expect(res.body.data.eligible).toBe(2);
+    // The eligibility filter itself — never touches withdrawn/graduated/
+    // transferred, already-active, or admission-number-less students.
+    const filterArg = mockStudentsFind.mock.calls[0][0];
+    expect(filterArg).toMatchObject({
+      schoolId: 'school_test_001',
+      status: { $nin: ['withdrawn', 'graduated', 'transferred'] },
+      hasPortalAccount: { $ne: true },
+    });
+  });
+
+  test('all:true — refuses when more than 1000 students are eligible, rather than risking a slow/partial request', async () => {
+    const many = Array.from({ length: 1001 }, (_, i) => makeStudent({ id: `stu_${i}`, admissionNumber: `ADM-${i}` }));
+    mockStudentsFind.mockReturnValue({ lean: jest.fn().mockResolvedValue(many) });
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/students/bulk-portal-accounts')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ all: true });
+
+    expect(res.status).toBe(400);
+    expect(mockUsersCreate).not.toHaveBeenCalled();
+  });
+
+  test('rejects a request with neither studentIds nor all:true', async () => {
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/students/bulk-portal-accounts')
+      .set('Authorization', 'Bearer fake-token')
+      .send({});
+
+    expect(res.status).toBe(400);
   });
 });

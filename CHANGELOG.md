@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.80.0] — 2026-09-11 — feat(students): activate portal accounts for every eligible student in one request
+
+Requested directly, for onboarding a school onto Msingi whose students already exist in the system: "bulk reset to be done to all users when onboarding... instead of activating per user." A bulk-create endpoint already existed (`POST /api/students/bulk-portal-accounts`), but only for an explicit, admin-picked list of student ids — a school with hundreds of newly-imported students still meant checking them off page by page first.
+
+### Decided with the user
+Not a shared/fixed password (a literal password shared across every account, especially staff, was raised as an option and correctly ruled out as a serious security downgrade — a single leaked or guessed password would expose every account it was assigned to). Instead: keep the platform's existing per-account random password + forced-change-on-first-login behavior exactly as it is, and simply remove the need to hand-select students before running it.
+
+### Added
+- `POST /api/students/bulk-portal-accounts` now accepts `{ all: true }` as an alternative to `{ studentIds: [...] }` — resolves every eligible student in the caller's own school server-side (active, not withdrawn/graduated/transferred, no existing portal account, has an admission number) and processes all of them in one request, capped at 1,000 for reliability. The existing per-id path is unchanged. An already-active account is never touched, in either mode.
+- Students page: a new **Activate All Portals** button (admins only) — one confirmation naming exactly what it does, then creates the missing accounts and auto-downloads the one-time credentials CSV, same as the existing per-selection flow.
+
+### Scope note (tenancy)
+This runs against the current session's own school — the same boundary every other action in this app already respects (`req.jwtUser.schoolId`). For an organisation with more than one school sharing one login (switchable via the School Switcher), running "Activate All Portals" covers whichever school is currently active; switch schools and run it again to cover the other one. Nothing here reaches across schools in a single call.
+
+### Verified
+- 5 new integration tests in `students.test.js`: explicit-ids mode still creates and returns a credential (regression coverage — this path had no prior test), an already-active student is skipped either way, `all:true` queries with the correct eligibility filter, more than 1,000 eligible students is refused rather than risking a slow/partial request, and a request with neither `studentIds` nor `all` is rejected. Full server suite 2004/2004. `verify-rbac-coverage.js` 100% (no regression — same route, additive request shape). `security-scan.js` clean. Client production build passes.
+
+---
+
 ## [v5.79.0] — 2026-09-11 — fix(students): resolving a duplicate now merges its history instead of orphaning or destroying it
 
 Reported directly, pressing on the duplicate-resolve feature from v5.76.0/v5.77.0: "you instruct so that dabase is also aligned, right? no dead codes after the delete, right?" Honest answer at the time: no. Resolving a duplicate only ever cleaned up the removed record's invoices and payments — attendance, exam results, behaviour history, growth-profile entries, medical visits, hostel/transport assignments, and more than a dozen other collections kept rows pointing at a student id that no longer existed. This is a pre-existing gap in the platform's student-deletion generally (the original `DELETE /students/purge` had the exact same narrow scope), not something these two features introduced — but duplicate-resolve is a routine cleanup action admins are meant to reach for often, so the exposure mattered more here.

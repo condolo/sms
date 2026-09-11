@@ -978,11 +978,13 @@ router.post('/bulk-portal-accounts', authMiddleware, PLAN, MODGATE, rbac('studen
     const allowed = ['superadmin', 'admin', 'principal', 'deputy_principal'];
     if (!allowed.includes(role)) return E.forbidden(res, 'Only admin or principal can grant portal access.');
 
-    const { studentIds } = req.body;
-    if (!Array.isArray(studentIds) || studentIds.length === 0) {
-      return E.badRequest(res, 'studentIds array is required.');
+    const { studentIds, all } = req.body;
+    if (!all && (!Array.isArray(studentIds) || studentIds.length === 0)) {
+      return E.badRequest(res, 'studentIds array is required (or pass { all: true } for every eligible student).');
     }
-    if (studentIds.length > 200) return E.badRequest(res, 'Maximum 200 students per batch.');
+    if (Array.isArray(studentIds) && studentIds.length > 200) {
+      return E.badRequest(res, 'Maximum 200 students per batch.');
+    }
 
     const Students = tenantModel('students', tenantContext(req));
     const Users    = tenantModel('users', tenantContext(req));
@@ -993,16 +995,37 @@ router.post('/bulk-portal-accounts', authMiddleware, PLAN, MODGATE, rbac('studen
       return E.badRequest(res, 'Student portal requires the Student or Family tier. Upgrade your subscription to enable student logins.');
     }
 
-    // Dual lookup — client may send UUID `id` or Mongo `_id` (pre-migration records)
-    const mongoose = require('mongoose');
-    const validObjectIds = studentIds.filter(id => mongoose.Types.ObjectId.isValid(id) && String(id).length === 24);
-    const docs = await Students.find({
-      schoolId,
-      $or: [
-        { id: { $in: studentIds } },
-        ...(validObjectIds.length ? [{ _id: { $in: validObjectIds } }] : []),
-      ],
-    }).lean();
+    let docs;
+    if (all) {
+      // "Every eligible student" mode (2026-09) — for onboarding a school
+      // whose students were just imported/enrolled: activates a portal
+      // account for every one that doesn't already have one, in a single
+      // action, instead of an admin manually checking students off page
+      // by page. Pre-filtered to the same eligibility this route already
+      // enforces per-row below (status, hasPortalAccount, admissionNumber)
+      // so "all" never reports hundreds of "no admission number" errors
+      // for students who were never eligible in the first place.
+      docs = await Students.find({
+        schoolId,
+        status: { $nin: ['withdrawn', 'graduated', 'transferred'] },
+        hasPortalAccount: { $ne: true },
+        admissionNumber: { $exists: true, $nin: [null, ''] },
+      }).lean();
+      if (docs.length > 1000) {
+        return E.badRequest(res, `${docs.length} students are eligible — "all" is capped at 1000 per request to keep this reliable. Run it again afterward to pick up any still-missing accounts, or select students in smaller batches instead.`);
+      }
+    } else {
+      // Dual lookup — client may send UUID `id` or Mongo `_id` (pre-migration records)
+      const mongoose = require('mongoose');
+      const validObjectIds = studentIds.filter(id => mongoose.Types.ObjectId.isValid(id) && String(id).length === 24);
+      docs = await Students.find({
+        schoolId,
+        $or: [
+          { id: { $in: studentIds } },
+          ...(validObjectIds.length ? [{ _id: { $in: validObjectIds } }] : []),
+        ],
+      }).lean();
+    }
     const now  = new Date().toISOString();
 
     let created = 0, skipped = 0;
@@ -1062,11 +1085,12 @@ router.post('/bulk-portal-accounts', authMiddleware, PLAN, MODGATE, rbac('studen
       }
     }));
 
-    // studentIds not found in DB count as skipped
-    skipped += Math.max(0, studentIds.length - docs.length);
+    // Requested ids not found in DB count as skipped — meaningless in
+    // "all" mode, where `docs` already IS the full eligible set.
+    if (!all) skipped += Math.max(0, studentIds.length - docs.length);
 
     console.log(`[students] Bulk portal accounts: ${created} created, ${skipped} skipped, ${errors.length} errors — by ${userId}`);
-    return ok(res, { created, skipped, errors, credentials });
+    return ok(res, { created, skipped, errors, credentials, eligible: docs.length });
   } catch (err) {
     console.error('[students POST/bulk-portal-accounts]', err);
     return E.serverError(res);
