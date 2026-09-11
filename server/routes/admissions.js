@@ -166,13 +166,22 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('admissions', 'read'), async
     if (_at)    filter.assignedTo     = _at;
     if (req.query.sibling === 'true') filter.sibling = true;
 
-    if (req.query.search) {
-      const rx = new RegExp(req.query.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      filter.$or = [
-        { firstName: rx }, { lastName: rx },
-        { parentName: rx }, { parentEmail: rx },
-        { applicationRef: rx }
-      ];
+    // Each word matched independently, ALL required (2026-09 fix — see
+    // the identical bug/fix in students.js GET /): firstName and
+    // lastName are separate fields, so a single regex built from "John
+    // Doe" could never match either one alone — a full-name search
+    // silently returned zero applications no matter how exactly the
+    // name was typed.
+    if (req.query.search?.trim()) {
+      const terms = req.query.search.trim().split(/\s+/)
+        .map(t => new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+      filter.$and = terms.map(rx => ({
+        $or: [
+          { firstName: rx }, { lastName: rx },
+          { parentName: rx }, { parentEmail: rx },
+          { applicationRef: rx },
+        ],
+      }));
     }
 
     const Apps = tenantModel('admissions', tenantContext(req));

@@ -1180,6 +1180,23 @@ Applies the dual-identifier pattern above to a new problem: removing a duplicate
 
 **Disclosed limitation:** a collection meant to hold at most one row per student (e.g. `growth_aspirations`) can end up with two rows for the kept student if both original records already had one — re-pointing doesn't de-duplicate. Surfaced via the merge's returned per-collection counts (and the duplicate-resolve routes' `mergedRecords` response field) rather than silently guessed at, since resolving it well needs collection-specific knowledge (which row to prefer) a generic merge can't have.
 
+### Multi-Word Name Search — split-and-AND, not one regex (v5.81.0)
+
+A person's name lives in separate fields (`firstName`/`lastName`/`middleName`), so building one `RegExp` from the whole search string and testing it against each field independently silently breaks the instant someone searches a first and last name together — "Jane Wanjiku" never appears verbatim in a `firstName` that only ever contains "Jane". A single-word search still works (which is exactly why this shipped unnoticed in four separate places — `students.js`, `admissions.js`, `teachers.js`, `import-export.js`'s student CSV export — before being reported directly and fixed the same day across all four).
+
+```js
+// ❌ Wrong — one regex, checked against each field independently:
+const rx = new RegExp(escaped(search), 'i');
+filter.$or = [{ firstName: rx }, { lastName: rx }, ...];
+
+// ✅ Right — split into words, every word must match SOMEWHERE
+// (possibly a different field per word), not the whole phrase in one field:
+const terms = search.trim().split(/\s+/).map(t => new RegExp(escaped(t), 'i'));
+filter.$and = terms.map(rx => ({ $or: [{ firstName: rx }, { lastName: rx }, ...] }));
+```
+
+Apply this pattern to any new free-text "search by name" filter in this codebase — a person-name field split across `firstName`/`lastName`/`middleName` is the norm here (students, teachers, admissions applicants, users), not the exception.
+
 ### Impersonate Flow (v4.5.5+)
 
 ```

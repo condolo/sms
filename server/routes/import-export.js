@@ -2072,9 +2072,17 @@ router.get('/export/:type', authMiddleware, /* rbac: dynamic — checked via EXP
         filter.enrollmentDate = { $gte: `${qEnrollYear}-01-01`, $lte: `${qEnrollYear}-12-31` };
       }
 
-      if (req.query.search) {
-        const rx = new RegExp(req.query.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-        filter.$or = [{ firstName: rx }, { lastName: rx }, { admissionNumber: rx }];
+      // Each word matched independently, ALL required (2026-09 fix — see
+      // the identical bug/fix in students.js GET /): a single regex
+      // built from "John Doe" could never match firstName ("John") or
+      // lastName ("Doe") alone, so exporting a full-name search silently
+      // exported nothing no matter how exactly the name was typed.
+      if (req.query.search?.trim()) {
+        const terms = req.query.search.trim().split(/\s+/)
+          .map(t => new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+        filter.$and = terms.map(rx => ({
+          $or: [{ firstName: rx }, { lastName: rx }, { admissionNumber: rx }],
+        }));
       }
 
       const [docs, classes, streams, school] = await Promise.all([

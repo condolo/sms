@@ -6,6 +6,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.81.0] — 2026-09-11 — fix(students, admissions, teachers): a full-name search returned nothing, silently
+
+Reported directly: three applicants showed as "Enrolled" on the Admissions board, the Students page's total count included them, but searching for them in the Students list found nothing.
+
+### Root cause
+`firstName`/`lastName`/`middleName` are separate fields on a student (and staff, and admissions applicant) record. The search box built ONE regex from the whole typed string and matched it against each field independently — so typing a first and last name together, e.g. "Jane Wanjiku", built the regex `/Jane Wanjiku/i` and checked whether `firstName` (which only ever contains "Jane") matched it, then whether `lastName` (only ever "Wanjiku") matched it. Neither ever could — "Jane Wanjiku" never appears verbatim in either field alone. A single-word search (just "Jane") always worked, which is exactly why this went unnoticed: it only breaks the moment someone searches a first and last name together, the single most natural way to search for a specific person.
+
+### Fixed
+- `GET /api/students`, `GET /api/admissions`, `GET /api/teachers`, and the Students CSV export (`import-export.js`) now split the search text into words and require every word to match somewhere — possibly across different fields — instead of the whole phrase matching one field. "Jane Wanjiku" now matches a record with `firstName: "Jane"` and `lastName: "Wanjiku"`; a single-word search behaves exactly as before.
+- The Admissions "Enrolled" stage was also asked about directly: it's a permanent, terminal stage — like a CRM's "Closed Won" column — not a queue that clears out. An enrolled application stays there forever by design, linked to the real Student record it produced, so it's always traceable later. This wasn't a bug; confirmed by reading `STAGE_ORDER` and the enroll route directly.
+
+### Verified
+- 3 new integration tests in `students.test.js`: a two-word search matches a student split across firstName/lastName, a single-word search still matches name/admission-number/email as before, and a blank search adds no filter. Full server suite 2007/2007. `verify-rbac-coverage.js` 100% (no regression — no new routes). `security-scan.js` clean. Client production build passes. The identical fix in `admissions.js`/`teachers.js`/`import-export.js` is the same mechanical change verified by inspection and the same passing full suite; dedicated tests for those two routes' list endpoints (neither had any before this) are a follow-up, not done in this pass.
+
+---
+
 ## [v5.80.0] — 2026-09-11 — feat(students): activate portal accounts for every eligible student in one request
 
 Requested directly, for onboarding a school onto Msingi whose students already exist in the system: "bulk reset to be done to all users when onboarding... instead of activating per user." A bulk-create endpoint already existed (`POST /api/students/bulk-portal-accounts`), but only for an explicit, admin-picked list of student ids — a school with hundreds of newly-imported students still meant checking them off page by page first.

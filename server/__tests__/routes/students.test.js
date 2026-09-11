@@ -255,6 +255,74 @@ describe('GET /api/students', () => {
     const filterArg = mockStudentsFind.mock.calls[0][0];
     expect(filterArg).toHaveProperty('schoolId', 'school_test_001');
   });
+
+  /* ── Free-text search (2026-09) ────────────────────────────────
+     Reported directly: a newly-enrolled student wasn't found by
+     search even though the school's total count included them.
+     Root cause: firstName/lastName/middleName are separate fields, so
+     a single regex built from "John Doe" could never match any one of
+     them — "John Doe" doesn't appear verbatim in a firstName ("John")
+     or a lastName ("Doe") alone. A full-name search silently returned
+     zero rows no matter how exactly the name was typed. */
+  test('a full-name search ("First Last") matches a student whose name is split across firstName/lastName', async () => {
+    mockStudentsFind.mockReturnValue({
+      sort: jest.fn().mockReturnThis(), skip: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(), select: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue([]),
+    });
+    mockStudentsCountDocuments.mockResolvedValue(0);
+
+    const app = buildApp();
+    await supertest(app)
+      .get('/api/students')
+      .query({ search: 'John Doe' })
+      .set('Authorization', 'Bearer fake-token');
+
+    const filterArg = mockStudentsFind.mock.calls[0][0];
+    // Each word must be found independently (possibly in different
+    // fields) — "John" in one, "Doe" in another — rather than one
+    // regex requiring "John Doe" to appear verbatim in a single field.
+    expect(filterArg.$and).toHaveLength(2);
+    expect(filterArg.$and[0].$or.some(c => c.firstName?.test('John'))).toBe(true);
+    expect(filterArg.$and[1].$or.some(c => c.lastName?.test('Doe'))).toBe(true);
+  });
+
+  test('a single-word search still matches across name/admissionNumber/parentEmail', async () => {
+    mockStudentsFind.mockReturnValue({
+      sort: jest.fn().mockReturnThis(), skip: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(), select: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue([]),
+    });
+    mockStudentsCountDocuments.mockResolvedValue(0);
+
+    const app = buildApp();
+    await supertest(app)
+      .get('/api/students')
+      .query({ search: 'ADM-100' })
+      .set('Authorization', 'Bearer fake-token');
+
+    const filterArg = mockStudentsFind.mock.calls[0][0];
+    expect(filterArg.$and).toHaveLength(1);
+    expect(filterArg.$and[0].$or).toHaveLength(5); // firstName/lastName/middleName/admissionNumber/parentEmail
+  });
+
+  test('a blank search adds no filter at all', async () => {
+    mockStudentsFind.mockReturnValue({
+      sort: jest.fn().mockReturnThis(), skip: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(), select: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue([]),
+    });
+    mockStudentsCountDocuments.mockResolvedValue(0);
+
+    const app = buildApp();
+    await supertest(app)
+      .get('/api/students')
+      .query({ search: '   ' })
+      .set('Authorization', 'Bearer fake-token');
+
+    const filterArg = mockStudentsFind.mock.calls[0][0];
+    expect(filterArg).not.toHaveProperty('$and');
+  });
 });
 
 /* ══════════════════════════════════════════════════════════════

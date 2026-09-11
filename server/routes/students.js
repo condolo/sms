@@ -567,13 +567,27 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), scopeMi
       if (req.query.dateTo)   filter.createdAt.$lte = new Date(`${req.query.dateTo}T23:59:59.999Z`);
     }
 
-    // Free-text search on name / admissionNumber
-    if (req.query.search) {
-      const rx = new RegExp(req.query.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      filter.$or = [
-        { firstName: rx }, { lastName: rx }, { middleName: rx },
-        { admissionNumber: rx }, { parentEmail: rx }
-      ];
+    // Free-text search on name / admissionNumber / parent email (2026-09
+    // fix — reported directly: a newly-enrolled student wasn't found by
+    // search even though the school's total count included them).
+    // firstName/lastName/middleName are separate fields, but a single
+    // regex against "John Doe" can only ever match ONE field at a time —
+    // "John Doe" never appears verbatim in a firstName ("John") or a
+    // lastName ("Doe") alone, so a full-name search always returned zero
+    // results, silently, no matter how exact the name was. Each word of
+    // the search is now matched independently and ALL must be found
+    // (possibly across different fields) — "John Doe" now requires one
+    // field to contain "John" AND one to contain "Doe", which a single
+    // name still satisfies trivially (only one word to match).
+    if (req.query.search?.trim()) {
+      const terms = req.query.search.trim().split(/\s+/)
+        .map(t => new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+      filter.$and = terms.map(rx => ({
+        $or: [
+          { firstName: rx }, { lastName: rx }, { middleName: rx },
+          { admissionNumber: rx }, { parentEmail: rx },
+        ],
+      }));
     }
 
     // Enforce data access scope (teachers see only their assigned classes)

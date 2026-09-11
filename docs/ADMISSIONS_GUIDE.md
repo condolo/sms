@@ -42,6 +42,8 @@ Go to **Admissions**. Two ways to work:
 - **Board** — a kanban view, one column per stage, cards you drag (or move via the card's own controls) between columns. Best for a quick visual sense of where every applicant currently sits.
 - **List** — a filterable, sortable table. Best for searching a specific applicant or exporting the full pipeline.
 
+**Enquiry through Acceptance are working stages — Enrolled, Withdrawn, and Rejected are permanent.** An application that reaches Enrolled stays in that column forever, the same way a "Closed Won" column works in a sales pipeline — it's not a queue that clears out once the student is created. That's deliberate: the application record is the enrolled student's history (see §7 below), so it stays visible and traceable rather than disappearing the moment it's no longer "in progress." The Enrolled *count* on the board only ever grows.
+
 ---
 
 ## 4. Creating a New Application
