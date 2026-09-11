@@ -683,9 +683,9 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), as
     const { data, error } = _validate(StudentUpdateSchema, req.body);
     if (error) return E.validation(res, error);
 
-    // Immutable server-generated fields
+    // Immutable server-generated fields — admissionNumber is handled
+    // separately below (it's editable, just never silently changed).
     const clientVersion = data._v;
-    delete data.admissionNumber;
     delete data.schoolId;
     delete data.id;
     delete data._v;
@@ -698,6 +698,31 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), as
       try { existing = await Students.findOne({ _id: req.params.id, schoolId }).lean(); } catch (_) {}
     }
     if (!existing) return E.notFound(res, 'Student not found');
+
+    // Admission number — reported directly (2026-09): "how do you edit
+    // admission number of a student, if the system picks automatically."
+    // The Student Profile edit form has always HAD this field, but it
+    // was silently discarded here on every save with no error at all —
+    // a save appeared to succeed while the number never actually
+    // changed. Now handled like any other manual override: checked
+    // against every OTHER student in the school first (the same
+    // collision guard POST / already applies), so an edit can't
+    // silently create the exact kind of duplicate v5.75.0 stopped at
+    // creation time.
+    if (data.admissionNumber !== undefined) {
+      const newAdmNo = data.admissionNumber.trim();
+      if (!newAdmNo) return E.badRequest(res, 'Admission number cannot be blank');
+      if (newAdmNo !== existing.admissionNumber) {
+        // Excluded by _id (always present, unlike the UUID `id` field —
+        // see the pre-migration-record comment above) so this can never
+        // accidentally match the very record being edited.
+        const taken = await Students.exists({ schoolId, admissionNumber: newAdmNo, _id: { $ne: existing._id } });
+        if (taken) return E.conflict(res, `Admission number '${newAdmNo}' is already in use by another student.`);
+        data.admissionNumber = newAdmNo;
+      } else {
+        delete data.admissionNumber; // unchanged — nothing to write
+      }
+    }
 
     // Parent Medical Consent — recordedAt/recordedBy are server-stamped,
     // never trusted from the client, and only refreshed when the consent

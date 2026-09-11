@@ -586,6 +586,82 @@ describe('PUT /api/students/:id — medical field', () => {
 });
 
 /* ══════════════════════════════════════════════════════════════
+   PUT /api/students/:id — admission number edit (2026-09)
+   Reported directly: "how do you edit admission number of a student,
+   if the system picks automatically" — the edit form has always had
+   this field, but the route silently discarded it on every save with
+   no error at all. This is the fix.
+══════════════════════════════════════════════════════════════ */
+describe('PUT /api/students/:id — admission number edit', () => {
+  function mockExistingStudent(student) {
+    mockStudentsFindOne.mockReturnValue({ lean: jest.fn().mockResolvedValue(student) });
+  }
+
+  test('a changed admission number is saved through to the update', async () => {
+    const student = makeStudent({ admissionNumber: 'ADM-001' });
+    mockExistingStudent(student);
+    mockStudentsExists.mockResolvedValueOnce(false); // ADM-999 is free
+    mockStudentsFindOneAndUpdate.mockReturnValue({
+      lean: jest.fn().mockResolvedValue({ ...student, admissionNumber: 'ADM-999' }),
+    });
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .put('/api/students/stu_demo_001')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ admissionNumber: 'ADM-999' });
+
+    expect(res.status).toBe(200);
+    const [, updateOp] = mockStudentsFindOneAndUpdate.mock.calls[0];
+    expect(updateOp.$set.admissionNumber).toBe('ADM-999');
+  });
+
+  test('resending the SAME admission number is a no-op — no duplicate check, nothing written', async () => {
+    const student = makeStudent({ admissionNumber: 'ADM-001' });
+    mockExistingStudent(student);
+    mockStudentsFindOneAndUpdate.mockReturnValue({ lean: jest.fn().mockResolvedValue(student) });
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .put('/api/students/stu_demo_001')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ admissionNumber: 'ADM-001', firstName: 'Jane' }); // form always resends the current value
+
+    expect(res.status).toBe(200);
+    expect(mockStudentsExists).not.toHaveBeenCalled();
+    const [, updateOp] = mockStudentsFindOneAndUpdate.mock.calls[0];
+    expect(updateOp.$set).not.toHaveProperty('admissionNumber');
+  });
+
+  test('rejects a change to an admission number already used by another student', async () => {
+    mockExistingStudent(makeStudent({ admissionNumber: 'ADM-001' }));
+    mockStudentsExists.mockResolvedValueOnce(true); // ADM-999 already taken
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .put('/api/students/stu_demo_001')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ admissionNumber: 'ADM-999' });
+
+    expect(res.status).toBe(409);
+    expect(mockStudentsFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  test('rejects blanking out the admission number', async () => {
+    mockExistingStudent(makeStudent({ admissionNumber: 'ADM-001' }));
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .put('/api/students/stu_demo_001')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ admissionNumber: '   ' });
+
+    expect(res.status).toBe(400);
+    expect(mockStudentsFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════
    Medical Centre milestone 2 — disabilities/notes fields,
    Parent Medical Consent stamping, legacy medicalNotes mirroring
 ══════════════════════════════════════════════════════════════ */
