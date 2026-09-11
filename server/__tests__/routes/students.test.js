@@ -459,6 +459,66 @@ describe('POST /api/students/duplicates/resolve', () => {
   });
 });
 
+describe('POST /api/students/duplicates/resolve-bulk', () => {
+  test('resolves multiple valid groups in one combined delete, not one per group', async () => {
+    mockStudentsFindOne
+      .mockReturnValueOnce({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ id: 'stu_keep1', admissionNumber: 'ADM-001', firstName: 'Jane', lastName: 'Doe' }) }) })
+      .mockReturnValueOnce({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ id: 'stu_keep2', admissionNumber: 'ADM-002', firstName: 'John', lastName: 'Smith' }) }) });
+    mockStudentsFind
+      .mockReturnValueOnce({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([{ id: 'stu_dupe1', _id: 'oid_dupe1' }]) }) })
+      .mockReturnValueOnce({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([{ id: 'stu_dupe2', _id: 'oid_dupe2' }]) }) });
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/students/duplicates/resolve-bulk')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ resolutions: [
+        { keepId: 'stu_keep1', removeIds: ['stu_dupe1'] },
+        { keepId: 'stu_keep2', removeIds: ['stu_dupe2'] },
+      ] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.resolved).toBe(2);
+    expect(res.body.data.removed).toBe(2);
+    expect(res.body.data.errors).toHaveLength(0);
+    expect(mockStudentsDeleteMany).toHaveBeenCalledTimes(1); // one combined delete, not one per group
+    const deleteArg = mockStudentsDeleteMany.mock.calls[0][0];
+    expect(deleteArg._id.$in).toEqual(expect.arrayContaining(['oid_dupe1', 'oid_dupe2']));
+  });
+
+  test('skips an invalid group but still resolves the valid ones in the same request', async () => {
+    mockStudentsFindOne
+      .mockReturnValueOnce({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }) }) // group 1: keeper not found
+      .mockReturnValueOnce({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ id: 'stu_keep2', admissionNumber: 'ADM-002', firstName: 'John', lastName: 'Smith' }) }) });
+    mockStudentsFind
+      .mockReturnValueOnce({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([{ id: 'stu_dupe2', _id: 'oid_dupe2' }]) }) });
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/students/duplicates/resolve-bulk')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ resolutions: [
+        { keepId: 'stu_missing', removeIds: ['stu_dupe1'] },
+        { keepId: 'stu_keep2', removeIds: ['stu_dupe2'] },
+      ] });
+
+    expect(res.status).toBe(207);
+    expect(res.body.data.resolved).toBe(1);
+    expect(res.body.data.removed).toBe(1);
+    expect(res.body.data.errors).toHaveLength(1);
+  });
+
+  test('rejects the request when resolutions array is missing', async () => {
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/students/duplicates/resolve-bulk')
+      .set('Authorization', 'Bearer fake-token')
+      .send({});
+
+    expect(res.status).toBe(400);
+  });
+});
+
 /* ══════════════════════════════════════════════════════════════
    PUT /api/students/:id — medical field persistence
    (Medical Centre milestone 1: StudentUpdateSchema never declared

@@ -383,6 +383,106 @@ router.post('/duplicates/resolve', authMiddleware, PLAN, MODGATE, rbac('students
   }
 });
 
+/* ── POST /api/students/duplicates/resolve-bulk ─ Resolve several
+   duplicate groups in one request (2026-09) ─────────────────────────
+   Same per-group validation as POST /duplicates/resolve above — every
+   removeId is re-checked against its own keepId's admission number —
+   but applied independently per resolution, matching this codebase's
+   established bulk-import convention (v5.70.0/v5.71.0/v5.74.0): one
+   bad group is reported in `errors` and skipped, it never fails the
+   whole batch. All valid deletions across every group are then applied
+   in ONE combined delete + ONE audit log entry, not one per group. */
+router.post('/duplicates/resolve-bulk', authMiddleware, PLAN, MODGATE, rbac('students', 'delete'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { resolutions } = req.body;
+
+    if (!Array.isArray(resolutions) || resolutions.length === 0) {
+      return E.badRequest(res, 'resolutions array is required');
+    }
+    if (resolutions.length > 50) {
+      return E.badRequest(res, 'Maximum 50 groups per request. Split into smaller batches.');
+    }
+
+    const Students = tenantModel('students', tenantContext(req));
+    const Invoices = tenantModel('invoices', tenantContext(req));
+    const Payments = tenantModel('payments', tenantContext(req));
+
+    const results = { resolved: 0, removed: 0, errors: [] };
+    const allMongoIds  = [];
+    const allCustomIds = [];
+    const auditGroups  = [];
+
+    for (let i = 0; i < resolutions.length; i++) {
+      const row = i + 1;
+      const { keepId, removeIds } = resolutions[i] || {};
+
+      if (!keepId || typeof keepId !== 'string') {
+        results.errors.push({ row, message: 'keepId is required' }); continue;
+      }
+      if (!Array.isArray(removeIds) || removeIds.length === 0) {
+        results.errors.push({ row, keepId, message: 'removeIds array is required' }); continue;
+      }
+
+      const keeper = await Students.findOne({ id: keepId, schoolId }).select('id admissionNumber firstName lastName').lean();
+      if (!keeper) {
+        results.errors.push({ row, keepId, message: 'Student to keep was not found' }); continue;
+      }
+      if (!keeper.admissionNumber) {
+        results.errors.push({ row, keepId, message: 'Student to keep has no admission number' }); continue;
+      }
+
+      const toRemove = await Students.find({
+        id: { $in: removeIds }, schoolId, admissionNumber: keeper.admissionNumber,
+      }).select('id _id firstName lastName').lean();
+
+      if (toRemove.length !== removeIds.length) {
+        // Same rule as the single-resolve route: refuse THIS group
+        // rather than silently deleting a subset of it — every other
+        // valid group in the batch still proceeds.
+        results.errors.push({ row, keepId, message: `${removeIds.length - toRemove.length} of the given record(s) for this group do not share its admission number — group skipped` });
+        continue;
+      }
+
+      allMongoIds.push(...toRemove.map(s => s._id));
+      allCustomIds.push(...toRemove.map(s => s.id).filter(Boolean));
+      auditGroups.push({
+        kept:            { id: keeper.id, name: `${keeper.firstName ?? ''} ${keeper.lastName ?? ''}`.trim() },
+        removed:         toRemove.map(s => ({ id: s.id ?? String(s._id), name: `${s.firstName ?? ''} ${s.lastName ?? ''}`.trim() })),
+        admissionNumber: keeper.admissionNumber,
+      });
+      results.resolved++;
+      results.removed += toRemove.length;
+    }
+
+    if (allMongoIds.length > 0) {
+      await Promise.all([
+        Students.deleteMany({ _id: { $in: allMongoIds }, schoolId }),
+        ...(allCustomIds.length ? [
+          Invoices.deleteMany({ studentId: { $in: allCustomIds }, schoolId }),
+          Payments.deleteMany({ studentId: { $in: allCustomIds }, schoolId }),
+        ] : []),
+      ]);
+
+      AuditService.log({
+        action: 'student.deleted',
+        actor:  req.jwtUser,
+        schoolId,
+        target: { type: 'student', id: 'bulk', label: `${results.removed} duplicate student(s) across ${results.resolved} group(s)` },
+        details: { count: results.removed, groups: auditGroups },
+        req,
+      });
+
+      console.log(`[students/duplicates/resolve-bulk] ${userId} resolved ${results.resolved} group(s), removed ${results.removed} duplicate(s) in school ${schoolId}`);
+    }
+
+    return ok(res, results, null, results.errors.length > 0 ? 207 : 200);
+  } catch (err) {
+    console.error('[students POST /duplicates/resolve-bulk]', err);
+    return E.serverError(res);
+  }
+});
+
 /* ── GET /api/students ─ Paginated list ─────────────────────── */
 router.get('/', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), scopeMiddleware, async (req, res) => {
   try {

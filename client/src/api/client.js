@@ -191,6 +191,7 @@ export const students = {
   promote:            (data)       => _post('/students/promote', data),
   duplicates:         ()           => _get('/students/duplicates'),
   resolveDuplicate:   (data)       => _post('/students/duplicates/resolve', data),
+  resolveDuplicatesBulk: (resolutions) => _post('/students/duplicates/resolve-bulk', { resolutions }),
 };
 
 export const teachers = {

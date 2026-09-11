@@ -20,7 +20,20 @@ Requested directly, immediately after v5.75.0 stopped new duplicates from being 
 
 ---
 
-## [v5.75.0] — 2026-09-10 — fix(students): a manually-imported admission number could be silently re-issued to a new student
+## [v5.77.0] — 2026-09-11 — feat(students): bulk-select and remove duplicate students in one pass
+
+Requested directly, right after v5.76.0 shipped: "ensure there is bulk selection and delete of dublicates." v5.76.0 resolved one group at a time — fine for one duplicate, tedious for a school with a dozen after switching to Msingi mid-year.
+
+### Added
+- `POST /api/students/duplicates/resolve-bulk` — takes an array of `{ keepId, removeIds }` (up to 50 groups) and resolves them all in one request: one combined delete across every group's records (not one delete call per group) and one audit log entry covering the whole batch. Each group is still validated independently, same rule as the single-resolve route (every `removeId` must actually share its `keepId`'s admission number) — a bad or stale group is skipped and reported in `errors`, it never fails the other valid groups in the same request.
+- Students page: the Duplicates panel now opens with **every group pre-selected** using its recommended keeper — a checkbox per group to include/exclude it, "Select all"/"Deselect all" for the whole list, and clicking any student card re-picks the keeper for just that group without losing your other choices. One shared **Remove Duplicates** bar at the bottom shows the running total ("3 groups, 5 records") and asks for a single confirmation before removing everything selected in one request.
+
+### Verified
+- 3 new integration tests in `students.test.js`: multiple valid groups resolve in one combined delete call (not one per group), an invalid group is skipped while valid ones in the same request still succeed (207 partial success), and a request with no `resolutions` is rejected outright. Full server suite 1989/1989. `verify-rbac-coverage.js` 100% (486 → 487 endpoints, all covered). `security-scan.js` clean. Client production build passes.
+
+---
+
+## [v5.76.0] — 2026-09-11 — feat(students): find and resolve existing duplicate student records
 
 Reported directly, with a screenshot of two identical student rows sharing one admission number: "the system did not recognise the double entry." Also reported in the same message: "Tried to enrol and admit. The forms to fill are different. On enrol, it picks an automatic ADM no, and there's no field to add the one they have."
 

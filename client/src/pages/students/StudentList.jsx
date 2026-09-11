@@ -1556,31 +1556,77 @@ function PromoteModal({ onClose }) {
    (see v5.75.0/v5.76.0) and lets the admin pick which record to
    keep — the system suggests one (more linked activity, or
    created first), but never removes anything without an
-   explicit, per-group confirmation.
+   explicit confirmation naming exactly what will go.
+
+   Bulk selection (2026-09): every group starts pre-selected with its
+   recommended keeper, so reviewing 20 groups doesn't mean 20 separate
+   confirm clicks — "Select all" / "Deselect all" plus one shared
+   confirm-and-remove bar resolve every checked group in one request
+   (POST /duplicates/resolve-bulk). Clicking a different student card
+   within a group still overrides just that group's keeper; unchecking
+   a group's box excludes it from this pass without losing your other
+   picks.
    ══════════════════════════════════════════════════════════ */
 function DuplicateStudentsPanel({ groups, houseName, onClose }) {
   const qc = useQueryClient();
   const { toast } = useToast();
-  // { admissionNumber, keepId, removeIds, keepName } while the confirm
-  // step is showing for one group; null otherwise.
-  const [confirming, setConfirming] = useState(null);
+  // Per-group overrides, keyed by admissionNumber: { included, keepId }.
+  // A group not in here uses the default (included=true, keepId=recommended).
+  const [overrides, setOverrides] = useState({});
+  const [bulkConfirming, setBulkConfirming] = useState(false);
 
-  const { mutate: resolve, isPending: resolving } = useMutation({
-    mutationFn: ({ keepId, removeIds }) => studentsApi.resolveDuplicate({ keepId, removeIds }),
-    onSuccess: (_res, vars) => {
+  function selectionFor(group) {
+    return {
+      included: overrides[group.admissionNumber]?.included ?? true,
+      keepId:   overrides[group.admissionNumber]?.keepId   ?? group.recommendedKeepId,
+    };
+  }
+  function setKeeper(group, keepId) {
+    setOverrides(o => ({ ...o, [group.admissionNumber]: { ...selectionFor(group), keepId } }));
+  }
+  function toggleIncluded(group) {
+    setOverrides(o => ({ ...o, [group.admissionNumber]: { ...selectionFor(group), included: !selectionFor(group).included } }));
+  }
+  function setAllIncluded(included) {
+    setOverrides(o => Object.fromEntries(groups.map(g => [g.admissionNumber, { ...selectionFor(g), included }])));
+  }
+
+  const selectedGroups = groups.filter(g => selectionFor(g).included);
+  const totalToRemove  = selectedGroups.reduce((sum, g) => sum + (g.students.length - 1), 0);
+
+  const { mutate: resolveBulk, isPending: resolving } = useMutation({
+    mutationFn: (resolutions) => studentsApi.resolveDuplicatesBulk(resolutions),
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['students'] });
       qc.invalidateQueries({ queryKey: ['students', 'duplicates'] });
-      toast.success(`Kept ${vars.keepName || 'the selected record'} — ${vars.removeIds.length} duplicate${vars.removeIds.length === 1 ? '' : 's'} removed.`);
-      setConfirming(null);
+      const { resolved = 0, removed = 0, errors = [] } = res?.data ?? {};
+      if (errors.length > 0) {
+        toast.error(`Removed ${removed} duplicate(s) across ${resolved} group(s) — ${errors.length} group(s) skipped (their data changed since this list loaded; refresh and try again).`);
+      } else {
+        toast.success(`Removed ${removed} duplicate${removed === 1 ? '' : 's'} across ${resolved} group${resolved === 1 ? '' : 's'}.`);
+      }
+      setBulkConfirming(false);
+      setOverrides({});
     },
-    onError: e => toast.error(e?.message ?? 'Failed to resolve this duplicate.'),
+    onError: e => toast.error(e?.message ?? 'Failed to resolve the selected duplicates.'),
   });
+
+  function confirmResolve() {
+    const resolutions = selectedGroups.map(g => {
+      const { keepId } = selectionFor(g);
+      return { keepId, removeIds: g.students.map(s => s.id).filter(id => id !== keepId) };
+    });
+    resolveBulk(resolutions);
+  }
 
   function fmtDate(d) {
     if (!d) return '—';
     try { return new Date(d).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); }
     catch { return '—'; }
   }
+
+  const allIncluded  = groups.length > 0 && groups.every(g => selectionFor(g).included);
+  const noneIncluded = groups.every(g => !selectionFor(g).included);
 
   return (
     <>
@@ -1599,7 +1645,7 @@ function DuplicateStudentsPanel({ groups, houseName, onClose }) {
             <div>
               <h2 className="text-base font-semibold text-slate-900">Duplicate Students</h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                {groups.length} group{groups.length === 1 ? '' : 's'} share{groups.length === 1 ? 's' : ''} one admission number. Pick which record to keep for each — the other{groups.length === 1 && groups[0]?.count === 2 ? '' : 's'} will be permanently removed, along with any invoices and payments attached to it.
+                {groups.length} group{groups.length === 1 ? '' : 's'} share{groups.length === 1 ? 's' : ''} one admission number. Every group is pre-selected with its recommended keeper — review each, adjust as needed, then remove them all in one go.
               </p>
             </div>
           </div>
@@ -1607,6 +1653,21 @@ function DuplicateStudentsPanel({ groups, houseName, onClose }) {
             <X size={18} />
           </button>
         </div>
+
+        {groups.length > 0 && (
+          <div className="flex items-center justify-between gap-3 px-6 py-2.5 border-b border-slate-100 bg-slate-50/60">
+            <div className="flex items-center gap-3 text-xs">
+              <button onClick={() => setAllIncluded(true)} disabled={allIncluded} className="font-medium text-slate-600 hover:text-slate-900 disabled:opacity-40 disabled:cursor-default">
+                Select all
+              </button>
+              <span className="text-slate-300">|</span>
+              <button onClick={() => setAllIncluded(false)} disabled={noneIncluded} className="font-medium text-slate-600 hover:text-slate-900 disabled:opacity-40 disabled:cursor-default">
+                Deselect all
+              </button>
+            </div>
+            <span className="text-xs text-slate-500">{selectedGroups.length} of {groups.length} selected</span>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
           {groups.length === 0 && (
@@ -1617,30 +1678,44 @@ function DuplicateStudentsPanel({ groups, houseName, onClose }) {
           )}
 
           {groups.map(group => {
-            const isConfirmingThisGroup = confirming?.admissionNumber === group.admissionNumber;
+            const { included, keepId } = selectionFor(group);
             return (
-              <div key={group.admissionNumber} className="rounded-xl border border-slate-200 overflow-hidden">
-                <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3">
-                  <span className="text-sm font-semibold text-slate-800">Admission No. {group.admissionNumber}</span>
+              <div key={group.admissionNumber} className={`rounded-xl border overflow-hidden transition-colors ${included ? 'border-slate-200' : 'border-slate-100 opacity-60'}`}>
+                <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={included}
+                    onChange={() => toggleIncluded(group)}
+                    className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
+                  />
+                  <span className="text-sm font-semibold text-slate-800 flex-1">Admission No. {group.admissionNumber}</span>
                   <span className="text-xs text-slate-500">{group.count} records</span>
                 </div>
                 <p className="px-4 pt-3 text-xs text-slate-500">{group.recommendedReason}</p>
 
                 <div className="grid sm:grid-cols-2 gap-3 p-4">
                   {group.students.map(s => {
+                    const isKept = s.id === keepId;
                     const isRecommended = s.id === group.recommendedKeepId;
-                    const removeIds = group.students.map(o => o.id).filter(id => id !== s.id);
                     const fullName = [s.firstName, s.middleName, s.lastName].filter(Boolean).join(' ');
                     return (
-                      <div
+                      <button
+                        type="button"
                         key={s.id}
-                        className={`rounded-lg border p-3 text-sm ${isRecommended ? 'border-emerald-300 bg-emerald-50/40' : 'border-slate-200'}`}
+                        onClick={() => setKeeper(group, s.id)}
+                        disabled={!included}
+                        className={`text-left rounded-lg border p-3 text-sm transition-colors disabled:cursor-not-allowed ${isKept ? 'border-emerald-400 bg-emerald-50/50 ring-1 ring-emerald-300' : 'border-slate-200 hover:border-slate-300'}`}
                       >
                         <div className="flex items-center justify-between gap-2 mb-1.5">
                           <span className="font-semibold text-slate-900 truncate">{fullName || '—'}</span>
-                          {isRecommended && (
-                            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">Recommended</span>
-                          )}
+                          <span className="shrink-0 flex items-center gap-1">
+                            {isRecommended && (
+                              <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">Suggested</span>
+                            )}
+                            {isKept && (
+                              <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">Keeping</span>
+                            )}
+                          </span>
                         </div>
                         <div className="space-y-0.5 text-xs text-slate-500">
                           <p>Class: {s.className || '—'} {s.houseId ? `· House ${houseName(s.houseId) ?? s.houseId}` : ''}</p>
@@ -1649,42 +1724,48 @@ function DuplicateStudentsPanel({ groups, houseName, onClose }) {
                           {(s.parentName || s.parentEmail) && <p>Parent: {[s.parentName, s.parentEmail].filter(Boolean).join(' · ')}</p>}
                           <p>{s.invoiceCount} invoice(s) · {s.paymentCount} payment(s) linked</p>
                         </div>
-                        <button
-                          onClick={() => setConfirming({ admissionNumber: group.admissionNumber, keepId: s.id, removeIds, keepName: fullName })}
-                          disabled={resolving}
-                          className="mt-3 w-full text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-900 hover:text-white hover:border-slate-900 disabled:opacity-50 transition-colors"
-                        >
-                          Keep this one
-                        </button>
-                      </div>
+                      </button>
                     );
                   })}
                 </div>
-
-                {isConfirmingThisGroup && (
-                  <div className="mx-4 mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3">
-                    <p className="text-sm text-red-800">
-                      Keep <span className="font-semibold">{confirming.keepName || 'this record'}</span> and permanently remove the other {confirming.removeIds.length} record{confirming.removeIds.length === 1 ? '' : 's'} (and any of its invoices/payments)? <span className="font-medium">This cannot be undone.</span>
-                    </p>
-                    <div className="flex items-center justify-end gap-3 mt-3">
-                      <button onClick={() => setConfirming(null)} disabled={resolving} className="text-xs font-medium text-slate-600 hover:text-slate-800 disabled:opacity-50">
-                        Cancel
-                      </button>
-                      <button
-                        onClick={() => resolve(confirming)}
-                        disabled={resolving}
-                        className="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
-                      >
-                        {resolving ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-                        {resolving ? 'Removing…' : 'Confirm & Remove'}
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
             );
           })}
         </div>
+
+        {groups.length > 0 && (
+          <div className="border-t border-slate-100 bg-slate-50/50 px-6 py-4">
+            {!bulkConfirming ? (
+              <button
+                onClick={() => setBulkConfirming(true)}
+                disabled={selectedGroups.length === 0}
+                className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition-colors"
+              >
+                <Trash2 size={14} />
+                Remove Duplicates — {selectedGroups.length} group{selectedGroups.length === 1 ? '' : 's'} ({totalToRemove} record{totalToRemove === 1 ? '' : 's'})
+              </button>
+            ) : (
+              <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3">
+                <p className="text-sm text-red-800">
+                  This will permanently remove <span className="font-semibold">{totalToRemove} duplicate record{totalToRemove === 1 ? '' : 's'}</span> across <span className="font-semibold">{selectedGroups.length} group{selectedGroups.length === 1 ? '' : 's'}</span>, along with any invoices and payments attached to them. <span className="font-medium">This cannot be undone.</span>
+                </p>
+                <div className="flex items-center justify-end gap-3 mt-3">
+                  <button onClick={() => setBulkConfirming(false)} disabled={resolving} className="text-xs font-medium text-slate-600 hover:text-slate-800 disabled:opacity-50">
+                    Cancel
+                  </button>
+                  <button
+                    onClick={confirmResolve}
+                    disabled={resolving}
+                    className="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    {resolving ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                    {resolving ? 'Removing…' : `Confirm & Remove ${totalToRemove}`}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </motion.div>
     </>
   );
