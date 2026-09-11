@@ -306,6 +306,15 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('admissions', 'update'), 
       Object.assign(data, resolvePrimaryContact(merged));
     }
 
+    // Same rule as PATCH /:id/stage below, and for the same reason
+    // (2026-09 confirmed live bug): this generic update can also carry a
+    // `stage` field, and setting it straight to 'enrolled' here has the
+    // exact same effect — a stage flip with none of POST /:id/enroll's
+    // actual work behind it.
+    if (data.stage === 'enrolled' && existing.stage !== 'enrolled') {
+      return E.badRequest(res, 'Use "Enroll Student" to move an applicant to Enrolled — it creates the actual student record, admission number, and invoice; a plain field update does not.');
+    }
+
     const update = { ...data, updatedBy: userId };
 
     // If stage changed, append to history
@@ -330,6 +339,21 @@ router.patch('/:id/stage', authMiddleware, PLAN, MODGATE, rbac('admissions', 'up
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(StageChangeSchema, req.body);
     if (error) return E.validation(res, error);
+
+    // Confirmed live-data bug (2026-09): this route set stage: 'enrolled'
+    // directly, same as any other stage, with none of POST /:id/enroll's
+    // actual work — no Student record, no admission number, no guardian
+    // link, no invoice. Three real applicants ended up on the Enrolled
+    // column with nothing behind them: unsearchable in Students, not
+    // counted in its totals, no login, no way to bill them. "Enrolled"
+    // is the one stage this quick-move endpoint must never set — moving
+    // there always goes through the dedicated enroll endpoint, which
+    // does the real work AND still updates stage. See "Enrolling an
+    // applicant" in ADMISSIONS_GUIDE.md for why this was already meant
+    // to require a deliberate, separate click.
+    if (data.stage === 'enrolled') {
+      return E.badRequest(res, 'Use "Enroll Student" to move an applicant to Enrolled — it creates the actual student record, admission number, and invoice; this quick stage-move does not.');
+    }
 
     const Apps = tenantModel('admissions', tenantContext(req));
     const doc  = await Apps.findOneAndUpdate(

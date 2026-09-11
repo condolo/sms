@@ -8,6 +8,17 @@ import { X, Loader2 } from 'lucide-react';
 import { admissions as admissionsApi } from '@/api/client.js';
 import { PIPELINE, TERMINAL } from '../constants.js';
 
+// "Enrolled" is deliberately excluded from this quick mover (2026-09,
+// confirmed live bug): this dialog only ever changes the `stage` field —
+// it never creates the actual Student record, admission number,
+// guardian link, or invoice that "Enrolled" is supposed to mean. Three
+// real applicants ended up here with nothing behind them: unsearchable
+// in Students, not counted in its totals, no login. The server now
+// rejects it too (defense in depth), but hiding it here means a staff
+// member is guided straight to the real "Enroll Student" button on the
+// detail panel instead of hitting an error after picking it.
+const MOVABLE_STAGES = [...PIPELINE.filter(s => s.id !== 'enrolled'), ...TERMINAL];
+
 export default function StageModal({ applicant, onClose, onChanged }) {
   const a = applicant;
   const [selectedStage, setSelectedStage] = useState(a.stage);
@@ -51,7 +62,7 @@ export default function StageModal({ applicant, onClose, onChanged }) {
             <div>
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">Select stage</p>
               <div className="grid grid-cols-2 gap-2">
-                {[...PIPELINE, ...TERMINAL].map(s => {
+                {MOVABLE_STAGES.map(s => {
                   const isCurrent  = s.id === a.stage;
                   const isSelected = s.id === selectedStage;
                   return (
@@ -74,6 +85,9 @@ export default function StageModal({ applicant, onClose, onChanged }) {
                   );
                 })}
               </div>
+              {a.stage === 'acceptance' && (
+                <p className="text-[11px] text-slate-400 mt-2">Ready to enroll? Close this and use the <strong>Enroll Student</strong> button instead — it creates the actual student record, not just this stage label.</p>
+              )}
             </div>
 
             {/* Notes */}

@@ -95,7 +95,7 @@ A stage-only change (e.g. Enquiry → Application) never re-checks or touches th
 
 Once an application reaches **Acceptance**, open it — its detail panel shows an **Enroll Student** button.
 
-This is a deliberate, explicit action, not something that happens automatically when you change the stage dropdown, because it creates a real, permanent student record. Clicking it:
+This is a deliberate, explicit action, not something that happens automatically when you change the stage dropdown, because it creates a real, permanent student record. *(2026-09)* The **Move Applicant** dialog (§3) no longer offers "Enrolled" as a destination at all — moving an application there any other way used to silently set the label with none of the real work behind it (no student record, no admission number, no invoice), leaving a card in the Enrolled column that Students had never heard of. If you ever see an application at Enrolled with no linked student, opening it and clicking Enroll Student fixes it — the button still appears, and enrolling is safe to retry. Clicking it:
 
 - Assigns the student's **permanent admission number** at that exact moment — never earlier, and never on the application itself.
 - Carries every field across automatically: names, DOB, gender, class/stream/house, both parents' full details, Allergies and Emergency Contact (filed under the new student's Medical tab).
@@ -119,4 +119,4 @@ The Dashboard's **Admissions Pipeline** bar chart shows applicant counts by stag
 
 ---
 
-*Last reviewed: 2026-09-08 — §4 and §8 updated for the billing-sequence fix: Fee Discounts (Director's/Referral) are now set on the application itself, and sibling discounts link automatically before the draft admission invoice is generated (`server/utils/guardian-linking.js`, `server/utils/admission-billing.js`), checked directly against `server/routes/admissions.js`.*
+*Last reviewed: 2026-09-11 — §3 and §8 updated: "Enrolled" can no longer be set from the Move Applicant dialog or a plain field update — confirmed live (a real Trinitas school's data) that it previously could, leaving three real applicants "Enrolled" with no linked Student record at all — checked directly against `server/routes/admissions.js` and `client/src/pages/admissions/components/StageModal.jsx`. Earlier: 2026-09-08 — §4 and §8 updated for the billing-sequence fix: Fee Discounts (Director's/Referral) are now set on the application itself, and sibling discounts link automatically before the draft admission invoice is generated (`server/utils/guardian-linking.js`, `server/utils/admission-billing.js`), checked directly against `server/routes/admissions.js`.*

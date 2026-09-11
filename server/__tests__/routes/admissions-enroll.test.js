@@ -513,3 +513,59 @@ describe('POST /api/admissions/:id/enroll — business-flow: discount is correct
     expect(mockUserDocs[0].studentIds.filter(id => id === newStudentId)).toHaveLength(1); // never double-linked
   });
 });
+
+/* ══════════════════════════════════════════════════════════════
+   PATCH /:id/stage and PUT /:id — "enrolled" is blocked outside
+   POST /:id/enroll (2026-09 confirmed live bug)
+
+   Three real Trinitas applicants ended up on the Enrolled column via
+   the generic "Move Applicant" dialog (PATCH /:id/stage) — a stage
+   flip with none of POST /:id/enroll's actual work behind it: no
+   Student record, no admission number, no guardian link, no invoice.
+   Unsearchable in Students, not counted in its totals, no login.
+   Neither quick-update route may set stage to 'enrolled' anymore —
+   only the dedicated enroll endpoint may.
+══════════════════════════════════════════════════════════════ */
+describe('PATCH /api/admissions/:id/stage — enrolled is blocked', () => {
+  test('rejects a direct move to "enrolled"', async () => {
+    mockAppDocs = [app({ stage: 'acceptance' })];
+    const res = await supertest(buildApp())
+      .patch('/api/admissions/app_1/stage')
+      .send({ stage: 'enrolled' });
+
+    expect(res.status).toBe(400);
+    expect(mockAppDocs[0].stage).toBe('acceptance'); // untouched
+  });
+
+  test('still allows moving between ordinary pipeline stages', async () => {
+    mockAppDocs = [app({ stage: 'offer' })];
+    const res = await supertest(buildApp())
+      .patch('/api/admissions/app_1/stage')
+      .send({ stage: 'acceptance' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.stage).toBe('acceptance');
+  });
+});
+
+describe('PUT /api/admissions/:id — enrolled is blocked outside enroll', () => {
+  test('rejects a plain field update that flips stage to "enrolled"', async () => {
+    mockAppDocs = [app({ stage: 'acceptance' })];
+    const res = await supertest(buildApp())
+      .put('/api/admissions/app_1')
+      .send({ stage: 'enrolled' });
+
+    expect(res.status).toBe(400);
+    expect(mockAppDocs[0].stage).toBe('acceptance');
+  });
+
+  test('an unrelated update to an already-enrolled application (same stage resent) is not blocked', async () => {
+    mockAppDocs = [app({ stage: 'enrolled', studentId: 'stu_1', notes: 'old note' })];
+    const res = await supertest(buildApp())
+      .put('/api/admissions/app_1')
+      .send({ stage: 'enrolled', notes: 'updated note' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.notes).toBe('updated note');
+  });
+});

@@ -6,6 +6,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.82.0] — 2026-09-11 — fix(admissions): "Enrolled" could be set without ever creating the student it names
+
+Traced directly from the previous search-bug report: three Trinitas applicants showed as Enrolled on the board, but none of them existed in Students at all — confirmed live, by connecting to the actual database, not inferred from the report alone.
+
+### Root cause
+Two routes could set an application's `stage` straight to `'enrolled'` as an ordinary field update, with none of `POST /:id/enroll`'s actual work behind it: no Student record, no admission number, no guardian link, no invoice.
+- `PATCH /api/admissions/:id/stage` — the "quick stage change" behind the client's **Move Applicant** dialog, which lists Enrolled in the same grid as every other stage with no indication it's different.
+- `PUT /api/admissions/:id` — the general-purpose application update, which also accepts a bare `stage` field.
+
+All three affected applications had `stageHistory` entries with a plain date and empty notes — not the auto-generated `"Enrolled — admission number …"` text `/enroll` always writes — confirming they went through the quick-move dialog, not the real Enroll Student button. The result: a card sitting in the Enrolled column that the Students module has never heard of — unsearchable, not counted in its totals, no login, nothing to bill.
+
+### Fixed
+- Both `PATCH /api/admissions/:id/stage` and `PUT /api/admissions/:id` now reject a bare attempt to set `stage: 'enrolled'` with a clear error pointing to the Enroll Student action — an update that leaves an already-enrolled application's stage unchanged (e.g. editing its notes) is unaffected.
+- The **Move Applicant** dialog no longer lists Enrolled as a destination at all, and shows a note directing to the real Enroll Student button once an application reaches Acceptance — the option is removed, not just disabled, so there's nothing to click and get an error from.
+
+### Recovering the 3 affected applications
+No database repair needed — the enroll endpoint's own idempotency guard already covers exactly this case (an application at stage `'enrolled'` with no `studentId` yet is treated as a fresh enroll, not a duplicate). Opening each application's detail panel now shows the real **Enroll Student** button; clicking it creates the actual student record, admission number, guardian link, and invoice — nothing needs editing by hand.
+
+### Verified
+- 4 new integration tests in `admissions-enroll.test.js`: a direct move to Enrolled is rejected via both routes and the application's stage is left untouched, ordinary pipeline moves are unaffected, and editing an already-enrolled application without touching its stage still works. Full server suite 2011/2011. `verify-rbac-coverage.js` 100% (no regression — no new routes). `security-scan.js` clean. Client production build passes.
+
+---
+
 ## [v5.81.0] — 2026-09-11 — fix(students, admissions, teachers): a full-name search returned nothing, silently
 
 Reported directly: three applicants showed as "Enrolled" on the Admissions board, the Students page's total count included them, but searching for them in the Students list found nothing.
