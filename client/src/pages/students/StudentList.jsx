@@ -11,7 +11,7 @@ import {
   Search, X, Filter,
   GraduationCap, Users, AlertTriangle, Eye, Trash2,
   Loader2, CheckCircle2, Phone, Mail, Download,
-  ShieldAlert, UserMinus, KeyRound, ArrowUpCircle, ChevronsRight,
+  ShieldAlert, UserMinus, KeyRound, ArrowUpCircle, ChevronsRight, Copy,
 } from 'lucide-react';
 import {
   students as studentsApi, classes as classesApi, streams as streamsApi, importExport,
@@ -92,6 +92,17 @@ export default function StudentList() {
   const houses = Array.isArray(settingsData?.data?.houses) ? settingsData.data.houses : [];
   const houseName = id => houses.find(h => (h.id ?? h.name) === id)?.name ?? null;
 
+  /* Duplicate admission numbers (2026-09) — read-only badge count; the
+     admin resolves them from the slide-over. Only fetched for admins,
+     since resolving one requires the same delete permission anyway. */
+  const { data: duplicatesData } = useQuery({
+    queryKey: ['students', 'duplicates'],
+    queryFn:  () => studentsApi.duplicates(),
+    enabled:  canDelete,
+    staleTime: 60_000,
+  });
+  const duplicateGroups = duplicatesData?.data?.groups ?? [];
+
   /* Read ?classId= from URL so "View students" on class cards pre-filters the list */
   const [searchParams] = useSearchParams();
 
@@ -116,6 +127,7 @@ export default function StudentList() {
   // null = closed | student object = single deactivate | 'bulk' = bulk deactivate
   const [deactivateTarget, setDeactivateTarget] = useState(null);
   const [showPromote, setShowPromote] = useState(false);
+  const [showDuplicates, setShowDuplicates] = useState(false);
 
   /* React to URL param changes */
   useEffect(() => {
@@ -407,6 +419,16 @@ export default function StudentList() {
               {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
               Export
             </button>
+            {canDelete && duplicateGroups.length > 0 && (
+              <button
+                onClick={() => setShowDuplicates(true)}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50 hover:border-amber-400 transition-colors"
+                title="Two or more students share the same admission number"
+              >
+                <Copy size={14} />
+                {duplicateGroups.length} Duplicate{duplicateGroups.length === 1 ? '' : 's'}
+              </button>
+            )}
             {canDelete && (
               <button
                 onClick={() => setShowPromote(true)}
@@ -855,6 +877,17 @@ export default function StudentList() {
       <AnimatePresence>
         {showPromote && (
           <PromoteModal onClose={() => setShowPromote(false)} />
+        )}
+      </AnimatePresence>
+
+      {/* ── Duplicate students slide-over (2026-09) ─────────── */}
+      <AnimatePresence>
+        {showDuplicates && (
+          <DuplicateStudentsPanel
+            groups={duplicateGroups}
+            houseName={houseName}
+            onClose={() => setShowDuplicates(false)}
+          />
         )}
       </AnimatePresence>
     </div>
@@ -1511,6 +1544,146 @@ function PromoteModal({ onClose }) {
               </>
             )}
           </div>
+        </div>
+      </motion.div>
+    </>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════
+   DUPLICATE STUDENTS PANEL (2026-09)
+   Lists every group of students sharing one admission number
+   (see v5.75.0/v5.76.0) and lets the admin pick which record to
+   keep — the system suggests one (more linked activity, or
+   created first), but never removes anything without an
+   explicit, per-group confirmation.
+   ══════════════════════════════════════════════════════════ */
+function DuplicateStudentsPanel({ groups, houseName, onClose }) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  // { admissionNumber, keepId, removeIds, keepName } while the confirm
+  // step is showing for one group; null otherwise.
+  const [confirming, setConfirming] = useState(null);
+
+  const { mutate: resolve, isPending: resolving } = useMutation({
+    mutationFn: ({ keepId, removeIds }) => studentsApi.resolveDuplicate({ keepId, removeIds }),
+    onSuccess: (_res, vars) => {
+      qc.invalidateQueries({ queryKey: ['students'] });
+      qc.invalidateQueries({ queryKey: ['students', 'duplicates'] });
+      toast.success(`Kept ${vars.keepName || 'the selected record'} — ${vars.removeIds.length} duplicate${vars.removeIds.length === 1 ? '' : 's'} removed.`);
+      setConfirming(null);
+    },
+    onError: e => toast.error(e?.message ?? 'Failed to resolve this duplicate.'),
+  });
+
+  function fmtDate(d) {
+    if (!d) return '—';
+    try { return new Date(d).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); }
+    catch { return '—'; }
+  }
+
+  return (
+    <>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-40" onClick={onClose} />
+      <motion.div
+        initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+        transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+        className="fixed right-0 top-0 h-full w-full max-w-3xl bg-white shadow-2xl z-50 flex flex-col"
+      >
+        <div className="flex items-start justify-between gap-3 px-6 py-5 border-b border-slate-100">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+              <Copy size={18} className="text-amber-600" />
+            </div>
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">Duplicate Students</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {groups.length} group{groups.length === 1 ? '' : 's'} share{groups.length === 1 ? 's' : ''} one admission number. Pick which record to keep for each — the other{groups.length === 1 && groups[0]?.count === 2 ? '' : 's'} will be permanently removed, along with any invoices and payments attached to it.
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition shrink-0">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+          {groups.length === 0 && (
+            <div className="text-center py-16 text-sm text-slate-500">
+              <CheckCircle2 size={28} className="mx-auto mb-2 text-emerald-500" />
+              No duplicate admission numbers left to resolve.
+            </div>
+          )}
+
+          {groups.map(group => {
+            const isConfirmingThisGroup = confirming?.admissionNumber === group.admissionNumber;
+            return (
+              <div key={group.admissionNumber} className="rounded-xl border border-slate-200 overflow-hidden">
+                <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3">
+                  <span className="text-sm font-semibold text-slate-800">Admission No. {group.admissionNumber}</span>
+                  <span className="text-xs text-slate-500">{group.count} records</span>
+                </div>
+                <p className="px-4 pt-3 text-xs text-slate-500">{group.recommendedReason}</p>
+
+                <div className="grid sm:grid-cols-2 gap-3 p-4">
+                  {group.students.map(s => {
+                    const isRecommended = s.id === group.recommendedKeepId;
+                    const removeIds = group.students.map(o => o.id).filter(id => id !== s.id);
+                    const fullName = [s.firstName, s.middleName, s.lastName].filter(Boolean).join(' ');
+                    return (
+                      <div
+                        key={s.id}
+                        className={`rounded-lg border p-3 text-sm ${isRecommended ? 'border-emerald-300 bg-emerald-50/40' : 'border-slate-200'}`}
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <span className="font-semibold text-slate-900 truncate">{fullName || '—'}</span>
+                          {isRecommended && (
+                            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">Recommended</span>
+                          )}
+                        </div>
+                        <div className="space-y-0.5 text-xs text-slate-500">
+                          <p>Class: {s.className || '—'} {s.houseId ? `· House ${houseName(s.houseId) ?? s.houseId}` : ''}</p>
+                          <p>Gender: {s.gender || '—'} · DOB: {fmtDate(s.dateOfBirth)}</p>
+                          <p>Status: {s.status || '—'} · Added {fmtDate(s.createdAt)}</p>
+                          {(s.parentName || s.parentEmail) && <p>Parent: {[s.parentName, s.parentEmail].filter(Boolean).join(' · ')}</p>}
+                          <p>{s.invoiceCount} invoice(s) · {s.paymentCount} payment(s) linked</p>
+                        </div>
+                        <button
+                          onClick={() => setConfirming({ admissionNumber: group.admissionNumber, keepId: s.id, removeIds, keepName: fullName })}
+                          disabled={resolving}
+                          className="mt-3 w-full text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-900 hover:text-white hover:border-slate-900 disabled:opacity-50 transition-colors"
+                        >
+                          Keep this one
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {isConfirmingThisGroup && (
+                  <div className="mx-4 mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3">
+                    <p className="text-sm text-red-800">
+                      Keep <span className="font-semibold">{confirming.keepName || 'this record'}</span> and permanently remove the other {confirming.removeIds.length} record{confirming.removeIds.length === 1 ? '' : 's'} (and any of its invoices/payments)? <span className="font-medium">This cannot be undone.</span>
+                    </p>
+                    <div className="flex items-center justify-end gap-3 mt-3">
+                      <button onClick={() => setConfirming(null)} disabled={resolving} className="text-xs font-medium text-slate-600 hover:text-slate-800 disabled:opacity-50">
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => resolve(confirming)}
+                        disabled={resolving}
+                        className="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+                      >
+                        {resolving ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                        {resolving ? 'Removing…' : 'Confirm & Remove'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </motion.div>
     </>

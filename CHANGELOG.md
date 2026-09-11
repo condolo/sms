@@ -6,6 +6,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.76.0] — 2026-09-11 — feat(students): find and resolve existing duplicate student records
+
+Requested directly, immediately after v5.75.0 stopped new duplicates from being created: "i need us to find away how to filter duplicates and eliminate... so that it selects one name if they are two." v5.75.0 only prevented FUTURE duplicates — it did nothing for ones already sitting in the data, like the exact-duplicate pair (same admission number, same everything) reported the same day.
+
+### Added
+- `GET /api/students/duplicates` — groups every student in the school by admission number and returns any group with more than one record (a blank admission number is never treated as a group). For each group, suggests which record to keep: whichever has more linked invoices/payments (the one actually in use), tied-broken by whichever was created first. Detection only — this never deletes or changes anything on its own.
+- `POST /api/students/duplicates/resolve` — takes a `keepId` and `removeIds`, deletes the `removeIds` records (cascading to their invoices/payments, same scope as the existing `DELETE /students/purge`) and keeps `keepId`. Deliberately narrow: every id in `removeIds` is re-checked server-side against `keepId`'s own admission number before anything is deleted — a stale or tampered id list is refused outright rather than silently deleting the wrong record.
+- Students page: a **Duplicates** button appears in the toolbar (admins only) whenever any exist, showing the count. Opens a panel listing every group side-by-side — name, class, gender, house, status, parent contact, linked invoice/payment counts, and when each was added — with the recommended record marked. Clicking **Keep this one** asks for one explicit confirmation naming exactly what will be removed before anything happens; nothing is ever auto-resolved without that click.
+
+### Verified
+- 6 new integration tests in `students.test.js`: an empty result when nothing collides, recommending the older record when neither has linked activity, recommending whichever has linked invoices/payments even if created later, a clean resolve that removes only the matching record and cascades its invoices/payments, refusing a request where a removeId doesn't actually share the admission number, and 404 on a missing keepId. Full server suite 1986/1986. `verify-rbac-coverage.js` 100% (484 → 486 endpoints, both covered). `security-scan.js` clean. Client production build passes.
+
+---
+
 ## [v5.75.0] — 2026-09-10 — fix(students): a manually-imported admission number could be silently re-issued to a new student
 
 Reported directly, with a screenshot of two identical student rows sharing one admission number: "the system did not recognise the double entry." Also reported in the same message: "Tried to enrol and admit. The forms to fill are different. On enrol, it picks an automatic ADM no, and there's no field to add the one they have."

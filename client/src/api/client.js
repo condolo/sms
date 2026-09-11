@@ -189,6 +189,8 @@ export const students = {
   deactivate:         (id, data)   => _req('PATCH', `/students/${id}/deactivate`, data),
   reactivate:         (id)         => _req('PATCH', `/students/${id}/reactivate`, {}),
   promote:            (data)       => _post('/students/promote', data),
+  duplicates:         ()           => _get('/students/duplicates'),
+  resolveDuplicate:   (data)       => _post('/students/duplicates/resolve', data),
 };
 
 export const teachers = {

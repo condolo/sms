@@ -220,6 +220,169 @@ router.get('/stats', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), as
   } catch (err) { console.error('[students GET /stats]', err); return E.serverError(res); }
 });
 
+/* ── GET /api/students/duplicates ─ Find students sharing one admission
+   number (2026-09) ──────────────────────────────────────────────────
+   Detection only — never deletes anything on its own. v5.75.0 stopped
+   NEW duplicates from being created, but did nothing for ones already
+   sitting in the data (a manually-imported admission number the
+   counter never learned about, handed out again later). Admission
+   number is the same unambiguous "same person" signal already used by
+   every other duplicate check in this codebase (v5.70.0's CSV-import
+   check, v5.75.0's collision-safe counter) — a blank number is never
+   treated as a group of its own. */
+router.get('/duplicates', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const Students = tenantModel('students', tenantContext(req));
+    const Invoices = tenantModel('invoices', tenantContext(req));
+    const Payments = tenantModel('payments', tenantContext(req));
+
+    const groups = await Students.aggregate([
+      { $match: { schoolId, admissionNumber: { $nin: [null, ''] } } },
+      { $group: { _id: '$admissionNumber', count: { $sum: 1 }, docs: { $push: '$$ROOT' } } },
+      { $match: { count: { $gt: 1 } } },
+      { $sort: { _id: 1 } },
+    ]);
+
+    if (groups.length === 0) {
+      return ok(res, { groups: [], totalGroups: 0, totalDuplicateRecords: 0 });
+    }
+
+    // One pass to count linked invoices/payments for every student across
+    // every group — used only to suggest which record to keep (the one
+    // actually in use); the admin always makes the final call, never an
+    // automatic deletion.
+    const allIds = groups.flatMap(g => g.docs.map(d => d.id).filter(Boolean));
+    const [invoiceCounts, paymentCounts] = await Promise.all([
+      Invoices.aggregate([{ $match: { schoolId, studentId: { $in: allIds } } }, { $group: { _id: '$studentId', count: { $sum: 1 } } }]),
+      Payments.aggregate([{ $match: { schoolId, studentId: { $in: allIds } } }, { $group: { _id: '$studentId', count: { $sum: 1 } } }]),
+    ]);
+    const invoiceCountById = Object.fromEntries(invoiceCounts.map(c => [c._id, c.count]));
+    const paymentCountById = Object.fromEntries(paymentCounts.map(c => [c._id, c.count]));
+
+    const groupList = groups.map(g => {
+      const students = g.docs.map(d => {
+        const id            = d.id ?? String(d._id);
+        const invoiceCount  = invoiceCountById[id] ?? 0;
+        const paymentCount  = paymentCountById[id] ?? 0;
+        return {
+          id, firstName: d.firstName, middleName: d.middleName, lastName: d.lastName,
+          gender: d.gender, dateOfBirth: d.dateOfBirth,
+          classId: d.classId, className: d.className,
+          houseId: d.houseId, status: d.status,
+          parentName: d.parentName, parentEmail: d.parentEmail,
+          createdAt: d.createdAt,
+          invoiceCount, paymentCount, linkedRecords: invoiceCount + paymentCount,
+        };
+      });
+
+      // Suggests whichever record has more linked activity (invoices/
+      // payments) — that's the one actually in use day to day. Ties go
+      // to whichever was created first, since a later duplicate is more
+      // likely to be the accidental re-entry. A suggestion only — never
+      // acted on until the admin picks one via POST /duplicates/resolve.
+      const recommended = [...students].sort((a, b) =>
+        b.linkedRecords - a.linkedRecords ||
+        new Date(a.createdAt || 0) - new Date(b.createdAt || 0)
+      )[0];
+      const recommendedReason = recommended.linkedRecords > 0
+        ? `Has ${recommended.linkedRecords} linked invoice/payment record${recommended.linkedRecords === 1 ? '' : 's'} — the others have none or fewer.`
+        : 'Created first — none of these have any invoices or payments yet.';
+
+      return {
+        admissionNumber: g._id,
+        count: g.count,
+        students,
+        recommendedKeepId: recommended.id,
+        recommendedReason,
+      };
+    });
+
+    return ok(res, {
+      groups: groupList,
+      totalGroups: groupList.length,
+      totalDuplicateRecords: groupList.reduce((sum, g) => sum + g.count, 0),
+    });
+  } catch (err) {
+    console.error('[students GET /duplicates]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── POST /api/students/duplicates/resolve ─ Keep one, remove the rest
+   of a duplicate-admission-number group (2026-09) ───────────────────
+   Deliberately narrow: every id in `removeIds` must share the SAME
+   admission number as `keepId` — this can only ever resolve a genuine
+   duplicate group from GET /duplicates above, never delete an unrelated
+   student by a mistaken or tampered id. Reuses DELETE /purge's own
+   cascade scope (students + their invoices/payments) so a resolved
+   duplicate doesn't leave orphaned finance records behind, and the same
+   audit action so it shows up alongside every other student deletion. */
+router.post('/duplicates/resolve', authMiddleware, PLAN, MODGATE, rbac('students', 'delete'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { keepId, removeIds } = req.body;
+
+    if (!keepId || typeof keepId !== 'string') return E.badRequest(res, 'keepId is required');
+    if (!Array.isArray(removeIds) || removeIds.length === 0) return E.badRequest(res, 'removeIds array is required');
+    if (removeIds.length > 50) return E.badRequest(res, 'Maximum 50 records per resolve. Split into smaller batches.');
+
+    const Students = tenantModel('students', tenantContext(req));
+    const Invoices = tenantModel('invoices', tenantContext(req));
+    const Payments = tenantModel('payments', tenantContext(req));
+
+    const keeper = await Students.findOne({ id: keepId, schoolId }).select('id admissionNumber firstName lastName').lean();
+    if (!keeper) return E.notFound(res, 'The student to keep was not found');
+    if (!keeper.admissionNumber) return E.badRequest(res, 'The student to keep has no admission number — nothing to resolve');
+
+    const toRemove = await Students.find({
+      id: { $in: removeIds }, schoolId, admissionNumber: keeper.admissionNumber,
+    }).select('id _id firstName lastName').lean();
+
+    if (toRemove.length === 0) {
+      return E.badRequest(res, 'None of removeIds share an admission number with keepId — nothing was removed');
+    }
+    if (toRemove.length !== removeIds.length) {
+      // Some requested ids didn't match — either a different admission
+      // number (not part of THIS duplicate group) or don't exist at all.
+      // Refuse the whole request rather than silently deleting a subset,
+      // since the client's idea of the group no longer matches reality.
+      return E.badRequest(res, `${removeIds.length - toRemove.length} of the given record(s) do not share this admission number — refresh and try again`);
+    }
+
+    const mongoIds  = toRemove.map(s => s._id);
+    const customIds = toRemove.map(s => s.id).filter(Boolean);
+
+    await Promise.all([
+      Students.deleteMany({ _id: { $in: mongoIds }, schoolId }),
+      ...(customIds.length ? [
+        Invoices.deleteMany({ studentId: { $in: customIds }, schoolId }),
+        Payments.deleteMany({ studentId: { $in: customIds }, schoolId }),
+      ] : []),
+    ]);
+
+    AuditService.log({
+      action: 'student.deleted',
+      actor:  req.jwtUser,
+      schoolId,
+      target: { type: 'student', id: 'bulk', label: `${toRemove.length} duplicate student(s) (admission number ${keeper.admissionNumber})` },
+      details: {
+        count: toRemove.length,
+        kept: { id: keeper.id, name: `${keeper.firstName ?? ''} ${keeper.lastName ?? ''}`.trim() },
+        removed: toRemove.map(s => ({ id: s.id ?? String(s._id), name: `${s.firstName ?? ''} ${s.lastName ?? ''}`.trim() })),
+        admissionNumber: keeper.admissionNumber,
+      },
+      req,
+    });
+
+    console.log(`[students/duplicates/resolve] ${userId} kept ${keeper.id}, removed ${toRemove.length} duplicate(s) of admission number ${keeper.admissionNumber} in school ${schoolId}`);
+    return ok(res, { kept: keeper.id, removed: toRemove.length });
+  } catch (err) {
+    console.error('[students POST /duplicates/resolve]', err);
+    return E.serverError(res);
+  }
+});
+
 /* ── GET /api/students ─ Paginated list ─────────────────────── */
 router.get('/', authMiddleware, PLAN, MODGATE, rbac('students', 'read'), scopeMiddleware, async (req, res) => {
   try {

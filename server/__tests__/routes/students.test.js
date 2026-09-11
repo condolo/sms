@@ -44,6 +44,11 @@ const mockStudentsFindOneAndUpdate = jest.fn();
 const mockStudentsCountDocuments = jest.fn();
 const mockStudentsAggregate = jest.fn();
 const mockStudentsExists = jest.fn().mockResolvedValue(false); // default: admission number is free
+const mockStudentsDeleteMany = jest.fn().mockResolvedValue({ deletedCount: 0 });
+const mockInvoicesAggregate  = jest.fn().mockResolvedValue([]);
+const mockInvoicesDeleteMany = jest.fn().mockResolvedValue({ deletedCount: 0 });
+const mockPaymentsAggregate  = jest.fn().mockResolvedValue([]);
+const mockPaymentsDeleteMany = jest.fn().mockResolvedValue({ deletedCount: 0 });
 
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((collection) => {
@@ -57,7 +62,14 @@ jest.mock('../../utils/model', () => ({
         countDocuments:    mockStudentsCountDocuments,
         aggregate:         mockStudentsAggregate,
         exists:            mockStudentsExists,
+        deleteMany:        mockStudentsDeleteMany,
       };
+    }
+    if (collection === 'invoices') {
+      return { aggregate: mockInvoicesAggregate, deleteMany: mockInvoicesDeleteMany };
+    }
+    if (collection === 'payments') {
+      return { aggregate: mockPaymentsAggregate, deleteMany: mockPaymentsDeleteMany };
     }
     // Default empty mock for any other collection
     return {
@@ -323,6 +335,127 @@ describe('POST /api/students', () => {
       .send({ lastName: 'Wanjiku' });   // no firstName
 
     expect(res.status).toBe(422);
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════
+   GET /api/students/duplicates & POST /api/students/duplicates/resolve
+   (2026-09) — detection is read-only; resolve only ever removes ids
+   that share the kept student's own admission number.
+══════════════════════════════════════════════════════════════ */
+describe('GET /api/students/duplicates', () => {
+  test('returns no groups when nothing collides', async () => {
+    mockStudentsAggregate.mockResolvedValueOnce([]);
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .get('/api/students/duplicates')
+      .set('Authorization', 'Bearer fake-token');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.groups).toEqual([]);
+    expect(res.body.data.totalGroups).toBe(0);
+  });
+
+  test('recommends the older record when neither has any linked invoices/payments', async () => {
+    const older = makeStudent({ id: 'stu_older', createdAt: '2026-01-01T00:00:00.000Z' });
+    const newer = makeStudent({ id: 'stu_newer', createdAt: '2026-06-01T00:00:00.000Z' });
+    mockStudentsAggregate.mockResolvedValueOnce([{ _id: 'ADM-001', count: 2, docs: [newer, older] }]);
+    mockInvoicesAggregate.mockResolvedValueOnce([]);
+    mockPaymentsAggregate.mockResolvedValueOnce([]);
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .get('/api/students/duplicates')
+      .set('Authorization', 'Bearer fake-token');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.totalGroups).toBe(1);
+    expect(res.body.data.groups[0].admissionNumber).toBe('ADM-001');
+    expect(res.body.data.groups[0].recommendedKeepId).toBe('stu_older');
+  });
+
+  test('recommends whichever record has linked invoices/payments, even if created later', async () => {
+    const older = makeStudent({ id: 'stu_older', createdAt: '2026-01-01T00:00:00.000Z' });
+    const newer = makeStudent({ id: 'stu_newer', createdAt: '2026-06-01T00:00:00.000Z' });
+    mockStudentsAggregate.mockResolvedValueOnce([{ _id: 'ADM-001', count: 2, docs: [older, newer] }]);
+    mockInvoicesAggregate.mockResolvedValueOnce([{ _id: 'stu_newer', count: 3 }]);
+    mockPaymentsAggregate.mockResolvedValueOnce([]);
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .get('/api/students/duplicates')
+      .set('Authorization', 'Bearer fake-token');
+
+    expect(res.body.data.groups[0].recommendedKeepId).toBe('stu_newer');
+  });
+});
+
+describe('POST /api/students/duplicates/resolve', () => {
+  test('removes only the students that share the kept record\'s admission number', async () => {
+    mockStudentsFindOne.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue({ id: 'stu_keep', admissionNumber: 'ADM-001', firstName: 'Jane', lastName: 'Doe' }),
+      }),
+    });
+    mockStudentsFind.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([{ id: 'stu_dupe', _id: 'oid_dupe', firstName: 'Jane', lastName: 'Doe' }]),
+      }),
+    });
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/students/duplicates/resolve')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ keepId: 'stu_keep', removeIds: ['stu_dupe'] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.kept).toBe('stu_keep');
+    expect(res.body.data.removed).toBe(1);
+    expect(mockInvoicesDeleteMany).toHaveBeenCalled();
+    expect(mockPaymentsDeleteMany).toHaveBeenCalled();
+  });
+
+  test('refuses to resolve when a removeId does not actually share the admission number (stale/tampered request)', async () => {
+    mockStudentsFindOne.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue({ id: 'stu_keep', admissionNumber: 'ADM-001', firstName: 'Jane', lastName: 'Doe' }),
+      }),
+    });
+    // The DB-side lookup only matches records that ACTUALLY share the
+    // admission number — an unrelated id in removeIds simply won't come
+    // back here, simulating that mismatch.
+    mockStudentsFind.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([]),
+      }),
+    });
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/students/duplicates/resolve')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ keepId: 'stu_keep', removeIds: ['stu_unrelated'] });
+
+    expect(res.status).toBe(400);
+    expect(mockStudentsCreate).not.toHaveBeenCalled(); // sanity: nothing was created
+  });
+
+  test('returns 404 when keepId does not exist', async () => {
+    mockStudentsFindOne.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue(null),
+      }),
+    });
+
+    const app = buildApp();
+    const res = await supertest(app)
+      .post('/api/students/duplicates/resolve')
+      .set('Authorization', 'Bearer fake-token')
+      .send({ keepId: 'stu_missing', removeIds: ['stu_dupe'] });
+
+    expect(res.status).toBe(404);
   });
 });
 
