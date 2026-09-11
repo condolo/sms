@@ -99,6 +99,7 @@ jest.mock('../../utils/tenant-model', () => ({
           if ($push?.stageHistory) d.stageHistory = [...(d.stageHistory || []), $push.stageHistory];
           return mockChain({ ...d });
         },
+        create: (doc) => { const d = { ...doc }; mockAppDocs.push(d); return Promise.resolve(d); },
       };
     }
     if (collection === 'students') {
@@ -526,6 +527,28 @@ describe('POST /api/admissions/:id/enroll — business-flow: discount is correct
    Neither quick-update route may set stage to 'enrolled' anymore —
    only the dedicated enroll endpoint may.
 ══════════════════════════════════════════════════════════════ */
+describe('POST /api/admissions — enrolled is blocked at creation too', () => {
+  test('rejects creating a brand-new application already at "enrolled"', async () => {
+    mockAppDocs = [];
+    const res = await supertest(buildApp())
+      .post('/api/admissions')
+      .send({ ...app(), id: undefined, schoolId: undefined, applicationRef: undefined, stage: 'enrolled' });
+
+    expect(res.status).toBe(400);
+    expect(mockAppDocs).toHaveLength(0); // nothing created
+  });
+
+  test('creating a new application at an ordinary stage still works', async () => {
+    mockAppDocs = [];
+    const res = await supertest(buildApp())
+      .post('/api/admissions')
+      .send({ ...app(), id: undefined, schoolId: undefined, applicationRef: undefined, stage: 'enquiry' });
+
+    expect(res.status).toBe(201);
+    expect(mockAppDocs).toHaveLength(1);
+  });
+});
+
 describe('PATCH /api/admissions/:id/stage — enrolled is blocked', () => {
   test('rejects a direct move to "enrolled"', async () => {
     mockAppDocs = [app({ stage: 'acceptance' })];

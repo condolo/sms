@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.83.0] — 2026-09-11 — fix(admissions): closed the third, last write path around "Enrolled" — and confirmed the bug's real reach
+
+Requested directly, after v5.82.0 shipped: "the bug was systemic, not specific to Trinitas — fix this bug." Correct to push on this — v5.82.0 closed two of three write paths onto the `admissions` collection; a third, `POST /api/admissions` (creating a brand-new application), could also be handed `stage: "enrolled"` directly in the create payload, with the exact same missing consequences (no Student, no admission number, nothing). A full audit confirmed `admissions.js` is the *only* file in the codebase that ever writes to this collection — no import route, no platform/bulk route touches it — so these three routes are now the complete, closed set.
+
+### Confirmed reach (read-only check, live database, this organisation's authorization)
+Queried every school on the platform for the same signature (`stage: "enrolled"`, no `studentId`) to answer "systemic or Trinitas-only?" honestly rather than assume:
+- **Trinitas International School** — 3 (already known and now recoverable via Enroll Student, per v5.82.0).
+- **Mascit Lab Academy** (a separate organisation) — 1 real applicant, same recoverable state. Not touched — read-only check, no writes made to this school's data.
+- **Msingi Demo School** — 4, internal seed data, not a real family.
+- **Trinity International School** — 0. The bug's *reach* was real; it wasn't universal.
+
+### Fixed
+- `POST /api/admissions` now rejects `stage: "enrolled"` on application creation, the same rule and the same error shape as `PATCH /:id/stage` and `PUT /:id` from v5.82.0. A new application always starts earlier in the pipeline; only `POST /:id/enroll` may ever set this stage.
+
+### Verified
+- 2 new integration tests in `admissions-enroll.test.js`: creating an application already at "enrolled" is rejected and nothing is written; creating one at an ordinary stage is unaffected. Full server suite 2013/2013. `verify-rbac-coverage.js` 100% (no regression). `security-scan.js` clean. Client production build passes.
+
+---
+
 ## [v5.82.0] — 2026-09-11 — fix(admissions): "Enrolled" could be set without ever creating the student it names
 
 Traced directly from the previous search-bug report: three Trinitas applicants showed as Enrolled on the board, but none of them existed in Students at all — confirmed live, by connecting to the actual database, not inferred from the report alone.

@@ -245,6 +245,15 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('admissions', 'create'), as
     if (error) return E.validation(res, error);
     delete data.studentId; // system-managed — see POST /:id/enroll
 
+    // Same rule as PATCH /:id/stage and PUT /:id below, and for the same
+    // reason (2026-09 confirmed live bug, systemic across all three
+    // write paths): a brand-new application can't be born "enrolled" —
+    // that has no Student record, no admission number, nothing behind
+    // it. Only POST /:id/enroll may ever set this stage.
+    if (data.stage === 'enrolled') {
+      return E.badRequest(res, 'A new application cannot be created directly at "Enrolled" — save it at an earlier stage, then use "Enroll Student" once it reaches Acceptance.');
+    }
+
     // Fetched once, used for BOTH this school's required-field settings
     // and (below) the academic-year label for the application reference —
     // one query, not two.
