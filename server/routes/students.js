@@ -18,6 +18,7 @@ const ScopeEngine               = require('../utils/scopeEngine');
 const { _model }                = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { nextFreeAdmissionNumber, reserveFreeAdmissionNumbers } = require('../utils/counters');
+const { mergeStudentData } = require('../utils/student-merge');
 const { ok, created, fail, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
 const AuditService            = require('../services/audit');
@@ -309,15 +310,23 @@ router.get('/duplicates', authMiddleware, PLAN, MODGATE, rbac('students', 'read'
   }
 });
 
-/* ── POST /api/students/duplicates/resolve ─ Keep one, remove the rest
-   of a duplicate-admission-number group (2026-09) ───────────────────
+/* ── POST /api/students/duplicates/resolve ─ Keep one, merge the rest
+   of a duplicate-admission-number group into it (2026-09) ───────────
    Deliberately narrow: every id in `removeIds` must share the SAME
    admission number as `keepId` — this can only ever resolve a genuine
-   duplicate group from GET /duplicates above, never delete an unrelated
-   student by a mistaken or tampered id. Reuses DELETE /purge's own
-   cascade scope (students + their invoices/payments) so a resolved
-   duplicate doesn't leave orphaned finance records behind, and the same
-   audit action so it shows up alongside every other student deletion. */
+   duplicate group from GET /duplicates above, never touch an unrelated
+   student by a mistaken or tampered id.
+
+   MERGES, does not just delete (2026-09 audit — "how do you ensure the
+   database is also aligned... no dead code after the delete"): the two
+   records are the same real child, so their attendance, exam results,
+   behaviour history, invoices/payments, and everything else with a
+   studentId reference (see student-merge.js for the full list) is
+   re-pointed onto the kept record BEFORE the removed one is deleted —
+   never silently orphaned, never silently destroyed. See
+   student-merge.js's own header for the one disclosed edge case this
+   can't fully resolve on its own (a one-row-per-student collection can
+   end up with two rows if both original records already had one). */
 router.post('/duplicates/resolve', authMiddleware, PLAN, MODGATE, rbac('students', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
@@ -327,9 +336,8 @@ router.post('/duplicates/resolve', authMiddleware, PLAN, MODGATE, rbac('students
     if (!Array.isArray(removeIds) || removeIds.length === 0) return E.badRequest(res, 'removeIds array is required');
     if (removeIds.length > 50) return E.badRequest(res, 'Maximum 50 records per resolve. Split into smaller batches.');
 
-    const Students = tenantModel('students', tenantContext(req));
-    const Invoices = tenantModel('invoices', tenantContext(req));
-    const Payments = tenantModel('payments', tenantContext(req));
+    const ctx      = tenantContext(req);
+    const Students = tenantModel('students', ctx);
 
     const keeper = await Students.findOne({ id: keepId, schoolId }).select('id admissionNumber firstName lastName').lean();
     if (!keeper) return E.notFound(res, 'The student to keep was not found');
@@ -350,33 +358,32 @@ router.post('/duplicates/resolve', authMiddleware, PLAN, MODGATE, rbac('students
       return E.badRequest(res, `${removeIds.length - toRemove.length} of the given record(s) do not share this admission number — refresh and try again`);
     }
 
-    const mongoIds  = toRemove.map(s => s._id);
-    const customIds = toRemove.map(s => s.id).filter(Boolean);
+    const mergedCounts = {};
+    for (const s of toRemove) {
+      const counts = await mergeStudentData(schoolId, ctx, s, keeper.id);
+      for (const [col, n] of Object.entries(counts)) mergedCounts[col] = (mergedCounts[col] ?? 0) + n;
+    }
 
-    await Promise.all([
-      Students.deleteMany({ _id: { $in: mongoIds }, schoolId }),
-      ...(customIds.length ? [
-        Invoices.deleteMany({ studentId: { $in: customIds }, schoolId }),
-        Payments.deleteMany({ studentId: { $in: customIds }, schoolId }),
-      ] : []),
-    ]);
+    const mongoIds = toRemove.map(s => s._id);
+    await Students.deleteMany({ _id: { $in: mongoIds }, schoolId });
 
     AuditService.log({
       action: 'student.deleted',
       actor:  req.jwtUser,
       schoolId,
-      target: { type: 'student', id: 'bulk', label: `${toRemove.length} duplicate student(s) (admission number ${keeper.admissionNumber})` },
+      target: { type: 'student', id: 'bulk', label: `${toRemove.length} duplicate student(s) merged into ${keeper.firstName ?? ''} ${keeper.lastName ?? ''} (admission number ${keeper.admissionNumber})`.trim() },
       details: {
         count: toRemove.length,
         kept: { id: keeper.id, name: `${keeper.firstName ?? ''} ${keeper.lastName ?? ''}`.trim() },
         removed: toRemove.map(s => ({ id: s.id ?? String(s._id), name: `${s.firstName ?? ''} ${s.lastName ?? ''}`.trim() })),
         admissionNumber: keeper.admissionNumber,
+        mergedRecords: mergedCounts,
       },
       req,
     });
 
-    console.log(`[students/duplicates/resolve] ${userId} kept ${keeper.id}, removed ${toRemove.length} duplicate(s) of admission number ${keeper.admissionNumber} in school ${schoolId}`);
-    return ok(res, { kept: keeper.id, removed: toRemove.length });
+    console.log(`[students/duplicates/resolve] ${userId} kept ${keeper.id}, merged and removed ${toRemove.length} duplicate(s) of admission number ${keeper.admissionNumber} in school ${schoolId}`);
+    return ok(res, { kept: keeper.id, removed: toRemove.length, mergedRecords: mergedCounts });
   } catch (err) {
     console.error('[students POST /duplicates/resolve]', err);
     return E.serverError(res);
@@ -390,8 +397,10 @@ router.post('/duplicates/resolve', authMiddleware, PLAN, MODGATE, rbac('students
    but applied independently per resolution, matching this codebase's
    established bulk-import convention (v5.70.0/v5.71.0/v5.74.0): one
    bad group is reported in `errors` and skipped, it never fails the
-   whole batch. All valid deletions across every group are then applied
-   in ONE combined delete + ONE audit log entry, not one per group. */
+   whole batch. Same merge-then-delete treatment as the single-resolve
+   route above (see student-merge.js) — every valid group's removed
+   record(s) are re-pointed onto that group's own keeper before the
+   final combined delete + ONE audit log entry for the whole batch. */
 router.post('/duplicates/resolve-bulk', authMiddleware, PLAN, MODGATE, rbac('students', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
@@ -404,14 +413,13 @@ router.post('/duplicates/resolve-bulk', authMiddleware, PLAN, MODGATE, rbac('stu
       return E.badRequest(res, 'Maximum 50 groups per request. Split into smaller batches.');
     }
 
-    const Students = tenantModel('students', tenantContext(req));
-    const Invoices = tenantModel('invoices', tenantContext(req));
-    const Payments = tenantModel('payments', tenantContext(req));
+    const ctx      = tenantContext(req);
+    const Students = tenantModel('students', ctx);
 
     const results = { resolved: 0, removed: 0, errors: [] };
-    const allMongoIds  = [];
-    const allCustomIds = [];
-    const auditGroups  = [];
+    const allMongoIds   = [];
+    const auditGroups   = [];
+    const mergedCounts  = {};
 
     for (let i = 0; i < resolutions.length; i++) {
       const row = i + 1;
@@ -444,8 +452,12 @@ router.post('/duplicates/resolve-bulk', authMiddleware, PLAN, MODGATE, rbac('stu
         continue;
       }
 
+      for (const s of toRemove) {
+        const counts = await mergeStudentData(schoolId, ctx, s, keeper.id);
+        for (const [col, n] of Object.entries(counts)) mergedCounts[col] = (mergedCounts[col] ?? 0) + n;
+      }
+
       allMongoIds.push(...toRemove.map(s => s._id));
-      allCustomIds.push(...toRemove.map(s => s.id).filter(Boolean));
       auditGroups.push({
         kept:            { id: keeper.id, name: `${keeper.firstName ?? ''} ${keeper.lastName ?? ''}`.trim() },
         removed:         toRemove.map(s => ({ id: s.id ?? String(s._id), name: `${s.firstName ?? ''} ${s.lastName ?? ''}`.trim() })),
@@ -456,27 +468,21 @@ router.post('/duplicates/resolve-bulk', authMiddleware, PLAN, MODGATE, rbac('stu
     }
 
     if (allMongoIds.length > 0) {
-      await Promise.all([
-        Students.deleteMany({ _id: { $in: allMongoIds }, schoolId }),
-        ...(allCustomIds.length ? [
-          Invoices.deleteMany({ studentId: { $in: allCustomIds }, schoolId }),
-          Payments.deleteMany({ studentId: { $in: allCustomIds }, schoolId }),
-        ] : []),
-      ]);
+      await Students.deleteMany({ _id: { $in: allMongoIds }, schoolId });
 
       AuditService.log({
         action: 'student.deleted',
         actor:  req.jwtUser,
         schoolId,
-        target: { type: 'student', id: 'bulk', label: `${results.removed} duplicate student(s) across ${results.resolved} group(s)` },
-        details: { count: results.removed, groups: auditGroups },
+        target: { type: 'student', id: 'bulk', label: `${results.removed} duplicate student(s) merged across ${results.resolved} group(s)` },
+        details: { count: results.removed, groups: auditGroups, mergedRecords: mergedCounts },
         req,
       });
 
       console.log(`[students/duplicates/resolve-bulk] ${userId} resolved ${results.resolved} group(s), removed ${results.removed} duplicate(s) in school ${schoolId}`);
     }
 
-    return ok(res, results, null, results.errors.length > 0 ? 207 : 200);
+    return ok(res, { ...results, mergedRecords: mergedCounts }, null, results.errors.length > 0 ? 207 : 200);
   } catch (err) {
     console.error('[students POST /duplicates/resolve-bulk]', err);
     return E.serverError(res);

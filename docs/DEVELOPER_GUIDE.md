@@ -1172,6 +1172,14 @@ const ids = classes.map(c => c.id).filter(Boolean); // drops pre-migration class
 
 **A related, structurally different trap in the same area (v4.62.0):** `users_school_email` / `users_school_username` were **unique + sparse compound** indexes. Sparse compound indexes still index a document if it has *any one* of the compound keys — every user has `schoolId`, so every user (including students with no email, parents with no username) was indexed, permitting only one such document per school before `E11000` on the second. Fixed by converting to **partial indexes** (`partialFilterExpression: { field: { $type: 'string' } }`) in `server/utils/indexes.js` — uniqueness enforced only on real string values. Never write `email: null` / `username: null`; omit the field entirely when absent.
 
+### Student Record Merge — `server/utils/student-merge.js` (v5.79.0)
+
+Applies the dual-identifier pattern above to a new problem: removing a duplicate student (see `POST /api/students/duplicates/resolve[-bulk]`) can't just delete the losing record — every collection with a `studentId` reference to it would either end up orphaned (if only the student doc is deleted) or lose real history (if the deletion cascades). `mergeStudentData(schoolId, ctx, oldStudent, newStudentId)` re-points every `studentId` reference from the removed record onto the kept one FIRST, matching both `oldStudent.id` and `String(oldStudent._id)`, across every collection in its `REFERENCING_COLLECTIONS` list — 23 as of this writing, including `invoices`/`payments` (merged, not deleted, unlike the unrelated `DELETE /students/purge`, which still hard-deletes those for a genuine, non-duplicate removal).
+
+**When adding a new collection with a `studentId` field:** add its name to `REFERENCING_COLLECTIONS` in `student-merge.js`, or a future duplicate-resolve will silently leave that collection's rows behind — the same class of gap this utility exists to close. Two collections are deliberately NOT in the list: `elearning_sessions.attendees[].studentId` (a sub-document inside an array, not a top-level reference — ephemeral virtual-class attendance with no independent value once the session has passed), and anywhere `studentId` refers to the *caller's own* JWT claim rather than a stored document field (e.g. `resources.js`'s portal-access checks).
+
+**Disclosed limitation:** a collection meant to hold at most one row per student (e.g. `growth_aspirations`) can end up with two rows for the kept student if both original records already had one — re-pointing doesn't de-duplicate. Surfaced via the merge's returned per-collection counts (and the duplicate-resolve routes' `mergedRecords` response field) rather than silently guessed at, since resolving it well needs collection-specific knowledge (which row to prefer) a generic merge can't have.
+
 ### Impersonate Flow (v4.5.5+)
 
 ```

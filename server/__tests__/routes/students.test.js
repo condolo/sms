@@ -47,8 +47,10 @@ const mockStudentsExists = jest.fn().mockResolvedValue(false); // default: admis
 const mockStudentsDeleteMany = jest.fn().mockResolvedValue({ deletedCount: 0 });
 const mockInvoicesAggregate  = jest.fn().mockResolvedValue([]);
 const mockInvoicesDeleteMany = jest.fn().mockResolvedValue({ deletedCount: 0 });
+const mockInvoicesUpdateMany = jest.fn().mockResolvedValue({ modifiedCount: 0 });
 const mockPaymentsAggregate  = jest.fn().mockResolvedValue([]);
 const mockPaymentsDeleteMany = jest.fn().mockResolvedValue({ deletedCount: 0 });
+const mockPaymentsUpdateMany = jest.fn().mockResolvedValue({ modifiedCount: 0 });
 
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((collection) => {
@@ -66,17 +68,21 @@ jest.mock('../../utils/model', () => ({
       };
     }
     if (collection === 'invoices') {
-      return { aggregate: mockInvoicesAggregate, deleteMany: mockInvoicesDeleteMany };
+      return { aggregate: mockInvoicesAggregate, deleteMany: mockInvoicesDeleteMany, updateMany: mockInvoicesUpdateMany };
     }
     if (collection === 'payments') {
-      return { aggregate: mockPaymentsAggregate, deleteMany: mockPaymentsDeleteMany };
+      return { aggregate: mockPaymentsAggregate, deleteMany: mockPaymentsDeleteMany, updateMany: mockPaymentsUpdateMany };
     }
-    // Default empty mock for any other collection
+    // Default empty mock for any other collection — covers every other
+    // studentId-referencing collection student-merge.js walks through
+    // (attendance, exam_results, behaviour_incidents, growth_*, etc.);
+    // these tests don't assert on any one of them individually.
     return {
       find:           jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }),
       findOne:        jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }),
       countDocuments: jest.fn().mockResolvedValue(0),
       aggregate:      jest.fn().mockResolvedValue([]),
+      updateMany:     jest.fn().mockResolvedValue({ modifiedCount: 0 }),
     };
   }),
 }));
@@ -392,7 +398,7 @@ describe('GET /api/students/duplicates', () => {
 });
 
 describe('POST /api/students/duplicates/resolve', () => {
-  test('removes only the students that share the kept record\'s admission number', async () => {
+  test('merges the removed student\'s records onto the kept one, then removes only that student', async () => {
     mockStudentsFindOne.mockReturnValue({
       select: jest.fn().mockReturnValue({
         lean: jest.fn().mockResolvedValue({ id: 'stu_keep', admissionNumber: 'ADM-001', firstName: 'Jane', lastName: 'Doe' }),
@@ -403,6 +409,8 @@ describe('POST /api/students/duplicates/resolve', () => {
         lean: jest.fn().mockResolvedValue([{ id: 'stu_dupe', _id: 'oid_dupe', firstName: 'Jane', lastName: 'Doe' }]),
       }),
     });
+    mockInvoicesUpdateMany.mockResolvedValueOnce({ modifiedCount: 2 });
+    mockPaymentsUpdateMany.mockResolvedValueOnce({ modifiedCount: 1 });
 
     const app = buildApp();
     const res = await supertest(app)
@@ -413,8 +421,19 @@ describe('POST /api/students/duplicates/resolve', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.kept).toBe('stu_keep');
     expect(res.body.data.removed).toBe(1);
-    expect(mockInvoicesDeleteMany).toHaveBeenCalled();
-    expect(mockPaymentsDeleteMany).toHaveBeenCalled();
+    // Invoices/payments (and every other studentId-bearing collection)
+    // are RE-POINTED onto the kept student, not deleted — see
+    // student-merge.js.
+    expect(mockInvoicesUpdateMany).toHaveBeenCalledWith(
+      { studentId: { $in: ['stu_dupe', 'oid_dupe'] }, schoolId: 'school_test_001' },
+      { $set: { studentId: 'stu_keep' } },
+    );
+    expect(mockPaymentsUpdateMany).toHaveBeenCalled();
+    expect(mockInvoicesDeleteMany).not.toHaveBeenCalled();
+    expect(mockPaymentsDeleteMany).not.toHaveBeenCalled();
+    expect(res.body.data.mergedRecords).toEqual({ invoices: 2, payments: 1 });
+    // Only the removed student's document is actually deleted
+    expect(mockStudentsDeleteMany).toHaveBeenCalledWith({ _id: { $in: ['oid_dupe'] }, schoolId: 'school_test_001' });
   });
 
   test('refuses to resolve when a removeId does not actually share the admission number (stale/tampered request)', async () => {

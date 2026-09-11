@@ -1601,9 +1601,9 @@ function DuplicateStudentsPanel({ groups, houseName, onClose }) {
       qc.invalidateQueries({ queryKey: ['students', 'duplicates'] });
       const { resolved = 0, removed = 0, errors = [] } = res?.data ?? {};
       if (errors.length > 0) {
-        toast.error(`Removed ${removed} duplicate(s) across ${resolved} group(s) — ${errors.length} group(s) skipped (their data changed since this list loaded; refresh and try again).`);
+        toast.error(`Merged and removed ${removed} duplicate(s) across ${resolved} group(s) — ${errors.length} group(s) skipped (their data changed since this list loaded; refresh and try again).`);
       } else {
-        toast.success(`Removed ${removed} duplicate${removed === 1 ? '' : 's'} across ${resolved} group${resolved === 1 ? '' : 's'}.`);
+        toast.success(`Merged and removed ${removed} duplicate${removed === 1 ? '' : 's'} across ${resolved} group${resolved === 1 ? '' : 's'}.`);
       }
       setBulkConfirming(false);
       setOverrides({});
@@ -1747,7 +1747,7 @@ function DuplicateStudentsPanel({ groups, houseName, onClose }) {
             ) : (
               <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3">
                 <p className="text-sm text-red-800">
-                  This will permanently remove <span className="font-semibold">{totalToRemove} duplicate record{totalToRemove === 1 ? '' : 's'}</span> across <span className="font-semibold">{selectedGroups.length} group{selectedGroups.length === 1 ? '' : 's'}</span>, along with any invoices and payments attached to them. <span className="font-medium">This cannot be undone.</span>
+                  This will merge <span className="font-semibold">{totalToRemove} duplicate record{totalToRemove === 1 ? '' : 's'}</span> across <span className="font-semibold">{selectedGroups.length} group{selectedGroups.length === 1 ? '' : 's'}</span> into the kept record — their attendance, exam results, invoices, and everything else move over, then the duplicate record itself is permanently removed. <span className="font-medium">This cannot be undone.</span> If both records already had their own entry for the same thing (e.g. two invoices for the same term), the kept record will show both — worth a quick check in Finance afterward.
                 </p>
                 <div className="flex items-center justify-end gap-3 mt-3">
                   <button onClick={() => setBulkConfirming(false)} disabled={resolving} className="text-xs font-medium text-slate-600 hover:text-slate-800 disabled:opacity-50">

@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.79.0] — 2026-09-11 — fix(students): resolving a duplicate now merges its history instead of orphaning or destroying it
+
+Reported directly, pressing on the duplicate-resolve feature from v5.76.0/v5.77.0: "you instruct so that dabase is also aligned, right? no dead codes after the delete, right?" Honest answer at the time: no. Resolving a duplicate only ever cleaned up the removed record's invoices and payments — attendance, exam results, behaviour history, growth-profile entries, medical visits, hostel/transport assignments, and more than a dozen other collections kept rows pointing at a student id that no longer existed. This is a pre-existing gap in the platform's student-deletion generally (the original `DELETE /students/purge` had the exact same narrow scope), not something these two features introduced — but duplicate-resolve is a routine cleanup action admins are meant to reach for often, so the exposure mattered more here.
+
+### Decided with the user
+Given the choice between merging the removed record's history onto the kept one, extending hard-delete to wipe it everywhere, or leaving it as-is — merge. The two records are the same real child; destroying one's attendance, exam, or medical history to "clean up" a duplicate would just trade one data-integrity problem for a worse one.
+
+### Fixed
+- New `server/utils/student-merge.js` — `mergeStudentData()` re-points every `studentId` reference from a removed record onto the kept one, across all 23 collections confirmed to hold one (attendance, exam_results, grades, mark_audit_log, behaviour_incidents/appeals/points_resets, student_subjects, every growth_* collection, hostel_assignments, transport_assignments, medical_visits, report_card_snapshots, weekly_snapshots, assessment_marks, invoices, payments) — matching both possible stored forms of the old student's id (UUID and Mongo `_id` string, per this codebase's existing dual-ID-forms handling). The removed student document is only ever deleted once nothing else points at it.
+- Both `POST /api/students/duplicates/resolve` and `resolve-bulk` now merge before deleting, instead of deleting invoices/payments outright and leaving everything else untouched. The response and audit log entry now include a `mergedRecords` breakdown (which collections got how many rows re-pointed).
+- Students page: the bulk-resolve confirmation now describes what actually happens — history merges onto the kept record, only the duplicate document itself is removed — and flags the one disclosed edge case: if both records already had their own entry for the same thing (e.g. two invoices for the same term), the kept record ends up with both, worth a quick check afterward.
+- Also fixed two changelog-integrity bugs found while reviewing this work: v5.75.0 and v5.76.0 had collided under the same version number (a copy-paste mistake in an earlier entry), and v5.77.0 wasn't at the top of the file despite being the most recent. `CHANGELOG.md` is now correctly ordered with no duplicate version numbers.
+
+### Known, disclosed limitation
+A collection meant to hold at most one row per student (e.g. `growth_aspirations`) can end up with two rows for the kept student if both original records already had one — re-pointing doesn't de-duplicate. This is a rare, visible-and-fixable inconsistency (an admin can spot and merge/void the extra row by hand), not silent data loss or an invisible orphan, and resolving it generically would need collection-specific knowledge a shared merge function can't have. Also out of scope: `elearning_sessions.attendees[].studentId`, a sub-document inside an array rather than a top-level reference — left alone deliberately, since virtual-class attendance (Emergency Online Learning Mode) is ephemeral, session-scoped data with no independent value once the session has passed.
+
+### Verified
+- 6 new unit tests (`student-merge.test.js`): every referencing collection is re-pointed with both id forms matched, invoices/payments are confirmed present in the collection list, a pre-migration record with no UUID id still merges via its `_id`, only collections with actual matches are returned, and both no-op cases (no old id, no new id) do nothing. Updated the existing duplicate-resolve integration tests in `students.test.js` to assert the merge behavior (invoices/payments are re-pointed via `updateMany`, never deleted). Full server suite 1999/1999. `verify-rbac-coverage.js` 100% (no regression — same two routes, no shape change to their contracts beyond the additive `mergedRecords` field). `security-scan.js` clean. Client production build passes.
+
+---
+
 ## [v5.78.0] — 2026-09-11 — fix(students): editing a student's admission number was silently discarded
 
 Reported directly: "how do you edit admission number of a student, if the system picks automatically." The Student Profile edit form has always had an Admission Number field — it looked completely ordinary, sat right next to every other editable field, and appeared to save successfully. It never actually changed anything.
