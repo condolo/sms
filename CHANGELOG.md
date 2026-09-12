@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.86.0] — 2026-09-12 — fix(admissions): a legacy application with no UUID id was unreachable through the API
+
+Found running the new `find-orphaned-enrollments.js` diagnostic against the real database: one of the eight orphaned applications (a pre-migration Msingi Demo School record) has no `id` field at all, only a Mongo `_id`. Every route on this router that looks up an application by id used an exact match on the `id` field alone, with no fallback to `_id` — the same dual-identifier pattern already handled for students, classes, streams, and users elsewhere in this codebase, but never applied to admissions. The client already correctly falls back to `a.id ?? a._id` when linking to an application; the server just never met it halfway. A legacy record missing `id` was completely unreachable through the API — `GET`, `PUT`, `PATCH .../stage`, `DELETE`, and, critically, `POST .../enroll` all returned 404 "Application not found" no matter what, so its Enroll Student button couldn't even be clicked.
+
+### Fixed
+- All five `:id`-based routes on `server/routes/admissions.js` (`GET`, `PUT`, `PATCH .../stage`, `DELETE`, `POST .../enroll`) now resolve an application by `id` first, falling back to `_id` when absent — via one shared `_findApplication()` helper — and every subsequent write targets the resolved `_id` (always present), never the possibly-absent `id`, matching the exact convention documented in `docs/DEVELOPER_GUIDE.md`'s "Dual-Identifier Pattern" section.
+
+### Verified
+- 5 new integration tests in `admissions-enroll.test.js`, one per affected route, confirming a legacy record (no `id`, only `_id`) is correctly found and acted on — including the `POST /:id/enroll` case, which is the exact scenario this was found from. Full server suite 2023/2023. `verify-rbac-coverage.js` 100% (no regression — no new routes). `security-scan.js` clean. Client production build passes.
+
+---
+
 ## [v5.85.0] — 2026-09-12 — chore(admissions): a permanent, read-only check for the orphaned-enrollment bug class
 
 Follows a full investigation of the four applications discovered stuck at "Enrolled" with no linked Student record (three at Trinitas, one at Mascit Lab Academy) — confirmed, case by case, that each is a clean, unambiguous historical artifact of the three now-closed write paths (v5.82.0/v5.83.0), with no Student, guardian account, invoice, or payment of any kind existing anywhere for any of them. No database repair was performed or recommended; the correct fix for each is the real Enroll Student action in the app.

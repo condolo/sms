@@ -38,6 +38,15 @@
  * whether either parent email already has a guardian login account
  * (relevant to what POST /:id/enroll's guardian-linking will do).
  *
+ * A first run against real production data (2026-09) found an eighth
+ * case beyond the four reported directly: a Msingi Demo School record
+ * predating the UUID `id` field, printed here as `id=undefined`. That
+ * surfaced a separate, real bug — every :id route on admissions.js
+ * matched on `id` alone with no fallback to `_id`, so a record like it
+ * couldn't be opened, edited, or enrolled through the API at all. Fixed
+ * in v5.86.0 (see DEVELOPER_GUIDE.md's "Dual-Identifier Pattern").
+ *
+
  * Usage:
  *   node scripts/find-orphaned-enrollments.js                    # all schools
  *   node scripts/find-orphaned-enrollments.js --school <schoolId>

@@ -1124,9 +1124,11 @@ function _tenantQuery(school) {
 
 Additionally, both delete routes always delete users by `school.adminEmail` regardless of `schoolId` matching — this is the guaranteed fallback.
 
-### Dual-Identifier Pattern — students/classes/streams/users (v4.62.0)
+### Dual-Identifier Pattern — students/classes/streams/users/admissions (v4.62.0, admissions added v5.86.0)
 
 The same root cause as the Mongoose `id` virtual conflict above shows up independently across student, class, stream, and user documents: each one references others by whichever identifier form was current when the reference was **written** — the custom UUID `id` field (what routes generate today) or the MongoDB `_id` string (pre-migration and imported records). The UUID migration never back-filled `id` onto old documents or rewrote denormalised references (e.g. a student's stored `classId`), so a collection can legitimately contain both forms side by side, referencing each other inconsistently.
+
+**v5.86.0** found the same gap in `admissions.js`: every `:id` route (`GET`, `PUT`, `PATCH .../stage`, `DELETE`, `POST .../enroll`) matched on `id` alone, so a pre-migration application with no UUID `id` — found via `scripts/find-orphaned-enrollments.js` against real data — was unreachable through the API at all, even though the client already fell back to `a.id ?? a._id` when linking to it. Fixed with a shared `_findApplication(Apps, id, schoolId)` helper (`id` then `_id`), with every write targeting the resolved `_id`. Adopt this same shape — resolve-by-either, write-by-`_id` — in any other module still doing an exact-`id`-only lookup.
 
 **Symptom pattern:** anything that does an exact-string lookup or filter against one identifier form silently misses documents written under the other. This produced several distinct-looking bugs before the actual cause was found (v4.62.0): 500s on student deactivate/reactivate/portal-account for imported students, "No students found" on a correctly-populated class/stream/section filter (and the Export feature, which shares the same endpoint), and MongoDB ObjectIds rendering in place of class names on the analytics dashboard (v4.61.0, same root cause, independently discovered first).
 

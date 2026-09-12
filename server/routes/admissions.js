@@ -147,6 +147,24 @@ function _validate(schema, data) {
   return { data: r.data };
 }
 
+/* Resolve an application by its UUID `id`, falling back to the Mongo
+   `_id` string for pre-migration records that never got one (2026-09 —
+   confirmed live: a legacy application with no `id` field returned 404
+   from every :id route, including POST /:id/enroll, even though the
+   client already correctly falls back to `a.id ?? a._id` when linking
+   to it — same dual-identifier pattern already used for
+   students/classes/streams/users elsewhere in this codebase; see
+   DEVELOPER_GUIDE.md's "Dual-Identifier Pattern" section). Every :id
+   route below resolves through this once, then writes by `_id` (always
+   present), never by the possibly-absent `id`. */
+async function _findApplication(Apps, id, schoolId) {
+  let doc = await Apps.findOne({ id, schoolId }).lean();
+  if (!doc) {
+    try { doc = await Apps.findOne({ _id: id, schoolId }).lean(); } catch (_) { /* not a valid ObjectId */ }
+  }
+  return doc;
+}
+
 /* ── GET /api/admissions ─ Paginated pipeline ───────────────── */
 router.get('/', authMiddleware, PLAN, MODGATE, rbac('admissions', 'read'), async (req, res) => {
   try {
@@ -255,8 +273,9 @@ router.get('/stats', authMiddleware, PLAN, MODGATE, rbac('admissions', 'read'), 
 router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('admissions', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const doc = await tenantModel('admissions', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
+    const doc = await _findApplication(tenantModel('admissions', tenantContext(req)), req.params.id, schoolId);
     if (!doc) return E.notFound(res, 'Application not found');
+    delete doc.__v;
     return ok(res, doc);
   } catch (err) { console.error('[admissions GET/:id]', err); return E.serverError(res); }
 });
@@ -320,7 +339,7 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('admissions', 'update'), 
     delete data.schoolId; delete data.id; delete data.applicationRef; delete data.studentId;
 
     const Apps    = tenantModel('admissions', tenantContext(req));
-    const existing = await Apps.findOne({ id: req.params.id, schoolId }).lean();
+    const existing = await _findApplication(Apps, req.params.id, schoolId);
     if (!existing) return E.notFound(res, 'Application not found');
 
     // Only re-validate/re-derive the guardian fields if THIS request
@@ -358,7 +377,7 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('admissions', 'update'), 
     }
 
     const doc = await Apps.findOneAndUpdate(
-      { id: req.params.id, schoolId },
+      { _id: existing._id, schoolId },
       update,
       { new: true, runValidators: false }
     ).lean();
@@ -389,8 +408,11 @@ router.patch('/:id/stage', authMiddleware, PLAN, MODGATE, rbac('admissions', 'up
     }
 
     const Apps = tenantModel('admissions', tenantContext(req));
+    const existing = await _findApplication(Apps, req.params.id, schoolId);
+    if (!existing) return E.notFound(res, 'Application not found');
+
     const doc  = await Apps.findOneAndUpdate(
-      { id: req.params.id, schoolId },
+      { _id: existing._id, schoolId },
       {
         stage:      data.stage,
         updatedBy:  userId,
@@ -433,7 +455,7 @@ router.post('/:id/enroll',
       const ctx = tenantContext(req);
       const Apps = tenantModel('admissions', ctx);
 
-      const app = await Apps.findOne({ id: req.params.id, schoolId }).lean();
+      const app = await _findApplication(Apps, req.params.id, schoolId);
       if (!app) return E.notFound(res, 'Application not found');
 
       // Idempotent — enrolling twice (a double-click, a retried request)
@@ -606,7 +628,7 @@ router.post('/:id/enroll',
       if (!stageUnchanged) {
         appUpdate.$push = { stageHistory: { stage: 'enrolled', date: now, changedBy: userId, notes: `Enrolled — admission number ${admissionNumber}` } };
       }
-      const updatedApp = await Apps.findOneAndUpdate({ id: req.params.id, schoolId }, appUpdate, { new: true, runValidators: false }).lean();
+      const updatedApp = await Apps.findOneAndUpdate({ _id: app._id, schoolId }, appUpdate, { new: true, runValidators: false }).lean();
 
       AuditService.log({
         action: 'admissions.enrolled', actor: req.jwtUser, schoolId,
@@ -624,13 +646,16 @@ router.post('/:id/enroll',
 router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('admissions', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const doc = await tenantModel('admissions', tenantContext(req)).findOneAndUpdate(
-      { id: req.params.id, schoolId },
+    const Apps     = tenantModel('admissions', tenantContext(req));
+    const existing = await _findApplication(Apps, req.params.id, schoolId);
+    if (!existing) return E.notFound(res, 'Application not found');
+    const doc = await Apps.findOneAndUpdate(
+      { _id: existing._id, schoolId },
       { stage: 'withdrawn', deletedAt: new Date().toISOString(), deletedBy: userId },
       { new: true }
     ).lean();
     if (!doc) return E.notFound(res, 'Application not found');
-    return ok(res, { id: req.params.id, withdrawn: true });
+    return ok(res, { id: existing.id ?? String(existing._id), withdrawn: true });
   } catch (err) { console.error('[admissions DELETE/:id]', err); return E.serverError(res); }
 });
 

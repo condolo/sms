@@ -556,6 +556,70 @@ describe('POST /api/admissions/:id/enroll — business-flow: discount is correct
 ══════════════════════════════════════════════════════════════ */
 
 /* ══════════════════════════════════════════════════════════════
+   Pre-migration applications with no UUID `id` — resolved via _id
+   (2026-09, found while investigating the orphaned-enrollment cases)
+
+   Every :id route on this router looked up an application by an EXACT
+   match on its `id` field, with no fallback to Mongo's own `_id` — the
+   same dual-identifier pattern already handled for students/classes/
+   streams/users elsewhere in this codebase (DEVELOPER_GUIDE.md). The
+   client already correctly falls back to `a.id ?? a._id` when linking
+   to an application (DetailPanel.jsx), so a legacy record with no `id`
+   field at all was completely unreachable through the API: every
+   route, including POST /:id/enroll, returned 404 "Application not
+   found" no matter what — confirmed live, running the orphaned-
+   enrollment diagnostic script against production, where exactly one
+   of the eight orphans (a Msingi Demo School record predating the
+   UUID `id` field) had this shape.
+══════════════════════════════════════════════════════════════ */
+describe('Legacy applications with no UUID id — every :id route falls back to _id', () => {
+  function legacyApp(overrides = {}) {
+    const a = app({ ...overrides });
+    delete a.id; // simulate a pre-migration record: no UUID id, only _id
+    a._id = 'oid_legacy_1';
+    return a;
+  }
+
+  test('GET /:id resolves a legacy record by its _id', async () => {
+    mockAppDocs = [legacyApp()];
+    const res = await supertest(buildApp()).get('/api/admissions/oid_legacy_1');
+    expect(res.status).toBe(200);
+    expect(res.body.data.firstName).toBe('Amara');
+  });
+
+  test('PUT /:id resolves and updates a legacy record by its _id', async () => {
+    mockAppDocs = [legacyApp()];
+    const res = await supertest(buildApp()).put('/api/admissions/oid_legacy_1').send({ notes: 'updated' });
+    expect(res.status).toBe(200);
+    expect(mockAppDocs[0].notes).toBe('updated');
+  });
+
+  test('PATCH /:id/stage resolves and moves a legacy record by its _id', async () => {
+    mockAppDocs = [legacyApp({ stage: 'enquiry' })];
+    const res = await supertest(buildApp()).patch('/api/admissions/oid_legacy_1/stage').send({ stage: 'application' });
+    expect(res.status).toBe(200);
+    expect(mockAppDocs[0].stage).toBe('application');
+  });
+
+  test('DELETE /:id resolves and withdraws a legacy record by its _id', async () => {
+    mockAppDocs = [legacyApp()];
+    const res = await supertest(buildApp()).delete('/api/admissions/oid_legacy_1');
+    expect(res.status).toBe(200);
+    expect(mockAppDocs[0].stage).toBe('withdrawn');
+  });
+
+  test('POST /:id/enroll resolves a legacy record by its _id and enrolls it — the exact case this was found from', async () => {
+    mockAppDocs = [legacyApp({ stage: 'acceptance' })];
+    const res = await supertest(buildApp()).post('/api/admissions/oid_legacy_1/enroll').send({});
+    expect(res.status).toBe(201);
+    expect(res.body.data.student.firstName).toBe('Amara');
+    // The APPLICATION update after enrolling must also target the right
+    // record by _id, not silently no-op because `id` doesn't exist.
+    expect(mockAppDocs[0].studentId).toBeDefined();
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════
    GET /api/admissions and /stats — completed enrollments hidden by
    default (2026-09, requested directly)
 
