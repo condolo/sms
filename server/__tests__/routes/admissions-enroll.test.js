@@ -334,6 +334,21 @@ describe('POST /api/admissions/:id/enroll — field carry-through', () => {
     expect(student.status).toBe('active');
   });
 
+  // Reported directly, from the orphaned-enrollment investigation (2026-09):
+  // one of the affected applications had applyingForClass as an empty
+  // string (never assigned a class before the stage was bypassed to
+  // "enrolled"). The route doesn't require a class — it must still
+  // enroll cleanly, producing a student with no class rather than
+  // rejecting or carrying through an empty string as if it were a real id.
+  test('an application with no class assigned (empty string) still enrolls, with classId left unset rather than an empty string', async () => {
+    mockAppDocs = [app({ applyingForClass: '', applyingForClassName: '' })];
+    const res = await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});
+    expect(res.status).toBe(201);
+    const student = res.body.data.student;
+    expect(student.classId).toBeUndefined();
+    expect(student.className).toBeUndefined();
+  });
+
   test('the application is updated: stage -> enrolled, studentId set, one stageHistory entry appended', async () => {
     mockAppDocs = [app({ stage: 'acceptance' })];
     const res = await supertest(buildApp()).post('/api/admissions/app_1/enroll').send({});

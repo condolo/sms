@@ -6,6 +6,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.85.0] — 2026-09-12 — chore(admissions): a permanent, read-only check for the orphaned-enrollment bug class
+
+Follows a full investigation of the four applications discovered stuck at "Enrolled" with no linked Student record (three at Trinitas, one at Mascit Lab Academy) — confirmed, case by case, that each is a clean, unambiguous historical artifact of the three now-closed write paths (v5.82.0/v5.83.0), with no Student, guardian account, invoice, or payment of any kind existing anywhere for any of them. No database repair was performed or recommended; the correct fix for each is the real Enroll Student action in the app.
+
+### Added
+- `scripts/find-orphaned-enrollments.js` — a read-only diagnostic (same pattern as `find-duplicate-staff-emails.js` and friends): finds every application at `stage: "enrolled"` with no `studentId`, across one school or all of them, and reports its identity, whether a class was ever assigned, its stage history (which usually reveals which of the three closed paths produced it), and two safety cross-checks before anyone re-enrolls it — whether a Student with a matching name already exists anywhere (a genuine name collision, not this bug), and whether either parent already has a guardian login account. Makes zero writes. This is the operational safety net requested directly: catch this by running a check, not by noticing an applicant is missing from Students weeks later.
+- 1 new integration test in `admissions-enroll.test.js`, covering a gap the investigation surfaced: an application whose `applyingForClass` is an empty string (one of the four affected records) still enrolls cleanly, with `classId` left unset rather than carrying through an empty string as if it were a real class reference.
+
+### Verified
+- Full server suite 2018/2018. `verify-rbac-coverage.js` 100% (no regression — no new routes). `security-scan.js` clean. The script's query logic was independently cross-checked against the live database during the investigation (via read-only access) and confirmed to identify exactly the four known cases, with no false positives or negatives, before being committed.
+
+---
+
 ## [v5.84.0] — 2026-09-11 — feat(admissions): a fully-enrolled application no longer shows in Admissions
 
 Requested directly, looking at the same three Trinitas cards from v5.82.0/v5.83.0: "once a student is enrolled, goes to the list of all students... it will cause confusion. once moved to enroll, student should be active not listed here under admission... do this globally." A deliberate design from earlier this session (Admissions §3: "Enrolled... stays in that column forever, the same way a 'Closed Won' column works") was reconsidered and reversed after seeing it cause exactly the confusion it wasn't meant to — a fully-enrolled child showing in both Admissions and Students at once looks like two different records for one person, not one person tracked in two places.
