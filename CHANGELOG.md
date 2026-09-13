@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.87.0] — 2026-09-13 — fix(students): editing an existing student could fail with a blank "Validation failed" and a permanently-empty Guardian section
+
+Reported directly: an admission officer editing an existing Mascit Lab Academy student (MLA-00002, "WENDY BBOSSA") got a generic "Validation failed" toast, and the edit form's entire Guardian section (Name/Relationship/Phone/Email) showed blank even though the student had real guardian data on file. Investigated with a full elimination pass against the live document (confirmed via read-only MongoDB access) before touching any code: the stored record itself passes the server's Zod schema cleanly as-is (verified by re-running the exact schema against it), and a client/server field-name mismatch on its own cannot produce a validation error — Zod v3 silently strips fields it doesn't recognize rather than rejecting them, confirmed empirically. That elimination pointed at `client/src/pages/students/StudentProfile.jsx` itself, where two separate, unrelated bugs were found:
+
+1. The edit-mode Gender `<select>` used hardcoded option values `"M"` / `"F"` / `"Other"`, and the Status `<select>`'s last option used `"expelled"` — none of which match the server's actual enum values (`"male"/"female"/"other"/"prefer_not_to_say"` and `.../"withdrawn"`). Because the real stored value (e.g. `"male"`) never matches any option, the dropdown renders looking blank/wrong even though the true value is held correctly — and if the officer interacts with it to "fix" what looks like an error, the form now submits an invalid value the server correctly (and only generically) rejects with 422 "Validation failed", with no indication of which field or why.
+2. Independently, the whole Guardian section (both the read-only view and the edit form) read and wrote `guardianName` / `guardianRelation` / `guardianPhone` / `guardianEmail` — field names that have never existed in the schema. The real fields are `parentName` / `parentRelationship` / `parentPhone` / `parentEmail`. This made the Guardian section always render blank regardless of real data, and silently discarded (not rejected — stripped, per the same Zod behavior above) any guardian edits typed into it.
+
+### Fixed
+- `client/src/pages/students/StudentProfile.jsx`: Gender dropdown now offers the 4 real schema values instead of 3 mismatched ones; Status dropdown's last option is `withdrawn` (a real, existing status) instead of the invalid `expelled`; Guardian view (`InfoCard`) and edit (`FField`/`input`) now both read/write the real `parentName`/`parentRelationship`/`parentPhone`/`parentEmail` fields.
+- Same file: the update-mutation's error toast now also surfaces the first per-field validation issue (`field: message`, from `err.extra.error.issues`) alongside the generic top-level message, instead of discarding it — the exact detail that would have made this report self-diagnosing without a code investigation.
+- Confirmed by full grep of every `<option value=` in this file that no other dropdown has this bug class (House and Blood group are both built dynamically from real data/shared constants, not hardcoded).
+
+### Verified
+- Full server suite 2023/2023 (unaffected — this is a client-only fix; run as a sanity pass, not because server logic changed). `verify-rbac-coverage.js` 100% (no regression). `security-scan.js` clean. `npx vite build --mode production` succeeds cleanly.
+
+---
+
 ## [v5.86.0] — 2026-09-12 — fix(admissions): a legacy application with no UUID id was unreachable through the API
 
 Found running the new `find-orphaned-enrollments.js` diagnostic against the real database: one of the eight orphaned applications (a pre-migration Msingi Demo School record) has no `id` field at all, only a Mongo `_id`. Every route on this router that looks up an application by id used an exact match on the `id` field alone, with no fallback to `_id` — the same dual-identifier pattern already handled for students, classes, streams, and users elsewhere in this codebase, but never applied to admissions. The client already correctly falls back to `a.id ?? a._id` when linking to an application; the server just never met it halfway. A legacy record missing `id` was completely unreachable through the API — `GET`, `PUT`, `PATCH .../stage`, `DELETE`, and, critically, `POST .../enroll` all returned 404 "Application not found" no matter what, so its Enroll Student button couldn't even be clicked.

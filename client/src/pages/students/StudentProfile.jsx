@@ -172,7 +172,17 @@ export default function StudentProfile() {
       toast.success('Student profile saved.');
     },
     onError: (err) => {
-      toast.error(err?.message || 'Failed to save student profile. Please try again.');
+      // The server's top-level message for a 422 is always the same generic
+      // "Validation failed" regardless of which field or why — the actual
+      // reason only ever lives in error.issues (per-field {field, message}),
+      // which until now was thrown away here. Surface the first issue too,
+      // so a bad value (e.g. a stale dropdown option) is diagnosable from
+      // the toast alone instead of needing someone to read server logs.
+      const issues = err?.extra?.error?.issues;
+      const detail = Array.isArray(issues) && issues.length
+        ? ` (${issues[0].field}: ${issues[0].message})`
+        : '';
+      toast.error((err?.message || 'Failed to save student profile. Please try again.') + detail);
     },
   });
 
@@ -525,10 +535,10 @@ function OverviewTab({ student, houses, houseName, editing, saving, onSave, onCa
         </InfoCard>
 
         <InfoCard title="Guardian" icon={<Shield size={14} />}>
-          <InfoRow label="Name"         value={student.guardianName} />
-          <InfoRow label="Relationship" value={student.guardianRelation} />
-          <InfoRow label="Phone"        value={student.guardianPhone} />
-          <InfoRow label="Email"        value={student.guardianEmail} />
+          <InfoRow label="Name"         value={student.parentName} />
+          <InfoRow label="Relationship" value={student.parentRelationship} />
+          <InfoRow label="Phone"        value={student.parentPhone} />
+          <InfoRow label="Email"        value={student.parentEmail} />
         </InfoCard>
       </div>
     );
@@ -555,9 +565,10 @@ function OverviewTab({ student, houses, houseName, editing, saving, onSave, onCa
           <FField label="Gender">
             <select className={iCls()} value={form.gender ?? ''} onChange={e => set('gender', e.target.value)}>
               <option value="">—</option>
-              <option value="M">Male</option>
-              <option value="F">Female</option>
-              <option value="Other">Other</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="other">Other</option>
+              <option value="prefer_not_to_say">Prefer not to say</option>
             </select>
           </FField>
           <FField label="Nationality">
@@ -612,7 +623,7 @@ function OverviewTab({ student, houses, houseName, editing, saving, onSave, onCa
               <option value="suspended">Suspended</option>
               <option value="graduated">Graduated</option>
               <option value="transferred">Transferred</option>
-              <option value="expelled">Expelled</option>
+              <option value="withdrawn">Withdrawn</option>
             </select>
           </FField>
           <FField label="Enrollment date">
@@ -643,16 +654,16 @@ function OverviewTab({ student, houses, houseName, editing, saving, onSave, onCa
         <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
           <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Guardian</h3>
           <FField label="Guardian name">
-            <input className={iCls()} value={form.guardianName ?? ''} onChange={e => set('guardianName', e.target.value)} />
+            <input className={iCls()} value={form.parentName ?? ''} onChange={e => set('parentName', e.target.value)} />
           </FField>
           <FField label="Relationship">
-            <input className={iCls()} value={form.guardianRelation ?? ''} onChange={e => set('guardianRelation', e.target.value)} />
+            <input className={iCls()} value={form.parentRelationship ?? ''} onChange={e => set('parentRelationship', e.target.value)} />
           </FField>
           <FField label="Guardian phone">
-            <input className={iCls()} value={form.guardianPhone ?? ''} onChange={e => set('guardianPhone', e.target.value)} />
+            <input className={iCls()} value={form.parentPhone ?? ''} onChange={e => set('parentPhone', e.target.value)} />
           </FField>
           <FField label="Guardian email">
-            <input type="email" className={iCls()} value={form.guardianEmail ?? ''} onChange={e => set('guardianEmail', e.target.value)} />
+            <input type="email" className={iCls()} value={form.parentEmail ?? ''} onChange={e => set('parentEmail', e.target.value)} />
           </FField>
         </div>
       </div>
