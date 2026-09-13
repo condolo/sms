@@ -1,7 +1,7 @@
 import {
   Activity, BarChart3, BookCheck, BookMarked, BookOpen, Boxes, Building2, Bus,
-  Calendar, CalendarDays, CheckCircle, ClipboardList, DollarSign,
-  FileText, GraduationCap, HeartPulse, Layers, Link2, MessageSquare, MonitorPlay,
+  Calendar, CalendarCheck, CalendarDays, CheckCircle, ClipboardList, DollarSign,
+  FileBarChart2, FileText, GraduationCap, HeartPulse, Layers, Link2, MessageSquare, MonitorPlay,
   ShieldCheck, TrendingUp, UserCheck, UserCog, Users,
 } from 'lucide-react';
 
@@ -15,6 +15,7 @@ export const ECOSYSTEM_NODES = [
   { label: 'Admissions',      Icon: ClipboardList, color: 'bg-pink-500',    desc: 'First enquiry in'   },
   { label: 'Student Records', Icon: Users,         color: 'bg-indigo-500',  desc: 'Profile created'    },
   { label: 'Growth Profile',  Icon: Activity,      color: 'bg-green-600',  desc: 'Milestones tracked' },
+  { label: 'Weekly Snapshot', Icon: CalendarCheck, color: 'bg-emerald-600', desc: 'Progress at a glance' },
   { label: 'Teachers',        Icon: UserCheck,     color: 'bg-blue-600',    desc: 'Staff managed'      },
   { label: 'Classes',         Icon: Layers,        color: 'bg-blue-500',    desc: 'Sections & streams' },
   { label: 'Subjects',        Icon: BookMarked,    color: 'bg-violet-400',  desc: 'Curriculum mapped'  },
@@ -22,6 +23,7 @@ export const ECOSYSTEM_NODES = [
   { label: 'Attendance',      Icon: CheckCircle,   color: 'bg-emerald-500', desc: 'Daily tracked'      },
   { label: 'Lessons',         Icon: BookCheck,     color: 'bg-cyan-500',    desc: 'Curriculum covered' },
   { label: 'Grades & Exams',  Icon: GraduationCap, color: 'bg-violet-500',  desc: 'Marks attributed'   },
+  { label: 'Report Cards',    Icon: FileBarChart2, color: 'bg-fuchsia-500', desc: 'Comments approved'  },
   { label: 'eLearning',       Icon: MonitorPlay,   color: 'bg-purple-600',  desc: 'Online learning'    },
   // Operations
   { label: 'Behaviour',       Icon: ShieldCheck,   color: 'bg-orange-500',  desc: 'Incidents logged'   },

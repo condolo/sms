@@ -6,6 +6,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.88.0] — 2026-09-13 — fix(marketing): Report Cards and Weekly Snapshot were missing from the landing page's module grid
+
+Asked directly to confirm every real module is represented on the marketing/landing page. Cross-checked `landingData.js`'s `ECOSYSTEM_NODES` (the icon grid rendered on `Landing.jsx`) against `server/config/moduleRegistry.js` — the single source of truth also used to build the real in-app sidebar — and found two live, `navRoute`-bearing modules with no tile: **Report Cards** (`/report-cards`) and **Weekly Snapshot** (`/weekly-snapshot`). Both are fully built, routed pages, not stubs; they were simply never added to this list.
+
+### Fixed
+- `client/src/data/landingData.js`: added `Report Cards` (after Grades & Exams, matching the academic pipeline it belongs to) and `Weekly Snapshot` (after Growth Profile, its Student Services sibling) to `ECOSYSTEM_NODES`, using the same icons as the app's real sidebar (`FileBarChart2`, `CalendarCheck` from `moduleNav.js`) and matching the existing 2-3 word description style.
+- `Landing.jsx`'s module-count copy already derives from `ECOSYSTEM_NODES.length` (v5.35.0) rather than a hardcoded literal, so it now correctly reads 26 without a separate edit.
+- Not touched: `PlatformPage.jsx`'s `GROUPS` list is a deliberately independent, separately-curated list (documented in v5.35.0) — it already includes Report Cards but is still missing Weekly Snapshot. Flagged to the user as a same-class follow-up, not fixed here since it wasn't the page asked about.
+
+### Verified
+- Rebuilt `landingData.js`'s icon import list (added `CalendarCheck`, `FileBarChart2`) and confirmed a clean production client build.
+- Visually verified via the dev server preview: both tiles render in the correct position with the correct icon, color, and description style; no console errors introduced (pre-existing `/api/platform/settings` 500s in the preview are from the backend not being started for this check, unrelated to this change).
+
+---
+
 ## [v5.87.0] — 2026-09-13 — fix(students): editing an existing student could fail with a blank "Validation failed" and a permanently-empty Guardian section
 
 Reported directly: an admission officer editing an existing Mascit Lab Academy student (MLA-00002, "WENDY BBOSSA") got a generic "Validation failed" toast, and the edit form's entire Guardian section (Name/Relationship/Phone/Email) showed blank even though the student had real guardian data on file. Investigated with a full elimination pass against the live document (confirmed via read-only MongoDB access) before touching any code: the stored record itself passes the server's Zod schema cleanly as-is (verified by re-running the exact schema against it), and a client/server field-name mismatch on its own cannot produce a validation error — Zod v3 silently strips fields it doesn't recognize rather than rejecting them, confirmed empirically. That elimination pointed at `client/src/pages/students/StudentProfile.jsx` itself, where two separate, unrelated bugs were found:
