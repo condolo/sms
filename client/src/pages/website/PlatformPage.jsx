@@ -34,6 +34,7 @@ const MODULES = {
   'Lessons':         'Lesson planning linked to schemes of work and CBC/CAIE objectives. Syllabus coverage tracked live — no notebook required.',
   'E-Learning':      'Lessons, notes, videos, and assignments published online. Student progress tracked per module. Feeds directly into Grades.',
   'Growth Profile':  'Digital student portfolio tracking co-curricular achievements, competencies, and development across the full school journey.',
+  'Weekly Snapshot': 'One-page weekly rollup per student — attendance, behaviour, and academic activity, with medical details auto-redacted by role. Downloadable as a PDF for parents.',
   'Admissions':      'Kanban pipeline from enquiry to enrolled. Offer tracking, waiting list management, and automatic student record creation on enrolment.',
   // Operations
   'Finance':         'M-Pesa Paybill reconciliation built in. Fee structures, bursary management, arrears tracking, and term statements in one module.',
@@ -56,7 +57,7 @@ const MODULES = {
 };
 
 const GROUPS = [
-  { label: 'Academic',   nodes: ['Students', 'Teachers', 'Classes', 'Attendance', 'Grades & Exams', 'Report Cards', 'Timetable', 'Subjects', 'Lessons', 'E-Learning', 'Growth Profile', 'Admissions'] },
+  { label: 'Academic',   nodes: ['Students', 'Teachers', 'Classes', 'Attendance', 'Grades & Exams', 'Report Cards', 'Timetable', 'Subjects', 'Lessons', 'E-Learning', 'Growth Profile', 'Weekly Snapshot', 'Admissions'] },
   { label: 'Operations', nodes: ['Finance', 'HR', 'Library', 'Hostel', 'Transport', 'Events', 'Messages', 'Behaviour', 'Resources', 'Medical Centre', 'Inventory'] },
   { label: 'Insights',   nodes: ['Analytics', 'Reports'] },
   { label: 'Portals',    nodes: ['Student Portal', 'Parent Portal'] },

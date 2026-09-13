@@ -6,6 +6,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.89.0] — 2026-09-13 — fix(marketing): Weekly Snapshot was also missing from the Platform Overview page
+
+Direct follow-up to v5.88.0, flagged rather than fixed there since it hadn't been asked about: `PlatformPage.jsx`'s `GROUPS`/`MODULES` (the `/platform` page's own, deliberately independent module list — see v5.35.0) already listed Report Cards but not Weekly Snapshot, the same gap as the landing page's grid.
+
+### Fixed
+- `client/src/pages/website/PlatformPage.jsx`: added a `Weekly Snapshot` entry to `MODULES` (grounded in the real feature — `weekly-snapshot/WeeklySnapshotDetail.jsx`'s per-student weekly rollup with role-based medical redaction and a PDF export) and to the `Academic` group in `GROUPS`, right after `Growth Profile`. Its icon/color resolve automatically from `ECOSYSTEM_NODES` (same lookup-by-label the page already uses for every other node), which already carries the entry added in v5.88.0.
+- `MODULE_COUNT` (`GROUPS.flatMap(g => g.nodes).length`) now correctly reads 28, with no separate edit needed — same self-deriving copy from v5.35.0.
+
+### Verified
+- Production client build passes. Visually confirmed via the dev server preview: the new card renders in the Academic group with the correct icon/color/description, and the hero now reads "28 modules". No new console errors (pre-existing `/api/platform/settings` 500s in the preview are from the backend not being started for this check).
+
+---
+
 ## [v5.88.0] — 2026-09-13 — fix(marketing): Report Cards and Weekly Snapshot were missing from the landing page's module grid
 
 Asked directly to confirm every real module is represented on the marketing/landing page. Cross-checked `landingData.js`'s `ECOSYSTEM_NODES` (the icon grid rendered on `Landing.jsx`) against `server/config/moduleRegistry.js` — the single source of truth also used to build the real in-app sidebar — and found two live, `navRoute`-bearing modules with no tile: **Report Cards** (`/report-cards`) and **Weekly Snapshot** (`/weekly-snapshot`). Both are fully built, routed pages, not stubs; they were simply never added to this list.
