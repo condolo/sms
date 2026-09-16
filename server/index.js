@@ -183,24 +183,33 @@ function _rateLimitKey(req) {
   return req.ip;
 }
 
-// General limiter: 3000 req/15min, per authenticated user (or per IP for
-// anonymous requests). Raised from 1000, which was itself raised from 600,
-// which was raised from 300 — each bump chasing the same underlying cause
-// without actually sizing it: this SPA genuinely fires 8-10 parallel
-// requests per page load (documented, accepted tradeoff, not a bug), and
-// a single active admin session — testing/QA, bulk data entry, running
-// reports across many pages in one sitting — can plausibly exceed 1000
-// requests inside 15 minutes on its own, with nothing wrong on either
-// end. Per-user keying (see _rateLimitKey above) already means this
-// ceiling is never shared across users on the same network — raising it
-// further only affects how much a single account can do, not how many
-// accounts can pile onto one bucket. 3000 keeps meaningful headroom
-// above realistic peak single-session usage while still bounding a
-// genuine automated-abuse pattern (which looks nothing like normal
-// interactive browsing regardless of the exact ceiling).
+// General limiter: 10000 req/15min, per authenticated user (or per IP for
+// anonymous requests). Raised from 3000, which was itself raised from 1000,
+// 600, and 300 (v5.43.0 and earlier) — this is the fourth time real usage
+// has outgrown the ceiling, and each prior bump sized only for one heavy
+// admin's own session, not the pattern actually reported: "Too many
+// requests" recurring across unrelated pages (Teachers, Settings) despite
+// v5.43.0 already fixing the *scope* bug (an IP-keyed bucket shared by
+// every device on the same office network). That fix is confirmed still
+// correct — _rateLimitKey above still keys by authenticated user, not IP —
+// which means this recurrence isn't the same bug back: it's the ceiling
+// itself, sized for the wrong unit. A school's real usage is commonly
+// several staff sharing ONE login credential (an "admin" or "hr" account
+// used by whoever's at the front desk that hour), not one person per
+// account — per-user keying can't distinguish that from a single unusually
+// fast clicker, so a shared credential draws down the same budget as
+// before, just shared by login instead of by network. Settings alone fires
+// up to ~22 queries on its heaviest tabs; a handful of staff independently
+// working through Settings/Teachers/other modules across a working day can
+// plausibly exceed even 3000 in a 15-minute window with nothing actually
+// wrong. Sized this time for that reality (several concurrent users on one
+// credential) rather than bumped incrementally again — comfortably above
+// even a heavily-shared account's realistic peak, while 10000 req/15min
+// (~11/sec sustained) still bounds genuine automated abuse, which looks
+// nothing like human clicking regardless of how many humans share the login.
 const apiLimiter = rateLimit({
   windowMs:          15 * 60 * 1000,
-  max:               3000,
+  max:               10000,
   standardHeaders:   true,
   legacyHeaders:     false,
   keyGenerator:      _rateLimitKey,
@@ -254,7 +263,7 @@ app.use('/api/auth/change-password',    authLimiter);
 app.use('/api/auth/sessions/revoke-all',authLimiter);
 app.use('/api/platform', platformLimiter);
 
-console.log('[Security] rate limiting active — general: 3000/15min per user (IP for anonymous), auth: 20/15min per IP (login+force-change+change-password+revoke-all), platform: 300/15min per IP');
+console.log('[Security] rate limiting active — general: 10000/15min per user (IP for anonymous), auth: 20/15min per IP (login+force-change+change-password+revoke-all), platform: 300/15min per IP');
 
 /* ── API Routes ─────────────────────────────────────────────── */
 app.use('/api/public',      require('./routes/public'));   // no auth — school branding

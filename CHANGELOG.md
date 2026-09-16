@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.90.0] — 2026-09-16 — fix(security): general rate limit still too low for real (often shared-login) usage
+
+Reported directly: "Too many requests — please slow down and try again shortly" recurring on unrelated pages — Teachers (searching "physl"), Settings → School, Settings → Users. The exact same symptom, on the exact same two pages, that v5.43.0 already investigated and fixed once (Teachers + Settings → Roles & Permissions) — so before touching anything, re-verified that fix hadn't regressed rather than assuming it had.
+
+### Investigated — the v5.43.0 fix is still correct; this is a different cause
+`_rateLimitKey` in `server/index.js` still keys `apiLimiter` by authenticated user (`user:<userId>`, decoded from the session cookie), not IP — confirmed by reading it directly, so the original "one office network shares one bucket" bug has not come back. Re-checked for a genuine request-storm bug on both reported pages, same way v5.43.0 did: Teachers' search box is still debounced 350ms (`TeacherList.jsx`), no `setInterval`/`refetchInterval` anywhere in the client fires background polling, and the global React Query `retry` policy (from an earlier fix, `client/src/main.jsx`) already excludes 4xx/429 from ever auto-retrying, so no retry cascade. Neither page has a code bug.
+
+The real cause: per-user keying assumes one person per login, but a school's actual usage pattern is often several staff sharing **one** login credential (an "admin" or "hr" account used by whoever's on duty) — which draws down the identical shared budget the v5.43.0 fix was meant to eliminate, just shared by credential instead of by network. `SettingsPage.jsx` fires up to ~22 queries across its heaviest tabs; a handful of staff independently working through Settings/Teachers/other modules across a working day can plausibly exceed even the current 3000/15min ceiling with nothing actually wrong on either end.
+
+### Fixed
+- `apiLimiter`'s ceiling raised 3000 → **10000** req/15min (still per authenticated user, still falling back to IP only for anonymous requests) — sized this time for several concurrent users on one shared credential, not bumped incrementally again the way the prior three raises (300→600→1000→3000) each were. 10000/15min (~11 req/sec sustained) still bounds genuine automated abuse, which looks nothing like human clicking no matter how many humans share the login.
+- Corrected the startup log line (`console.log('[Security] rate limiting active...')`) to match, following the same "fix the log while touching this block" lesson v5.43.0 already documented once for the same line.
+- `authLimiter` (login brute-force, IP-keyed) and `platformLimiter` (platform admin, IP-keyed) were deliberately left untouched — neither is what the user hit, and both remain correctly IP-keyed for their own reasons (no session exists yet to key against for login; platform admin is a single shared operator credential by design).
+
+### Verified
+- Full Jest suite 2023/2023, `verify-rbac-coverage.js` 100% (no regression — no routes changed), `security-scan.js` clean. This limiter only activates in production (`skip: () => NODE_ENV !== 'production'`), so — same as v5.43.0 — a live 429 could not be reproduced in this environment; verification relies on direct code review of `_rateLimitKey` and the debounce/retry logic, plus the constant-value change itself carrying no logic risk.
+
+---
+
 ## [v5.89.0] — 2026-09-13 — fix(marketing): Weekly Snapshot was also missing from the Platform Overview page
 
 Direct follow-up to v5.88.0, flagged rather than fixed there since it hadn't been asked about: `PlatformPage.jsx`'s `GROUPS`/`MODULES` (the `/platform` page's own, deliberately independent module list — see v5.35.0) already listed Report Cards but not Weekly Snapshot, the same gap as the landing page's grid.

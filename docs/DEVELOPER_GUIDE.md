@@ -1758,7 +1758,7 @@ Use these class names directly in JSX — avoid writing Tailwind utility strings
 
 ---
 
-## 20. Security Layer (v4.5+, rate limiting reworked v5.43.0/v5.56.0)
+## 20. Security Layer (v4.5+, rate limiting reworked v5.43.0/v5.56.0/v5.90.0)
 
 ### Global Rate Limiting (`server/index.js`)
 
@@ -1770,20 +1770,20 @@ Request → apiLimiter → [authLimiter if credential-submission route] → [pla
 
 | Limiter | Window | Max | Scope | Keyed by | Dev mode |
 |---------|--------|-----|-------|----------|----------|
-| `apiLimiter` | 15 min | 3000 req | All `/api/*` | **Authenticated user** (`user:<userId>`, decoded from the HttpOnly session cookie) — falls back to IP only for requests with no valid token | **Disabled** (skipped when `NODE_ENV !== 'production'`) |
+| `apiLimiter` | 15 min | 10000 req | All `/api/*` | **Authenticated user** (`user:<userId>`, decoded from the HttpOnly session cookie) — falls back to IP only for requests with no valid token | **Disabled** (skipped when `NODE_ENV !== 'production'`) |
 | `authLimiter` | 15 min | 20 req | Credential-submission routes only (`/api/auth/login`, `/force-change`, `/change-password`, `/sessions/revoke-all`) — NOT the whole `/api/auth` namespace, so `verify-otp`/`ping`/`me` don't share the same 20-request budget mid-login | IP | **Always on** (skipped only when `NODE_ENV === 'test'`) |
 | `platformLimiter` | 15 min | 10 req | `/api/platform` only | IP | **Disabled** (skipped when `NODE_ENV !== 'production'`) |
 
 **Why `apiLimiter` is keyed per-user, not per-IP (v5.43.0):** an IP-keyed bucket is shared by *every device behind the same network* — a school office's shared WiFi/NAT meant several staff members, or one admin with a few tabs open, could trip each other's limit with entirely legitimate traffic. Per-user keying eliminates that cross-contamination; each account now has its own independent budget regardless of who else is on the same network.
 
-**Why 3000, not something tighter (v5.56.0, raised from 1000, itself raised from 600, itself raised from 300):** this SPA genuinely fires 8-10 parallel requests per page load (an accepted tradeoff, not a bug) — a single active admin session (testing, bulk data entry, running reports across many pages) can plausibly exceed 1000 requests inside 15 minutes with nothing wrong on either end. Per-user keying means this ceiling only ever bounds what ONE account can do in the window, never how many accounts can pile onto a shared bucket — so raising it is a pure UX/false-positive tradeoff, not a re-opening of the office-WiFi bug above.
+**Why 10000, not something tighter (v5.90.0, raised from 3000, itself raised from 1000, 600, and 300):** the same "Too many requests" symptom recurred a fourth time — reported again on the same two pages (Teachers, Settings) v5.43.0 had already investigated once. Re-verified the per-user keying fix was still intact (it was) and re-checked both pages for a request-storm bug (neither had one, same conclusion as v5.43.0), which means the ceiling itself was still sized for the wrong unit: per-user keying assumes one person per login, but a school's real usage pattern is commonly several staff sharing ONE login credential — which draws down the same shared budget the v5.43.0 fix was meant to eliminate, just shared by credential instead of by network. `SettingsPage.jsx` alone fires up to ~22 queries across its heaviest tabs, so a handful of staff independently working through it across a working day can plausibly exceed even 3000 in a 15-minute window. Sized this time for that reality (several concurrent users on one shared credential) rather than bumped incrementally again.
 
 **Why skip `apiLimiter`/`platformLimiter` in dev?** Running seed scripts, automated tests, or hot-reload against `localhost` would otherwise trip them constantly. `authLimiter` stays active outside dev so brute-force behaviour is still testable locally (only actually disabled in `NODE_ENV === 'test'`, for the Jest suite).
 
 **Standard headers** — every response includes (`apiLimiter` example):
 ```
-RateLimit-Limit: 3000
-RateLimit-Remaining: 2999
+RateLimit-Limit: 10000
+RateLimit-Remaining: 9999
 RateLimit-Reset: 1746285600
 ```
 
