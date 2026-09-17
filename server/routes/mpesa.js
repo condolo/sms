@@ -492,7 +492,7 @@ router.post('/subscription', authMiddleware, async (req, res) => {
     }
 
     const { schoolId } = req.jwtUser;
-    const { phone, studentCount } = req.body;
+    const { phone } = req.body;
 
     if (!phone) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'phone is required.' } });
@@ -512,7 +512,14 @@ router.post('/subscription', authMiddleware, async (req, res) => {
     if (!rate) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `This school's plan (${school?.plan || 'not set'}) isn't a self-service tier. Contact platform admin to set a Base, Student, or Family plan, or sales for Enterprise.` } });
     }
-    const count  = Math.max(1, parseInt(studentCount, 10) || 1);
+    // Student count used to come straight from the request body — a school
+    // admin could type any number, including one lower than their real
+    // enrollment, and pay Msingi less than owed for its own subscription.
+    // Same integrity gap the tier check above already closes for `plan`:
+    // never trust client-supplied billing inputs, recompute them server-side.
+    // Matches createBillingSnapshot()'s own count (billing.js) exactly, so
+    // this route and the "Generate invoice" path always agree.
+    const count  = Math.max(1, await tenantModel('students', tenantContext(req)).countDocuments({ schoolId, status: 'active' }));
     const amount = rate * count;
 
     // Platform M-Pesa credentials (separate from school's own credentials)

@@ -40,12 +40,18 @@ jest.mock('../../utils/model', () => ({
   }),
 }));
 
+let mockActiveStudentCount = 100;
+
 jest.mock('../../utils/tenant-model', () => ({
   tenantModel: jest.fn(() => ({
-    create:    jest.fn().mockResolvedValue({}),
-    updateOne: jest.fn().mockResolvedValue({}),
-    find:      () => ({ lean: () => Promise.resolve([]) }),
-    findOne:   () => ({ sort: () => ({ lean: () => Promise.resolve(null) }) }),
+    create:          jest.fn().mockResolvedValue({}),
+    updateOne:       jest.fn().mockResolvedValue({}),
+    find:            () => ({ lean: () => Promise.resolve([]) }),
+    findOne:         () => ({ sort: () => ({ lean: () => Promise.resolve(null) }) }),
+    // v5.93.0 — the route now recomputes the real active student count
+    // itself (same query createBillingSnapshot() uses in billing.js)
+    // rather than trusting req.body.studentCount.
+    countDocuments:  jest.fn(() => Promise.resolve(mockActiveStudentCount)),
   })),
   tenantContext: jest.fn((req) => ({ schoolId: req.jwtUser?.schoolId })),
 }));
@@ -69,6 +75,7 @@ beforeEach(() => {
     MSINGI_MPESA_PASSKEY:         'p',
   };
   mockSchoolDoc = { id: 'sch_1', plan: 'family', slug: 'test-school', shortName: 'Test' };
+  mockActiveStudentCount = 100;
 });
 afterAll(() => { process.env = ORIGINAL_ENV; });
 
@@ -101,6 +108,22 @@ describe('POST /api/mpesa/subscription — plan authority', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.plan).toBe('student'); // still the school's real current plan
+  });
+
+  // v5.93.0 — real gap found directly: this route used to trust
+  // req.body.studentCount outright to compute the charge, letting a school
+  // under-report its own enrollment and pay Msingi less than owed for its
+  // own subscription. Same class of problem as the tier/plan tests above —
+  // never trust a client-supplied billing input, recompute it server-side.
+  test('ignores a studentCount sent by the client, charges for the real active count instead', async () => {
+    mockSchoolDoc.plan = 'family'; // rate 350
+    mockActiveStudentCount = 42;   // the REAL count (mocked, matches billing.js's own query)
+    const res = await supertest(app())
+      .post('/api/mpesa/subscription')
+      .send({ phone: '254712345678', studentCount: 9999 }); // client tries to pay for far more than actually enrolled
+
+    expect(res.status).toBe(200);
+    expect(res.body.amount).toBe(350 * 42); // real count, not the client-sent 9999
   });
 
   test('rejects with a clear message when the school is on Enterprise (no self-service rate)', async () => {

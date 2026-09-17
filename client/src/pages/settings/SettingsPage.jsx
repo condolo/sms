@@ -23,6 +23,7 @@ import { sections as sectionsApi, teachers as teachersApi } from '@/api/client.j
 import { settings as settingsApi } from '@/api/client.js';
 import { academicConfig as academicConfigApi } from '@/api/client.js';
 import { billing as billingApi, mpesa as mpesaApi } from '@/api/client.js';
+import { students as studentsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { deriveNavModules, buildModuleConfigMap } from '@/config/moduleNav.js';
 import { SYSTEM_ROLE_LABELS, roleLabel } from '@/utils/roleLabels.js';
@@ -4330,8 +4331,25 @@ function SubscriptionTab() {
     }
   }, [livePlanResp]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The enrolled-student count used to price this payment used to be a
+  // free-typed number defaulting to a hardcoded, meaningless 300 — not
+  // read from anywhere real, and the server (mpesa.js's /subscription
+  // route) trusted whatever the client sent to compute the charge amount,
+  // with no cross-check against actual enrollment. Found and fixed
+  // directly: this now reads the school's real active student count
+  // (same query — status: 'active' — createBillingSnapshot() in
+  // billing.js already uses server-side for the aligned "Generate
+  // invoice" path below), and the server independently recomputes this
+  // same count itself rather than trusting the request body — this field
+  // is now display-only, matching what will actually be charged.
+  const { data: activeCountResp, isLoading: countLoading } = useQuery({
+    queryKey: ['students', 'active-count-for-billing'],
+    queryFn:  () => studentsApi.list({ status: 'active', limit: 1 }),
+    staleTime: 60_000,
+  });
+  const activeStudentCount = activeCountResp?.pagination?.total ?? null;
+
   const [phone,        setPhone]        = useState(user?.phone || '');
-  const [studentCount, setStudentCount] = useState(300);
   const [loading,      setLoading]      = useState(false);
   const [generating,   setGenerating]   = useState(false);
   const [result,       setResult]       = useState(null);
@@ -4357,8 +4375,10 @@ function SubscriptionTab() {
   // enforcement in mpesa.js's /subscription route, which derives the tier
   // from schools.plan directly and ignores anything the client sends).
   const selectedRate = currentTierMeta.rate || 0;
-  // If there's a pending invoice, use its amount; otherwise calculate from manual input
-  const termAmount   = invoice ? invoice.totalAmount : selectedRate * Math.max(1, studentCount);
+  // If there's a pending invoice, use its amount; otherwise calculate from the
+  // real active student count (see activeStudentCount above) — never a
+  // manually-typed number.
+  const termAmount   = invoice ? invoice.totalAmount : selectedRate * Math.max(1, activeStudentCount ?? 0);
 
   async function handleGenerate() {
     setGenerating(true); setError(''); setResult(null);
@@ -4387,11 +4407,14 @@ function SubscriptionTab() {
   }
 
   async function handlePay() {
-    if (!phone.trim())     { setError('Enter the M-Pesa number to charge.'); return; }
-    if (studentCount < 1)  { setError('Enter a valid student count.'); return; }
+    if (!phone.trim())            { setError('Enter the M-Pesa number to charge.'); return; }
+    if (!activeStudentCount)      { setError('No active students found — check the Students module before paying.'); return; }
     setLoading(true); setError(''); setResult(null);
     try {
-      const json = await mpesaApi.subscription({ phone: phone.trim(), studentCount });
+      // studentCount is sent for logging/visibility only — the server
+      // independently recomputes the real active count and ignores this
+      // value when calculating the actual charge (see mpesa.js).
+      const json = await mpesaApi.subscription({ phone: phone.trim(), studentCount: activeStudentCount });
       if (!json.success) throw new Error(json.error?.message || 'Payment initiation failed.');
       setResult(json);
     } catch (err) {
@@ -4480,8 +4503,8 @@ function SubscriptionTab() {
           <span className="ml-auto text-[10px] font-semibold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200">Instant</span>
         </div>
         <p className="text-xs text-slate-400">
-          Enter your enrolled student count — the term amount is calculated automatically.
-          An STK push will be sent to your M-Pesa number.
+          Priced from your school's real active student count — the term amount is
+          calculated automatically. An STK push will be sent to your M-Pesa number.
         </p>
 
         {/* Invoice panel — shows auto-generated invoice or manual fallback */}
@@ -4502,20 +4525,20 @@ function SubscriptionTab() {
           <div className="space-y-3">
             <div className="flex items-center gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
               <div className="flex-1">
-                <label className="block text-xs font-medium text-slate-600 mb-1">Enrolled students this term</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="9999"
-                  value={studentCount}
-                  onChange={e => setStudentCount(Math.max(1, parseInt(e.target.value) || 1))}
-                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
-                />
+                <label className="block text-xs font-medium text-slate-600 mb-1">Active students this term</label>
+                <div className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-slate-100 text-slate-700 flex items-center gap-2">
+                  {countLoading ? (
+                    <Loader2 size={13} className="animate-spin text-slate-400" />
+                  ) : (
+                    <span className="font-semibold">{activeStudentCount ?? 0}</span>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">Counted live from Students — not editable here.</p>
               </div>
               <div className="text-right shrink-0">
                 <p className="text-xs text-slate-400 mb-1">Term total</p>
                 <p className="text-xl font-bold text-slate-800">KSh {termAmount.toLocaleString()}</p>
-                <p className="text-[10px] text-slate-400">{studentCount} × KSh {selectedRate}</p>
+                <p className="text-[10px] text-slate-400">{activeStudentCount ?? 0} × KSh {selectedRate}</p>
               </div>
             </div>
             <button
@@ -4562,7 +4585,7 @@ function SubscriptionTab() {
             <button
               type="button"
               onClick={handlePay}
-              disabled={loading || !phone.trim()}
+              disabled={loading || !phone.trim() || countLoading || !activeStudentCount}
               className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
             >
               {loading ? <Loader2 size={14} className="animate-spin" /> : <Smartphone size={14} />}

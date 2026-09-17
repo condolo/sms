@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.93.0] — 2026-09-17 — fix(billing): M-Pesa subscription payment used a manually-typed, hardcoded-default student count
+
+Asked directly whether academic-year data is aligned across dependent modules, pointing at the Settings → Subscription "Pay via M-Pesa STK Push" panel showing "Enrolled students this term: 300." Investigated and confirmed: `300` was a hardcoded initial value with no connection to anything real — not the academic year, not Admissions, not even the school's actual active student count. Worse than a display issue: the server (`POST /api/mpesa/subscription`) trusted whatever number the client sent to compute the charge amount, with no cross-check against real enrollment — a school could type any number and pay Msingi's own platform subscription based on it, including under-reporting.
+
+### Fixed
+- `server/routes/mpesa.js`'s `/subscription` route no longer reads `studentCount` from the request body at all. It now counts the school's real active students itself (`tenantModel('students', ...).countDocuments({ schoolId, status: 'active' })`) — the exact same query `billing.js`'s `createBillingSnapshot()` already uses for the "Generate invoice" path, so both paths can never disagree. Same trust-nothing-from-the-client pattern this route already applies to the subscription tier itself (v5.5x — plan is always the school's own current plan, never client-supplied).
+- `client/src/pages/settings/SettingsPage.jsx`'s billing panel: the manual "Enrolled students this term" number input is replaced with a live, read-only "Active students this term" count fetched from `GET /api/students?status=active&limit=1` (`pagination.total`) — the same real number the server now enforces, so the displayed price always matches what will actually be charged. The "Pay" button is disabled until this count has loaded and is non-zero.
+- Added a regression test (`mpesa-subscription-plan-authority.test.js`) asserting a client-sent `studentCount` of 9999 is ignored and the real (mocked) active count is charged instead — same pattern the file already used for tier/plan spoofing.
+
+### Investigated, not fixed here — a separate, real gap
+Checked whether Admissions applications carry an academic year, since the question specifically named admissions. They don't, in practice: `academicYearId` exists as an optional, filterable field in `admissions.js`'s schema and `/enroll` does thread it through to the created student's `enrollmentAcademicYearId` when present — but a direct database check across every real school found **zero** admissions documents, ever, with `academicYearId` set. The client's Admissions pages never capture or send it when creating an application. This means admissions currently cannot be filtered or reported on by academic year in practice, even though the API pretends to support it — a real gap, but a distinct, separately-scoped one from this billing fix (adding a year field to the admissions creation flow, defaulting from `GET /academic-config/current`), not addressed in this change since it wasn't what broke the billing panel.
+
+### Verified
+- Live end-to-end against the real database (demo-school account): the panel now shows the school's genuine active count (21, cross-checked directly against the `students` collection), and Term total (21 × KSh 350 = KSh 7,350) exactly matches the school's existing pending billing-history invoice, which independently recorded 21 students the same way.
+- Full Jest suite 2024/2024 (2023 + 1 new), `verify-rbac-coverage.js` 100% (no regression — no routes added/removed), `security-scan.js` clean, production client build passes.
+
+---
+
 ## [v5.92.0] — 2026-09-17 — fix(settings): "Create draft year" silently did nothing — a `<form>` nested inside another `<form>`
 
 Reported directly: "i was trying to add the draft year, but am not seeing any draft." Investigated by reproducing the exact flow live (local server against the real database, demo-school account) rather than guessing from code, since the earlier explanation ("maybe it's a permissions issue") didn't hold up — the reporting user's own real account is `superadmin`, well within the required role, confirmed directly against the database.
