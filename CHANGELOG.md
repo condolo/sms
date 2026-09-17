@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.98.0] — 2026-09-17 — fix(auth): client never received a logged-in teacher's `extraRoles`, leaving a UI check permanently dead
+
+Direct follow-up to v5.97.0 below, flagged in that fix's own report and actioned on request: "let's remove the dead code[...] let it be fixed."
+
+### The bug
+`LessonsPage.jsx`'s `useRole()` reads `session?.user?.extraRoles` to mirror the server's `isAdmin()`/`canManage()` broad-access checks in the UI. The logic was correct, but `session.user.extraRoles` was never populated: `extraRoles`/`departmentId` are resolved once in `_buildTokenPayload` (`server/routes/auth.js`) from the linked `teachers` record and correctly land on the JWT (`req.jwtUser.extraRoles` — real, server-side authorization was never affected), but every login-family response built its `user` object — the one the client actually stores in `useAuthStore` — from the raw `users` collection document, which never carries these fields (they live on `teachers`). Confirmed safe-direction the whole time: the client can only ever *under-show* capability the server independently and correctly grants, never over-show it — but it was genuinely non-functional code, not a security issue.
+
+### Fixed
+- New shared helper `_attachExtraRoleFields(safeUser, tokenPayload)` in `server/routes/auth.js`, called from every place a login-family response builds its `user` object: `POST /login`, `/verify-otp`, `/force-change-password`, `/exchange`, `GET /me`, and the shared `_completeOrgLoginSession` (`/org-login` + `/complete-org-login`) — one place, not six copies that can drift out of sync with each other or with `_buildTokenPayload` again.
+- `client/src/store/auth.js`'s `_slimUser()` — the explicit allowlist controlling what survives a page refresh via localStorage — now also persists `extraRoles`/`departmentId`. Without this, the fields above would have reached the client in memory but been silently stripped again on the next reload.
+- No change needed in `LessonsPage.jsx` itself — its `useRole()` check was already correct; only the data feeding it was missing.
+
+### Verified
+- Full Jest suite: 208 suites, 2054/2054 passing (no new tests needed — existing `build-token-payload-extra-roles.test.js`, `auth-token.test.js`, and the four `auth/*` route suites already cover `_buildTokenPayload` and the response flows this change touches; none asserted a closed/exact shape for `user`, so nothing needed updating).
+- `verify-rbac-coverage.js` 100% (487/487), `security-scan.js` clean, production client build passes.
+
+---
+
 ## [v5.97.0] — 2026-09-17 — fix(security): Staff Responsibility tags could silently grant real RBAC-role-level access
 
 Prompted directly: "this roles and responsibilities under school settings isn't it affecting the roles and permissions submodule, isnt there a conflict? do the assessments first." Assessment confirmed a real, confirmed privilege-escalation path; fix implemented and shipped under explicit "Priority 0-4" authorization after answering a design question about the feature's original intent.

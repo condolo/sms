@@ -185,6 +185,24 @@ async function _buildTokenPayload(user, schoolId) {
   return payload;
 }
 
+// extraRoles/departmentId are computed once in _buildTokenPayload and land
+// on the JWT (req.jwtUser.extraRoles) — real, server-side authorization has
+// always seen them correctly. But every login-family response builds its
+// `user` object (the one the CLIENT stores and reads, e.g. useRole() in
+// LessonsPage.jsx) from the raw `users` collection document, which never
+// carries these fields at all (they live on the linked `teachers` record).
+// The client-side extraRoles check was consequently always evaluating
+// against an empty array — safe-direction (it can only under-show
+// capability the server independently and correctly grants), but genuinely
+// dead code. Call this on every safeUser right after computing a token
+// payload so the two stay in sync — one place, not five copies that can
+// drift.
+function _attachExtraRoleFields(safeUser, tokenPayload) {
+  if (tokenPayload?.extraRoles)   safeUser.extraRoles   = tokenPayload.extraRoles;
+  if (tokenPayload?.departmentId) safeUser.departmentId = tokenPayload.departmentId;
+  return safeUser;
+}
+
 /**
  * Which schools can this identity actually log into, within one
  * organization? The single source of truth for "eligible schools" used
@@ -486,6 +504,7 @@ router.post('/login', loginIpLimiter, tenantMiddleware, async (req, res) => {
     _checkTrialAndNotify(req.school).catch(() => {});
 
     const safeUser = { ...user, password: undefined };
+    _attachExtraRoleFields(safeUser, tokenPayload);
 
     // Attach merged role permissions so the client sidebar can filter correctly.
     // Merges across all roles the user holds (union of actions per module).
@@ -563,6 +582,7 @@ router.post('/verify-otp', otpLimiter, tenantMiddleware, async (req, res) => {
 
     // Attach merged role permissions so sidebar filters correctly (same as regular login)
     const safeUser = { ...user, password: undefined, mfaOtp: undefined, mfaExpiry: undefined };
+    _attachExtraRoleFields(safeUser, otpTokenPayload);
     const otpAllRoles = Array.isArray(user.roles) && user.roles.length ? user.roles : [_otpUserRole];
     const otpMergedPerms = await _loadMergedPermissions(user.schoolId, otpAllRoles, user.id);
     if (otpMergedPerms !== null) safeUser.permissions = otpMergedPerms;
@@ -768,6 +788,7 @@ router.post('/force-change', forceChangeLimiter, tenantMiddleware, async (req, r
 
     const safeUser = { ...user, password: undefined, mfaOtp: undefined, mfaExpiry: undefined,
                        passwordChangedAt: now, mustChangePassword: false };
+    _attachExtraRoleFields(safeUser, fcTokenPayload);
     const fcAvailableSchools = await _availableSchools(fcTokenPayload);
     _setAuthCookie(res, token, fcAbsExpiry);
     res.json({
@@ -1160,7 +1181,9 @@ router.get('/me', authMiddleware, async (req, res) => {
     const School = _model('schools');
     const school = await School.findOne({ id: req.jwtUser.schoolId }).lean();
 
-    res.json({ user: { ...user, password: undefined }, school });
+    const safeUser = { ...user, password: undefined };
+    _attachExtraRoleFields(safeUser, req.jwtUser); // already-verified JWT — same values _buildTokenPayload put there at login, no extra DB round trip needed
+    res.json({ user: safeUser, school });
   } catch (err) {
     res.status(500).json({ error: 'Failed to get user' });
   }
@@ -1292,6 +1315,7 @@ router.post('/exchange', exchangeLimiter, async (req, res) => {
     }
 
     const safeUser = { ...user, password: undefined, passwordHash: undefined, mfaOtp: undefined, mfaExpiry: undefined };
+    _attachExtraRoleFields(safeUser, payload);
     safeUser.photoUrl = photo
       ? `/api/users/${user.id}/photo?schoolId=${encodeURIComponent(payload.schoolId)}`
       : null;
@@ -1732,6 +1756,7 @@ async function _completeOrgLoginSession(req, res, user, school, identity) {
   const token = sign({ ...tokenPayload, sessionId, absoluteExpiry });
 
   const safeUser = { ...user, password: undefined };
+  _attachExtraRoleFields(safeUser, tokenPayload);
   const allRoles = Array.isArray(user.roles) && user.roles.length ? user.roles : [userRole];
   const mergedPerms = await _loadMergedPermissions(school.id, allRoles, user.id);
   if (mergedPerms !== null) safeUser.permissions = mergedPerms;

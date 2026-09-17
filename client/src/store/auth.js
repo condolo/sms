@@ -34,6 +34,13 @@ function _slimUser(user) {
     studentIds:  user.studentIds  ?? undefined,
     photoUrl:    user.photoUrl    ?? undefined,
     permissions: user.permissions ?? undefined,
+    // Staff responsibility tags (e.g. 'hod', 'acting_deputy') from the
+    // linked teachers record — not PII, same broad-access role checks
+    // this drives server-side (see server/routes/auth.js's
+    // _attachExtraRoleFields). Without persisting these, a page refresh
+    // silently dropped them even after the server started sending them.
+    extraRoles:   user.extraRoles   ?? undefined,
+    departmentId: user.departmentId ?? undefined,
   };
 }
 

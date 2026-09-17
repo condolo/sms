@@ -1268,6 +1268,32 @@ affected either way — `extraRoles` never leaks into it, verified by a
 long-standing test in `role-architecture-verification-matrix.test.js`
 (section B3) that predates and remains true after this fix.
 
+**Follow-up (v5.98.0) — the client-side mirror of this same check was
+always dead code, for an unrelated reason.** `LessonsPage.jsx`'s
+`useRole()` reads `session?.user?.extraRoles` to mirror the server's
+`isAdmin()`/`canManage()` checks in the UI — correct logic, but
+`session.user.extraRoles` was never populated in the first place.
+`extraRoles`/`departmentId` are resolved once in `_buildTokenPayload`
+(`server/routes/auth.js`) from the linked `teachers` record and land on
+the JWT (`req.jwtUser.extraRoles` — real, server-side authorization has
+always seen them correctly), but every login-family response built its
+`user` object — the one the client actually stores — from the raw
+`users` collection document, which never carries these fields at all
+(they live on `teachers`, not `users`). So the client-side check was
+always evaluating against an empty array: safe-direction (it can only
+under-show capability the server independently and correctly grants
+anyway), but genuinely non-functional. Fixed by a single helper,
+`_attachExtraRoleFields(safeUser, tokenPayload)`, called from every
+place a login-family response builds its `user` object — `POST /login`,
+`/verify-otp`, `/force-change-password`, `/exchange`, `GET /me`, and
+`_completeOrgLoginSession` (shared by `/org-login` and
+`/complete-org-login`) — one place, not six copies that can drift again.
+Also added to `client/src/store/auth.js`'s `_slimUser()` allowlist,
+which otherwise would have stripped these fields back out on the very
+next page refresh even after the server started sending them (session
+persistence there is an explicit field allowlist, not a raw copy — see
+that file's own comment on why).
+
 ### Student Record Merge — `server/utils/student-merge.js` (v5.79.0)
 
 Applies the dual-identifier pattern above to a new problem: removing a duplicate student (see `POST /api/students/duplicates/resolve[-bulk]`) can't just delete the losing record — every collection with a `studentId` reference to it would either end up orphaned (if only the student doc is deleted) or lose real history (if the deletion cascades). `mergeStudentData(schoolId, ctx, oldStudent, newStudentId)` re-points every `studentId` reference from the removed record onto the kept one FIRST, matching both `oldStudent.id` and `String(oldStudent._id)`, across every collection in its `REFERENCING_COLLECTIONS` list — 23 as of this writing, including `invoices`/`payments` (merged, not deleted, unlike the unrelated `DELETE /students/purge`, which still hard-deletes those for a genuine, non-duplicate removal).
