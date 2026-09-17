@@ -24,44 +24,62 @@ async function runBillingCheck() {
   const today = _todayKenyaDate();
   console.log(`[billing-cron] Running billing check for ${today}`);
 
-  const Schools = _model('schools');
-  const Users   = _model('users');
+  const Schools       = _model('schools');
+  const Users         = _model('users');
+  const AcademicYears = _model('academic_years');
 
-  let schools;
+  // Term dates used to be read from schools.termDates — a legacy field that
+  // only ever gets set at onboarding time, never kept in sync with the real
+  // Academic Years CRUD (server/routes/academic-config.js) a school actually
+  // manages its years/terms through. Found directly: real schools set up
+  // entirely through that UI have no schools.termDates at all, so this cron
+  // could never fire for them — a school could go a full year without ever
+  // being auto-invoiced, silently. The academic_years collection (isCurrent
+  // flags the school's real active year) is the same source of truth
+  // _resolveCurrentPeriod and every other live "what term is it" read in
+  // this codebase already uses — this is the one place that wasn't.
+  let years;
   try {
-    schools = await Schools.find({
-      'termDates.startDate': today,   // any term that starts today
+    years = await AcademicYears.find({
+      isCurrent: true,
+      'terms.startDate': today,   // any term of the CURRENT year that starts today
     }).lean();
   } catch (err) {
-    console.error('[billing-cron] Failed to query schools:', err.message);
+    console.error('[billing-cron] Failed to query academic years:', err.message);
     return;
   }
 
-  if (!schools.length) {
+  if (!years.length) {
     console.log(`[billing-cron] No term starts today (${today})`);
     return;
   }
 
-  console.log(`[billing-cron] ${schools.length} school(s) have a term starting today`);
+  console.log(`[billing-cron] ${years.length} school(s) have a term starting today`);
 
-  for (const school of schools) {
+  for (const year of years) {
+    const schoolId = year.schoolId;
     try {
-      const termDates = school.termDates || [];
-      const startingTerms = termDates.filter(t => t.startDate === today);
+      const school = await Schools.findOne({ id: schoolId }).lean();
+      if (!school) {
+        console.warn(`[billing-cron] No school document found for ${schoolId} — skipping`);
+        continue;
+      }
+
+      const startingTerms = (year.terms || []).filter(t => t.startDate === today);
 
       for (const termDef of startingTerms) {
         const legacyMap = { core: 'base', standard: 'student', premium: 'family' };
         const tier = legacyMap[school.plan] || school.plan || 'base';
 
-        const { existing, snapshot } = await createBillingSnapshot(school.id, {
-          academicYear: school.academicYear,
+        const { existing, snapshot } = await createBillingSnapshot(schoolId, {
+          academicYear: year.name,
           term:         termDef.term,
           tier,
           triggerType:  'auto',
         });
 
         if (existing) {
-          console.log(`[billing-cron] Snapshot already exists for ${school.id} | ${school.academicYear} T${termDef.term} — skipping`);
+          console.log(`[billing-cron] Snapshot already exists for ${schoolId} | ${year.name} T${termDef.term} — skipping`);
           continue;
         }
 
@@ -69,7 +87,7 @@ async function runBillingCheck() {
         await _sendInvoiceEmail(school, snapshot, Users);
       }
     } catch (err) {
-      console.error(`[billing-cron] Error processing school ${school.id}:`, err.message);
+      console.error(`[billing-cron] Error processing school ${schoolId}:`, err.message);
     }
   }
 }

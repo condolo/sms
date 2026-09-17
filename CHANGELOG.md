@@ -6,6 +6,53 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.96.0] — 2026-09-17 — fix(academic-config): a schema drift silently stripped the `id` field from every new academic year
+
+The deepest of three findings from one continuous investigation, prompted directly: "not aligned, just checking now — anywhere else where the academic year is needed but hardcoded and doesn't change." Fixing the two visible symptoms (below, v5.95.0 and v5.94.0) surfaced a third, root-cause bug underneath both.
+
+### Root cause — confirmed by direct reproduction, not assumed
+Creating a fresh draft year through the real UI, then trying to edit, delete, or activate it, 500'd every time in this environment — but only for `academic_years`, nothing else. Traced to `server/scripts/seed-demo.js` (and six other files: `seed-demo-data.js`, `routes/collections.js`, `routes/onboard.js`, `routes/platform.js`, `scripts/audit.js`, `scripts/migrate-legacy-deputy-role.js`) each carrying their own hand-copied "model factory," missing one option the canonical one (`server/utils/model.js`) carries: `id: false`. That option disables Mongoose's own default `id` virtual (which otherwise silently shadows any real `id` field a caller tries to set — reproduced directly with an isolated script: a schema without `id: false` really does discard a UUID `id` on `.create()`, no error, no warning). Because `mongoose.models[name]` caches by name for the life of the process, whichever caller touches a given collection name *first* wins that cache for everyone after it — and `seed-demo.js` runs first thing at every server start, before any HTTP route ever touches `academic_years` specifically (the one collection `ensureIndexes()`'s own early, correctly-configured registration doesn't happen to cover). Every other collection these six files touch is protected by `ensureIndexes()` winning the race first; `academic_years` was the one gap.
+
+This, not the lookup routes themselves, is *why* PUT/DELETE/transition-year kept 500ing even after their own bug (below) was fixed: a document silently missing `id` isn't itself broken — the app's own dual-identifier convention already tolerates that — but it meant every academic year this session's own testing created was landing in exactly the state the Dual-Identifier Pattern exists to handle gracefully, not the state new documents are supposed to be in.
+
+### Fixed
+- All seven files now `require('../utils/model')` instead of carrying their own copy of the factory — one shared definition, not seven that can drift again.
+- `server/routes/academic-config.js`: `PUT /years/:id`, `DELETE /years/:id`, and `POST /transition-year` all resolved a year with `findOne({ $or: [{ id }, { _id }] })` — Mongoose validates every field in a query *before* evaluating `$or`, so passing a real UUID as `_id` throws a CastError regardless of whether the `id` branch would have matched. Every year created through `POST /years` gets a UUID `id`, so this broke editing, deleting, and activating every single draft year created through the normal UI. Replaced with a shared `_findAcademicYear()` helper — the same id-then-_id-with-fallback pattern already used for admissions (`_findApplication`).
+
+### Verified
+- Reproduced and fixed live against the real database (demo-school account): before, `POST /years` returned a document with no `id` field at all, and PUT/DELETE/transition-year all 500'd on a UUID-shaped id; after a clean server restart, a freshly created year carries a real UUID `id`, and edit/delete/activate all succeed. Confirmed via a direct, isolated repro script that a schema missing `id: false` really does drop a UUID id, and that the canonical factory does not.
+- New regression test (`academic-config-year-lookup.test.js`) with a mock that actually simulates Mongoose's CastError behavior for a non-ObjectId `_id` — the existing test file for this router never caught this because its mock matched on plain value equality regardless of shape. 5/5 new tests pass, including the exact UUID-id case that was broken.
+- Fixing `platform.js`'s copy (the same code-level change, drop-in for production) exposed a real test-mock assumption that stopped being true: `platform-operator-auth.test.js` mocked `mongoose.model` directly specifically *because* `platform.js` used to bypass `server/utils/model.js` entirely — now that it doesn't, that mock was dead weight and the real one (`../../utils/model`) needed to route by collection name instead. Updated; all 13 tests in that file now pass (previously timing out — an unmocked-in-this-context call inside an unguarded async route handler doesn't throw visibly, it hangs).
+- Full Jest suite 2032/2032 (2027 + 5 new), `verify-rbac-coverage.js` 100% (no regression — no routes changed), `security-scan.js` clean, production client build passes.
+
+---
+
+## [v5.95.0] — 2026-09-17 — fix(billing): the automated billing cron could never fire for a school set up through the new Academic Years UI
+
+Second of three findings from the same investigation. `server/utils/billing-cron.js` — which runs daily and auto-generates + emails a term invoice the moment any school's term starts — decided "did a term start today" by querying `schools.termDates`, the same legacy, never-synced field just fixed for the manual "Generate invoice" button (v5.93.0/v5.94.0 below). Checked directly: a real school (Trinity, Trinitas) set up entirely through Settings → Academic Years has no `schools.termDates` field at all — meaning this cron could **never** fire for it, silently, indefinitely. No error, no log, just nothing happening, forever.
+
+### Fixed
+- `runBillingCheck()` now queries `academic_years` (`isCurrent: true, 'terms.startDate': today`) — the same live source of truth as everywhere else — instead of the legacy `schools.termDates` field, and reads `academicYear`/`term` from that record rather than `schools.academicYear`.
+
+### Verified
+- Rewrote `billing-cron.test.js` to seed `academic_years` instead of `schools.termDates`/`schools.academicYear`, and added a test that specifically seeds a school with **neither legacy field at all** (the real shape found live) confirming it now bills correctly, plus a test confirming a non-current (archived/draft) year's terms are correctly ignored. 8/8 tests pass (5 rewritten + 3 new).
+- Full Jest suite passes; no server routes changed, so RBAC/security scans are unaffected by this file.
+
+---
+
+## [v5.94.0] — 2026-09-17 — fix(academic-year): the School Settings "System Information" panel and "Generate invoice" button both read a stale, unsynced legacy field
+
+First of three findings, directly reproducing what was reported: Settings → School → System Information showed "Academic Year: 2025/2026" while the real active year (Settings → School → Academic Years) was "2026–2027" — confirmed directly against the database: `schools.academicYear` (a legacy free-text label, only ever set at onboarding or by a real year transition) had simply never been touched for this school, while the actual `academic_years` collection — the real source of truth — correctly showed the newer year as `isCurrent: true`.
+
+### Fixed
+- `SystemTab`'s "Academic Year" field and `SubscriptionTab`'s "Generate invoice" button (`client/src/pages/settings/SettingsPage.jsx`) both now read from `useCurrentAcademicPeriod()` — the same live-resolved hook already used by Admissions, Exams, Report Cards, and Student pages — instead of `school.academicYear`/`school.termDates`. `handleGenerate()` now also refuses to run (with a clear message) rather than silently defaulting to term 1 of an empty year label, if no current period is configured yet.
+
+### Verified
+- Live, against the real database: after the fix, System Information correctly shows "2026–2027" (previously "2025/2026") with no other change to the account.
+- Full Jest suite passes; this is display/read-path only, no routes changed.
+
+---
+
 ## [v5.93.0] — 2026-09-17 — fix(billing): M-Pesa subscription payment used a manually-typed, hardcoded-default student count
 
 Asked directly whether academic-year data is aligned across dependent modules, pointing at the Settings → Subscription "Pay via M-Pesa STK Push" panel showing "Enrolled students this term: 300." Investigated and confirmed: `300` was a hardcoded initial value with no connection to anything real — not the academic year, not Admissions, not even the school's actual active student count. Worse than a display issue: the server (`POST /api/mpesa/subscription`) trusted whatever number the client sent to compute the charge amount, with no cross-check against real enrollment — a school could type any number and pay Msingi's own platform subscription based on it, including under-reporting.

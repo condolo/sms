@@ -164,20 +164,14 @@ function _sanitiseUser(doc) {
   return safe;
 }
 
-// Lazy-create a Mongoose model for any collection name
-function _model(col) {
-  const name = _modelName(col);
-  if (mongoose.models[name]) return mongoose.models[name];
-  const schema = new mongoose.Schema({}, { strict: false, timestamps: true });
-  schema.index({ schoolId: 1 });
-  schema.index({ id: 1 });
-  return mongoose.model(name, schema, col); // use col as the actual MongoDB collection name
-}
-
-function _modelName(col) {
-  return col.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
-            .replace(/^./, c => c.toUpperCase()) + 'Doc';
-}
+// Was a locally duplicated model factory missing the `id: false` schema
+// option the canonical one (server/utils/model.js) carries — that option
+// disables Mongoose's default `id` virtual, which otherwise silently
+// discards any real `id` field a caller tries to set. Found live via
+// academic_years (see seed-demo.js's comment for the full mechanism);
+// this router can touch an arbitrary caller-supplied collection name, so
+// it's exactly the kind of place that risk should never sit uncovered.
+const { _model } = require('../utils/model');
 
 /* col is caller-controlled (URL param, gated by ALLOWED). GLOBAL collections
    are deliberately unscoped by this router's own design (unrelated to

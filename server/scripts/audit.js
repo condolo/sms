@@ -51,14 +51,14 @@ const args    = process.argv.slice(2);
 const verbose = args.includes('--verbose');
 const schoolArg = (args.find(a => a.startsWith('--schoolId=')) || '').replace('--schoolId=', '') || null;
 
-/* ── Minimal model factory (mirrors server/utils/model.js) ───── */
-function _model(col) {
-  const name = col.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
-                  .replace(/^./, c => c.toUpperCase()) + 'Doc';
-  if (mongoose.models[name]) return mongoose.models[name];
-  const schema = new mongoose.Schema({}, { strict: false, timestamps: true });
-  return mongoose.model(name, schema, col);
-}
+/* Was a hand-copied "mirror" of server/utils/model.js that had drifted —
+   missing the `id: false` schema option, which disables Mongoose's
+   default `id` virtual (otherwise it silently discards a real `id`
+   field on write). This script is read-only, so the drift caused no
+   observable harm here — but it's the exact copy-paste that DID cause
+   real harm elsewhere (see seed-demo.js's comment); using the real thing
+   instead of a hand-kept mirror removes the drift risk entirely. */
+const { _model } = require('../utils/model');
 
 /* ── Helpers ────────────────────────────────────────────────── */
 function log(...a) { if (verbose) process.stderr.write('[audit] ' + a.join(' ') + '\n'); }

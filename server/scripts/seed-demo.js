@@ -21,14 +21,21 @@ const DEMO_SLUG     = 'demo';
 const DEMO_PASSWORD = 'Demo2025!';
 const { seedDemoData } = require('./seed-demo-data');
 
-/* ── Mongoose model factory (same pattern as the rest of the app) ── */
-function _model(col) {
-  const name = col.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
-                  .replace(/^./, c => c.toUpperCase()) + 'Doc';
-  if (mongoose.models[name]) return mongoose.models[name];
-  const schema = new mongoose.Schema({}, { strict: false, timestamps: true });
-  return mongoose.model(name, schema, col);
-}
+// Was a locally duplicated copy of this factory, missing the `id: false`
+// schema option the canonical one (server/utils/model.js) carries. Found
+// live, the hard way: seedDemo() runs first thing at every server start —
+// before any HTTP route ever touches a given collection name — so its
+// schema (missing id:false) won the mongoose.models[name] cache race for
+// 'academic_years' specifically (nothing else reaches that collection
+// this early), silently discarding every real `id: uuidv4()` any later
+// route tried to set on a new academic year for the rest of that
+// process's life — reproduced directly: a fresh, isolated schema without
+// id:false really does drop a UUID id field on .create(), because
+// Mongoose's own default `id` virtual (undisabled) intercepts the
+// assignment before strict:false's arbitrary-path storage gets it.
+// Using the one shared factory everywhere removes the drift entirely
+// instead of just matching its options by hand a second time.
+const { _model } = require('../utils/model');
 
 /* ── Users to provision ── */
 const DEMO_USERS = [

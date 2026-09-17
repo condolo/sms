@@ -36,13 +36,14 @@ const SEC_SEC   = `sec_secondary_${SCHOOL_ID}`;
 const SEC_AL    = `sec_alevel_${SCHOOL_ID}`;
 const ADMIN_ID  = 'u_demo_admin';
 
-function _model(col) {
-  const name = col.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
-                  .replace(/^./, c => c.toUpperCase()) + 'Doc';
-  if (mongoose.models[name]) return mongoose.models[name];
-  const schema = new mongoose.Schema({}, { strict: false, timestamps: true });
-  return mongoose.model(name, schema, col);
-}
+// Was a locally duplicated model factory missing the `id: false` schema
+// option the canonical one (server/utils/model.js) carries — found live
+// causing academic_years specifically to silently drop every custom
+// `id` field (see seed-demo.js's comment for the full mechanism). This
+// file runs in the same startup path and touches ~20 collections; using
+// the one shared factory here too closes the same latent risk for all
+// of them rather than leaving a second copy to drift again.
+const { _model } = require('../utils/model');
 
 function upsert(Model, id, data) {
   // Insert-only: creates if not exists, skips if already there.

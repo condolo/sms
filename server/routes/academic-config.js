@@ -362,6 +362,29 @@ function _yearStatus(year, archivedIds = []) {
 }
 
 /**
+ * _findAcademicYear — resolve a year by its UUID `id` first, falling back
+ * to Mongo `_id`. Same dual-identifier pattern already used for admissions
+ * (`_findApplication` in admissions.js) — needed here for the identical
+ * reason: found live, `findOne({ $or: [{ id }, { _id }] })` throws a
+ * Mongoose CastError the moment `id` is a real UUID (not a 24-hex-char
+ * string), because `_id` is validated against the ObjectId type BEFORE
+ * MongoDB ever evaluates which `$or` branch matches — it doesn't matter
+ * that the first branch would have matched fine on its own. Every year
+ * created through POST /years gets `id: uuidv4()`, so PUT, DELETE, and
+ * POST /transition-year (all three used this same broken pattern) 500'd
+ * on every single draft year created through the normal UI — reproduced
+ * live: creating a draft worked, but editing, deleting, or activating it
+ * immediately after did not.
+ */
+async function _findAcademicYear(Years, id, schoolId) {
+  let doc = await Years.findOne({ id, schoolId }).lean();
+  if (!doc) {
+    try { doc = await Years.findOne({ _id: id, schoolId }).lean(); } catch (_) { /* not a valid ObjectId */ }
+  }
+  return doc;
+}
+
+/**
  * _resolveCurrentPeriod — live-resolve "now" against a school's configured
  * academic years/terms. This is the single algorithm for "what year/term
  * is it right now" — every screen that needs a default must call
@@ -514,7 +537,7 @@ router.put('/years/:id', authMiddleware, async (req, res) => { // rbac: admin-on
     }
 
     const yearId = req.params.id;
-    const year   = await tenantModel('academic_years', tenantContext(req)).findOne({ schoolId, $or: [{ id: yearId }, { _id: yearId }] }).lean();
+    const year   = await _findAcademicYear(tenantModel('academic_years', tenantContext(req)), yearId, schoolId);
     if (!year) return E.notFound(res, 'Academic year not found');
 
     const cfg        = await tenantModel('academic_config', tenantContext(req)).findOne({ schoolId }, { archivedAcademicYears: 1 }).lean();
@@ -568,7 +591,7 @@ router.delete('/years/:id', authMiddleware, async (req, res) => { // rbac: admin
     }
 
     const yearId = req.params.id;
-    const year   = await tenantModel('academic_years', tenantContext(req)).findOne({ schoolId, $or: [{ id: yearId }, { _id: yearId }] }).lean();
+    const year   = await _findAcademicYear(tenantModel('academic_years', tenantContext(req)), yearId, schoolId);
     if (!year) return E.notFound(res, 'Academic year not found');
 
     const cfg        = await tenantModel('academic_config', tenantContext(req)).findOne({ schoolId }, { archivedAcademicYears: 1 }).lean();
@@ -613,7 +636,7 @@ router.post('/transition-year', authMiddleware, async (req, res) => { // rbac: s
     // ── Locate the active and target years ────────────────────
     const [activeYear, targetYear, cfg] = await Promise.all([
       tenantModel('academic_years', tenantContext(req)).findOne({ schoolId, isCurrent: true }).lean(),
-      tenantModel('academic_years', tenantContext(req)).findOne({ schoolId, $or: [{ id: targetYearId }, { _id: targetYearId }] }).lean(),
+      _findAcademicYear(tenantModel('academic_years', tenantContext(req)), targetYearId, schoolId),
       tenantModel('academic_config', tenantContext(req)).findOne({ schoolId }, { archivedAcademicYears: 1 }).lean(),
     ]);
 

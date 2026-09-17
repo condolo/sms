@@ -28,13 +28,14 @@ const onboardLimiter = rateLimit({
 });
 
 /* ── Mongoose model helper ──────────────────────────────── */
-function _model(col) {
-  const name = col.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
-                  .replace(/^./, c => c.toUpperCase()) + 'Doc';
-  if (mongoose.models[name]) return mongoose.models[name];
-  const schema = new mongoose.Schema({}, { strict: false, timestamps: true });
-  return mongoose.model(name, schema, col);
-}
+// Was a locally duplicated copy missing the `id: false` schema option the
+// canonical factory (server/utils/model.js) carries — that option
+// disables Mongoose's default `id` virtual, which otherwise silently
+// discards a real `id` field. Found live via academic_years (see
+// seed-demo.js's comment for the full mechanism); using the shared
+// factory here removes the same latent risk for this file's schools/
+// users lookups.
+const { _model } = require('../utils/model');
 
 /* ── Slug sanitiser ─────────────────────────────────────── */
 function sanitiseSlug(raw) {

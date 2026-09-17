@@ -35,9 +35,6 @@ jest.mock('../../utils/provision-identities',    () => ({ provisionIdentityForUs
 
 let mockOperators; // array backing the platform_operators collection
 function mockChain(result) { return { lean: () => Promise.resolve(result) }; }
-jest.mock('../../utils/model', () => ({
-  _model: jest.fn(() => ({ find: jest.fn(() => mockChain([])), findOne: jest.fn(() => mockChain(null)) })),
-}));
 function mockOperatorsCollection() {
   return {
     exists:  jest.fn((filter) => Promise.resolve(mockOperators.some(o => (filter.isActive === undefined || o.isActive === filter.isActive)) ? { _id: 'x' } : null)),
@@ -49,12 +46,6 @@ function mockOperatorsCollection() {
     }),
   };
 }
-// platform.js defines its OWN local _model helper (mongoose.model(name,
-// schema, col) directly) rather than importing server/utils/model — so
-// that shared module isn't what needs mocking here; mongoose itself is.
-// Routes by the real 3rd argument (collection name) platform.js's local
-// _model always passes, same as the real one would resolve to a real
-// per-collection Mongoose model.
 function mockGenericSafeCollection() {
   return {
     find:    jest.fn(() => mockChain([])),
@@ -62,14 +53,16 @@ function mockGenericSafeCollection() {
     exists:  jest.fn(() => Promise.resolve(null)),
   };
 }
-jest.mock('mongoose', () => {
-  const actual = jest.requireActual('mongoose');
-  return {
-    ...actual,
-    models: {},
-    model: jest.fn((_name, _schema, col) => (col === 'platform_operators' ? mockOperatorsCollection() : mockGenericSafeCollection())),
-  };
-});
+// platform.js used to define its OWN local _model helper (calling
+// mongoose.model(name, schema, col) directly) instead of importing
+// server/utils/model — this mock used to route on the real 3rd argument
+// (collection name) via a `jest.mock('mongoose', ...)` override instead.
+// Now that platform.js imports the shared _model (v5.9x — closing the
+// same id:false schema drift fixed for academic_years), this is the
+// mock that actually matters: route by collection name here instead.
+jest.mock('../../utils/model', () => ({
+  _model: jest.fn((col) => (col === 'platform_operators' ? mockOperatorsCollection() : mockGenericSafeCollection())),
+}));
 
 const express   = require('express');
 const supertest = require('supertest');

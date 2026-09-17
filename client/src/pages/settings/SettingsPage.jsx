@@ -27,6 +27,7 @@ import { students as studentsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import { deriveNavModules, buildModuleConfigMap } from '@/config/moduleNav.js';
 import { SYSTEM_ROLE_LABELS, roleLabel } from '@/utils/roleLabels.js';
+import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
 
 /* ── Tab config ─────────────────────────────────────────────── */
 const TABS = [
@@ -4349,6 +4350,16 @@ function SubscriptionTab() {
   });
   const activeStudentCount = activeCountResp?.pagination?.total ?? null;
 
+  // "Generate invoice" below used to compute academicYear/term from
+  // schoolData.academicYear/termDates — the same legacy, unsynced fields
+  // fixed above for the student count. Found directly: a real school
+  // managed entirely through Settings → Academic Years has no
+  // schools.termDates at all, so this button would tag the invoice with
+  // term 1 by default and an empty/stale academicYear label regardless of
+  // the school's real current year. Same fix, same source of truth as
+  // everywhere else: the live-resolved current period.
+  const currentPeriod = useCurrentAcademicPeriod();
+
   const [phone,        setPhone]        = useState(user?.phone || '');
   const [loading,      setLoading]      = useState(false);
   const [generating,   setGenerating]   = useState(false);
@@ -4381,19 +4392,15 @@ function SubscriptionTab() {
   const termAmount   = invoice ? invoice.totalAmount : selectedRate * Math.max(1, activeStudentCount ?? 0);
 
   async function handleGenerate() {
+    if (!currentPeriod.academicYear || !currentPeriod.termNumber) {
+      setError('No current academic year/term configured yet — set one up in Settings → School → Academic Years first.');
+      return;
+    }
     setGenerating(true); setError(''); setResult(null);
     try {
-      // Determine current term from school settings (first term whose start date <= today)
-      const schoolData = school;
-      const termDates  = schoolData?.termDates ?? [];
-      const today      = new Date().toISOString().slice(0, 10);
-      const currentTermDef = termDates
-        .filter(t => t.startDate && t.startDate <= today)
-        .sort((a, b) => b.startDate.localeCompare(a.startDate))[0];
-
       const body = {
-        academicYear: schoolData?.academicYear || '',
-        term:         currentTermDef?.term ?? 1,
+        academicYear: currentPeriod.academicYear,
+        term:         currentPeriod.termNumber,
       };
 
       const json = await billingApi.generate(body);
@@ -4544,8 +4551,8 @@ function SubscriptionTab() {
             <button
               type="button"
               onClick={handleGenerate}
-              disabled={generating}
-              className="flex items-center gap-2 text-xs font-medium text-slate-500 hover:text-indigo-600 transition-colors"
+              disabled={generating || currentPeriod.isLoading || !currentPeriod.academicYear}
+              className="flex items-center gap-2 text-xs font-medium text-slate-500 hover:text-indigo-600 transition-colors disabled:opacity-50"
             >
               {generating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCcw size={12} />}
               Generate invoice from active student count
@@ -4658,6 +4665,12 @@ function SystemTab() {
   const school = useAuthStore(s => s.session?.school);
   const user   = useAuthStore(s => s.session?.user);
   const [exporting, setExporting] = useState(false);
+  // school.academicYear is the legacy free-text label, only ever set at
+  // onboarding and never kept in sync with the real Academic Years CRUD —
+  // found directly showing a school's PRIOR year here while its actual
+  // active year (Settings → School → Academic Years) had already moved on.
+  // Same live source of truth as everywhere else in the app.
+  const currentPeriod = useCurrentAcademicPeriod();
 
   const planBadgeColor = {
     free:       'bg-slate-100 text-slate-600',
@@ -4697,7 +4710,7 @@ function SystemTab() {
             ['Version',      'v4.19.0'],
             ['Timezone',     school?.timezone ?? 'Africa/Nairobi'],
             ['Currency',     school?.currency ?? 'KES'],
-            ['Academic Year',school?.academicYear ?? '—'],
+            ['Academic Year',currentPeriod.academicYear ?? school?.academicYear ?? '—'],
             ['Terms/Year',   school?.termsPerYear ?? 3],
           ].map(([label, value]) => (
             <div key={label} className="space-y-0.5">

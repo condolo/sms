@@ -188,13 +188,16 @@ router.use((req, res, next) => {
   return requireOwnerTier(req, res, next);
 });
 
-function _model(col) {
-  const name = col.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
-                  .replace(/^./, c => c.toUpperCase()) + 'Doc';
-  if (mongoose.models[name]) return mongoose.models[name];
-  const schema = new mongoose.Schema({}, { strict: false, timestamps: true });
-  return mongoose.model(name, schema, col);
-}
+// Was a locally duplicated model factory missing the `id: false` schema
+// option the canonical one (server/utils/model.js) carries — that option
+// disables Mongoose's default `id` virtual, which otherwise silently
+// discards a real `id` field. Found live via academic_years (see
+// seed-demo.js's comment for the full mechanism); this file touches
+// several collections (landing_content, platform_operators,
+// platform_settings, system_announcements) not covered by
+// ensureIndexes()'s early registration, so it's exactly the kind of
+// place that risk should never sit uncovered.
+const { _model } = require('../utils/model');
 
 /* Security Baseline Register, PLAT-04 — falls out of PLAT-01 rather than
    being fixed separately: every AuditService.log call in this file used to

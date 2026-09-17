@@ -56,6 +56,7 @@
 
 require('dotenv').config();
 const mongoose = require('mongoose');
+const { _model } = require('../utils/model');
 
 /* ── Pure decision logic — exported for unit testing without a DB ── */
 
@@ -121,14 +122,6 @@ if (require.main === module) {
   const args      = process.argv.slice(2);
   const apply     = args.includes('--apply');
   const schoolArg = (args.find(a => a.startsWith('--schoolId=')) || '').replace('--schoolId=', '') || null;
-
-  function _model(col) {
-    const name = col.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
-                    .replace(/^./, c => c.toUpperCase()) + 'Doc';
-    if (mongoose.models[name]) return mongoose.models[name];
-    const schema = new mongoose.Schema({}, { strict: false, timestamps: true });
-    return mongoose.model(name, schema, col);
-  }
 
   const findings = { usersRenamed: [], rolePermsRenamed: [], rolePermsDeleted: [], manualReview: [] };
 
