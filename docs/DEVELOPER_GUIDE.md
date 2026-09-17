@@ -1126,6 +1126,8 @@ Additionally, both delete routes always delete users by `school.adminEmail` rega
 
 ### Dual-Identifier Pattern — students/classes/streams/users/admissions/academic-years (v4.62.0, admissions added v5.86.0, academic-years added v5.96.0)
 
+> See also [Staff Responsibility Tags vs. RBAC Roles (v5.97.0)](#staff-responsibility-tags-vs-rbac-roles--extraroles-value-collision-v5970) below — a different kind of string-collision bug in the same neighborhood: an organizational label sharing a literal value with a real system identifier.
+
 The same root cause as the Mongoose `id` virtual conflict above shows up independently across student, class, stream, and user documents: each one references others by whichever identifier form was current when the reference was **written** — the custom UUID `id` field (what routes generate today) or the MongoDB `_id` string (pre-migration and imported records). The UUID migration never back-filled `id` onto old documents or rewrote denormalised references (e.g. a student's stored `classId`), so a collection can legitimately contain both forms side by side, referencing each other inconsistently.
 
 **v5.86.0** found the same gap in `admissions.js`: every `:id` route (`GET`, `PUT`, `PATCH .../stage`, `DELETE`, `POST .../enroll`) matched on `id` alone, so a pre-migration application with no UUID `id` — found via `scripts/find-orphaned-enrollments.js` against real data — was unreachable through the API at all, even though the client already fell back to `a.id ?? a._id` when linking to it. Fixed with a shared `_findApplication(Apps, id, schoolId)` helper (`id` then `_id`), with every write targeting the resolved `_id`. Adopt this same shape — resolve-by-either, write-by-`_id` — in any other module still doing an exact-`id`-only lookup.
@@ -1177,6 +1179,94 @@ const ids = classes.map(c => c.id).filter(Boolean); // drops pre-migration class
 **Never hand-copy the model factory (v5.96.0).** `server/utils/model.js`'s `_model(col)` is the single canonical way to get a schema-less Mongoose model for a collection — its `id: false` schema option specifically disables Mongoose's own default `id` virtual, which otherwise silently discards any real `id` field a caller tries to set on `.create()` (no error, no warning — confirmed by direct reproduction). `mongoose.models[name]` caches by name for the life of the process, so whichever caller touches a given collection name *first* wins that schema for every other caller after it. Found live: seven files (`seed-demo.js`, `seed-demo-data.js`, `routes/collections.js`, `routes/onboard.js`, `routes/platform.js`, `scripts/audit.js`, `scripts/migrate-legacy-deputy-role.js`) each carried their own hand-copied version of this factory, missing `id: false`, and `seed-demo.js`'s copy — which runs first thing at every server start — won the cache race for `academic_years` specifically (the one collection `ensureIndexes()`'s own early, correct registration doesn't happen to touch), silently stripping the `id` off every academic year anyone created for the rest of that process's life. All seven now `require('../utils/model')` instead. If you ever need a schema-less model for a new collection, import the shared one — do not write `new mongoose.Schema({}, { strict: false, timestamps: true })` by hand again, even if it looks like a two-line saving.
 
 **A related, structurally different trap in the same area (v4.62.0):** `users_school_email` / `users_school_username` were **unique + sparse compound** indexes. Sparse compound indexes still index a document if it has *any one* of the compound keys — every user has `schoolId`, so every user (including students with no email, parents with no username) was indexed, permitting only one such document per school before `E11000` on the second. Fixed by converting to **partial indexes** (`partialFilterExpression: { field: { $type: 'string' } }`) in `server/utils/indexes.js` — uniqueness enforced only on real string values. Never write `email: null` / `username: null`; omit the field entirely when absent.
+
+### Staff Responsibility Tags vs. RBAC Roles — extraRoles value collision (v5.97.0)
+
+Two independent, differently-owned pieces of data both describe "what this
+teacher can do," and they must never share a vocabulary:
+
+- **`user.role` / `user.roles`** (`server/utils/role-validation.js`'s
+  `SYSTEM_ROLES`) — the real, RBAC-enforced account role. Changing it goes
+  through Settings → Roles & Permissions, is checked by `rbac(module,
+  action)` on every gated route, and is the only thing `role_permissions`
+  grants are keyed by.
+- **`teacher.extraRoles`** (Settings → Staff Roles & Responsibilities,
+  `server/config/staffResponsibilities.js`) — an organizational label an
+  admin can attach to any teacher from the Staff form (e.g. "this teacher
+  also handles the timetable"). It carries **no RBAC implication** in the
+  UI that sets it, and setting it never touches `role_permissions`.
+
+Found live (2026-09): three route files —
+`server/routes/teaching-assignments.js`, `server/routes/lessons.js`,
+`server/routes/weekly-snapshots.js` — each merge a user's role(s) and
+`extraRoles` into one `Set` (`_effectiveRoles`/`_eff`) before checking
+broad-access membership against it. That merge is intentional and still
+correct (see below), but the *values* two of the six built-in
+`extraRoles` tags used — `'deputy'` and `'principal'` — were **identical
+strings** to real `SYSTEM_ROLES` values. A teacher merely tagged "Deputy
+Principal" as a responsibility (no different, from the admin's point of
+view, than tagging someone "Timetabler") was silently granted the same
+broad access as an account that actually holds that role via Roles &
+Permissions — a privilege escalation that never passed through the real
+grant flow. Verified against production: exactly one teacher had
+`extraRoles: ['deputy']` at the time, and their primary role was
+independently already `'deputy'` too, so no one's actual access changed
+as a result of the fix.
+
+**The fix preserves the feature's intent — it does not remove the merge.**
+The original design (confirmed with the person who owns this product
+decision before implementing) is real: a teacher can hold a primary role
+*and* be recognized for extra responsibilities — Head of Department,
+Timetabler, Exam Officer, Deputy-level or Head-of-School-level duties —
+and those responsibilities are meant to grant the same broad access a
+person actually holding that role would have. Simply removing extraRoles
+from the broad-access checks would have quietly taken capability away
+from admins who rely on this. Instead:
+
+1. **Renamed the two colliding values** so no `extraRoles` value can ever
+   equal a `SYSTEM_ROLES` value again: `deputy → acting_deputy`,
+   `principal → head_of_school` (`server/config/staffResponsibilities.js`
+   is now the single canonical list — client and server both import it;
+   previously 5 server-side and 2 client-side copies existed
+   independently and could drift).
+2. **`FULL_MANAGE`/`MANAGE_ROLES`/`isAdmin()`/`BROAD_STAFF_ROLES` in all
+   three route files now check the renamed values** (`acting_deputy`,
+   `head_of_school`) alongside the real roles they always checked
+   (`deputy`, `principal`, `deputy_principal`) — the capability is
+   unchanged, only the string an `extraRoles` tag can hold changed.
+3. **Closed the *latent* version of the same bug**, not just the two
+   known instances: `PUT /api/settings/school` now rejects any custom
+   `staffResponsibilities` entry whose `value` matches a real
+   `SYSTEM_ROLES` string (e.g. a school hand-typing `'section_head'` as a
+   custom responsibility) with a 400, instead of silently accepting a
+   value that would collide the same way in the future. The client has a
+   matching check for immediate feedback; the server check is
+   authoritative.
+4. **One-time production migration**
+   (`server/scripts/migrate-staff-responsibility-rename.js`, dry-run by
+   default, `--apply` to write) renamed the two real persisted uses of
+   the old values — one teacher's `extraRoles` entry and one school's
+   customized `staffResponsibilities` list — preserving array order and
+   any school-customized label exactly. Re-run anytime; it is a no-op
+   once nothing matches the old values.
+
+**Rule going forward:** any new `extraRoles` / responsibility-style
+vocabulary must never reuse a `SYSTEM_ROLES` string. If you add a new
+built-in responsibility, add it to
+`server/config/staffResponsibilities.js` (and its client mirror) — never
+hardcode a parallel list — and if you need to merge `extraRoles` into a
+broad-access check, that's fine (it's the intended design), but the
+values it can ever contain are the guarantee, not the merge itself.
+
+**Unaffected on purpose:** `hr.js`, `sections.js`,
+`lesson-reminders.js`, `workflow-config.js` also read `extraRoles`, but
+via `$or: [{ role: X }, { roles: X }, { extraRoles: X }]` against one
+admin-chosen target value — never vulnerable to this collision class,
+since they never blindly union into one broad-access Set. The general
+RBAC permission grid (`role_permissions`, `hasPermission()`) was never
+affected either way — `extraRoles` never leaks into it, verified by a
+long-standing test in `role-architecture-verification-matrix.test.js`
+(section B3) that predates and remains true after this fix.
 
 ### Student Record Merge — `server/utils/student-merge.js` (v5.79.0)
 

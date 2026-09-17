@@ -37,7 +37,13 @@ const MODGATE = moduleGate('weekly_snapshot');
 
 /* Which "extra" roles put someone outside the "plain teacher" narrowing —
    mirrors teaching-assignments.js's _effectiveRoles()/isTeacherOnly pattern. */
-const BROAD_STAFF_ROLES = new Set(['admin', 'superadmin', 'principal', 'deputy_principal', 'deputy', 'section_head']);
+// 'acting_deputy'/'head_of_school' are teacher.extraRoles responsibility
+// tags (see server/config/staffResponsibilities.js), not real account
+// roles — listed explicitly alongside the real role keys so a teacher
+// tagged with that responsibility keeps the same broad snapshot
+// visibility as before those tag values were renamed off of the exact
+// strings SYSTEM_ROLES uses.
+const BROAD_STAFF_ROLES = new Set(['admin', 'superadmin', 'principal', 'deputy_principal', 'deputy', 'section_head', 'acting_deputy', 'head_of_school']);
 
 function _effectiveRoles(req) {
   const role       = req.jwtUser?.role       ?? '';

@@ -45,7 +45,15 @@ const { invalidateScopeCache } = require('../middleware/scopeMiddleware');
 const router = express.Router();
 
 /* ── Role helpers ────────────────────────────────────────────── */
-const FULL_MANAGE = new Set(['admin', 'superadmin', 'deputy', 'principal']);
+// 'acting_deputy'/'head_of_school' are teacher.extraRoles responsibility
+// tags (Settings → Staff Roles & Responsibilities — see
+// server/config/staffResponsibilities.js), not real account roles.
+// Listed here explicitly, alongside the real 'deputy'/'principal' role
+// keys, so a teacher tagged with that responsibility keeps the same full
+// management access as before the tag values were renamed off of the
+// exact strings SYSTEM_ROLES uses — this is a deliberate capability
+// grant, not the accidental string collision it used to be.
+const FULL_MANAGE = new Set(['admin', 'superadmin', 'deputy', 'principal', 'acting_deputy', 'head_of_school']);
 
 function _effectiveRoles(req) {
   const role       = req.jwtUser?.role       ?? '';
@@ -132,7 +140,7 @@ router.get('/', authMiddleware, async (req, res) => { // rbac: self-scoped below
 
     // Teachers can only read their own assignments
     const isTeacherOnly = eff.has('teacher') &&
-      !['admin','superadmin','principal','deputy','hod','timetabler']
+      !['admin','superadmin','principal','deputy','acting_deputy','head_of_school','hod','timetabler']
         .some(r => eff.has(r));
 
     if (isTeacherOnly) {

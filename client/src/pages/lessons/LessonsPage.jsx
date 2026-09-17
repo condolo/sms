@@ -30,7 +30,8 @@ function useRole() {
   const roles   = session?.user?.roles ?? [];
   const extra   = session?.user?.extraRoles ?? [];
   const all     = new Set([role, ...roles, ...extra]);
-  const isAdmin = all.has('admin') || all.has('superadmin') || all.has('principal') || all.has('deputy') || all.has('deputy_principal');
+  const isAdmin = all.has('admin') || all.has('superadmin') || all.has('principal') || all.has('deputy') || all.has('deputy_principal')
+    || all.has('acting_deputy') || all.has('head_of_school'); // extraRoles responsibility tags — see server/config/staffResponsibilities.js
   const isHod   = all.has('hod') || all.has('section_head');
   const isTeacher = all.has('teacher') || isHod;
   return { isAdmin, isHod, isTeacher, all };

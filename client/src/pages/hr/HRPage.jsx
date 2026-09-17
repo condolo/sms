@@ -18,6 +18,7 @@ import StaffDetailPanel from './StaffDetailPanel.jsx';
 import PayrollSettingsModal from './PayrollSettingsModal.jsx';
 import BulkImportSlideOver from '@/components/import/BulkImportSlideOver.jsx';
 import { useToast } from '@/hooks/useToast.jsx';
+import { BUILTIN_STAFF_RESPONSIBILITIES } from '@/config/staffResponsibilities.js';
 
 /* ── Constants ──────────────────────────────────────────── */
 const HR_ROLES    = ['superadmin','admin','hr'];
@@ -36,14 +37,7 @@ const BUILT_IN_STAFF_ROLES = [
   { key: 'discipline_committee', label: 'Discipline Committee', color: 'bg-red-100 text-red-700'       },
   { key: 'front_office',         label: 'Front Office',         color: 'bg-slate-100 text-slate-700'   },
 ];
-const DEFAULT_RESPONSIBILITIES = [
-  { value: 'hod',           label: 'Head of Department' },
-  { value: 'class_teacher', label: 'Class Teacher / Form Tutor' },
-  { value: 'timetabler',    label: 'Timetabler' },
-  { value: 'exam_officer',  label: 'Exam Officer' },
-  { value: 'deputy',        label: 'Deputy Principal' },
-  { value: 'principal',     label: 'Principal' },
-];
+const DEFAULT_RESPONSIBILITIES = BUILTIN_STAFF_RESPONSIBILITIES;
 const DOC_TYPES   = { contract:'Contract', appraisal:'Appraisal', certificate:'Certificate', id_copy:'ID / Document', other:'Other' };
 const DOC_COLORS  = { contract:'bg-blue-100 text-blue-700', appraisal:'bg-purple-100 text-purple-700', certificate:'bg-emerald-100 text-emerald-700', id_copy:'bg-amber-100 text-amber-700', other:'bg-slate-100 text-slate-600' };
 const LEAVE_TYPES = { annual:'Annual Leave', sick:'Sick Leave', emergency:'Emergency', maternity:'Maternity', paternity:'Paternity', unpaid:'Unpaid Leave' };

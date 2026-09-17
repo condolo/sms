@@ -6,6 +6,35 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.97.0] — 2026-09-17 — fix(security): Staff Responsibility tags could silently grant real RBAC-role-level access
+
+Prompted directly: "this roles and responsibilities under school settings isn't it affecting the roles and permissions submodule, isnt there a conflict? do the assessments first." Assessment confirmed a real, confirmed privilege-escalation path; fix implemented and shipped under explicit "Priority 0-4" authorization after answering a design question about the feature's original intent.
+
+### The vulnerability
+`teacher.extraRoles` (Settings → Staff Roles & Responsibilities) is meant to be a purely organizational label an admin can attach to a teacher — e.g. "this teacher also handles the timetable" — with no RBAC implication in the UI that sets it. Three route files (`server/routes/teaching-assignments.js`, `server/routes/lessons.js`, `server/routes/weekly-snapshots.js`) merge a user's role(s) and `extraRoles` into one Set and check broad-access membership against it — an intentional, still-correct design (a responsibility tag is meant to grant broad access, same as holding the role for real). The bug: two of the six built-in `extraRoles` values, `'deputy'` and `'principal'`, were **the exact same strings** `server/utils/role-validation.js`'s `SYSTEM_ROLES` uses for the real Deputy Principal / Principal account roles. Tagging a teacher with that *responsibility* — indistinguishable, from an admin's point of view, from tagging them "Timetabler" — silently granted the same broad access as an account that actually holds that role via Roles & Permissions, without ever passing through the real permission-grant flow.
+
+Verified against live production data before changing anything: exactly one teacher had `extraRoles: ['deputy']`, and their primary role was independently already `'deputy'` too, so no one's real-world access changed as a result of this fix; zero teachers anywhere had `'principal'` as a tag; only one school (`sch_demo`) had ever persisted a customized `staffResponsibilities` list.
+
+### Fixed
+- Renamed the two colliding values so no `extraRoles` value can ever equal a `SYSTEM_ROLES` value again: `deputy → acting_deputy`, `principal → head_of_school`. The capability they grant is unchanged — only the string changed.
+- Consolidated 5 server-side and 2 client-side hand-copied vocabulary lists into two canonical shared files: `server/config/staffResponsibilities.js` and `client/src/config/staffResponsibilities.js`.
+- `PUT /api/settings/school` now rejects (400, whole-request, not partial) any custom `staffResponsibilities` entry whose value matches a real `SYSTEM_ROLES` string — closing the *latent* version of this bug (e.g. a school typing `'section_head'` as a custom responsibility), not just the two known instances. Matching non-authoritative check added client-side for immediate feedback.
+- `server/scripts/migrate-staff-responsibility-rename.js` (dry-run by default, `--apply` to write): renamed the two real persisted uses of the old values in production — one teacher's `extraRoles` entry, one school's customized `staffResponsibilities` list — preserving array order and the school's own label text exactly. Confirmed idempotent (re-run after apply reports 0 remaining).
+
+### Verified
+- Full Jest suite: 208 suites, 2054/2054 tests passing (2035 existing + 19 new: migration-logic unit tests, a new settings-route collision-guard test file, and 3 new cases added directly to the pre-existing formal `role-architecture-verification-matrix.test.js`, which now covers the renamed values end-to-end against the real, unmodified route modules).
+- `verify-rbac-coverage.js` — 100% (487/487 endpoints), no regression. `security-scan.js` clean. Production client build passes.
+- Migration dry-run confirmed exactly 1 teacher + 1 school affected (matching the live-data assessment exactly) before `--apply`; writes verified directly against MongoDB; re-run afterward confirmed idempotency.
+- Confirmed via exhaustive search that the 15+ other, legitimate uses of the literal strings `'deputy'`/`'principal'` as real primary-role values elsewhere in the codebase were completely untouched by this rename — only the `extraRoles` vocabulary changed.
+
+### Explicitly not changed
+- `hr.js`, `sections.js`, `lesson-reminders.js`, `workflow-config.js` also read `extraRoles`, but via a per-value `$or` match rather than a merged Set — never vulnerable to this collision class, confirmed and left as-is.
+- The general RBAC grid (`role_permissions`/`hasPermission()`) — `extraRoles` never leaks into it; a long-standing test (`role-architecture-verification-matrix.test.js`, section B3) already covered this and remains true, unchanged.
+
+See [`docs/DEVELOPER_GUIDE.md` — Staff Responsibility Tags vs. RBAC Roles](docs/DEVELOPER_GUIDE.md#staff-responsibility-tags-vs-rbac-roles--extraroles-value-collision-v5970) for the full architecture note.
+
+---
+
 ## [v5.96.0] — 2026-09-17 — fix(academic-config): a schema drift silently stripped the `id` field from every new academic year
 
 The deepest of three findings from one continuous investigation, prompted directly: "not aligned, just checking now — anywhere else where the academic year is needed but hardcoded and doesn't change." Fixing the two visible symptoms (below, v5.95.0 and v5.94.0) surfaced a third, root-cause bug underneath both.

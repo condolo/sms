@@ -389,13 +389,17 @@ export default function TeacherList() {
   );
 }
 
+// Compact badge labels — deliberately shorter than
+// staffResponsibilities.js's full picker labels, kept as its own map for
+// that reason. Keys must still match the real stored extraRoles values
+// (see that config file for why 'deputy'/'principal' were renamed).
 const EXTRA_ROLE_LABELS = {
-  hod:          'Head of Department',
-  class_teacher:'Class Teacher',
-  timetabler:   'Timetabler',
-  exam_officer: 'Exam Officer',
-  deputy:       'Deputy Principal',
-  principal:    'Principal',
+  hod:            'Head of Department',
+  class_teacher:  'Class Teacher',
+  timetabler:     'Timetabler',
+  exam_officer:   'Exam Officer',
+  acting_deputy:  'Deputy Head',
+  head_of_school: 'Head of School',
 };
 
 /* ── Teacher Detail / Edit Slide-Over ────────────────────── */

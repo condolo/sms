@@ -27,6 +27,7 @@ const { planGate }            = require('../middleware/plan');
 const { _model }              = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { resolvePrimaryContact, validateGuardianRequirement } = require('../utils/guardian-contact');
+const { BUILTIN_EXTRA_ROLE_VALUES } = require('../config/staffResponsibilities');
 const { resolveRequiredFields } = require('../utils/admission-requirements');
 const { PURCHASE_ORIGINS } = require('../utils/purchase-origin');
 const {
@@ -1072,7 +1073,7 @@ async function _importTeachers(rows, schoolId, userId, req) {
   // _validateExtraRoles for the fuller rationale).
   const school = await _model('schools').findOne({ id: schoolId }).select('staffResponsibilities').lean();
   const VALID_EXTRA_ROLE = new Set([
-    'hod', 'class_teacher', 'timetabler', 'exam_officer', 'deputy', 'principal',
+    ...BUILTIN_EXTRA_ROLE_VALUES,
     ...(school?.staffResponsibilities ?? []).map(r => r.value),
   ]);
   const isSuperAdmin = req?.jwtUser?.role === 'superadmin' || (req?.jwtUser?.roles ?? []).includes('superadmin');

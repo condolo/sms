@@ -18,6 +18,7 @@ const { nextStaffId }     = require('../utils/counters');
 const { ok, created, fail, paginate, parsePagination, E } = require('../utils/response');
 const { applyOptimisticLock } = require('../utils/optimistic-lock');
 const { revokeUserTokens } = require('../utils/token-version');
+const { BUILTIN_EXTRA_ROLE_VALUES } = require('../config/staffResponsibilities');
 
 const router = express.Router();
 const PLAN   = planGate('teachers');
@@ -70,9 +71,12 @@ const TeacherUpdateSchema = TeacherCreateSchema.partial().omit({ email: true }).
   email: z.string().email().optional(),
 });
 
-// Matches StaffFormModal.jsx's/SettingsPage.jsx's own DEFAULT_STAFF_RESPONSIBILITIES
-// — these 6 are always valid regardless of what a school has customized.
-const BUILTIN_EXTRA_ROLES = new Set(['hod', 'class_teacher', 'timetabler', 'exam_officer', 'deputy', 'principal']);
+// Sourced from server/config/staffResponsibilities.js — the single list
+// this, import-export.js, and every client picker (StaffFormModal.jsx,
+// HRPage.jsx, SettingsPage.jsx) all share, instead of five independent
+// hardcoded copies. These 6 are always valid regardless of what a school
+// has customized.
+const BUILTIN_EXTRA_ROLES = BUILTIN_EXTRA_ROLE_VALUES;
 
 /**
  * Validates extraRoles values against the built-in 6 PLUS whatever custom

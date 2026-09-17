@@ -41,7 +41,13 @@ const PLAN   = planGate('lessons');
 const MODGATE = moduleGate('lessons');
 
 /* ── Role helpers ────────────────────────────────────────────── */
-const MANAGE_ROLES = new Set(['superadmin', 'admin', 'deputy_principal', 'principal', 'section_head', 'teacher', 'hod', 'deputy']);
+// 'acting_deputy'/'head_of_school' are teacher.extraRoles responsibility
+// tags (see server/config/staffResponsibilities.js), not real account
+// roles — listed explicitly alongside the real 'deputy'/'deputy_principal'/
+// 'principal' role keys so a teacher tagged with that responsibility
+// keeps the same admin-level lessons access as before those tag values
+// were renamed off of the exact strings SYSTEM_ROLES uses.
+const MANAGE_ROLES = new Set(['superadmin', 'admin', 'deputy_principal', 'principal', 'section_head', 'teacher', 'hod', 'deputy', 'acting_deputy', 'head_of_school']);
 
 function _eff(req) {
   const role       = req.jwtUser?.role       ?? '';
@@ -57,7 +63,8 @@ function isTeacher(req) {
 
 function isAdmin(req) {
   const eff = _eff(req);
-  return eff.has('admin') || eff.has('superadmin') || eff.has('principal') || eff.has('deputy') || eff.has('deputy_principal');
+  return eff.has('admin') || eff.has('superadmin') || eff.has('principal') || eff.has('deputy') || eff.has('deputy_principal')
+    || eff.has('acting_deputy') || eff.has('head_of_school'); // extraRoles responsibility tags — see MANAGE_ROLES comment above
 }
 
 function isHodOrAdmin(req) {

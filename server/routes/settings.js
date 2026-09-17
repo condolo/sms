@@ -327,6 +327,36 @@ router.put('/school', authMiddleware, rbac('settings', 'update'), async (req, re
     // non-empty, sane-length strings are accepted; anything else is
     // dropped from the write rather than failing the whole save, same
     // tolerance every other free-shape settings object here gets.
+    // staffResponsibilities — a school-customizable list of organizational
+    // tags (Settings → Staff Roles & Responsibilities), stored on
+    // teacher.extraRoles, NOT a real account role. Found live: several
+    // authorization checks (teaching-assignments.js, lessons.js,
+    // weekly-snapshots.js) merge extraRoles into the same set as
+    // user.role/roles, so a custom responsibility whose value happens to
+    // equal a real SYSTEM_ROLES key would silently grant that role's
+    // access to anyone merely tagged with it — the exact bug the built-in
+    // 'deputy'/'principal' values caused before being renamed (see
+    // server/config/staffResponsibilities.js). This is the authoritative
+    // guard against a school ever recreating that by hand with a custom
+    // entry — client-side (StaffResponsibilitiesPanel) has the same check
+    // for immediate feedback, but that alone is trivially bypassed.
+    if (req.body.staffResponsibilities !== undefined) {
+      const list = req.body.staffResponsibilities;
+      if (!Array.isArray(list)) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'staffResponsibilities must be an array.' } });
+      }
+      const reserved = list.filter(r => r && typeof r.value === 'string' && SYSTEM_ROLES.has(r.value));
+      if (reserved.length) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: `"${reserved[0].label ?? reserved[0].value}" can't be used as a responsibility name — "${reserved[0].value}" is reserved for a real system role. Pick a different name.`,
+          },
+        });
+      }
+    }
+
     if (req.body.roleLabels !== undefined) {
       const raw = req.body.roleLabels;
       const clean = {};

@@ -28,6 +28,7 @@ import useAuthStore from '@/store/auth.js';
 import { deriveNavModules, buildModuleConfigMap } from '@/config/moduleNav.js';
 import { SYSTEM_ROLE_LABELS, roleLabel } from '@/utils/roleLabels.js';
 import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
+import { BUILTIN_STAFF_RESPONSIBILITIES } from '@/config/staffResponsibilities.js';
 
 /* ── Tab config ─────────────────────────────────────────────── */
 const TABS = [
@@ -857,14 +858,7 @@ function AdmissionRequirementsSection({ form: f, set }) {
    Placed inside SchoolTab (HR section). Manages the per-school
    list of responsibility options shown in the Add/Edit Staff form.
    ══════════════════════════════════════════════════════════════ */
-const DEFAULT_STAFF_RESPONSIBILITIES = [
-  { value: 'hod',           label: 'Head of Department' },
-  { value: 'class_teacher', label: 'Class Teacher / Form Tutor' },
-  { value: 'timetabler',    label: 'Timetabler' },
-  { value: 'exam_officer',  label: 'Exam Officer' },
-  { value: 'deputy',        label: 'Deputy Principal' },
-  { value: 'principal',     label: 'Principal' },
-];
+const DEFAULT_STAFF_RESPONSIBILITIES = BUILTIN_STAFF_RESPONSIBILITIES;
 
 function StaffResponsibilitiesPanel() {
   const qc = useQueryClient();
@@ -901,6 +895,19 @@ function StaffResponsibilitiesPanel() {
     const value = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
     if (responsibilities.some(r => r.value === value || r.label.toLowerCase() === label.toLowerCase())) {
       showT('That responsibility already exists.', 'error');
+      return;
+    }
+    // A responsibility tag lives on teacher.extraRoles — a real account ROLE
+    // (Roles & Permissions) lives on user.role/roles. Found live: two
+    // built-in responsibility values ('deputy', 'principal', since renamed)
+    // used to collide with real role keys, and several authorization
+    // checks merge extraRoles into the same set as role/roles — a school
+    // tagging someone "Principal" as a mere responsibility silently
+    // granted them the actual Principal role's access. Blocked here for
+    // immediate feedback; server-side (PUT /settings/school) is the
+    // authoritative check, since a client-only guard is trivially bypassed.
+    if (Object.keys(SYSTEM_ROLE_LABELS).includes(value)) {
+      showT(`"${label}" is reserved as a real system role — pick a different name (e.g. "${label} (Responsibility)").`, 'error');
       return;
     }
     saveList([...responsibilities, { value, label }]);

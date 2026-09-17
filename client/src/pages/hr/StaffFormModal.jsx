@@ -12,18 +12,12 @@
    ============================================================ */
 import { useState } from 'react';
 import { X, Save, Loader2, User, Briefcase, Shield, Lock } from 'lucide-react';
+import { BUILTIN_STAFF_RESPONSIBILITIES } from '@/config/staffResponsibilities.js';
 
 // staffRoles is passed in from HRPage (built-in roles + school custom roles)
 // so the Staff Type dropdown stays in sync with the Roles & Permissions system
 
-const DEFAULT_RESPONSIBILITIES = [
-  { value: 'hod',           label: 'Head of Department' },
-  { value: 'class_teacher', label: 'Class Teacher / Form Tutor' },
-  { value: 'timetabler',    label: 'Timetabler' },
-  { value: 'exam_officer',  label: 'Exam Officer' },
-  { value: 'deputy',        label: 'Deputy Principal' },
-  { value: 'principal',     label: 'Principal' },
-];
+const DEFAULT_RESPONSIBILITIES = BUILTIN_STAFF_RESPONSIBILITIES;
 
 const CONTRACT_OPTIONS = [
   { value: 'full_time', label: 'Full Time' },

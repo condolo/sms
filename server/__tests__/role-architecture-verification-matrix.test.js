@@ -198,6 +198,53 @@ describe('A7. extraRoles', () => {
   });
 });
 
+describe('A7b. extraRoles security fix (2026-09) — responsibility tags renamed off of real role strings', () => {
+  // Found live: 'deputy'/'principal' used to be two of the six built-in
+  // teacher.extraRoles values (the exact strings SYSTEM_ROLES uses for
+  // the real Deputy Principal / Principal account roles). Since these
+  // three routes each merge extraRoles into the same Set as role/roles,
+  // a teacher merely TAGGED "Principal" as a responsibility was silently
+  // granted full teaching-assignment management, admin-level lessons
+  // access, and broad weekly-snapshot visibility — identical to an
+  // account actually holding that RBAC role, never granted through
+  // Roles & Permissions. Renamed to 'acting_deputy'/'head_of_school'
+  // (server/config/staffResponsibilities.js) so no extraRoles value can
+  // equal a SYSTEM_ROLES value again — these tests prove the renamed
+  // values still grant the SAME intended capability (nobody's access
+  // regresses) using the new, non-colliding strings.
+  test('the renamed values elevate the same three routes exactly like "hod" does', () => {
+    const reqHeadOfSchool = { jwtUser: { role: 'teacher', roles: ['teacher'], extraRoles: ['head_of_school'] } };
+    const reqActingDeputy = { jwtUser: { role: 'teacher', roles: ['teacher'], extraRoles: ['acting_deputy'] } };
+    expect(lessons.isAdmin(reqHeadOfSchool)).toBe(true);
+    expect(lessons.isAdmin(reqActingDeputy)).toBe(true);
+    expect(teachingAssignments.canManage(reqHeadOfSchool)).toBe(true);
+    expect(teachingAssignments.canManage(reqActingDeputy)).toBe(true);
+    expect(weeklySnapshots._effectiveRoles(reqHeadOfSchool).has('head_of_school')).toBe(true);
+    expect(weeklySnapshots._effectiveRoles(reqActingDeputy).has('acting_deputy')).toBe(true);
+  });
+
+  test('a raw "deputy"/"principal" extraRoles value is no longer part of the valid vocabulary a school can assign', () => {
+    // The actual gate against the vulnerability recurring is validation at
+    // write time (teachers.js's _validateExtraRoles, import-export.js's
+    // CSV import, and settings.js's staffResponsibilities guard below) —
+    // not these Sets, which correctly still contain 'deputy'/'principal'
+    // for real role matching. This proves the picker itself can no longer
+    // produce the colliding value in the first place.
+    const { BUILTIN_EXTRA_ROLE_VALUES } = require('../config/staffResponsibilities');
+    expect(BUILTIN_EXTRA_ROLE_VALUES.has('deputy')).toBe(false);
+    expect(BUILTIN_EXTRA_ROLE_VALUES.has('principal')).toBe(false);
+    expect(BUILTIN_EXTRA_ROLE_VALUES.has('acting_deputy')).toBe(true);
+    expect(BUILTIN_EXTRA_ROLE_VALUES.has('head_of_school')).toBe(true);
+  });
+
+  test('the renamed values still do NOT leak into the general RBAC grid — same invariant as A7/B3, for the new strings', async () => {
+    mockDB.role_permissions.push({ schoolId: SCHOOL_A, roleKey: 'teacher', permissions: { finance: [], hr: [] } });
+    const dana = { userId: 'u_dana', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'], extraRoles: ['head_of_school', 'acting_deputy'] };
+    expect(await hasPermission({ jwtUser: dana }, 'finance', 'read')).toBe(false);
+    expect(await hasPermission({ jwtUser: dana }, 'hr', 'read')).toBe(false);
+  });
+});
+
 describe('A8. section_head with sectionAssigned', () => {
   test('resolves to section-level scope, narrowed to that section\'s classes', async () => {
     mockDB.classes.push(
