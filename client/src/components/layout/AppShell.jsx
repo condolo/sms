@@ -24,18 +24,38 @@ export default function AppShell() {
   const location      = useLocation();
   const school        = useAuthStore(s => s.session?.school);
   const patchUser     = useAuthStore(s => s.patchUser);
-  const sessionUser   = useAuthStore(s => s.session?.user);
+  // A primitive (the user's id), not the whole `session.user` object — see
+  // below for why that distinction is the entire fix.
+  const sessionUserId = useAuthStore(s => s.session?.user?.id);
   const faviconUrl    = school?.faviconUrl ?? null;
   const schoolName    = school?.name ?? null;
 
   // Refresh role permissions from the server on mount, window focus, and whenever
   // the admin broadcasts a permissions change via BroadcastChannel or custom event.
+  //
+  // BUG FIXED HERE (found investigating recurring production "Too many
+  // requests" reports — see CHANGELOG.md): this used to select the whole
+  // `session.user` object and depend on it directly. `patchUser()` (see
+  // auth.js) unconditionally builds a brand-new `session`/`session.user`
+  // object on every call, even when the incoming `permissions` value is
+  // byte-identical to what's already stored — so every successful fetch
+  // below produced a new object identity, which changed `sessionUser`,
+  // which changed this `useCallback`'s identity, which re-ran the effect
+  // below (keyed on this callback), which fetched again — forever, with no
+  // exit condition, on every authenticated page, confirmed live at ~4.9
+  // requests/second sustained on an idle tab. Four separate rate-limit
+  // ceiling increases over this app's history were really just this loop
+  // finding a new, later wall to hit. Selecting the user's `id` (a
+  // primitive string, unchanged by a permissions-only patch) instead of the
+  // whole object gives this callback a stable identity across permission
+  // refreshes, while still correctly re-subscribing on a genuine user
+  // change (login/logout/school switch).
   const refreshPermissions = useCallback(() => {
-    if (!sessionUser) return;
+    if (!sessionUserId) return;
     authApi.permissions()
       .then(res => { patchUser({ permissions: res.permissions ?? undefined }); })
       .catch(() => {}); // silent — stale permissions are acceptable
-  }, [sessionUser, patchUser]);
+  }, [sessionUserId, patchUser]);
 
   useEffect(() => {
     refreshPermissions();

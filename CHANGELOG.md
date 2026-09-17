@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.91.0] — 2026-09-17 — fix(perf): found and fixed the actual cause of v5.90.0's recurring rate-limit reports — an unconditional infinite request loop
+
+Asked to critically review v5.90.0 (the 3000→10000 rate-limit bump) before making any further change to it — specifically to produce *evidence* that the new ceiling was justified rather than just large enough to hide the problem. Investigated empirically this time: ran the real client and server locally against the actual production database (using the pre-existing, purpose-built demo-school account — read-only navigation, no writes), and measured actual request traffic with the browser's own network inspector instead of reasoning from code alone.
+
+### Found — `AppShell.jsx`'s permissions refresh was an unconditional infinite loop, live since 2026-07-01
+`GET /api/auth/permissions` fired continuously at **~4.9 requests/second, sustained, forever**, on every authenticated page, with the tab completely idle — no clicks, no typing, nothing. Root cause: `refreshPermissions` (a `useCallback`) depended on the whole `session.user` object; `patchUser()` (`store/auth.js`) unconditionally builds a *new* `session`/`session.user` object on every call, even when the returned permissions are byte-identical to what's already stored; the new object identity changed `sessionUser`, which changed `refreshPermissions`'s identity, which re-ran the `useEffect` it's the dependency of, which called it again — forever, with no exit condition. This is not new: it was introduced by v4.62-era commit `dd4e89c` (2026-07-01), over a month *before* v5.43.0's first rate-limit investigation. Every rate-limit ceiling raised since then (v5.43.0's 1000, then 3000, then v5.90.0's 10000) was really just finding a later wall for this same loop to hit — at ~4.9 req/sec, 3000/15min is exhausted by this loop alone in **~10 minutes** of one idle tab; 10000/15min in **~34 minutes**. No amount of raising the ceiling was ever going to stay fixed.
+
+Also found, smaller: `FloatingWidgets.jsx`'s WhatsApp-widget effect called `getPlatformSettings()` (→ `GET /api/platform/settings`) unconditionally on every mount, even though the component's own render immediately returns `null` for every authenticated session and every real school's pages — one wasted request per full page load, on every page, for every user, logged in or not.
+
+### Fixed
+- `AppShell.jsx`: `refreshPermissions` now depends on `sessionUserId` (`session.user.id`, a primitive string) instead of the whole `session.user` object. A permissions-only `patchUser()` call no longer changes this value, so the callback's identity — and therefore the `useEffect` keyed on it — now stays stable across refreshes, while still correctly re-subscribing on an actual login/logout/user change. Mount, window-`focus`, and the `permissions:changed`/`BroadcastChannel` triggers were all verified individually still work (each fires exactly one request, confirmed live), and the loop is gone (confirmed live: 0 additional requests after 30+ seconds idle, was previously ~150 in the same window).
+- `FloatingWidgets.jsx`: the platform-settings fetch is now skipped entirely (not just the render) when `!isMarketingSurface || isAuthenticated` — matching the condition the component's own render already gates on.
+- The `apiLimiter` ceiling from v5.90.0 (10000/15min) is **left as-is for now** — deliberately not touched again in this change. The honest next step is to re-measure real per-user request volume now that this loop is gone, before deciding what the ceiling should permanently be; that's a follow-up, not something to guess at in the same change that just removed the dominant, previously-invisible traffic source.
+
+### Verified
+- Full Jest suite 2023/2023, `verify-rbac-coverage.js` 100% (no regression — no routes touched), `security-scan.js` clean, production client build passes.
+- No client-side automated test infrastructure exists for this component (server-side Jest suite only) — verification was empirical/live instead: local server against the real database, demo-school account, browser network inspector. Before the fix: `GET /api/auth/permissions` climbed continuously and unboundedly (127 → 171 → 250+ requests across successive idle checks). After the fix: exactly 2 requests total after login (React StrictMode's dev-only double-invoke; production won't double this), unchanged after 30+ seconds idle, with `focus` and `permissions:changed` events each correctly firing exactly one additional request and settling back to zero — no regression in the feature's intended behaviour, only the loop removed.
+
+---
+
 ## [v5.90.0] — 2026-09-16 — fix(security): general rate limit still too low for real (often shared-login) usage
 
 Reported directly: "Too many requests — please slow down and try again shortly" recurring on unrelated pages — Teachers (searching "physl"), Settings → School, Settings → Users. The exact same symptom, on the exact same two pages, that v5.43.0 already investigated and fixed once (Teachers + Settings → Roles & Permissions) — so before touching anything, re-verified that fix hadn't regressed rather than assuming it had.

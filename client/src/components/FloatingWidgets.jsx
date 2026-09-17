@@ -18,12 +18,20 @@ export default function FloatingWidgets() {
   const [waUrl, setWaUrl] = useState(null);
 
   useEffect(() => {
+    // Skip the fetch entirely when the widget can never render anyway (a
+    // real school's pages, or any authenticated session) — found while
+    // investigating request volume for the AppShell.jsx permissions-loop
+    // fix: this ran unconditionally on every mount (hooks run before the
+    // early return below), firing one extra /api/platform/settings call on
+    // every single page load of the whole app, logged-in or not, even
+    // though the button it powers never shows once authenticated.
+    if (!isMarketingSurface || isAuthenticated) return;
     // Load WhatsApp number from platform settings (editable in Platform Admin → Branding)
     getPlatformSettings().then(settings => {
       const raw = (settings?.contactPhone || '').replace(/\D/g, '');
       if (raw) setWaUrl(`https://wa.me/${raw}?text=${WA_MESSAGE}`);
     }).catch(() => {});
-  }, []);
+  }, [isMarketingSurface, isAuthenticated]);
 
   useEffect(() => {
     function onScroll() {
