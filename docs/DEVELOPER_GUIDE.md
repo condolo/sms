@@ -2649,6 +2649,8 @@ function _yearStatus(year, archivedIds = []) {
 - Sets `isCurrent: false` on docs missing the field
 - Non-blocking, idempotent — runs after `listen()` on every startup
 
+**v5.92.0 — the client "New year" form never actually worked.** A direct database check found every `academic_years` document ever created has `isCurrent: true` — no school had ever successfully created a draft (`isCurrent: false`) through the UI. Root cause: `AcademicYearsSection`'s "New Academic Year" panel (`SettingsPage.jsx`) was a `<form onSubmit={handleCreate}>` nested inside `SchoolTab`'s own outer `<form>` (the whole School Info tab, submitted by "Save settings") — invalid HTML that React warns about (`validateDOMNesting`) but still renders. Clicking "Create draft year" triggered a full browser page reload instead of the React submit handler, confirmed live (zero `POST /api/academic-config/years` ever sent; the whole SPA remounted from scratch). Fixed by converting that panel to a plain `<div>` with a `type="button"` + `onClick` submit — no nested form at all. If you add another inline "quick create" panel anywhere inside `SchoolTab` (or any other tab whose root is itself a `<form>`), do **not** wrap it in its own `<form>` — use a `<div>` + button `onClick`, or hoist the field state up to the parent's own single form.
+
 ### 27.4 Audit Action Types Reference (complete)
 
 | Action | Written by | What it records |

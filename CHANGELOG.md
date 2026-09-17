@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.92.0] — 2026-09-17 — fix(settings): "Create draft year" silently did nothing — a `<form>` nested inside another `<form>`
+
+Reported directly: "i was trying to add the draft year, but am not seeing any draft." Investigated by reproducing the exact flow live (local server against the real database, demo-school account) rather than guessing from code, since the earlier explanation ("maybe it's a permissions issue") didn't hold up — the reporting user's own real account is `superadmin`, well within the required role, confirmed directly against the database.
+
+### Root cause — confirmed, not assumed
+A direct database check found the real signal: **zero** `academic_years` documents anywhere in the database have ever had `isCurrent: false` — meaning no school has ever successfully created a draft year through this UI, not just this one attempt. Reproducing the click live confirmed why: React's own `validateDOMNesting` console warning showed `AcademicYearsSection`'s "New Academic Year" `<form>` (added when this feature was built) renders inside `SchoolTab`'s own outer `<form>` (wrapping the entire School Info tab, submitted by its own "Save settings" button) — an HTML-invalid nested `<form>`. Clicking "Create draft year" caused a full browser page reload instead of running `handleCreate()` — confirmed directly in the network log (a burst of asset/public requests identical to a fresh app boot, zero `POST /api/academic-config/years` ever sent) — so `createMut.mutate(...)` never ran, no error was shown, and the whole page silently reset, discarding whatever was typed. This looked exactly like "nothing happened."
+
+### Fixed
+- `AcademicYearsSection`'s "New Academic Year" panel (`client/src/pages/settings/SettingsPage.jsx`) converted from a nested `<form onSubmit>` to a plain `<div>`, with its submit button now `type="button" onClick={handleCreate}` (no native form submission involved at all) and Enter-to-submit preserved on the year-name field via an explicit `onKeyDown` handler.
+- In the same block, fixed a real (if secondary) bug this touched: the inline creation-error message read `createMut.error?.response?.data?.message` — an axios convention this app's `APIError` class doesn't use — so it always fell back to the generic "Failed to create year" even when the server gave a specific reason (e.g. a duplicate year name). Now reads `createMut.error?.message`, which `APIError` actually carries.
+
+### Verified
+- Reproduced live end-to-end, twice: before the fix, clicking "Create draft year" reliably reloaded the page with zero POST requests and zero documents created (confirmed via direct database read after each attempt); after the fix, the same click fires exactly one `POST /api/academic-config/years` (200), the "Academic year created." toast appears, and the new year renders immediately with a Draft badge and its own "Start this academic year" button — no page reload, no console nesting warning. Test-created record deleted afterward through the app's own delete action (not a raw database write), confirmed removed by a direct database read.
+- Full Jest suite 2023/2023, `verify-rbac-coverage.js` 100% (no regression — no routes changed), `security-scan.js` clean, production client build passes.
+
+---
+
 ## [v5.91.0] — 2026-09-17 — fix(perf): found and fixed the actual cause of v5.90.0's recurring rate-limit reports — an unconditional infinite request loop
 
 Asked to critically review v5.90.0 (the 3000→10000 rate-limit bump) before making any further change to it — specifically to produce *evidence* that the new ceiling was justified rather than just large enough to hide the problem. Investigated empirically this time: ran the real client and server locally against the actual production database (using the pre-existing, purpose-built demo-school account — read-only navigation, no writes), and measured actual request traffic with the browser's own network inspector instead of reasoning from code alone.

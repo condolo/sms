@@ -2333,8 +2333,18 @@ function AcademicYearsSection({ schoolId }) {
     onError: (err) => setToast({ msg: err?.message ?? 'Failed to create academic year.', type: 'error' }),
   });
 
-  function handleCreate(e) {
-    e.preventDefault();
+  // Plain function, not a form-submit handler — see the JSX below for why:
+  // this whole panel used to be a real <form>, but it renders inside
+  // SchoolTab's own outer <form> (wrapping the whole School Info tab).
+  // Nested <form> elements are invalid HTML; React warns about it
+  // (validateDOMNesting) but still renders both, and the click on this
+  // inner form's submit button was reaching the browser's native form
+  // submission before/alongside React's onSubmit handler — reproduced
+  // live as a full page reload on every click, so createMut.mutate()
+  // never ran and no draft year was ever created, silently. Converting
+  // this panel to a plain <div> with a real button + onClick removes the
+  // nested form entirely rather than working around it.
+  function handleCreate() {
     if (!newName.trim() || !newStart || !newEnd) return;
     const terms = Array.from({ length: newTermCount }, (_, i) => ({
       term: i + 1, label: `Term ${i + 1}`, startDate: '', endDate: '',
@@ -2455,8 +2465,7 @@ function AcademicYearsSection({ schoolId }) {
             exit={{ opacity: 0, height: 0 }}
             className="overflow-hidden"
           >
-            <form
-              onSubmit={handleCreate}
+            <div
               className="border border-indigo-100 rounded-xl bg-indigo-50/40 p-4 space-y-3"
             >
               <p className="text-xs font-semibold text-indigo-700">New Academic Year</p>
@@ -2466,6 +2475,7 @@ function AcademicYearsSection({ schoolId }) {
                   <input
                     value={newName}
                     onChange={e => setNewName(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreate(); } }}
                     placeholder="e.g. 2026-2027"
                     required
                     className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400"
@@ -2492,7 +2502,7 @@ function AcademicYearsSection({ schoolId }) {
                 </div>
               </div>
               <div className="flex gap-2 pt-1">
-                <button type="submit" disabled={createMut.isPending}
+                <button type="button" onClick={handleCreate} disabled={createMut.isPending}
                   className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">
                   {createMut.isPending ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
                   Create draft year
@@ -2504,10 +2514,10 @@ function AcademicYearsSection({ schoolId }) {
               </div>
               {createMut.isError && (
                 <p className="text-xs text-red-600 flex items-center gap-1">
-                  <AlertCircle size={11} /> {createMut.error?.response?.data?.message ?? 'Failed to create year'}
+                  <AlertCircle size={11} /> {createMut.error?.message ?? 'Failed to create year'}
                 </p>
               )}
-            </form>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
