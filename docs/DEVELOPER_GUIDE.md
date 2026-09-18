@@ -1342,31 +1342,60 @@ message fired.
 // server/utils/scopeEngine.js — classes is NOT streamAware:
 classes: { field: 'id', source: 'classIds' }, // no streamAware — see MODULE_SCOPE's own comment
 
-// server/routes/classes.js's GET / (?assignedOnly=true branch) resolves
-// stream-only assignments to their PARENT classIds itself, in a
-// request-local copy of scope — never mutating the shared, 5-minute-cached
-// scope object other modules' routes will read on their own next call:
+// scopeEngine.js's own resolveClassPickerScope(req) resolves stream-only
+// assignments to their PARENT classIds, returning a NEW scope object —
+// never mutating the shared, 5-minute-cached scope object other modules'
+// routes will read on their own next call. Any route needing "which
+// classes can this teacher act on" for a picker over the `classes` module
+// itself calls this once, uses the returned scope for its OWN
+// applyToFilter/hasNoAssignments calls, and restores the original
+// immediately after:
 const originalScope = req.scope;
-if (originalScope?.streamIds?.length) {
-  const parents = await tenantModel('streams', tenantContext(req))
-    .find({ schoolId, id: { $in: originalScope.streamIds } })
-    .select('classId').lean();
-  req.scope = { ...originalScope, classIds: [...new Set([...(originalScope.classIds ?? []), ...parents.map(s => s.classId)])] };
-}
+req.scope = await ScopeEngine.resolveClassPickerScope(req);
 ScopeEngine.applyToFilter(req, 'classes', filter);
 const noAssignments = ScopeEngine.hasNoAssignments(req, 'classes');
-req.scope = originalScope; // restore immediately — this merge is only for THIS list's own picker
+req.scope = originalScope; // restore immediately — the resolved copy is only for THIS list's own scoping
 ```
 Before marking any new module `streamAware`, confirm its own documents
 carry a real `streamId` field written at create/update time — if the
 module's records don't individually belong to one stream (the way a
 class doesn't), don't set the flag; resolve stream-scoped access to
 whatever the module's real join key is at the route level instead, the
-way `classes.js` now does, and the way `classes.js`'s own
-`GET /:id/students` route already did correctly beforehand (see its
-`inWholeClassScope`/`relevantStreamIds` handling — the same resolve-
-against-a-specific-class pattern, just not yet applied to the list route
-until this fix).
+way `classes.js` and `assessment.js`'s `/analytics` `availableClasses`
+now do (the second call site was found, not just the first, by grepping
+every caller of `applyToFilter(req, 'classes', ...)` before considering
+this fixed) — and the way `classes.js`'s own `GET /:id/students` route
+already did correctly beforehand (see its `inWholeClassScope`/
+`relevantStreamIds` handling — the same resolve-against-a-specific-class
+pattern, just not yet applied to the list routes until this fix).
+
+**Follow-up (v5.101.0) — the reverse direction: a class→streams picker,
+plus why Attendance needed one at all.** The investigation above fixed
+"which classes can a stream-scoped teacher see," but a real report
+("if a teacher is teaching Year 3A, 3B... these students take classes at
+different times... the teacher cannot take attendance for all, but per
+stream") surfaced that Attendance had no stream concept at all — picking
+a class always produced ONE register merging every stream the caller
+could see, never one stream (one real lesson, one real time) at a time.
+`server/routes/streams.js`'s `GET /` gained the identical `?assignedOnly=
+true` (+`classId`) convention `classes.js` already had — school-level and
+whole-class-grant callers still see every stream in the class (no-op,
+matching the "unscoped by default" philosophy above); a stream-scoped
+teacher sees only their own assigned streams within that one class.
+`AttendancePage.jsx` shows this picker only when a class genuinely has
+more than one active stream — 0 or 1 stream is unaffected, no picker,
+identical behavior to before. Once a stream is chosen, the roster comes
+from the already-correct `GET /api/streams/:id/students` (existed since
+the original stream-scoping work — this feature only needed to start
+*calling* it from Attendance, not build it), and `GET /api/attendance`
+/ `POST /attendance/bulk` both gained an optional `streamId` — omitted,
+every existing caller is completely unaffected; provided, the module's
+own already-correct `streamAware` handling (`ScopeEngine.applyToFilter`)
+validates it, and the bulk-mark route additionally rejects (400) any
+submitted student who doesn't actually belong to the requested stream,
+rather than silently dropping them — a stream-targeted register should
+fail loudly if the client and reality have diverged, not save an
+incomplete one quietly.
 
 ### Student Record Merge — `server/utils/student-merge.js` (v5.79.0)
 

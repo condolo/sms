@@ -10,8 +10,10 @@ import {
   CalendarDays, ChevronDown, CheckCircle2, XCircle, Clock,
   FileText, Users, RefreshCw, Save, Loader2, AlertTriangle,
   CheckSquare, Square, BarChart3, ChevronLeft, ChevronRight, Printer, Download,
+  Layers,
 } from 'lucide-react';
-import { attendance as attendanceApi, classes as classesApi } from '@/api/client.js';
+import { attendance as attendanceApi, classes as classesApi, streams as streamsApi, timetable as timetableApi } from '@/api/client.js';
+import useAuthStore from '@/store/auth.js';
 
 /* ── Status config ───────────────────────────────────────────── */
 const STATUSES = [
@@ -33,12 +35,17 @@ function shiftDate(dateStr, days) {
   d.setDate(d.getDate() + days);
   return d.toISOString().slice(0, 10);
 }
+const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+function dayOfWeekFor(dateStr) {
+  return DAY_NAMES[new Date(dateStr + 'T00:00:00').getDay()];
+}
 
 /* ══════════════════════════════════════════════════════════════ */
 export default function AttendancePage() {
   const today   = new Date().toISOString().slice(0, 10);
   const [date, setDate]       = useState(today);
   const [classId, setClassId] = useState('');
+  const [streamId, setStreamId] = useState('');
   const [edits, setEdits]     = useState({});   // { studentId: status }
   const [toast, setToast]     = useState(null); // { type: 'success'|'error', msg: string }
   const qc = useQueryClient();
@@ -68,22 +75,75 @@ export default function AttendancePage() {
   const classList = classesData?.data ?? [];
   const noClassesAssigned = classesData?.pagination?.noAssignments === true;
 
-  /* ── Attendance records for selected class + date ─────────── */
-  const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['attendance', 'list', { classId, date }],
-    queryFn:  () => attendanceApi.list({ classId, date, limit: 200 }),
-    enabled:  !!classId,
-  });
-  const rows = data?.data ?? [];
-
-  /* ── Students in class (for unrecorded rows) ─────────────── */
-  const { data: studentsData, isLoading: studentsLoading } = useQuery({
-    queryKey: ['classes', classId, 'students'],
-    queryFn:  () => classesApi.students(classId, { limit: 500, status: 'active' }),
+  /* ── Streams within the selected class ───────────────────────
+     Classes are subdivided into streams (e.g. "Year 3A", "Year 3B") that
+     each run their own timetable — a teacher covering both has two
+     separate lessons at two separate times, not one merged group. A class
+     with more than one stream therefore needs a register PER STREAM, not
+     one combined list spanning every stream the caller can see. Same
+     assignedOnly convention as the class picker above: narrows to the
+     caller's own assigned streams within this class; a no-op for
+     school-level roles. */
+  const { data: streamsData } = useQuery({
+    queryKey: ['streams', 'assignedOnly', classId],
+    queryFn:  () => streamsApi.list({ classId, status: 'active', limit: 50, assignedOnly: true }),
     enabled:  !!classId,
     staleTime: 5 * 60_000,
   });
+  const streamList = streamsData?.data ?? [];
+  const needsStreamSelection = streamList.length > 1;
+  // The identifier actually used to fetch/save the register: once a class
+  // has more than one stream, nothing is fetched until a specific stream
+  // is chosen — there is no meaningful "whole class" register anymore.
+  const effectiveStreamId = needsStreamSelection ? streamId : (streamList[0]?.id ?? '');
+  const canLoadRegister = !!classId && (!needsStreamSelection || !!streamId);
+
+  /* ── Attendance records for selected class/stream + date ───── */
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['attendance', 'list', { classId, streamId: effectiveStreamId, date }],
+    queryFn:  () => attendanceApi.list({ classId, ...(effectiveStreamId ? { streamId: effectiveStreamId } : {}), date, limit: 200 }),
+    enabled:  canLoadRegister,
+  });
+  const rows = data?.data ?? [];
+
+  /* ── Students in class/stream (for unrecorded rows) ─────────
+     Once the class is subdivided, fetch the ONE selected stream's own
+     roster (already correctly scoped server-side — see
+     streams.js's GET /:id/students) instead of the whole class's. */
+  const { data: studentsData, isLoading: studentsLoading } = useQuery({
+    queryKey: needsStreamSelection
+      ? ['streams', streamId, 'students']
+      : ['classes', classId, 'students'],
+    queryFn: () => needsStreamSelection
+      ? streamsApi.students(streamId, { limit: 500, status: 'active' })
+      : classesApi.students(classId, { limit: 500, status: 'active' }),
+    enabled: canLoadRegister,
+    staleTime: 5 * 60_000,
+  });
   const classStudents = studentsData?.data ?? [];
+
+  /* ── Timetable alignment ──────────────────────────────────────
+     Purely informational — confirms what the register being taken
+     actually corresponds to on the timetable (period + time), it never
+     gates or changes what can be saved. Reuses the same "my weekly
+     schedule" data TimetablePortal.jsx already fetches for the teacher's
+     own timetable view. Only meaningful (and only RBAC-granted) for the
+     'teacher' role itself — an admin/deputy marking a register on someone
+     else's behalf has no personal "my schedule" to align against, and
+     unconditionally calling this for every role would 403 for anyone
+     without Timetable module access. */
+  const role = useAuthStore(s => s.session?.user?.role ?? '');
+  const { data: myTimetableData } = useQuery({
+    queryKey: ['timetable', 'my'],
+    queryFn:  () => timetableApi.my(),
+    enabled:  role === 'teacher',
+    staleTime: 5 * 60_000,
+  });
+  const todaysSlots = (myTimetableData?.data?.slots ?? [])
+    .filter(s => (s.day ?? '').toLowerCase() === dayOfWeekFor(date))
+    .filter(s => s.classId === classId)
+    .filter(s => !effectiveStreamId || !s.streamId || s.streamId === effectiveStreamId)
+    .sort((a, b) => (a.startTime ?? '').localeCompare(b.startTime ?? ''));
 
   /* ── Merge: existing records + unrecorded students ─────────── */
   const recorded = new Set(rows.map(r => r.studentId));
@@ -127,7 +187,7 @@ export default function AttendancePage() {
         date,
         status: edits[r.studentId] ?? r.status ?? 'absent',
       }));
-      return attendanceApi.bulkMark({ classId, date, records });
+      return attendanceApi.bulkMark({ classId, ...(effectiveStreamId ? { streamId: effectiveStreamId } : {}), date, records });
     },
     onSuccess: () => {
       setEdits({});
@@ -138,11 +198,12 @@ export default function AttendancePage() {
   });
 
   const hasEdits   = Object.keys(edits).length > 0;
-  const selectedClass = classList.find(c => (c.id ?? c._id) === classId);
+  const selectedClass  = classList.find(c => (c.id ?? c._id) === classId);
+  const selectedStream = streamList.find(s => (s.id ?? s._id) === effectiveStreamId);
   const registerLoading = isLoading || studentsLoading;
 
   function exportRegisterCSV() {
-    const cls  = selectedClass?.name ?? 'Class';
+    const cls  = selectedClass?.name ? `${selectedClass.name}${selectedStream?.name ? ` ${selectedStream.name}` : ''}` : 'Class';
     const header = 'Student,Status';
     const lines  = merged.map(r => {
       const status = edits[r.studentId] ?? r.status ?? 'unmarked';
@@ -158,7 +219,7 @@ export default function AttendancePage() {
   }
 
   function printRegister() {
-    const cls  = selectedClass?.name ?? 'Class';
+    const cls  = selectedClass?.name ? `${selectedClass.name}${selectedStream?.name ? ` ${selectedStream.name}` : ''}` : 'Class';
     const rows$ = merged.map(r => {
       const status = edits[r.studentId] ?? r.status ?? '—';
       const cfg    = STATUS_MAP[status];
@@ -223,6 +284,20 @@ export default function AttendancePage() {
                 No classes are assigned to your account yet — ask your school admin to assign classes.
               </p>
             )}
+            {/* Timetable alignment — informational only, never gates saving.
+               Confirms this register matches what's actually on the
+               timetable for this class/stream on the selected date. */}
+            {classId && (!needsStreamSelection || streamId) && todaysSlots.length > 0 && (
+              <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+                <Clock size={12} className="text-indigo-400 shrink-0" />
+                {todaysSlots.map(s => (
+                  <span key={s.id ?? `${s.day}-${s.period}`} className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100">
+                    {s.subject ? `${s.subject} · ` : ''}Period {s.period}
+                    {s.startTime && s.endTime ? ` · ${s.startTime}–${s.endTime}` : ''}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Controls */}
@@ -251,7 +326,7 @@ export default function AttendancePage() {
             <div className="relative">
               <select
                 value={classId}
-                onChange={e => { setClassId(e.target.value); setEdits({}); }}
+                onChange={e => { setClassId(e.target.value); setStreamId(''); setEdits({}); }}
                 className="text-sm text-slate-700 font-medium bg-white border border-slate-200 rounded-lg pl-3 pr-8 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 appearance-none cursor-pointer"
               >
                 <option value="">Select class…</option>
@@ -261,6 +336,28 @@ export default function AttendancePage() {
               </select>
               <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             </div>
+
+            {/* Stream selector — only when this class actually has more than
+               one stream. Each stream runs its own timetable (different
+               time, sometimes a different room), so a class with multiple
+               streams needs a register PER STREAM, never one list merging
+               every stream a teacher can see. */}
+            {classId && needsStreamSelection && (
+              <div className="relative">
+                <select
+                  value={streamId}
+                  onChange={e => { setStreamId(e.target.value); setEdits({}); }}
+                  className="text-sm text-slate-700 font-medium bg-white border border-slate-200 rounded-lg pl-8 pr-8 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 appearance-none cursor-pointer"
+                >
+                  <option value="">Select stream…</option>
+                  {streamList.map(s => (
+                    <option key={s.id ?? s._id} value={s.id ?? s._id}>{s.name}</option>
+                  ))}
+                </select>
+                <Layers size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
+            )}
 
             {/* Export / Print register */}
             {classId && !registerLoading && merged.length > 0 && (
@@ -336,6 +433,14 @@ export default function AttendancePage() {
             <p className="text-sm font-medium text-slate-600">Select a class to view the register</p>
             <p className="text-xs mt-1">Choose a class from the dropdown above</p>
           </div>
+        ) : needsStreamSelection && !streamId ? (
+          <div className="flex flex-col items-center justify-center py-24 text-slate-400">
+            <Layers size={36} className="mb-3 opacity-40" />
+            <p className="text-sm font-medium text-slate-600">Select a stream to view the register</p>
+            <p className="text-xs mt-1">
+              {selectedClass?.name ?? 'This class'} has {streamList.length} streams — each runs its own timetable, so attendance is taken per stream
+            </p>
+          </div>
         ) : registerLoading ? (
           <div className="space-y-2">
             {[...Array(6)].map((_, i) => (
@@ -351,8 +456,10 @@ export default function AttendancePage() {
         ) : merged.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-slate-400">
             <Users size={36} className="mb-3 opacity-40" />
-            <p className="text-sm font-medium text-slate-600">No students in {selectedClass?.name ?? 'this class'}</p>
-            <p className="text-xs mt-1">Add students to this class first</p>
+            <p className="text-sm font-medium text-slate-600">
+              No students in {selectedClass?.name ?? 'this class'}{selectedStream?.name ? ` ${selectedStream.name}` : ''}
+            </p>
+            <p className="text-xs mt-1">Add students to this {selectedStream ? 'stream' : 'class'} first</p>
           </div>
         ) : (
           <>
@@ -455,7 +562,10 @@ export default function AttendancePage() {
 
               {/* Footer */}
               <div className="px-4 py-3 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-                <p className="text-xs text-slate-500">{total} student{total !== 1 ? 's' : ''} · {fmtDate(date)}</p>
+                <p className="text-xs text-slate-500">
+                  {total} student{total !== 1 ? 's' : ''}
+                  {selectedStream?.name ? ` · ${selectedClass?.name ?? ''} ${selectedStream.name}` : ''} · {fmtDate(date)}
+                </p>
                 {hasEdits ? (
                   <button
                     onClick={() => save()}

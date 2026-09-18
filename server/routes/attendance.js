@@ -44,6 +44,13 @@ const AttendanceRecordSchema = z.object({
 
 const BulkAttendanceSchema = z.object({
   classId:    z.string().min(1),
+  // Narrows this register to one specific stream within the class — a
+  // teacher teaching, say, both 3A and 3B has two separate lessons at two
+  // separate times and must mark two separate registers, not one merged
+  // list. Optional and fully backward-compatible: omitted (a class with no
+  // streams, or a caller who intentionally wants the whole merged class)
+  // behaves exactly as before this field existed.
+  streamId:   z.string().optional(),
   date:       z.string().min(1),
   period:     z.string().optional(),
   records:    z.array(z.object({
@@ -67,6 +74,14 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read'), scope
 
     const filter = { schoolId };
     if (req.query.classId)    filter.classId   = req.query.classId;
+    // A caller narrowing to one specific stream within a multi-stream class
+    // (AttendancePage.jsx's stream picker) — ScopeEngine.applyToFilter below
+    // already validates this against the caller's own scope.streamIds via
+    // its existing streamAware handling (attendance IS streamAware — each
+    // record carries its own streamId, stamped from the student at write
+    // time), the same mechanism that already narrows classId for a
+    // stream-scoped teacher even without this param.
+    if (req.query.streamId)   filter.streamId  = req.query.streamId;
     if (req.query.studentId)  filter.studentId = req.query.studentId;
     if (req.query.status)     filter.status    = req.query.status;
     if (req.query.period)     filter.period    = req.query.period;
@@ -229,9 +244,19 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create')
     const { data, error } = _validate(BulkAttendanceSchema, req.body);
     if (error) return E.validation(res, error);
 
-    const { classId, date, period, records } = data;
+    const { classId, streamId, date, period, records } = data;
 
     const wholeClassGrant = ScopeEngine.isClassInScope(req, 'attendance', classId);
+
+    // The request targets one specific stream — validate the caller may
+    // act on it at all (either via the whole-class grant above, or their
+    // own scope.streamIds) before even looking at the submitted records.
+    if (streamId && !wholeClassGrant) {
+      const myStreamIds = req.scope?.streamIds ?? [];
+      if (!myStreamIds.includes(streamId)) {
+        return E.forbidden(res, 'This stream is not in your assigned scope.');
+      }
+    }
 
     // Resolve each submitted student's stream — needed to denormalize
     // streamId onto every record (same as classId already is) and, for a
@@ -248,7 +273,18 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create')
     const streamByStudent = Object.fromEntries(studentDocs.map(s => [s.id, s.streamId ?? null]));
 
     let allowedRecords = records;
-    if (!wholeClassGrant) {
+    if (streamId) {
+      // A stream-targeted register: every submitted student must actually
+      // belong to it — the roster this form is built from (streams.js's
+      // GET /:id/students) is already scoped to exactly this stream, so a
+      // mismatch here means the client and reality have diverged. Fail
+      // loudly (400) rather than silently dropping the offending student,
+      // since that would save an incomplete register without saying so.
+      const mismatched = records.filter(r => streamByStudent[r.studentId] !== streamId);
+      if (mismatched.length) {
+        return E.badRequest(res, `${mismatched.length} student(s) in this submission do not belong to the requested stream.`);
+      }
+    } else if (!wholeClassGrant) {
       const myStreamIds = req.scope?.streamIds ?? [];
       allowedRecords = records.filter(r => myStreamIds.includes(streamByStudent[r.studentId]));
       if (allowedRecords.length === 0) {

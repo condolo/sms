@@ -37,6 +37,7 @@ function mockMakeFakeCollection(seed = []) {
   return {
     find:             jest.fn((filter) => mockChainArr(docs.filter(d => mockMatchesFilter(d, filter)))),
     findOne:          jest.fn((filter) => mockChainObj(docs.find(d => mockMatchesFilter(d, filter)) || null)),
+    countDocuments:   jest.fn((filter) => Promise.resolve(docs.filter(d => mockMatchesFilter(d, filter)).length)),
     findOneAndUpdate: jest.fn((filter, update) => {
       const existing = docs.find(d => mockMatchesFilter(d, filter));
       const flat = update.$set ? { ...update.$set, ...(update.$setOnInsert ?? {}) } : update;
@@ -175,6 +176,80 @@ describe('POST /api/attendance/bulk — stream-only teacher', () => {
       records: [{ studentId: STUDENT_BLUE.id, status: 'present' }],
     });
     expect(res.status).toBe(403);
+  });
+});
+
+describe('POST /api/attendance/bulk — explicit streamId (2026-09, per-stream registers)', () => {
+  // A teacher teaching two streams of the same class (e.g. 3A and 3B) has
+  // two separate lessons at two separate times and must mark two separate
+  // registers — AttendancePage.jsx's stream picker now sends an explicit
+  // streamId per submission instead of relying on the old "submit whatever
+  // the roster shows, server silently drops the rest" behavior above.
+  test('a stream-only teacher can submit an explicit streamId for their own stream — no silent skipping', async () => {
+    asStreamTeacherOf('cls_yr7', 'strm_7i');
+    const res = await supertest(buildApp()).post('/api/attendance/bulk').send({
+      classId: 'cls_yr7', streamId: 'strm_7i', date: '2026-05-02',
+      records: [{ studentId: STUDENT_RED.id, status: 'present' }],
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.data.total).toBe(1);
+    expect(res.body.data.skipped).toBe(0);
+  });
+
+  test('a stream-only teacher submitting an explicit streamId for the SIBLING stream is forbidden outright (403), before even looking at records', async () => {
+    asStreamTeacherOf('cls_yr7', 'strm_7i');
+    const res = await supertest(buildApp()).post('/api/attendance/bulk').send({
+      classId: 'cls_yr7', streamId: 'strm_7ii', date: '2026-05-02',
+      records: [{ studentId: STUDENT_BLUE.id, status: 'present' }],
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test('a mismatched student in a streamId-targeted submission fails loudly (400), not a silent drop', async () => {
+    asStreamTeacherOf('cls_yr7', 'strm_7i');
+    // Client/reality diverged: streamId says 7i, but one submitted student is actually in 7ii.
+    const res = await supertest(buildApp()).post('/api/attendance/bulk').send({
+      classId: 'cls_yr7', streamId: 'strm_7i', date: '2026-05-02',
+      records: [
+        { studentId: STUDENT_RED.id,  status: 'present' },
+        { studentId: STUDENT_BLUE.id, status: 'present' },
+      ],
+    });
+    expect(res.status).toBe(400);
+    // Nothing should have been written — a partial, silently-incomplete register is worse than an outright error.
+    expect(mockAttendance._docs().length).toBe(0);
+  });
+
+  test('a whole-class admin submitting an explicit streamId still only writes that stream\'s students', async () => {
+    const res = await supertest(buildApp()).post('/api/attendance/bulk').send({
+      classId: 'cls_yr7', streamId: 'strm_7i', date: '2026-05-02',
+      records: [{ studentId: STUDENT_RED.id, status: 'present' }],
+    });
+    expect(res.status).toBe(201);
+    expect(mockAttendance._docs()[0].streamId).toBe('strm_7i');
+  });
+});
+
+describe('GET /api/attendance — explicit streamId filter (2026-09)', () => {
+  test('a stream-only teacher requesting their own streamId sees only that stream\'s records', async () => {
+    mockAttendance = mockMakeFakeCollection([
+      { id: 'att_red',  schoolId: SCHOOL_A, studentId: STUDENT_RED.id,  classId: 'cls_yr7', streamId: 'strm_7i',  date: '2026-05-01', status: 'present' },
+      { id: 'att_blue', schoolId: SCHOOL_A, studentId: STUDENT_BLUE.id, classId: 'cls_yr7', streamId: 'strm_7ii', date: '2026-05-01', status: 'present' },
+    ]);
+    asStreamTeacherOf('cls_yr7', 'strm_7i');
+    const res = await supertest(buildApp()).get('/api/attendance').query({ classId: 'cls_yr7', streamId: 'strm_7i', date: '2026-05-01' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.map(d => d.id)).toEqual(['att_red']);
+  });
+
+  test('a stream-only teacher requesting the SIBLING streamId gets nothing back, not an error and not that stream\'s data', async () => {
+    mockAttendance = mockMakeFakeCollection([
+      { id: 'att_blue', schoolId: SCHOOL_A, studentId: STUDENT_BLUE.id, classId: 'cls_yr7', streamId: 'strm_7ii', date: '2026-05-01', status: 'present' },
+    ]);
+    asStreamTeacherOf('cls_yr7', 'strm_7i');
+    const res = await supertest(buildApp()).get('/api/attendance').query({ classId: 'cls_yr7', streamId: 'strm_7ii', date: '2026-05-01' });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
   });
 });
 

@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.101.0] — 2026-09-18 — feat(attendance): per-stream registers, aligned with the timetable
+
+Reported directly, with a concrete example: "if a teacher is teaching Year 3A, 3B... when taking attendance the list of students should not all appear since these students take classes at different times, the timetable will be different for each, so the teacher cannot take attendance for all, but per stream." Confirmed the underlying scoping was already correct (a stream-scoped teacher already only saw their own streams' students, verified live in v5.99.0/v5.100.0's investigation) — the actual gap was that Attendance had no concept of a stream at all: selecting a class always produced ONE merged register spanning every stream the caller could see, with no way to work one stream (one real lesson, one real time) at a time.
+
+### Added
+- **Stream picker.** `AttendancePage.jsx` now shows a stream dropdown whenever the selected class genuinely has more than one active stream — sourced from `GET /api/streams?classId=X&assignedOnly=true` (new, mirrors `classes.js`'s existing `assignedOnly` convention: unscoped by default for the 20+ other callers of the plain list, opt-in narrowed for this one caller). A class with 0 or 1 stream behaves exactly as before — no picker, no behavior change.
+- **Per-stream roster and register.** Once a stream is chosen, the roster comes from the already-correctly-scoped `GET /api/streams/:id/students` (existed since the original stream-scoping work; classes.js's `GET /:id/students` route is no longer used for a multi-stream class's register) and the attendance list/save calls now carry an explicit `streamId` — `GET /api/attendance?...&streamId=X` and `POST /attendance/bulk {..., streamId}`.
+- **Timetable alignment.** Purely informational: for a `teacher`-role caller, the header now shows a chip for each of today's timetable slots matching the selected class/stream (subject, period, time) — reusing the existing `GET /api/timetable/my` (the same data `TimetablePortal.jsx`'s "My Timetable" view already fetches). It never gates or changes what can be saved — a register can still be taken outside its scheduled period (e.g. marking a late-morning register after the fact).
+
+### Server changes
+- `server/routes/streams.js` — `GET /` gains the `?assignedOnly=true` (+`classId`) opt-in, identical convention to `classes.js`'s own.
+- `server/routes/attendance.js` — `GET /` accepts `?streamId=`, narrowed by the module's existing (unchanged) `streamAware` handling in `ScopeEngine.applyToFilter`. `POST /bulk`'s `BulkAttendanceSchema` gains an optional `streamId`; when present, every submitted student must actually belong to it (400 outright on any mismatch — a stream-targeted register failing loudly beats silently saving an incomplete one) and the caller's access to that specific stream is validated before even inspecting the records. Both fields are fully optional and backward-compatible — omitted, every route behaves exactly as it did before this change.
+
+### Verified
+- Live, end-to-end, against the real demo school: a class with two real streams (Standard 4A → "4A"/"4B") correctly shows the picker; selecting each stream returns a genuinely different, correctly-scoped roster (3 students vs. 1); saving a register for one stream succeeds and is independently retrievable; a single/no-stream class (Form 1A) shows no picker and behaves identically to before.
+- Caught and fixed one issue during this same verification pass: the new timetable-alignment fetch 403'd for a non-teacher role (the demo Administrator has no Timetable RBAC grant) — gated the fetch to `role === 'teacher'` before shipping, since it's only ever meaningful for the person actually marking their own register.
+- New/extended tests: `server/__tests__/routes/streams-assigned-only.test.js` (8 tests, new file) and `server/__tests__/routes/attendance-stream-scope.test.js` (6 new tests: explicit-streamId submit, cross-stream rejection, mismatched-student 400, admin submitting a specific stream, and the `GET /` streamId filter both ways). Full Jest suite 2073/2073 passing. `verify-rbac-coverage.js` 100% (487/487, no regression). `security-scan.js` clean. Production client build passes.
+
+---
+
 ## [v5.100.0] — 2026-09-18 — docs: Help Centre and School Admin Guide still described the pre-rename Staff Responsibilities defaults
 
 Follow-up to v5.97.0's staff-responsibility rename (`deputy`→`acting_deputy`, `principal`→`head_of_school`) and its new collision guard — the code shipped correctly at the time, but two user-facing docs were never updated to match, per this session's own check-docs discipline.

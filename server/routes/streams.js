@@ -38,7 +38,21 @@ function _validate(schema, data) {
 }
 
 /* ── GET /api/streams ─ List (filter by classId / status) ────── */
-router.get('/', authMiddleware, PLAN, rbac('classes', 'read'), async (req, res) => {
+// Deliberately UNSCOPED by default, same reasoning as classes.js's GET / —
+// most callers (Curriculum, Timetable builder, Classes admin) need every
+// stream in a class regardless of the caller's own teaching scope.
+//
+// `?assignedOnly=true` (requires `classId`) is the narrow, opt-in exception
+// — AttendancePage.jsx's stream picker uses it so a scoped teacher isn't
+// shown a stream they'd be 403'd for picking (see GET /:id/students below,
+// which already enforces this authoritatively). A caller with whole-class
+// access to this classId sees every stream, same as the default; a
+// stream-scoped teacher (teaching-assignments.js's per-stream grant) sees
+// only the streams they're actually assigned to within this one class.
+router.get(
+  '/', authMiddleware, PLAN, rbac('classes', 'read'),
+  (req, res, next) => (req.query.assignedOnly === 'true' ? scopeMiddleware(req, res, next) : next()),
+  async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -46,6 +60,14 @@ router.get('/', authMiddleware, PLAN, rbac('classes', 'read'), async (req, res) 
     const filter = { schoolId };
     if (req.query.classId) filter.classId = req.query.classId;
     if (req.query.status)  filter.status  = req.query.status;
+
+    if (req.query.assignedOnly === 'true' && req.query.classId) {
+      const inWholeClassScope = ScopeEngine.isClassInScope(req, 'students', req.query.classId);
+      if (!inWholeClassScope) {
+        const myStreamIds = req.scope?.streamIds ?? [];
+        filter.id = { $in: myStreamIds };
+      }
+    }
 
     const Streams = tenantModel('streams', tenantContext(req));
     const [docs, total] = await Promise.all([

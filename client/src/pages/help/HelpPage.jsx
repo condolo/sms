@@ -255,7 +255,11 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I mark attendance for my class?',
-        a: 'Go to Attendance → select the date and class → mark each student as Present, Absent, Late, or Excused → click Save. You can only save attendance once per class per day.',
+        a: 'Go to Attendance → select the date and class (and stream, if the class has more than one — see below) → mark each student as Present, Absent, Late, or Excused → click Save. You can only save attendance once per class/stream per day.',
+      },
+      {
+        q: 'My class has multiple streams (e.g. Year 3A and 3B) — why do I have to pick one before I can mark attendance?',
+        a: 'Each stream runs its own timetable — often a different time and sometimes a different room — so it needs its own register, not one list merging every stream together. The stream picker only appears when a class genuinely has more than one stream; a class with just one (or none) works exactly as before, no extra step. If you teach today\'s scheduled period for that class/stream, a small chip near the top of the page shows the matching subject, period, and time from your timetable — purely a confirmation that you\'re marking the right register, it never blocks you from taking attendance outside that exact period.',
       },
       {
         q: 'Can I mark the whole class present at once?',
