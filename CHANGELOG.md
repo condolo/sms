@@ -6,6 +6,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.100.0] — 2026-09-18 — docs: Help Centre and School Admin Guide still described the pre-rename Staff Responsibilities defaults
+
+Follow-up to v5.97.0's staff-responsibility rename (`deputy`→`acting_deputy`, `principal`→`head_of_school`) and its new collision guard — the code shipped correctly at the time, but two user-facing docs were never updated to match, per this session's own check-docs discipline.
+
+### Fixed
+- `docs/SCHOOL_ADMIN_GUIDE.md` §6 — the "Configuring Staff Roles & Responsibilities" section still listed the old default labels ("Deputy Principal, and Principal" — renamed to "Deputy Head, and Head of School"), and its own worked example told an admin to add *Section Head* as a custom responsibility — a real `SYSTEM_ROLES` value, which the v5.97.0 collision guard now rejects outright. Following that exact example would fail. Corrected the defaults, replaced the bad example, and added a note explaining the collision guard and why it exists.
+- `client/src/pages/help/HelpPage.jsx` (in-app Help Centre, HR & Staff section) — updated the "How do I configure staff roles and responsibilities?" answer to mention the collision restriction, and added a new FAQ, "Why was my custom responsibility name rejected?", explaining the guard in plain language with a corrected example.
+
+### Verified
+- Confirmed the corrected default labels ("Deputy Head", "Head of School") against `client/src/config/staffResponsibilities.js` / `server/config/staffResponsibilities.js`, the actual source of truth, rather than assuming from memory.
+- Production client build passes; loaded the Help Centre live (demo school, Administrator login) and confirmed both HR & Staff FAQ entries render with the correct expanded text.
+
+---
+
 ## [v5.99.0] — 2026-09-18 — fix(attendance): a stream-only-scoped teacher saw zero classes in the Attendance picker despite real, valid assignments
 
 Reported directly with a screenshot: a teacher (Mr Joram Ngure, Trinitas International School) with 4 confirmed teaching assignments (English in Year 2 Diamond & Sapphire, Mathematics in Year 3 Gold & Sapphire — all visible and correct in his own Staff profile) opened Attendance and got an empty "Select class..." dropdown, with no "no assignments" message either.

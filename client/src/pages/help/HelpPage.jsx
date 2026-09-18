@@ -627,7 +627,11 @@ const SECTIONS = [
       },
       {
         q: 'How do I configure staff roles and responsibilities?',
-        a: "Go to Settings → School → Staff Responsibilities. Add custom responsibility labels (e.g. HOD, KS Coordinator, Pastoral Lead). These appear as checkboxes in staff profiles and HR forms.",
+        a: "Go to Settings → School → Staff Responsibilities. Add custom responsibility labels (e.g. KS Coordinator, Pastoral Lead, Boarding Supervisor). These appear as checkboxes in staff profiles and HR forms. A name that exactly matches a real account role (e.g. \"Principal\", \"Section Head\") is rejected — see below.",
+      },
+      {
+        q: 'Why was my custom responsibility name rejected?',
+        a: "Its name matched a real account role — one of the roles actually granted in Settings → Roles & Permissions — exactly. This is blocked on purpose: a Roles & Responsibilities tag is only an organisational label with no access of its own, so it can never be allowed to share a name with, and be mistaken for, an actual system role. Pick a more specific name instead, e.g. \"Deputy Head Primary\" rather than \"Deputy Principal\".",
       },
       {
         q: 'How do I reset a staff password?',

@@ -161,14 +161,16 @@ Subjects are then linked to classes via the **Timetable** module.
 
 ### Configuring Staff Roles & Responsibilities
 
-The **Roles & Responsibilities** section in the Add/Edit Staff form is fully customisable per school. By default it includes: Head of Department, Class Teacher / Form Tutor, Timetabler, Exam Officer, Deputy Principal, and Principal.
+The **Roles & Responsibilities** section in the Add/Edit Staff form is fully customisable per school. By default it includes: Head of Department, Class Teacher / Form Tutor, Timetabler, Exam Officer, Deputy Head, and Head of School.
 
 To customise for your school's structure:
 
 1. Go to **Settings → School** and scroll to **Staff Roles & Responsibilities**
-2. Click **Add Role** to enter a new responsibility (e.g. *KS3 Academic Coordinator*, *Deputy Head Primary*, *Section Head*, *Pastoral Lead*)
+2. Click **Add Role** to enter a new responsibility (e.g. *KS3 Academic Coordinator*, *Pastoral Lead*, *Boarding Supervisor*)
 3. Click the **×** next to any role to remove it
 4. Changes take effect immediately in the Add/Edit Staff form — no page refresh needed
+
+> **A responsibility name can't duplicate a real account role.** Names like "Principal" or "Section Head" are rejected outright (400, with an explanation) if entered here — those are real roles granted through **Settings → Roles & Permissions**, and a Roles & Responsibilities tag must never be able to be mistaken for one, since it carries no access of its own. Pick a more specific variant instead — e.g. *Deputy Head Primary* rather than *Deputy Principal*, or *Acting Section Head* rather than *Section Head*.
 
 > **Existing assignments are preserved.** If a staff member already has a role assigned (e.g. `hod`) and you remove it from the list, the value remains on their record — it just no longer appears as a selectable option.
 
