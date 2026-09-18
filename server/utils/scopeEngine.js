@@ -11,6 +11,8 @@
  */
 'use strict';
 
+const { tenantModel, tenantContext } = require('./tenant-model');
+
 /* ── Module → MongoDB field mapping ────────────────────────── */
 // Maps each module to the field used to restrict records and which scope
 // array to source the allowed IDs from.
@@ -280,4 +282,37 @@ function isClassInScope(req, module, classId, streamId) {
   return false;
 }
 
-module.exports = { applyToFilter, hasNoAssignments, isUnrestricted, isClassInScope };
+/**
+ * Resolve a stream-only-scoped caller's `scope.streamIds` to their PARENT
+ * classes' ids — the one thing a `classes` document can actually be matched
+ * on, since (see MODULE_SCOPE's own comment on `classes` above) it carries
+ * no streamId field of its own. Any route that needs "which classes can
+ * this teacher act on" for a picker/dropdown over the `classes` module
+ * itself — not a record-level module like `attendance`/`grades`, which stay
+ * correctly narrowed by their own streamAware handling — should call this
+ * ONCE, use the RETURNED scope for its own applyToFilter/hasNoAssignments
+ * calls, and never write the result back onto `req.scope`: scopeMiddleware
+ * caches that object per `userId::schoolId` for 5 minutes, and every other
+ * module's route reads the SAME cached object on its own next call — this
+ * function never mutates it, always returning a new object (or the original
+ * unchanged when there's nothing to resolve).
+ *
+ * @param {import('express').Request} req
+ * @returns {object|null} a new scope object (or the original, if no
+ *   stream-only assignments exist to resolve) — never `req.scope` mutated
+ *   in place
+ */
+async function resolveClassPickerScope(req) {
+  const scope = req.scope;
+  if (!scope?.streamIds?.length) return scope;
+
+  const parents = await tenantModel('streams', tenantContext(req))
+    .find({ schoolId: req.jwtUser.schoolId, id: { $in: scope.streamIds } })
+    .select('classId').lean();
+  const resolvedClassIds = [...new Set(parents.map(s => s.classId).filter(Boolean))];
+  if (!resolvedClassIds.length) return scope;
+
+  return { ...scope, classIds: [...new Set([...(scope.classIds ?? []), ...resolvedClassIds])] };
+}
+
+module.exports = { applyToFilter, hasNoAssignments, isUnrestricted, isClassInScope, resolveClassPickerScope };

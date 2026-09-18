@@ -51,6 +51,7 @@ let mockAcademicConfigDoc;
 let mockMarkDocs;
 let mockSubjectDocs;
 let mockClassDocs;
+let mockStreamDocs;
 
 function mockChainArr(arr) { return { sort: () => mockChainArr(arr), select: () => mockChainArr(arr), lean: () => Promise.resolve(arr) }; }
 function mockChainObj(obj) { return { select: () => mockChainObj(obj), lean: () => Promise.resolve(obj) }; }
@@ -95,6 +96,7 @@ jest.mock('../../utils/tenant-model', () => ({
     if (collection === 'assessment_marks') return { aggregate: (pipeline) => mockFakeMarksAggregate(pipeline) };
     if (collection === 'subjects')         return { find: (filter) => mockChainArr(mockSubjectDocs.filter(d => mockMatchesFilter(d, filter))) };
     if (collection === 'classes')          return { find: (filter) => mockChainArr(mockClassDocs.filter(d => mockMatchesFilter(d, filter))) };
+    if (collection === 'streams')          return { find: (filter) => mockChainArr(mockStreamDocs.filter(d => mockMatchesFilter(d, filter))) };
     return { find: () => mockChainArr([]), findOne: () => mockChainObj(null) };
   }),
   tenantContext: jest.fn((req) => ({ schoolId: req.jwtUser.schoolId })),
@@ -131,6 +133,7 @@ beforeEach(() => {
   mockAcademicConfigDoc = { passMark: 40 };
   mockClassDocs = CLASSES;
   mockSubjectDocs = SUBJECTS;
+  mockStreamDocs = [];
   mockMarkDocs = [
     mark({ subjectId: 'sub_math', classId: 'cls_a', rawScore: 80 }),
     mark({ subjectId: 'sub_math', classId: 'cls_a', rawScore: 60 }),
@@ -171,6 +174,28 @@ describe('GET /api/assessment/analytics — scoped teacher view', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.subjects).toEqual([]);
     expect(res.body.data.overall).toBeNull();
+  });
+});
+
+describe('GET /api/assessment/analytics — stream-only-scoped teacher', () => {
+  // Regression (2026-09) — a compulsory-subject-per-stream teaching
+  // assignment (teaching-assignments.js) contributes only to
+  // scope.streamIds, never scope.classIds. `classes` documents have no
+  // streamId field of their own to match a stream-scoped grant against
+  // (see scopeEngine.js's MODULE_SCOPE comment on `classes`), so this used
+  // to resolve to an empty availableClasses list here — the same bug found
+  // live in AttendancePage.jsx's class picker (classes.js's GET /), fixed
+  // in the same change via the shared ScopeEngine.resolveClassPickerScope().
+  beforeEach(() => {
+    mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL, role: 'teacher', roles: ['teacher'] };
+    mockScope = { level: 'assigned', classIds: [], streamIds: ['str_a'] }; // no whole-class grant anywhere
+    mockStreamDocs = [{ id: 'str_a', schoolId: SCHOOL, classId: 'cls_a' }];
+  });
+
+  test('availableClasses still lists the stream\'s parent class, not an empty list', async () => {
+    const res = await supertest(buildApp()).get('/api/assessment/analytics').query({ academicYearId: 'ay_2026', termNumber: 2, compareTo: 'none' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.availableClasses).toEqual([{ id: 'cls_a', name: 'Form 1A' }]);
   });
 });
 

@@ -82,29 +82,18 @@ router.get(
       // whose ONLY assignments are stream-scoped (the common case whenever
       // a compulsory subject has a separate teacher per stream) had zero
       // classIds to match and saw an empty "Select class..." picker on
-      // Attendance despite having real, valid assignments. Resolve their
-      // assigned streams' PARENT classes here and fold those ids into a
-      // request-local copy of scope.classIds before scoping — the picker
-      // only needs to know WHICH classes this teacher can act in; the
-      // write routes it feeds (POST /attendance, /attendance/bulk) and the
-      // record-level list queries already narrow to the correct stream on
-      // their own and are untouched by this.
+      // Attendance despite having real, valid assignments.
+      // resolveClassPickerScope() resolves those streams to their PARENT
+      // classes and returns a NEW scope object — never mutates req.scope
+      // itself, since scopeMiddleware caches it per userId::schoolId and
+      // other modules' routes (e.g. assessment.js's own /analytics
+      // availableClasses, the only other `classes`-module scope consumer)
+      // read that same cached object on their own next call.
       const originalScope = req.scope;
-      if (originalScope?.streamIds?.length) {
-        const parentStreams = await tenantModel('streams', tenantContext(req))
-          .find({ schoolId, id: { $in: originalScope.streamIds } })
-          .select('classId').lean();
-        const resolvedClassIds = [...new Set(parentStreams.map(s => s.classId).filter(Boolean))];
-        if (resolvedClassIds.length) {
-          req.scope = {
-            ...originalScope,
-            classIds: [...new Set([...(originalScope.classIds ?? []), ...resolvedClassIds])],
-          };
-        }
-      }
+      req.scope = await ScopeEngine.resolveClassPickerScope(req);
       ScopeEngine.applyToFilter(req, 'classes', filter);
       const noAssignments = ScopeEngine.hasNoAssignments(req, 'classes');
-      req.scope = originalScope; // restore — the merged copy is only for this list's own scoping
+      req.scope = originalScope; // restore — the resolved copy is only for this list's own scoping
       if (noAssignments) {
         return ok(res, [], { ...paginate(page, limit, 0), noAssignments: true });
       }

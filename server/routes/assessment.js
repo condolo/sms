@@ -1544,7 +1544,20 @@ router.get('/analytics', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
     // unrestricted (leadership) caller, or only the caller's assigned
     // classes otherwise. Names resolved so the client never needs a
     // second "my classes" call just to populate this dropdown.
+    // resolveClassPickerScope() folds any stream-only assignment (a
+    // compulsory subject taught per-stream — see teaching-assignments.js)
+    // into its parent class before scoping `classes` itself, which — unlike
+    // `assessment` above — has no streamId field of its own to match a
+    // stream-scoped grant against (see scopeEngine.js's MODULE_SCOPE
+    // comment on `classes`); without this, a teacher whose only assignments
+    // were stream-scoped got an empty availableClasses list here despite
+    // real, valid assignments — the same bug classes.js's own GET / had.
+    // Uses a request-local scope, restored right after, since scopeMiddleware
+    // caches req.scope per userId::schoolId for other routes to read as-is.
+    const originalScope = req.scope;
+    req.scope = await ScopeEngine.resolveClassPickerScope(req);
     const classesFilter = ScopeEngine.applyToFilter(req, 'classes', { schoolId });
+    req.scope = originalScope;
     const classDocs = await tenantModel('classes', ctx).find(classesFilter).select('id name').lean();
 
     return _ok(res, {
