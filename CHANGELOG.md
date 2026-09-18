@@ -6,6 +6,31 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.102.0] — 2026-09-18 — feat(lessons): curriculum coverage is stream-aware; fixed a "Curriculum Coverage" widget that has always shown 0%
+
+Direct follow-up to a codebase-wide audit for "where else does the stream-merging class of bug from Attendance apply?" (see v5.101.0). Lessons/Curriculum Coverage was the one confirmed real gap, and investigating it surfaced two adjacent bugs — all three fixed together on request ("fix and update all bugs, be aware of dependencies, no assumptions").
+
+### The gap — worse than "shared coverage between streams"
+`lessons` was never marked `streamAware` in the scope engine at all. This meant a stream-only-scoped teacher (a subject taught separately per stream — e.g. English taught to 2A and 2B by the same or different teachers) didn't just share one merged coverage record between streams — they got an outright **403 opening their own class's coverage view** (`isClassInScope` denied unconditionally, regardless of how many real stream assignments they held). Confirmed live: a real teacher with 4 valid stream-scoped assignments was locked out of every one of them. "My Classes" also showed duplicate, indistinguishable cards for two different streams of the same class-subject — no stream name, identical percentages, both reading/writing the same shared coverage record.
+
+### Two adjacent bugs found while tracing the fix, fixed in the same pass
+1. **The "Curriculum Coverage" widget on Student, Parent, and Teacher dashboards has shown 0% for every subject since it shipped.** `student-portal.js`, `parent-portal.js`, and `teacher-portal.js` all counted coverage with a `{covered: true}` filter — but a `lesson_coverage` document's mere *existence* means covered; it never carries a `covered` boolean field (see lessons.js's `POST /coverage`). That filter never matched a single real document. Removed in all three, and made stream-aware in the same edit (a student only sees their own stream's progress, unioned with any legacy whole-class record).
+2. **`POST /api/lessons/coverage` had no class-ownership check at all.** Any authenticated teacher could previously mark coverage for a class or subject they don't teach — only *deleting* a record was ever restricted to your own. Added the same `isClassInScope` check every other write route in this codebase already has; admins keep their existing "submit on behalf of another teacher" ability.
+
+### Fixed
+- `server/utils/scopeEngine.js` — `lessons` is now `streamAware: true` (Milestone 3), same mechanism as attendance/grades/assessment/report_cards/growth_profile/growth_records — but resolved from the submitting teacher's own teaching-assignment, not a student record (lessons has none).
+- `server/routes/lessons.js` — `CoverageSchema` gains an optional `streamId`; `GET /coverage` and `POST /coverage` both validate it against the caller's scope; the coverage upsert's identity (already keyed by class-subject-topic-subtopic) now also includes streamId, so a stream-scoped assignment's coverage never merges with a sibling stream's or the whole class's — while an assignment with no streamId (a genuine whole-class subject) behaves exactly as before. `GET /my-classes`, `GET /summary` (admin/HOD overview), and `GET /pending-teachers` all now compute coverage per assignment's own streamId instead of merging every stream into one class-subject total, and return `streamId`/`streamName` for display.
+- `server/routes/student-portal.js`, `server/routes/parent-portal.js`, `server/routes/teacher-portal.js` — removed the phantom `covered: true` filter; added the student's/child's own `streamId` (or, for the teacher dashboard, each assignment's own `streamId`) to the coverage query.
+- `client/src/pages/lessons/LessonsPage.jsx` — "My Classes" cards and the admin Overview table now show the stream name (e.g. "Standard 4A · 4A") and are keyed/scored independently per stream; the topic drill-down and mark/unmark actions thread `streamId` through to the server. A class-subject with no stream split is completely unaffected — no visual or behavioral change.
+
+### Verified
+- Live, end-to-end, against real production data (Trinitas International School): the same reporting teacher who was 403'd on Attendance was also completely locked out of Lessons for the identical reason — now correctly allowed for each of their own streams and still denied for streams they don't teach.
+- Live, end-to-end, in the browser (demo school, temporary seeded assignments, cleaned up after): a class with two real streams shows two distinct "My Classes" cards; marking a topic covered in one stream leaves the sibling stream's card and drill-down at 0%, both viewing the exact same shared topic.
+- New test file `server/__tests__/routes/lessons-stream-scope.test.js` (12 tests: GET/POST scope checks, the new POST ownership check, streamId identity isolation, distinct "My Classes" cards). New test files for all three portal dashboards' coverage fix (`student-portal-lessons-coverage.test.js`, `parent-portal-lessons-coverage.test.js`, `teacher-portal-lessons-coverage.test.js`, 3 tests each). Updated `scope-engine.test.js`/`scope-engine-streams.test.js`, which had explicitly asserted the old (now-fixed) non-streamAware behavior for `lessons`.
+- Full Jest suite: 213 suites, 2095/2095 passing (2074 + 21 new). `verify-rbac-coverage.js` 100% (487/487, no regression). `security-scan.js` clean. Production client build passes.
+
+---
+
 ## [v5.101.0] — 2026-09-18 — feat(attendance): per-stream registers, aligned with the timetable
 
 Reported directly, with a concrete example: "if a teacher is teaching Year 3A, 3B... when taking attendance the list of students should not all appear since these students take classes at different times, the timetable will be different for each, so the teacher cannot take attendance for all, but per stream." Confirmed the underlying scoping was already correct (a stream-scoped teacher already only saw their own streams' students, verified live in v5.99.0/v5.100.0's investigation) — the actual gap was that Attendance had no concept of a stream at all: selecting a class always produced ONE merged register spanning every stream the caller could see, with no way to work one stream (one real lesson, one real time) at a time.

@@ -63,7 +63,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
 
     // ── Student record ───────────────────────────────────────
     const student = await Students.findOne({ id: studentId, schoolId })
-      .select('firstName lastName admissionNumber classId className photo status dateOfBirth gender')
+      .select('firstName lastName admissionNumber classId className streamId photo status dateOfBirth gender')
       .lean();
     if (!student) return E.notFound(res, 'Student record not found.');
 
@@ -97,15 +97,30 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       : 100;
 
     // ── Lessons / curriculum coverage ────────────────────────
+    // A coverage record's mere EXISTENCE means "covered" — lesson_coverage
+    // documents never carry a `covered` boolean field (see lessons.js's
+    // POST /coverage). The `covered: true` condition previously here never
+    // matched anything, so this widget showed 0% for every subject
+    // regardless of real progress — found and fixed alongside the
+    // streamId work below, since it made that work impossible to verify
+    // on this dashboard otherwise.
+    // streamOr: this student's OWN stream's coverage (if their class-
+    // subject is taught separately per stream) UNION any legacy/whole-
+    // class record (no streamId at all) — so a student in one stream
+    // never sees a sibling stream's progress credited to them, while a
+    // non-subdivided subject still counts normally.
     let lessonsCoverage = [];
     if (student.classId) {
-      const subjectIds = await Coverage.distinct('subjectId', { schoolId, classId: student.classId, academicYear });
+      const streamOr = student.streamId
+        ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
+        : [{ streamId: { $exists: false } }];
+      const subjectIds = await Coverage.distinct('subjectId', { schoolId, classId: student.classId, academicYear, $or: streamOr });
       const subjectDocs = await Subjects.find({ id: { $in: subjectIds }, schoolId }).select('id name code').lean();
       const subjectMap  = Object.fromEntries(subjectDocs.map(s => [s.id, s]));
 
       for (const subjectId of subjectIds) {
         const totalTopics   = await Topics.countDocuments({ schoolId, subjectId, academicYear });
-        const coveredTopics = await Coverage.countDocuments({ schoolId, classId: student.classId, subjectId, academicYear, covered: true });
+        const coveredTopics = await Coverage.countDocuments({ schoolId, classId: student.classId, subjectId, academicYear, $or: streamOr });
         if (totalTopics === 0) continue;
         lessonsCoverage.push({
           subjectId,

@@ -57,9 +57,9 @@ function ProgressRing({ pct, size = 64, stroke = 5, className = '' }) {
   );
 }
 
-/* ── Class-Subject card ──────────────────────────────────────── */
+/* ── Class-Subject[-Stream] card ──────────────────────────────── */
 function ClassCard({ item, onClick }) {
-  const { pct, className, subjectName, coveredItems, totalItems } = item;
+  const { pct, className, streamName, subjectName, coveredItems, totalItems } = item;
   const color = pct >= 80 ? 'text-emerald-600' : pct >= 50 ? 'text-amber-600' : 'text-indigo-600';
   return (
     <button
@@ -68,7 +68,9 @@ function ClassCard({ item, onClick }) {
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wide truncate">{className}</p>
+          <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wide truncate">
+            {className}{streamName ? ` · ${streamName}` : ''}
+          </p>
           <h3 className="text-sm font-semibold text-slate-800 mt-0.5 truncate">{subjectName}</h3>
           <p className="text-xs text-slate-400 mt-1">{coveredItems} of {totalItems} items covered</p>
         </div>
@@ -196,7 +198,7 @@ function TopicSlideOver({ subjectId, subjectName, academicYear, existing, onClos
 }
 
 /* ── Topic row ───────────────────────────────────────────────── */
-function TopicRow({ topic, classId, subjectId, academicYear, canManage, onEdit, onDelete }) {
+function TopicRow({ topic, classId, streamId, subjectId, academicYear, canManage, onEdit, onDelete }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
 
@@ -206,17 +208,17 @@ function TopicRow({ topic, classId, subjectId, academicYear, canManage, onEdit, 
 
   const markMutation = useMutation({
     mutationFn: ({ topicId, subtopicId }) => lessonsApi.coverage.mark({
-      classId, subjectId, topicId, subtopicId, academicYear,
+      classId, ...(streamId ? { streamId } : {}), subjectId, topicId, subtopicId, academicYear,
     }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['lessons', 'coverage', classId, subjectId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lessons', 'coverage', classId, subjectId, streamId ?? ''] }),
   });
 
   const unmarkMutation = useMutation({
     mutationFn: ({ coverageId, topicId, subtopicId }) => {
       if (coverageId) return lessonsApi.coverage.unmark(coverageId);
-      return lessonsApi.coverage.unmarkBulk({ classId, subjectId, topicId, subtopicId });
+      return lessonsApi.coverage.unmarkBulk({ classId, ...(streamId ? { streamId } : {}), subjectId, topicId, subtopicId });
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['lessons', 'coverage', classId, subjectId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lessons', 'coverage', classId, subjectId, streamId ?? ''] }),
   });
 
   function toggleTopic() {
@@ -326,15 +328,15 @@ function TopicRow({ topic, classId, subjectId, academicYear, canManage, onEdit, 
 
 /* ── Drill-down: topics for a class-subject ──────────────────── */
 function DrillDown({ item, onBack, canManage }) {
-  const { classId, subjectId, subjectName, className, academicYear } = item;
+  const { classId, streamId, streamName, subjectId, subjectName, className, academicYear } = item;
   const qc = useQueryClient();
   const [search,     setSearch]     = useState('');
   const [showSlider, setShowSlider] = useState(false);
   const [editing,    setEditing]    = useState(null);
 
   const { data: resp, isLoading } = useQuery({
-    queryKey: ['lessons', 'coverage', classId, subjectId],
-    queryFn:  () => lessonsApi.coverage.list({ classId, subjectId, academicYear }),
+    queryKey: ['lessons', 'coverage', classId, subjectId, streamId ?? ''],
+    queryFn:  () => lessonsApi.coverage.list({ classId, subjectId, ...(streamId ? { streamId } : {}), academicYear }),
     staleTime: 30_000,
   });
 
@@ -354,7 +356,7 @@ function DrillDown({ item, onBack, canManage }) {
 
   const deleteMutation = useMutation({
     mutationFn: (topic) => lessonsApi.topics.remove(topic.id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['lessons', 'coverage', classId, subjectId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lessons', 'coverage', classId, subjectId, streamId ?? ''] }),
   });
 
   return (
@@ -367,7 +369,9 @@ function DrillDown({ item, onBack, canManage }) {
         <div className="flex-1">
           <div className="flex items-center gap-2">
             <h2 className="text-base font-semibold text-slate-900">{subjectName}</h2>
-            <span className="text-xs font-medium text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">{className}</span>
+            <span className="text-xs font-medium text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
+              {className}{streamName ? ` · ${streamName}` : ''}
+            </span>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
             {covered} of {total} topic{total !== 1 ? 's' : ''} complete
@@ -439,6 +443,7 @@ function DrillDown({ item, onBack, canManage }) {
               key={t.id}
               topic={t}
               classId={classId}
+              streamId={streamId}
               subjectId={subjectId}
               academicYear={academicYear}
               canManage={canManage}
@@ -509,7 +514,7 @@ function MyClassesTab() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {items.map(item => (
           <ClassCard
-            key={`${item.classId}-${item.subjectId}`}
+            key={`${item.classId}-${item.subjectId}-${item.streamId ?? ''}`}
             item={item}
             onClick={() => setDrilldown(item)}
           />
@@ -538,6 +543,7 @@ function OverviewTab() {
     return rows.filter(r =>
       r.teacherName?.toLowerCase().includes(s) ||
       r.className?.toLowerCase().includes(s) ||
+      r.streamName?.toLowerCase().includes(s) ||
       r.subjectName?.toLowerCase().includes(s)
     );
   }, [rows, search]);
@@ -582,7 +588,7 @@ function OverviewTab() {
               {filtered.map((r, i) => (
                 <tr key={i} className="hover:bg-slate-50/50 transition-colors">
                   <td className="px-4 py-3 font-medium text-slate-800">{r.teacherName}</td>
-                  <td className="px-4 py-3 text-slate-600">{r.className}</td>
+                  <td className="px-4 py-3 text-slate-600">{r.className}{r.streamName ? ` · ${r.streamName}` : ''}</td>
                   <td className="px-4 py-3 text-slate-600">{r.subjectName}</td>
                   <td className="px-4 py-3 text-slate-500 text-xs">
                     {r.coveredItems}/{r.totalItems} items

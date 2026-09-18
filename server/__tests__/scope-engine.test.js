@@ -64,9 +64,16 @@ describe('isClassInScope', () => {
     expect(isClassInScope(req, 'attendance', 'cls_yr7', 'strm_7ii')).toBe(false);
   });
 
-  test('streamId is ignored for a non-streamAware module — classId-only decision, same as before', () => {
+  test('streamId is ignored for a non-streamAware module (classes — deliberately not streamAware, see scopeEngine.js\'s own MODULE_SCOPE comment) — classId-only decision', () => {
     const req = { scope: { level: 'assigned', classIds: [], streamIds: ['strm_7i'], unrestrictedModules: [] } };
-    expect(isClassInScope(req, 'lessons', 'cls_yr7', 'strm_7i')).toBe(false);
+    expect(isClassInScope(req, 'classes', 'cls_yr7', 'strm_7i')).toBe(false);
+  });
+
+  test('lessons is streamAware (2026-09, Milestone 3) — a stream-only teacher is allowed via streamId, unlike before', () => {
+    const req = { scope: { level: 'assigned', classIds: [], streamIds: ['strm_7i'], unrestrictedModules: [] } };
+    expect(isClassInScope(req, 'lessons', 'cls_yr7', 'strm_7i')).toBe(true);
+    expect(isClassInScope(req, 'lessons', 'cls_yr7', 'strm_7ii')).toBe(false); // still denied for a stream they don't have
+    expect(isClassInScope(req, 'lessons', 'cls_yr7')).toBe(false); // no streamId passed, no whole-class grant — denied, same as attendance
   });
 
   test('a whole-class grant still wins outright regardless of streamId', () => {

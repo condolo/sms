@@ -563,15 +563,19 @@ const SECTIONS = [
       },
       {
         q: 'How do I log a lesson as covered?',
-        a: 'Go to Lessons → select your class and subject → find the topic → click "Mark as covered". Add optional notes on what was taught and how.',
+        a: 'Go to Lessons → select your class and subject (and stream, if you teach that subject separately per stream — see below) → find the topic → click "Mark as covered". Add optional notes on what was taught and how.',
+      },
+      {
+        q: 'My class has multiple streams and I teach them separately — is coverage tracked per stream?',
+        a: 'Yes, when it should be. If a subject is taught to each stream separately (e.g. a different pace or a different teacher per stream), your "My Classes" cards show one card per stream — e.g. "Standard 4A · 4A" and "Standard 4A · 4B" — each with its own topics and its own percentage. Marking a topic covered in one stream never affects the other. If instead the whole class is taught together with no stream split, there is just one shared card, same as it always was.',
       },
       {
         q: 'Where do students see curriculum coverage?',
-        a: "Students see a per-subject coverage bar on their Student Dashboard showing the percentage of topics covered so far in the term.",
+        a: "Students see a per-subject coverage bar on their Student Dashboard showing the percentage of topics covered so far in the term — scoped to their own stream when the subject is taught separately per stream, so a student never sees a sibling stream's progress credited to them.",
       },
       {
         q: 'Do teachers only see their assigned classes in Lessons?',
-        a: 'Yes. Teachers can only view and update coverage for classes they are assigned to teach. Admins and section heads have broader access.',
+        a: 'Yes. Teachers can only view and update coverage for classes (and streams, where relevant) they are actually assigned to teach. Admins and section heads have broader access.',
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',

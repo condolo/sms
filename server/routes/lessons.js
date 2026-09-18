@@ -92,6 +92,11 @@ const TopicSchema = z.object({
 const CoverageSchema = z.object({
   teacherId:    z.string().optional(),   // admin can submit on behalf
   classId:      z.string().min(1),
+  // Set only when the submitting teacher's assignment for this class-
+  // subject is stream-scoped (a subject taught separately per stream —
+  // see teaching-assignments.js). Omitted, coverage stays shared across
+  // the whole class exactly as before this field existed.
+  streamId:     z.string().optional(),
   subjectId:    z.string().min(1),
   topicId:      z.string().min(1),       // syllabus_topics.id
   subtopicId:   z.string().optional(),   // id within topic.subtopics
@@ -109,8 +114,16 @@ function _validate(schema, data) {
 async function _teacherAssignments(schoolId, teacherId) {
   return tenantModel('teaching_assignments', { schoolId })
     .find({ schoolId, teacherId })
-    .select('classId className subjectId subjectName')
+    .select('classId className subjectId subjectName streamId streamName')
     .lean();
+}
+
+/* ── Helper: coverage identity filter for one class-subject-[stream] ──
+   The exact same optional-field pattern subtopicId already uses below —
+   a stream-scoped assignment's coverage never bleeds into a whole-class
+   assignment's shared coverage (or another stream's), and vice versa. */
+function _streamFilterPart(streamId) {
+  return streamId ? { streamId } : { streamId: { $exists: false } };
 }
 
 /* ── Helper: build coverage map for a set of class-subjects ─── */
@@ -332,9 +345,12 @@ router.get('/my-classes', authMiddleware, PLAN, MODGATE, async (req, res) => {
         totalItems += t.subtopics?.length ? t.subtopics.length : 1;
       });
 
-      // Count covered items for this class-subject
+      // Count covered items for this exact class-subject[-stream] — a
+      // stream-scoped assignment's coverage never merges with a sibling
+      // stream's or the whole-class total, matching how it's written
+      // (see POST /coverage's identical identity filter).
       const coveredCount = await tenantModel('lesson_coverage', tenantContext(req)).countDocuments({
-        schoolId, classId: a.classId, subjectId: a.subjectId, academicYear,
+        schoolId, classId: a.classId, subjectId: a.subjectId, academicYear, ..._streamFilterPart(a.streamId),
       });
 
       const pct = totalItems > 0 ? Math.round((Math.min(coveredCount, totalItems) / totalItems) * 100) : 0;
@@ -342,6 +358,8 @@ router.get('/my-classes', authMiddleware, PLAN, MODGATE, async (req, res) => {
       return {
         classId:     a.classId,
         className:   a.className,
+        streamId:    a.streamId ?? null,
+        streamName:  a.streamName ?? null,
         subjectId:   a.subjectId,
         subjectName: a.subjectName,
         totalTopics: topics.length,
@@ -358,20 +376,25 @@ router.get('/my-classes', authMiddleware, PLAN, MODGATE, async (req, res) => {
 
 /* ── GET /api/lessons/coverage ─ detailed coverage for class ── */
 /*
-  Returns topics with coverage markers for a given classId + subjectId.
-  Used by the teacher drill-down view.
-  Query: classId, subjectId, academicYear (optional)
+  Returns topics with coverage markers for a given classId + subjectId
+  [+ streamId]. Used by the teacher drill-down view.
+  Query: classId, subjectId, streamId (optional), academicYear (optional)
 */
 router.get('/coverage', authMiddleware, PLAN, MODGATE, scopeMiddleware, async (req, res) => { // rbac: scopeMiddleware above + intentionally open — curriculum reference data
   try {
     const { schoolId } = req.jwtUser;
-    const { classId, subjectId, academicYear } = req.query;
+    const { classId, subjectId, streamId, academicYear } = req.query;
     if (!classId || !subjectId) {
       return E.validation(res, [{ field: 'classId', message: 'classId and subjectId are required' }]);
     }
 
-    // Validate classId is within teacher's scope before doing work
-    if (!ScopeEngine.isClassInScope(req, 'lessons', classId)) {
+    // Validate classId (and, if provided, streamId) is within teacher's
+    // scope before doing work. `lessons` is streamAware, so a stream-only-
+    // scoped teacher (no whole-class grant at all) is correctly allowed
+    // through for their own stream — previously this denied them
+    // outright regardless of streamId, since the module wasn't
+    // streamAware yet.
+    if (!ScopeEngine.isClassInScope(req, 'lessons', classId, streamId)) {
       return E.forbidden(res, 'This class is not in your teaching assignments.');
     }
 
@@ -384,7 +407,7 @@ router.get('/coverage', authMiddleware, PLAN, MODGATE, scopeMiddleware, async (r
         .sort({ order: 1, createdAt: 1 })
         .lean(),
       tenantModel('lesson_coverage', tenantContext(req))
-        .find({ schoolId, classId, subjectId, academicYear: year })
+        .find({ schoolId, classId, subjectId, academicYear: year, ..._streamFilterPart(streamId) })
         .lean(),
     ]);
 
@@ -423,11 +446,22 @@ router.get('/coverage', authMiddleware, PLAN, MODGATE, scopeMiddleware, async (r
 });
 
 /* ── POST /api/lessons/coverage ─ mark topic/subtopic covered ─ */
-router.post('/coverage', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'), async (req, res) => {
+router.post('/coverage', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(CoverageSchema, req.body);
     if (error) return E.validation(res, error);
+
+    // Security Baseline Register — this route had NO class-ownership check
+    // at all: any authenticated teacher could mark coverage for a class/
+    // subject they don't teach (only *deleting* a record was ever
+    // restricted to your own — see DELETE below). Admins retain the
+    // existing "submit on behalf of another teacher" ability for any
+    // class; a non-admin teacher must actually hold the assignment for
+    // this exact class[-stream] they're submitting for.
+    if (!isAdmin(req) && !ScopeEngine.isClassInScope(req, 'lessons', data.classId, data.streamId)) {
+      return E.forbidden(res, 'This class is not in your teaching assignments.');
+    }
 
     // Teachers can only submit for themselves unless admin
     const effectiveTeacherId = (isAdmin(req) && data.teacherId) ? data.teacherId : userId;
@@ -452,7 +486,10 @@ router.post('/coverage', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'
       teacherName = t?.name ?? teacherName;
     }
 
-    // Upsert — prevent duplicate coverage records for same class-subject-topic-subtopic
+    // Upsert — prevent duplicate coverage records for same class-subject-
+    // [stream-]topic-subtopic. streamId is part of the identity now, same
+    // as subtopicId already was: a stream-scoped assignment's coverage
+    // never merges with a sibling stream's or a whole-class total.
     const filter = {
       schoolId,
       classId:    data.classId,
@@ -460,10 +497,11 @@ router.post('/coverage', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'
       topicId:    data.topicId,
       academicYear,
       ...(data.subtopicId ? { subtopicId: data.subtopicId } : { subtopicId: { $exists: false } }),
+      ..._streamFilterPart(data.streamId),
     };
 
     const update = {
-      $setOnInsert: { id: uuidv4(), createdBy: userId },
+      $setOnInsert: { id: uuidv4(), createdBy: userId, ...(data.streamId ? { streamId: data.streamId } : {}) },
       $set: {
         teacherId:   effectiveTeacherId,
         teacherName,
@@ -499,16 +537,16 @@ router.delete('/coverage/:id', authMiddleware, PLAN, MODGATE, rbac('lessons', 'd
   } catch (err) { console.error('[lessons/coverage DELETE/:id]', err); return E.serverError(res); }
 });
 
-/* ── DELETE /api/lessons/coverage (bulk unmark for class-subject-topic) */
+/* ── DELETE /api/lessons/coverage (bulk unmark for class-subject-[stream-]topic) */
 router.delete('/coverage', authMiddleware, PLAN, MODGATE, rbac('lessons', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
-    const { classId, subjectId, topicId, subtopicId } = req.query;
+    const { classId, subjectId, streamId, topicId, subtopicId } = req.query;
     if (!classId || !subjectId || !topicId) {
       return E.validation(res, [{ field: 'classId', message: 'classId, subjectId, and topicId are required' }]);
     }
 
-    const filter = { schoolId, classId, subjectId, topicId };
+    const filter = { schoolId, classId, subjectId, topicId, ..._streamFilterPart(streamId) };
     if (subtopicId) filter.subtopicId = subtopicId;
     if (!isAdmin(req)) filter.teacherId = userId;
 
@@ -557,25 +595,29 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, async (req, res) => { // r
       topicCounts[sid] = total;
     }));
 
-    // Coverage per class-subject
+    // Coverage per class-subject[-stream] — a stream-scoped assignment's
+    // row must never be credited with a sibling stream's (or the whole
+    // class's) coverage, matching how it's written (see POST /coverage).
     const coverageCounts = {};
     await Promise.all(assignments.map(async a => {
-      const key = `${a.classId}__${a.subjectId}`;
+      const key = `${a.classId}__${a.subjectId}__${a.streamId ?? ''}`;
       const count = await tenantModel('lesson_coverage', tenantContext(req)).countDocuments({
-        schoolId, classId: a.classId, subjectId: a.subjectId, academicYear,
+        schoolId, classId: a.classId, subjectId: a.subjectId, academicYear, ..._streamFilterPart(a.streamId),
       });
       coverageCounts[key] = count;
     }));
 
     const rows = assignments.map(a => {
       const totalItems   = topicCounts[a.subjectId] || 0;
-      const covered      = coverageCounts[`${a.classId}__${a.subjectId}`] || 0;
+      const covered      = coverageCounts[`${a.classId}__${a.subjectId}__${a.streamId ?? ''}`] || 0;
       const pct          = totalItems > 0 ? Math.round((Math.min(covered, totalItems) / totalItems) * 100) : 0;
       return {
         teacherId:   a.teacherId,
         teacherName: a.teacherName,
         classId:     a.classId,
         className:   a.className,
+        streamId:    a.streamId ?? null,
+        streamName:  a.streamName ?? null,
         subjectId:   a.subjectId,
         subjectName: a.subjectName,
         totalItems,
@@ -696,10 +738,14 @@ router.get('/pending-teachers', authMiddleware, PLAN, MODGATE, async (req, res) 
       if (!byTeacher[a.teacherId]) {
         byTeacher[a.teacherId] = { teacherId: a.teacherId, teacherName: a.teacherName, classes: [] };
       }
-      byTeacher[a.teacherId].classes.push({ classId: a.classId, className: a.className, subjectId: a.subjectId, subjectName: a.subjectName });
+      byTeacher[a.teacherId].classes.push({ classId: a.classId, className: a.className, streamId: a.streamId ?? null, streamName: a.streamName ?? null, subjectId: a.subjectId, subjectName: a.subjectName });
     });
 
-    // Check coverage completeness per teacher
+    // Check coverage completeness per teacher. Each class-subject-[stream]
+    // entry counts its OWN coverage — a teacher 100% done on one stream
+    // and 0% on a sibling stream must still show as pending overall, not
+    // be averaged/masked by a shared count that was never split per
+    // stream to begin with.
     const results = await Promise.all(Object.values(byTeacher).map(async (t) => {
       let totalItems = 0, coveredItems = 0;
       await Promise.all(t.classes.map(async (c) => {
@@ -709,7 +755,7 @@ router.get('/pending-teachers', authMiddleware, PLAN, MODGATE, async (req, res) 
         topics.forEach(tp => { totalItems += tp.subtopics?.length ? tp.subtopics.length : 1; });
 
         const cov = await tenantModel('lesson_coverage', tenantContext(req)).countDocuments({
-          schoolId, classId: c.classId, subjectId: c.subjectId, academicYear,
+          schoolId, classId: c.classId, subjectId: c.subjectId, academicYear, ..._streamFilterPart(c.streamId),
         });
         coveredItems += cov;
       }));

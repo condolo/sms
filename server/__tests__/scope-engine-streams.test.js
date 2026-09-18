@@ -71,14 +71,14 @@ describe('applyToFilter — stream-aware modules (students, classes)', () => {
     expect(filter2.streamId).toBe('__no_match__'); // outside scope — denied
   });
 
-  test('non-streamAware module (e.g. lessons — a class+subject coverage log, no per-student record to stream-scope) ignores streamIds entirely — unchanged behaviour', () => {
+  test('lessons is streamAware (2026-09, Milestone 3) — a stream-only teacher is correctly folded into the $or, not strictly denied', () => {
     const req = streamOnlyReq(['strm_7i']);
     const filter = {};
     applyToFilter(req, 'lessons', filter);
-    // No whole-class grant and streamIds don't apply to this module →
-    // strict deny, same as a teacher with zero assignments at all.
-    expect(filter.classId).toEqual({ $in: [] });
-    expect(filter.$or).toBeUndefined();
+    // Same shape as students/attendance: no whole-class grant, but
+    // streamIds gives real (narrower) access — folded into $or, not denied.
+    expect(filter.classId).toBeUndefined();
+    expect(filter.$or).toEqual([{ classId: { $in: [] } }, { streamId: { $in: ['strm_7i'] } }]);
   });
 
   test('a teacher with neither classIds nor streamIds is strictly denied, same as before', () => {
@@ -100,9 +100,9 @@ describe('hasNoAssignments — stream-only grant counts as having an assignment'
     expect(hasNoAssignments(req, 'students')).toBe(true);
   });
 
-  test('stream-only teacher on a non-streamAware module (lessons) still reports no assignments (streamIds not consulted there)', () => {
+  test('a stream-only teacher on lessons (now streamAware, Milestone 3) is correctly NOT reported as having no assignments', () => {
     const req = streamOnlyReq(['strm_7i']);
-    expect(hasNoAssignments(req, 'lessons')).toBe(true);
+    expect(hasNoAssignments(req, 'lessons')).toBe(false);
   });
 
   test('a stream-only teacher on attendance (now streamAware, Milestone 2) is correctly NOT reported as having no assignments', () => {

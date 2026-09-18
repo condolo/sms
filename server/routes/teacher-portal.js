@@ -106,7 +106,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
 
     // ── Teaching assignments (classIds + subjectIds) ─────────
     const assignments = await TeachingAssignments.find({ teacherId, schoolId })
-      .select('classId subjectId').lean();
+      .select('classId subjectId streamId streamName').lean();
 
     const classIds   = [...new Set(assignments.map(a => a.classId).filter(Boolean))];
     const subjectIds = [...new Set(assignments.map(a => a.subjectId).filter(Boolean))];
@@ -277,18 +277,28 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     }
 
     // ── Curriculum coverage (per assignment, capped at 10) ────
+    // A coverage record's mere EXISTENCE means "covered" — the previous
+    // `covered: true` condition never matched any real document (see
+    // lessons.js's POST /coverage), so this always showed 0% regardless
+    // of real progress. Also now keyed by the assignment's OWN streamId
+    // (when it's a stream-scoped assignment) so this teacher's Diamond
+    // progress is never conflated with a colleague's Sapphire progress
+    // for the same class-subject.
     let curriculumCoverage = [];
     const topAssignments = assignments.slice(0, 10);
     if (topAssignments.length) {
       curriculumCoverage = await Promise.all(topAssignments.map(async a => {
+        const streamFilter = a.streamId ? { streamId: a.streamId } : { streamId: { $exists: false } };
         const [total, covered] = await Promise.all([
           Topics.countDocuments({ schoolId, subjectId: a.subjectId, academicYear }).catch(() => 0),
-          Coverage.countDocuments({ schoolId, classId: a.classId, subjectId: a.subjectId, academicYear, covered: true }).catch(() => 0),
+          Coverage.countDocuments({ schoolId, classId: a.classId, subjectId: a.subjectId, academicYear, ...streamFilter }).catch(() => 0),
         ]);
         if (total === 0) return null;
         return {
           classId:     a.classId,
           className:   classMap[a.classId]?.name,
+          streamId:    a.streamId ?? null,
+          streamName:  a.streamName ?? null,
           subjectId:   a.subjectId,
           subjectName: subjectMap[a.subjectId]?.name,
           total,

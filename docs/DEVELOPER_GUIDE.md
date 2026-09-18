@@ -1397,6 +1397,60 @@ rather than silently dropping them — a stream-targeted register should
 fail loudly if the client and reality have diverged, not save an
 incomplete one quietly.
 
+**Follow-up (v5.102.0) — Milestone 3: `lessons`, a category different
+from every module above again.** Prompted by asking "where else does
+this class of bug apply?" after the Attendance work — `lessons` was the
+one confirmed real gap, and it was worse than "streams share one
+coverage record": `lessons` wasn't `streamAware` in `MODULE_SCOPE` at
+all, so `isClassInScope(req,'lessons',classId)` denied a stream-only-
+scoped teacher **outright**, with no way to pass through even for their
+own stream (confirmed live: a real teacher with 4 valid stream-scoped
+assignments got a 403 opening their own class's coverage view, and "My
+Classes" showed duplicate, indistinguishable cards for two different
+streams sharing one merged record).
+
+Unlike Milestone 2's modules (each record IS one specific student's/
+class's own row) or `classes` (the parent of its streams, never
+streamAware) or `lessons`'s OWN prior state (no streamId concept at
+all), a `lesson_coverage` record's streamId isn't resolved from a
+student or the class itself — it's resolved from the **submitting
+teacher's own teaching-assignment** for that class-subject (see
+`teaching-assignments.js`'s per-stream grant), and it's genuinely
+OPTIONAL on the record: a whole-class assignment (no streamId) still
+shares one coverage record across the class exactly as it always has;
+only a stream-scoped assignment gets its own, separate coverage per
+stream. `_streamFilterPart(streamId)` in `lessons.js` is the one-line
+identity helper every coverage read/write/count uses:
+```js
+function _streamFilterPart(streamId) {
+  return streamId ? { streamId } : { streamId: { $exists: false } };
+}
+```
+The same pattern as `subtopicId`'s existing `{$exists:false}` branch
+just above it in `POST /coverage` — never a bare equality check, since
+that would treat "no streamId" and "streamId: undefined" as the same
+query shape when they aren't.
+
+**Two adjacent bugs found while tracing this, fixed in the same pass
+(not part of the original ask, authorized explicitly once found):**
+1. `student-portal.js`/`parent-portal.js`/`teacher-portal.js`'s own
+   "Curriculum Coverage" dashboard widgets all filtered
+   `Coverage.countDocuments({..., covered: true})` — but a
+   `lesson_coverage` document's mere *existence* means covered; it never
+   carries a `covered` field. That condition matched zero real documents,
+   ever — the widget has shown 0% for every subject since it shipped,
+   completely independent of the streamId work. Fixed by removing the
+   phantom filter and adding the viewer's own streamId (student/child)
+   or the assignment's own streamId (teacher) via the same union-with-
+   legacy-record pattern: `student.streamId ? [{streamId: student.streamId}, {streamId:{$exists:false}}] : [{streamId:{$exists:false}}]`.
+2. `POST /api/lessons/coverage` had **no class-ownership check at all**
+   — any authenticated teacher could mark coverage for a class/subject
+   they don't teach (only *deleting* a record was ever restricted to
+   your own, via `filter.teacherId = userId` for non-admins). Added the
+   same `isClassInScope` check every other write route already has;
+   admins retain their existing "submit on behalf of another teacher"
+   ability for any class.
+
 ### Student Record Merge — `server/utils/student-merge.js` (v5.79.0)
 
 Applies the dual-identifier pattern above to a new problem: removing a duplicate student (see `POST /api/students/duplicates/resolve[-bulk]`) can't just delete the losing record — every collection with a `studentId` reference to it would either end up orphaned (if only the student doc is deleted) or lose real history (if the deletion cascades). `mergeStudentData(schoolId, ctx, oldStudent, newStudentId)` re-points every `studentId` reference from the removed record onto the kept one FIRST, matching both `oldStudent.id` and `String(oldStudent._id)`, across every collection in its `REFERENCING_COLLECTIONS` list — 23 as of this writing, including `invoices`/`payments` (merged, not deleted, unlike the unrelated `DELETE /students/purge`, which still hard-deletes those for a genuine, non-duplicate removal).

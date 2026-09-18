@@ -146,7 +146,7 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
     const todayDay  = DAY_NAMES[new Date().getDay()];
 
     const student = await Students.findOne({ id: childId, schoolId })
-      .select('firstName lastName admissionNumber classId className photo status dateOfBirth gender')
+      .select('firstName lastName admissionNumber classId className streamId photo status dateOfBirth gender')
       .lean();
     if (!student) return E.notFound(res, 'Student record not found.');
 
@@ -185,15 +185,24 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
       .lean();
 
     // ── Lessons coverage ─────────────────────────────────────
+    // A coverage record's mere EXISTENCE means "covered" — the previous
+    // `covered: true` condition never matched any real document (see
+    // lessons.js's POST /coverage), so this always showed 0% regardless
+    // of real progress. streamOr: this child's OWN stream's coverage
+    // UNION any legacy/whole-class record — see student-portal.js's
+    // identical fix for the full reasoning.
     let lessonsCoverage = [];
     if (student.classId) {
-      const subjectIds  = await Coverage.distinct('subjectId', { schoolId, classId: student.classId, academicYear });
+      const streamOr = student.streamId
+        ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
+        : [{ streamId: { $exists: false } }];
+      const subjectIds  = await Coverage.distinct('subjectId', { schoolId, classId: student.classId, academicYear, $or: streamOr });
       const subjectDocs = await Subjects.find({ id: { $in: subjectIds }, schoolId }).select('id name code').lean();
       const subjectMap  = Object.fromEntries(subjectDocs.map(s => [s.id, s]));
 
       for (const subjectId of subjectIds) {
         const totalTopics   = await Topics.countDocuments({ schoolId, subjectId, academicYear });
-        const coveredTopics = await Coverage.countDocuments({ schoolId, classId: student.classId, subjectId, academicYear, covered: true });
+        const coveredTopics = await Coverage.countDocuments({ schoolId, classId: student.classId, subjectId, academicYear, $or: streamOr });
         if (totalTopics === 0) continue;
         lessonsCoverage.push({
           subjectId,

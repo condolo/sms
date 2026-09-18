@@ -33,11 +33,25 @@ const { tenantModel, tenantContext } = require('./tenant-model');
 // Milestone 2: attendance/grades/assessment/report_cards/growth_profile/
 // growth_records now stamp streamId at write time too (resolved from the
 // referenced student's own record — see each route's create/update path).
-// `lessons` stays deferred — it's a class+subject coverage log, not a
-// per-student record, so there's no student to resolve a streamId from;
-// making it stream-aware would need its own schema field and its own
-// write-time source, a different shape of change from the rest of this
-// batch.
+// Milestone 3 (2026-09): `lessons`. Unlike the modules above, a
+// `lesson_coverage` record isn't resolved from a student — it's an
+// independent per-class-subject-topic log, so its streamId is resolved
+// from the submitting teacher's OWN teaching-assignment for that class-
+// subject (see lessons.js's POST /coverage), and is OPTIONAL on the
+// record itself: a whole-class assignment (no streamId) still shares one
+// coverage record across the class exactly as before; only a genuinely
+// stream-scoped assignment (a subject taught separately per stream — the
+// same teaching-assignments.js shape every other Milestone-2 module
+// already narrows by) gets its own, separate coverage per stream. Before
+// this, `lessons` wasn't just imprecise for a stream-only teacher — it
+// was completely inaccessible: `isClassInScope(req,'lessons',classId)`
+// unconditionally denied anyone with `scope.classIds` empty, which is
+// every stream-only-scoped teacher, regardless of streamCount (confirmed
+// live: a real teacher with 4 valid stream-scoped assignments got a 403
+// "not in your teaching assignments" opening their own class's coverage
+// view). And "My Classes" showed duplicate, indistinguishable cards for
+// two different streams of the same class-subject, both silently reading/
+// writing the SAME shared (unscoped) coverage record.
 //
 // `classes` is deliberately NOT streamAware, unlike every module above —
 // this is a category error those modules don't have. A student/attendance/
@@ -69,7 +83,7 @@ const MODULE_SCOPE = {
   report_cards:    { field: 'classId',   source: 'classIds', streamAware: true },
   growth_profile:  { field: 'classId',   source: 'classIds', streamAware: true },
   growth_records:  { field: 'classId',   source: 'classIds', streamAware: true },
-  lessons:         { field: 'classId',   source: 'classIds'   },
+  lessons:         { field: 'classId',   source: 'classIds', streamAware: true },
   exams:           { field: 'subjectId', source: 'subjectIds' },
   timetable:       { field: 'teacherId', source: 'userId'     },
 };
