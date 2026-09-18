@@ -54,7 +54,7 @@ jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => ne
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res, next) => next() }));
 
-let mockClasses, mockTeachingAssignments;
+let mockClasses, mockTeachingAssignments, mockStreams;
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((c) => {
     if (c === 'teaching_assignments') return mockTeachingAssignments;
@@ -65,7 +65,8 @@ jest.mock('../../utils/tenant-model', () => ({
   tenantContext: (req) => ({ schoolId: req.jwtUser.schoolId }),
   tenantModel: (collection) => {
     if (collection === 'classes') return mockClasses;
-    return mockMakeFakeCollection([]); // streams / students enrichment
+    if (collection === 'streams') return mockStreams;
+    return mockMakeFakeCollection([]); // students enrichment
   },
 }));
 
@@ -89,6 +90,7 @@ beforeEach(() => {
     { id: 'cls_2', schoolId: SCHOOL_A, name: 'Grade 7B', status: 'active' },
   ]);
   mockTeachingAssignments = mockMakeFakeCollection([]);
+  mockStreams = mockMakeFakeCollection([]);
   invalidateScopeCache('usr_admin', SCHOOL_A);
   invalidateScopeCache('usr_teacher', SCHOOL_A);
 });
@@ -97,6 +99,19 @@ function asTeacherOf(...classIds) {
   mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
   mockTeachingAssignments = mockMakeFakeCollection(
     classIds.map(classId => ({ schoolId: SCHOOL_A, teacherId: 'usr_teacher', classId }))
+  );
+}
+
+// A compulsory-subject-per-stream assignment (teaching-assignments.js) never
+// contributes to scope.classIds, only scope.streamIds — this teacher has NO
+// whole-class assignment anywhere, only stream-scoped ones.
+function asStreamTeacherOf(...streamAssignments) {
+  mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
+  mockTeachingAssignments = mockMakeFakeCollection(
+    streamAssignments.map(({ classId, streamId }) => ({ schoolId: SCHOOL_A, teacherId: 'usr_teacher', classId, streamId }))
+  );
+  mockStreams = mockMakeFakeCollection(
+    streamAssignments.map(({ classId, streamId }) => ({ id: streamId, schoolId: SCHOOL_A, classId }))
   );
 }
 
@@ -133,5 +148,53 @@ describe('GET /api/classes?assignedOnly=true — opt-in narrowing', () => {
   test('admin (school-level scope) still sees every class even with the flag set — no-op for unrestricted roles', async () => {
     const res = await supertest(buildApp()).get('/api/classes?assignedOnly=true');
     expect(res.body.data.length).toBe(2);
+  });
+
+  // Regression (2026-09) — a teacher whose ONLY assignment is a compulsory
+  // subject in one specific stream (teaching-assignments.js's per-stream
+  // grant) never appears in scope.classIds, only scope.streamIds. `classes`
+  // documents have no streamId field of their own to match against, so this
+  // used to resolve to an empty picker with no "no assignments" explanation
+  // either — real, reported production bug (a teacher with 4 real stream
+  // assignments saw "Select class..." with nothing to select on Attendance).
+  test('a teacher with ONLY a stream-scoped assignment (no whole-class grant anywhere) still sees that stream\'s parent class', async () => {
+    asStreamTeacherOf({ classId: 'cls_1', streamId: 'str_diamond' });
+    const res = await supertest(buildApp()).get('/api/classes?assignedOnly=true');
+    expect(res.status).toBe(200);
+    expect(res.body.data.map(c => c.id)).toEqual(['cls_1']);
+    expect(res.body.pagination.noAssignments).toBeFalsy();
+  });
+
+  test('a stream-scoped teacher with assignments across two different classes sees both parent classes, nothing else', async () => {
+    asStreamTeacherOf(
+      { classId: 'cls_1', streamId: 'str_diamond' },
+      { classId: 'cls_2', streamId: 'str_gold' },
+    );
+    const res = await supertest(buildApp()).get('/api/classes?assignedOnly=true');
+    expect(res.body.data.map(c => c.id).sort()).toEqual(['cls_1', 'cls_2']);
+  });
+
+  test('mixing a whole-class grant with a stream-scoped grant in a different class shows both, not just the whole-class one', async () => {
+    mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
+    mockTeachingAssignments = mockMakeFakeCollection([
+      { schoolId: SCHOOL_A, teacherId: 'usr_teacher', classId: 'cls_1' }, // whole-class, no streamId
+      { schoolId: SCHOOL_A, teacherId: 'usr_teacher', classId: 'cls_2', streamId: 'str_gold' }, // stream-only
+    ]);
+    mockStreams = mockMakeFakeCollection([{ id: 'str_gold', schoolId: SCHOOL_A, classId: 'cls_2' }]);
+    const res = await supertest(buildApp()).get('/api/classes?assignedOnly=true');
+    expect(res.body.data.map(c => c.id).sort()).toEqual(['cls_1', 'cls_2']);
+  });
+
+  test('resolving stream assignments to their parent class does not leak into other modules\' scope (record-level narrowing stays intact)', async () => {
+    asStreamTeacherOf({ classId: 'cls_1', streamId: 'str_diamond' });
+    await supertest(buildApp()).get('/api/classes?assignedOnly=true');
+    // The middleware caches scope per user::school — fetch it fresh the same
+    // way scopeMiddleware itself would, and confirm the classes.js handler's
+    // request-local merge never wrote back into the cached scope object.
+    const { scopeMiddleware } = require('../../middleware/scopeMiddleware');
+    const req2 = { jwtUser: mockJwtUser };
+    await new Promise(resolve => scopeMiddleware(req2, {}, resolve));
+    expect(req2.scope.classIds).toEqual([]); // still stream-only — untouched by the classes.js picker's own resolution
+    expect(req2.scope.streamIds).toEqual(['str_diamond']);
   });
 });

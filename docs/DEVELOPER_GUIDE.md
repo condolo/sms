@@ -1294,6 +1294,80 @@ next page refresh even after the server started sending them (session
 persistence there is an explicit field allowlist, not a raw copy — see
 that file's own comment on why).
 
+### Data Access Scope (`scopeMiddleware.js` / `scopeEngine.js`) — `streamAware` only fits a record that IS one stream's record (v5.99.0)
+
+The third authorization layer, after authentication and RBAC: RBAC decides
+*whether* a role can touch a module at all; `scopeMiddleware` decides
+*which records within it* — `req.scope` is `null` for a school-level role
+(admin, deputy, etc. — no restriction) or `{ level, classIds, subjectIds,
+streamIds, ... }` for a scoped role (currently only `teacher`, at
+`level: 'assigned'`, and `section_head`, at `level: 'section'`).
+`ScopeEngine.applyToFilter(req, module, filter)` is what every scoped
+list/write route calls to turn that into a MongoDB filter — see
+`server/utils/scopeEngine.js`'s own `MODULE_SCOPE` map for exactly which
+field each module is scoped on.
+
+**`streamAware: true` means "this module's own records each carry a real
+per-row `streamId` field, copied at write time from something narrower
+than the whole class"** — true for `students` (a student's own assigned
+stream), and for `attendance`/`grades`/`assessment`/`report_cards`/
+`growth_profile`/`growth_records` (each stamps `streamId` at write time,
+resolved from the referenced student's own record). For these,
+`teaching-assignments.js`'s per-stream assignment type (a compulsory
+subject taught by a different teacher per stream — e.g. 7i's Maths isn't
+7ii's) correctly narrows a teacher's scope to `scope.streamIds` instead of
+`scope.classIds`, and `applyToFilter`'s stream branch ORs in
+`{ streamId: { $in: scope.streamIds } }` to catch exactly those rows in
+otherwise-narrower-than-whole-class visibility.
+
+**`classes` was marked `streamAware: true` too, and that was a category
+error** — fixed 2026-09, found live via a direct report: a teacher with
+4 real, correct teaching assignments (all 4 happened to be stream-scoped
+— a completely ordinary shape once a compulsory subject has a
+per-stream teacher) opened Attendance and got an empty "Select class…"
+picker, not even a "no assignments" explanation. A `classes` document is
+the **parent** of its streams — streams reference their class via
+`classId`; a class never has a `streamId` of its own to be matched
+against. Marking it `streamAware` anyway made `applyToFilter`'s stream
+branch OR in a clause against a field that collection can never have —
+dead code, silently matching nothing, while `scope.classIds` was
+(correctly, by the design above) empty for an all-stream-scoped teacher.
+Two failures compounding: the filter matched nothing, AND
+`hasNoAssignments()` correctly saw a non-zero `streamCount` and reported
+"this isn't a zero-assignment case" — so not even the fallback empty-state
+message fired.
+
+**The fix, and the rule going forward:**
+```js
+// server/utils/scopeEngine.js — classes is NOT streamAware:
+classes: { field: 'id', source: 'classIds' }, // no streamAware — see MODULE_SCOPE's own comment
+
+// server/routes/classes.js's GET / (?assignedOnly=true branch) resolves
+// stream-only assignments to their PARENT classIds itself, in a
+// request-local copy of scope — never mutating the shared, 5-minute-cached
+// scope object other modules' routes will read on their own next call:
+const originalScope = req.scope;
+if (originalScope?.streamIds?.length) {
+  const parents = await tenantModel('streams', tenantContext(req))
+    .find({ schoolId, id: { $in: originalScope.streamIds } })
+    .select('classId').lean();
+  req.scope = { ...originalScope, classIds: [...new Set([...(originalScope.classIds ?? []), ...parents.map(s => s.classId)])] };
+}
+ScopeEngine.applyToFilter(req, 'classes', filter);
+const noAssignments = ScopeEngine.hasNoAssignments(req, 'classes');
+req.scope = originalScope; // restore immediately — this merge is only for THIS list's own picker
+```
+Before marking any new module `streamAware`, confirm its own documents
+carry a real `streamId` field written at create/update time — if the
+module's records don't individually belong to one stream (the way a
+class doesn't), don't set the flag; resolve stream-scoped access to
+whatever the module's real join key is at the route level instead, the
+way `classes.js` now does, and the way `classes.js`'s own
+`GET /:id/students` route already did correctly beforehand (see its
+`inWholeClassScope`/`relevantStreamIds` handling — the same resolve-
+against-a-specific-class pattern, just not yet applied to the list route
+until this fix).
+
 ### Student Record Merge — `server/utils/student-merge.js` (v5.79.0)
 
 Applies the dual-identifier pattern above to a new problem: removing a duplicate student (see `POST /api/students/duplicates/resolve[-bulk]`) can't just delete the losing record — every collection with a `studentId` reference to it would either end up orphaned (if only the student doc is deleted) or lose real history (if the deletion cascades). `mergeStudentData(schoolId, ctx, oldStudent, newStudentId)` re-points every `studentId` reference from the removed record onto the kept one FIRST, matching both `oldStudent.id` and `String(oldStudent._id)`, across every collection in its `REFERENCING_COLLECTIONS` list — 23 as of this writing, including `invoices`/`payments` (merged, not deleted, unlike the unrelated `DELETE /students/purge`, which still hard-deletes those for a genuine, non-duplicate removal).

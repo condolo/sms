@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.99.0] — 2026-09-18 — fix(attendance): a stream-only-scoped teacher saw zero classes in the Attendance picker despite real, valid assignments
+
+Reported directly with a screenshot: a teacher (Mr Joram Ngure, Trinitas International School) with 4 confirmed teaching assignments (English in Year 2 Diamond & Sapphire, Mathematics in Year 3 Gold & Sapphire — all visible and correct in his own Staff profile) opened Attendance and got an empty "Select class..." dropdown, with no "no assignments" message either.
+
+### Root cause
+`GET /api/classes?assignedOnly=true` (the query behind Attendance's class picker) narrows the list via `ScopeEngine.applyToFilter(req, 'classes', filter)`, and `classes` was marked `streamAware: true` in `server/utils/scopeEngine.js`'s `MODULE_SCOPE` — the same flag used correctly by `students`/`attendance`/`grades`/etc. But those modules are streamAware because each of THEIR records genuinely carries its own `streamId` field (a specific student's own stream, a specific attendance row's stream). A `classes` document has no such field at all — a class doesn't belong to a stream, streams belong to it. Marking `classes` streamAware anyway made `applyToFilter`'s generic stream branch OR in `{ streamId: { $in: [...] } }` against a collection that can never have that field — dead code that matches nothing.
+
+Every one of this teacher's 4 assignments is a compulsory-subject-per-stream grant (`teaching-assignments.js`'s stream-scoped assignment type — a different teacher per stream is common for compulsory subjects), which by design contributes only to `scope.streamIds`, never `scope.classIds` (so record-level queries correctly narrow to just that stream, not the whole class). With `classIds` empty and the streamId branch permanently dead for this module, the picker's filter matched literally nothing — and because `streamCount` was non-zero, `hasNoAssignments()` correctly reported "this isn't a zero-assignment case" too, so not even the fallback "no assignments" explanation showed. A confusing, silent empty state for what is now a completely ordinary assignment shape.
+
+### Fixed
+- `server/utils/scopeEngine.js` — removed the `streamAware` flag from `classes`'s `MODULE_SCOPE` entry; documented why in a new comment block (a class is the parent of its streams, not a record belonging to one).
+- `server/routes/classes.js`'s `GET /` (`assignedOnly=true` branch) — resolves the caller's `scope.streamIds` to their **parent** classIds (via the `streams` collection) and folds those into a request-local copy of `scope.classIds` before calling `ScopeEngine.applyToFilter`/`hasNoAssignments`, then restores the original `req.scope` afterward. The picker only needs "which classes can this teacher act in at all" — the write routes it feeds (`POST /attendance`, `/attendance/bulk`) and the record-level list queries they call already narrow to the correct stream on their own and are completely untouched by this change.
+- Deliberately does NOT mutate the shared, cached scope object (`scopeMiddleware.js` caches scope per `userId::schoolId` for 5 minutes) — a new object is assigned to `req.scope` for the duration of this one route's own scoping calls only, then the original is restored. Verified directly: a fresh `scopeMiddleware()` call for the same user immediately after hitting this endpoint still reports empty `classIds`/unchanged `streamIds` — the merge never leaked into other modules' record-level narrowing.
+
+### Verified
+- Reproduced the exact production shape directly against the real database (Trinitas International School, Mr Joram Ngure): his 4 real assignments have `classId`/`streamId` on every row, resolve today to `classIds: []` before this fix; running the fix's own resolution logic against those same rows correctly resolves to his two real classes (Year 2, Year 3) — the same two his assignments actually cover.
+- 4 new tests in `server/__tests__/routes/classes-assigned-only.test.js`: a stream-only teacher sees their stream's parent class; a stream-only teacher assigned across two classes sees both; mixing one whole-class grant with one stream-only grant in a different class shows both, not just the whole-class one; and a cache-isolation test confirming the route's merge never writes back into the shared cached scope object.
+- Full Jest suite: 208 suites, 2058/2058 passing (2054 + 4 new). `verify-rbac-coverage.js` 100% (487/487, no regression — no RBAC/module-gate changes, this is a data-scope-only fix). `security-scan.js` clean.
+
+---
+
 ## [v5.98.0] — 2026-09-17 — fix(auth): client never received a logged-in teacher's `extraRoles`, leaving a UI check permanently dead
 
 Direct follow-up to v5.97.0 below, flagged in that fix's own report and actioned on request: "let's remove the dead code[...] let it be fixed."

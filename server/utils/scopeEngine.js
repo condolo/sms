@@ -27,7 +27,7 @@
 // whose records have no streamId yet doesn't leak anything (a stream-scoped
 // teacher just sees nothing there until it's wired up), but it's cleaner to
 // leave it off until that's true.
-// Milestone 1: students + classes (students natively carry streamId).
+// Milestone 1: students (students natively carry streamId).
 // Milestone 2: attendance/grades/assessment/report_cards/growth_profile/
 // growth_records now stamp streamId at write time too (resolved from the
 // referenced student's own record — see each route's create/update path).
@@ -36,9 +36,30 @@
 // making it stream-aware would need its own schema field and its own
 // write-time source, a different shape of change from the rest of this
 // batch.
+//
+// `classes` is deliberately NOT streamAware, unlike every module above —
+// this is a category error those modules don't have. A student/attendance/
+// grade/etc. record genuinely IS one specific stream's record and carries
+// its own streamId field; a `classes` document is the PARENT of its
+// streams and has no streamId field at all (streams reference their class
+// via `classId`, never the reverse). Marking it streamAware anyway (fixed
+// 2026-09) made applyToFilter's stream branch OR in `{ streamId: { $in }}`
+// against a collection that can never have that field — a teacher whose
+// ONLY assignments were stream-scoped (the common case whenever a
+// compulsory subject has a separate teacher per stream — see
+// teaching-assignments.js) matched neither half of the OR and saw zero
+// classes in AttendancePage.jsx's class picker despite having real
+// assignments, without even a "no assignments" flag to explain why (their
+// streamCount was non-zero, so hasNoAssignments correctly said "this
+// isn't nothing" while applyToFilter's own filter matched nothing anyway).
+// classes.js's GET / resolves the fix itself, at the route level: before
+// calling into this engine, it resolves the caller's scope.streamIds to
+// their PARENT classIds (via the `streams` collection) and folds those
+// into a request-local copy of classIds — the one attribute a `classes`
+// document can actually be matched on.
 const MODULE_SCOPE = {
   students:        { field: 'classId',   source: 'classIds', streamAware: true },
-  classes:         { field: 'id',        source: 'classIds', streamAware: true },
+  classes:         { field: 'id',        source: 'classIds' },
   'class-subjects':{ field: 'classId',   source: 'classIds'   },
   attendance:      { field: 'classId',   source: 'classIds', streamAware: true },
   grades:          { field: 'classId',   source: 'classIds', streamAware: true },
