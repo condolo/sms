@@ -12,6 +12,7 @@
 'use strict';
 
 const { tenantModel, tenantContext } = require('./tenant-model');
+const { resolveTeacher } = require('./resolveTeacher');
 
 /* ── Module → MongoDB field mapping ────────────────────────── */
 // Maps each module to the field used to restrict records and which scope
@@ -297,19 +298,86 @@ function isClassInScope(req, module, classId, streamId) {
 }
 
 /**
- * Resolve a stream-only-scoped caller's `scope.streamIds` to their PARENT
- * classes' ids — the one thing a `classes` document can actually be matched
- * on, since (see MODULE_SCOPE's own comment on `classes` above) it carries
- * no streamId field of its own. Any route that needs "which classes can
- * this teacher act on" for a picker/dropdown over the `classes` module
- * itself — not a record-level module like `attendance`/`grades`, which stay
- * correctly narrowed by their own streamAware handling — should call this
- * ONCE, use the RETURNED scope for its own applyToFilter/hasNoAssignments
- * calls, and never write the result back onto `req.scope`: scopeMiddleware
- * caches that object per `userId::schoolId` for 5 minutes, and every other
- * module's route reads the SAME cached object on its own next call — this
- * function never mutates it, always returning a new object (or the original
- * unchanged when there's nothing to resolve).
+ * Resolve the streams where this caller is the designated form/homeroom
+ * teacher (`streams.js`'s `formTeacherId`) — an administrative/pastoral
+ * responsibility assigned independently of any subject-teaching
+ * assignment in `teaching_assignments`. Returns `[]` for anyone without a
+ * linked teacher record or with no homeroom streams — never throws.
+ *
+ * Deliberately NOT folded into scopeMiddleware.js's generic per-request
+ * scope, which every stream-aware module (grades, assessment,
+ * report_cards, growth_profile, growth_records, lessons) reads from
+ * identically. Being someone's form teacher is real access to THAT
+ * stream's roster and daily attendance — it is not academic authority to
+ * enter grades, mark curriculum coverage, or write growth records for a
+ * stream they don't actually teach. Only Attendance's own routes/pickers
+ * (and the roster endpoint that feeds them) fold this in, each via
+ * `foldHomeroomScope` below — a deliberate, narrow exception, not a
+ * generic architecture change.
+ *
+ * @param {import('express').Request} req
+ * @returns {Promise<string[]>}
+ */
+async function resolveHomeroomStreamIds(req) {
+  const { userId, schoolId, email } = req.jwtUser ?? {};
+  if (!userId || !schoolId) return [];
+  // Wrapped in try/catch, not a `.catch()` on the call — resolveTeacher
+  // (or anything it calls) throwing synchronously would otherwise escape
+  // uncaught and 500 the whole request. A homeroom-scope lookup failing
+  // must degrade to "no homeroom access", never take down the caller's
+  // actual attendance request.
+  try {
+    const teacher = await resolveTeacher(userId, email, schoolId);
+    if (!teacher) return [];
+    const rows = await tenantModel('streams', { schoolId })
+      .find({ schoolId, formTeacherId: teacher.id })
+      .select('id').lean();
+    return rows.map(r => r.id);
+  } catch (err) {
+    console.error('[scopeEngine] resolveHomeroomStreamIds failed (non-fatal):', err.message);
+    return [];
+  }
+}
+
+/**
+ * Returns a NEW scope object with the caller's own homeroom streamIds
+ * (see resolveHomeroomStreamIds) folded into `streamIds` — or the
+ * original scope completely unchanged when there's nothing to add,
+ * including the guaranteed no-op for an unrestricted (`scope === null`)
+ * caller. Never mutates `req.scope` in place — scopeMiddleware caches
+ * that exact object per `userId::schoolId` for 5 minutes, and every
+ * OTHER module's route reads the same cached object on its own next
+ * call; a caller of this function uses the RETURNED scope for its own
+ * checks only, then restores `req.scope` afterward.
+ *
+ * @param {import('express').Request} req
+ * @returns {Promise<object|null>}
+ */
+async function foldHomeroomScope(req) {
+  if (!req.scope) return req.scope; // unrestricted already — nothing to add
+  const homeroomStreamIds = await resolveHomeroomStreamIds(req);
+  if (!homeroomStreamIds.length) return req.scope;
+  return { ...req.scope, streamIds: [...new Set([...(req.scope.streamIds ?? []), ...homeroomStreamIds])] };
+}
+
+/**
+ * Resolve a stream-only-scoped caller's `scope.streamIds` — including any
+ * homeroom streams folded in by foldHomeroomScope above, since a form
+ * teacher should see their own homeroom class in the same pickers a
+ * subject-teaching assignment would surface it in — to their PARENT
+ * classes' ids: the one thing a `classes` document can actually be
+ * matched on, since (see MODULE_SCOPE's own comment on `classes` above)
+ * it carries no streamId field of its own. Any route that needs "which
+ * classes can this teacher act on" for a picker/dropdown over the
+ * `classes` module itself — not a record-level module like
+ * `attendance`/`grades`, which stay correctly narrowed by their own
+ * streamAware handling — should call this ONCE, use the RETURNED scope
+ * for its own applyToFilter/hasNoAssignments calls, and never write the
+ * result back onto `req.scope`: scopeMiddleware caches that object per
+ * `userId::schoolId` for 5 minutes, and every other module's route reads
+ * the SAME cached object on its own next call — this function never
+ * mutates it, always returning a new object (or the original unchanged
+ * when there's nothing to resolve).
  *
  * @param {import('express').Request} req
  * @returns {object|null} a new scope object (or the original, if no
@@ -317,7 +385,7 @@ function isClassInScope(req, module, classId, streamId) {
  *   in place
  */
 async function resolveClassPickerScope(req) {
-  const scope = req.scope;
+  const scope = await foldHomeroomScope(req);
   if (!scope?.streamIds?.length) return scope;
 
   const parents = await tenantModel('streams', tenantContext(req))
@@ -329,4 +397,4 @@ async function resolveClassPickerScope(req) {
   return { ...scope, classIds: [...new Set([...(scope.classIds ?? []), ...resolvedClassIds])] };
 }
 
-module.exports = { applyToFilter, hasNoAssignments, isUnrestricted, isClassInScope, resolveClassPickerScope };
+module.exports = { applyToFilter, hasNoAssignments, isUnrestricted, isClassInScope, resolveClassPickerScope, resolveHomeroomStreamIds, foldHomeroomScope };

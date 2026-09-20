@@ -54,6 +54,11 @@ jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => ne
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res, next) => next() }));
 
+let mockHomeroomTeacherRecord;
+jest.mock('../../utils/resolveTeacher', () => ({
+  resolveTeacher: jest.fn(() => Promise.resolve(mockHomeroomTeacherRecord)),
+}));
+
 let mockClasses, mockTeachingAssignments, mockStreams;
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((c) => {
@@ -91,6 +96,7 @@ beforeEach(() => {
   ]);
   mockTeachingAssignments = mockMakeFakeCollection([]);
   mockStreams = mockMakeFakeCollection([]);
+  mockHomeroomTeacherRecord = null;
   invalidateScopeCache('usr_admin', SCHOOL_A);
   invalidateScopeCache('usr_teacher', SCHOOL_A);
 });
@@ -196,5 +202,17 @@ describe('GET /api/classes?assignedOnly=true — opt-in narrowing', () => {
     await new Promise(resolve => scopeMiddleware(req2, {}, resolve));
     expect(req2.scope.classIds).toEqual([]); // still stream-only — untouched by the classes.js picker's own resolution
     expect(req2.scope.streamIds).toEqual(['str_diamond']);
+  });
+
+  // 2026-09 — a form/homeroom teacher (streams.js's formTeacherId) with NO
+  // teaching_assignments at all must still find their own homeroom class here.
+  test('a form teacher with zero teaching assignments anywhere still sees their homeroom class', async () => {
+    mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
+    mockTeachingAssignments = mockMakeFakeCollection([]); // no subject assignment anywhere
+    mockHomeroomTeacherRecord = { id: 'tch_1', userId: 'usr_teacher' };
+    mockStreams = mockMakeFakeCollection([{ id: 'str_homeroom', schoolId: SCHOOL_A, classId: 'cls_1', formTeacherId: 'tch_1' }]);
+    const res = await supertest(buildApp()).get('/api/classes?assignedOnly=true');
+    expect(res.status).toBe(200);
+    expect(res.body.data.map(c => c.id)).toEqual(['cls_1']);
   });
 });

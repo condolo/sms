@@ -52,6 +52,11 @@ jest.mock('../../middleware/auth', () => ({
 jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 
+let mockHomeroomTeacherRecord;
+jest.mock('../../utils/resolveTeacher', () => ({
+  resolveTeacher: jest.fn(() => Promise.resolve(mockHomeroomTeacherRecord)),
+}));
+
 let mockStreams, mockTeachingAssignments;
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((c) => {
@@ -88,6 +93,7 @@ beforeEach(() => {
     { id: 'str_3c', schoolId: SCHOOL_A, classId: 'cls_year3', name: '3C', status: 'active' },
   ]);
   mockTeachingAssignments = mockMakeFakeCollection([]);
+  mockHomeroomTeacherRecord = null;
   invalidateScopeCache('usr_admin', SCHOOL_A);
   invalidateScopeCache('usr_teacher', SCHOOL_A);
 });
@@ -157,5 +163,21 @@ describe('GET /api/streams?classId=X&assignedOnly=true — opt-in narrowing', ()
     const res = await supertest(buildApp()).get('/api/streams?assignedOnly=true');
     expect(res.status).toBe(200);
     expect(res.body.data.map(s => s.id).sort()).toEqual(['str_3a', 'str_3b', 'str_3c']);
+  });
+
+  // 2026-09 — a form/homeroom teacher (formTeacherId) with NO teaching
+  // assignment anywhere must still see their own homeroom stream here.
+  test('a form teacher with zero teaching assignments still sees their own homeroom stream, and only that one', async () => {
+    mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
+    mockTeachingAssignments = mockMakeFakeCollection([]); // no subject assignment anywhere
+    mockHomeroomTeacherRecord = { id: 'tch_1', userId: 'usr_teacher' };
+    mockStreams = mockMakeFakeCollection([
+      { id: 'str_3a', schoolId: SCHOOL_A, classId: 'cls_year3', name: '3A', status: 'active', formTeacherId: 'tch_1' },
+      { id: 'str_3b', schoolId: SCHOOL_A, classId: 'cls_year3', name: '3B', status: 'active' },
+      { id: 'str_3c', schoolId: SCHOOL_A, classId: 'cls_year3', name: '3C', status: 'active' },
+    ]);
+    const res = await supertest(buildApp()).get('/api/streams?classId=cls_year3&assignedOnly=true');
+    expect(res.status).toBe(200);
+    expect(res.body.data.map(s => s.id)).toEqual(['str_3a']);
   });
 });

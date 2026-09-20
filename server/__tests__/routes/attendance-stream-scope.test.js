@@ -72,7 +72,12 @@ jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res
 const STUDENT_RED  = { id: 'stu_red_1',  schoolId: SCHOOL_A, classId: 'cls_yr7', streamId: 'strm_7i' };
 const STUDENT_BLUE = { id: 'stu_blue_1', schoolId: SCHOOL_A, classId: 'cls_yr7', streamId: 'strm_7ii' };
 
-let mockAttendance, mockTeachingAssignments, mockStudents;
+let mockHomeroomTeacherRecord;
+jest.mock('../../utils/resolveTeacher', () => ({
+  resolveTeacher: jest.fn(() => Promise.resolve(mockHomeroomTeacherRecord)),
+}));
+
+let mockAttendance, mockTeachingAssignments, mockStudents, mockStreams;
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((c) => {
     if (c === 'teaching_assignments') return mockTeachingAssignments;
@@ -85,6 +90,7 @@ jest.mock('../../utils/tenant-model', () => ({
   tenantModel: (collection) => {
     if (collection === 'attendance') return mockAttendance;
     if (collection === 'students')   return mockStudents;
+    if (collection === 'streams')    return mockStreams;
     return mockMakeFakeCollection([]);
   },
 }));
@@ -108,6 +114,8 @@ beforeEach(() => {
   mockAttendance = mockMakeFakeCollection([]);
   mockStudents   = mockMakeFakeCollection([STUDENT_RED, STUDENT_BLUE]);
   mockTeachingAssignments = mockMakeFakeCollection([]);
+  mockStreams = mockMakeFakeCollection([]);
+  mockHomeroomTeacherRecord = null;
   invalidateScopeCache('usr_admin', SCHOOL_A);
   invalidateScopeCache('usr_teacher', SCHOOL_A);
 });
@@ -118,6 +126,15 @@ function asStreamTeacherOf(classId, streamId) {
   mockTeachingAssignments = mockMakeFakeCollection([
     { schoolId: SCHOOL_A, teacherId: 'usr_teacher', classId, subjectId: 'subj_math', streamId },
   ]);
+}
+
+// A form/homeroom teacher (streams.js's formTeacherId) with NO
+// teaching_assignments at all — the exact confirmed live gap.
+function asHomeroomTeacherOf(streamId) {
+  mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
+  mockTeachingAssignments = mockMakeFakeCollection([]);
+  mockHomeroomTeacherRecord = { id: 'tch_1', userId: 'usr_teacher' };
+  mockStreams = mockMakeFakeCollection([{ id: streamId, schoolId: SCHOOL_A, formTeacherId: 'tch_1' }]);
 }
 
 describe('POST /api/attendance — stream-only teacher', () => {
@@ -278,6 +295,76 @@ describe('PUT/DELETE /api/attendance/:id — stream-only teacher', () => {
     ]);
     asStreamTeacherOf('cls_yr7', 'strm_7i');
     const res = await supertest(buildApp()).delete('/api/attendance/att_blue');
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('Homeroom/form-teacher attendance access (2026-09, formTeacherId, no teaching_assignments at all)', () => {
+  // The exact confirmed live gap: a designated form teacher of a stream
+  // with ZERO subject-teaching assignments anywhere got a flat 403
+  // everywhere in Attendance, since formTeacherId was never consulted by
+  // scope resolution at all.
+  test('a form teacher with no subject assignment can mark attendance (single POST) for their own homeroom stream', async () => {
+    asHomeroomTeacherOf('strm_7i');
+    const res = await supertest(buildApp()).post('/api/attendance').send({
+      studentId: STUDENT_RED.id, classId: 'cls_yr7', date: '2026-05-02', status: 'present',
+    });
+    expect(res.status).toBe(201);
+  });
+
+  test('a form teacher of Red is still denied Blue, its sibling stream in the same class', async () => {
+    asHomeroomTeacherOf('strm_7i');
+    const res = await supertest(buildApp()).post('/api/attendance').send({
+      studentId: STUDENT_BLUE.id, classId: 'cls_yr7', date: '2026-05-02', status: 'present',
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test('a form teacher with no subject assignment can submit a bulk register for their own homeroom stream', async () => {
+    asHomeroomTeacherOf('strm_7i');
+    const res = await supertest(buildApp()).post('/api/attendance/bulk').send({
+      classId: 'cls_yr7', streamId: 'strm_7i', date: '2026-05-02',
+      records: [{ studentId: STUDENT_RED.id, status: 'present' }],
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.data.total).toBe(1);
+  });
+
+  test('a form teacher can view the attendance list for their own homeroom stream via GET /', async () => {
+    mockAttendance = mockMakeFakeCollection([
+      { id: 'att_red', schoolId: SCHOOL_A, studentId: STUDENT_RED.id, classId: 'cls_yr7', streamId: 'strm_7i', date: '2026-05-01', status: 'present' },
+    ]);
+    asHomeroomTeacherOf('strm_7i');
+    const res = await supertest(buildApp()).get('/api/attendance').query({ classId: 'cls_yr7', streamId: 'strm_7i', date: '2026-05-01' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.map(d => d.id)).toEqual(['att_red']);
+  });
+
+  test('a form teacher can edit (PUT) a record already stamped with their own homeroom stream', async () => {
+    mockAttendance = mockMakeFakeCollection([
+      { id: 'att_red', schoolId: SCHOOL_A, studentId: STUDENT_RED.id, classId: 'cls_yr7', streamId: 'strm_7i', date: '2026-05-01', status: 'present' },
+    ]);
+    asHomeroomTeacherOf('strm_7i');
+    const res = await supertest(buildApp()).put('/api/attendance/att_red').send({ status: 'late' });
+    expect(res.status).toBe(200);
+  });
+
+  test('a form teacher still CANNOT edit a record stamped with a stream they are not the form teacher of', async () => {
+    mockAttendance = mockMakeFakeCollection([
+      { id: 'att_blue', schoolId: SCHOOL_A, studentId: STUDENT_BLUE.id, classId: 'cls_yr7', streamId: 'strm_7ii', date: '2026-05-01', status: 'present' },
+    ]);
+    asHomeroomTeacherOf('strm_7i');
+    const res = await supertest(buildApp()).put('/api/attendance/att_blue').send({ status: 'late' });
+    expect(res.status).toBe(403);
+  });
+
+  test('someone with no linked teacher record and no assignments gets the ordinary 403 — homeroom lookup fails safe, not a 500', async () => {
+    mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
+    mockTeachingAssignments = mockMakeFakeCollection([]);
+    mockHomeroomTeacherRecord = null;
+    const res = await supertest(buildApp()).post('/api/attendance').send({
+      studentId: STUDENT_RED.id, classId: 'cls_yr7', date: '2026-05-02', status: 'present',
+    });
     expect(res.status).toBe(403);
   });
 });

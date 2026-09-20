@@ -279,7 +279,7 @@ const SECTIONS = [
       },
       {
         q: 'Do teachers only see their own classes?',
-        a: "Yes. Teachers see only the classes they are assigned to teach. Admins and deputy principals see all classes. Section Heads see classes within their section.",
+        a: "Yes, from two separate sources. A subject teacher sees the classes/streams they're assigned to teach. A form/homeroom teacher (set per stream from Classes → open a class → edit a stream → Form Teacher) also sees their own homeroom stream here — for daily attendance only — even if they don't teach a subject there. Admins, deputy principals, and Section Heads (within their section) see every class.",
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',

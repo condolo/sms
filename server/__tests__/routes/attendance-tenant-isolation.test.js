@@ -26,7 +26,13 @@ jest.mock('../../middleware/auth', () => ({
 jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/scopeMiddleware', () => ({ scopeMiddleware: (_req, _res, next) => next() }));
-jest.mock('../../utils/scopeEngine', () => ({ applyToFilter: jest.fn(), isClassInScope: jest.fn(() => true) }));
+jest.mock('../../utils/scopeEngine', () => ({
+  applyToFilter: jest.fn(),
+  isClassInScope: jest.fn(() => true),
+  // This admin's req.scope is never set (school-level, unrestricted) —
+  // matches foldHomeroomScope's own real no-op behavior for that case.
+  foldHomeroomScope: jest.fn((req) => Promise.resolve(req.scope)),
+}));
 
 /* Spy attendance model — records every filter/pipeline/op it receives.
    tenantModel() calls _model('attendance') under the hood, so these

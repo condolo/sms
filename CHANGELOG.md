@@ -6,6 +6,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.103.0] — 2026-09-20 — fix(attendance): a form/homeroom teacher with no subject assignment could not take attendance for their own class
+
+Prompted directly, thinking through the design: "the subject teacher can take attendance during their normal lessons, but the class teacher/homeroom teacher can take daily attendance for each stream they have been allocated... confirm this status." Investigated and confirmed both halves before touching any code.
+
+### Status confirmed before implementing
+- **Subject-teacher access was already correct.** "During their normal lessons" is enforced today via `teaching_assignments` — a subject teacher can only mark attendance for classes/streams they actually teach. No new restriction needed.
+- **A real, live, unrelated gap existed.** `streams.js`'s `formTeacherId` (the designated form/homeroom teacher of a stream — already used elsewhere: report cards, weekly snapshots, the teacher dashboard's "my form class" widget) was **never consulted anywhere in Attendance's authorization**, which reads exclusively from `teaching_assignments`. Confirmed against real production data: at least 3 real cases exist of a teacher being the designated homeroom teacher of a stream with **zero teaching assignments there at all** — under the old system, that person got an empty class picker and a 403 everywhere in Attendance, unable to take their own homeroom's daily register.
+- **A literal timetable-period clock-lock for subject teachers was deliberately NOT implemented.** Doing so risked disrupting legitimate attendance-taking (catch-up marking, a teacher opening the app after the bell, correcting a register later) on an assumption about exactly how strict the rule should be — flagged explicitly rather than guessed at.
+
+### Fixed
+- `server/utils/scopeEngine.js` — two new functions: `resolveHomeroomStreamIds(req)` resolves the caller's own linked teacher record (reusing the existing `resolveTeacher` utility) and returns the streams where they're the designated form teacher; `foldHomeroomScope(req)` returns a **new** scope object with those streams folded into `streamIds`, never mutating `req.scope` in place. **Deliberately not folded into the generic `scopeMiddleware` pipeline** that grades/assessment/report_cards/growth_profile/growth_records/lessons all read from identically — being a form teacher is pastoral/administrative access to that stream's roster and attendance, not academic authority to enter grades or curriculum coverage for a subject they don't teach. `resolveClassPickerScope` (used by `classes.js`'s and `assessment.js`'s own class pickers) now calls `foldHomeroomScope` internally, so a form teacher's homeroom class also surfaces correctly in those pickers — a deliberate, narrow extension (visibility/reporting only, never write authorization for those modules).
+- `server/routes/streams.js` — `GET /` (`assignedOnly`) and `GET /:id/students` (the roster feeding Attendance) both fold in homeroom streams before their own scope checks.
+- `server/routes/attendance.js` — `GET /`, `GET /summary`, `POST /` (single), `POST /bulk`, `PUT /:id`, and `DELETE /:id` all fold in homeroom streams for their own request's scope checks only, restoring `req.scope` immediately after.
+- Fails safe: a homeroom-lookup failure (bad data, a DB hiccup) never 500s the caller's real request — it degrades to "no homeroom access", logged non-fatally.
+
+### Verified
+- Live, end-to-end, against real production data (the demo school's own confirmed gap case, Peter Kamau — form teacher of Standard 4A's "4A" stream with zero teaching assignments there): now correctly sees the class in the picker, the stream in the stream picker (only his own, never the sibling "4B"), the roster, and the attendance list — all previously inaccessible.
+- Confirmed the fix does NOT leak into other modules with the same real account: Lessons/Curriculum Coverage correctly still returns 403 for him, and "My Classes" still shows zero cards — homeroom access grants attendance/roster only, exactly as designed.
+- New tests: `scope-engine-homeroom.test.js` (11 tests, new file), plus homeroom scenarios added to `classes-streams-students-scope.test.js`, `classes-assigned-only.test.js`, `streams-assigned-only.test.js`, and `attendance-stream-scope.test.js` (24 new tests total). One existing test file (`attendance-tenant-isolation.test.js`) needed its `scopeEngine` mock extended with a `foldHomeroomScope` stub. A real robustness gap was caught and fixed during test-writing: `resolveHomeroomStreamIds` used a `.catch()` on the `resolveTeacher()` call, which does not protect against that function throwing *synchronously* — now wrapped in a proper try/catch.
+- Full Jest suite: 214 suites, 2119/2119 passing (2095 + 24 new). `verify-rbac-coverage.js` 100% (487/487, no regression). `security-scan.js` clean. No client-side changes in this fix — AttendancePage.jsx's existing UI already works correctly against the newly-widened server access, unchanged.
+
+---
+
 ## [v5.102.0] — 2026-09-18 — feat(lessons): curriculum coverage is stream-aware; fixed a "Curriculum Coverage" widget that has always shown 0%
 
 Direct follow-up to a codebase-wide audit for "where else does the stream-merging class of bug from Attendance apply?" (see v5.101.0). Lessons/Curriculum Coverage was the one confirmed real gap, and investigating it surfaced two adjacent bugs — all three fixed together on request ("fix and update all bugs, be aware of dependencies, no assumptions").

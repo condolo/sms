@@ -48,7 +48,12 @@ function _validate(schema, data) {
 // which already enforces this authoritatively). A caller with whole-class
 // access to this classId sees every stream, same as the default; a
 // stream-scoped teacher (teaching-assignments.js's per-stream grant) sees
-// only the streams they're actually assigned to within this one class.
+// only the streams they're actually assigned to within this one class —
+// folded together with any stream they're the form/homeroom teacher of
+// (streams.js's own formTeacherId), so a homeroom teacher with no subject
+// assignment there at all can still find their own class to take
+// attendance for (see scopeEngine.js's foldHomeroomScope for why this is
+// deliberately narrow to Attendance's own pickers, not a generic change).
 router.get(
   '/', authMiddleware, PLAN, rbac('classes', 'read'),
   (req, res, next) => (req.query.assignedOnly === 'true' ? scopeMiddleware(req, res, next) : next()),
@@ -64,7 +69,8 @@ router.get(
     if (req.query.assignedOnly === 'true' && req.query.classId) {
       const inWholeClassScope = ScopeEngine.isClassInScope(req, 'students', req.query.classId);
       if (!inWholeClassScope) {
-        const myStreamIds = req.scope?.streamIds ?? [];
+        const homeroomScope = await ScopeEngine.foldHomeroomScope(req);
+        const myStreamIds = homeroomScope?.streamIds ?? [];
         filter.id = { $in: myStreamIds };
       }
     }
@@ -157,10 +163,18 @@ router.get('/:id/students', authMiddleware, PLAN, rbac('students', 'read'), scop
     // scope.classIds — that's deliberate, see teaching-assignments.js — so
     // the whole-class check alone would wrongly deny them their own
     // stream's roster. Their own streamId list is checked directly here
-    // too, since this route is already stream-specific.
+    // too, since this route is already stream-specific — folded together
+    // with any stream they're the form/homeroom teacher of (this route's
+    // own doc comment on formTeacherId elsewhere in this file), since
+    // seeing your own homeroom's roster is squarely pastoral access,
+    // independent of whether you teach a subject there at all.
     const streamIdForms = [...new Set([stream.id, String(stream._id), req.params.id].filter(Boolean))];
     const inWholeClassScope = ScopeEngine.isClassInScope(req, 'students', stream.classId);
-    const inOwnStreamScope  = (req.scope?.streamIds ?? []).some(sid => streamIdForms.includes(sid));
+    let inOwnStreamScope = (req.scope?.streamIds ?? []).some(sid => streamIdForms.includes(sid));
+    if (!inWholeClassScope && !inOwnStreamScope) {
+      const homeroomStreamIds = await ScopeEngine.resolveHomeroomStreamIds(req);
+      inOwnStreamScope = homeroomStreamIds.some(sid => streamIdForms.includes(sid));
+    }
     if (!inWholeClassScope && !inOwnStreamScope) {
       return E.forbidden(res, 'This class is not in your assigned scope.');
     }

@@ -58,6 +58,11 @@ jest.mock('../../middleware/rbac', () => ({ rbac: () => (_req, _res, next) => ne
 jest.mock('../../middleware/plan', () => ({ planGate: () => (_req, _res, next) => next() }));
 jest.mock('../../middleware/module-gate', () => ({ moduleGate: () => (_req, _res, next) => next() }));
 
+let mockHomeroomTeacherRecord;
+jest.mock('../../utils/resolveTeacher', () => ({
+  resolveTeacher: jest.fn(() => Promise.resolve(mockHomeroomTeacherRecord)),
+}));
+
 let mockClasses, mockStreams, mockStudents, mockTeachingAssignments;
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((c) => {
@@ -120,9 +125,24 @@ beforeEach(() => {
   ]);
   mockStudents = mockMakeFakeCollection([STUDENT_9C, STUDENT_9C_BLUE, STUDENT_4A]);
   mockTeachingAssignments = mockMakeFakeCollection([]);
+  mockHomeroomTeacherRecord = null; // no linked teacher record by default — most tests here aren't about homeroom
   invalidateScopeCache('usr_admin', SCHOOL_A);
   invalidateScopeCache('usr_teacher', SCHOOL_A);
 });
+
+// A form/homeroom teacher (streams.js's formTeacherId) with NO
+// teaching_assignments at all — the exact live-confirmed gap: formTeacherId
+// was never consulted, so this person got 403'd for their own homeroom.
+function asHomeroomTeacherOf(streamId) {
+  mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
+  mockTeachingAssignments = mockMakeFakeCollection([]);
+  mockHomeroomTeacherRecord = { id: 'tch_1', userId: 'usr_teacher' };
+  mockStreams = mockMakeFakeCollection([
+    { id: 'strm_9c_red',  schoolId: SCHOOL_A, classId: 'cls_9c', name: 'Red', formTeacherId: streamId === 'strm_9c_red' ? 'tch_1' : undefined },
+    { id: 'strm_9c_blue', schoolId: SCHOOL_A, classId: 'cls_9c', name: 'Blue', formTeacherId: streamId === 'strm_9c_blue' ? 'tch_1' : undefined },
+    { id: 'strm_4a_blue', schoolId: SCHOOL_A, classId: 'cls_4a', name: 'Blue', formTeacherId: streamId === 'strm_4a_blue' ? 'tch_1' : undefined },
+  ]);
+}
 
 function asTeacherOf(...classIds) {
   mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
@@ -255,5 +275,37 @@ describe('GET /api/streams/:id/students — AUTHZ-28', () => {
     const res = await supertest(buildApp()).get('/api/streams/strm_9c_blue/students');
     expect(res.status).toBe(403);
     expect(JSON.stringify(res.body)).not.toContain('Chiamaka');
+  });
+
+  // 2026-09 — the confirmed live gap: a form/homeroom teacher (formTeacherId)
+  // with ZERO teaching_assignments for their own homeroom class.
+  describe('homeroom/form-teacher access (formTeacherId, no teaching_assignments at all)', () => {
+    test('the exact confirmed bug: a form teacher with NO subject assignment anywhere is still denied without the fix... now correctly ALLOWED for their own stream', async () => {
+      asHomeroomTeacherOf('strm_9c_red');
+      const res = await supertest(buildApp()).get('/api/streams/strm_9c_red/students');
+      expect(res.status).toBe(200);
+      expect(res.body.data[0].firstName).toBe('Amara');
+    });
+
+    test('a form teacher of Red is still denied Blue, its sibling stream in the same class', async () => {
+      asHomeroomTeacherOf('strm_9c_red');
+      const res = await supertest(buildApp()).get('/api/streams/strm_9c_blue/students');
+      expect(res.status).toBe(403);
+      expect(JSON.stringify(res.body)).not.toContain('Chiamaka');
+    });
+
+    test('a form teacher of one class is still denied a completely different class\'s stream', async () => {
+      asHomeroomTeacherOf('strm_4a_blue');
+      const res = await supertest(buildApp()).get('/api/streams/strm_9c_red/students');
+      expect(res.status).toBe(403);
+    });
+
+    test('someone with no linked teacher record and no assignments gets the ordinary zero-assignment 403 — homeroom lookup fails safe, not a 500', async () => {
+      mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
+      mockTeachingAssignments = mockMakeFakeCollection([]);
+      mockHomeroomTeacherRecord = null;
+      const res = await supertest(buildApp()).get('/api/streams/strm_9c_red/students');
+      expect(res.status).toBe(403);
+    });
   });
 });

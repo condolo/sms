@@ -94,7 +94,15 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read'), scope
       if (req.query.dateTo)   filter.date.$lte = req.query.dateTo;
     }
 
+    // Fold in the caller's own homeroom/form-teacher streams (see
+    // scopeEngine.js's foldHomeroomScope) for this request's own scoping
+    // only — never written back onto req.scope, which scopeMiddleware
+    // caches per userId::schoolId for every other module's own next call
+    // to read as-is.
+    const originalScope = req.scope;
+    req.scope = await ScopeEngine.foldHomeroomScope(req);
     ScopeEngine.applyToFilter(req, 'attendance', filter);
+    req.scope = originalScope;
 
     const Attendance = tenantModel('attendance', tenantContext(req));
     const [docs, total] = await Promise.all([
@@ -127,7 +135,10 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read')
       if (req.query.dateTo)   filter.date.$lte = req.query.dateTo;
     }
 
+    const originalScope = req.scope;
+    req.scope = await ScopeEngine.foldHomeroomScope(req);
     ScopeEngine.applyToFilter(req, 'attendance', filter);
+    req.scope = originalScope;
 
     // No classId/studentId -> one school-wide aggregate (a single object,
     // not an array) for dashboard-style summaries. With either given, keep
@@ -206,7 +217,14 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create'), sc
     // school via this route regardless of what teaching_assignments says,
     // since the classes dropdown that feeds this form isn't scoped either.
     // This is the authoritative check; the dropdown itself is unchanged.
-    if (!ScopeEngine.isClassInScope(req, 'attendance', data.classId, student?.streamId)) {
+    // Folds in the caller's own homeroom/form-teacher streams for this
+    // check only (see scopeEngine.js's foldHomeroomScope) — never written
+    // back onto req.scope.
+    const originalScope = req.scope;
+    req.scope = await ScopeEngine.foldHomeroomScope(req);
+    const inScope = ScopeEngine.isClassInScope(req, 'attendance', data.classId, student?.streamId);
+    req.scope = originalScope;
+    if (!inScope) {
       return E.forbidden(res, 'This class is not in your assigned scope.');
     }
 
@@ -246,6 +264,13 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create')
 
     const { classId, streamId, date, period, records } = data;
 
+    // Folds in the caller's own homeroom/form-teacher streams (see
+    // scopeEngine.js's foldHomeroomScope) for every scope check in this
+    // route only — restored immediately after, never written back onto
+    // req.scope.
+    const originalScope = req.scope;
+    req.scope = await ScopeEngine.foldHomeroomScope(req);
+
     const wholeClassGrant = ScopeEngine.isClassInScope(req, 'attendance', classId);
 
     // The request targets one specific stream — validate the caller may
@@ -254,6 +279,7 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create')
     if (streamId && !wholeClassGrant) {
       const myStreamIds = req.scope?.streamIds ?? [];
       if (!myStreamIds.includes(streamId)) {
+        req.scope = originalScope;
         return E.forbidden(res, 'This stream is not in your assigned scope.');
       }
     }
@@ -282,15 +308,18 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create')
       // since that would save an incomplete register without saying so.
       const mismatched = records.filter(r => streamByStudent[r.studentId] !== streamId);
       if (mismatched.length) {
+        req.scope = originalScope;
         return E.badRequest(res, `${mismatched.length} student(s) in this submission do not belong to the requested stream.`);
       }
     } else if (!wholeClassGrant) {
       const myStreamIds = req.scope?.streamIds ?? [];
       allowedRecords = records.filter(r => myStreamIds.includes(streamByStudent[r.studentId]));
       if (allowedRecords.length === 0) {
+        req.scope = originalScope;
         return E.forbidden(res, 'This class is not in your assigned scope.');
       }
     }
+    req.scope = originalScope; // scope checks done — restore before the write below
 
     const Attendance = tenantModel('attendance', tenantContext(req));
 
@@ -342,8 +371,12 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('attendance', 'update'), 
     // in-scope record onto an out-of-scope class via `data.classId`.
     const existing = await Attendance.findOne({ id: req.params.id, schoolId }).select('classId streamId').lean();
     if (!existing) return E.notFound(res, 'Attendance record not found');
-    if (!ScopeEngine.isClassInScope(req, 'attendance', existing.classId, existing.streamId) ||
-        !ScopeEngine.isClassInScope(req, 'attendance', data.classId, existing.streamId)) {
+    const originalScope = req.scope;
+    req.scope = await ScopeEngine.foldHomeroomScope(req);
+    const inScope = ScopeEngine.isClassInScope(req, 'attendance', existing.classId, existing.streamId) &&
+      ScopeEngine.isClassInScope(req, 'attendance', data.classId, existing.streamId);
+    req.scope = originalScope;
+    if (!inScope) {
       return E.forbidden(res, 'This class is not in your assigned scope.');
     }
 
@@ -369,7 +402,11 @@ router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('attendance', 'delete'
 
     const existing = await Attendance.findOne({ id: req.params.id, schoolId }).select('classId streamId').lean();
     if (!existing) return E.notFound(res, 'Attendance record not found');
-    if (!ScopeEngine.isClassInScope(req, 'attendance', existing.classId, existing.streamId)) {
+    const originalScope = req.scope;
+    req.scope = await ScopeEngine.foldHomeroomScope(req);
+    const inScope = ScopeEngine.isClassInScope(req, 'attendance', existing.classId, existing.streamId);
+    req.scope = originalScope;
+    if (!inScope) {
       return E.forbidden(res, 'This class is not in your assigned scope.');
     }
 

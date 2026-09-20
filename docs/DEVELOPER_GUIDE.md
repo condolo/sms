@@ -1451,6 +1451,52 @@ query shape when they aren't.
    admins retain their existing "submit on behalf of another teacher"
    ability for any class.
 
+**Follow-up (v5.103.0) — a THIRD source of access, deliberately walled
+off from everything above.** Prompted directly by thinking through the
+design: subject-teacher access to Attendance ("during their normal
+lessons") was already correctly enforced via `teaching_assignments` —
+no change needed. But `streams.js`'s `formTeacherId` (the designated
+form/homeroom teacher of a stream — already used elsewhere: report
+cards, weekly snapshots, the teacher dashboard's "my form class"
+widget) was **never consulted by Attendance's authorization at all**,
+which reads exclusively from `teaching_assignments`. Confirmed against
+real production data: real cases exist of a teacher being the
+designated homeroom teacher of a stream with zero teaching assignments
+there — that person got an empty class picker and a 403 everywhere in
+Attendance, unable to take their own homeroom's daily register.
+
+```js
+// server/utils/scopeEngine.js
+async function resolveHomeroomStreamIds(req) {
+  // resolves the caller's own teacher record (reusing resolveTeacher.js),
+  // returns the streams where streams.formTeacherId === that teacher's id
+}
+async function foldHomeroomScope(req) {
+  // returns a NEW scope with resolveHomeroomStreamIds folded into
+  // streamIds — never mutates req.scope; the caller restores it after use
+}
+```
+
+**The one rule that makes this safe: `foldHomeroomScope` is called
+directly by `streams.js`'s and `attendance.js`'s own routes (and
+transitively by `resolveClassPickerScope`, for `classes.js`'s and
+`assessment.js`'s pickers) — it is never folded into
+`scopeMiddleware.js`'s generic per-request scope**, the one every
+stream-aware module (grades, assessment, report_cards, growth_profile,
+growth_records, lessons) reads from identically. Being someone's form
+teacher is real, legitimate access to that stream's roster and daily
+attendance — it is not, and must never become, academic authority to
+enter grades or mark curriculum coverage for a subject they don't
+actually teach. Confirmed live with the same real account this fix was
+built against: homeroom access correctly reaches Attendance and the
+roster, and is correctly still denied (403) in Lessons.
+
+If a future module has a similar "the pastoral/administrative owner of
+this stream should have real access here too" need, follow this exact
+shape — a request-local `foldHomeroom*Scope` call at that module's own
+routes, restored immediately after use — never widen
+`scopeMiddleware.js`'s shared computation to include it.
+
 ### Student Record Merge — `server/utils/student-merge.js` (v5.79.0)
 
 Applies the dual-identifier pattern above to a new problem: removing a duplicate student (see `POST /api/students/duplicates/resolve[-bulk]`) can't just delete the losing record — every collection with a `studentId` reference to it would either end up orphaned (if only the student doc is deleted) or lose real history (if the deletion cascades). `mergeStudentData(schoolId, ctx, oldStudent, newStudentId)` re-points every `studentId` reference from the removed record onto the kept one FIRST, matching both `oldStudent.id` and `String(oldStudent._id)`, across every collection in its `REFERENCING_COLLECTIONS` list — 23 as of this writing, including `invoices`/`payments` (merged, not deleted, unlike the unrelated `DELETE /students/purge`, which still hard-deletes those for a genuine, non-duplicate removal).
