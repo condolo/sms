@@ -2080,8 +2080,7 @@ router.put('/draft-comments/:studentId/subject/:subjectId', authMiddleware, PLAN
     if (!termNumber) return E.badRequest(res, 'termNumber is required');
     if (typeof comment !== 'string') return E.badRequest(res, 'comment must be a string');
 
-    // Guard: subject-teacher scoping (RC6) — only enforced when the school
-    // has turned on academic_config.subjectAssignmentEnforced
+    // Guard: subject-teacher scoping (RC6) — unconditional (see subject-scope.js)
     if (!(await canWriteSubject(req, classId, subjectId))) {
       return E.forbidden(res, 'You are not assigned to teach this subject in this class.');
     }

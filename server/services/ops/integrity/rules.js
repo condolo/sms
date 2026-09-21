@@ -74,7 +74,10 @@ const RULES = [
     severity: 'warn',
     async run() {
       const studentIds = await _model('students').distinct('id').catch(() => []);
-      const orphans = await _model('attendance_records')
+      // 'attendance' — not 'attendance_records', which doesn't exist. Same
+      // stale-name-always-empty bug as the finance fix below; this check
+      // silently reported "0 orphans" for as long as the wrong name was here.
+      const orphans = await _model('attendance')
         .find({ studentId: { $nin: studentIds, $exists: true } })
         .select('studentId classId date').limit(10).lean();
       return { count: orphans.length, samples: orphans.map(d => d.studentId) };
@@ -121,9 +124,17 @@ const RULES = [
     severity: 'warn',
     async run() {
       const classIds = await _model('classes').distinct('id').catch(() => []);
-      const orphans = await _model('grade_entries')
+      // 'assessment_marks' — not 'grade_entries', which doesn't exist. This
+      // is the live per-student-per-subject marks collection backing the
+      // CA/HW/MT/ET assessment system every school actually enters marks
+      // into (server/routes/assessment.js). The older 'grades' gradebook
+      // collection (server/routes/grades.js) is a separate, unmounted
+      // legacy system populated only via the Google Classroom eLearning
+      // sync — checking it here would give little real signal for most
+      // schools, unlike this one. Field is 'subjectId', not 'subject'.
+      const orphans = await _model('assessment_marks')
         .find({ classId: { $nin: classIds, $exists: true } })
-        .select('classId studentId subject').limit(10).lean();
+        .select('classId studentId subjectId').limit(10).lean();
       return { count: orphans.length, samples: orphans.map(d => d.classId) };
     },
   },
@@ -167,7 +178,10 @@ const RULES = [
     severity: 'warn',
     async run() {
       const studentIds = await _model('students').distinct('id').catch(() => []);
-      const orphans = await _model('behaviour_records')
+      // 'behaviour_incidents' — not 'behaviour_records', which doesn't
+      // exist. Same stale-name-always-empty bug as the finance/attendance
+      // fixes in this file.
+      const orphans = await _model('behaviour_incidents')
         .find({ studentId: { $nin: studentIds, $exists: true } })
         .select('studentId type date').limit(10).lean();
       return { count: orphans.length, samples: orphans.map(d => d.studentId) };

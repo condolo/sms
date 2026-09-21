@@ -9,11 +9,11 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  FileText, ClipboardList, Plus, X, Loader2,
+  FileText, Plus, X, Loader2,
   CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight,
-  Search, Save, Check, TrendingUp, PenLine, Bell,
-  Award, Users2, GraduationCap, Filter, Percent, Settings,
-  Tag, Layers, Info, Trash2, BookOpen, ClipboardPaste, Lock,
+  Search, Save, Check, PenLine, Bell,
+  Users2, GraduationCap, Filter, Percent, Settings,
+  Tag, Layers, Info, ClipboardPaste, Lock,
   BookMarked, LockOpen, Send, ClipboardEdit,
 } from 'lucide-react';
 import {

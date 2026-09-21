@@ -6,6 +6,35 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.111.0] — 2026-09-21 — fix(ops): Database Integrity checker was silently checking 3 collections that don't exist
+
+Requested as a "system cleaning" pass to find dead code and anything confusing the system. Two parallel audits (server + client) surfaced this as the one genuinely live bug, not just cleanup — every other finding turned out to be either already-dead code with zero customer impact, or needed a product decision I flagged separately rather than acting on unilaterally.
+
+### Root cause
+`server/services/ops/integrity/rules.js` — mounted live via `/api/ops` — had 3 of its ~9 orphan-detection rules querying collection names that don't exist anywhere in this app: `attendance_records` (real: `attendance`), `behaviour_records` (real: `behaviour_incidents`), and `grade_entries` (repointed to `assessment_marks`, the live per-student-per-subject marks collection — see reasoning below). A query against a nonexistent MongoDB collection doesn't error, it just returns an empty result forever — so these 3 checks always reported "0 orphans," giving false confidence rather than an error anyone would notice. The file's own header comment already documented this exact bug class happening once before with `finance_invoices`/`finance_payments` vs. the real `invoices`/`payments`.
+
+**Investigated before fixing, not assumed:** `grade_entries` had no obvious 1:1 real-collection match. Traced it to two live candidates — the legacy `grades` gradebook collection (`server/routes/grades.js`, whose HTTP route is itself unmounted and dead) vs. `assessment_marks` (the collection every school's CA/HW/MT/ET marks actually live in today, via `server/routes/assessment.js`). Chose `assessment_marks` because it's the one collection that's actually populated for real schools — pointing the checker at the near-permanently-empty legacy collection would have "fixed" the name while still providing near-zero real signal. Also corrected the orphan check's own field list (`subject` → `subjectId`, matching the real schema — the wrong field name would have silently omitted data from the returned samples even after the collection name was fixed).
+
+### Fixed
+- All 3 rules repointed to their real, live collections, each with an inline comment (matching the existing `finance` rule's precedent) explaining why.
+- New test `server/__tests__/integrity-rules-collection-names.test.js` (4 tests) pins the exact collection name each rule queries — a query against a wrong-but-plausible name still "succeeds" with an empty array, so a smoke test alone would never have caught this; the assertion has to be the collection name itself.
+
+### Also cleaned up (confirmed dead, zero dependents, verified before touching)
+- Deleted `client/src/pages/import-export/ImportExportPage.jsx` — 298 lines, explicitly superseded per `App.jsx`'s own comment ("dissolved into individual modules, v4.18.0"), zero references anywhere in the codebase.
+- Fixed 3 stale comments in `assessment.js`/`report-cards.js` still describing subject-teacher scope enforcement as opt-in via `academic_config.subjectAssignmentEnforced` — that flag was made unconditional earlier this session (v5.106.0); the comments were the only thing still describing the old, no-longer-true behavior. No code change, wording only.
+- Removed a handful of confirmed-unused `lucide-react` icon imports (each verified individually via grep to appear only on its own import line, nowhere else in the file) from `SettingsPage.jsx`, `ExamsPage.jsx`, and `AttendancePage.jsx`.
+
+### Deliberately NOT acted on — flagged back to the user instead of assumed
+- `server/routes/grades.js` (the legacy manual Gradebook API) is unmounted, and its client page was already deleted in a past refactor — but `elearning.js`'s Google Classroom sync still writes directly into the same `grades` collection via the Mongoose model, bypassing the dead HTTP route entirely. Whether to formally retire the legacy Gradebook (delete `grades.js` + its now-inert merge-fallback call in `report-cards.js`) or restore manual entry for non-Google-Classroom schools is a product decision, not a bug fix — initial framing of this as "3 features silently broken" was corrected before acting: `report-cards.js`'s merge logic already tolerates the legacy source being empty by design (comment: "CA marks win on per-type conflict"), so report cards are computing correctly regardless.
+- `moduleRegistry.js`'s `reports` permission entry remains the only one with zero backing `rbac()` calls — now confirmed it also gates the entire Analytics module's on/off toggle (`analytics.js`'s `moduleGate('reports')`) on top of the sidebar-nav consequence found earlier — still needs a decision, not a unilateral removal.
+- `PlatformQATab.jsx` + `qa-health.js` — a whole "Platform QA Dashboard" feature built but never wired into `SettingsPage.jsx`'s tabs or `server/index.js`'s routes, confirmed dead on both sides via git history. Left as-is pending a wire-up-vs-delete decision.
+- ~8 duplicated hand-rolled CSV-export implementations and duplicated `formatDate`/`initials` helpers across pages — real duplication, but consolidating them is a refactor with its own regression risk (subtle CSV-quoting differences per call site), not a pure dead-code removal; left for a deliberate, separate pass if wanted.
+
+### Verified
+Full Jest suite: 223 suites, 2201/2201 passing (4 new). Production client build clean. Live-checked the Settings page (heaviest user of the touched icon-import list) in the browser after the edits — renders fully, zero console errors referencing any removed identifier.
+
+---
+
 ## [v5.110.0] — 2026-09-21 — feat(hr): "Configure Leave/Payroll Approval Workflow" is now a grantable permission
 
 Resolves one of the two items flagged in v5.108.0's audit as "needs a decision, not a pure bug fix": `hr.js`'s 4 `manage_workflow`-gated routes had the action string seeded correctly for the built-in `superadmin`/`admin`/`hr` roles, but no control existed anywhere in Roles & Permissions to grant or revoke it for a custom role — a custom "HR Manager" role could never be given this capability no matter what was checked in the UI.

@@ -8,8 +8,8 @@ import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  CalendarDays, ChevronDown, CheckCircle2, XCircle, Clock,
-  FileText, Users, RefreshCw, Save, Loader2, AlertTriangle,
+  CalendarDays, ChevronDown, CheckCircle2, Clock,
+  Users, Save, Loader2, AlertTriangle,
   CheckSquare, Square, BarChart3, ChevronLeft, ChevronRight, Printer, Download,
   Layers,
 } from 'lucide-react';

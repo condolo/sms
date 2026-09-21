@@ -911,8 +911,7 @@ router.post('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'create'), a
     const markStudent = await tenantModel('students', tenantContext(req))
       .findOne({ schoolId, id: d.studentId }).select('streamId').lean();
 
-    // Guard: subject-teacher scoping (RC6) — only enforced when the school
-    // has turned on academic_config.subjectAssignmentEnforced
+    // Guard: subject-teacher scoping (RC6) — unconditional (see subject-scope.js)
     if (!(await canWriteSubject(req, d.classId, d.subjectId, markStudent?.streamId))) {
       return _err(res, 'You are not assigned to teach this subject in this class.', 403);
     }
@@ -1031,10 +1030,9 @@ router.post('/marks/bulk', authMiddleware, PLAN, MODGATE, rbac('grades', 'create
       .find({ schoolId, id: { $in: bulkStudentIds } }).select('id streamId').lean();
     const streamByStudent = Object.fromEntries(bulkStudentDocs.map(s => [s.id, s.streamId ?? null]));
 
-    // Guard: subject-teacher scoping (RC6) — one query for every distinct
-    // {classId, subjectId, streamId} triple in the batch, only enforced
-    // when the school has turned on academic_config.subjectAssignmentEnforced.
-    // Deduped by triple, not just {classId, subjectId} — within one class+
+    // Guard: subject-teacher scoping (RC6) — unconditional (see subject-scope.js);
+    // one query for every distinct {classId, subjectId, streamId} triple in
+    // the batch. Deduped by triple, not just {classId, subjectId} — within one class+
     // subject, 7i and 7ii can have different assigned teachers, so the same
     // pair can be assigned for one stream and not the other.
     const distinctPairs = [...new Map(
