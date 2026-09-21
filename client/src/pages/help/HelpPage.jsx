@@ -285,6 +285,10 @@ const SECTIONS = [
         q: 'Who can do what here? (Roles & Permissions)',
         a: '• View Register — see attendance already marked\n• Mark Attendance — record present/absent/late/excused\n• Edit Records — change attendance after it has been saved\n• Export / Print Register — download or print the register\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
+      {
+        q: 'Can I take attendance straight from my dashboard?',
+        a: 'Yes. Your Dashboard\'s "Today\'s Timetable" widget lists each of your lessons for today, with a "Take Att." shortcut on each row that opens Attendance with that lesson\'s class (and stream, if it has one) already selected. The button switches to "✓ Att." once that class/stream\'s register has been submitted for the day.',
+      },
     ],
   },
 

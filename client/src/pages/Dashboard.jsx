@@ -1840,7 +1840,11 @@ function TeacherView({ data, loading, primary }) {
                 {timetableToday.map((slot, i) => {
                   const start=_tmins(slot.startTime), end=_tmins(slot.endTime);
                   const isNow=start<=nowMins&&nowMins<end, isNext=!activeSlot&&slot===nextSlot, isPast=end<=nowMins;
-                  const attSubmitted=attendanceWidget.find(a=>a.classId===slot.classId)?.submitted??false;
+                  // Matched by BOTH classId and streamId — two lessons for the
+                  // same class but different streams (e.g. Math for 4A then
+                  // 4B) must never share one "submitted" status.
+                  const attSubmitted=attendanceWidget.find(a=>a.classId===slot.classId && (a.streamId??null)===(slot.streamId??null))?.submitted??false;
+                  const attendanceHref = `/attendance${slot.classId?`?classId=${slot.classId}${slot.streamId?`&streamId=${slot.streamId}`:''}`:''}`;
                   return (
                     <div key={i} className={`px-5 py-3 ${isNow?'bg-teal-50':''}`}>
                       <div className="flex items-center gap-3">
@@ -1855,13 +1859,13 @@ function TeacherView({ data, loading, primary }) {
                             {isNext && <span className="text-[9px] font-bold text-white bg-amber-400 px-1.5 py-0.5 rounded-full shrink-0">NEXT</span>}
                           </div>
                           <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                            <span>{slot.className}</span>
+                            <span>{slot.className}{slot.streamName?` · ${slot.streamName}`:''}</span>
                             {slot.room && <><span>·</span><span className="flex items-center gap-0.5"><MapPin size={9}/>{slot.room}</span></>}
                           </div>
                         </div>
                         {!isPast && (
                           <div className="flex items-center gap-1 shrink-0">
-                            <Link to={`/attendance${slot.classId?`?classId=${slot.classId}`:''}`}
+                            <Link to={attendanceHref}
                               className={`text-[10px] font-semibold px-2 py-1 rounded-lg border transition ${attSubmitted?'text-emerald-600 bg-emerald-50 border-emerald-200':'text-amber-600 bg-amber-50 border-amber-200 hover:bg-amber-100'}`}>
                               {attSubmitted?'✓ Att.':'Take Att.'}
                             </Link>

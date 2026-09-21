@@ -6,6 +6,33 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.104.0] — 2026-09-21 — fix(dashboard): "Today's Timetable" showed nothing, for every school, every day, since it shipped
+
+Prompted directly, following straight on from v5.103.0's homeroom fix: "and the teacher can see in their dashboard Today's Lessons, proceed to take attendance?" Investigating the Dashboard → Attendance flow surfaced a foundational bug underneath it, plus two compounding gaps in the flow itself — all fixed together on explicit authorization ("proceed").
+
+### The root cause — a day-name casing mismatch, present since these routes shipped
+`timetable_slots.day` is stored **lowercase** in every real document (`timetable.js`'s own `DAYS` constant is lowercase, used correctly there). But `teacher-portal.js`, `student-portal.js`, and `parent-portal.js` each independently declared their own local `DAY_NAMES` array **capitalized**, and queried `Timetable.find({ day: todayDay })` against it. Confirmed directly against the production database: a query for `day: 'Monday'` matched **0** real documents; `day: 'monday'` matched every one. This meant the "Today's Timetable" widget has shown "no lessons scheduled today" for every teacher, student, and parent, on every dashboard, every day, for as long as these three routes have existed — independent of and more fundamental than the flow this fix set out to check.
+
+### Two further gaps, specific to the teacher dashboard's attendance flow
+1. **`timetableToday` never carried `streamId`.** A teacher with two lessons today for the same class but different streams (e.g. Math for 4A then 4B) had no way to tell the two rows apart.
+2. **Attendance's "submitted" check was per-classId only.** Marking one stream's register as submitted incorrectly showed a still-unmarked sibling stream's lesson as "✓ Att." too.
+3. **The "Take Att." deep-link was silently non-functional.** `Dashboard.jsx` linked to `/attendance?classId=...`, but `AttendancePage.jsx` never read URL params at all — the link landed on a blank picker every time, regardless of the two bugs above.
+
+### Fixed
+- `server/routes/teacher-portal.js`, `server/routes/student-portal.js`, `server/routes/parent-portal.js` — `DAY_NAMES` fixed to lowercase, matching real stored data.
+- `server/routes/teacher-portal.js` — `timetableToday` now selects and returns `streamId`/`streamName` per slot; the attendance-submitted check now keys off a composite `(classId, streamId)` pair (`_slotKey`) instead of `classId` alone, so two streams' submitted-status never bleed into each other. A legacy whole-class lesson (no `streamId` at all) behaves exactly as before.
+- `client/src/pages/Dashboard.jsx` — "Today's Timetable" now shows the stream name alongside the class (e.g. "Standard 4A · 4A"), the submitted-check matches on `(classId, streamId)`, and the "Take Att." link includes `&streamId=...` when the lesson has one.
+- `client/src/pages/attendance/AttendancePage.jsx` — now reads `classId`/`streamId` from the URL (via `useSearchParams`, following the same lazy-`useState`-initializer + syncing-`useEffect` pattern already used by `StudentList.jsx`) and pre-selects them on load. Deliberately guarded so the sync only fires when a `classId` param is actually present — navigating to a bare `/attendance` (e.g. re-clicking the sidebar link) never wipes an in-progress attendance marking.
+- The "Lesson" link (to `/lessons?classId=...`) was left as-is — `LessonsPage.jsx` has no URL-param deep-linking support at all, a separate, out-of-scope gap noted but not acted on here.
+
+### Verified
+- Live, end-to-end, in the browser (demo school, "Teacher" quick-login, temporary seeded Monday timetable/assignment data, cleaned up after): "Today's Timetable" now correctly shows the seeded lesson (previously showed nothing, confirming the casing bug's real-world impact); clicking "Take Att." correctly lands on `/attendance?classId=...` with "Standard 4A" pre-selected in the class dropdown.
+- New test file `server/__tests__/routes/teacher-portal-timetable-attendance.test.js` (6 tests: streamId on timetable rows, per-(class,stream) submitted-status isolation, distinct widget entries, legacy whole-class compatibility, and two explicit day-casing regression tests). `student-portal-lessons-coverage.test.js` and `parent-portal-lessons-coverage.test.js` each extended with 2 new day-casing regression tests.
+- A subtle lesson caught mid-fix: this phase's own first draft of the new teacher-portal test file used a capitalized day fixture too — matching the route's bug at the time, so the test passed without ever catching the real-world mismatch (mock and code were both wrong the same way). Fixed the fixture and added explicit tests asserting the lowercase value matches and the old capitalized value does not, so this exact class of self-consistent-but-wrong mock can't recur silently.
+- Full Jest suite: 215 suites, 2129/2129 passing (2119 + 10 new). `verify-rbac-coverage.js` 100% (487/487, no regression). `security-scan.js` clean. Production client build passes.
+
+---
+
 ## [v5.103.0] — 2026-09-20 — fix(attendance): a form/homeroom teacher with no subject assignment could not take attendance for their own class
 
 Prompted directly, thinking through the design: "the subject teacher can take attendance during their normal lessons, but the class teacher/homeroom teacher can take daily attendance for each stream they have been allocated... confirm this status." Investigated and confirmed both halves before touching any code.

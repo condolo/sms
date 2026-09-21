@@ -134,7 +134,12 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     }
 
     // ── Today's timetable ────────────────────────────────────
-    const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    // Lowercase — matches how timetable.js's own SlotSchema actually
+    // stores `day` (confirmed against real data: a query for 'Monday'
+    // matches 0 documents, 'monday' matches every one). A capitalized
+    // array here silently broke "Today's Timetable" on this dashboard
+    // for every student, every day, since this route shipped.
+    const DAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
     const today = DAY_NAMES[new Date().getDay()];
 
     let rawSlots = student.classId

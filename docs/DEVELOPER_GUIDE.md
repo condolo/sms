@@ -1497,6 +1497,25 @@ shape — a request-local `foldHomeroom*Scope` call at that module's own
 routes, restored immediately after use — never widen
 `scopeMiddleware.js`'s shared computation to include it.
 
+### Dashboard "Today's Timetable" day-name casing (v5.104.0)
+
+`timetable_slots.day` is stored **lowercase** in every real document — `timetable.js`'s own canonical constant is
+```js
+const DAYS = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+```
+used correctly in that file's own three query sites. But `teacher-portal.js`, `student-portal.js`, and `parent-portal.js` each independently declared their own **local** `DAY_NAMES` array, capitalized (`['Sunday','Monday',...]`), and queried `Timetable.find({ day: todayDay })` against it. Confirmed directly against the production database: `day: 'Monday'` matched 0 documents; `day: 'monday'` matched every one. This made "Today's Timetable" show nothing, on all three dashboards, for every school, since each of those routes shipped — found only because it happened to sit directly underneath a feature request ("can the teacher take attendance from Today's Lessons on their dashboard?") that made the empty widget observable.
+
+**If you ever add a new route that queries `timetable_slots` by day of week, do not declare your own day-name array.** Either import `timetable.js`'s `DAYS` constant, or build the lookup the same way it does — `['sunday','monday',...][new Date().getDay()]` — never capitalized. A test file that seeds its own "today" fixture is just as exposed to this mistake as the route itself: this phase's own first draft of `teacher-portal-timetable-attendance.test.js` used a capitalized fixture too, matching the (buggy) route it was testing, so the test passed while never catching the real-world mismatch — mock and code were both wrong the same way. There is no defense against this except comparing the fixture's actual string casing against a real database document, which is why the fix added an explicit pair of regression tests (one lowercase value that must match, one capitalized value that must not) rather than trusting a single happy-path assertion.
+
+**Two further gaps specific to the teacher dashboard's "Today's Timetable → Take Attendance" flow, fixed in the same pass:**
+1. `teacher-portal.js`'s `timetableToday` never selected `streamId`/`streamName`, so a teacher with two lessons today for the same class but different streams (e.g. Math for 4A then 4B) had no way to distinguish the rows. Fixed by selecting both fields per slot.
+2. The attendance-submitted check was keyed by `classId` alone, so marking one stream's register as submitted incorrectly showed a still-unmarked sibling stream's lesson as already submitted too. Fixed with a composite-key helper:
+```js
+const _slotKey = (classId, streamId) => `${classId}::${streamId ?? ''}`;
+```
+used to build both the submitted-lookup set and the widget's own dedup map, so a legacy whole-class lesson (no `streamId`) and a stream-scoped one never collide.
+3. `Dashboard.jsx`'s "Take Att." link pointed to `/attendance?classId=...&streamId=...`, but `AttendancePage.jsx` had no URL-param support at all — the deep-link silently landed on an empty picker regardless of the two fixes above. Fixed by adding `useSearchParams`-based initialization to `AttendancePage.jsx`, following the same lazy-`useState`-initializer + syncing-`useEffect` pattern already established in `StudentList.jsx` (`?classId=`/`?streamId=`) — with one deliberate deviation: the sync effect only fires `if (cid)` (a `classId` param is actually present), rather than clearing state unconditionally on every param change, so navigating to a bare `/attendance` (e.g. re-clicking the sidebar link) never wipes attendance marks the teacher has already started entering.
+
 ### Student Record Merge — `server/utils/student-merge.js` (v5.79.0)
 
 Applies the dual-identifier pattern above to a new problem: removing a duplicate student (see `POST /api/students/duplicates/resolve[-bulk]`) can't just delete the losing record — every collection with a `studentId` reference to it would either end up orphaned (if only the student doc is deleted) or lose real history (if the deletion cascades). `mergeStudentData(schoolId, ctx, oldStudent, newStudentId)` re-points every `studentId` reference from the removed record onto the kept one FIRST, matching both `oldStudent.id` and `String(oldStudent._id)`, across every collection in its `REFERENCING_COLLECTIONS` list — 23 as of this writing, including `invoices`/`payments` (merged, not deleted, unlike the unrelated `DELETE /students/purge`, which still hard-deletes those for a genuine, non-duplicate removal).

@@ -3,7 +3,8 @@
    /platform-audit: Replaced alert(), radio buttons → status buttons,
    added quick-mark all, attendance rate summary strip, success toast
    ============================================================ */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -43,12 +44,31 @@ function dayOfWeekFor(dateStr) {
 /* ══════════════════════════════════════════════════════════════ */
 export default function AttendancePage() {
   const today   = new Date().toISOString().slice(0, 10);
+  /* Read ?classId=&streamId= from the URL so the Dashboard's "Take Att."
+     link on today's timetable can jump straight into the right register
+     instead of dropping the teacher on an empty "Select a class…" state
+     they'd have to fill in by hand. */
+  const [searchParams] = useSearchParams();
   const [date, setDate]       = useState(today);
-  const [classId, setClassId] = useState('');
-  const [streamId, setStreamId] = useState('');
+  const [classId, setClassId] = useState(() => searchParams.get('classId') ?? '');
+  const [streamId, setStreamId] = useState(() => searchParams.get('streamId') ?? '');
   const [edits, setEdits]     = useState({});   // { studentId: status }
   const [toast, setToast]     = useState(null); // { type: 'success'|'error', msg: string }
   const qc = useQueryClient();
+
+  /* React to a later navigation to this same page with different params
+     (e.g. clicking a different lesson's "Take Att." link while already
+     on Attendance) — same pattern as StudentList.jsx's own classId/
+     streamId deep-link support. */
+  useEffect(() => {
+    const cid = searchParams.get('classId') ?? '';
+    const sid = searchParams.get('streamId') ?? '';
+    if (cid) {
+      setClassId(cid);
+      setStreamId(sid);
+      setEdits({});
+    }
+  }, [searchParams.get('classId'), searchParams.get('streamId')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function showToast(type, msg) {
     setToast({ type, msg });

@@ -14,7 +14,12 @@ const { ok, E }          = require('../utils/response');
 const { resolveTeacher } = require('../utils/resolveTeacher');
 
 const router    = express.Router();
-const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+// Lowercase — matches how timetable.js's own SlotSchema actually stores
+// `day` (its DAYS constant is lowercase; confirmed against real data: a
+// query for 'Monday' matches 0 real documents, 'monday' matches every
+// one). A capitalized array here silently broke "Today's Timetable" on
+// this dashboard for every teacher, every day, since this route shipped.
+const DAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
 
 function _requireTeacher(req, res) {
   const role = req.jwtUser?.role;
@@ -112,35 +117,49 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     const subjectIds = [...new Set(assignments.map(a => a.subjectId).filter(Boolean))];
 
     // ── Today's timetable ────────────────────────────────────
+    // streamId included so the dashboard can tell apart two lessons for
+    // the SAME class but different streams (e.g. Math for 4A then 4B) —
+    // without it, the "Take Att." deep-link below can't pre-select the
+    // right stream, and the submitted-check further down would wrongly
+    // conflate the two.
     const timetableToday = await Timetable.find({
       schoolId,
       day: todayDay,
       $or: [{ teacherId }, { teacherId: userId }],
     }).sort({ startTime: 1 })
-      .select('subjectName className classId startTime endTime room teacherName')
+      .select('subjectName className classId streamId streamName startTime endTime room teacherName')
       .lean();
 
     // Classes that appear in today's timetable
     const todayClassIds = [...new Set(timetableToday.map(s => s.classId).filter(Boolean))];
 
-    // ── Which timetable classes have attendance today ─────────
-    const todayAttClassIds = classIds.length
-      ? await Attendance.distinct('classId', {
+    // ── Which (class, stream) combos have attendance today ────
+    // A composite key, not a plain classId distinct — a teacher with two
+    // lessons today for the same class but different streams must see
+    // each one's OWN submitted status, not "any register for this class
+    // today" bleeding across both (the exact bug this fix closes).
+    const _slotKey = (classId, streamId) => `${classId}::${streamId ?? ''}`;
+    const todayAttCombos = classIds.length
+      ? await Attendance.find({
           schoolId,
           date: todayISO,
           classId: { $in: todayClassIds.length ? todayClassIds : classIds },
-        }).catch(() => [])
+        }).select('classId streamId').lean().catch(() => [])
       : [];
+    const submittedKeys = new Set(todayAttCombos.map(a => _slotKey(a.classId, a.streamId)));
 
     const attendanceStatus = timetableToday.map(slot => ({
       classId:   slot.classId,
       className: slot.className,
-      submitted: todayAttClassIds.includes(slot.classId),
+      streamId:  slot.streamId ?? null,
+      streamName: slot.streamName ?? null,
+      submitted: submittedKeys.has(_slotKey(slot.classId, slot.streamId)),
     }));
-    // Deduplicate by classId
+    // Deduplicate by (classId, streamId) — NOT classId alone, which used
+    // to silently merge two different streams' lessons into one entry.
     const attStatusMap = {};
     for (const s of attendanceStatus) {
-      attStatusMap[s.classId] = s;
+      attStatusMap[_slotKey(s.classId, s.streamId)] = s;
     }
     const attendanceWidget = Object.values(attStatusMap);
     const pendingCount     = attendanceWidget.filter(s => !s.submitted).length;

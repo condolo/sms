@@ -57,7 +57,7 @@ function mockCollection(seed = []) {
   };
 }
 
-let mockSchoolDoc, mockStudentDoc, mockCoverageDocs, mockTopicDocs, mockSubjectDocs;
+let mockSchoolDoc, mockStudentDoc, mockCoverageDocs, mockTopicDocs, mockSubjectDocs, mockTimetableDocs;
 
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((c) => {
@@ -72,6 +72,7 @@ jest.mock('../../utils/tenant-model', () => ({
     if (collection === 'lesson_coverage') return mockCollection(mockCoverageDocs);
     if (collection === 'syllabus_topics') return mockCollection(mockTopicDocs);
     if (collection === 'subjects')        return mockCollection(mockSubjectDocs);
+    if (collection === 'timetable_slots') return mockCollection(mockTimetableDocs);
     return mockCollection([]);
   },
 }));
@@ -104,6 +105,7 @@ beforeEach(() => {
     { id: 'topic_2', schoolId: SCHOOL_A, subjectId: 'subj_eng', academicYear: '2026', subtopics: [] },
   ];
   mockCoverageDocs = [];
+  mockTimetableDocs = [];
 });
 
 describe('GET /api/parent-portal/dashboard/:childId — curriculum coverage', () => {
@@ -134,5 +136,30 @@ describe('GET /api/parent-portal/dashboard/:childId — curriculum coverage', ()
     const res = await supertest(buildApp()).get(`/api/parent-portal/dashboard/${CHILD_1}`);
     const eng = res.body.data.lessonsCoverage.find(s => s.subjectId === 'subj_eng');
     expect(eng.coveredTopics).toBe(1);
+  });
+});
+
+describe("GET /api/parent-portal/dashboard/:childId — Today's Timetable day-name casing (2026-09)", () => {
+  // Confirmed against real production data before this fix: every real
+  // timetable_slots document stores `day` lowercase (e.g. 'monday') — a
+  // query for the capitalized form ('Monday') matched zero documents,
+  // ever. "Today's Timetable" showed nothing for every parent's child,
+  // every day, since this route shipped.
+  test('a real-shaped lowercase day value is matched', async () => {
+    const today = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][new Date().getDay()];
+    mockTimetableDocs = [
+      { schoolId: SCHOOL_A, classId: CLASS_ID, day: today, subjectName: 'English', startTime: '08:00', endTime: '08:40' },
+    ];
+    const res = await supertest(buildApp()).get(`/api/parent-portal/dashboard/${CHILD_1}`);
+    expect(res.body.data.timetableToday).toHaveLength(1);
+  });
+
+  test('the OLD capitalized day value is correctly NOT matched by the now-fixed query', async () => {
+    const capitalized = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date().getDay()];
+    mockTimetableDocs = [
+      { schoolId: SCHOOL_A, classId: CLASS_ID, day: capitalized, subjectName: 'English', startTime: '08:00', endTime: '08:40' },
+    ];
+    const res = await supertest(buildApp()).get(`/api/parent-portal/dashboard/${CHILD_1}`);
+    expect(res.body.data.timetableToday).toHaveLength(0);
   });
 });

@@ -142,7 +142,12 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
     const LibraryLoans  = tenantModel('library_loans', tenantContext(req));
 
     const todayISO = new Date().toISOString().slice(0, 10);
-    const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    // Lowercase — matches how timetable.js's own SlotSchema actually
+    // stores `day` (confirmed against real data: a query for 'Monday'
+    // matches 0 documents, 'monday' matches every one). A capitalized
+    // array here silently broke "Today's Timetable" on this dashboard
+    // for every parent, every day, since this route shipped.
+    const DAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
     const todayDay  = DAY_NAMES[new Date().getDay()];
 
     const student = await Students.findOne({ id: childId, schoolId })
