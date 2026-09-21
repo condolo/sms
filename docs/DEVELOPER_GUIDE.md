@@ -1569,6 +1569,72 @@ student's full report card (scores, GPA, comments) by id. Fixed by
 mirroring the exact same check (including the compliance audit log)
 for `role === 'student'` against `jwtUser.studentId`.
 
+**Follow-up (v5.107.0) — a real-world consequence of `MODULE_SCOPE.exams`
+not being `streamAware`, and a separate RBAC resource-key bug found
+while confirming it.** Prompted by the user asking for precise
+confirmation of exactly how the v5.106.0 fix scopes each module — "a
+teacher is assigned a stream not entire class... still treated per
+stream, confirm this."
+
+**Confirmed, with the honest asymmetry stated plainly:** `assessment.js`
+and `report-cards.js` are genuinely stream-precise — `assessment_marks`
+and `report_card_snapshots` both carry a real `streamId` (resolved
+from the student, `assessment.js`'s `POST /marks`/`/marks/bulk`,
+`report-cards.js`'s publish path), `MODULE_SCOPE.assessment`/
+`report_cards` are `streamAware: true`, and `applyToFilter`'s
+streamAware `$or` branch matches each record against its OWN
+`streamId` — confirmed even for a teacher holding TWO separate
+stream-scoped `teaching_assignments` rows for the same class (e.g.
+Math for both "Diamond" and "Sapphire", never a whole-class row):
+`scopeMiddleware.js`'s `_loadAssigned` keeps both in `streamIds`, never
+promotes them to `classIds`, so each record is still checked against
+its own real `streamId` — never silently equivalent to "any record for
+this class." `exams.js` is **not** the same — `exam_results` carries no
+`streamId` field at all (by design, see v5.106.0's own note above), so
+a stream-only-scoped teacher's exam visibility resolves via
+`_examClassScope`'s parent-class fold: they see every exam for the
+**whole class** (every stream), narrowed only by subject. This is a
+real, documented data-model limitation, not an oversight — exams
+simply aren't split per stream the way lessons/attendance/grades are.
+
+**One genuine gap found and fixed while confirming this:** `GET
+/assessment/marks/summary` called `isClassInScope(req, 'assessment',
+classId)` **without** passing `streamId` — unlike `GET /report`'s
+identical-looking check just above it in the same file, which does.
+A stream-only-scoped teacher was denied outright (403) here instead of
+being narrowed to their own stream. Fixed by accepting an optional
+`streamId` query param (no live client calls this endpoint today —
+confirmed via search, `client.js`'s `marksSummary()` has no caller
+anywhere — so this was latent, not active).
+
+**Separately, reported live in the same conversation:** an admin gave
+a teacher the built-in `exams_officer` role with full exam/report-card
+access, and still hit `"Your role does not have 'read' permission on
+'settings'"` the instant the Exams page loaded. Root cause: 15 routes
+across `GET`/`PATCH /assessment/config`, `/schedule`(+`/:id`, `/lock`,
+`/unlock`), `/types`(+`/:key`), `/grade-scales`(+`/:id`), and
+`/reminders/notify` were gated on `rbac('settings', ...)` — a
+genuinely different RBAC resource from `'assessment'`, which is the
+only one `exams_officer`'s default grant (and the Roles & Permissions
+UI's own "Assessment Scheduling" row) can ever cover. Two sibling
+routes in the very same file (`/schedule/:id/lock`, `/unlock`) already
+correctly used `'assessment'` — this was a same-file inconsistency,
+not a deliberate split. Fixed by switching all 15 to `'assessment'`.
+`academic-config.js`'s own `GET /` — the broader, genuinely
+school-wide Academic Configuration screen — was deliberately left on
+`'settings'`, since that one isn't part of this same
+Exams/Assessment-specific configuration surface.
+
+**If you ever add a new route under `/api/assessment/*` that isn't a
+mark-entry or analytics endpoint:** check what RBAC resource its
+siblings in the same functional area already use before picking one —
+`'settings'` is for genuinely school-wide configuration (Academic
+Configuration, user management, notification templates), not for
+"this happens to be a configuration screen" in general. A `grades:read`
+holder for Grades and an `assessment:read` holder for Exams/Assessment
+should never need a THIRD, unrelated permission just to open their own
+module's settings tab.
+
 ### Dashboard "Today's Timetable" day-name casing (v5.104.0)
 
 `timetable_slots.day` is stored **lowercase** in every real document — `timetable.js`'s own canonical constant is

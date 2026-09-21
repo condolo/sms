@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.107.0] — 2026-09-21 — fix(rbac): granting full Exams/Report Cards access never covered the "settings" resource the Configuration tab actually checks
+
+Reported live: an admin gave a teacher the built-in "Exams Officer" role with full exam/report-card access via Settings → Roles & Permissions, and that account still hit "Your role does not have 'read' permission on 'settings'" the moment the Exams page loaded.
+
+### Root cause
+`GET`/`PATCH /api/assessment/config`, `GET`/`PUT`/`DELETE /schedule`(+`/:id`), `GET`/`POST`/`PUT`/`DELETE /types`(+`/:key`), `GET`/`POST`/`PUT`/`DELETE /grade-scales`(+`/:id`), and `POST /reminders/notify` — 15 routes total — were all gated on `rbac('settings', ...)`, a genuinely different RBAC resource from `'exams'`/`'grades'`/`'assessment'`/`'report_cards'`. The built-in `exams_officer` role (and Settings → Roles & Permissions' own "Assessment Scheduling" module row, which maps to the `'assessment'` resource) can only ever grant those four resources — never `'settings'`. So no amount of "full exam/report-card access" could ever satisfy these routes' actual check. Two sibling routes in the same file (`/schedule/:id/lock`, `/schedule/:id/unlock`) already correctly used `'assessment'` — this was an inconsistency within the file, not a deliberate design.
+
+### Fixed
+- All 15 routes switched from `rbac('settings', ...)` to `rbac('assessment', ...)`, matching the already-correct sibling routes and the Roles & Permissions UI's own "Assessment Scheduling" module key.
+- `academic-config.js`'s own `GET /` (the broader, genuinely school-wide Academic Configuration screen under Settings) was deliberately left untouched — that one legitimately belongs to `'settings'`, unlike the assessment-specific config surface above.
+
+### Also fixed in the same investigation — a scope-precision gap left incomplete in v5.106.0
+`GET /api/assessment/marks/summary` (the mark-entry completion grid) checked `ScopeEngine.isClassInScope(req, 'assessment', classId)` without passing a `streamId` — meaning a stream-only-scoped teacher (assigned a subject for one specific stream, not the whole class) was denied outright (403) instead of being narrowed to their own stream, unlike `GET /report`'s equivalent check just above it in the same file. Fixed by accepting an optional `streamId` query param and passing it through — no live client calls this endpoint today (confirmed: `client.js`'s `marksSummary()` has no caller anywhere), so this was a latent gap, not an active one, but is now consistent with `GET /report`'s behavior.
+
+### Verified
+- New test file `assessment-config-rbac-resource.test.js` (2 tests) — asserts the actual `(resource, action)` pairs registered by every route in the file, since every other assessment.js test mocks `rbac()` as a no-op and could never have caught a resource-key mismatch like this.
+- Full Jest suite: 221 suites, 2185/2185 passing. `verify-rbac-coverage.js` 100% (487/487, no regression). `security-scan.js` clean.
+
+---
+
 ## [v5.106.0] — 2026-09-21 — fix(security): Exams/Assessment/Report Cards had no data-scope enforcement at all — any teacher could see or write any class's academic records
 
 Direct follow-up to a requested critical assessment of the Exams and Report Cards modules' flow, connections, and dependencies. That assessment found the read/write authorization gaps below; this is the fix, done deliberately ("a teacher should only see their streams and subjects they've been assigned to — no assumptions") after confirming one policy decision explicitly with the requester (see "Unconditional subject-assignment enforcement" below).

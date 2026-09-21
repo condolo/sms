@@ -114,6 +114,22 @@ function _syncLegacyFields(customTypes) {
 
 /* ══════════════════════════════════════════════════════════════
    CONFIG  —  GET / PATCH /api/assessment/config
+
+   RBAC note (2026-09): every route from here through GET/POST/PUT/
+   DELETE /grade-scales and POST /reminders/notify was previously
+   gated on rbac('settings', ...) — a genuinely different RBAC
+   resource from 'exams'/'grades'/'assessment'/'report_cards'.
+   Granting a role full access to the exam/report-card modules (e.g.
+   the built-in 'exams_officer' role, which holds assessment:RCUD by
+   default — repairPermissions.js) never grants 'settings', so these
+   config screens stayed 403 no matter how much exam/grades access was
+   granted. Found live: an admin gave a teacher the Exams Officer role
+   with full exam/report-card access, and that account still hit
+   "Your role does not have 'read' permission on 'settings'" the
+   moment the Exams page loaded (GET /config fires unconditionally on
+   mount, not just when opening the Configuration tab). Fixed by
+   switching every one of these to rbac('assessment', ...) — the same
+   resource /schedule/:id/lock and /unlock already correctly used.
    ══════════════════════════════════════════════════════════════ */
 
 /**
@@ -121,7 +137,7 @@ function _syncLegacyFields(customTypes) {
  * Returns the school's assessment configuration (weights, template, instances).
  * Falls back to defaults if not yet configured.
  */
-router.get('/config', authMiddleware, PLAN, MODGATE, rbac('settings', 'read'), async (req, res) => {
+router.get('/config', authMiddleware, PLAN, MODGATE, rbac('assessment', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { academicYearId } = req.query;
@@ -152,7 +168,7 @@ router.get('/config', authMiddleware, PLAN, MODGATE, rbac('settings', 'read'), a
  *     placeholder rows) rather than an empty section
  *   academicYearId: string
  */
-router.patch('/config', authMiddleware, PLAN, MODGATE, rbac('settings', 'update'), async (req, res) => {
+router.patch('/config', authMiddleware, PLAN, MODGATE, rbac('assessment', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { academicYearId, weights, instances, subjectTeacherCommentsEnabled } = req.body;
@@ -237,7 +253,7 @@ const ScheduleEntrySchema = z.object({
  * GET /api/assessment/schedule
  * Returns all assessment date ranges for the school.
  */
-router.get('/schedule', authMiddleware, PLAN, MODGATE, rbac('settings', 'read'), async (req, res) => {
+router.get('/schedule', authMiddleware, PLAN, MODGATE, rbac('assessment', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId };
@@ -258,7 +274,7 @@ router.get('/schedule', authMiddleware, PLAN, MODGATE, rbac('settings', 'read'),
  * Upsert a single schedule entry.
  * Body: ScheduleEntrySchema
  */
-router.put('/schedule', authMiddleware, PLAN, MODGATE, rbac('settings', 'update'), async (req, res) => {
+router.put('/schedule', authMiddleware, PLAN, MODGATE, rbac('assessment', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const parsed = ScheduleEntrySchema.safeParse(req.body);
@@ -305,7 +321,7 @@ router.put('/schedule', authMiddleware, PLAN, MODGATE, rbac('settings', 'update'
 /**
  * DELETE /api/assessment/schedule/:id
  */
-router.delete('/schedule/:id', authMiddleware, PLAN, MODGATE, rbac('settings', 'update'), async (req, res) => {
+router.delete('/schedule/:id', authMiddleware, PLAN, MODGATE, rbac('assessment', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('assessment_schedule', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
@@ -444,7 +460,7 @@ const TypeSchema = z.object({
  * GET /api/assessment/types
  * Returns the school's configured assessment types array.
  */
-router.get('/types', authMiddleware, PLAN, MODGATE, rbac('settings', 'read'), async (req, res) => {
+router.get('/types', authMiddleware, PLAN, MODGATE, rbac('assessment', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const cfg = await _getConfig(schoolId, null);
@@ -460,7 +476,7 @@ router.get('/types', authMiddleware, PLAN, MODGATE, rbac('settings', 'read'), as
  * Add a new assessment type to the school's configuration.
  * Body: { key, label, weight, instances, color }
  */
-router.post('/types', authMiddleware, PLAN, MODGATE, rbac('settings', 'update'), async (req, res) => {
+router.post('/types', authMiddleware, PLAN, MODGATE, rbac('assessment', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const input  = { ...req.body, key: (req.body.key || '').toUpperCase().trim() };
@@ -502,7 +518,7 @@ router.post('/types', authMiddleware, PLAN, MODGATE, rbac('settings', 'update'),
  * Body: { customTypes: [{ key, label, weight, instances, color }, ...] }
  * Weights must sum to exactly 100.
  */
-router.put('/types', authMiddleware, PLAN, MODGATE, rbac('settings', 'update'), async (req, res) => {
+router.put('/types', authMiddleware, PLAN, MODGATE, rbac('assessment', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const raw = req.body.customTypes;
@@ -553,7 +569,7 @@ router.put('/types', authMiddleware, PLAN, MODGATE, rbac('settings', 'update'), 
  * Remove an assessment type.
  * Rejected with 409 if any assessment_marks exist for this type.
  */
-router.delete('/types/:key', authMiddleware, PLAN, MODGATE, rbac('settings', 'update'), async (req, res) => {
+router.delete('/types/:key', authMiddleware, PLAN, MODGATE, rbac('assessment', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const key = req.params.key.toUpperCase();
@@ -630,7 +646,7 @@ function _applyGradeScale(score, bands) {
  * Returns all grading scales for the school.
  * Query param: sectionId (optional filter)
  */
-router.get('/grade-scales', authMiddleware, PLAN, MODGATE, rbac('settings', 'read'), async (req, res) => {
+router.get('/grade-scales', authMiddleware, PLAN, MODGATE, rbac('assessment', 'read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId };
@@ -653,7 +669,7 @@ router.get('/grade-scales', authMiddleware, PLAN, MODGATE, rbac('settings', 'rea
  * Create a new grading scale.
  * If isDefault:true, clears isDefault on all other school-wide (or same-section) scales.
  */
-router.post('/grade-scales', authMiddleware, PLAN, MODGATE, rbac('settings', 'update'), async (req, res) => {
+router.post('/grade-scales', authMiddleware, PLAN, MODGATE, rbac('assessment', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const parsed = GradeScaleSchema.safeParse(req.body);
@@ -716,7 +732,7 @@ router.post('/grade-scales', authMiddleware, PLAN, MODGATE, rbac('settings', 'up
  * PUT /api/assessment/grade-scales/:id
  * Update an existing scale's name, description, bands, sectionId, or isDefault.
  */
-router.put('/grade-scales/:id', authMiddleware, PLAN, MODGATE, rbac('settings', 'update'), async (req, res) => {
+router.put('/grade-scales/:id', authMiddleware, PLAN, MODGATE, rbac('assessment', 'update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const Scales = tenantModel('grade_boundaries', tenantContext(req));
@@ -779,7 +795,7 @@ router.put('/grade-scales/:id', authMiddleware, PLAN, MODGATE, rbac('settings', 
  * Cannot delete the last scale for a school.
  * Cannot delete the default scale if there are others — must re-assign default first.
  */
-router.delete('/grade-scales/:id', authMiddleware, PLAN, MODGATE, rbac('settings', 'update'), async (req, res) => {
+router.delete('/grade-scales/:id', authMiddleware, PLAN, MODGATE, rbac('assessment', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const Scales = tenantModel('grade_boundaries', tenantContext(req));
@@ -1694,7 +1710,7 @@ router.get('/reminders', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), 
    Typically called by a cron job but can also be triggered manually by admin.
    ══════════════════════════════════════════════════════════════ */
 
-router.post('/reminders/notify', authMiddleware, PLAN, MODGATE, rbac('settings', 'update'), async (req, res) => {
+router.post('/reminders/notify', authMiddleware, PLAN, MODGATE, rbac('assessment', 'update'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { academicYearId } = req.body;
@@ -1784,13 +1800,18 @@ router.post('/reminders/notify', authMiddleware, PLAN, MODGATE, rbac('settings',
 router.get('/marks/summary', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
-    const { classId, subjectId, termNumber, academicYearId } = req.query;
+    const { classId, subjectId, termNumber, academicYearId, streamId } = req.query;
 
     if (!classId) return _err(res, 'classId is required');
 
     // Data scope — this route had no check at all before; any grades:read
     // holder could pull the completion grid for any class in the school.
-    if (!ScopeEngine.isClassInScope(req, 'assessment', classId)) {
+    // streamId is optional (this route predates any client passing one —
+    // confirmed unused today, client.js's marksSummary() has no caller) but
+    // accepted so a stream-only-scoped teacher can narrow to their own
+    // stream instead of being denied outright, same as GET /report's
+    // studentStreamId handling just above.
+    if (!ScopeEngine.isClassInScope(req, 'assessment', classId, streamId)) {
       return _err(res, 'This class is not in your assigned scope.', 403);
     }
 
@@ -1798,6 +1819,7 @@ router.get('/marks/summary', authMiddleware, PLAN, MODGATE, rbac('grades', 'read
     if (subjectId)      filter.subjectId      = subjectId;
     if (termNumber)     filter.termNumber     = Number(termNumber);
     if (academicYearId) filter.academicYearId = academicYearId;
+    if (streamId)       filter.streamId       = streamId;
 
     // classId is required (enforced above) — bounded to one class, safe ceiling
     const marks = await tenantModel('assessment_marks', tenantContext(req)).find(filter).limit(5000).lean();
