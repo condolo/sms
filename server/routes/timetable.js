@@ -96,6 +96,14 @@ const SlotSchema = z.object({
   subjectId:      z.string().optional(),
   teacherId:      z.string().optional(),
   teacherName:    z.string().max(100).optional(),
+  // Optional second teacher shown alongside the primary one (e.g. a
+  // teaching assistant or co-teacher for that lesson). Display/scheduling
+  // only — deliberately NOT part of conflict detection (_checkConflicts
+  // only ever reads teacherId) or workload totals (GET /workload), and
+  // grants no attendance/grading access; that stays governed entirely by
+  // teaching_assignments, same as before this field existed.
+  assistantTeacherId:   z.string().optional(),
+  assistantTeacherName: z.string().max(100).optional(),
   room:           z.string().max(100).optional(),
   startTime:      z.string().optional(),               // "HH:MM" — auto-filled from bell schedule
   endTime:        z.string().optional(),               // "HH:MM" — auto-filled from bell schedule
@@ -677,9 +685,17 @@ router.get('/my-children', authMiddleware, async (req, res) => {
       .find({ id: { $in: guardianOf }, schoolId }).lean();
 
     const children = await Promise.all(students.map(async student => {
+      // This child's own stream's slots, unioned with any genuine whole-
+      // class slot (no streamId — e.g. Assembly). Without this, a child in
+      // one stream saw EVERY stream's lessons for their class merged
+      // together — the same class of bug fixed in student-portal.js's and
+      // parent-portal.js's own "Today's Timetable" widgets.
+      const streamOr = student.streamId
+        ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
+        : [{ streamId: { $exists: false } }];
       const slots = student.classId
         ? await tenantModel('timetable', tenantContext(req))
-          .find({ schoolId, classId: student.classId, isActive: true })
+          .find({ schoolId, classId: student.classId, isActive: true, $or: streamOr })
           .sort({ day: 1, startTime: 1, period: 1 }).limit(300).lean()
         : [];
       return {

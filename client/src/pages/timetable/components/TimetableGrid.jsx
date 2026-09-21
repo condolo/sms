@@ -47,6 +47,9 @@ function SlotCard({ slot, onDelete, onEdit, canEdit, emergencyMode, teacherMap }
       {slot.teacherName && (
         <p className={`text-[10px] mt-0.5 truncate ${col.sub} opacity-80`}>{slot.teacherName}</p>
       )}
+      {slot.assistantTeacherName && (
+        <p className={`text-[10px] truncate ${col.sub} opacity-60`}>+ {slot.assistantTeacherName}</p>
+      )}
       {slot.room && (
         <p className={`text-[10px] truncate ${col.sub} opacity-60`}>{slot.room}</p>
       )}

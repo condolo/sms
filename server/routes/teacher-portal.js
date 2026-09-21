@@ -47,7 +47,15 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     const Classes            = tenantModel('classes', tenantContext(req));
     const Students           = tenantModel('students', tenantContext(req));
     const Attendance         = tenantModel('attendance', tenantContext(req));
-    const Timetable          = tenantModel('timetable_slots', tenantContext(req));
+    // 'timetable' — NOT 'timetable_slots'. See CHANGELOG (this fix) for
+    // the full reasoning: these are genuinely different, both-populated
+    // collections; 'timetable' is what the admin Scheduling Engine
+    // (server/routes/timetable.js) actually reads and writes, while
+    // 'timetable_slots' is an orphaned legacy collection nothing writes
+    // to anymore. Reading the wrong one meant an admin's timetable edits
+    // never reached this dashboard widget.
+    const Timetable          = tenantModel('timetable', tenantContext(req));
+    const Streams            = tenantModel('streams', tenantContext(req));
     const Subjects           = tenantModel('subjects', tenantContext(req));
     const Schools            = _model('schools');
     const Behaviour          = tenantModel('behaviour', tenantContext(req));
@@ -122,13 +130,34 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     // without it, the "Take Att." deep-link below can't pre-select the
     // right stream, and the submitted-check further down would wrongly
     // conflate the two.
-    const timetableToday = await Timetable.find({
+    const rawTimetableToday = await Timetable.find({
       schoolId,
       day: todayDay,
+      isActive: true,
       $or: [{ teacherId }, { teacherId: userId }],
     }).sort({ startTime: 1 })
-      .select('subjectName className classId streamId streamName startTime endTime room teacherName')
+      .select('subject subjectId classId streamId startTime endTime room teacherName')
       .lean();
+
+    // 'timetable' stores only the FK ids (classId/streamId), not the
+    // display names 'timetable_slots' used to carry — resolve them here.
+    // Scoped to just today's classes/streams (not the teacher's full
+    // teaching_assignments list below), since an admin-scheduled lesson
+    // can exist without a matching assignment record.
+    const todayClassIdsRaw  = [...new Set(rawTimetableToday.map(s => s.classId).filter(Boolean))];
+    const todayStreamIdsRaw = [...new Set(rawTimetableToday.map(s => s.streamId).filter(Boolean))];
+    const [todayClassNameDocs, todayStreamNameDocs] = await Promise.all([
+      todayClassIdsRaw.length  ? Classes.find({ id: { $in: todayClassIdsRaw }, schoolId }).select('id name').lean().catch(() => []) : [],
+      todayStreamIdsRaw.length ? Streams.find({ id: { $in: todayStreamIdsRaw }, schoolId }).select('id name').lean().catch(() => []) : [],
+    ]);
+    const todayClassNameMap  = Object.fromEntries(todayClassNameDocs.map(c => [c.id, c.name]));
+    const todayStreamNameMap = Object.fromEntries(todayStreamNameDocs.map(s => [s.id, s.name]));
+    const timetableToday = rawTimetableToday.map(s => ({
+      ...s,
+      subjectName: s.subject,
+      className:   todayClassNameMap[s.classId] ?? null,
+      streamName:  s.streamId ? (todayStreamNameMap[s.streamId] ?? null) : null,
+    }));
 
     // Classes that appear in today's timetable
     const todayClassIds = [...new Set(timetableToday.map(s => s.classId).filter(Boolean))];

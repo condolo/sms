@@ -30,7 +30,9 @@ import { FField, iCls } from './TimetablePrimitives.jsx';
 
 const EMPTY_FORM = {
   day: 'monday', period: '1', subject: '',
-  teacherId: '', teacherName: '', room: '', type: 'lesson',
+  teacherId: '', teacherName: '',
+  assistantTeacherId: '', assistantTeacherName: '',
+  room: '', type: 'lesson',
 };
 
 export default function AddSlotSlideOver({
@@ -51,6 +53,8 @@ export default function AddSlotSlideOver({
         subject:     editSlot.subject     ?? '',
         teacherId:   editSlot.teacherId   ?? '',
         teacherName: editSlot.teacherName ?? '',
+        assistantTeacherId:   editSlot.assistantTeacherId   ?? '',
+        assistantTeacherName: editSlot.assistantTeacherName ?? '',
         room:        editSlot.room        ?? '',
         type:        editSlot.type        ?? 'lesson',
       };
@@ -65,22 +69,24 @@ export default function AddSlotSlideOver({
   const [subjectId,         setSubjectId]         = useState(editSlot?.subjectId ?? '');
   const [userPickedSubject, setUserPickedSubject] = useState(false);
   const [autoFillApplied,   setAutoFillApplied]   = useState(false);
-  // Set only when this slot is for one specific stream (compulsory subject
-  // in a class that has streams — 7i's Maths and 7ii's Maths are two
-  // separate slots, same reasoning as teaching-assignments.js). Empty =
-  // whole-class slot.
-  const [streamId,          setStreamId]          = useState(editSlot?.streamId ?? '');
+  // Set only when this slot is for one specific stream. Defaults to the
+  // stream the caller was already viewing (TimetablePage's own class→stream
+  // picker — each stream runs its own timetable, so "Add slot" from within
+  // a specific stream's grid should stay scoped to that stream throughout,
+  // not just for compulsory subjects). Empty = whole-class slot (e.g. a
+  // genuine school-wide Assembly/Registration entry).
+  const [streamId,          setStreamId]          = useState(editSlot?.streamId ?? defaults?.streamId ?? '');
 
   // Re-init when editSlot changes (user clicks a different slot)
   useEffect(() => {
     setFormState(buildForm());
     setErrors({});
     setSubjectId(editSlot?.subjectId ?? '');
-    setStreamId(editSlot?.streamId ?? '');
+    setStreamId(editSlot?.streamId ?? defaults?.streamId ?? '');
     setUserPickedSubject(false);
     setAutoFillApplied(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editSlot?.id ?? editSlot?._id, defaults?.day, defaults?.period]);
+  }, [editSlot?.id ?? editSlot?._id, defaults?.day, defaults?.period, defaults?.streamId]);
 
   function set(k, v) {
     setFormState(f => ({ ...f, [k]: v }));
@@ -154,11 +160,12 @@ export default function AddSlotSlideOver({
 
   function handleSubjectSelect(cs) {
     const name = cs.subject?.name ?? cs.subjectId;
-    // Clear teacher + room so auto-fill can write them; clear streamId too
-    // since a different subject may have a different stream requirement
+    // Clear teacher + room so auto-fill can write them. streamId is
+    // deliberately left as-is — it reflects which stream this whole
+    // add-slot session is scoped to (see the streamId state's own
+    // comment above), not something a subject change should reset.
     setFormState(f => ({ ...f, subject: name, teacherId: '', teacherName: '', room: '' }));
     setSubjectId(cs.subjectId);
-    setStreamId('');
     setUserPickedSubject(true);
     setAutoFillApplied(false);
     setErrors(e => { const n = { ...e }; delete n.subject; delete n.streamId; return n; });
@@ -175,6 +182,8 @@ export default function AddSlotSlideOver({
         streamId:    streamId                || undefined,
         teacherId:   form.teacherId          || undefined,
         teacherName: form.teacherName.trim() || undefined,
+        assistantTeacherId:   form.assistantTeacherId            || undefined,
+        assistantTeacherName: form.assistantTeacherName.trim()   || undefined,
         room:        form.room.trim()        || undefined,
         type:        form.type,
       };
@@ -190,6 +199,9 @@ export default function AddSlotSlideOver({
     const errs = {};
     if (!form.subject.trim()) errs.subject = 'Subject is required.';
     if (streamRequired && !streamId) errs.streamId = 'This subject is compulsory here — select which stream this lesson is for.';
+    if (form.assistantTeacherId && form.assistantTeacherId === form.teacherId) {
+      errs.assistantTeacherId = 'Assistant teacher must be different from the primary teacher.';
+    }
     if (Object.keys(errs).length) { setErrors(errs); return; }
     mutate();
   }
@@ -361,6 +373,30 @@ export default function AddSlotSlideOver({
                 </option>
               ))}
             </select>
+          </FField>
+
+          {/* ── Assistant teacher ─────────────────────────────── */}
+          <FField label="Assistant teacher (optional)" error={errors.assistantTeacherId}>
+            <select
+              value={form.assistantTeacherId}
+              onChange={e => {
+                const t = teachers.find(t => teacherKey(t) === e.target.value);
+                set('assistantTeacherId',   e.target.value);
+                set('assistantTeacherName', t ? `${t.title ?? ''} ${t.firstName ?? ''} ${t.lastName ?? ''}`.trim() : '');
+              }}
+              className={iCls(errors.assistantTeacherId)}
+            >
+              <option value="">No assistant teacher</option>
+              {teachers.map(t => (
+                <option key={teacherKey(t)} value={teacherKey(t)}>
+                  {t.firstName} {t.lastName}
+                  {t.department ? ` · ${t.department}` : ''}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Shown alongside the primary teacher on this slot — for a teaching assistant or co-teacher. Doesn't affect attendance, grading, or scheduling conflict checks.
+            </p>
           </FField>
 
           {/* ── Room ────────────────────────────────────────── */}

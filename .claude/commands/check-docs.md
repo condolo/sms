@@ -84,13 +84,15 @@ After completing any change, you MUST update:
 | Assessment     | `assessments`, `assessment_submissions`            |
 | Report cards   | `report_cards`                                     |
 | Admissions     | `admissions`                                       |
-| Timetable      | `timetable_slots`                                  |
+| Timetable      | `timetable` (NOT `timetable_slots` — see below)    |
 | Messages       | `messages`, `message_threads`                      |
 | Permissions    | `role_permissions`                                 |
 | Sections       | `sections`                                         |
 | Announcements  | `system_announcements`                             |
 | Backup         | `backups`                                          |
 | Audit log      | `audit_logs`                                       |
+
+**`timetable` vs `timetable_slots` (found and fixed 2026-09, v5.105.0):** these are two genuinely different, both-populated MongoDB collections. `timetable` is the real one — the entire admin Scheduling Engine (`server/routes/timetable.js`) reads and writes it exclusively, and it's what `student-portal.js`/`parent-portal.js`/`teacher-portal.js`'s dashboard widgets now read too, after being repointed away from `timetable_slots`. `timetable_slots` is an orphaned legacy collection nothing writes to via any route or UI action anymore — using it for anything new will silently disconnect that feature from every real admin edit. See `docs/DEVELOPER_GUIDE.md`'s own section on this for the full story. **This table's other rows have not been individually re-verified against current code since this was found — confirm the actual collection name in the relevant route file before trusting a row here, the same way this row turned out to be stale.**
 
 ---
 

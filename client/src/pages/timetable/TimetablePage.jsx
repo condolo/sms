@@ -17,6 +17,7 @@ import {
   teachers     as teachersApi,
   bellSchedule as bellApi,
   rooms        as roomsApi,
+  streams      as streamsApi,
 } from '@/api/client.js';
 import BulkImportSlideOver from '@/components/import/BulkImportSlideOver.jsx';
 import useAuthStore from '@/store/auth.js';
@@ -64,6 +65,7 @@ export default function TimetablePage() {
 
   const [activeView,      setActiveView]      = useState('class');
   const [classId,         setClassId]         = useState('');
+  const [streamId,        setStreamId]        = useState('');
   const [section,         setSection]         = useState('all');
   const [teacherId,       setTeacherId]       = useState('');
   const [showAdd,         setShowAdd]         = useState(false);
@@ -96,6 +98,20 @@ export default function TimetablePage() {
   // Use string `id` field (e.g. "cls_demo_4a") not MongoDB _id — timetable slots
   // store classId as the string id, so the fetch must use the same format.
   const selectedClass = classList.find(c => (c.id ?? String(c._id)) === classId);
+
+  /* Streams of the selected class — each stream runs its own timetable
+     (same principle Attendance's per-stream registers, v5.101.0, is built
+     on: two streams can legitimately have different lessons at the same
+     day/period, so the class-level grid must be viewed one stream at a
+     time, not merged). A class with no streams is unaffected below. */
+  const { data: classStreamsData } = useQuery({
+    queryKey: ['streams', classId],
+    queryFn:  () => streamsApi.list({ classId, status: 'active' }),
+    staleTime: 5 * 60_000,
+    enabled:  !!classId,
+  });
+  const classStreamList = classStreamsData?.data ?? [];
+  const hasStreams       = classStreamList.length > 0;
 
   /* Bell schedule — resolved for the selected class's section (prefer stored sectionKey) */
   const classSection = selectedClass ? (selectedClass.sectionKey || inferSection(selectedClass.name)) : 'all';
@@ -163,9 +179,19 @@ export default function TimetablePage() {
     enabled:  !!classId && activeView === 'class',
     staleTime: 30_000,
   });
-  const classSlots = Array.isArray(classData?.data)
+  const rawClassSlots = Array.isArray(classData?.data)
     ? classData.data
     : (classData?.data?.slots ?? []);
+  // The API returns every stream's slots for the class unfiltered — buildSlotMap
+  // (constants.js) keys the grid purely by day+period, so without this filter
+  // two different streams' lessons at the same day/period would silently
+  // collide (only the last one in the array would ever render, the other
+  // invisibly dropped). Union: the selected stream's own slots + any genuine
+  // whole-class slot (no streamId — e.g. Assembly). Until a stream is picked
+  // (for a class that has streams), show nothing rather than an ambiguous mix.
+  const classSlots = hasStreams
+    ? (streamId ? rawClassSlots.filter(s => !s.streamId || s.streamId === streamId) : [])
+    : rawClassSlots;
 
   const { data: teacherData, isLoading: teacherLoading } = useQuery({
     queryKey: ['timetable', 'teacher', teacherId],
@@ -227,9 +253,9 @@ export default function TimetablePage() {
   /* ── Handlers ────────────────────────────────────────────── */
   const openAdd = useCallback((day, period) => {
     setEditSlot(null);
-    setAddDefaults({ day, period });
+    setAddDefaults({ day, period, streamId });
     setShowAdd(true);
-  }, []);
+  }, [streamId]);
 
   function openEdit(slot) {
     setEditSlot(slot);
@@ -254,8 +280,9 @@ export default function TimetablePage() {
         const slot = classSlots.find(s => String(s.period) === String(b.p) && s.day === day);
         if (slot) {
           const parts = [slot.subject];
-          if (slot.teacherName) parts.push(slot.teacherName);
-          if (slot.room)        parts.push(slot.room);
+          if (slot.teacherName)          parts.push(slot.teacherName);
+          if (slot.assistantTeacherName) parts.push(`+ ${slot.assistantTeacherName}`);
+          if (slot.room)                 parts.push(slot.room);
           row.push(parts.join(' · '));
         } else {
           row.push('');
@@ -287,8 +314,9 @@ export default function TimetablePage() {
         if (!slot) return '<td class="empty">—</td>';
         return `<td>
           <div class="subj">${slot.subject || '—'}</div>
-          ${slot.teacherName ? `<div class="meta">${slot.teacherName}</div>` : ''}
-          ${slot.room        ? `<div class="meta">${slot.room}</div>`        : ''}
+          ${slot.teacherName          ? `<div class="meta">${slot.teacherName}</div>`            : ''}
+          ${slot.assistantTeacherName ? `<div class="meta">+ ${slot.assistantTeacherName}</div>` : ''}
+          ${slot.room                 ? `<div class="meta">${slot.room}</div>`                   : ''}
         </td>`;
       }).join('');
       return `<tr><td class="period"><b>P${b.p}</b><br/><span>${b.start}–${b.end}</span></td>${cells}</tr>`;
@@ -418,7 +446,7 @@ export default function TimetablePage() {
               )}
 
               {/* Add slot */}
-              {canEdit && activeView === 'class' && classId && (
+              {canEdit && activeView === 'class' && classId && (!hasStreams || streamId) && (
                 <button
                   onClick={() => openAdd('monday', '1')}
                   className="flex items-center gap-1.5 bg-white hover:bg-indigo-50 text-indigo-700 text-xs font-bold px-4 py-1.5 rounded-lg shadow-sm transition"
@@ -510,7 +538,7 @@ export default function TimetablePage() {
                   return (
                     <button
                       key={s.id}
-                      onClick={() => { setSection(s.id); setClassId(''); }}
+                      onClick={() => { setSection(s.id); setClassId(''); setStreamId(''); }}
                       className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
                         isActive ? 'text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       }`}
@@ -524,7 +552,7 @@ export default function TimetablePage() {
               <div className="h-4 border-r border-slate-200" />
               <select
                 value={classId}
-                onChange={e => setClassId(e.target.value)}
+                onChange={e => { setClassId(e.target.value); setStreamId(''); }}
                 className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-700 max-w-xs"
               >
                 <option value="">Select class…</option>
@@ -534,11 +562,26 @@ export default function TimetablePage() {
                   <option key={c.id ?? String(c._id)} value={c.id ?? String(c._id)}>{c.name}</option>
                 ))}
               </select>
-              {selectedClass && (
+              {/* Stream picker — each stream runs its own timetable, so a
+                  class with streams must always resolve to one specific
+                  stream before its grid can be shown or edited. */}
+              {hasStreams && (
+                <select
+                  value={streamId}
+                  onChange={e => setStreamId(e.target.value)}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-700 max-w-xs"
+                >
+                  <option value="">Select stream…</option>
+                  {classStreamList.map(s => (
+                    <option key={s.id ?? s._id} value={s.id ?? s._id}>{s.name}</option>
+                  ))}
+                </select>
+              )}
+              {selectedClass && (!hasStreams || streamId) && (
                 <span className="text-xs text-slate-400">{classSlots.length} lesson{classSlots.length !== 1 ? 's' : ''} scheduled</span>
               )}
-              {/* Export buttons — visible when a class is selected */}
-              {selectedClass && classSlots.length > 0 && (
+              {/* Export buttons — visible once a viewable timetable is resolved */}
+              {selectedClass && (!hasStreams || streamId) && classSlots.length > 0 && (
                 <>
                   <div className="ml-auto flex items-center gap-1.5">
                     <button
@@ -648,6 +691,18 @@ export default function TimetablePage() {
             <div className="bg-white border border-red-200 rounded-xl p-8 flex flex-col items-center gap-2">
               <AlertCircle size={20} className="text-red-400" />
               <p className="text-sm text-slate-600">Failed to load timetable.</p>
+            </div>
+          ) : (hasStreams && !streamId) ? (
+            <div className="bg-white border border-slate-200 rounded-xl p-14 flex flex-col items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-indigo-50 flex items-center justify-center">
+                <LayoutGrid size={26} className="text-indigo-300" />
+              </div>
+              <div className="text-center max-w-sm">
+                <p className="text-sm font-semibold text-slate-600">Select a stream to view its timetable</p>
+                <p className="text-xs text-slate-400 mt-1">
+                  {selectedClass?.name} has {classStreamList.length} streams — each runs its own timetable, so lessons are scheduled per stream.
+                </p>
+              </div>
             </div>
           ) : (
             <TimetableGrid slots={classSlots} onDelete={removeSlot} onEdit={openEdit} onAdd={openAdd} canEdit={canEdit} bell={bell}

@@ -6,6 +6,37 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.105.0] — 2026-09-21 — fix(timetable): the three dashboard "Today's Timetable" widgets read an orphaned collection, disconnected from every admin edit
+
+Asked to confirm two things about the Timetable module's workflow: (1) does picking a subject when scheduling a lesson auto-fill the teacher already assigned to it, and (2) add support for recording an assistant/co-teacher on a slot. Investigating and live-testing (1) — already correctly built, see below — surfaced a user-visible gap in the admin Class Grid itself, and fixing that surfaced a far more serious, previously-undiscovered defect underneath everything already shipped in v5.104.0.
+
+### Confirmed already working — subject→teacher auto-fill (no change needed)
+`AddSlotSlideOver.jsx`'s slot editor already queries `teaching_assignments` live when a subject is picked for a class(+stream), and auto-fills the teacher and preferred room from whoever is actually assigned — with a status banner ("Teacher and room auto-filled" / "Looking up…" / "No assignment found — fill manually"). Verified this already resolves per-stream correctly (e.g. Year 1-A's own Maths teacher, not Year 1-B's).
+
+### Added — assistant/co-teacher on a slot
+No such concept existed anywhere in the codebase (the closest analogues — `substituteTeacherId` for absence cover, and lessons.js's informal "co-teacher" curriculum-sharing language — are both unrelated). Added as **display/scheduling only, by design** (confirmed with the requester before building): a second optional teacher shown alongside the primary one, with no attendance/grading access implied and deliberately excluded from conflict detection and workload totals.
+- `server/routes/timetable.js` — `SlotSchema` gains optional `assistantTeacherId`/`assistantTeacherName`.
+- `client/src/pages/timetable/components/AddSlotSlideOver.jsx` — new "Assistant teacher (optional)" picker; rejects picking the same person as both primary and assistant.
+- Displayed (prefixed `+`) in `TimetableGrid.jsx`, `TimetablePortal.jsx`'s `ReadGrid`, and the CSV/print exports in `TimetablePage.jsx`.
+
+### Fixed — the admin Class Grid silently conflated different streams' lessons
+`TimetablePage.jsx`'s Class Grid picked a class and rendered every one of its slots in one grid keyed only by day+period (`buildSlotMap`, `constants.js`) — for a class with streams, two different streams can legitimately have different lessons at the same day/period (this is explicitly allowed, not a conflict, per `_checkConflicts`'s own class-collision logic), so the second one was silently dropped from the grid entirely, invisible to the admin editing it. Fixed by adding a class→stream picker (mirroring Attendance's v5.101.0 per-stream register pattern and its exact copy: "each runs its own timetable, so lessons are scheduled per stream") — a class with streams now requires picking one before its grid renders, showing that stream's own slots unioned with any genuine whole-class slot (e.g. Assembly). "Add slot" opened from within a stream's view now defaults to (and stays scoped to) that stream throughout the edit, auto-fill included, rather than resetting on every subject change as before.
+
+### Fixed — the far bigger issue found while live-verifying the above: two disconnected MongoDB collections
+While seeding test data to verify the stream picker, discovered `server/routes/timetable.js` (the entire admin Scheduling Engine — create/edit/delete, Class Grid, conflict detection, publish, "My Timetable" for teachers/parents/section heads) reads and writes collection **`timetable`**, while `student-portal.js`/`parent-portal.js`/`teacher-portal.js`'s "Today's Timetable" dashboard widgets — the exact widgets fixed for day-casing and streamId in v5.104.0 — read from a **different, genuinely separate** collection, **`timetable_slots`**. Confirmed directly against the live database: `timetable` has 202 real, actively-maintained documents; `timetable_slots` has 55 stale ones that nothing writes to via the UI anymore. Concretely: **anything an admin schedules or edits through the Scheduling Engine has never reached the Dashboard's "Today's Timetable" widget for any teacher, student, or parent** — only their separate, full "My Timetable" page (which already read `timetable` correctly) reflected it. v5.104.0's day-casing/streamId fixes were real and correct for `timetable_slots`'s legacy data, but that collection was never the live source of truth going forward.
+
+Repointed all three dashboard routes to `timetable`:
+- `server/routes/student-portal.js`, `parent-portal.js` — now query `timetable` with `isActive: true`; `timetable`'s display-name field is `subject`, not `timetable_slots`'s `subjectName` — aliased in the response so the existing client contract (`slot.subjectName`) is unchanged.
+- `server/routes/teacher-portal.js` — same collection/field fix, plus: `timetable` stores only `classId`/`streamId` (FKs), not `timetable_slots`'s old denormalized `className`/`streamName` — now resolved via a small `classes`/`streams` lookup scoped to just today's actual slots.
+- `server/routes/timetable.js`'s own `GET /my-children` (parent's full timetable view) was already correctly reading `timetable` — but had no `streamId` filter at all, so a child in one stream saw **every** stream's lessons for their class merged together. Fixed with the same student/child-streamId union pattern already used for lessons coverage.
+
+### Verified
+- Live, end-to-end, in the browser: created a real slot via the admin Scheduling Engine (Standard 4A, stream "4A", Kiswahili, period 8) and confirmed it appeared correctly, with the right stream name, on the "Teacher" demo account's own Dashboard "Today's Timetable" widget — previously would have shown nothing, since that widget read the disconnected collection.
+- New test files: `timetable-assistant-teacher.test.js` (4 tests — round-trip create/update, and confirms an assistant teacher busy elsewhere at the same time does NOT block creation, since conflict detection is deliberately teacherId-only), `timetable-my-children-stream-scope.test.js` (4 tests). `teacher-portal-timetable-attendance.test.js`, `student-portal-lessons-coverage.test.js`, and `parent-portal-lessons-coverage.test.js` all repointed to the `timetable` collection shape and extended with stream-isolation + "reads the live collection, not the orphaned one" regression tests.
+- Full Jest suite: 217 suites, 2145/2145 passing. `verify-rbac-coverage.js` 100% (487/487, no regression). `security-scan.js` clean. Production client build passes.
+
+---
+
 ## [v5.104.0] — 2026-09-21 — fix(dashboard): "Today's Timetable" showed nothing, for every school, every day, since it shipped
 
 Prompted directly, following straight on from v5.103.0's homeroom fix: "and the teacher can see in their dashboard Today's Lessons, proceed to take attendance?" Investigating the Dashboard → Attendance flow surfaced a foundational bug underneath it, plus two compounding gaps in the flow itself — all fixed together on explicit authorization ("proceed").

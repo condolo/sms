@@ -48,7 +48,15 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     const Reports       = tenantModel('report_card_snapshots', tenantContext(req));
     const Coverage      = tenantModel('lesson_coverage', tenantContext(req));
     const Topics        = tenantModel('syllabus_topics', tenantContext(req));
-    const Timetable     = tenantModel('timetable_slots', tenantContext(req));
+    // 'timetable' — NOT 'timetable_slots'. The two are genuinely different,
+    // both-populated MongoDB collections: 'timetable' is what the admin
+    // Scheduling Engine (server/routes/timetable.js) actually reads and
+    // writes; 'timetable_slots' is an orphaned legacy collection nothing
+    // writes to anymore. Reading the wrong one meant an admin's timetable
+    // edits never reached this dashboard widget. Confirmed live against
+    // the real database: 202 real documents in 'timetable' vs 55 stale
+    // ones in 'timetable_slots'.
+    const Timetable     = tenantModel('timetable', tenantContext(req));
     const Subjects      = tenantModel('subjects', tenantContext(req));
     const Schools       = _model('schools');
     const Behaviour     = tenantModel('behaviour', tenantContext(req));
@@ -142,11 +150,25 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     const DAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
     const today = DAY_NAMES[new Date().getDay()];
 
+    // Same union as lessonsCoverage's streamOr above: this student's own
+    // stream's lessons, plus any genuine whole-class slot (no streamId at
+    // all — e.g. Assembly). Without this, a student in one stream saw
+    // EVERY stream's lessons for their class merged together — not just a
+    // display quirk, a real case of showing a student the wrong stream's
+    // subject/teacher/room for today.
+    const timetableStreamOr = student.streamId
+      ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
+      : [{ streamId: { $exists: false } }];
+
     let rawSlots = student.classId
-      ? await Timetable.find({ schoolId, classId: student.classId, day: today })
+      ? (await Timetable.find({ schoolId, classId: student.classId, day: today, isActive: true, $or: timetableStreamOr })
           .sort({ startTime: 1 })
-          .select('subjectId subjectName teacherName teacherId startTime endTime room day')
+          .select('subjectId subject teacherName teacherId startTime endTime room day')
           .lean()
+        // 'timetable' stores the display name as `subject`, not
+        // `subjectName` — alias it so this widget's existing contract
+        // (StudentDashboard.jsx reads slot.subjectName) is unchanged.
+        ).map(s => ({ ...s, subjectName: s.subject }))
       : [];
 
     // When Emergency Online Learning Mode is active, attach meeting link to each slot

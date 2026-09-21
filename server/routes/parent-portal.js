@@ -138,7 +138,11 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
     const Events        = tenantModel('events', tenantContext(req));
     const Classes       = tenantModel('classes', tenantContext(req));
     const Teachers      = tenantModel('teachers', tenantContext(req));
-    const Timetable     = tenantModel('timetable_slots', tenantContext(req));
+    // 'timetable' — NOT 'timetable_slots'. See student-portal.js's
+    // identical fix for the full reasoning: these are genuinely different,
+    // both-populated collections, and 'timetable_slots' is an orphaned
+    // legacy one nothing writes to anymore.
+    const Timetable     = tenantModel('timetable', tenantContext(req));
     const LibraryLoans  = tenantModel('library_loans', tenantContext(req));
 
     const todayISO = new Date().toISOString().slice(0, 10);
@@ -154,6 +158,15 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
       .select('firstName lastName admissionNumber classId className streamId photo status dateOfBirth gender')
       .lean();
     if (!student) return E.notFound(res, 'Student record not found.');
+
+    // This child's own stream's timetable slots, unioned with any genuine
+    // whole-class slot (no streamId at all — e.g. Assembly). Without this,
+    // a child in one stream had EVERY stream's lessons for their class
+    // merged into "Today's Timetable" — not just a display quirk, a real
+    // case of showing a parent the wrong stream's subject/teacher/room.
+    const timetableStreamOr = student.streamId
+      ? [{ streamId: student.streamId }, { streamId: { $exists: false } }]
+      : [{ streamId: { $exists: false } }];
 
     const school       = await Schools.findOne({ id: schoolId }).select('academicYear name portalConfig').lean();
     const academicYear = school?.academicYear || '';
@@ -277,9 +290,10 @@ router.get('/dashboard/:childId', authMiddleware, async (req, res) => {
             .select('formTeacherId name').lean().catch(() => null)
         : null,
       student.classId
-        ? Timetable.find({ schoolId, classId: student.classId, day: todayDay })
+        ? Timetable.find({ schoolId, classId: student.classId, day: todayDay, isActive: true, $or: timetableStreamOr })
             .sort({ startTime: 1 })
-            .select('subjectName teacherName startTime endTime room').lean()
+            .select('subject teacherName startTime endTime room').lean()
+            .then(rows => rows.map(s => ({ ...s, subjectName: s.subject }))) // alias — see student-portal.js
             .catch(() => [])
         : [],
       FeeInvoices.findOne({ schoolId, studentId: childId, balance: { $gt: 0 }, dueDate: { $gte: todayISO } })

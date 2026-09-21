@@ -301,11 +301,23 @@ const SECTIONS = [
     articles: [
       {
         q: 'How do I build a class timetable?',
-        a: 'Go to Timetable → select a class → click any empty cell in the grid → choose subject, teacher, and room → Save. Repeat for each period across the week.',
+        a: 'Go to Timetable → select a class. If that class has streams, select a stream too — each stream runs its own timetable, so you build one stream at a time (a whole-class entry like Assembly can still be added by leaving the stream as "Whole class"). Click any empty cell in the grid → choose subject, teacher, and room → Save. Repeat for each period across the week.',
+      },
+      {
+        q: "Why do I have to pick a stream before I see the timetable?",
+        a: 'Because two streams of the same class can have different lessons at the same time — e.g. 4A doing Maths while 4B does English, same period. Picking a stream shows exactly that stream\'s lessons, plus any lesson entered for the whole class.',
+      },
+      {
+        q: 'Does picking a subject fill in the teacher automatically?',
+        a: "Yes, if that subject already has a teaching assignment for the class (and stream, if it has one) — the teacher and their preferred room are filled in automatically, with a note confirming the auto-fill. You can still change either manually. If no assignment is found, you'll be prompted to fill it in yourself.",
+      },
+      {
+        q: 'Can I record an assistant or co-teacher on a lesson?',
+        a: "Yes. Each lesson slot has an optional \"Assistant teacher\" field, shown alongside the main teacher on the grid, printouts, and CSV export. It's for display and scheduling only — it doesn't grant the assistant teacher any attendance or grading access for that class, and isn't checked for double-booking.",
       },
       {
         q: 'Does the system detect teacher or room conflicts?',
-        a: 'Yes. Assigning a teacher or room already in use at the same period returns a 409 conflict error and blocks the save.',
+        a: 'Yes. Assigning a teacher or room already in use at the same period returns a 409 conflict error and blocks the save. (This check looks at the main teacher only, not an assistant teacher.)',
       },
       {
         q: 'Can I bulk-load a timetable?',

@@ -17,7 +17,16 @@
       pre-filled anything — separately covered by this file's own
       Dashboard-side assertions and a client-side fix.
 
-   This file covers (1) and (2) at the server layer.
+   Follow-up (same investigation, found while verifying the fix live):
+   this route was reading from 'timetable_slots', an orphaned legacy
+   collection nothing writes to anymore — the real, admin-editable
+   Scheduling Engine (server/routes/timetable.js) reads and writes
+   'timetable'. Repointed to 'timetable', which stores only the FK ids
+   (classId/streamId), not 'timetable_slots' old denormalized className/
+   streamName fields — those are now resolved via a small classes/streams
+   lookup, covered by the mockClassDocs/mockStreamDocs fixtures below.
+
+   This file covers all of the above at the server layer.
 
    All DB calls are mocked — no MongoDB required.
    ============================================================ */
@@ -68,7 +77,7 @@ function mockCollection(seed = []) {
   };
 }
 
-let mockSchoolDoc, mockAssignments, mockTimetableDocs, mockAttendanceDocs, mockClassDocs;
+let mockSchoolDoc, mockAssignments, mockTimetableDocs, mockAttendanceDocs, mockClassDocs, mockStreamDocs;
 
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((c) => {
@@ -80,9 +89,12 @@ jest.mock('../../utils/tenant-model', () => ({
   tenantContext: (req) => ({ schoolId: req?.jwtUser?.schoolId ?? null }),
   tenantModel: (collection) => {
     if (collection === 'teaching_assignments') return mockCollection(mockAssignments);
-    if (collection === 'timetable_slots')      return mockCollection(mockTimetableDocs);
+    // 'timetable', not 'timetable_slots' — see the file header. Real
+    // admin-editable timetable data lives in 'timetable'.
+    if (collection === 'timetable')            return mockCollection(mockTimetableDocs);
     if (collection === 'attendance')           return mockCollection(mockAttendanceDocs);
     if (collection === 'classes')              return mockCollection(mockClassDocs);
+    if (collection === 'streams')              return mockCollection(mockStreamDocs);
     return mockCollection([]);
   },
 }));
@@ -114,6 +126,10 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockSchoolDoc = { name: 'Test School', academicYear: '2026' };
   mockClassDocs = [{ id: CLASS_ID, schoolId: SCHOOL_A, name: 'Standard 4A', formTeacherId: null, studentCount: 0 }];
+  mockStreamDocs = [
+    { id: STREAM_A, schoolId: SCHOOL_A, name: 'A' },
+    { id: STREAM_B, schoolId: SCHOOL_A, name: 'B' },
+  ];
   mockAssignments = [
     { schoolId: SCHOOL_A, teacherId: TEACHER_ID, classId: CLASS_ID, subjectId: 'subj_math', streamId: STREAM_A, streamName: 'A' },
     { schoolId: SCHOOL_A, teacherId: TEACHER_ID, classId: CLASS_ID, subjectId: 'subj_math', streamId: STREAM_B, streamName: 'B' },
@@ -125,20 +141,22 @@ beforeEach(() => {
 describe("GET /api/teacher-portal/dashboard — Today's Timetable includes streamId", () => {
   test('each timetable slot reports its own streamId/streamName, not just the class', async () => {
     mockTimetableDocs = [
-      { schoolId: SCHOOL_A, teacherId: TEACHER_ID, day: TODAY_DAY, classId: CLASS_ID, streamId: STREAM_A, streamName: 'A', subjectName: 'Math', className: 'Standard 4A', startTime: '08:00', endTime: '08:40' },
+      { schoolId: SCHOOL_A, teacherId: TEACHER_ID, day: TODAY_DAY, classId: CLASS_ID, streamId: STREAM_A, isActive: true, subject: 'Math', startTime: '08:00', endTime: '08:40' },
     ];
     const res = await supertest(buildApp()).get('/api/teacher-portal/dashboard');
     expect(res.status).toBe(200);
     expect(res.body.data.timetableToday[0].streamId).toBe(STREAM_A);
     expect(res.body.data.timetableToday[0].streamName).toBe('A');
+    expect(res.body.data.timetableToday[0].className).toBe('Standard 4A');
+    expect(res.body.data.timetableToday[0].subjectName).toBe('Math');
   });
 });
 
 describe('GET /api/teacher-portal/dashboard — attendance submitted-status is per (class, stream)', () => {
   test('two lessons today, same class different streams: marking stream A submitted does NOT mark stream B as submitted too', async () => {
     mockTimetableDocs = [
-      { schoolId: SCHOOL_A, teacherId: TEACHER_ID, day: TODAY_DAY, classId: CLASS_ID, streamId: STREAM_A, streamName: 'A', subjectName: 'Math', className: 'Standard 4A', startTime: '08:00', endTime: '08:40' },
-      { schoolId: SCHOOL_A, teacherId: TEACHER_ID, day: TODAY_DAY, classId: CLASS_ID, streamId: STREAM_B, streamName: 'B', subjectName: 'Math', className: 'Standard 4A', startTime: '09:00', endTime: '09:40' },
+      { schoolId: SCHOOL_A, teacherId: TEACHER_ID, day: TODAY_DAY, classId: CLASS_ID, streamId: STREAM_A, isActive: true, subject: 'Math', startTime: '08:00', endTime: '08:40' },
+      { schoolId: SCHOOL_A, teacherId: TEACHER_ID, day: TODAY_DAY, classId: CLASS_ID, streamId: STREAM_B, isActive: true, subject: 'Math', startTime: '09:00', endTime: '09:40' },
     ];
     // Only stream A's register has been submitted today.
     mockAttendanceDocs = [
@@ -154,8 +172,8 @@ describe('GET /api/teacher-portal/dashboard — attendance submitted-status is p
 
   test('two distinct (class, stream) lessons produce two distinct widget entries, not merged into one', async () => {
     mockTimetableDocs = [
-      { schoolId: SCHOOL_A, teacherId: TEACHER_ID, day: TODAY_DAY, classId: CLASS_ID, streamId: STREAM_A, streamName: 'A', subjectName: 'Math', className: 'Standard 4A', startTime: '08:00', endTime: '08:40' },
-      { schoolId: SCHOOL_A, teacherId: TEACHER_ID, day: TODAY_DAY, classId: CLASS_ID, streamId: STREAM_B, streamName: 'B', subjectName: 'Math', className: 'Standard 4A', startTime: '09:00', endTime: '09:40' },
+      { schoolId: SCHOOL_A, teacherId: TEACHER_ID, day: TODAY_DAY, classId: CLASS_ID, streamId: STREAM_A, isActive: true, subject: 'Math', startTime: '08:00', endTime: '08:40' },
+      { schoolId: SCHOOL_A, teacherId: TEACHER_ID, day: TODAY_DAY, classId: CLASS_ID, streamId: STREAM_B, isActive: true, subject: 'Math', startTime: '09:00', endTime: '09:40' },
     ];
     const res = await supertest(buildApp()).get('/api/teacher-portal/dashboard');
     expect(res.body.data.attendanceWidget).toHaveLength(2);
@@ -165,7 +183,7 @@ describe('GET /api/teacher-portal/dashboard — attendance submitted-status is p
   test('a legacy whole-class lesson (no streamId at all) still works exactly as before', async () => {
     mockAssignments = [{ schoolId: SCHOOL_A, teacherId: TEACHER_ID, classId: CLASS_ID, subjectId: 'subj_math' }];
     mockTimetableDocs = [
-      { schoolId: SCHOOL_A, teacherId: TEACHER_ID, day: TODAY_DAY, classId: CLASS_ID, subjectName: 'Math', className: 'Standard 4A', startTime: '08:00', endTime: '08:40' },
+      { schoolId: SCHOOL_A, teacherId: TEACHER_ID, day: TODAY_DAY, classId: CLASS_ID, isActive: true, subject: 'Math', startTime: '08:00', endTime: '08:40' },
     ];
     mockAttendanceDocs = [
       { schoolId: SCHOOL_A, classId: CLASS_ID, date: TODAY_ISO, studentId: 'stu_1', status: 'present' },
@@ -179,16 +197,15 @@ describe('GET /api/teacher-portal/dashboard — attendance submitted-status is p
 
 describe('Today\'s Timetable day-name casing (2026-09 — the root cause found while investigating this whole feature)', () => {
   // Confirmed against real production data before this fix: EVERY real
-  // timetable_slots document stores `day` lowercase (e.g. 'monday') — a
-  // query for the capitalized form ('Monday') matched zero documents,
-  // ever, for any school. This meant "Today's Timetable" (and therefore
-  // the entire "Take Att." deep-link flow this fix is about) has shown
-  // NOTHING, for every teacher, every day, since this route shipped —
-  // independent of and more fundamental than the streamId/submitted-
-  // status fixes above.
+  // timetable document stores `day` lowercase (e.g. 'monday') — a query
+  // for the capitalized form ('Monday') matched zero documents, ever, for
+  // any school. This meant "Today's Timetable" (and therefore the entire
+  // "Take Att." deep-link flow this fix is about) has shown NOTHING, for
+  // every teacher, every day, since this route shipped — independent of
+  // and more fundamental than the streamId/submitted-status fixes above.
   test('a real-shaped lowercase `day` value on the stored slot is matched — the actual production shape', async () => {
     mockTimetableDocs = [
-      { schoolId: SCHOOL_A, teacherId: TEACHER_ID, day: TODAY_DAY, classId: CLASS_ID, streamId: STREAM_A, streamName: 'A', subjectName: 'Math', className: 'Standard 4A', startTime: '08:00', endTime: '08:40' },
+      { schoolId: SCHOOL_A, teacherId: TEACHER_ID, day: TODAY_DAY, classId: CLASS_ID, streamId: STREAM_A, isActive: true, subject: 'Math', startTime: '08:00', endTime: '08:40' },
     ];
     expect(TODAY_DAY).toEqual(TODAY_DAY.toLowerCase()); // sanity: this file's own fixture is lowercase
     const res = await supertest(buildApp()).get('/api/teacher-portal/dashboard');
@@ -198,9 +215,34 @@ describe('Today\'s Timetable day-name casing (2026-09 — the root cause found w
   test('a slot stored with the OLD capitalized day value is correctly NOT matched by today\'s (now-fixed) lowercase query', async () => {
     const capitalized = TODAY_DAY.charAt(0).toUpperCase() + TODAY_DAY.slice(1);
     mockTimetableDocs = [
-      { schoolId: SCHOOL_A, teacherId: TEACHER_ID, day: capitalized, classId: CLASS_ID, subjectName: 'Math', className: 'Standard 4A', startTime: '08:00', endTime: '08:40' },
+      { schoolId: SCHOOL_A, teacherId: TEACHER_ID, day: capitalized, classId: CLASS_ID, isActive: true, subject: 'Math', startTime: '08:00', endTime: '08:40' },
     ];
     const res = await supertest(buildApp()).get('/api/teacher-portal/dashboard');
     expect(res.body.data.timetableToday).toHaveLength(0); // proves the route's query is genuinely lowercase, not coincidentally passing
+  });
+});
+
+describe("Today's Timetable reads the live-edited collection, not the orphaned legacy one (2026-09)", () => {
+  // Confirmed live against the real database: 'timetable' (202 real docs)
+  // is what the admin Scheduling Engine (server/routes/timetable.js)
+  // actually reads and writes; 'timetable_slots' (55 docs) is an orphaned
+  // legacy collection nothing writes to anymore. A slot that exists ONLY
+  // in the legacy collection must NOT appear here.
+  test("a slot seeded only under the legacy 'timetable_slots' name is not returned", async () => {
+    // Simulate the old, wrong collection still having data: since this
+    // mock only ever routes the 'timetable' key to mockTimetableDocs,
+    // leaving mockTimetableDocs empty here proves the route no longer
+    // has any path back to the legacy collection.
+    mockTimetableDocs = [];
+    const res = await supertest(buildApp()).get('/api/teacher-portal/dashboard');
+    expect(res.body.data.timetableToday).toHaveLength(0);
+  });
+
+  test('an inactive (soft-deleted) slot in the live collection is excluded', async () => {
+    mockTimetableDocs = [
+      { schoolId: SCHOOL_A, teacherId: TEACHER_ID, day: TODAY_DAY, classId: CLASS_ID, isActive: false, subject: 'Math', startTime: '08:00', endTime: '08:40' },
+    ];
+    const res = await supertest(buildApp()).get('/api/teacher-portal/dashboard');
+    expect(res.body.data.timetableToday).toHaveLength(0);
   });
 });

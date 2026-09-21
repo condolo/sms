@@ -75,7 +75,7 @@ jest.mock('../../utils/tenant-model', () => ({
     if (collection === 'lesson_coverage')  return mockCollection(mockCoverageDocs);
     if (collection === 'syllabus_topics')  return mockCollection(mockTopicDocs);
     if (collection === 'subjects')         return mockCollection(mockSubjectDocs);
-    if (collection === 'timetable_slots')  return mockCollection(mockTimetableDocs);
+    if (collection === 'timetable')        return mockCollection(mockTimetableDocs);
     return mockCollection([]);
   },
 }));
@@ -153,7 +153,7 @@ describe("GET /api/student-portal/dashboard — Today's Timetable day-name casin
   test('a real-shaped lowercase day value is matched', async () => {
     const today = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][new Date().getDay()];
     mockTimetableDocs = [
-      { schoolId: SCHOOL_A, classId: CLASS_ID, day: today, subjectName: 'English', startTime: '08:00', endTime: '08:40' },
+      { schoolId: SCHOOL_A, classId: CLASS_ID, day: today, subject: 'English', isActive: true, startTime: '08:00', endTime: '08:40' },
     ];
     const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
     expect(res.body.data.timetableToday).toHaveLength(1);
@@ -162,9 +162,42 @@ describe("GET /api/student-portal/dashboard — Today's Timetable day-name casin
   test('the OLD capitalized day value is correctly NOT matched by the now-fixed query', async () => {
     const capitalized = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date().getDay()];
     mockTimetableDocs = [
-      { schoolId: SCHOOL_A, classId: CLASS_ID, day: capitalized, subjectName: 'English', startTime: '08:00', endTime: '08:40' },
+      { schoolId: SCHOOL_A, classId: CLASS_ID, day: capitalized, subject: 'English', isActive: true, startTime: '08:00', endTime: '08:40' },
     ];
     const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
     expect(res.body.data.timetableToday).toHaveLength(0);
+  });
+});
+
+describe("GET /api/student-portal/dashboard — Today's Timetable is stream-scoped (2026-09)", () => {
+  // Confirmed while investigating the day-casing bug above: the query had
+  // no streamId filter at all — a student in one stream saw EVERY
+  // stream's lessons for their class merged into "Today's Timetable",
+  // not just as a display quirk but as real, wrong subject/teacher/room
+  // information for that student's own dashboard.
+  const today = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][new Date().getDay()];
+
+  test("a sibling stream's lesson is NOT shown on this student's dashboard", async () => {
+    mockTimetableDocs = [
+      { schoolId: SCHOOL_A, classId: CLASS_ID, streamId: SAPPHIRE, day: today, subject: 'Science', isActive: true, startTime: '09:00', endTime: '09:40' },
+    ];
+    const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
+    expect(res.body.data.timetableToday).toHaveLength(0);
+  });
+
+  test("this student's OWN stream's lesson IS shown", async () => {
+    mockTimetableDocs = [
+      { schoolId: SCHOOL_A, classId: CLASS_ID, streamId: DIAMOND, day: today, subject: 'Science', isActive: true, startTime: '09:00', endTime: '09:40' },
+    ];
+    const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
+    expect(res.body.data.timetableToday).toHaveLength(1);
+  });
+
+  test('a legacy whole-class slot (no streamId at all) still shows for every student in the class', async () => {
+    mockTimetableDocs = [
+      { schoolId: SCHOOL_A, classId: CLASS_ID, day: today, subject: 'Assembly', isActive: true, startTime: '07:30', endTime: '07:45' },
+    ];
+    const res = await supertest(buildApp()).get('/api/student-portal/dashboard');
+    expect(res.body.data.timetableToday).toHaveLength(1);
   });
 });
