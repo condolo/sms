@@ -1,9 +1,12 @@
 /* ============================================================
    server/utils/subject-scope.js (RC6)
 
-   academic_config.subjectAssignmentEnforced existed since it was
-   added to academic-config.js's schema, but nothing anywhere read
-   it. These tests cover the new enforcement primitive directly.
+   canWriteSubject/unassignedPairs are unconditional as of 2026-09 —
+   previously gated behind academic_config.subjectAssignmentEnforced,
+   an opt-in flag with no Settings UI anywhere to turn it on, so it
+   was permanently off for every real school. isSubjectAssignmentEnforced
+   itself is unchanged (still reads the raw config value) but is no
+   longer consulted by either enforcement function.
 
    All DB calls are mocked — no MongoDB required.
    ============================================================ */
@@ -67,22 +70,27 @@ describe('canWriteSubject', () => {
     }
   });
 
-  test('a teacher passes when enforcement is off, regardless of assignment', async () => {
-    mockAcademicConfig = { subjectAssignmentEnforced: false };
-    mockAssignmentDocs = [];
-    expect(await canWriteSubject(reqAs('teacher'), 'cls_1', 'subj_math')).toBe(true);
+  test('the academic_config flag no longer matters — a teacher with a matching assignment passes regardless of its value', async () => {
+    for (const flagValue of [true, false, undefined]) {
+      mockAcademicConfig = { subjectAssignmentEnforced: flagValue };
+      mockAssignmentDocs = [{ id: 'ta_1' }];
+      expect(await canWriteSubject(reqAs('teacher'), 'cls_1', 'subj_math')).toBe(true);
+    }
   });
 
-  test('a teacher with a matching teaching_assignments record passes when enforced', async () => {
-    mockAcademicConfig = { subjectAssignmentEnforced: true };
+  test('the academic_config flag no longer matters — a teacher with NO matching assignment is denied regardless of its value', async () => {
+    for (const flagValue of [true, false, undefined]) {
+      mockAcademicConfig = { subjectAssignmentEnforced: flagValue };
+      mockAssignmentDocs = [];
+      expect(await canWriteSubject(reqAs('teacher'), 'cls_1', 'subj_math')).toBe(false);
+    }
+  });
+
+  test('the academic_config lookup is never even queried — enforcement no longer depends on it', async () => {
+    const { tenantModel } = require('../utils/tenant-model');
     mockAssignmentDocs = [{ id: 'ta_1' }];
-    expect(await canWriteSubject(reqAs('teacher'), 'cls_1', 'subj_math')).toBe(true);
-  });
-
-  test('a teacher with no matching assignment is denied when enforced', async () => {
-    mockAcademicConfig = { subjectAssignmentEnforced: true };
-    mockAssignmentDocs = [];
-    expect(await canWriteSubject(reqAs('teacher'), 'cls_1', 'subj_math')).toBe(false);
+    await canWriteSubject(reqAs('teacher'), 'cls_1', 'subj_math');
+    expect(tenantModel).not.toHaveBeenCalledWith('academic_config');
   });
 });
 
@@ -101,11 +109,14 @@ describe('unassignedPairs', () => {
     expect(result).toEqual([]);
   });
 
-  test('enforcement off returns no denials regardless of assignment', async () => {
-    mockAcademicConfig = { subjectAssignmentEnforced: false };
-    mockAssignmentDocs = [];
-    const result = await unassignedPairs(reqAs('teacher'), [{ classId: 'cls_1', subjectId: 'subj_math' }]);
-    expect(result).toEqual([]);
+  test('the academic_config flag no longer matters — zero assignments denies every pair regardless of its value', async () => {
+    for (const flagValue of [true, false, undefined]) {
+      mockAcademicConfig = { subjectAssignmentEnforced: flagValue };
+      mockAssignmentDocs = [];
+      const pairs = [{ classId: 'cls_1', subjectId: 'subj_math' }];
+      const result = await unassignedPairs(reqAs('teacher'), pairs);
+      expect(result).toEqual(pairs);
+    }
   });
 
   test('a pair not covered by any assignment doc is returned as denied; a covered pair is not', async () => {

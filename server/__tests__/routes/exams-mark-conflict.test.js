@@ -57,6 +57,13 @@ const mockResultsFind = jest.fn(() => ({ lean: jest.fn().mockResolvedValue(EXIST
 const mockBulkWrite   = jest.fn().mockResolvedValue({ upsertedCount: 1, modifiedCount: 0 });
 const mockAuditInsertMany = jest.fn().mockResolvedValue({});
 const mockExamUpdateOne = jest.fn().mockResolvedValue({});
+// No ownerId on EXAM + a plain 'teacher' role means POST /:id/results falls
+// back to a real teaching_assignments check (see exams.js's own comment on
+// this) — the assignment exists so this file keeps exercising the
+// optimistic-concurrency logic it's actually about, not this scope check.
+const mockAssignmentFindOne = jest.fn().mockReturnValue({
+  select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ id: 'ta_1' }) }),
+});
 
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((collection) => {
@@ -69,8 +76,14 @@ jest.mock('../../utils/model', () => ({
     if (collection === 'mark_audit_log') {
       return { create: jest.fn().mockResolvedValue({}), insertMany: mockAuditInsertMany };
     }
+    if (collection === 'teaching_assignments') {
+      return { findOne: mockAssignmentFindOne };
+    }
     return {
-      findOne: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }),
+      findOne: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }),
+        lean:   jest.fn().mockResolvedValue(null),
+      }),
     };
   }),
 }));

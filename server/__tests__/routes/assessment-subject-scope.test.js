@@ -109,11 +109,11 @@ describe('POST /api/assessment/marks — subject-teacher scoping', () => {
     expect(res.status).toBe(201);
   });
 
-  test('enforcement OFF → write proceeds even with no assignment', async () => {
+  test('the academic_config flag no longer matters — no assignment still 403s regardless of its value', async () => {
     mockAcademicConfig = { subjectAssignmentEnforced: false };
     mockAssignmentDocs = [];
     const res = await supertest(buildApp()).post('/api/assessment/marks').send(VALID_MARK);
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(403);
   });
 
   test('admin role is exempt from the check regardless of assignment', async () => {

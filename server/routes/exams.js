@@ -14,6 +14,9 @@ const { authMiddleware } = require('../middleware/auth');
 const { moduleGate }     = require('../middleware/module-gate');
 const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
+const { scopeMiddleware } = require('../middleware/scopeMiddleware');
+const ScopeEngine        = require('../utils/scopeEngine');
+const { canWriteSubject } = require('../utils/subject-scope');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E, strParam } = require('../utils/response');
 const { isYearArchived } = require('../utils/archival');
@@ -42,6 +45,73 @@ function _calcGrade(score, maxScore, gradingSchema) {
   const pct = _round((score / maxScore) * 100);
   const { grade, points } = resolveGrade(pct, gradingSchema);
   return { percentage: pct, grade, points };
+}
+
+/* ── Data scope (2026-09) ─────────────────────────────────────────
+   Prompted directly: "a teacher should only see their streams and
+   subjects they've been assigned to — no assumptions." Before this,
+   exams.js never called scopeMiddleware/ScopeEngine at all — any
+   caller holding exams:read could list or open ANY exam in the
+   school, and POST /:id/results's only ownership gate was an
+   optional, client-suppliable exam.ownerId that the general admin
+   create path never sets (see POST / below) — meaning an exam
+   created without one had NO ownership check whatsoever. */
+
+/* exam_results carries no streamId (unlike grades/assessment_marks),
+   so a teacher whose ONLY assignment for a class is stream-scoped
+   (e.g. 7i's Maths teacher — see teaching-assignments.js) never
+   contributes to scope.classIds, only scope.streamIds
+   (scopeMiddleware.js's _loadAssigned) — the plain classId filter
+   below would then wrongly show them zero exams for their own class.
+   Resolve those streams' PARENT classIds so they still see "the" exam
+   for their class (there is only one — exams aren't split per
+   stream). Mirrors scopeEngine.js's own resolveClassPickerScope, but
+   deliberately does NOT fold in homeroom/form-teacher streams the way
+   that function does — being a stream's pastoral form teacher is not
+   academic authority to see that stream's exams, the same boundary
+   foldHomeroomScope draws for grades/assessment/report_cards. */
+async function _examClassScope(req) {
+  const scope = req.scope;
+  if (!scope?.streamIds?.length) return scope;
+  const parents = await tenantModel('streams', tenantContext(req))
+    .find({ schoolId: req.jwtUser.schoolId, id: { $in: scope.streamIds } })
+    .select('classId').lean();
+  const resolvedClassIds = [...new Set(parents.map(s => s.classId).filter(Boolean))];
+  if (!resolvedClassIds.length) return scope;
+  return { ...scope, classIds: [...new Set([...(scope.classIds ?? []), ...resolvedClassIds])] };
+}
+
+/* ScopeEngine only scopes one field per module (MODULE_SCOPE.exams is
+   classId) — exams also need narrowing by subjectId, since a teacher
+   assigned Math in 4A should not see every OTHER subject's exams for
+   4A just because they're in scope for that class. Mirrors
+   applyToFilter's own string/$in-narrowing shape. An exam with no
+   subjectId at all (schema allows it — created before finalising)
+   has nothing to check and is let through, same philosophy as
+   isClassInScope's handling of an absent classId. */
+function _applySubjectScope(req, filter) {
+  const scope = req.scope;
+  if (!scope || scope.unrestrictedModules?.includes('exams')) return filter;
+  const allowed = scope.subjectIds ?? [];
+  const existing = filter.subjectId;
+  if (typeof existing === 'string') {
+    if (!allowed.includes(existing)) filter.subjectId = '__no_match__';
+    return filter;
+  }
+  filter.$or = [{ subjectId: { $in: allowed } }, { subjectId: { $exists: false } }, { subjectId: null }];
+  return filter;
+}
+
+/* Single-document counterpart to _applySubjectScope/applyToFilter, for
+   routes that fetch one exam by id rather than building a list query
+   (e.g. GET /:id). An absent classId/subjectId on the exam has nothing
+   to check and is allowed through, same philosophy as isClassInScope. */
+function _examInScope(scope, doc) {
+  if (!scope) return true;
+  if (scope.unrestrictedModules?.includes('exams')) return true;
+  const classOk   = !doc.classId   || (scope.classIds   ?? []).includes(doc.classId);
+  const subjectOk = !doc.subjectId || (scope.subjectIds ?? []).includes(doc.subjectId);
+  return classOk && subjectOk;
 }
 
 /* ── Validation ─────────────────────────────────────────────── */
@@ -346,7 +416,7 @@ router.post('/announce', authMiddleware, PLAN, MODGATE, async (req, res) => { //
   }
 });
 
-router.get('/', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), async (req, res) => {
+router.get('/', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -383,6 +453,16 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), async (req
       filter.title = rx;
     }
 
+    // Data scope — see this file's own comment on _examClassScope/
+    // _applySubjectScope above. Request-local only; req.scope is restored
+    // before the handler returns so scopeMiddleware's 5-minute cache
+    // (shared across every other module's own next call) is never mutated.
+    const originalScope = req.scope;
+    req.scope = await _examClassScope(req);
+    ScopeEngine.applyToFilter(req, 'exams', filter);
+    _applySubjectScope(req, filter);
+    req.scope = originalScope;
+
     const Exams = tenantModel('exams', tenantContext(req));
     const [docs, total] = await Promise.all([
       Exams.find(filter).sort({ date: -1 }).skip(skip).limit(limit).select('-__v').lean(),
@@ -408,11 +488,17 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), async (req
   } catch (err) { console.error('[exams GET]', err); return E.serverError(res); }
 });
 
-router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), async (req, res) => {
+router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('exams', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Exam not found');
+
+    const scope = await _examClassScope(req);
+    if (!_examInScope(scope, doc)) {
+      return E.forbidden(res, 'This exam is not in your assigned scope.');
+    }
+
     return ok(res, doc);
   } catch (err) { console.error('[exams GET/:id]', err); return E.serverError(res); }
 });
@@ -739,9 +825,26 @@ router.post('/:id/results', authMiddleware, PLAN, MODGATE, rbac('exams', 'create
       return E.badRequest(res, `Academic year for this exam has been archived — results are permanently read-only.`);
     }
 
-    // Teacher ownership check — if enforced, only the exam owner (or admin) can write results
-    if (exam.ownerId && exam.ownerId !== userId && !['admin', 'superadmin'].includes(role)) {
-      return E.forbidden(res, 'Only the assigned subject teacher can enter results for this exam');
+    // Teacher ownership check. exam.ownerId is set by the /announce path
+    // (the teacher who scheduled that sitting) but is optional and never
+    // forced on the general admin POST / create path — an exam created
+    // there had NO ownership check at all before this fix, since the old
+    // condition's `exam.ownerId &&` short-circuited to "allowed" whenever
+    // ownerId was unset. Now falls back to a real teaching_assignments
+    // check (the same {classId, subjectId} pair canWriteSubject enforces
+    // for marks) whenever the caller isn't the recorded owner — an exam
+    // with no classId/subjectId at all has nothing to check and is
+    // allowed through unchanged, same as canWriteSubject's own callers
+    // elsewhere in this codebase never widen access, only narrow it.
+    const isOwner     = !!exam.ownerId && exam.ownerId === userId;
+    const isAdminRole = ['admin', 'superadmin'].includes(role);
+    if (!isOwner && !isAdminRole) {
+      const hasAssignment = (exam.classId && exam.subjectId)
+        ? await canWriteSubject(req, exam.classId, exam.subjectId)
+        : true;
+      if (!hasAssignment) {
+        return E.forbidden(res, 'You are not assigned to teach this class/subject — only the assigned subject teacher (or an admin) can enter results for this exam.');
+      }
     }
 
     // If admin is acting as teacher, require actingAs field

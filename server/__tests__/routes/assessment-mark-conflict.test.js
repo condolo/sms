@@ -76,6 +76,16 @@ jest.mock('../../utils/model', () => ({
     if (collection === 'assessment_marks') {
       return { findOne: mockMarksFindOne, find: mockMarksFind, bulkWrite: mockBulkWrite };
     }
+    // teaching_assignments — canWriteSubject/unassignedPairs (RC6) are
+    // unconditional now; this file is about conflict detection, not
+    // subject scoping, so every write here is for an assignment the
+    // teacher genuinely holds.
+    if (collection === 'teaching_assignments') {
+      return {
+        findOne: jest.fn(() => mockChain(() => ({ id: 'ta_1' }))),
+        find:    jest.fn(() => mockChain(() => [{ classId: 'cls_001', subjectId: 'subj_001' }])),
+      };
+    }
     // 'students' — resolved by assessment.js's POST /marks(/bulk) to
     // denormalize/scope-check streamId (Milestone 2); no test here cares
     // about actual stream values, so an empty result keeps every write

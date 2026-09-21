@@ -87,13 +87,13 @@ describe('PUT /api/report-cards/draft-comments/:studentId/subject/:subjectId', (
     expect(mockDraftCommentUpsert).toHaveBeenCalledTimes(1);
   });
 
-  test('enforcement OFF → write proceeds with no assignment', async () => {
+  test('the academic_config flag no longer matters — no assignment still 403s regardless of its value', async () => {
     mockAcademicConfig = { subjectAssignmentEnforced: false };
     mockAssignmentDocs = [];
     const res = await supertest(buildApp())
       .put('/api/report-cards/draft-comments/stu_001/subject/subj_math')
       .send({ classId: 'cls_001', termNumber: 1, comment: 'Doing well' });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
   });
 
   test('admin role bypasses the check', async () => {

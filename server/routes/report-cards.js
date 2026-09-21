@@ -31,6 +31,8 @@ const { authMiddleware } = require('../middleware/auth');
 const { moduleGate }     = require('../middleware/module-gate');
 const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
+const { scopeMiddleware } = require('../middleware/scopeMiddleware');
+const ScopeEngine        = require('../utils/scopeEngine');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
@@ -973,9 +975,9 @@ router.get('/publish-batches', authMiddleware, PLAN, MODGATE, rbac('grades', 're
 /* ══════════════════════════════════════════════════════════════
    GET /  — list snapshots
    ══════════════════════════════════════════════════════════════ */
-router.get('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
+router.get('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMiddleware, async (req, res) => {
   try {
-    const { schoolId, role } = req.jwtUser;
+    const { schoolId, role, userId, guardianOf } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
 
     // Restricted roles can never see superseded versions
@@ -989,6 +991,28 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (re
     if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
     if (req.query.studentId)      filter.studentId      = req.query.studentId;
     if (req.query.status)         filter.status         = req.query.status;
+
+    // Data scope. This route had none at all before — any grades:read
+    // holder (e.g. a teacher, or a restricted role that somehow held that
+    // permission) could list every student's report card in the school.
+    // Restricted roles (parent/student/guardian) don't fit ScopeEngine's
+    // class/stream shape at all — this admin-facing route isn't the one
+    // their own portals actually use (student-portal.js/parent-portal.js
+    // query report_card_snapshots directly, already correctly scoped),
+    // but it must fail closed rather than fail open if reached directly.
+    // A staff-level ('assigned'/'section') caller gets the same
+    // classId(+streamId) narrowing every other stream-aware module uses.
+    if (RESTRICTED_ROLES.includes(role)) {
+      const ownStudentIds = ['parent', 'guardian'].includes(role)
+        ? (Array.isArray(guardianOf) ? guardianOf : [])
+        : [req.jwtUser.studentId].filter(Boolean);
+      const requested = filter.studentId;
+      filter.studentId = requested
+        ? (ownStudentIds.includes(requested) ? requested : '__no_match__')
+        : { $in: ownStudentIds };
+    } else {
+      ScopeEngine.applyToFilter(req, 'report_cards', filter);
+    }
 
     const [docs, total] = await Promise.all([
       tenantModel('report_card_snapshots', tenantContext(req)).find(filter).sort({ publishedAt: -1 }).skip(skip).limit(limit)
@@ -1251,9 +1275,9 @@ router.patch('/publication-policy', authMiddleware, PLAN, MODGATE, rbac('report_
 /* ══════════════════════════════════════════════════════════════
    GET /:id  — full snapshot
    ══════════════════════════════════════════════════════════════ */
-router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
+router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMiddleware, async (req, res) => {
   try {
-    const { schoolId, role, userId, guardianOf } = req.jwtUser;
+    const { schoolId, role, userId, guardianOf, studentId: ownStudentId } = req.jwtUser;
     const doc = await tenantModel('report_card_snapshots', tenantContext(req))
       .findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Report card snapshot not found');
@@ -1282,6 +1306,33 @@ router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async 
       }
     }
 
+    // Student: can only view their OWN report card. Previously missing
+    // entirely — only 'parent'/'guardian' were checked above, so a
+    // 'student'-role caller with grades:read could fetch any OTHER
+    // student's full report card (scores, comments, GPA) by id, with no
+    // ownership check at all.
+    if (role === 'student' && doc.studentId !== ownStudentId) {
+      tenantModel('mark_audit_log', tenantContext(req)).create({
+        action:       'GUARDIAN_ACCESS_DENIED',
+        schoolId,
+        requestedBy:  userId,
+        requestedRole: role,
+        targetStudentId: doc.studentId,
+        snapshotId:   req.params.id,
+        route:        'GET /api/report-cards/:id',
+        timestamp:    new Date().toISOString(),
+      }).catch(e => console.error('[report-cards] student audit log failed:', e.message));
+      return E.forbidden(res, 'You are not authorised to view this student\'s report card.');
+    }
+
+    // Staff (teacher/section-head): same classId(+streamId) narrowing every
+    // other stream-aware module uses. This route had no scope check of any
+    // kind before — a teacher with grades:read could open any student's
+    // report card in the school, not just their own class/stream.
+    if (!RESTRICTED_ROLES.includes(role) && !ScopeEngine.isClassInScope(req, 'report_cards', doc.classId, doc.streamId)) {
+      return E.forbidden(res, 'This class is not in your assigned scope.');
+    }
+
     return ok(res, doc);
   } catch (err) { console.error('[report-cards GET/:id]', err); return E.serverError(res); }
 });
@@ -1298,6 +1349,20 @@ router.put('/:id/comments', authMiddleware, PLAN, MODGATE, rbac('grades', 'updat
     const snap = await tenantModel('report_card_snapshots', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!snap) return E.notFound(res, 'Report card snapshot not found');
     if (snap.superseded) return E.badRequest(res, 'Cannot edit a superseded report card. Use the current version.');
+
+    // Subject-teacher scoping (RC6) — the draft-comments routes for this
+    // exact same data (a subject's comment before publish) already enforce
+    // this via unassignedPairs; this route, which can also edit
+    // subjectComments post-publish, had no such check at all — any
+    // grades:update holder could overwrite any subject's comment on any
+    // published report card regardless of teaching_assignments.
+    if (data.subjectComments && typeof data.subjectComments === 'object' && snap.classId) {
+      const pairs = Object.keys(data.subjectComments).map(subjectId => ({ classId: snap.classId, subjectId, streamId: snap.streamId }));
+      const denied = await unassignedPairs(req, pairs);
+      if (denied.length > 0) {
+        return E.forbidden(res, `You are not assigned to teach: ${denied.map(p => p.subjectId).join(', ')}`);
+      }
+    }
 
     const now    = new Date().toISOString();
     const merged = { ...(snap.comments || {}) };

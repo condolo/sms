@@ -42,6 +42,14 @@ const EXAM = {
   ownerId: null,
 };
 
+// No ownerId on EXAM + a plain 'teacher' role means POST /:id/results falls
+// back to a real teaching_assignments check (see exams.js's own comment on
+// this) — the assignment exists so every existing test in this file keeps
+// exercising the grade-calc logic it's actually about, not this scope check.
+const mockAssignmentFindOne = jest.fn().mockReturnValue({
+  select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ id: 'ta_1' }) }),
+});
+
 const DEFAULT_SCALE = {
   isDefault: true,
   bands: [
@@ -78,8 +86,11 @@ jest.mock('../../utils/model', () => ({
     if (collection === 'academic_config') {
       return { findOne: jest.fn().mockReturnValue({ lean: jest.fn(() => Promise.resolve(mockAcademicCfg)) }) };
     }
+    if (collection === 'teaching_assignments') {
+      return { findOne: mockAssignmentFindOne };
+    }
     return {
-      findOne: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }),
+      findOne: jest.fn().mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }) }),
     };
   }),
 }));

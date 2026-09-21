@@ -1497,6 +1497,78 @@ shape — a request-local `foldHomeroom*Scope` call at that module's own
 routes, restored immediately after use — never widen
 `scopeMiddleware.js`'s shared computation to include it.
 
+**Follow-up (v5.106.0) — three modules had a `MODULE_SCOPE` entry that
+was never actually wired in.** Prompted by a requested critical
+assessment of the Exams/Report Cards flow ("a teacher should only see
+their streams and subjects they've been assigned to — no
+assumptions"): `exams.js`'s `GET /`/`GET /:id` and `report-cards.js`'s
+`GET /`/`GET /:id` never called `scopeMiddleware`/`ScopeEngine`
+anywhere (confirmed by grep — zero hits in either file before this
+fix), despite `MODULE_SCOPE.report_cards` already declaring
+`streamAware: true`. A teacher with the coarse `grades:read`/
+`exams:read` RBAC permission could list or open **any** exam or
+report card in the school, not just their own class/stream.
+`assessment.js`'s `GET /marks`, `GET /report`, and `GET /marks/summary`
+had the identical gap — only `GET /analytics` applied
+`ScopeEngine.applyToFilter`.
+
+`exams` needed its own treatment, not just "turn scoping on": its
+prior `MODULE_SCOPE` entry was `{field: 'subjectId', source:
+'subjectIds'}` — unused, and the wrong shape besides, since it would
+have matched a subject across *every* class in the school rather than
+narrowing by class at all. Changed to `{field: 'classId', source:
+'classIds'}` (matching grades/assessment/report_cards' own class-level
+convention) — deliberately **not** `streamAware`, since `exam_results`
+carries no `streamId` field at all (confirmed absent from
+`ResultSchema`'s `$set` block), and this map's own comment above
+already establishes the rule: leave `streamAware` off until a
+module's records genuinely carry the field. Because `ScopeEngine` only
+scopes one field per module, `exams.js` additionally narrows by
+subject itself, in a small local helper (`_applySubjectScope`) mirror-
+ing `applyToFilter`'s own string/`$in` narrowing shape — a teacher
+assigned Math in a class should not see that class's Science exams
+just because the class itself is in scope.
+
+A stream-only-scoped teacher (a compulsory subject taught separately
+per stream — see `teaching-assignments.js`) never contributes to
+`scope.classIds`, only `scope.streamIds` — and since `exam_results`
+has no `streamId` to match against, the `streamAware` mechanism that
+solves this for grades/assessment can't apply here either. `exams.js`
+resolves it locally instead (`_examClassScope`): fold those streams'
+PARENT classIds into a request-local scope copy — exactly
+`resolveClassPickerScope`'s own logic, **minus** its `foldHomeroomScope`
+step. This is deliberate: exams are academic content, and a stream's
+pastoral form teacher must not gain visibility into it just by being
+folded in the same way `classes.js`'s picker folds homeroom streams
+for its own, much lower-stakes "which classes can I open" use case.
+
+**A second, unrelated finding surfaced by the same assessment:**
+`server/utils/subject-scope.js`'s `canWriteSubject`/`unassignedPairs`
+— the exact-`{classId, subjectId}`-pair check `assessment.js`'s mark-
+entry writes already used — only ran `if
+academic_config.subjectAssignmentEnforced`, an opt-in flag with **no
+Settings UI anywhere in the app** to turn it on (confirmed by search:
+zero client files read or write it). It was permanently off for every
+real school. Confirmed explicitly with the requester before changing
+(this alters live write behavior, not just visibility) and made
+unconditional — every school now gets real enforcement, no exceptions,
+management-tier roles still exempt. The same fix closed two more,
+previously separate gaps for free: `POST /exams/:id/results`'s only
+ownership check was an optional `exam.ownerId` never forced on the
+general admin create path (an exam created there had **no** ownership
+check at all) — now falls back to `canWriteSubject` whenever the
+caller isn't the recorded owner; and `report-cards.js`'s `PUT
+/:id/comments` had no subject check on `subjectComments` at all,
+unlike the `draft-comments` routes covering the same data pre-publish.
+
+**A third, unrelated finding in the same file:** `GET
+/report-cards/:id`'s restricted-role ownership check only covered
+`'parent'`/`'guardian'` (checking `guardianOf`) — a `'student'`-role
+caller had **no** ownership check whatsoever and could fetch any other
+student's full report card (scores, GPA, comments) by id. Fixed by
+mirroring the exact same check (including the compliance audit log)
+for `role === 'student'` against `jwtUser.studentId`.
+
 ### Dashboard "Today's Timetable" day-name casing (v5.104.0)
 
 `timetable_slots.day` is stored **lowercase** in every real document — `timetable.js`'s own canonical constant is

@@ -1,12 +1,7 @@
 /* ============================================================
    Msingi — Subject-Teacher Scope Enforcement (RC6)
 
-   academic_config.subjectAssignmentEnforced ("if true, only assigned
-   teacher can enter marks") has existed since it was added to
-   academic-config.js's schema — validated, persisted, returned by
-   GET /api/academic-config — but never read anywhere else in the
-   codebase. This closes that gap: when a school turns it on, a
-   teacher may only write marks or the Subject Teacher Comment for a
+   A teacher may only write marks or the Subject Teacher Comment for a
    {classId, subjectId} pair they hold a teaching_assignments record
    for. Management-tier roles are never restricted by this rule — the
    same bypass set teaching-assignments.js's own canManage() uses for
@@ -18,6 +13,20 @@
    — a teacher assigned Math-in-4A and English-in-4B would pass a
    flat-list check for English-in-4A too, which is exactly the wrong
    pairing. This enforces the exact {classId, subjectId} tuple.
+
+   Unconditional as of 2026-09 (Exams/Report Cards security pass).
+   This used to run only `if academic_config.subjectAssignmentEnforced`
+   — an opt-in flag with no Settings UI control anywhere in the app
+   (confirmed by search: no client file ever reads or sets it), so it
+   was permanently OFF for every real school. Any teacher with
+   `grades:create`/`grades:delete` RBAC could enter or delete marks
+   for any class/subject in the school, and the identical gap applied
+   to exam results (see exams.js) and report-card subject comments.
+   Prompted directly: "a teacher should only see their streams and
+   subjects they've been assigned to — no assumptions." `isSubjectAssignmentEnforced`
+   is kept exported (and the schema field left in place) only so a
+   caller checking it doesn't break; nothing in this file honors it as
+   a gate anymore.
    ============================================================ */
 'use strict';
 
@@ -63,9 +72,9 @@ function _streamOr(streamId) {
 
 /**
  * Single {classId, subjectId[, streamId]} check for one write. Returns true
- * when the write may proceed — enforcement is off for this school, the
- * caller is a management-tier role, or a matching teaching_assignments
- * record exists (a whole-class grant, or one scoped to this exact stream).
+ * when the write may proceed — the caller is a management-tier role, or a
+ * matching teaching_assignments record exists (a whole-class grant, or one
+ * scoped to this exact stream).
  *
  * `streamId` is optional and backward compatible: omitting it (as every
  * pre-Milestone-2 caller does) only ever matches whole-class assignments,
@@ -73,7 +82,6 @@ function _streamOr(streamId) {
  */
 async function canWriteSubject(req, classId, subjectId, streamId) {
   if (_isManagement(req)) return true;
-  if (!(await isSubjectAssignmentEnforced(req))) return true;
 
   const { schoolId, userId } = req.jwtUser;
   const doc = await tenantModel('teaching_assignments', tenantContext(req))
@@ -84,15 +92,14 @@ async function canWriteSubject(req, classId, subjectId, streamId) {
 /**
  * Bulk variant — checks every distinct {classId, subjectId[, streamId]}
  * triple in one query instead of one round-trip per mark. Returns the
- * subset of `pairs` the caller is NOT permitted to write (empty when
- * enforcement is off, the caller is management-tier, or every pair is
- * assigned to them). Each pair's `streamId` is optional, same backward-
- * compatibility contract as canWriteSubject above.
+ * subset of `pairs` the caller is NOT permitted to write (empty when the
+ * caller is management-tier, or every pair is assigned to them). Each
+ * pair's `streamId` is optional, same backward-compatibility contract as
+ * canWriteSubject above.
  */
 async function unassignedPairs(req, pairs) {
   if (pairs.length === 0) return [];
   if (_isManagement(req)) return [];
-  if (!(await isSubjectAssignmentEnforced(req))) return [];
 
   const { schoolId, userId } = req.jwtUser;
   const assigned = await tenantModel('teaching_assignments', tenantContext(req))

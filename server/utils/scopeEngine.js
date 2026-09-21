@@ -85,7 +85,19 @@ const MODULE_SCOPE = {
   growth_profile:  { field: 'classId',   source: 'classIds', streamAware: true },
   growth_records:  { field: 'classId',   source: 'classIds', streamAware: true },
   lessons:         { field: 'classId',   source: 'classIds', streamAware: true },
-  exams:           { field: 'subjectId', source: 'subjectIds' },
+  // classId, NOT subjectId — an exam belongs to one class, and (unlike
+  // grades/assessment/report_cards) exam_results carries no streamId at
+  // all, so this is deliberately not streamAware (see this map's own
+  // comment above: "turning this on for a module whose records have no
+  // streamId yet doesn't leak anything... but it's cleaner to leave it
+  // off until that's true"). Previously subjectId-only, which was both
+  // unused (exams.js never called applyToFilter/scopeMiddleware at all,
+  // confirmed by grep) and wrong in shape — a teacher assigned Math in
+  // ONE class would have matched every Math exam in the whole school,
+  // not just their own class's. exams.js additionally narrows by
+  // subjectId itself (see its own _applySubjectScope) since this engine
+  // only supports one scoped field per module.
+  exams:           { field: 'classId',   source: 'classIds' },
   timetable:       { field: 'teacherId', source: 'userId'     },
 };
 

@@ -839,7 +839,7 @@ const BulkMarkSchema = z.object({
  * Query params: studentId, subjectId, classId, termNumber,
  *               academicYearId, assessmentType, isPublished
  */
-router.get('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
+router.get('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId };
@@ -853,6 +853,11 @@ router.get('/marks', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), asyn
     if (req.query.isPublished !== undefined) {
       filter.isPublished = req.query.isPublished === 'true';
     }
+
+    // Data scope — same mechanism GET /analytics already uses below;
+    // this route had none at all before, so any grades:read holder could
+    // list every mark in the school regardless of class/stream assignment.
+    ScopeEngine.applyToFilter(req, 'assessment', filter);
 
     const docs = await tenantModel('assessment_marks', tenantContext(req)).find(filter)
       .sort({ termNumber: 1, assessmentType: 1, instance: 1 }).limit(5000).lean();
@@ -1259,7 +1264,7 @@ router.delete('/marks/:id', authMiddleware, PLAN, MODGATE, rbac('grades', 'delet
  * Response (per student):
  *   subjects: [{ subjectId, subject, avgPct, grade, examCount }]
  */
-router.get('/report', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
+router.get('/report', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     let { studentId, classId, academicYearId, termNumber } = req.query;
@@ -1270,10 +1275,26 @@ router.get('/report', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), asy
 
     // aggregateAssessmentMarks requires classId; resolve it from the
     // student's own record when the route was called with studentId only.
+    // streamId is resolved alongside it either way — needed for the scope
+    // check below, since a teacher whose only assignment for this class is
+    // scoped to ONE stream must not pull a report for a different stream's
+    // student.
+    let studentStreamId = null;
     if (!classId && studentId) {
       const studentDoc = await tenantModel('students', tenantContext(req))
-        .findOne({ schoolId, id: studentId }).select('classId').lean();
+        .findOne({ schoolId, id: studentId }).select('classId streamId').lean();
       classId = studentDoc?.classId || null;
+      studentStreamId = studentDoc?.streamId || null;
+    } else if (classId && studentId) {
+      const studentDoc = await tenantModel('students', tenantContext(req))
+        .findOne({ schoolId, id: studentId }).select('streamId').lean();
+      studentStreamId = studentDoc?.streamId || null;
+    }
+
+    // Data scope — this route had no check at all before; any grades:read
+    // holder could pull any class's/student's computed report.
+    if (classId && !ScopeEngine.isClassInScope(req, 'assessment', classId, studentStreamId)) {
+      return _err(res, 'This class is not in your assigned scope.', 403);
     }
 
     // Load config (weights, template) + default grade scale in parallel
@@ -1760,12 +1781,18 @@ router.post('/reminders/notify', authMiddleware, PLAN, MODGATE, rbac('settings',
  *
  * Query: classId (required), subjectId, termNumber, academicYearId
  */
-router.get('/marks/summary', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), async (req, res) => {
+router.get('/marks/summary', authMiddleware, PLAN, MODGATE, rbac('grades', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { classId, subjectId, termNumber, academicYearId } = req.query;
 
     if (!classId) return _err(res, 'classId is required');
+
+    // Data scope — this route had no check at all before; any grades:read
+    // holder could pull the completion grid for any class in the school.
+    if (!ScopeEngine.isClassInScope(req, 'assessment', classId)) {
+      return _err(res, 'This class is not in your assigned scope.', 403);
+    }
 
     const filter = { schoolId, classId };
     if (subjectId)      filter.subjectId      = subjectId;

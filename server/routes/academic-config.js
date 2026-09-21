@@ -106,8 +106,12 @@ const ConfigSchema = z.object({
   classTeacherSignatureLabel:  z.string().max(100).optional(),
   footerNote:          z.string().max(500).optional(),
 
-  // Subject assignment enforcement
-  subjectAssignmentEnforced: z.boolean().optional(), // if true, only assigned teacher can enter marks
+  // Subject assignment enforcement — vestigial as of 2026-09. Kept for
+  // backward compatibility (existing stored docs, GET responses) only;
+  // server/utils/subject-scope.js's canWriteSubject/unassignedPairs no
+  // longer read this field — the check they enforce is unconditional
+  // now, for every school, regardless of this value.
+  subjectAssignmentEnforced: z.boolean().optional(),
 
   // archivedAcademicYears is intentionally NOT in this schema.
   // It is read-only from the client's perspective — only writable via POST /archive-year.
