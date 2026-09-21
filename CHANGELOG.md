@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.109.0] — 2026-09-21 — fix(attendance): already-recorded students rendered with a blank name and "?" avatar on every register reopen
+
+Reported live, flagged as crucial: a Year 4/Diamond stream register (homeroom teacher assigned) showed correct attendance stats (18/18 accounted for) but only 2 visible rows, the rest blank with a "?" placeholder. Investigated as a possible scope/RBAC bug given the module's recent hardening, but the true cause was unrelated to scope, assignment, or role.
+
+### Root cause
+`attendance` documents never store a `studentName` field at all — `server/routes/attendance.js` only ever builds that string in memory, for absence-notification text, and never persists it onto the record. `AttendancePage.jsx`'s register-merge logic built its `merged` row list as `[...rows, ...unrecordedRosterStudents]`: the roster half (`classStudents`) attached a real `studentName` when building placeholder rows for students with no record yet, but the `rows` half (already-saved attendance records, fetched from `GET /api/attendance`) was spread in as-is — carrying `studentId`/`status`/`date` but no name. The instant a register was reopened after being saved even once, every already-recorded student rendered with `studentName: undefined`, tripping the `(r.studentName ?? '?')` initials fallback. This is a universal bug that reproduces for any class or stream once its register has been saved for that date — not specific to homeroom-assigned streams or to Diamond; the report's framing simply reflected which register the user happened to reopen.
+
+### Fixed
+- `client/src/pages/attendance/AttendancePage.jsx`: build a `nameById` lookup from `classStudents` (the roster, which does carry real names) and backfill `studentName` onto every row sourced from `rows` before merging. A student who has since left the roster but still has a historical attendance record keeps the pre-existing "?" fallback — an acceptable, unchanged edge case, not a regression.
+
+### Verified
+- Reproduced live in the demo environment: created a fresh register, marked all present, saved, then did a full page reload and reselected the same class/stream (the exact bug-triggering path, since every row is now sourced from `rows`) — names and statuses rendered correctly post-fix.
+- Confirmed against real production data (Trinitas International School, Year 4/Diamond): 18 students, all correctly matching `stream.id`, exactly 18 attendance records for the day, one per roster student, zero missing/duplicated — the data layer was already fully consistent, isolating the bug to this client-side rendering gap.
+- Full Jest suite: 222 suites, 2197/2197 passing. Client build clean.
+
+---
+
 ## [v5.108.0] — 2026-09-21 — fix(rbac): system-wide audit found the same "ungrantable permission" bug in three more modules
 
 Direct follow-up to the previous fix, prompted by a pointed question: "is this really working across the system RBAC... i have also noted that when investigating you assume some things which comes back to haunt us." Rather than assume the `assessment.js` fix was isolated, ran an exhaustive audit — every `rbac()` call in all 65 route files, cross-referenced against `server/config/moduleRegistry.js` (the single source of truth for what Settings → Roles & Permissions can actually grant) and `settings.js`'s `_deriveApiPerms` (the only code path that ever writes a role's permission arrays, which can only ever contain `'read'/'create'/'update'/'delete'`, plus a `mod__sub` key for the same four strings per sub-permission).

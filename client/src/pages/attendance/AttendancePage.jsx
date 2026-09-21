@@ -165,10 +165,24 @@ export default function AttendancePage() {
     .filter(s => !effectiveStreamId || !s.streamId || s.streamId === effectiveStreamId)
     .sort((a, b) => (a.startTime ?? '').localeCompare(b.startTime ?? ''));
 
-  /* ── Merge: existing records + unrecorded students ─────────── */
+  /* ── Merge: existing records + unrecorded students ───────────
+     An attendance document only ever stores studentId/status/date — it
+     never carries a studentName (that field is built server-side only
+     for notification text, never persisted onto the record itself —
+     see attendance.js's absence-alert code). Every row sourced from
+     `rows` (i.e. every ALREADY-recorded student) therefore had no name
+     to render at all — blank text plus the "?" avatar fallback — the
+     instant a register was reopened after being saved once, since only
+     the *unrecorded* students below ever got a real studentName
+     attached. Backfilled here from the roster (classStudents), which
+     does carry real names; a student who has since left the roster
+     (e.g. transferred out) but still has a historical record here
+     keeps the same "?" fallback as before — not a regression, just an
+     edge case this fix doesn't need to solve. */
+  const nameById = Object.fromEntries(classStudents.map(s => [s.id ?? s._id, `${s.firstName} ${s.lastName}`]));
   const recorded = new Set(rows.map(r => r.studentId));
   const merged   = [
-    ...rows,
+    ...rows.map(r => ({ ...r, studentName: nameById[r.studentId] ?? r.studentName })),
     ...classStudents.filter(s => !recorded.has(s.id ?? s._id)).map(s => ({
       studentId:   s.id ?? s._id,
       studentName: `${s.firstName} ${s.lastName}`,
