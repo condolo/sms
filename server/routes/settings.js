@@ -85,6 +85,20 @@ function _deriveApiPerms(byRoleCell) {
       if (cell.d) subActions.push('delete');
       perms[key] = subActions; // sub-level grant, e.g. perms['hr__leave_view']
       subActions.forEach(a => actions.add(a));
+
+      // hr.js's 4 workflow-config routes check the literal string
+      // 'manage_workflow' in the COARSE 'hr' array — deliberately a
+      // separate, more restrictive grant from general hr RCUD (Governance
+      // Spec §0), not something the standard mod__sub subKey check could
+      // safely express here: that mechanism falls back to the coarse
+      // module grant whenever no sub-specific array exists for a role,
+      // which would silently hand every hr:update-holding role
+      // workflow-config access the moment this shipped, before any role
+      // was individually re-saved (Priority-0 audit finding, 2026-09).
+      // Special-cased instead: only the explicit 'workflow' sub's Edit
+      // checkbox ever adds/removes this literal string, and only for the
+      // one role actually being saved — no fallback, no implicit grant.
+      if (key === 'hr__workflow' && cell.e) actions.add('manage_workflow');
     }
     perms[mod] = [...actions]; // always include — empty array means no access, module hidden from sidebar
   }
@@ -113,7 +127,23 @@ function _deriveApiPerms(byRoleCell) {
    key(s), reintroducing the same wipeout at module-grain instead of
    school-grain. That recomputation happens once, correctly, at
    resolution time in rbac.js's _mergeUserOverrides, which does have
-   the role's full grant in view. */
+   the role's full grant in view.
+
+   KNOWN LIMITATION (2026-09): the hr__workflow special case in
+   _deriveApiPerms above (which adds the literal 'manage_workflow'
+   string to the COARSE hr array) is NOT mirrored here or in rbac.js's
+   _mergeUserOverrides. A per-user override toggling the "Configure
+   Leave/Payroll Approval Workflow" checkbox produces a normal
+   perms.byUser[user]['hr__workflow'] sub-array, but nothing ever reads
+   that key back into 'manage_workflow' for this one user specifically
+   — hr.js's routes only ever check the coarse 'hr' array, which
+   per-user overrides deliberately never touch (see above). This fails
+   SAFE (the override silently does nothing for this one permission,
+   never grants unintended access) but does mean per-user
+   grant/revoke of workflow-config specifically isn't supported yet —
+   only role-level. Extending it correctly needs the same special case
+   added to rbac.js's _mergeUserOverrides, which has the full
+   role-grant context this function deliberately doesn't. */
 function _deriveUserOverridePerms(byUserCell) {
   const perms = {};
   for (const [key, cell] of Object.entries(byUserCell ?? {})) {

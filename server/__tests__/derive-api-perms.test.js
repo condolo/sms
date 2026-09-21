@@ -76,3 +76,42 @@ describe('_deriveApiPerms — sub-level grants (the actual fix)', () => {
     expect(derived['hr__payroll_view']).not.toEqual(derived.finance);
   });
 });
+
+describe('_deriveApiPerms — hr__workflow special case (2026-09, Priority-0 audit fix)', () => {
+  // hr.js's 4 workflow-config routes check the literal string
+  // 'manage_workflow' in the COARSE 'hr' array — a deliberately separate,
+  // more restrictive grant from general hr RCUD (Governance Spec §0), not
+  // expressible via the standard mod__sub subKey mechanism (which falls
+  // back to the coarse grant and would have silently handed every
+  // hr:update-holding role this capability). Only this sub's Edit
+  // checkbox may ever add/remove it, and only for the role being saved.
+  test('"Configure Leave/Payroll Approval Workflow" Edit checked adds manage_workflow to the coarse hr array', () => {
+    const derived = _deriveApiPerms({ 'hr__workflow': { v: true, e: true, d: false } });
+    expect(derived.hr).toEqual(expect.arrayContaining(['manage_workflow']));
+  });
+
+  test('View-only (no Edit) on hr__workflow does NOT add manage_workflow', () => {
+    const derived = _deriveApiPerms({ 'hr__workflow': { v: true, e: false, d: false } });
+    expect(derived.hr).not.toContain('manage_workflow');
+  });
+
+  test('manage_workflow is never added when hr__workflow is absent entirely', () => {
+    const derived = _deriveApiPerms({ 'hr__leave_view': { v: true, e: true, d: true } });
+    expect(derived.hr).not.toContain('manage_workflow');
+  });
+
+  test('checking Edit on a DIFFERENT hr sub does not add manage_workflow', () => {
+    const derived = _deriveApiPerms({ 'hr__payroll_view': { v: true, e: true, d: false } });
+    expect(derived.hr).not.toContain('manage_workflow');
+    expect(derived.hr.sort()).toEqual(['create', 'read', 'update']);
+  });
+
+  test('manage_workflow coexists correctly with other hr subs\' normal RCUD contributions', () => {
+    const derived = _deriveApiPerms({
+      'hr__staff':    { v: true, e: false, d: false },
+      'hr__workflow': { v: true, e: true,  d: false },
+    });
+    expect(derived.hr.sort()).toEqual(['create', 'manage_workflow', 'read', 'update']);
+    expect(derived['hr__workflow'].sort()).toEqual(['create', 'read', 'update']); // sub-level array unaffected by the special case
+  });
+});

@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.110.0] — 2026-09-21 — feat(hr): "Configure Leave/Payroll Approval Workflow" is now a grantable permission
+
+Resolves one of the two items flagged in v5.108.0's audit as "needs a decision, not a pure bug fix": `hr.js`'s 4 `manage_workflow`-gated routes had the action string seeded correctly for the built-in `superadmin`/`admin`/`hr` roles, but no control existed anywhere in Roles & Permissions to grant or revoke it for a custom role — a custom "HR Manager" role could never be given this capability no matter what was checked in the UI.
+
+### Why not the standard `mod__sub` mechanism
+`rbac.js`'s `_isAllowed` falls back to the coarse module-level array whenever a specific `mod__sub` array doesn't exist yet for a role. Adding `manage_workflow` as an ordinary sub-permission would have silently granted it to every role already holding general `hr:update` the moment the sub existed in the registry, until each role was individually re-saved — a real, transitional over-grant, not a hypothetical one. Given the choice between that and a dedicated, narrower mechanism, chose the dedicated flag: zero fallback risk, at the cost of one hardcoded special case.
+
+### Fixed
+- `server/config/moduleRegistry.js` — added `hr`'s `workflow` sub ("Configure Leave/Payroll Approval Workflow").
+- `server/routes/settings.js`'s `_deriveApiPerms` — special-cased: only `hr__workflow`'s Edit checkbox being checked adds the literal `'manage_workflow'` string to the coarse `hr` array for the role being saved; nothing else can produce it. `_deriveUserOverridePerms` documented with a known limitation: per-user overrides of this one permission don't mirror the special case, so they no-op safely rather than granting anything unintended.
+- `client/src/pages/settings/SettingsPage.jsx` — `PERM_MODULES` fallback mirror updated to match; `deputy_principal`'s default-permission function gained an explicit deny for this one sub, catching a would-have-shipped bug where its blanket "Edit" fallback for `hr` would have defaulted this new checkbox to checked for that role.
+
+### Verified
+- New tests in `derive-api-perms.test.js` (5 cases: Edit-checked adds it, view-only doesn't, absent sub doesn't, a different sub doesn't, coexists correctly with other `hr` subs' normal RCUD). Full Jest suite and client build both pass.
+
+---
+
 ## [v5.109.0] — 2026-09-21 — fix(attendance): already-recorded students rendered with a blank name and "?" avatar on every register reopen
 
 Reported live, flagged as crucial: a Year 4/Diamond stream register (homeroom teacher assigned) showed correct attendance stats (18/18 accounted for) but only 2 visible rows, the rest blank with a "?" placeholder. Investigated as a possible scope/RBAC bug given the module's recent hardening, but the true cause was unrelated to scope, assignment, or role.

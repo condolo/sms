@@ -4310,3 +4310,18 @@ Reported live, flagged as crucial: a class/stream with an already-marked registe
 
 ### Verified
 Reproduced live in the demo environment: created a fresh register, marked all present, saved, then did a full page reload and reselected the same class/stream (the exact bug-triggering path, since every row is now sourced from `rows`) — names and statuses rendered correctly post-fix. Full Jest suite (222 suites / 2197 tests) and production client build both pass unchanged.
+
+---
+
+## 42. HR `manage_workflow` — Dedicated Flag Instead of the Standard `mod__sub` Mechanism (v5.110.0)
+
+Closes the "needs a decision" item from the §41-adjacent RBAC audit (v5.108.0 changelog): `hr.js`'s 4 leave/payroll approval-workflow config routes check the literal string `'manage_workflow'` in the coarse `hr` permission array, but nothing in Roles & Permissions could ever grant or revoke it for a custom role — only the built-in `superadmin`/`admin`/`hr` roles had it pre-seeded.
+
+**Why this one couldn't use the standard `mod__sub` subKey pattern already used everywhere else** (e.g. `hr__payroll_view`, `timetable__bell_schedule`): `rbac.js`'s `_isAllowed` has a deliberate fallback — `hasSubGrant = subFullKey && Array.isArray(perms[subFullKey])`; if a role has never had that specific sub array written yet, the check falls back to the coarse `perms[mod]` array instead. That's the right behavior for an ordinary sub-permission (a role predating the new sub shouldn't lose access it already had), but it's exactly wrong for a brand-new, more-restrictive capability: the instant `hr__workflow` existed as a normal sub, every role already holding general `hr:update` would have silently gained `manage_workflow` until it was individually re-saved. Chosen fix: a dedicated special case in `_deriveApiPerms` (`server/routes/settings.js`) — `if (key === 'hr__workflow' && cell.e) actions.add('manage_workflow')` — so only that one sub's own Edit checkbox, for the role actually being saved, can ever produce the string. No other code path can.
+
+**A near-miss caught during implementation, not after:** `client/src/pages/settings/SettingsPage.jsx`'s `_makeDefaultPerms` computes default checkbox states per built-in role when no saved data exists yet for a `mod__sub` key. `deputy_principal`/`principal`/`deputy` all fall through to a blanket `return E;` (Edit) for unrecognized `hr` subs — which would have defaulted the new `workflow` checkbox to checked for `deputy_principal` the first time that role's permissions screen rendered, before anyone touched anything. Caught by reviewing every role's DEFS function against the new sub before shipping, not by a bug report; fixed with an explicit `if (m==='hr' && s==='workflow') return N;` guard ahead of the fallback.
+
+**Known limitation, documented in place rather than silently left:** `_deriveUserOverridePerms` (per-user permission overrides, a separate code path from role-level `_deriveApiPerms`) does not mirror this special case — a per-user override of `manage_workflow` specifically no-ops rather than working. Safe (fails closed, not open) but incomplete; flagged in the code as a `_deriveUserOverridePerms` doc comment for whoever extends per-user overrides next.
+
+### Verified
+5 new tests in `server/__tests__/derive-api-perms.test.js` pin the special case's exact boundaries (Edit-checked adds it; view-only, absent, or a different sub don't; coexists correctly with other `hr` subs' ordinary RCUD contributions). Full Jest suite and production client build pass.

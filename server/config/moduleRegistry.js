@@ -192,6 +192,20 @@ const MODULE_REGISTRY = [
     { key: 'payroll_view',   label: 'View Payroll' },
     { key: 'payroll_export', label: 'Export Payroll (CSV)' },
     { key: 'documents',      label: 'Manage Staff Documents' },
+    // 'workflow' — Configure Leave/Payroll Approval Workflow. Special-cased
+    // in settings.js's _deriveApiPerms (2026-09 fix): hr.js's 4 workflow-
+    // config routes check the literal string 'manage_workflow' in the
+    // coarse 'hr' array — a genuinely separate, more restrictive grant
+    // from general hr:update by design (Governance Spec §0), never
+    // reachable from Settings → Roles & Permissions before this sub
+    // existed. Deliberately NOT using the standard mod__sub subKey check
+    // (rbac('hr', action, 'workflow')) for this one — that mechanism falls
+    // back to the coarse module grant when no sub-specific array exists,
+    // which would have silently handed every hr:update-holding role
+    // workflow-config access the moment this shipped, before any role was
+    // individually re-saved. See settings.js's _deriveApiPerms for the
+    // exact (narrow, deliberate) special case this sub triggers.
+    { key: 'workflow',      label: 'Configure Leave/Payroll Approval Workflow' },
   ]},
   { key: 'resources', label: 'Resources', section: 'Communication', icon: 'Link2', navRoute: '/resources', navOrder: 17, subs: [
     { key: 'read',   label: 'View Resources' },

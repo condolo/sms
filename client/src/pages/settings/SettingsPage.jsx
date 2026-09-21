@@ -3446,6 +3446,7 @@ const PERM_MODULES = [
     { key: 'payroll_view',   label: 'View Payroll' },
     { key: 'payroll_export', label: 'Export Payroll (CSV)' },
     { key: 'documents',      label: 'Manage Staff Documents' },
+    { key: 'workflow',      label: 'Configure Leave/Payroll Approval Workflow' }, // mirrors moduleRegistry.js — see its own comment
   ]},
   { key: 'reports',    label: 'Reports & Analytics', subs: [
     { key: 'view',   label: 'View Reports' },
@@ -3558,6 +3559,15 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='finance'    && ['void_invoice','record_payment','payroll_view','payroll_export','mpesa'].includes(s)) return N;
       if (m==='finance'    && s==='fee_structure') return E;
       if (m==='hr'         && ['payroll_view','payroll_export','documents'].includes(s)) return N;
+      // 'workflow' deliberately excluded from the blanket E fallback below —
+      // repairPermissions.js's server-side defaults only grant
+      // 'manage_workflow' to superadmin/admin/hr. Falling through to E here
+      // would silently WIDEN deputy_principal/principal/deputy's real
+      // access the first time this role is saved via the UI after this sub
+      // was added, not just reflect it. If a school wants deputy principals
+      // to configure leave/payroll workflow by default, grant it explicitly
+      // per-role instead of changing this default.
+      if (m==='hr'         && s==='workflow') return N;
       if (m==='settings'   && s==='permissions') return N;
       if (m==='analytics') return V;
       if (['exams','assessment'].includes(m)) return T;   // matches RCUD already seeded server-side
