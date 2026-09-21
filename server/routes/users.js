@@ -74,7 +74,15 @@ function _isSuperAdmin(req) {
    Creates user in MongoDB with temp password, sends welcome email.
    Returns: { user (no password), tempPassword (shown once to admin) }
 */
-router.post('/invite', authMiddleware, inviteLimiter, rbac('settings', 'users'), async (req, res) => {
+// RBAC fix (2026-09): now checks {resource: 'settings', action: 'create'}.
+// 'users' was previously passed as the ACTION (2nd arg), but _deriveApiPerms
+// (settings.js) can only ever write 'read'/'create'/'update'/'delete' into
+// a role's permission array — 'users' could never match for any role
+// except superadmin (which bypasses RBAC entirely), no matter how much
+// "Settings" access an admin granted via Roles & Permissions. Matches the
+// already-correct sibling implementation of the same "invite user"
+// operation at server/routes/settings.js's own POST /users/invite.
+router.post('/invite', authMiddleware, inviteLimiter, rbac('settings', 'create'), async (req, res) => {
 
   const { name, email: userEmail, role, phone, staffId, ...extra } = req.body;
   if (!name || !userEmail) return res.status(400).json({ error: 'name and email are required' });
@@ -171,7 +179,8 @@ router.post('/invite', authMiddleware, inviteLimiter, rbac('settings', 'users'),
    Processes each sequentially, skips duplicates.
    Returns: { created, skipped, errors }
 */
-router.post('/bulk-invite', authMiddleware, inviteLimiter, rbac('settings', 'users'), async (req, res) => {
+// RBAC fix: same as POST /invite above — checks {settings, create}.
+router.post('/bulk-invite', authMiddleware, inviteLimiter, rbac('settings', 'create'), async (req, res) => {
 
   const rows = req.body;
   if (!Array.isArray(rows) || !rows.length) {
@@ -256,7 +265,10 @@ router.post('/bulk-invite', authMiddleware, inviteLimiter, rbac('settings', 'use
    Body: { newRole, oldRole?, note? }
    Sends role-change email to the user.
 */
-router.post('/:id/role-change', authMiddleware, rbac('settings', 'users'), async (req, res) => {
+// RBAC fix: same class as POST /invite above ('users' was never a valid
+// action string). Checks {settings, update} — this route updates the
+// user's account state via a role-change notification.
+router.post('/:id/role-change', authMiddleware, rbac('settings', 'update'), async (req, res) => {
 
   const { newRole, oldRole, note } = req.body;
   if (!newRole) return res.status(400).json({ error: 'newRole is required' });

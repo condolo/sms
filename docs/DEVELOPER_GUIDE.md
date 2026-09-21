@@ -1635,6 +1635,83 @@ holder for Grades and an `assessment:read` holder for Exams/Assessment
 should never need a THIRD, unrelated permission just to open their own
 module's settings tab.
 
+**Follow-up (v5.108.0) — a full, exhaustive audit (not a sample) of the
+entire system, prompted by a direct challenge: "is this really working
+across the system RBAC... you assume some things which comes back to
+haunt us."** Rather than assume the v5.107.0 fix was a one-off, every
+`rbac()` call across all 65 route files was cross-referenced against
+`server/config/moduleRegistry.js` (confirmed as the single source of
+truth for what Settings → Roles & Permissions can grant — it's served
+live via `GET /api/settings/modules`, and `SettingsPage.jsx`'s own
+`PERM_MODULES` array is explicitly commented as a fallback mirror of
+it, not an independent source) and `settings.js`'s `_deriveApiPerms`
+(the ONE code path that ever writes a role's permission arrays — it
+can only ever write `'read'/'create'/'update'/'delete'`, nothing else,
+ever).
+
+**Three more clusters of the exact same bug found and fixed:**
+1. `users.js`'s `POST /invite`/`/bulk-invite`/`/:id/role-change` checked
+   `rbac('settings', 'users')` — `'users'` passed as the ACTION. Fixed
+   to `'create'`/`'create'`/`'update'` respectively, matching
+   `settings.js`'s own already-correct `POST /users/invite`.
+2. `bell-schedule.js`'s `PUT`/`DELETE /` checked `rbac('timetable',
+   'bell_schedule')` — `'bell_schedule'` passed as the ACTION when it's
+   actually the SUBKEY (`moduleRegistry.js`'s own
+   `timetable.bell_schedule`). Fixed to `rbac('timetable', 'update'/
+   'delete', 'bell_schedule')`, matching `rooms.js`'s already-correct
+   `rbac('timetable', action, 'rooms')` pattern for the sibling
+   "Configure Rooms" sub-permission.
+3. `elearning.js` — 7 GET routes checked `rbac('elearning', 'view')`
+   and one PATCH checked `rbac('elearning', 'edit')`. Neither is a real
+   action string, so even **admin**'s own default full RCUD grant for
+   `elearning` could never satisfy them — only superadmin (RBAC bypass)
+   could ever reach this module's entire read surface. Fixed to
+   `'read'`/`'update'`, matching the file's own already-correct
+   create/delete routes.
+
+**A subtlety hit while writing the fix, worth knowing if you ever
+leave a similar comment:** `scripts/security-scan.js`'s
+`commented-out-auth` rule (`/\/\/\s*(authMiddleware|requireAuth|
+authenticate|rbac\()/`) flags any `//` line comment that starts with
+`rbac(` — including an explanatory comment that quotes the OLD, broken
+call verbatim for documentation. Describe the change in prose (or put
+it in a `/* */` block comment) instead of leading a `//` line with
+`rbac(...)` — the check exists to catch a real auth bypass (someone
+commenting out a live `rbac()` call), and a doc comment that
+incidentally matches the same shape is a false positive worth avoiding
+by rewording, not by touching the scanner's rules.
+
+**Found but deliberately not fixed in this pass — each needs a product
+decision, not just a resource-key correction:**
+- `hr.js`'s 4 `manage_workflow`-gated routes: the action string is
+  correctly seeded for the built-in `superadmin`/`admin`/`hr` roles,
+  but the Roles & Permissions UI has **no control anywhere** to grant
+  or revoke it — a custom role can never be given (or denied) this
+  specifically. This needs a new UI checkbox, not a rename.
+- The `reports` module key in `moduleRegistry.js` ("Reports &
+  Analytics") has **zero backing routes** anywhere in `server/routes/`.
+  Granting it currently does nothing. Either an unfinished feature or a
+  stale toggle — needs a decision on which, not a code fix.
+- `sections.js` gates on `rbac('settings', ..., 'school')` rather than
+  `classes`'s own `section` sub, which sounds like the same naming-
+  collision bug at first glance — investigated and left alone, since
+  the file's own header comment establishes these are two genuinely
+  different features (school-wide Curriculum Sections config vs.
+  per-class Streams) that happen to share the word "section." Flagged
+  here anyway, since that kind of naming collision is exactly the
+  shape of thing that caused the original miss — worth a second look
+  if `sections.js` is ever touched again.
+
+**The durable lesson for this whole area, going forward:** `rbac(mod,
+action, subKey)`'s `action` argument may ONLY ever be one of `'read'`,
+`'create'`, `'update'`, `'delete'` — never a feature name, a verb like
+`'view'`/`'edit'`, or a sub-feature name. A sub-feature belongs in the
+3rd argument (`subKey`), matched against `moduleRegistry.js`'s own
+`subs` list for that module. If you're ever tempted to write
+`rbac('mod', 'somethingDescriptive')`, that is very likely this exact
+bug — check `moduleRegistry.js` for whether `'somethingDescriptive'`
+is actually meant to be a `subKey` on an existing action instead.
+
 ### Dashboard "Today's Timetable" day-name casing (v5.104.0)
 
 `timetable_slots.day` is stored **lowercase** in every real document — `timetable.js`'s own canonical constant is

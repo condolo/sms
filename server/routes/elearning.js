@@ -29,6 +29,18 @@
    PMI-based (new — no external API calls):
    GET  /api/elearning/sessions                       — list teacher's sessions
    POST /api/elearning/sessions                       — schedule using stored PMI/Meet link + create calendar event
+
+   RBAC note (2026-09 fix): every GET route here used to check
+   rbac('elearning', 'view') and PATCH /sessions/:id used 'edit' — neither
+   'view' nor 'edit' is an action string the Roles & Permissions UI can
+   ever write into a role's permission array (only read/create/update/
+   delete, via settings.js's _deriveApiPerms). Even the admin role's
+   default RCUD grant for 'elearning' could never satisfy `.includes('view')`
+   — only superadmin (which bypasses RBAC entirely) could ever reach this
+   module's entire read surface and its one PATCH route, no matter what a
+   school admin granted. Fixed: 'view' → 'read', 'edit' → 'update',
+   matching every other module's convention (and this file's own
+   create/delete routes, which were already correct).
    ============================================================ */
 const express        = require('express');
 const crypto         = require('crypto');
@@ -253,7 +265,7 @@ router.get('/gc/courses', authMiddleware, async (req, res) => { // rbac: self-sc
 });
 
 /* GET /api/elearning/courses — list courses linked in Msingi */
-router.get('/courses', authMiddleware, rbac('elearning', 'view'), async (req, res) => {
+router.get('/courses', authMiddleware, rbac('elearning', 'read'), async (req, res) => {
   try {
     const Links = tenantModel('elearning_course_links', tenantContext(req));
     const links = await Links.find({
@@ -316,7 +328,7 @@ router.delete('/courses/:id', authMiddleware, rbac('elearning', 'delete'), async
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/elearning/courses/:id/coursework — list coursework from GC */
-router.get('/courses/:id/coursework', authMiddleware, rbac('elearning', 'view'), async (req, res) => {
+router.get('/courses/:id/coursework', authMiddleware, rbac('elearning', 'read'), async (req, res) => {
   try {
     const tok = await _getToken(req.jwtUser.userId);
     if (!tok) return res.status(403).json({ error: 'Google Classroom not connected.' });
@@ -509,7 +521,7 @@ router.post('/drive/upload', authMiddleware, rbac('elearning', 'create'), async 
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/elearning/courses/:id/coursework/:cwId/submissions */
-router.get('/courses/:id/coursework/:cwId/submissions', authMiddleware, rbac('elearning', 'view'), async (req, res) => {
+router.get('/courses/:id/coursework/:cwId/submissions', authMiddleware, rbac('elearning', 'read'), async (req, res) => {
   try {
     const tok = await _getToken(req.jwtUser.userId);
     if (!tok) return res.status(403).json({ error: 'Google Classroom not connected.' });
@@ -615,7 +627,7 @@ router.post('/gc-webhook', async (req, res) => {
 });
 
 /* GET /api/elearning/gc/students/:courseId — list students in a GC course */
-router.get('/gc/students/:courseId', authMiddleware, rbac('elearning', 'view'), async (req, res) => {
+router.get('/gc/students/:courseId', authMiddleware, rbac('elearning', 'read'), async (req, res) => {
   try {
     const tok = await _getToken(req.jwtUser.userId);
     if (!tok) return res.status(403).json({ error: 'Google Classroom not connected.' });
@@ -781,7 +793,7 @@ router.get('/zoom/status', authMiddleware, (req, res) => {
 /* ── List ALL sessions for this teacher (across all courses) ─────
    GET /api/elearning/sessions?platform=meet|zoom  (optional filter)
 */
-router.get('/sessions', authMiddleware, rbac('elearning', 'view'), async (req, res) => {
+router.get('/sessions', authMiddleware, rbac('elearning', 'read'), async (req, res) => {
   try {
     const Sessions = tenantModel('elearning_sessions', tenantContext(req));
     const query    = { schoolId: req.jwtUser.schoolId, teacherId: req.jwtUser.userId };
@@ -911,7 +923,7 @@ router.post('/sessions', authMiddleware, planGate('elearning'), rbac('elearning'
 });
 
 /* ── List sessions for a course ──────────────────────────────── */
-router.get('/courses/:id/sessions', authMiddleware, rbac('elearning', 'view'), async (req, res) => {
+router.get('/courses/:id/sessions', authMiddleware, rbac('elearning', 'read'), async (req, res) => {
   try {
     const Sessions = tenantModel('elearning_sessions', tenantContext(req));
     const sessions = await Sessions.find({
@@ -1019,7 +1031,7 @@ router.post('/courses/:id/sessions', authMiddleware, rbac('elearning', 'create')
 });
 
 /* ── Get single session ──────────────────────────────────────── */
-router.get('/sessions/:sessionId', authMiddleware, rbac('elearning', 'view'), async (req, res) => {
+router.get('/sessions/:sessionId', authMiddleware, rbac('elearning', 'read'), async (req, res) => {
   try {
     const Sessions = tenantModel('elearning_sessions', tenantContext(req));
     const session  = await Sessions.findOne({
@@ -1034,7 +1046,7 @@ router.get('/sessions/:sessionId', authMiddleware, rbac('elearning', 'view'), as
 });
 
 /* ── Update session (reschedule) ─────────────────────────────── */
-router.patch('/sessions/:sessionId', authMiddleware, rbac('elearning', 'edit'), async (req, res) => {
+router.patch('/sessions/:sessionId', authMiddleware, rbac('elearning', 'update'), async (req, res) => {
   try {
     const Sessions = tenantModel('elearning_sessions', tenantContext(req));
     const session  = await Sessions.findOne({

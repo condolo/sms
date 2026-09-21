@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.108.0] — 2026-09-21 — fix(rbac): system-wide audit found the same "ungrantable permission" bug in three more modules
+
+Direct follow-up to the previous fix, prompted by a pointed question: "is this really working across the system RBAC... i have also noted that when investigating you assume some things which comes back to haunt us." Rather than assume the `assessment.js` fix was isolated, ran an exhaustive audit — every `rbac()` call in all 65 route files, cross-referenced against `server/config/moduleRegistry.js` (the single source of truth for what Settings → Roles & Permissions can actually grant) and `settings.js`'s `_deriveApiPerms` (the only code path that ever writes a role's permission arrays, which can only ever contain `'read'/'create'/'update'/'delete'`, plus a `mod__sub` key for the same four strings per sub-permission).
+
+### Confirmed: three more clusters of the identical bug class
+- `server/routes/users.js` — `POST /invite`, `POST /bulk-invite`, `POST /:id/role-change` all checked `rbac('settings', 'users')` — `'users'` was passed as the **action**, which can never be granted (only read/create/update/delete exist). Permanently inaccessible to every role except superadmin, regardless of any Settings → Roles & Permissions configuration. The already-correct sibling implementation of the same "invite user" operation, `settings.js`'s own `POST /users/invite`, uses `rbac('settings', 'create')` — confirming the fix.
+- `server/routes/bell-schedule.js` — `PUT /` and `DELETE /` checked `rbac('timetable', 'bell_schedule')` — `'bell_schedule'` was passed as the **action** when it's actually the **subKey** (`moduleRegistry.js`'s own `timetable.bell_schedule`, "Configure Bell Schedule"). `rooms.js`'s already-correct `rbac('timetable', 'update'/'delete', 'rooms')` pattern for the sibling "Configure Rooms" sub-permission confirmed the fix.
+- `server/routes/elearning.js` — 7 GET routes checked `rbac('elearning', 'view')` and the one `PATCH /sessions/:id` checked `rbac('elearning', 'edit')` — neither `'view'` nor `'edit'` is a real action string. This meant even the **admin** role's own default full (RCUD) `elearning` grant could never satisfy these checks — only superadmin, which bypasses RBAC entirely, could ever reach this module's entire read surface. The file's own `create`/`delete` routes were already correct, confirming this was an in-file inconsistency, not a deliberate pattern.
+
+### Also flagged, not yet acted on (need a decision, not a pure bug fix)
+- `server/routes/hr.js`'s 4 `manage_workflow`-gated routes: the action string IS seeded correctly for the built-in `superadmin`/`admin`/`hr` roles, but **no control exists anywhere in the Roles & Permissions UI to grant or revoke it** — a custom "HR Manager" role can never be given this capability. Needs a new UI checkbox, not a resource-key fix.
+- The "Reports & Analytics" module (`moduleRegistry.js`'s `reports` key) has **no backing routes at all** — granting it does nothing server-side. Either a planned feature never finished, or a stale toggle that should be removed — needs a decision either way.
+- `SettingsPage.jsx`'s client-side `PERM_MODULES` fallback (used only in the brief window before `GET /api/settings/modules` resolves, or if it errors) still shows Exams' lock/unlock as one combined sub; the live server registry already split them. Cosmetic — the fallback is rarely hit — but drifted from the source of truth.
+- `sections.js` (Curriculum Sections config) gates on `rbac('settings', ..., 'school')` rather than `classes`'s own `section` sub — investigated and left alone: the file's own header comment establishes this is a deliberate, differently-named feature (school-wide curriculum sections vs. class streams), not a naming collision bug — but flagged here since the naming collision is exactly the shape of thing that caused the original miss.
+
+### Verified
+- New test file `rbac-resource-key-audit.test.js` (7 tests) — asserts the actual registered `(resource, action, subKey)` for every fixed route in all three files, the same way `assessment-config-rbac-resource.test.js` did for the previous fix. No existing test anywhere referenced the old, broken action strings — confirming nothing could have caught this by accident.
+- Full Jest suite: 222 suites, 2192/2192 passing. `verify-rbac-coverage.js` 100% (487/487, no regression). `security-scan.js` clean (the fix's own explanatory comments initially tripped the scanner's `commented-out-auth` heuristic by quoting the old broken `rbac(...)` calls verbatim in a `//` comment — reworded to describe the change in prose instead of quoting code, avoiding the false positive without touching the scanner's rules).
+
+---
+
 ## [v5.107.0] — 2026-09-21 — fix(rbac): granting full Exams/Report Cards access never covered the "settings" resource the Configuration tab actually checks
 
 Reported live: an admin gave a teacher the built-in "Exams Officer" role with full exam/report-card access via Settings → Roles & Permissions, and that account still hit "Your role does not have 'read' permission on 'settings'" the moment the Exams page loaded.

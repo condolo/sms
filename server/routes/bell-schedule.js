@@ -161,7 +161,16 @@ router.get('/', authMiddleware, planGate('bell_schedule'), async (req, res) => {
 });
 
 /* PUT /api/bell-schedule ─ save or create section schedule ───── */
-router.put('/', authMiddleware, planGate('bell_schedule'), rbac('timetable', 'bell_schedule'), async (req, res) => {
+// RBAC fix (2026-09): now checks {resource: 'timetable', action: 'update',
+// subKey: 'bell_schedule'}. 'bell_schedule' was previously passed as the ACTION
+// (2nd arg) when it's actually the SUBKEY (3rd arg) — moduleRegistry.js's
+// own 'timetable.bell_schedule' sub ("Configure Bell Schedule"). No role's
+// timetable permission array can ever contain the literal string
+// 'bell_schedule' (only read/create/update/delete), so this was
+// permanently inaccessible to every role except superadmin. Matches
+// rooms.js's already-correct subKey usage for the same "Configure Rooms"
+// sub-permission pattern.
+router.put('/', authMiddleware, planGate('bell_schedule'), rbac('timetable', 'update', 'bell_schedule'), async (req, res) => {
   try {
     const parsed = BellBodySchema.safeParse(req.body);
     if (!parsed.success) {
@@ -205,7 +214,8 @@ router.put('/', authMiddleware, planGate('bell_schedule'), rbac('timetable', 'be
 });
 
 /* DELETE /api/bell-schedule?section=primary — revert to default ─ */
-router.delete('/', authMiddleware, planGate('bell_schedule'), rbac('timetable', 'bell_schedule'), async (req, res) => {
+// RBAC fix: same as PUT above — now checks action 'delete' with the same subKey.
+router.delete('/', authMiddleware, planGate('bell_schedule'), rbac('timetable', 'delete', 'bell_schedule'), async (req, res) => {
   try {
     const section  = req.query.section;
     const schoolId = req.jwtUser.schoolId;
