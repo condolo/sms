@@ -85,20 +85,25 @@ export default function AttendancePage() {
   }
 
   /* ── Classes dropdown ──────────────────────────────────────────
-     assignedOnly narrows this to the caller's own assigned classes for a
-     scoped ('assigned'-level) account — e.g. a teacher, or a custom role
-     without school-wide data visibility — and is a no-op for school-level
-     roles (admin etc. still see every class). This is a DIFFERENT query
-     key from the plain '['classes','all']' used elsewhere in the app
-     (Students, Admissions, Teachers, Exams) deliberately: those pages
-     need the full unrestricted list and must never share a cache entry
-     with this narrowed one. The write routes this feeds (POST /attendance,
+     attendanceScope narrows this to the caller's own real teaching/
+     homeroom assignments — a DIFFERENT, narrower flag than classes.js's
+     own `assignedOnly` (used by Exams/Growth Profile), and deliberately
+     so: several roles (exams_officer, admissions_officer, finance, hr,
+     timetabler, discipline_committee) are legitimately unrestricted for
+     their OWN module but have no business seeing every class's daily
+     register just because of that (see scopeEngine.js's
+     resolveAttendanceScope). Only admin/superadmin/principal/
+     deputy_principal/deputy stay unrestricted here. This is a DIFFERENT
+     query key from the plain '['classes','all']' used elsewhere in the
+     app (Students, Admissions, Teachers) deliberately: those pages need
+     the full unrestricted list and must never share a cache entry with
+     this narrowed one. The write routes this feeds (POST /attendance,
      POST /attendance/bulk) already enforce the same scope authoritatively
      server-side regardless of what this dropdown shows — this just keeps
      the picker from offering a class the write would reject anyway. */
   const { data: classesData } = useQuery({
-    queryKey: ['classes', 'assignedOnly'],
-    queryFn:  () => classesApi.list({ limit: 200, assignedOnly: true }),
+    queryKey: ['classes', 'attendanceScope'],
+    queryFn:  () => classesApi.list({ limit: 200, attendanceScope: true }),
     staleTime: 5 * 60_000,
   });
   const classList = classesData?.data ?? [];
@@ -110,12 +115,13 @@ export default function AttendancePage() {
      separate lessons at two separate times, not one merged group. A class
      with more than one stream therefore needs a register PER STREAM, not
      one combined list spanning every stream the caller can see. Same
-     assignedOnly convention as the class picker above: narrows to the
-     caller's own assigned streams within this class; a no-op for
-     school-level roles. */
+     attendanceScope convention as the class picker above: narrows to the
+     caller's own real assigned streams within this class; unlike
+     classes.js's `assignedOnly`, NOT a no-op for exams_officer/
+     admissions_officer/finance/hr/timetabler/discipline_committee. */
   const { data: streamsData } = useQuery({
-    queryKey: ['streams', 'assignedOnly', classId],
-    queryFn:  () => streamsApi.list({ classId, status: 'active', limit: 50, assignedOnly: true }),
+    queryKey: ['streams', 'attendanceScope', classId],
+    queryFn:  () => streamsApi.list({ classId, status: 'active', limit: 50, attendanceScope: true }),
     enabled:  !!classId,
     staleTime: 5 * 60_000,
   });

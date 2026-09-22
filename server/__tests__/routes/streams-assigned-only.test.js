@@ -1,10 +1,10 @@
 /* ============================================================
-   server/routes/streams.js — GET / ?assignedOnly=true (2026-09)
+   server/routes/streams.js — GET / ?attendanceScope=true (2026-09)
 
    GET /api/streams is deliberately UNSCOPED by default (Curriculum,
    Timetable builder, Classes admin all need every stream in a class
    regardless of the caller's own teaching scope — see the route's own
-   doc comment). ?assignedOnly=true (+classId) is the narrow, opt-in
+   doc comment). ?attendanceScope=true (+classId) is the narrow, opt-in
    exception: AttendancePage.jsx's stream picker uses it so a teacher
    teaching two streams of the same class (e.g. 3A and 3B — two separate
    lessons, two separate registers) sees only their own streams to choose
@@ -112,7 +112,7 @@ function asStreamTeacherOf(...streamIds) {
   );
 }
 
-describe('GET /api/streams — default (no assignedOnly) is unrestricted for everyone', () => {
+describe('GET /api/streams — default (no attendanceScope) is unrestricted for everyone', () => {
   test('a stream-scoped teacher still sees every stream when the flag is absent', async () => {
     asStreamTeacherOf('str_3a'); // assigned to only one of the three streams
     const res = await supertest(buildApp()).get('/api/streams?classId=cls_year3');
@@ -126,41 +126,41 @@ describe('GET /api/streams — default (no assignedOnly) is unrestricted for eve
   });
 });
 
-describe('GET /api/streams?classId=X&assignedOnly=true — opt-in narrowing', () => {
+describe('GET /api/streams?classId=X&attendanceScope=true — opt-in narrowing', () => {
   test('a teacher teaching two of three streams (e.g. 3A and 3B) sees only those two — the actual reported scenario', async () => {
     asStreamTeacherOf('str_3a', 'str_3b');
-    const res = await supertest(buildApp()).get('/api/streams?classId=cls_year3&assignedOnly=true');
+    const res = await supertest(buildApp()).get('/api/streams?classId=cls_year3&attendanceScope=true');
     expect(res.status).toBe(200);
     expect(res.body.data.map(s => s.id).sort()).toEqual(['str_3a', 'str_3b']);
   });
 
   test('a teacher with a whole-class grant (not stream-scoped) sees every stream even with the flag set', async () => {
     asWholeClassTeacher('cls_year3');
-    const res = await supertest(buildApp()).get('/api/streams?classId=cls_year3&assignedOnly=true');
+    const res = await supertest(buildApp()).get('/api/streams?classId=cls_year3&attendanceScope=true');
     expect(res.body.data.map(s => s.id).sort()).toEqual(['str_3a', 'str_3b', 'str_3c']);
   });
 
   test('admin (school-level scope) still sees every stream even with the flag set — no-op for unrestricted roles', async () => {
-    const res = await supertest(buildApp()).get('/api/streams?classId=cls_year3&assignedOnly=true');
+    const res = await supertest(buildApp()).get('/api/streams?classId=cls_year3&attendanceScope=true');
     expect(res.body.data.length).toBe(3);
   });
 
   test('a teacher with zero assignments in this class sees an empty list, not another teacher\'s streams', async () => {
     asStreamTeacherOf(); // no assignments at all
-    const res = await supertest(buildApp()).get('/api/streams?classId=cls_year3&assignedOnly=true');
+    const res = await supertest(buildApp()).get('/api/streams?classId=cls_year3&attendanceScope=true');
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual([]);
   });
 
   test('a stream assignment in a DIFFERENT class does not leak into this class\'s picker', async () => {
     asStreamTeacherOf('str_other_class_stream');
-    const res = await supertest(buildApp()).get('/api/streams?classId=cls_year3&assignedOnly=true');
+    const res = await supertest(buildApp()).get('/api/streams?classId=cls_year3&attendanceScope=true');
     expect(res.body.data).toEqual([]); // str_other_class_stream isn't one of cls_year3's own streams
   });
 
-  test('assignedOnly without a classId is a no-op — nothing to scope against', async () => {
+  test('attendanceScope without a classId is a no-op — nothing to scope against', async () => {
     asStreamTeacherOf('str_3a');
-    const res = await supertest(buildApp()).get('/api/streams?assignedOnly=true');
+    const res = await supertest(buildApp()).get('/api/streams?attendanceScope=true');
     expect(res.status).toBe(200);
     expect(res.body.data.map(s => s.id).sort()).toEqual(['str_3a', 'str_3b', 'str_3c']);
   });
@@ -176,7 +176,7 @@ describe('GET /api/streams?classId=X&assignedOnly=true — opt-in narrowing', ()
       { id: 'str_3b', schoolId: SCHOOL_A, classId: 'cls_year3', name: '3B', status: 'active' },
       { id: 'str_3c', schoolId: SCHOOL_A, classId: 'cls_year3', name: '3C', status: 'active' },
     ]);
-    const res = await supertest(buildApp()).get('/api/streams?classId=cls_year3&assignedOnly=true');
+    const res = await supertest(buildApp()).get('/api/streams?classId=cls_year3&attendanceScope=true');
     expect(res.status).toBe(200);
     expect(res.body.data.map(s => s.id)).toEqual(['str_3a']);
   });

@@ -216,4 +216,4 @@ async function scopeMiddleware(req, res, next) {
   }
 }
 
-module.exports = { scopeMiddleware, invalidateScopeCache, invalidateScopeCacheForRole, ROLE_SCOPE_LEVEL };
+module.exports = { scopeMiddleware, invalidateScopeCache, invalidateScopeCacheForRole, ROLE_SCOPE_LEVEL, _loadAssigned };

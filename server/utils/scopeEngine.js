@@ -13,6 +13,7 @@
 
 const { tenantModel, tenantContext } = require('./tenant-model');
 const { resolveTeacher } = require('./resolveTeacher');
+const { _loadAssigned } = require('../middleware/scopeMiddleware');
 
 /* ── Module → MongoDB field mapping ────────────────────────── */
 // Maps each module to the field used to restrict records and which scope
@@ -396,8 +397,7 @@ async function foldHomeroomScope(req) {
  *   stream-only assignments exist to resolve) — never `req.scope` mutated
  *   in place
  */
-async function resolveClassPickerScope(req) {
-  const scope = await foldHomeroomScope(req);
+async function _foldStreamsToParentClasses(req, scope) {
   if (!scope?.streamIds?.length) return scope;
 
   const parents = await tenantModel('streams', tenantContext(req))
@@ -409,4 +409,74 @@ async function resolveClassPickerScope(req) {
   return { ...scope, classIds: [...new Set([...(scope.classIds ?? []), ...resolvedClassIds])] };
 }
 
-module.exports = { applyToFilter, hasNoAssignments, isUnrestricted, isClassInScope, resolveClassPickerScope, resolveHomeroomStreamIds, foldHomeroomScope };
+async function resolveClassPickerScope(req) {
+  const scope = await foldHomeroomScope(req);
+  return _foldStreamsToParentClasses(req, scope);
+}
+
+/**
+ * A dedicated, Attendance-only floor — deliberately narrower than the
+ * generic ROLE_SCOPE_LEVEL 'school' classification several roles
+ * legitimately hold for THEIR OWN module (exams_officer sees every
+ * class's exams; admissions_officer/finance/hr/timetabler/
+ * discipline_committee similarly, each for their own real duty). None
+ * of that implies whole-school visibility into DAILY ATTENDANCE, which
+ * tracks real teaching/homeroom duty, not a specialist administrative
+ * remit. Prompted directly: an Exams Officer who is ALSO a homeroom
+ * teacher for one stream saw every class in the Attendance picker,
+ * purely because their ROLE is 'school'-level for scopeMiddleware's
+ * generic (correct, for Exams) purposes.
+ *
+ * Only genuine whole-school administrative roles stay unrestricted for
+ * Attendance specifically — everyone else (including roles that ARE
+ * 'school'-level for their own module) is scoped here to their REAL
+ * teaching_assignments + homeroom streams, resolved fresh every call.
+ * Deliberately does NOT use scopeMiddleware's own cache: that cache is
+ * keyed by userId::schoolId only (no module dimension), so writing a
+ * different scope value under the same key would silently corrupt
+ * every OTHER module's cached scope for this same user on their very
+ * next request. Same reasoning as resolveHomeroomStreamIds/
+ * foldHomeroomScope's own choice not to cache.
+ *
+ * @param {import('express').Request} req
+ * @returns {Promise<null|{classIds:string[], subjectIds:string[], streamIds:string[]}>}
+ *   null = unrestricted (floor role)
+ */
+const ATTENDANCE_FLOOR_ROLES = new Set(['admin', 'superadmin', 'principal', 'deputy_principal', 'deputy']);
+
+async function resolveAttendanceScope(req) {
+  const { userId, schoolId, role, roles = [] } = req.jwtUser ?? {};
+  const effectiveRole = role || roles[0] || '';
+  if (ATTENDANCE_FLOOR_ROLES.has(effectiveRole)) return null;
+  // level: 'assigned' — not because this role's own ROLE_SCOPE_LEVEL is
+  // 'assigned' (several, like exams_officer, are 'school'), but because
+  // hasNoAssignments()'s "does this caller have nothing at all" check
+  // reads scope.level and only recognizes 'assigned'/'section'. From
+  // Attendance's own point of view every non-floor role IS being treated
+  // as assigned-level, so this is accurate, not a workaround.
+  if (!userId || !schoolId) return { level: 'assigned', classIds: [], subjectIds: [], streamIds: [] };
+
+  const assigned = await _loadAssigned(userId, schoolId);
+  const homeroomStreamIds = await resolveHomeroomStreamIds(req);
+  return {
+    level:      'assigned',
+    classIds:   assigned.classIds,
+    subjectIds: assigned.subjectIds,
+    streamIds:  [...new Set([...assigned.streamIds, ...homeroomStreamIds])],
+  };
+}
+
+/* Attendance-only counterpart to resolveClassPickerScope above — same
+   stream-to-parent-class fold, sourced from resolveAttendanceScope
+   instead of the generic req.scope, so a class/stream PICKER for
+   Attendance specifically shows only what this narrower floor allows. */
+async function resolveAttendanceClassPickerScope(req) {
+  const scope = await resolveAttendanceScope(req);
+  return _foldStreamsToParentClasses(req, scope);
+}
+
+module.exports = {
+  applyToFilter, hasNoAssignments, isUnrestricted, isClassInScope,
+  resolveClassPickerScope, resolveHomeroomStreamIds, foldHomeroomScope,
+  resolveAttendanceScope, resolveAttendanceClassPickerScope, ATTENDANCE_FLOOR_ROLES,
+};

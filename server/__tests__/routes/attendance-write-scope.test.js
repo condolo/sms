@@ -187,3 +187,80 @@ describe('DELETE /api/attendance/:id — write-side scope', () => {
     expect(res.status).toBe(200);
   });
 });
+
+/* ============================================================
+   2026-09 — Attendance-only floor (resolveAttendanceScope). Proves the
+   fix at the DATA layer, not just the class-picker: exams_officer (and
+   admissions_officer/finance/hr/timetabler/discipline_committee, not
+   re-tested individually here since they share the exact same
+   ATTENDANCE_FLOOR_ROLES exclusion) is 'school'-level scope for their
+   OWN module, but must be scoped like a teacher for Attendance
+   specifically — narrowing the dropdown alone would have been cosmetic
+   if this route still trusted the generic req.scope=null for this role.
+   ============================================================ */
+function asExamsOfficerOf(...classIds) {
+  mockJwtUser = { userId: 'usr_exams_officer', schoolId: SCHOOL_A, role: 'exams_officer', roles: ['exams_officer'] };
+  mockTeachingAssignments = mockMakeFakeCollection(
+    classIds.map(classId => ({ schoolId: SCHOOL_A, teacherId: 'usr_exams_officer', classId }))
+  );
+}
+
+describe('exams_officer — Attendance-only floor (the actual reported bug)', () => {
+  test('exams_officer with NO real class assignment cannot mark attendance for any class', async () => {
+    asExamsOfficerOf(); // zero teaching assignments — the exact reported case
+    const res = await supertest(buildApp()).post('/api/attendance').send({
+      studentId: 'stu_2', classId: 'cls_1', date: '2026-05-02', status: 'present',
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test('exams_officer WITH a real assignment to the class can mark attendance for it', async () => {
+    asExamsOfficerOf('cls_1');
+    const res = await supertest(buildApp()).post('/api/attendance').send({
+      studentId: 'stu_2', classId: 'cls_1', date: '2026-05-02', status: 'present',
+    });
+    expect(res.status).toBe(201);
+  });
+
+  test('exams_officer assigned to cls_1 still cannot mark attendance for a different class', async () => {
+    asExamsOfficerOf('cls_1');
+    const res = await supertest(buildApp()).post('/api/attendance').send({
+      studentId: 'stu_2', classId: 'cls_9', date: '2026-05-02', status: 'present',
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test('bulk marking is scoped the same way for exams_officer', async () => {
+    asExamsOfficerOf('cls_1');
+    const res = await supertest(buildApp()).post('/api/attendance/bulk').send({
+      classId: 'cls_9', date: '2026-05-02',
+      records: [{ studentId: 'stu_2', status: 'present' }],
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test('deleting a record outside their real assignment is forbidden for exams_officer', async () => {
+    asExamsOfficerOf('cls_9');
+    const res = await supertest(buildApp()).delete('/api/attendance/att_1');
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('GET /api/attendance/:id — previously had NO scope check at all', () => {
+  test('exams_officer without a real assignment to the record\'s class is forbidden', async () => {
+    asExamsOfficerOf('cls_9');
+    const res = await supertest(buildApp()).get('/api/attendance/att_1');
+    expect(res.status).toBe(403);
+  });
+
+  test('exams_officer WITH a real assignment to the record\'s class can fetch it', async () => {
+    asExamsOfficerOf('cls_1');
+    const res = await supertest(buildApp()).get('/api/attendance/att_1');
+    expect(res.status).toBe(200);
+  });
+
+  test('admin (floor role) can fetch any record', async () => {
+    const res = await supertest(buildApp()).get('/api/attendance/att_1');
+    expect(res.status).toBe(200);
+  });
+});

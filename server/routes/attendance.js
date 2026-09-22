@@ -94,13 +94,16 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read'), scope
       if (req.query.dateTo)   filter.date.$lte = req.query.dateTo;
     }
 
-    // Fold in the caller's own homeroom/form-teacher streams (see
-    // scopeEngine.js's foldHomeroomScope) for this request's own scoping
-    // only — never written back onto req.scope, which scopeMiddleware
-    // caches per userId::schoolId for every other module's own next call
-    // to read as-is.
+    // Attendance uses its OWN, narrower floor (resolveAttendanceScope) —
+    // not the generic req.scope scopeMiddleware just populated. Several
+    // roles (exams_officer, admissions_officer, finance, hr, timetabler,
+    // discipline_committee) are 'school'-level for their own module's
+    // purposes but have no business seeing every class's daily register
+    // just because of that. Never written back onto req.scope, which
+    // scopeMiddleware caches per userId::schoolId for every other
+    // module's own next call to read as-is.
     const originalScope = req.scope;
-    req.scope = await ScopeEngine.foldHomeroomScope(req);
+    req.scope = await ScopeEngine.resolveAttendanceScope(req);
     ScopeEngine.applyToFilter(req, 'attendance', filter);
     req.scope = originalScope;
 
@@ -135,8 +138,9 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read')
       if (req.query.dateTo)   filter.date.$lte = req.query.dateTo;
     }
 
+    // Attendance's own narrower floor — see GET /'s own comment above.
     const originalScope = req.scope;
-    req.scope = await ScopeEngine.foldHomeroomScope(req);
+    req.scope = await ScopeEngine.resolveAttendanceScope(req);
     ScopeEngine.applyToFilter(req, 'attendance', filter);
     req.scope = originalScope;
 
@@ -271,8 +275,11 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read')
 router.get('/school-report', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read'), async (req, res) => {
   try {
     const { schoolId, role } = req.jwtUser;
-    const FLOOR_ROLES = new Set(['admin', 'principal', 'deputy_principal', 'deputy']);
-    if (!FLOOR_ROLES.has(role) && !(await hasExplicitSubGrant(req, 'attendance', 'report', 'read'))) {
+    // Reuses the same floor as every other Attendance route's
+    // resolveAttendanceScope (ScopeEngine.ATTENDANCE_FLOOR_ROLES) rather
+    // than a second, independently-drifting list — includes 'superadmin'
+    // too, though that role already bypasses the outer rbac() gate entirely.
+    if (!ScopeEngine.ATTENDANCE_FLOOR_ROLES.has(role) && !(await hasExplicitSubGrant(req, 'attendance', 'report', 'read'))) {
       return E.forbidden(res, 'Only admins, principals, deputies, or explicitly granted roles can view the school-wide attendance report.');
     }
 
@@ -379,6 +386,18 @@ router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read'), as
     const Attendance = tenantModel('attendance', tenantContext(req));
     const doc = await Attendance.findOne({ id: req.params.id, schoolId }).select('-__v').lean();
     if (!doc) return E.notFound(res, 'Attendance record not found');
+
+    // Previously had no scope check at all — unlike GET / and GET /summary,
+    // a caller who obtained a valid record id for a class/stream outside
+    // their own scope could fetch it directly.
+    const originalScope = req.scope;
+    req.scope = await ScopeEngine.resolveAttendanceScope(req);
+    const inScope = ScopeEngine.isClassInScope(req, 'attendance', doc.classId, doc.streamId);
+    req.scope = originalScope;
+    if (!inScope) {
+      return E.forbidden(res, 'This record is not in your assigned scope.');
+    }
+
     return ok(res, doc);
   } catch (err) {
     console.error('[attendance GET/:id]', err);
@@ -408,11 +427,10 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create'), sc
     // school via this route regardless of what teaching_assignments says,
     // since the classes dropdown that feeds this form isn't scoped either.
     // This is the authoritative check; the dropdown itself is unchanged.
-    // Folds in the caller's own homeroom/form-teacher streams for this
-    // check only (see scopeEngine.js's foldHomeroomScope) — never written
-    // back onto req.scope.
+    // Uses Attendance's own narrower floor (resolveAttendanceScope) —
+    // never written back onto req.scope.
     const originalScope = req.scope;
-    req.scope = await ScopeEngine.foldHomeroomScope(req);
+    req.scope = await ScopeEngine.resolveAttendanceScope(req);
     const inScope = ScopeEngine.isClassInScope(req, 'attendance', data.classId, student?.streamId);
     req.scope = originalScope;
     if (!inScope) {
@@ -455,12 +473,11 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create')
 
     const { classId, streamId, date, period, records } = data;
 
-    // Folds in the caller's own homeroom/form-teacher streams (see
-    // scopeEngine.js's foldHomeroomScope) for every scope check in this
-    // route only — restored immediately after, never written back onto
-    // req.scope.
+    // Attendance's own narrower floor (resolveAttendanceScope) for every
+    // scope check in this route only — restored immediately after, never
+    // written back onto req.scope.
     const originalScope = req.scope;
-    req.scope = await ScopeEngine.foldHomeroomScope(req);
+    req.scope = await ScopeEngine.resolveAttendanceScope(req);
 
     const wholeClassGrant = ScopeEngine.isClassInScope(req, 'attendance', classId);
 
@@ -563,7 +580,7 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('attendance', 'update'), 
     const existing = await Attendance.findOne({ id: req.params.id, schoolId }).select('classId streamId').lean();
     if (!existing) return E.notFound(res, 'Attendance record not found');
     const originalScope = req.scope;
-    req.scope = await ScopeEngine.foldHomeroomScope(req);
+    req.scope = await ScopeEngine.resolveAttendanceScope(req);
     const inScope = ScopeEngine.isClassInScope(req, 'attendance', existing.classId, existing.streamId) &&
       ScopeEngine.isClassInScope(req, 'attendance', data.classId, existing.streamId);
     req.scope = originalScope;
@@ -594,7 +611,7 @@ router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('attendance', 'delete'
     const existing = await Attendance.findOne({ id: req.params.id, schoolId }).select('classId streamId').lean();
     if (!existing) return E.notFound(res, 'Attendance record not found');
     const originalScope = req.scope;
-    req.scope = await ScopeEngine.foldHomeroomScope(req);
+    req.scope = await ScopeEngine.resolveAttendanceScope(req);
     const inScope = ScopeEngine.isClassInScope(req, 'attendance', existing.classId, existing.streamId);
     req.scope = originalScope;
     if (!inScope) {

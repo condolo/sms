@@ -42,21 +42,29 @@ function _validate(schema, data) {
 // most callers (Curriculum, Timetable builder, Classes admin) need every
 // stream in a class regardless of the caller's own teaching scope.
 //
-// `?assignedOnly=true` (requires `classId`) is the narrow, opt-in exception
-// — AttendancePage.jsx's stream picker uses it so a scoped teacher isn't
-// shown a stream they'd be 403'd for picking (see GET /:id/students below,
-// which already enforces this authoritatively). A caller with whole-class
-// access to this classId sees every stream, same as the default; a
-// stream-scoped teacher (teaching-assignments.js's per-stream grant) sees
-// only the streams they're actually assigned to within this one class —
-// folded together with any stream they're the form/homeroom teacher of
-// (streams.js's own formTeacherId), so a homeroom teacher with no subject
-// assignment there at all can still find their own class to take
-// attendance for (see scopeEngine.js's foldHomeroomScope for why this is
-// deliberately narrow to Attendance's own pickers, not a generic change).
+// `?attendanceScope=true` (requires `classId`) is the narrow, opt-in
+// exception — AttendancePage.jsx's stream picker uses it so a scoped
+// teacher isn't shown a stream they'd be 403'd for picking (see GET
+// /:id/students below, which already enforces this authoritatively).
+// Named distinctly from classes.js's own `assignedOnly` (a genuinely
+// different, broader exception used by Exams/Growth Profile): several
+// roles that are 'school'-level for their OWN module (exams_officer,
+// admissions_officer, finance, hr, timetabler, discipline_committee)
+// have no legitimate reason to see every stream's daily register just
+// because of that — Attendance tracks real teaching/homeroom duty, not
+// a specialist administrative remit. Uses resolveAttendanceScope's own
+// narrower floor (see scopeEngine.js), not the generic scopeMiddleware
+// scope this route would otherwise treat those roles as unrestricted
+// under. A caller with whole-class access to this classId sees every
+// stream, same as the default; a stream-scoped teacher (teaching-
+// assignments.js's per-stream grant) sees only the streams they're
+// actually assigned to within this one class — folded together with
+// any stream they're the form/homeroom teacher of (streams.js's own
+// formTeacherId), so a homeroom teacher with no subject assignment
+// there at all can still find their own class to take attendance for.
 router.get(
   '/', authMiddleware, PLAN, rbac('classes', 'read'),
-  (req, res, next) => (req.query.assignedOnly === 'true' ? scopeMiddleware(req, res, next) : next()),
+  (req, res, next) => (req.query.attendanceScope === 'true' ? scopeMiddleware(req, res, next) : next()),
   async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
@@ -66,13 +74,15 @@ router.get(
     if (req.query.classId) filter.classId = req.query.classId;
     if (req.query.status)  filter.status  = req.query.status;
 
-    if (req.query.assignedOnly === 'true' && req.query.classId) {
+    if (req.query.attendanceScope === 'true' && req.query.classId) {
+      const originalScope = req.scope;
+      req.scope = await ScopeEngine.resolveAttendanceScope(req);
       const inWholeClassScope = ScopeEngine.isClassInScope(req, 'students', req.query.classId);
       if (!inWholeClassScope) {
-        const homeroomScope = await ScopeEngine.foldHomeroomScope(req);
-        const myStreamIds = homeroomScope?.streamIds ?? [];
+        const myStreamIds = req.scope?.streamIds ?? [];
         filter.id = { $in: myStreamIds };
       }
+      req.scope = originalScope;
     }
 
     const Streams = tenantModel('streams', tenantContext(req));

@@ -30,8 +30,10 @@ jest.mock('../../utils/scopeEngine', () => ({
   applyToFilter: jest.fn(),
   isClassInScope: jest.fn(() => true),
   // This admin's req.scope is never set (school-level, unrestricted) —
-  // matches foldHomeroomScope's own real no-op behavior for that case.
+  // matches foldHomeroomScope's/resolveAttendanceScope's own real no-op
+  // behavior for a floor role (admin is in ATTENDANCE_FLOOR_ROLES too).
   foldHomeroomScope: jest.fn((req) => Promise.resolve(req.scope)),
+  resolveAttendanceScope: jest.fn((req) => Promise.resolve(req.scope)),
 }));
 
 /* Spy attendance model — records every filter/pipeline/op it receives.

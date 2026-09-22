@@ -48,16 +48,30 @@ function _validate(schema, data) {
 // the related write-side story.
 //
 // `?assignedOnly=true` is the narrow, opt-in exception: a caller that
-// specifically wants "just the classes I can act on" (currently only
-// AttendancePage.jsx's class picker — the write routes it feeds, POST
-// /attendance and POST /attendance/bulk, already enforce this
-// authoritatively server-side; this narrows the dropdown itself so a
-// scoped user isn't shown classes they'd be rejected for picking) can ask
-// for it explicitly. Every other consumer that never passes the flag sees
-// exactly the same unrestricted list it always has — zero behavior change.
+// specifically wants "just the classes I can act on" (Exams/Assessment's
+// and Growth Profile's own class pickers — the write/read routes they
+// feed already enforce this authoritatively server-side; this narrows
+// the dropdown itself so a scoped user isn't shown classes they'd be
+// rejected for picking) can ask for it explicitly. Every other consumer
+// that never passes the flag sees exactly the same unrestricted list it
+// always has — zero behavior change. Uses the generic scopeMiddleware
+// scope, correctly treating any role that's 'school'-level for its OWN
+// module (e.g. exams_officer) as unrestricted here too — that's correct
+// for Exams/Growth Profile's purposes.
+//
+// `?attendanceScope=true` is a SEPARATE, deliberately narrower exception
+// — AttendancePage.jsx's own class picker only. Several roles that are
+// genuinely 'school'-level for their own module (exams_officer,
+// admissions_officer, finance, hr, timetabler, discipline_committee)
+// have no legitimate reason to see every class's DAILY REGISTER just
+// because of that — Attendance tracks real teaching/homeroom duty, not
+// a specialist administrative remit (see scopeEngine.js's
+// resolveAttendanceScope for the full reasoning and the narrower floor
+// it applies). Never combine both flags — attendanceScope wins if both
+// are somehow present, since it's the more restrictive of the two.
 router.get(
   '/', authMiddleware, PLAN, MODGATE, rbac('classes', 'read'),
-  (req, res, next) => (req.query.assignedOnly === 'true' ? scopeMiddleware(req, res, next) : next()),
+  (req, res, next) => (req.query.assignedOnly === 'true' || req.query.attendanceScope === 'true' ? scopeMiddleware(req, res, next) : next()),
   async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
@@ -72,7 +86,16 @@ router.get(
       filter.$or = [{ name: rx }, { description: rx }];
     }
 
-    if (req.query.assignedOnly === 'true') {
+    if (req.query.attendanceScope === 'true') {
+      const originalScope = req.scope;
+      req.scope = await ScopeEngine.resolveAttendanceClassPickerScope(req);
+      ScopeEngine.applyToFilter(req, 'classes', filter);
+      const noAssignments = ScopeEngine.hasNoAssignments(req, 'classes');
+      req.scope = originalScope;
+      if (noAssignments) {
+        return ok(res, [], { ...paginate(page, limit, 0), noAssignments: true });
+      }
+    } else if (req.query.assignedOnly === 'true') {
       // A stream-only teaching assignment (scopeMiddleware.js's
       // _loadAssigned) deliberately never contributes to scope.classIds —
       // that's what lets students/attendance/grades etc. narrow to just
