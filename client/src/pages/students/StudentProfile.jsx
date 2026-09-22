@@ -1397,6 +1397,7 @@ function pctColor(pct) {
    ══════════════════════════════════════════════════════════════ */
 function PortalTab({ student, canEdit }) {
   const role  = useAuthStore(s => s.session?.user?.role);
+  const can   = useAuthStore(s => s.can.bind(s));
 
   const [studentAccResult, setStudentAccResult] = useState(null);
   const [parentAccResult,  setParentAccResult]  = useState(null);
@@ -1406,7 +1407,24 @@ function PortalTab({ student, canEdit }) {
   const [working,          setWorking]          = useState('');
   const [error,            setError]            = useState('');
 
-  const isAdmin = ['superadmin','admin','principal','deputy_principal'].includes(role);
+  /* Was: isAdmin = ['superadmin','admin','principal','deputy_principal']
+     .includes(role) — an independent, separately-hardcoded copy of the
+     EXACT same bug fixed in StudentList.jsx (v5.115.0): a role granted
+     real, explicit access via Settings still couldn't act, because this
+     component never read the real permission at all. Missed in that
+     pass because this file uses raw fetch() calls, not the studentsApi
+     client methods that pass was grepped for — a real gap, not assumed
+     fixed. canDeactivate/canReactivate mirror the plain coarse RBAC
+     those two routes actually check (no special floor, same as
+     StudentList.jsx's own Deactivate); canManagePortals mirrors the
+     dedicated students__portal_accounts sub + its own floor (same
+     PORTAL_ACCOUNTS_FLOOR as students.js — principal/deputy_principal
+     keep their pre-existing, unconditional access unchanged). */
+  const isFloor        = role === 'admin' || role === 'superadmin';
+  const isPortalFloor  = isFloor || role === 'principal' || role === 'deputy_principal';
+  const canDeactivate   = isFloor || can('students', 'delete');
+  const canReactivate   = isFloor || can('students', 'update');
+  const canManagePortals = isPortalFloor || can('students__portal_accounts', 'update');
 
   async function _call(method, path, setResult, body, workingKey) {
     const key = workingKey || path;
@@ -1485,7 +1503,7 @@ function PortalTab({ student, canEdit }) {
           </div>
         )}
 
-        {isAdmin && !isWithdrawn && (
+        {canManagePortals && !isWithdrawn && (
           <button
             onClick={() => _call('POST', '/portal-account', setStudentAccResult)}
             disabled={!!working}
@@ -1536,7 +1554,7 @@ function PortalTab({ student, canEdit }) {
                 </div>
               )}
 
-              {isAdmin && student.motherEmail && !isWithdrawn && (
+              {canManagePortals && student.motherEmail && !isWithdrawn && (
                 <button
                   onClick={() => _call('POST', '/parent-account', setMotherAccResult, { guardian: 'mother' }, '/parent-account:mother')}
                   disabled={!!working}
@@ -1576,7 +1594,7 @@ function PortalTab({ student, canEdit }) {
                 </div>
               )}
 
-              {isAdmin && student.fatherEmail && !isWithdrawn && (
+              {canManagePortals && student.fatherEmail && !isWithdrawn && (
                 <button
                   onClick={() => _call('POST', '/parent-account', setFatherAccResult, { guardian: 'father' }, '/parent-account:father')}
                   disabled={!!working}
@@ -1616,7 +1634,7 @@ function PortalTab({ student, canEdit }) {
             </div>
           )}
 
-          {isAdmin && student.parentEmail && !isWithdrawn && (
+          {canManagePortals && student.parentEmail && !isWithdrawn && (
             <button
               onClick={() => _call('POST', '/parent-account', setParentAccResult)}
               disabled={!!working}
@@ -1630,7 +1648,7 @@ function PortalTab({ student, canEdit }) {
       )}
 
       {/* ── Deactivate student ───────────────────────────── */}
-      {isAdmin && !isWithdrawn && (
+      {canDeactivate && !isWithdrawn && (
         <div className="bg-white border border-red-100 rounded-xl p-5">
           <div className="flex items-center gap-3 mb-3 pb-3 border-b border-red-50">
             <div className="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center">
@@ -1653,7 +1671,7 @@ function PortalTab({ student, canEdit }) {
         </div>
       )}
 
-      {isWithdrawn && isAdmin && (
+      {isWithdrawn && canReactivate && (
         <div className="bg-white border border-slate-200 rounded-xl p-5">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center">

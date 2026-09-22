@@ -6,6 +6,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.115.1] — 2026-09-22 — fix(students): v5.115.0 missed a second, independent copy of the same hardcoded gate
+
+Reported live, immediately after v5.115.0 shipped: the exact reported account (Trinitas, Admissions Officer, with "Deactivate Student" now fully granted and confirmed correctly persisted server-side) still couldn't deactivate. Traced to a genuine miss in the previous fix, not a new bug: `StudentProfile.jsx`'s Portal tab has its own, entirely separate implementation of Deactivate/Reactivate/Portal-account creation — calling raw `fetch()` directly rather than the `studentsApi.*` client methods v5.115.0's audit had grepped for — with its own independent hardcoded gate: `const isAdmin = ['superadmin','admin','principal','deputy_principal'].includes(role)`. Searching by API-call syntax rather than by outcome missed this real, live caller entirely.
+
+### Fixed
+`StudentProfile.jsx`'s `PortalTab` component's single `isAdmin` flag, gating 6 separate actions (Student/Mother/Father/combined Parent portal-account creation, Deactivate, Reactivate), replaced with the same real permission checks as `StudentList.jsx`: `canDeactivate`/`canReactivate` (plain coarse `students:delete`/`update`, matching what those two routes actually check — no special floor, same as the list view) and `canManagePortals` (the dedicated `students__portal_accounts` sub-permission + its own floor, identical to `StudentList.jsx`'s).
+
+### A broader pattern flagged, not fixed
+Searching the whole client for the same hardcoded-role-array pattern found it repeated, unrelated to Students, in `Dashboard.jsx`, `EventsPage.jsx`, `HRPage.jsx`, `MessagesPage.jsx`, `CatalogTab.jsx`, and `CurriculumTab.jsx`. Not touched here — some of these may be entirely deliberate (e.g. `SettingsPage.jsx`'s `PROTECTED_ROLES` guarding superadmin/admin from being demoted is clearly intentional), and auditing each on its own merits is a distinct, larger piece of work from what was asked. Flagged for a decision on whether to pursue the same treatment elsewhere.
+
+### Verified
+Directly against the real, reported account: her already-correctly-persisted `students:delete` grant (confirmed via direct query, matching the Settings screenshot exactly) now works through this second code path too. Full Jest suite: 229 suites, 2280/2280 passing (server-side routes were already correct from v5.115.0 — this was a client-only gap). Production client build clean. Live-verified in the browser: the admin floor role's Portal tab (portal-account creation, Deactivate, Reactivate) renders and functions exactly as before.
+
+---
+
 ## [v5.115.0] — 2026-09-22 — fix(students): "Deactivate," "Promote," and 3 other actions were hardcoded to admin/superadmin, invisible to Roles & Permissions
 
 Reported directly: an Admissions Officer with real, granted access to the Admissions module couldn't deactivate a student, prompting the question of whether Settings or a sub-permission checkbox was broken. Neither was — the real cause was a client-side `role === 'admin' || 'superadmin'` check with no Settings equivalent at all, so no amount of configuration could ever have fixed it. Investigating it surfaced a bigger, related gap worth closing at the same time.

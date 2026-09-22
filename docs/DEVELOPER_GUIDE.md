@@ -4464,3 +4464,33 @@ Before wiring the client to real permissions, checked what those permissions wou
 
 ### Verified
 New test `students-sensitive-permissions.test.js` (15 tests, using the real `rbac.js`/`hasExplicitSubGrant` — only its DB read is mocked) proves each of the 4 new sub-permissions genuinely requires its own explicit grant (coarse `students:delete`/`update` alone confirmed insufficient), that an explicit grant works, and that both floor sets bypass correctly — including confirming Principal specifically for the portal-accounts floor. Also directly confirms Deactivate's own simple, unchanged behavior (coarse grant alone is sufficient, as it always was). Directly verified against the real, reported production account (Trinitas, `admissions_officer`): her existing `students:delete` grant now correctly unblocks Deactivate with zero further configuration, while all 4 new sub-permissions correctly remain unset (and therefore denied) until a school admin explicitly grants them. Full Jest suite: 229 suites, 2280/2280 passing — existing `students-purge-audit.test.js`/`students-parent-account.test.js` (both authenticate as `admin`, a floor role for every change here) confirmed unaffected. Production client build clean. Live-verified in the browser: the admin floor role's Duplicates/Activate-All-Portals/Promote buttons render and function exactly as before this change.
+
+## 48. Students Module — A Second, Independent Hardcoded Gate on the Same Actions, Found via the User's Own Re-Test (v5.115.1)
+
+Reported live, immediately after v5.115.0 shipped: the exact reported account (Trinitas, Admissions Officer) — with "Deactivate Student" now fully granted in Settings and independently confirmed correctly persisted server-side via a direct DB query matching the screenshot — still could not deactivate a student from the profile view. This ruled out a Settings-persistence bug before looking any further, and pointed to a second, distinct client code path for the same action.
+
+### Root cause: the same action, implemented twice, audited once
+`StudentList.jsx` (the list view) and `StudentProfile.jsx` (the individual profile view's `PortalTab` component) each have their own, entirely independent implementation of Deactivate and portal-account creation. `StudentList.jsx` calls `studentsApi.remove(id)` → `DELETE /students/:id`. `StudentProfile.jsx`'s `PortalTab` instead calls a raw `fetch('/api/students/:id/deactivate', { method: 'PATCH' })` directly — the same underlying capability, reached through a completely separate code path that v5.115.0's audit never touched, because that audit searched for the `studentsApi.*` client-method call pattern and this caller doesn't use it. `PortalTab` gated Deactivate, Reactivate, and all three portal/parent-account actions (Student Portal Account, Mother's/Father's Portal Account, combined Parent Account) behind its own separately-hardcoded flag:
+
+```js
+const isAdmin = ['superadmin', 'admin', 'principal', 'deputy_principal'].includes(role);
+```
+
+Identical bug class to v5.115.0 (§47), a completely separate instance of it — the fix for one hardcoded gate does nothing for a second, independently-written one guarding the same feature.
+
+### Fixed
+`PortalTab` now derives its gates from real permissions via `useAuthStore().can()`, mirroring `StudentList.jsx`:
+```js
+const isFloor         = role === 'admin' || role === 'superadmin';
+const isPortalFloor   = isFloor || role === 'principal' || role === 'deputy_principal';
+const canDeactivate    = isFloor || can('students', 'delete');
+const canReactivate    = isFloor || can('students', 'update');
+const canManagePortals = isPortalFloor || can('students__portal_accounts', 'update');
+```
+All 6 usage sites (Student Portal Account creation, Mother's/Father's/combined Parent Account creation, Deactivate, Reactivate) updated to the matching flag. No server-side change was needed — `PATCH /:id/deactivate`'s hardcoded floor had already been removed in v5.115.0, leaving a correct, unadorned `rbac('students','update')` gate; only the client was still blocking the request before it was ever sent.
+
+### A broader pattern flagged, not fixed
+Searching the whole client for the same `role === 'admin' || role === 'superadmin'`-style hardcoded array found it recurring, unaddressed, in `Dashboard.jsx` (`LEADER_ROLES`), `client/src/pages/events/EventsPage.jsx` (`ADMIN_ROLES`), `client/src/pages/hr/HRPage.jsx` (`HR_ROLES`, `isAdminUser`), `client/src/pages/messages/MessagesPage.jsx` (`canDelete`), `client/src/pages/subjects/CatalogTab.jsx`, and `client/src/pages/subjects/CurriculumTab.jsx`. `SettingsPage.jsx`'s own `PROTECTED_ROLES = new Set(['superadmin','admin'])` was also found but assessed as likely deliberate (guards against editing/demoting the top roles themselves, not a feature-access gate). None of these were touched — flagged as a distinct, larger body of work for a separate decision, not folded into this fix.
+
+### Verified
+Directly against the real, reported account: her already-correctly-persisted `students:delete` grant (confirmed via direct query, matching the Settings screenshot exactly) now works through this second code path too. Full Jest suite: 229 suites, 2280/2280 passing (server-side routes were already correct from v5.115.0 — this was a client-only gap). Production client build clean. Live-verified in the browser: the admin floor role's Portal tab (portal-account creation, Deactivate, Reactivate) renders and functions exactly as before this change — no regression.
