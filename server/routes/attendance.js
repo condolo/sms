@@ -149,11 +149,93 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read')
     const schoolWide = !req.query.classId && !req.query.studentId;
 
     const Attendance = tenantModel('attendance', tenantContext(req));
+
+    if (schoolWide) {
+      // ReportsPage.jsx's Attendance tab reads avgRate/daysRecorded/
+      // chronicAbsent/byClass — none of which this route ever computed.
+      // It has shown "Attendance summary not yet available" for every
+      // school regardless of how much real data existed, since this was
+      // a genuine field-name/shape mismatch, not a data problem. Fixed
+      // additively: the pre-existing {total,present,absent,late,
+      // authorised,attendanceRate} shape (relied on by Dashboard.jsx's
+      // own attendance widget) is untouched below; these are new fields
+      // alongside it, computed in the same $facet pass over the same
+      // already-scoped `filter` so this stays one query, not several.
+      const [classDocs, facetResult] = await Promise.all([
+        tenantModel('classes', tenantContext(req)).find({ schoolId }).select('id name').lean(),
+        Attendance.aggregate([
+          { $match: filter },
+          {
+            $facet: {
+              overall: [
+                {
+                  $group: {
+                    _id:        null,
+                    total:      { $sum: 1 },
+                    present:    { $sum: { $cond: [{ $eq: ['$status', 'present'] }, 1, 0] } },
+                    absent:     { $sum: { $cond: [{ $eq: ['$status', 'absent'] }, 1, 0] } },
+                    late:       { $sum: { $cond: [{ $eq: ['$status', 'late'] }, 1, 0] } },
+                    authorised: { $sum: { $cond: [{ $eq: ['$status', 'authorised_absence'] }, 1, 0] } },
+                  }
+                },
+              ],
+              byClass: [
+                {
+                  $group: {
+                    _id:     '$classId',
+                    total:   { $sum: 1 },
+                    present: { $sum: { $cond: [{ $eq: ['$status', 'present'] }, 1, 0] } },
+                  }
+                },
+              ],
+              byStudent: [
+                {
+                  $group: {
+                    _id:     '$studentId',
+                    total:   { $sum: 1 },
+                    present: { $sum: { $cond: [{ $eq: ['$status', 'present'] }, 1, 0] } },
+                  }
+                },
+              ],
+              days: [
+                { $group: { _id: '$date' } },
+              ],
+            }
+          },
+        ]),
+      ]);
+
+      const classNameById = Object.fromEntries(classDocs.map(c => [c.id, c.name]));
+      const facet   = facetResult[0] ?? { overall: [], byClass: [], byStudent: [], days: [] };
+      const overall = facet.overall[0] ?? { total: 0, present: 0, absent: 0, late: 0, authorised: 0 };
+      const attendanceRate = Math.round((overall.present / Math.max(overall.total, 1)) * 1000) / 10;
+
+      const byClass = Object.fromEntries(
+        facet.byClass
+          .filter(c => c._id) // a record with no classId (shouldn't happen, but never crash the report over it)
+          .map(c => [classNameById[c._id] ?? 'Unknown class', c.total > 0 ? c.present / c.total : 0])
+      );
+
+      // Chronic absence is a per-STUDENT rate over the window, not a
+      // per-record count — a student attending 3 days out of 4 (75%) is
+      // chronically absent even if the school overall is at 95%.
+      const chronicAbsent = facet.byStudent.filter(s => s.total > 0 && (s.present / s.total) < 0.8).length;
+
+      return ok(res, {
+        ...overall,
+        attendanceRate,
+        avgRate:      overall.total > 0 ? overall.present / overall.total : null,
+        daysRecorded: facet.days.length,
+        chronicAbsent,
+        byClass,
+      });
+    }
+
     const summary = await Attendance.aggregate([
       { $match: filter },
       {
         $group: {
-          _id:        schoolWide ? null : '$studentId',
+          _id:        '$studentId',
           total:      { $sum: 1 },
           present:    { $sum: { $cond: [{ $eq: ['$status', 'present'] }, 1, 0] } },
           absent:     { $sum: { $cond: [{ $eq: ['$status', 'absent'] }, 1, 0] } },
@@ -170,10 +252,6 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read')
       },
       { $sort: { attendanceRate: 1 } }
     ]);
-
-    if (schoolWide) {
-      return ok(res, summary[0] ?? { total: 0, present: 0, absent: 0, late: 0, authorised: 0, attendanceRate: null });
-    }
     return ok(res, summary);
   } catch (err) {
     console.error('[attendance GET /summary]', err);

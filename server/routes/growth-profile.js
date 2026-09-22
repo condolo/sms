@@ -18,6 +18,8 @@ const { authMiddleware } = require('../middleware/auth');
 const { rbac }           = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { moduleGate }     = require('../middleware/module-gate');
+const { scopeMiddleware } = require('../middleware/scopeMiddleware');
+const ScopeEngine         = require('../utils/scopeEngine');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, E }          = require('../utils/response');
 const { forbiddenForSelfServiceRole } = require('../utils/self-service-scope');
@@ -37,17 +39,27 @@ const MODGATE = moduleGate('growth_profile');
 const _forbiddenForSelfServiceRole = forbiddenForSelfServiceRole;
 
 /* ── GET /api/growth-profile/:studentId ────────────────────── */
-router.get('/:studentId', authMiddleware, PLAN, MODGATE, rbac('growth_profile', 'read'), async (req, res) => {
+router.get('/:studentId', authMiddleware, PLAN, MODGATE, rbac('growth_profile', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { studentId } = req.params;
 
     // Verify student exists and belongs to this school
     const student = await tenantModel('students', tenantContext(req)).findOne({ id: studentId, schoolId })
-      .select('id firstName lastName admissionNumber classId className sectionKey photo status')
+      .select('id firstName lastName admissionNumber classId className sectionKey streamId photo status')
       .lean();
     if (!student) return E.notFound(res, 'Student not found');
     if (_forbiddenForSelfServiceRole(req, student)) return E.forbidden(res, 'You can only view your own Growth Profile.');
+    // MODULE_SCOPE already registers 'growth_profile' (classId, stream-aware)
+    // — this route simply never called it. Deliberately NOT folding in
+    // homeroom streams (unlike attendance): scopeEngine.js's own doc on
+    // foldHomeroomScope draws this exact line — being a student's form
+    // teacher is real access to their daily register, not academic
+    // authority over records like this one for a student they don't
+    // actually teach a subject to.
+    if (!ScopeEngine.isClassInScope(req, 'growth_profile', student.classId, student.streamId)) {
+      return E.forbidden(res, 'This student is not in your assigned scope.');
+    }
 
     // Section counts — parallel fetch for performance
     const [
@@ -112,15 +124,18 @@ router.get('/:studentId', authMiddleware, PLAN, MODGATE, rbac('growth_profile', 
 /* ── GET /api/growth-profile/:studentId/academic ───────────── */
 // Reads from existing grades, attendance, and report-cards collections.
 // NEVER writes to them.
-router.get('/:studentId/academic', authMiddleware, PLAN, MODGATE, rbac('growth_profile', 'read'), async (req, res) => {
+router.get('/:studentId/academic', authMiddleware, PLAN, MODGATE, rbac('growth_profile', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { studentId } = req.params;
 
     // Verify student
-    const student = await tenantModel('students', tenantContext(req)).findOne({ id: studentId, schoolId }).select('id firstName lastName classId className').lean();
+    const student = await tenantModel('students', tenantContext(req)).findOne({ id: studentId, schoolId }).select('id firstName lastName classId className streamId').lean();
     if (!student) return E.notFound(res, 'Student not found');
     if (_forbiddenForSelfServiceRole(req, student)) return E.forbidden(res, 'You can only view your own Growth Profile.');
+    if (!ScopeEngine.isClassInScope(req, 'growth_profile', student.classId, student.streamId)) {
+      return E.forbidden(res, 'This student is not in your assigned scope.');
+    }
 
     // Parallel fetch from existing collections — read-only aggregation
     const [gradesAgg, attendanceAgg, recentReports] = await Promise.all([
@@ -236,15 +251,22 @@ router.get('/:studentId/academic', authMiddleware, PLAN, MODGATE, rbac('growth_p
    points-reset). A yearly reset only moves the "current" window
    Behaviour itself shows; it never touches this collection, so every
    year's totals stay visible here permanently, per Governance Spec §2. */
-router.get('/:studentId/behaviour', authMiddleware, PLAN, MODGATE, rbac('growth_profile', 'read'), async (req, res) => {
+router.get('/:studentId/behaviour', authMiddleware, PLAN, MODGATE, rbac('growth_profile', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { studentId } = req.params;
 
     const student = await tenantModel('students', tenantContext(req)).findOne({ id: studentId, schoolId })
-      .select('id firstName lastName').lean();
+      .select('id firstName lastName classId streamId').lean();
     if (!student) return E.notFound(res, 'Student not found');
     if (_forbiddenForSelfServiceRole(req, student)) return E.forbidden(res, 'You can only view your own Growth Profile.');
+    // Scoped under growth_profile (this route's own RBAC gate), not
+    // behaviour's separate SCOPE_EXEMPT allowance — this endpoint is part
+    // of the Growth Profile aggregate view, not the Behaviour module's own
+    // reward-any-student surface, so it follows growth_profile's rule.
+    if (!ScopeEngine.isClassInScope(req, 'growth_profile', student.classId, student.streamId)) {
+      return E.forbidden(res, 'This student is not in your assigned scope.');
+    }
 
     const [byYear, years] = await Promise.all([
       tenantModel('behaviour_incidents', tenantContext(req)).aggregate([

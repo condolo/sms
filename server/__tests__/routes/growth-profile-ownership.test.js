@@ -5,12 +5,17 @@
    Previously, these three routes gated only on the coarse
    growth_profile:read module permission — a parent or student role
    with that grant could request ANY studentId in the school and get
-   it back, not just their own child / themselves (an IDOR). Staff
-   roles (teacher, admin, etc.) are deliberately left unrestricted here
-   — this app's convention elsewhere is that staff access is bounded by
-   RBAC, not hard-coded to "my own class only"; only parent/student
-   self-service scoping was actually missing and is what this fix (and
-   this test) covers.
+   it back, not just their own child / themselves (an IDOR). This test
+   covers that parent/student ownership fix specifically.
+
+   Staff (teacher) scoping is a SEPARATE fix, covered by
+   growth-profile-teacher-scope.test.js — these two are independent gaps
+   that happened to live in the same routes: this file's students never
+   set student.classId, so ScopeEngine.isClassInScope's `!classId →
+   true` early-return means the staff-scope check added alongside this
+   one is a no-op for every fixture here, by construction, not by
+   coincidence — keeping this file's assertions unaffected by that
+   separate change.
 
    All DB calls are mocked — no MongoDB required.
    ============================================================ */

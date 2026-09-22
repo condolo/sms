@@ -763,13 +763,24 @@ router.get('/:id/status-history', authMiddleware, PLAN, MODGATE, rbac('exams', '
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/exams/:id/results */
-router.get('/:id/results', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), async (req, res) => {
+router.get('/:id/results', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
 
     const exam = await tenantModel('exams', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!exam) return E.notFound(res, 'Exam not found');
+
+    // Was reachable by ANY caller with plain exams:read, regardless of
+    // whether they teach this exam's class/subject — GET / and GET /:id
+    // (the exam metadata itself) were already scoped this way; this route
+    // (the actual scores) was not, a real gap even though the current UI
+    // never surfaces an out-of-scope examId to click through to (GET /
+    // already excludes it from the list a teacher would pick from).
+    const scope = await _examClassScope(req);
+    if (!_examInScope(scope, exam)) {
+      return E.forbidden(res, 'This exam is not in your assigned scope.');
+    }
 
     const filter = { schoolId, examId: req.params.id };
     if (req.query.studentId) filter.studentId = req.query.studentId;
@@ -981,7 +992,7 @@ router.post('/:id/results', authMiddleware, PLAN, MODGATE, rbac('exams', 'create
 });
 
 /* GET /api/exams/results — cross-exam results query */
-router.get('/results/all', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), async (req, res) => {
+router.get('/results/all', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'), scopeMiddleware, async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -991,6 +1002,17 @@ router.get('/results/all', authMiddleware, PLAN, MODGATE, rbac('exams', 'read'),
     if (req.query.classId)      filter.classId      = req.query.classId;
     if (req.query.subjectId)    filter.subjectId    = req.query.subjectId;
     if (req.query.examId)       filter.examId       = req.query.examId;
+
+    // This took an arbitrary ?classId= with zero scope check — the one
+    // real gap that had no mitigating "the list itself is already scoped"
+    // story, since it accepts a classId directly rather than requiring a
+    // caller to have discovered an exam through GET /. Same treatment as
+    // GET / above: narrow by class first, then by subject.
+    const originalScope = req.scope;
+    req.scope = await _examClassScope(req);
+    ScopeEngine.applyToFilter(req, 'exams', filter);
+    _applySubjectScope(req, filter);
+    req.scope = originalScope;
 
     const Results = tenantModel('exam_results', tenantContext(req));
     const [docs, total] = await Promise.all([

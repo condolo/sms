@@ -38,9 +38,16 @@ export default function GrowthProfileHome() {
   const [classId, setClassId] = useState('');
   const [search,  setSearch]  = useState('');
 
+  // assignedOnly=true narrows this to the caller's own assigned classes
+  // (a no-op for admin/principal-tier roles) — this page previously showed
+  // every class in the school to every role, including a teacher with no
+  // assignment to most of them. The actual profile data underneath is
+  // independently scope-checked server-side (growth-profile.js), so this
+  // is defense-in-depth / correct UX, not the only thing standing between
+  // a teacher and another class's records.
   const { data: classesRes, isLoading: classesLoading } = useQuery({
-    queryKey: ['classes', 'list-for-growth-profile'],
-    queryFn:  () => classesApi.list({ limit: 200, status: 'active' }),
+    queryKey: ['classes', 'assignedOnly'],
+    queryFn:  () => classesApi.list({ limit: 200, status: 'active', assignedOnly: true }),
     staleTime: 5 * 60_000,
   });
   const classList = classesRes?.data ?? [];

@@ -12,13 +12,17 @@
    once instead of needing to be re-applied file by file.
 
    Coarser roles (teacher, admin, etc.) are intentionally left
-   unrestricted by this check — this app's convention elsewhere
-   (attendance, grades) is that staff access is bounded by RBAC, not
-   hard-coded to "my own class only," and narrowing that further is a
-   separate, bigger product decision, not an access-control bug fix.
-   Parent/student seeing someone else's child, however, is unambiguously
-   wrong regardless of that convention — this closes exactly that gap,
-   nothing broader.
+   unrestricted by THIS function — staff scoping, where it applies, is a
+   separate concern handled by ScopeEngine/scopeMiddleware in the route
+   itself (see growth-profile.js's own isClassInScope calls), not by
+   this ownership check. (Historical note: this comment used to claim
+   attendance/grades leave staff access unbounded by class — that was
+   never actually true and is doubly wrong now; both are scoped via
+   ScopeEngine, and growth-profile.js's routes were fixed to match in
+   2026-09 after being the one remaining unscoped module.) Parent/student
+   seeing someone else's child is unambiguously wrong regardless of any
+   staff-scoping question — this function closes exactly that gap, and
+   only that gap; it deliberately says nothing about staff at all.
    ============================================================ */
 'use strict';
 

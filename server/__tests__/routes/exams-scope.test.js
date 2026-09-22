@@ -33,6 +33,7 @@ let mockScope; // null = unrestricted; {level, classIds, subjectIds, streamIds, 
 let mockExamDocs;
 let mockAssignmentDocs;
 let mockStreamDocs;
+let mockResultDocs;
 
 function mockChainArr(arr) { return { sort: () => mockChainArr(arr), skip: () => mockChainArr(arr), limit: () => mockChainArr(arr), select: () => mockChainArr(arr), lean: () => Promise.resolve(arr) }; }
 function mockChainObj(obj) { return { select: () => mockChainObj(obj), lean: () => Promise.resolve(obj) }; }
@@ -74,7 +75,7 @@ jest.mock('../../utils/tenant-model', () => ({
     if (collection === 'exams')               return mockCollection(mockExamDocs);
     if (collection === 'teaching_assignments') return mockCollection(mockAssignmentDocs);
     if (collection === 'streams')              return mockCollection(mockStreamDocs);
-    if (collection === 'exam_results')         return mockCollection([]);
+    if (collection === 'exam_results')         return mockCollection(mockResultDocs);
     if (collection === 'grade_boundaries')     return mockCollection([]);
     if (collection === 'academic_config')      return mockCollection([]);
     if (collection === 'mark_audit_log')       return { create: jest.fn().mockResolvedValue({}) };
@@ -109,6 +110,7 @@ beforeEach(() => {
   ];
   mockAssignmentDocs = [];
   mockStreamDocs = [{ id: STREAM_A1, schoolId: SCHOOL, classId: CLASS_A, name: 'A1' }];
+  mockResultDocs = [];
 });
 
 describe('GET /api/exams — data scope', () => {
@@ -217,5 +219,75 @@ describe('POST /api/exams/:id/results — ownership fallback to teaching_assignm
     mockAssignmentDocs = [];
     const res = await supertest(buildApp()).post('/api/exams/exam_1/results').send({ results: [{ studentId: 'stu_1', score: 80, markState: 'present' }] });
     expect(res.status).toBe(201);
+  });
+});
+
+/* ============================================================
+   GET /:id/results and GET /results/all — previously had ZERO scope
+   check at all, unlike GET / and GET /:id (the exam metadata) above.
+   A teacher scoped to CLASS_A only, with a valid CLASS_B examId (e.g.
+   from a stray reference, not from their own scoped exam list), could
+   fetch CLASS_B's actual scores directly. Fixed to reuse the exact
+   same _examClassScope/_examInScope/_applySubjectScope helpers already
+   proven correct above — not a new, separately-drifting mechanism.
+   ============================================================ */
+describe('GET /api/exams/:id/results — data scope (2026-09 fix)', () => {
+  test('a teacher scoped to CLASS_A can fetch CLASS_A exam results', async () => {
+    mockScope = { level: 'assigned', classIds: [CLASS_A], subjectIds: [SUBJ_MATH, SUBJ_SCI], streamIds: [], unrestrictedModules: [] };
+    mockResultDocs = [{ id: 'res_1', schoolId: SCHOOL, examId: 'exam_A_math', studentId: 'stu_1', score: 80 }];
+    const res = await supertest(buildApp()).get('/api/exams/exam_A_math/results');
+    expect(res.status).toBe(200);
+    expect(res.body.data.results).toHaveLength(1);
+  });
+
+  test('a teacher scoped to CLASS_A only is forbidden from CLASS_B exam results — the actual bug this closes', async () => {
+    mockScope = { level: 'assigned', classIds: [CLASS_A], subjectIds: [SUBJ_MATH, SUBJ_SCI], streamIds: [], unrestrictedModules: [] };
+    mockResultDocs = [{ id: 'res_1', schoolId: SCHOOL, examId: 'exam_B_math', studentId: 'stu_1', score: 80 }];
+    const res = await supertest(buildApp()).get('/api/exams/exam_B_math/results');
+    expect(res.status).toBe(403);
+  });
+
+  test('unrestricted (school-level) role can fetch any exam\'s results', async () => {
+    mockScope = null;
+    mockResultDocs = [{ id: 'res_1', schoolId: SCHOOL, examId: 'exam_B_math', studentId: 'stu_1', score: 80 }];
+    const res = await supertest(buildApp()).get('/api/exams/exam_B_math/results');
+    expect(res.status).toBe(200);
+  });
+});
+
+describe('GET /api/exams/results/all — data scope (2026-09 fix)', () => {
+  beforeEach(() => {
+    mockResultDocs = [
+      { id: 'res_A_math', schoolId: SCHOOL, examId: 'exam_A_math', classId: CLASS_A, subjectId: SUBJ_MATH, studentId: 'stu_1', score: 70 },
+      { id: 'res_B_math', schoolId: SCHOOL, examId: 'exam_B_math', classId: CLASS_B, subjectId: SUBJ_MATH, studentId: 'stu_2', score: 90 },
+    ];
+  });
+
+  test('a teacher scoped to CLASS_A cannot pull CLASS_B results by passing ?classId=CLASS_B directly — the real IDOR this closes', async () => {
+    mockScope = { level: 'assigned', classIds: [CLASS_A], subjectIds: [SUBJ_MATH], streamIds: [], unrestrictedModules: [] };
+    const res = await supertest(buildApp()).get(`/api/exams/results/all?classId=${CLASS_B}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(0); // narrowed to __no_match__, not an error — matches this route's existing empty-result posture
+  });
+
+  test('a teacher scoped to CLASS_A gets CLASS_A results when passing ?classId=CLASS_A', async () => {
+    mockScope = { level: 'assigned', classIds: [CLASS_A], subjectIds: [SUBJ_MATH], streamIds: [], unrestrictedModules: [] };
+    const res = await supertest(buildApp()).get(`/api/exams/results/all?classId=${CLASS_A}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.map(r => r.id)).toEqual(['res_A_math']);
+  });
+
+  test('a teacher with NO classId filter at all only sees results for classes they are actually scoped to', async () => {
+    mockScope = { level: 'assigned', classIds: [CLASS_A], subjectIds: [SUBJ_MATH], streamIds: [], unrestrictedModules: [] };
+    const res = await supertest(buildApp()).get('/api/exams/results/all');
+    expect(res.status).toBe(200);
+    expect(res.body.data.map(r => r.id)).toEqual(['res_A_math']);
+  });
+
+  test('unrestricted (school-level) role sees every class\'s results', async () => {
+    mockScope = null;
+    const res = await supertest(buildApp()).get('/api/exams/results/all');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(2);
   });
 });

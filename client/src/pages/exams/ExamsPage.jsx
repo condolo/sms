@@ -537,22 +537,30 @@ function MarkbookTab({ years }) {
   });
   const assignments = assignmentsData?.data ?? [];
 
-  /* ── All classes (filtered to teacher's assigned ones for teachers) ── */
+  /* ── Classes — server-scoped to the caller's own assignments ──
+     Was: fetch every class, then filter client-side to assignments.map
+     (a.classId). That fallback silently showed EVERY class in the school
+     — not just "not narrowed enough," the actual unfiltered list — for
+     ANY teacher with zero rows in `assignments` (a pure homeroom/form
+     teacher with no subject-teaching assignment, or a newly added
+     teacher): `(isTeacher && myClassIds.length > 0)` is false the moment
+     myClassIds is empty, falling straight to `allClasses`. The exam/
+     assessment DATA underneath was never actually exposed by this —
+     GET /exams and /assessment/marks independently re-verify scope
+     server-side — but the dropdown itself violated "a teacher should
+     only see their own classes and streams, strictly anywhere," and a
+     teacher scheduling a NEW exam or entering CA marks for a class
+     picked from it would just hit a dead end.
+     assignedOnly=true reuses AttendancePage.jsx's own proven mechanism
+     (resolveClassPickerScope — already handles stream-only assignments
+     and is a no-op for school-level roles like admin), rather than a
+     second, independently-drifting reimplementation of the same logic. */
   const { data: classesData } = useQuery({
-    queryKey: ['classes', 'list', 'active'],
-    queryFn:  () => classesApi.list({ limit: 200, status: 'active' }),
+    queryKey: ['classes', 'assignedOnly'],
+    queryFn:  () => classesApi.list({ limit: 200, status: 'active', assignedOnly: true }),
     staleTime: 5 * 60_000,
   });
-  const allClasses = classesData?.data ?? [];
-
-  const myClassIds = useMemo(
-    () => [...new Set(assignments.map(a => a.classId).filter(Boolean))],
-    [assignments]
-  );
-
-  const classesList = (isTeacher && myClassIds.length > 0)
-    ? allClasses.filter(c => myClassIds.includes(c.id ?? c._id))
-    : allClasses;
+  const classesList = classesData?.data ?? [];
 
   /* ── Subjects: from assignments for teacher, all for admin ── */
   const { data: allSubjectsData } = useQuery({
@@ -867,7 +875,7 @@ function MarkbookTab({ years }) {
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1.5">
-              Class {isTeacher && myClassIds.length > 0 && <span className="text-slate-400 font-normal">(your classes)</span>}
+              Class {isTeacher && <span className="text-slate-400 font-normal">(your classes)</span>}
             </label>
             <select
               value={classId}
@@ -1680,9 +1688,12 @@ function CreateExamSlideOver({ years, assessmentWeights, subjectsList, onClose, 
   const [subjectSearch, setSubjectSearch] = useState('');
   const currentPeriod = useCurrentAcademicPeriod();
 
+  // Same fix as ExamsPage's own class picker above — assignedOnly=true is
+  // a no-op for admin/principal-tier callers and correctly narrows a
+  // teacher scheduling their own exam to classes they actually teach.
   const { data: classesData } = useQuery({
-    queryKey: ['classes', 'all'],
-    queryFn:  () => classesApi.list({ limit: 200 }),
+    queryKey: ['classes', 'assignedOnly'],
+    queryFn:  () => classesApi.list({ limit: 200, assignedOnly: true }),
     staleTime: 5 * 60_000,
   });
   const classList = classesData?.data ?? [];
