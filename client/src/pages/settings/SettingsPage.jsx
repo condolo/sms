@@ -3351,9 +3351,13 @@ const PERM_MODULES = [
     { key: 'profile', label: 'View Student Profile' },
     { key: 'create',  label: 'Add Student' },
     { key: 'edit',    label: 'Edit Student' },
-    { key: 'delete',  label: 'Delete Student' },
+    { key: 'delete',  label: 'Deactivate Student' },
     { key: 'export',  label: 'Export Students (CSV)' },
     { key: 'import',  label: 'Import Students (CSV)' },
+    { key: 'promote',         label: 'Promote Students to Next Class' },
+    { key: 'portal_accounts', label: 'Manage Student Portal Accounts' },
+    { key: 'duplicates',      label: 'Resolve Duplicate Student Records' },
+    { key: 'purge',           label: 'Permanently Delete Students' },
   ]},
   { key: 'teachers',   label: 'Teachers', subs: [
     { key: 'list',   label: 'View Teacher List' },
@@ -3580,6 +3584,17 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='medical') return T;   // matches RCUD already seeded server-side
       if (m==='inventory') return T;   // matches RCUD already seeded server-side
       if (m==='weekly_snapshot') return V;   // matches R already seeded server-side — system-generated, view only
+      // 'promote' excluded from the blanket E fallback below — enforced
+      // with hasExplicitSubGrant (no coarse-grant fallback), and
+      // deputy_principal/principal/deputy are NOT in students.js's
+      // SENSITIVE_FLOOR (only admin/superadmin bypass unconditionally) —
+      // so E's own 'update' action would silently WIDEN real access to a
+      // bulk, hard-to-reverse operation the first time this role is saved,
+      // not just reflect a UI grouping. ('portal_accounts' is NOT guarded
+      // here — deputy_principal/principal/deputy ARE in
+      // PORTAL_ACCOUNTS_FLOOR, so E accurately reflects their real,
+      // unconditional access rather than widening it.)
+      if (m==='students' && s==='promote') return N;
       return E;
     },
     principal: (m, s) => DEFS.deputy_principal(m, s),  // same defaults as deputy_principal; admin can adjust
@@ -3609,6 +3624,16 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='medical') return N;   // nothing seeded server-side — full records stay restricted by default
       if (m==='inventory') return N;   // nothing seeded server-side — restricted by default
       if (m==='weekly_snapshot') return N;   // nothing seeded server-side — restricted by default
+      // 'promote'/'portal_accounts' excluded from the blanket E fallback
+      // below — both enforced with hasExplicitSubGrant (no coarse-grant
+      // fallback), and section_head is in NEITHER students.js's
+      // SENSITIVE_FLOOR nor its PORTAL_ACCOUNTS_FLOOR (deliberately —
+      // section_head's own scope is narrower than whole-school, see
+      // ROLE_SCOPE_LEVEL 'section'), so E's 'update' action would
+      // silently WIDEN real access to two genuinely sensitive bulk
+      // operations the first time this role is saved, not just reflect
+      // a UI grouping.
+      if (m==='students' && ['promote', 'portal_accounts'].includes(s)) return N;
       return E;
     },
 
@@ -3687,6 +3712,18 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (['finance','hr'].includes(m)) return N;
       if (m==='settings') return N;
       if (m==='admissions') return T;
+      // 'promote'/'portal_accounts' carved out of the blanket E below —
+      // both enforced with hasExplicitSubGrant (no coarse-grant fallback),
+      // and admissions_officer is in neither students.js's SENSITIVE_FLOOR
+      // nor its PORTAL_ACCOUNTS_FLOOR. This is the exact role a real
+      // school asked to grant one of these for — the right way to do that
+      // is checking the box explicitly for this role in Settings, now
+      // that it's wired to something real, not a default that happens to
+      // match today's ask. ('delete' — now labeled "Deactivate Student" —
+      // and 'duplicates'/'purge' are unaffected: E's own d:false already
+      // keeps duplicates/purge off by default; 'delete' uses the ordinary
+      // coarse mechanism and was already correctly included in E.)
+      if (m==='students' && ['promote', 'portal_accounts'].includes(s)) return N;
       if (m==='students')   return E;
       if (m==='classes')    return V;
       if (m==='events')     return V;

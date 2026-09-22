@@ -11,7 +11,7 @@ const bcrypt   = require('bcryptjs');
 
 const { authMiddleware }        = require('../middleware/auth');
 const { moduleGate }     = require('../middleware/module-gate');
-const { rbac }                  = require('../middleware/rbac');
+const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }              = require('../middleware/plan');
 const { scopeMiddleware }       = require('../middleware/scopeMiddleware');
 const ScopeEngine               = require('../utils/scopeEngine');
@@ -27,6 +27,21 @@ const { provisionIdentityForUser } = require('../utils/provision-identities');
 const router = express.Router();
 const PLAN   = planGate('students');
 const MODGATE = moduleGate('students');
+
+/* Floor for the 4 sensitive students__* sub-permissions below (promote,
+   portal_accounts, duplicates, purge) — matches each capability's
+   PRE-EXISTING real access exactly (zero regression), so the only actual
+   change for any of these roles is that OTHER roles can now be
+   explicitly granted the same capability via Settings, where previously
+   no amount of configuration could do that at all.
+   - PORTAL_ACCOUNTS_FLOOR matches the hardcoded allowlist all 3 portal-
+     account routes already enforced before this change.
+   - SENSITIVE_FLOOR (promote/duplicates/purge) matches what the client's
+     old `role === 'admin' || 'superadmin'` check already allowed through
+     in practice — those two routes had no server-side floor of their own
+     before this, relying entirely on the client hiding the button. */
+const SENSITIVE_FLOOR = new Set(['admin', 'superadmin']);
+const PORTAL_ACCOUNTS_FLOOR = new Set(['admin', 'superadmin', 'principal', 'deputy_principal']);
 
 /* Medical Centre milestone 1 — the Student Profile's "Medical" tab
    (client/src/pages/students/StudentProfile.jsx, MedicalTab) has always
@@ -329,7 +344,15 @@ router.get('/duplicates', authMiddleware, PLAN, MODGATE, rbac('students', 'read'
    end up with two rows if both original records already had one). */
 router.post('/duplicates/resolve', authMiddleware, PLAN, MODGATE, rbac('students', 'delete'), async (req, res) => {
   try {
-    const { schoolId, userId } = req.jwtUser;
+    const { schoolId, userId, role } = req.jwtUser;
+    // Was gated by plain rbac('students','delete') — the SAME coarse
+    // action as deactivate AND purge, meaning any role holding either of
+    // those already satisfied this merge-and-remove-a-record operation's
+    // RBAC too. hasExplicitSubGrant closes that; admin/superadmin remain
+    // an unconditional floor, matching the client's prior gate.
+    if (!SENSITIVE_FLOOR.has(role) && !(await hasExplicitSubGrant(req, 'students', 'duplicates', 'delete'))) {
+      return E.forbidden(res, 'Only admins, or roles explicitly granted this permission, can resolve duplicate students.');
+    }
     const { keepId, removeIds } = req.body;
 
     if (!keepId || typeof keepId !== 'string') return E.badRequest(res, 'keepId is required');
@@ -403,7 +426,10 @@ router.post('/duplicates/resolve', authMiddleware, PLAN, MODGATE, rbac('students
    final combined delete + ONE audit log entry for the whole batch. */
 router.post('/duplicates/resolve-bulk', authMiddleware, PLAN, MODGATE, rbac('students', 'delete'), async (req, res) => {
   try {
-    const { schoolId, userId } = req.jwtUser;
+    const { schoolId, userId, role } = req.jwtUser;
+    if (!SENSITIVE_FLOOR.has(role) && !(await hasExplicitSubGrant(req, 'students', 'duplicates', 'delete'))) {
+      return E.forbidden(res, 'Only admins, or roles explicitly granted this permission, can resolve duplicate students.');
+    }
     const { resolutions } = req.body;
 
     if (!Array.isArray(resolutions) || resolutions.length === 0) {
@@ -792,13 +818,23 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), as
   }
 });
 
-/* ── DELETE /api/students/purge ─ Hard-delete (admin/superadmin only) ─
+/* ── DELETE /api/students/purge ─ Hard-delete ──────────────────────────
    Permanently removes student records and cascades to invoices + payments.
    Route MUST stay above /:id so Express doesn't treat 'purge' as an id.
+   Was gated by plain rbac('students','delete') — the SAME coarse action
+   as deactivate (DELETE /:id) and duplicate-resolution — meaning any role
+   granted "Deactivate Student" already satisfied this route's RBAC check
+   too, with only the client's hardcoded admin/superadmin-only button
+   visibility standing between that role and a real, irreversible purge
+   via direct API call. hasExplicitSubGrant has no coarse-grant fallback,
+   closing that gap; admin/superadmin remain an unconditional floor.
    ──────────────────────────────────────────────────────────────────── */
 router.delete('/purge', authMiddleware, PLAN, MODGATE, rbac('students', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
+    if (!SENSITIVE_FLOOR.has(role) && !(await hasExplicitSubGrant(req, 'students', 'purge', 'delete'))) {
+      return E.forbidden(res, 'Only admins, or roles explicitly granted this permission, can permanently delete students.');
+    }
 
     const { ids } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {
@@ -989,8 +1025,13 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('students', 'create'), 
 router.post('/bulk-portal-accounts', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
-    const allowed = ['superadmin', 'admin', 'principal', 'deputy_principal'];
-    if (!allowed.includes(role)) return E.forbidden(res, 'Only admin or principal can grant portal access.');
+    // hasExplicitSubGrant — no coarse-grant fallback — so any OTHER role
+    // holding plain students:update (routine record editing) does not
+    // silently gain portal-account creation, which mints real login
+    // credentials. Floor matches the previous hardcoded allowlist exactly.
+    if (!PORTAL_ACCOUNTS_FLOOR.has(role) && !(await hasExplicitSubGrant(req, 'students', 'portal_accounts', 'update'))) {
+      return E.forbidden(res, 'Only admins, principals, or roles explicitly granted this permission, can grant portal access.');
+    }
 
     const { studentIds, all } = req.body;
     if (!all && (!Array.isArray(studentIds) || studentIds.length === 0)) {
@@ -1150,8 +1191,9 @@ function _portalAllowed(school, portalType) {
 router.post('/:id/portal-account', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
-    const allowed = ['superadmin', 'admin', 'principal', 'deputy_principal'];
-    if (!allowed.includes(role)) return E.forbidden(res, 'Only admin or principal can create student portal accounts.');
+    if (!PORTAL_ACCOUNTS_FLOOR.has(role) && !(await hasExplicitSubGrant(req, 'students', 'portal_accounts', 'update'))) {
+      return E.forbidden(res, 'Only admins, principals, or roles explicitly granted this permission, can create student portal accounts.');
+    }
 
     const Students = tenantModel('students', tenantContext(req));
     const Users    = tenantModel('users', tenantContext(req));
@@ -1284,8 +1326,9 @@ router.post('/:id/portal-account', authMiddleware, PLAN, MODGATE, rbac('students
 router.delete('/:id/portal-account', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), async (req, res) => {
   try {
     const { schoolId, role } = req.jwtUser;
-    const allowed = ['superadmin', 'admin', 'principal', 'deputy_principal'];
-    if (!allowed.includes(role)) return E.forbidden(res, 'Only admin or principal can manage student portal accounts.');
+    if (!PORTAL_ACCOUNTS_FLOOR.has(role) && !(await hasExplicitSubGrant(req, 'students', 'portal_accounts', 'update'))) {
+      return E.forbidden(res, 'Only admins, principals, or roles explicitly granted this permission, can manage student portal accounts.');
+    }
 
     const Users = tenantModel('users', tenantContext(req));
     const result = await Users.updateOne(
@@ -1334,8 +1377,12 @@ router.delete('/:id/portal-account', authMiddleware, PLAN, MODGATE, rbac('studen
 router.post('/:id/parent-account', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
-    const allowed = ['superadmin', 'admin', 'principal', 'deputy_principal'];
-    if (!allowed.includes(role)) return E.forbidden(res, 'Only admin or principal can create parent portal accounts.');
+    // Same 'portal_accounts' sub as the student-portal routes above —
+    // creating a parent login is the same category of sensitive action
+    // (real credentials), not a separate capability.
+    if (!PORTAL_ACCOUNTS_FLOOR.has(role) && !(await hasExplicitSubGrant(req, 'students', 'portal_accounts', 'update'))) {
+      return E.forbidden(res, 'Only admins, principals, or roles explicitly granted this permission, can create parent portal accounts.');
+    }
 
     const guardian = req.body?.guardian;
     if (guardian !== undefined && guardian !== 'mother' && guardian !== 'father') {
@@ -1460,10 +1507,12 @@ const DEACTIVATE_REASONS = ['withdrawn', 'transferred', 'graduated', 'expelled',
 
 router.patch('/:id/deactivate', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
-    // Restrict to admin-level roles
-    const allowed = ['superadmin', 'admin', 'principal', 'deputy_principal'];
-    if (!allowed.includes(role)) return E.forbidden(res, 'Only admin or principal can deactivate students.');
+    const { schoolId, userId } = req.jwtUser;
+    // Had an extra hardcoded admin/principal-only floor on top of the
+    // coarse RBAC check below — inconsistent with DELETE /:id (the route
+    // the current UI's "Deactivate" button actually calls), which has no
+    // such extra floor. Removed for consistency; rbac('students','update')
+    // is the real, Settings-configurable gate, same as everywhere else.
 
     const { reason = 'withdrawn', notes = '', effectiveDate, status } = req.body;
     // Determine final status — graduated and transferred keep their own status values
@@ -1515,9 +1564,8 @@ router.patch('/:id/deactivate', authMiddleware, PLAN, MODGATE, rbac('students', 
    ──────────────────────────────────────────────────────────────── */
 router.patch('/:id/reactivate', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), async (req, res) => {
   try {
-    const { schoolId, userId, role } = req.jwtUser;
-    const allowed = ['superadmin', 'admin', 'principal', 'deputy_principal'];
-    if (!allowed.includes(role)) return E.forbidden(res, 'Only admin or principal can reactivate students.');
+    const { schoolId, userId } = req.jwtUser;
+    // Same consistency fix as PATCH /:id/deactivate above.
 
     const Students = tenantModel('students', tenantContext(req));
     let doc = await Students.findOne({ id: req.params.id, schoolId }).lean();
@@ -1563,6 +1611,16 @@ router.patch('/:id/reactivate', authMiddleware, PLAN, MODGATE, rbac('students', 
 router.post('/promote', authMiddleware, PLAN, MODGATE, rbac('students', 'update'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
+    // Was gated by plain rbac('students','update') — the same coarse
+    // action as routine "edit one student" record changes, meaning any
+    // role with ordinary edit rights already satisfied this bulk,
+    // whole-class-advancing operation's RBAC too. hasExplicitSubGrant has
+    // no coarse-grant fallback; admin/superadmin remain an unconditional
+    // floor, matching what the client's own hardcoded gate already let
+    // through in practice.
+    if (!SENSITIVE_FLOOR.has(role) && !(await hasExplicitSubGrant(req, 'students', 'promote', 'update'))) {
+      return E.forbidden(res, 'Only admins, or roles explicitly granted this permission, can promote students.');
+    }
 
     const { dryRun = false, promotions } = req.body;
     if (!Array.isArray(promotions) || promotions.length === 0) {

@@ -80,8 +80,24 @@ export default function StudentList() {
   const can     = useAuthStore(s => s.can.bind(s));
   const role    = useAuthStore(s => s.session?.user?.role ?? '');
 
-  const canDelete     = role === 'admin' || role === 'superadmin';
-  const canHardDelete = role === 'admin' || role === 'superadmin';
+  /* Was: canDelete/canHardDelete = role === 'admin' || 'superadmin' —
+     one hardcoded check gating 5 genuinely different actions, completely
+     bypassing Roles & Permissions. No amount of Settings configuration
+     could ever grant any of these to another role. Now each reads the
+     real permission the matching server route enforces (see
+     server/routes/students.js's SENSITIVE_FLOOR/PORTAL_ACCOUNTS_FLOOR +
+     hasExplicitSubGrant) — admin/superadmin (and, for portal accounts
+     specifically, principal/deputy_principal, matching that route's own
+     unchanged floor) still always see every one of these; any other
+     role sees exactly what's been explicitly granted in Settings. */
+  const isFloor       = role === 'admin' || role === 'superadmin';
+  const isPortalFloor = isFloor || role === 'principal' || role === 'deputy_principal';
+
+  const canDeactivate    = isFloor || can('students', 'delete');
+  const canPromote       = isFloor || can('students__promote', 'update');
+  const canManagePortals = isPortalFloor || can('students__portal_accounts', 'update');
+  const canDuplicates    = isFloor || can('students__duplicates', 'delete');
+  const canPurge         = isFloor || can('students__purge', 'delete');
 
   /* Houses — for resolving a student's houseId to a display name in the table */
   const { data: settingsData } = useQuery({
@@ -92,13 +108,12 @@ export default function StudentList() {
   const houses = Array.isArray(settingsData?.data?.houses) ? settingsData.data.houses : [];
   const houseName = id => houses.find(h => (h.id ?? h.name) === id)?.name ?? null;
 
-  /* Duplicate admission numbers (2026-09) — read-only badge count; the
-     admin resolves them from the slide-over. Only fetched for admins,
-     since resolving one requires the same delete permission anyway. */
+  /* Duplicate admission numbers (2026-09) — read-only badge count; only
+     fetched for whoever can actually resolve one from the slide-over. */
   const { data: duplicatesData } = useQuery({
     queryKey: ['students', 'duplicates'],
     queryFn:  () => studentsApi.duplicates(),
-    enabled:  canDelete,
+    enabled:  canDuplicates,
     staleTime: 60_000,
   });
   const duplicateGroups = duplicatesData?.data?.groups ?? [];
@@ -442,7 +457,7 @@ export default function StudentList() {
               {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
               Export
             </button>
-            {canDelete && duplicateGroups.length > 0 && (
+            {canDuplicates && duplicateGroups.length > 0 && (
               <button
                 onClick={() => setShowDuplicates(true)}
                 className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50 hover:border-amber-400 transition-colors"
@@ -452,7 +467,7 @@ export default function StudentList() {
                 {duplicateGroups.length} Duplicate{duplicateGroups.length === 1 ? '' : 's'}
               </button>
             )}
-            {canDelete && (
+            {canManagePortals && (
               <button
                 onClick={() => setShowActivateAllConfirm(true)}
                 disabled={bulkPortalLoading}
@@ -463,7 +478,7 @@ export default function StudentList() {
                 Activate All Portals
               </button>
             )}
-            {canDelete && (
+            {canPromote && (
               <button
                 onClick={() => setShowPromote(true)}
                 className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-violet-200 text-violet-700 hover:bg-violet-50 hover:border-violet-400 transition-colors"
@@ -677,7 +692,7 @@ export default function StudentList() {
                 <X size={13} />
               </button>
               <div className="h-4 w-px bg-slate-700 mx-1" />
-              {canDelete && (
+              {canManagePortals && (
                 <button
                   onClick={bulkGrantPortal}
                   disabled={bulkPortalLoading}
@@ -687,7 +702,7 @@ export default function StudentList() {
                   Grant Portal Access
                 </button>
               )}
-              {canDelete && (
+              {canDeactivate && (
                 <button
                   onClick={() => setDeactivateTarget('bulk')}
                   disabled={bulkDeactivating}
@@ -697,7 +712,7 @@ export default function StudentList() {
                   Deactivate
                 </button>
               )}
-              {canHardDelete && (
+              {canPurge && (
                 <button
                   onClick={() => setShowPurge(true)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 transition text-xs font-medium"
@@ -884,7 +899,7 @@ export default function StudentList() {
                           <Link to={`/students/${id}`} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition" title="View profile">
                             <Eye size={14} />
                           </Link>
-                          {canDelete && (
+                          {canDeactivate && (
                             <button onClick={() => confirmRemove(s)} className="p-1.5 text-slate-400 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition" title="Deactivate student">
                               <UserMinus size={14} />
                             </button>

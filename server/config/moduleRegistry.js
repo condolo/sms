@@ -54,9 +54,28 @@ const MODULE_REGISTRY = [
     { key: 'profile', label: 'View Student Profile' },
     { key: 'create',  label: 'Add Student' },
     { key: 'edit',    label: 'Edit Student' },
-    { key: 'delete',  label: 'Delete Student' },
+    // Relabeled (2026-09) — this key's real effect (DELETE /students/:id)
+    // is a soft, reversible deactivation (status: 'inactive'), not a
+    // permanent delete; a real school avoided granting it to an
+    // Admissions Officer specifically because the OLD label ("Delete
+    // Student") read as destructive. Key unchanged (already persisted
+    // for every school) — only the label changed.
+    { key: 'delete',  label: 'Deactivate Student' },
     { key: 'export',  label: 'Export Students (CSV)' },
     { key: 'import',  label: 'Import Students (CSV)' },
+    // The 4 subs below are genuinely distinct, more sensitive capabilities
+    // that used to be bundled behind a client-side `role === 'admin' ||
+    // 'superadmin'` check with NO Settings equivalent at all — no amount
+    // of configuration could ever grant them to another role. Each is now
+    // independently grantable, enforced with hasExplicitSubGrant (no
+    // coarse-grant fallback): holding students:update (routine editing)
+    // or students:delete (deactivate) must NOT silently also unlock
+    // these — same reasoning as report-card publishing / mark-submissions
+    // review / the Attendance School-Wide Report earlier this session.
+    { key: 'promote',         label: 'Promote Students to Next Class' },
+    { key: 'portal_accounts', label: 'Manage Student Portal Accounts' },
+    { key: 'duplicates',      label: 'Resolve Duplicate Student Records' },
+    { key: 'purge',           label: 'Permanently Delete Students' },
   ]},
   { key: 'teachers', label: 'Teachers', section: 'Academic Management', icon: 'Users', navRoute: '/teachers', navOrder: 1, subs: [
     { key: 'list',   label: 'View Teacher List' },
