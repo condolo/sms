@@ -45,17 +45,29 @@ const VIEWS = [
   { id: 'cover',    label: 'Cover / Subs', Icon: UserX,   adminOnly: true      },
 ];
 
-const ADMIN_ROLES = new Set(['admin', 'superadmin', 'deputy', 'timetabler']);
-
 export default function TimetablePage() {
   const qc    = useQueryClient();
   const can    = useAuthStore(s => s.can.bind(s));
   const role   = useAuthStore(s => s.session?.user?.role   ?? '');
-  const roles  = useAuthStore(s => s.session?.user?.roles  ?? []);
   const school = useAuthStore(s => s.session?.school);
 
-  const canEdit    = can('timetable') || ADMIN_ROLES.has(role);
-  const isAdminRole = ADMIN_ROLES.has(role) || roles.some(r => ADMIN_ROLES.has(r));
+  const isAdminLevel = role === 'admin' || role === 'superadmin';
+  /* Was: ADMIN_ROLES = {'admin','superadmin','deputy','timetabler'} — a
+     hardcoded set checking the legacy 'deputy' alias, not the real
+     'deputy_principal'/'principal' role keys. onboard.js's server-side
+     defaults already grant principal/deputy_principal full timetable RCUD
+     (same tier as timetabler), so both were silently locked out of this
+     entire management page — including its edit actions — and shown only
+     the read-only self-service Portal below, no matter what Settings said.
+     can('timetable','update') is the real, live-configurable capability
+     that separates "manages the whole-school timetable" (timetabler,
+     principal, deputy_principal — all RCUD by default) from "views their
+     own schedule" (teacher, section_head — read-only by default, correctly
+     still routed to the Portal). Already reflects secondary roles too —
+     the server unions permissions across every role a user holds, so the
+     old roles.some(...) fallback is no longer needed. */
+  const canEdit     = isAdminLevel || can('timetable', 'update');
+  const isAdminRole = canEdit;
 
   // Non-admin roles see the read-only portal
   if (!isAdminRole) return <TimetablePortal />;

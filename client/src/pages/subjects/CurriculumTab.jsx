@@ -30,10 +30,6 @@ function sectionCompatible(subject, sectionKey) {
   return subject.sections.includes(sectionKey);
 }
 
-function canEdit(role) {
-  return ['superadmin','admin','deputy','timetabler'].includes(role);
-}
-
 /* ── Small subject chip ─────────────────────────────────── */
 function SubjectChip({ subject, inCurriculum, isCompulsory, classSubjectId, onAdd, onRemove, onToggleCompulsory, adding, removing, toggling }) {
   return (
@@ -99,8 +95,14 @@ function SubjectChip({ subject, inCurriculum, isCompulsory, classSubjectId, onAd
 
 /* ── Main tab ─────────────────────────────────────────────── */
 export default function CurriculumTab({ flash }) {
-  const role     = useAuthStore(s => s.session?.user?.role ?? '');
-  const editable = canEdit(role);
+  const role = useAuthStore(s => s.session?.user?.role ?? '');
+  const can  = useAuthStore(s => s.can.bind(s));
+  /* Was: canEdit(role) = ['superadmin','admin','deputy','timetabler'].includes(role)
+     — a hardcoded array (also checking the legacy 'deputy' alias, not the real
+     'deputy_principal' role key) with no Settings equivalent. Every write route
+     here (class-subjects.js's add/bulk/toggle/remove) gates on the single coarse
+     subjects:update action, so one real permission check covers all 4. */
+  const editable = role === 'admin' || role === 'superadmin' || can('subjects', 'update');
   const qc       = useQueryClient();
   // sectionMap gives the school's own real section name + color per key —
   // used instead of a hardcoded kg/primary/secondary/alevel-only label/

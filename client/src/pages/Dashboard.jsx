@@ -128,7 +128,14 @@ export default function Dashboard() {
   const canViewFinance    = can('finance')    || isAdminLevel;
   const canViewAdm        = can('admissions') || isAdminLevel;
   const canViewStudents   = can('students')   || isAdminLevel;
-  const canViewLeadership = LEADER_ROLES.has(role);
+  /* Was: LEADER_ROLES.has(role) — a hardcoded ['superadmin','admin',
+     'deputy_principal','section_head'] set with no Settings equivalent,
+     even though analytics.js's own GET /leadership route already enforces
+     a real, live-configurable rbac('analytics','read') grant. Matches the
+     same 4 roles by default (see moduleRegistry.js's 'analytics' module),
+     but now any role can be granted it explicitly, and the client no
+     longer fires a query the server will just 403. */
+  const canViewLeadership = can('analytics') || isAdminLevel;
 
   /* ── Global date-range filter — drives every genuinely time-scoped
      widget below (Fees Collected, Admissions funnel, Attendance,
@@ -1296,10 +1303,11 @@ function SetupChecklist({ school, role, stuTotal }) {
 
 /* ══════════════════════════════════════════════════════════
    LEADERSHIP ANALYTICS PANEL
-   Visible to: superadmin, admin, deputy_principal, section_head
+   Visible to: whoever holds analytics:read (superadmin/admin bypass;
+   deputy_principal/section_head hold it by default — see moduleRegistry.js
+   and SettingsPage.jsx's _makeDefaultPerms).
    Plan:        premium
    ══════════════════════════════════════════════════════════ */
-const LEADER_ROLES = new Set(['superadmin', 'admin', 'deputy_principal', 'section_head']);
 
 /* Colour helpers */
 function scoreColor(pct) {

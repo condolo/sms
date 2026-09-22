@@ -8,7 +8,7 @@ const express        = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { authMiddleware }   = require('../middleware/auth');
 const { tenantMiddleware } = require('../middleware/tenant');
-const { rbac }             = require('../middleware/rbac');
+const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { moduleGate }       = require('../middleware/module-gate');
 const email = require('../utils/email');
 const notif = require('../utils/notif-settings');
@@ -226,7 +226,14 @@ router.patch('/:id/read', rbac('messages', 'update'), async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-/* ── DELETE /api/messages/:id — delete (sender or admin only) ─ */
+/* ── DELETE /api/messages/:id — own message, or moderation grant ─ */
+// MODERATE_FLOOR mirrors the exact set the old hardcoded check let through
+// (['superadmin','admin','deputy_principal']) — zero regression for those
+// three. Any OTHER role can now be granted the same moderation power
+// explicitly via Settings → Roles & Permissions ("Delete Any Message"),
+// enforced with hasExplicitSubGrant (no coarse-grant fallback) — holding
+// 'Delete Own Messages' alone must not silently imply it.
+const MODERATE_FLOOR = new Set(['superadmin', 'admin', 'deputy_principal']);
 router.delete('/:id', rbac('messages', 'delete'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.jwtUser;
@@ -235,7 +242,8 @@ router.delete('/:id', rbac('messages', 'delete'), async (req, res) => {
     if (!msg) return res.status(404).json({ error: 'Message not found' });
 
     const canDelete = msg.senderId === userId ||
-                      ['superadmin', 'admin', 'deputy_principal'].includes(role);
+                      MODERATE_FLOOR.has(role) ||
+                      await hasExplicitSubGrant(req, 'messages', 'moderate', 'delete');
     if (!canDelete) return res.status(403).json({ error: 'You cannot delete this message' });
 
     await Msg.deleteOne({ id: req.params.id, schoolId });

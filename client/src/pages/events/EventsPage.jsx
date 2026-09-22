@@ -30,8 +30,6 @@ const CATEGORIES = {
   online_class: { label: 'Online Class',  color: '#0284c7' },  // school-scheduled virtual session
 };
 
-const ADMIN_ROLES = ['superadmin','admin','deputy_principal','timetabler'];
-
 /* ── Helpers ──────────────────────────────────────────────── */
 function fmtDate(iso) {
   if (!iso) return '';
@@ -117,7 +115,7 @@ function BirthdayCard({ person, isToday }) {
 }
 
 /* ── Event Modal ────────────────────────────────────────────── */
-function EventModal({ event, onClose, onSave, onDelete, canAdmin }) {
+function EventModal({ event, onClose, onSave, onDelete, canEdit, canDelete }) {
   const [editing, setEditing] = useState(!event?.id);
   const [form, setForm] = useState(
     event ?? { title:'', description:'', startDate:'', endDate:'', allDay:true, category:'general', location:'', audience:['all'], meetingLink:'', meetingPasscode:'', platform:'zoom' }
@@ -138,13 +136,13 @@ function EventModal({ event, onClose, onSave, onDelete, canAdmin }) {
             {event?.id ? (editing ? 'Edit Event' : 'Event Details') : 'New Event'}
           </h2>
           <div className="flex items-center gap-2">
-            {event?.id && canAdmin && !editing && (
+            {event?.id && canEdit && !editing && (
               <button onClick={() => setEditing(true)}
                 className="text-slate-500 hover:text-violet-600 p-1.5 rounded-lg hover:bg-violet-50 transition">
                 <Edit2 size={14} />
               </button>
             )}
-            {event?.id && canAdmin && (
+            {event?.id && canDelete && (
               <button onClick={() => onDelete(event.id)}
                 className="text-slate-500 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 transition">
                 <Trash2 size={14} />
@@ -300,7 +298,11 @@ function EventModal({ event, onClose, onSave, onDelete, canAdmin }) {
 export default function EventsPage() {
   const qc       = useQueryClient();
   const user     = useAuthStore(s => s.session?.user);
-  const canAdmin = ADMIN_ROLES.includes(user?.role);
+  const can      = useAuthStore(s => s.can.bind(s));
+  const isAdminLevel = user?.role === 'admin' || user?.role === 'superadmin';
+  const canCreate = isAdminLevel || can('events', 'create');
+  const canEdit   = isAdminLevel || can('events', 'update');
+  const canDelete = isAdminLevel || can('events', 'delete');
 
   const [view, setView]         = useState('month'); // 'month' | 'list' | 'birthdays'
   const [current, setCurrent]   = useState(() => { const d = new Date(); return { year: d.getFullYear(), month: d.getMonth() }; });
@@ -461,7 +463,7 @@ export default function EventsPage() {
             </button>
           )}
 
-          {canAdmin && view !== 'birthdays' && (
+          {canCreate && view !== 'birthdays' && (
             <button onClick={() => setShowNew(true)}
               className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2 text-sm font-semibold text-white hover:bg-violet-700 transition">
               <Plus size={14} /> Add Event
@@ -565,7 +567,7 @@ export default function EventsPage() {
             <div className="text-center py-16">
               <Calendar size={32} className="mx-auto text-slate-300 mb-3" />
               <p className="text-slate-500 text-sm">No upcoming events.</p>
-              {canAdmin && (
+              {canCreate && (
                 <button onClick={() => setShowNew(true)}
                   className="mt-3 text-violet-600 text-sm hover:underline">
                   Add the first event
@@ -686,7 +688,8 @@ export default function EventsPage() {
         {(selected || showNew) && (
           <EventModal
             event={selected?.event ?? null}
-            canAdmin={canAdmin}
+            canEdit={canEdit}
+            canDelete={canDelete}
             onClose={() => { setSelected(null); setShowNew(false); }}
             onSave={handleSave}
             onDelete={handleDelete}

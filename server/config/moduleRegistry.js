@@ -203,7 +203,16 @@ const MODULE_REGISTRY = [
   { key: 'messages', label: 'Messages', section: 'Communication', icon: 'MessageSquare', navRoute: '/messages', navOrder: 11, subs: [
     { key: 'view',   label: 'View Messages' },
     { key: 'send',   label: 'Send Messages' },
-    { key: 'delete', label: 'Delete Messages' },
+    { key: 'delete', label: 'Delete Own Messages' },
+    // Deliberately NOT covered by 'delete' above (which only ever gated a
+    // sender deleting their OWN message) — deleting someone ELSE's message
+    // was a second, separate capability that used to be a hardcoded
+    // ['superadmin','admin','deputy_principal'] array in both messages.js
+    // and MessagesPage.jsx, invisible to Roles & Permissions. Enforced with
+    // hasExplicitSubGrant (no coarse-grant fallback), same mechanism as
+    // students__promote — holding 'Delete Own Messages' must not silently
+    // imply moderation power over everyone else's messages.
+    { key: 'moderate', label: 'Delete Any Message (Moderation)' },
   ]},
   { key: 'events', label: 'Events & Calendar', section: 'Communication', icon: 'Calendar', navRoute: '/events', navLabel: 'Events', navOrder: 12, subs: [
     { key: 'view',   label: 'View Events' },

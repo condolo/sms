@@ -240,8 +240,15 @@ function MessageItem({ msg, selected, isUnread, isSent, onClick }) {
 
 /* ── message detail ──────────────────────────────────────── */
 function MessageDetail({ msg, userId, userRole, onDelete, deleting, onBack }) {
+  const can      = useAuthStore(s => s.can.bind(s));
   const recs     = (msg.recipients ?? []).map(recipientLabel).join(', ');
-  const canDelete = msg.senderId === userId || ['superadmin', 'admin', 'deputy_principal'].includes(userRole);
+  /* Was: ['superadmin','admin','deputy_principal'].includes(userRole) — a
+     hardcoded moderation floor with no Settings equivalent, mirrored (and
+     also fixed) server-side in messages.js. MODERATE_FLOOR there is the
+     exact same 3 roles, kept here only as the isAdminLevel-style fast path;
+     can('messages__moderate','delete') is the real, live-configurable grant. */
+  const isModerateFloor = ['superadmin', 'admin', 'deputy_principal'].includes(userRole);
+  const canDelete = msg.senderId === userId || isModerateFloor || can('messages__moderate', 'delete');
   const [confirmDel, setConfirmDel] = useState(false);
 
   return (

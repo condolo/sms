@@ -35,10 +35,6 @@ const DEPT_COLORS = [
   '#6366F1','#0EA5E9','#10B981','#F59E0B','#EC4899',
   '#EF4444','#8B5CF6','#06B6D4','#84CC16','#F97316',
 ];
-function canEdit(role) {
-  return ['superadmin','admin','deputy'].includes(role);
-}
-
 /* ── small reusable ──────────────────────────────────────── */
 function SectionPill({ value }) {
   const { sectionMap } = useSections();
@@ -509,7 +505,7 @@ function DeleteDialog({ item, type, onConfirm, onClose, deleting }) {
 }
 
 /* ── Department card ─────────────────────────────────────── */
-function DeptCard({ dept, subjects, editable, enrollCounts, onEditDept, onDeleteDept, onAddSubject, onEditSubject, onDeleteSubject, onEnroll }) {
+function DeptCard({ dept, subjects, canCreate, canEdit, canDelete, enrollCounts, onEditDept, onDeleteDept, onAddSubject, onEditSubject, onDeleteSubject, onEnroll }) {
   const [expanded, setExpanded] = useState(true);
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
@@ -526,12 +522,14 @@ function DeptCard({ dept, subjects, editable, enrollCounts, onEditDept, onDelete
           <p className="text-xs text-slate-500 mt-0.5">{subjects.length} subject{subjects.length !== 1 ? 's' : ''}</p>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          {editable && (
-            <>
-              <button onClick={e => { e.stopPropagation(); onAddSubject(dept); }} className="p-1.5 rounded-lg text-violet-600 hover:bg-violet-50 transition" title="Add subject"><Plus size={14} /></button>
-              <button onClick={e => { e.stopPropagation(); onEditDept(dept); }} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition" title="Edit department"><Pencil size={14} /></button>
-              <button onClick={e => { e.stopPropagation(); onDeleteDept(dept); }} className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 transition" title="Deactivate department"><Trash2 size={14} /></button>
-            </>
+          {canCreate && (
+            <button onClick={e => { e.stopPropagation(); onAddSubject(dept); }} className="p-1.5 rounded-lg text-violet-600 hover:bg-violet-50 transition" title="Add subject"><Plus size={14} /></button>
+          )}
+          {canEdit && (
+            <button onClick={e => { e.stopPropagation(); onEditDept(dept); }} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition" title="Edit department"><Pencil size={14} /></button>
+          )}
+          {canDelete && (
+            <button onClick={e => { e.stopPropagation(); onDeleteDept(dept); }} className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 transition" title="Deactivate department"><Trash2 size={14} /></button>
           )}
           {expanded ? <ChevronDown size={16} className="text-slate-400" /> : <ChevronRight size={16} className="text-slate-400" />}
         </div>
@@ -541,7 +539,7 @@ function DeptCard({ dept, subjects, editable, enrollCounts, onEditDept, onDelete
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }} className="overflow-hidden">
             <div className="border-t border-slate-100">
               {subjects.length === 0
-                ? <div className="px-5 py-6 text-center text-sm text-slate-400">No subjects yet.{editable && <button onClick={() => onAddSubject(dept)} className="ml-1 text-violet-600 hover:underline">Add one</button>}</div>
+                ? <div className="px-5 py-6 text-center text-sm text-slate-400">No subjects yet.{canCreate && <button onClick={() => onAddSubject(dept)} className="ml-1 text-violet-600 hover:underline">Add one</button>}</div>
                 : <div className="divide-y divide-slate-50">
                     {subjects.map(sub => {
                       const count = enrollCounts[sub.id] ?? 0;
@@ -563,9 +561,13 @@ function DeptCard({ dept, subjects, editable, enrollCounts, onEditDept, onDelete
                             )}
                           </div>
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition shrink-0">
-                            {editable && <button onClick={() => onEnroll(sub)} className="p-1 rounded text-violet-500 hover:text-violet-700 hover:bg-violet-50 transition" title="Manage enrollment"><UserPlus size={13} /></button>}
-                            <button onClick={() => onEditSubject(sub)} className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"><Pencil size={13} /></button>
-                            <button onClick={() => onDeleteSubject(sub)} className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition"><Trash2 size={13} /></button>
+                            {canEdit && <button onClick={() => onEnroll(sub)} className="p-1 rounded text-violet-500 hover:text-violet-700 hover:bg-violet-50 transition" title="Manage enrollment"><UserPlus size={13} /></button>}
+                            {/* Was unconditional — Edit/Delete rendered for every viewer regardless
+                                of real permission, relying entirely on the server's 403 to block
+                                the actual save. Now matches subjects:update/delete like every
+                                other action on this page. */}
+                            {canEdit   && <button onClick={() => onEditSubject(sub)} className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"><Pencil size={13} /></button>}
+                            {canDelete && <button onClick={() => onDeleteSubject(sub)} className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition"><Trash2 size={13} /></button>}
                           </div>
                         </div>
                       );
@@ -582,8 +584,18 @@ function DeptCard({ dept, subjects, editable, enrollCounts, onEditDept, onDelete
 
 /* ── Main catalog tab ─────────────────────────────────────── */
 export default function CatalogTab({ flash }) {
-  const role     = useAuthStore(s => s.session?.user?.role ?? '');
-  const editable = canEdit(role);
+  const role = useAuthStore(s => s.session?.user?.role ?? '');
+  const can  = useAuthStore(s => s.can.bind(s));
+  const isAdminLevel = role === 'admin' || role === 'superadmin';
+  /* Was: canEdit(role) = ['superadmin','admin','deputy'].includes(role) — a
+     hardcoded array checking the legacy 'deputy' alias, not the real
+     'deputy_principal' role key, so it silently never matched a real
+     deputy principal even after Settings granted them subjects access.
+     Split into the 3 real server actions (subjects.js/departments.js/
+     student-subjects.js all gate on the coarse 'subjects' array). */
+  const canCreate = isAdminLevel || can('subjects', 'create');
+  const canEdit   = isAdminLevel || can('subjects', 'update');
+  const canDelete = isAdminLevel || can('subjects', 'delete');
   const qc       = useQueryClient();
 
   const [search, setSearch]           = useState('');
@@ -660,7 +672,7 @@ export default function CatalogTab({ flash }) {
               <p className="text-sm text-slate-500">School-wide subject registry with student enrollment</p>
             </div>
           </div>
-          {editable && (
+          {canCreate && (
             <div className="flex items-center gap-2">
               <button onClick={() => setSubSlide({ mode: 'new', data: null, deptId: depts[0]?.id })}
                 className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition">
@@ -708,11 +720,11 @@ export default function CatalogTab({ flash }) {
           <div className="rounded-xl border-2 border-dashed border-slate-300 py-16 text-center">
             <Library size={32} className="mx-auto text-slate-300 mb-3" />
             <p className="text-sm text-slate-500">{q ? `No results for "${search}"` : 'No departments yet.'}</p>
-            {!q && editable && <button onClick={() => setDeptSlide({ mode: 'new', data: null })} className="mt-3 text-sm text-violet-600 hover:underline">Create your first department</button>}
+            {!q && canCreate && <button onClick={() => setDeptSlide({ mode: 'new', data: null })} className="mt-3 text-sm text-violet-600 hover:underline">Create your first department</button>}
           </div>
         ) : (
           filteredDepts.map(dept => (
-            <DeptCard key={dept.id} dept={dept} subjects={subjectsFor(dept.id)} editable={editable}
+            <DeptCard key={dept.id} dept={dept} subjects={subjectsFor(dept.id)} canCreate={canCreate} canEdit={canEdit} canDelete={canDelete}
               enrollCounts={enrollCounts}
               onEditDept={d   => setDeptSlide({ mode: 'edit', data: d })}
               onDeleteDept={d => setDelTarget({ type: 'Department', item: d })}

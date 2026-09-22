@@ -21,7 +21,6 @@ import { useToast } from '@/hooks/useToast.jsx';
 import { BUILTIN_STAFF_RESPONSIBILITIES } from '@/config/staffResponsibilities.js';
 
 /* ── Constants ──────────────────────────────────────────── */
-const HR_ROLES    = ['superadmin','admin','hr'];
 
 // Built-in staff roles — mirrors the Roles & Permissions system (excludes superadmin/parent/student)
 const BUILT_IN_STAFF_ROLES = [
@@ -623,8 +622,15 @@ export default function HRPage() {
   const qc     = useQueryClient();
   const user   = useAuthStore(s => s.session?.user);
   const school = useAuthStore(s => s.session?.school);
+  const can    = useAuthStore(s => s.can.bind(s));
   const sym    = school?.currencySymbol ?? 'KSh';
-  const isHR   = HR_ROLES.includes(user?.role);
+  const isAdminLevel = user?.role === 'admin' || user?.role === 'superadmin';
+  /* Was: HR_ROLES.includes(user?.role) — a hardcoded ['superadmin','admin','hr']
+     array with no Settings equivalent, same bug class as v5.115.0/v5.115.1.
+     Real gate is the coarse hr:read grant the server's own GET /hr/summary
+     enforces (rbac('hr','read')) — 'hr' role has it by default, matching the
+     old array exactly, but now any role can be granted it live via Settings. */
+  const isHR   = isAdminLevel || can('hr', 'read');
 
   const [tab, setTab]                 = useState(() => isHR ? 'staff' : 'leave');
   const [showLeaveForm, setLeaveForm] = useState(false);

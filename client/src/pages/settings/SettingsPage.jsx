@@ -3435,7 +3435,8 @@ const PERM_MODULES = [
   { key: 'messages',   label: 'Messages', subs: [
     { key: 'view',   label: 'View Messages' },
     { key: 'send',   label: 'Send Messages' },
-    { key: 'delete', label: 'Delete Messages' },
+    { key: 'delete', label: 'Delete Own Messages' },
+    { key: 'moderate', label: 'Delete Any Message (Moderation)' },
   ]},
   { key: 'events',     label: 'Events & Calendar', subs: [
     { key: 'view',   label: 'View Events' },
@@ -3665,6 +3666,16 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       // Requisition-only (raise + view own), never full inventory
       // management — matches the inventory__requisition-only grant.
       if (m==='inventory') return s==='requisition' ? E : N;
+      // 'analytics' excluded from the blanket V fallback below — teacher has
+      // no 'analytics' key at all in onboard.js's server-side defaults (no
+      // access), so V here would silently WIDEN real access to the
+      // Leadership Analytics dashboard (fee/attendance/behaviour data across
+      // the whole school) the first time this role is next saved, not just
+      // reflect a harmless UI grouping. Found while wiring Dashboard.jsx's
+      // Leadership panel to this permission for the first time (it was
+      // previously gated by a hardcoded role list that never read this
+      // checkbox at all, so the drift had no live effect until now).
+      if (m==='analytics') return N;
       return V;
     },
 
