@@ -9,7 +9,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware }  = require('../middleware/auth');
 const { moduleGate }     = require('../middleware/module-gate');
-const { rbac }            = require('../middleware/rbac');
+const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }        = require('../middleware/plan');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 const ScopeEngine         = require('../utils/scopeEngine');
@@ -177,6 +177,119 @@ router.get('/summary', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read')
     return ok(res, summary);
   } catch (err) {
     console.error('[attendance GET /summary]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── GET /api/attendance/school-report ─ Whole-school, per-class/stream ──
+   A distinct, deliberately MORE restrictive view than plain 'attendance:
+   read' — a class teacher or subject teacher with ordinary attendance
+   access should not automatically see every other class's registers in
+   one place. Uses hasExplicitSubGrant (no coarse-grant fallback), same
+   reasoning as report-card publishing and mark-submissions review: falling
+   back to plain attendance:read would hand this to every teacher the
+   moment the 'attendance__report' sub exists, via the SAME role most
+   teachers already hold read/create on for their own register-taking. */
+router.get('/school-report', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read'), async (req, res) => {
+  try {
+    const { schoolId, role } = req.jwtUser;
+    const FLOOR_ROLES = new Set(['admin', 'principal', 'deputy_principal', 'deputy']);
+    if (!FLOOR_ROLES.has(role) && !(await hasExplicitSubGrant(req, 'attendance', 'report', 'read'))) {
+      return E.forbidden(res, 'Only admins, principals, deputies, or explicitly granted roles can view the school-wide attendance report.');
+    }
+
+    const date = req.query.date || new Date().toISOString().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return E.badRequest(res, 'date must be in YYYY-MM-DD format');
+
+    const Students    = tenantModel('students', tenantContext(req));
+    const Streams     = tenantModel('streams', tenantContext(req));
+    const Classes     = tenantModel('classes', tenantContext(req));
+    const Attendance  = tenantModel('attendance', tenantContext(req));
+
+    const [classDocs, streamDocs, rosterAgg, dayAgg] = await Promise.all([
+      Classes.find({ schoolId }).select('id name').lean(),
+      Streams.find({ schoolId }).select('id name classId').lean(),
+      Students.aggregate([
+        { $match: { schoolId, status: 'active' } },
+        { $group: { _id: { classId: '$classId', streamId: '$streamId' }, roster: { $sum: 1 } } },
+      ]),
+      Attendance.aggregate([
+        { $match: { schoolId, date } },
+        { $group: { _id: { classId: '$classId', streamId: '$streamId', status: '$status' }, count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    const bucketKey = (classId, streamId) => `${classId}::${streamId ?? ''}`;
+
+    // Seed a bucket for every real (classId, streamId) pair, plus one for
+    // any class that has students with no streamId at all (a class never
+    // split into streams) — never for a (classId, streamId) pair that has
+    // neither a roster nor any attendance recorded, so an empty class
+    // doesn't clutter the report.
+    const buckets = new Map();
+    function bucketFor(classId, streamId) {
+      const key = bucketKey(classId, streamId);
+      if (!buckets.has(key)) {
+        buckets.set(key, {
+          classId, streamId: streamId ?? null,
+          roster: 0, present: 0, absent: 0, late: 0, authorised_absence: 0, excluded: 0, holiday: 0,
+        });
+      }
+      return buckets.get(key);
+    }
+
+    for (const row of rosterAgg) {
+      const b = bucketFor(row._id.classId, row._id.streamId);
+      b.roster += row.roster;
+    }
+    for (const row of dayAgg) {
+      const b = bucketFor(row._id.classId, row._id.streamId);
+      if (b[row._id.status] !== undefined) b[row._id.status] += row.count;
+    }
+
+    const classNameById  = Object.fromEntries(classDocs.map(c => [c.id, c.name]));
+    const streamNameById = Object.fromEntries(streamDocs.map(s => [s.id, s.name]));
+
+    function finalizeRow(b, streamName) {
+      const marked  = b.present + b.absent + b.late + b.authorised_absence + b.excluded + b.holiday;
+      const unmarked = Math.max(b.roster - marked, 0);
+      const rate = b.roster > 0 ? Math.round((b.present / b.roster) * 100) : null;
+      return {
+        streamId: b.streamId, streamName: streamName ?? null,
+        roster: b.roster, present: b.present, absent: b.absent, late: b.late,
+        authorisedAbsence: b.authorised_absence, unmarked, rate,
+      };
+    }
+
+    const byClass = new Map();
+    for (const b of buckets.values()) {
+      if (!byClass.has(b.classId)) byClass.set(b.classId, []);
+      const streamName = b.streamId ? (streamNameById[b.streamId] ?? 'Unknown stream') : 'Unassigned to a stream';
+      byClass.get(b.classId).push(finalizeRow(b, streamName));
+    }
+
+    const classes = [...byClass.entries()].map(([classId, streams]) => {
+      const roster  = streams.reduce((s, r) => s + r.roster, 0);
+      const present = streams.reduce((s, r) => s + r.present, 0);
+      const rate    = roster > 0 ? Math.round((present / roster) * 100) : null;
+      return {
+        classId, className: classNameById[classId] ?? 'Unknown class',
+        roster, present, rate,
+        streams: streams.sort((a, b) => (a.streamName ?? '').localeCompare(b.streamName ?? '')),
+      };
+    }).sort((a, b) => a.className.localeCompare(b.className));
+
+    const schoolRoster  = classes.reduce((s, c) => s + c.roster, 0);
+    const schoolPresent = classes.reduce((s, c) => s + c.present, 0);
+    const schoolWide = {
+      roster: schoolRoster,
+      present: schoolPresent,
+      rate: schoolRoster > 0 ? Math.round((schoolPresent / schoolRoster) * 100) : null,
+    };
+
+    return ok(res, { date, schoolWide, classes });
+  } catch (err) {
+    console.error('[attendance GET /school-report]', err);
     return E.serverError(res);
   }
 });

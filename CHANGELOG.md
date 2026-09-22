@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.112.0] — 2026-09-22 — feat(attendance): School-Wide Report + fix(attendance): "Excused" status was rejected by the server on every save
+
+Two changes landed together: a genuine bug found while building the new feature (the fix), and the feature itself.
+
+### Fixed — "Excused" was never a valid status; saving one failed the whole register
+While reading `attendance.js`'s status enum to build the new report's aggregation, found that `AttendancePage.jsx`'s "Excused" button sent `status: 'excused'` to `POST /attendance` and `POST /attendance/bulk` — but neither route's Zod schema has ever accepted that value, only `'authorised_absence'` (the value every real consumer — `attendance.js`'s own `/summary` aggregation, `growth-profile.js`, `weekly-snapshot-aggregate.js` — already uses). Zod rejects the WHOLE request on any single invalid record, so marking even one student "Excused" in an otherwise fully-marked register of 30 students failed the save for all 30, with a generic "Failed to save attendance" toast giving no indication why. Fixed by renaming the client's wire value to `authorised_absence` (display label "Excused" unchanged). New test `attendance-status-enum.test.js` (5 tests) pins the real contract, including a test asserting one bad record fails the whole batch — documenting why this was severe, not cosmetic.
+
+### Added — School-Wide Attendance Report, its own distinct permission
+Prompted directly: an admissions officer had full `attendance`/`classes` RBAC but still couldn't see a whole-school view — traced to the "Reports & Analytics" module permission (a separate, unrelated toggle) being empty for their role, hiding the only screen that showed it. Rather than just fix that one role's config, built a proper, dedicated whole-school report living inside Attendance itself:
+
+- **New `GET /api/attendance/school-report?date=`** — for one date, returns roster/present/absent/late/authorisedAbsence/unmarked/rate broken down by class and by stream within each class, plus a school-wide rollup.
+- **A genuinely new kind of Attendance permission.** The existing 4 Attendance sub-permissions (View Register / Mark Attendance / Edit Records / Export-Print) were discovered, in the course of this work, to be purely cosmetic groupings — `attendance.js`'s routes never check which one was granted, only the combined module-level permission they all silently union into. The new 5th sub, **"School-Wide Report,"** is the first one that's actually independently enforced: gated with `hasExplicitSubGrant` (no coarse-grant fallback, same mechanism already used for report-card publishing and mark-submissions review), so holding full `attendance:read/create/update/delete` — which most teachers and several admin-tier roles already do — does NOT imply this grant. Only admin/principal/deputy_principal/deputy (an unconditional floor) or a role explicitly granted the new sub can reach it.
+- **Systematically reviewed every system role's default checkbox state for the new sub before shipping**, the same discipline applied to the HR workflow fix earlier this session — and found a real, would-have-shipped issue: the `parent` role's fallback default would have shown this checkbox pre-checked, meaning the very first time an admin saved ANY change on the Parent role's permissions screen, every parent account would have silently gained explicit access to a whole-school, cross-student attendance report. Fixed with an explicit deny, alongside two lower-severity over-broad defaults found the same way (`section_head`, `discipline_committee`).
+- **Client**: `AttendancePage.jsx` gained a Register / School Report tab switcher; the report itself is a new `SchoolReportPanel.jsx` component — its own date picker, an expandable per-class table drilling into streams, and CSV export. Shown to every role that can reach the Attendance page at all (this app doesn't pre-filter UI by permission anywhere), with a clear, actionable message on a 403 rather than a blank screen.
+
+### Verified
+New tests: `attendance-status-enum.test.js` (5), `attendance-school-report.test.js` (8, covering the floor/explicit-grant boundary and the roster+attendance merge arithmetic). Full Jest suite: 225 suites, 2214/2214 passing. Client build clean. Live-verified in the demo environment: an admin sees the correct whole-school breakdown (roster/rate per class, correct drill-down into a 2-stream class); a teacher sees the intended 403 with the exact guidance message, not a crash.
+
+---
+
 ## [v5.111.0] — 2026-09-21 — fix(ops): Database Integrity checker was silently checking 3 collections that don't exist
 
 Requested as a "system cleaning" pass to find dead code and anything confusing the system. Two parallel audits (server + client) surfaced this as the one genuinely live bug, not just cleanup — every other finding turned out to be either already-dead code with zero customer impact, or needed a product decision I flagged separately rather than acting on unilaterally.

@@ -15,13 +15,14 @@ import {
 } from 'lucide-react';
 import { attendance as attendanceApi, classes as classesApi, streams as streamsApi, timetable as timetableApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
+import SchoolReportPanel from './components/SchoolReportPanel.jsx';
 
 /* ── Status config ───────────────────────────────────────────── */
 const STATUSES = [
   { value: 'present',  label: 'Present',  short: 'P', color: 'bg-emerald-500', ring: 'ring-emerald-400', text: 'text-emerald-700', bg: 'bg-emerald-50',  border: 'border-emerald-200' },
   { value: 'absent',   label: 'Absent',   short: 'A', color: 'bg-red-500',     ring: 'ring-red-400',     text: 'text-red-700',     bg: 'bg-red-50',      border: 'border-red-200'     },
   { value: 'late',     label: 'Late',     short: 'L', color: 'bg-amber-500',   ring: 'ring-amber-400',   text: 'text-amber-700',   bg: 'bg-amber-50',    border: 'border-amber-200'   },
-  { value: 'excused',  label: 'Excused',  short: 'E', color: 'bg-blue-500',    ring: 'ring-blue-400',    text: 'text-blue-700',    bg: 'bg-blue-50',     border: 'border-blue-200'    },
+  { value: 'authorised_absence', label: 'Excused',  short: 'E', color: 'bg-blue-500',    ring: 'ring-blue-400',    text: 'text-blue-700',    bg: 'bg-blue-50',     border: 'border-blue-200'    },
 ];
 const STATUS_MAP = Object.fromEntries(STATUSES.map(s => [s.value, s]));
 
@@ -50,6 +51,14 @@ export default function AttendancePage() {
      they'd have to fill in by hand. */
   const [searchParams] = useSearchParams();
   const [date, setDate]       = useState(today);
+  // 'register': today's existing per-class/stream take/view flow.
+  // 'report': the School-Wide Report — a distinct, more-restrictive view
+  // (see attendance.js's GET /school-report) most roles won't have; the
+  // tab itself is always shown (this app never pre-filters UI by
+  // permission — see AttendancePage.jsx's own name-backfill comment
+  // history for the established convention) and the server's 403 message
+  // surfaces plainly inside the panel for anyone without the grant.
+  const [viewMode, setViewMode] = useState('register');
   const [classId, setClassId] = useState(() => searchParams.get('classId') ?? '');
   const [streamId, setStreamId] = useState(() => searchParams.get('streamId') ?? '');
   const [edits, setEdits]     = useState({});   // { studentId: status }
@@ -203,7 +212,7 @@ export default function AttendancePage() {
   function clearEdits() { setEdits({}); }
 
   /* ── Summary counts ────────────────────────────────────────── */
-  const counts = { present: 0, absent: 0, late: 0, excused: 0, unmarked: 0 };
+  const counts = { present: 0, absent: 0, late: 0, authorised_absence: 0, unmarked: 0 };
   merged.forEach(r => {
     const s = edits[r.studentId] ?? r.status;
     if (s && counts[s] !== undefined) counts[s]++;
@@ -273,7 +282,7 @@ export default function AttendancePage() {
 <table>
 <thead><tr><th style="width:70%">Student</th><th style="text-align:center">Status</th></tr></thead>
 <tbody>${rows$}</tbody>
-<tfoot><tr><td colspan="2">Present: ${counts.present} &nbsp; Absent: ${counts.absent} &nbsp; Late: ${counts.late} &nbsp; Excused: ${counts.excused} &nbsp; Unmarked: ${counts.unmarked} &nbsp;·&nbsp; Rate: ${attendRate}%</td></tr></tfoot>
+<tfoot><tr><td colspan="2">Present: ${counts.present} &nbsp; Absent: ${counts.absent} &nbsp; Late: ${counts.late} &nbsp; Excused: ${counts.authorised_absence} &nbsp; Unmarked: ${counts.unmarked} &nbsp;·&nbsp; Rate: ${attendRate}%</td></tr></tfoot>
 </table></body></html>`;
 
     const win = window.open('', '_blank', 'width=680,height=900');
@@ -312,7 +321,21 @@ export default function AttendancePage() {
           <div>
             <h1 className="text-xl font-semibold text-slate-900 tracking-tight">Attendance</h1>
             <p className="text-sm text-slate-500 mt-0.5">Mark and review daily registers</p>
-            {noClassesAssigned && (
+            <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 mt-3 w-fit">
+              <button
+                onClick={() => setViewMode('register')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${viewMode === 'register' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                Register
+              </button>
+              <button
+                onClick={() => setViewMode('report')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${viewMode === 'report' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                School Report
+              </button>
+            </div>
+            {noClassesAssigned && viewMode === 'register' && (
               <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
                 <AlertTriangle size={12} />
                 No classes are assigned to your account yet — ask your school admin to assign classes.
@@ -321,7 +344,7 @@ export default function AttendancePage() {
             {/* Timetable alignment — informational only, never gates saving.
                Confirms this register matches what's actually on the
                timetable for this class/stream on the selected date. */}
-            {classId && (!needsStreamSelection || streamId) && todaysSlots.length > 0 && (
+            {viewMode === 'register' && classId && (!needsStreamSelection || streamId) && todaysSlots.length > 0 && (
               <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
                 <Clock size={12} className="text-indigo-400 shrink-0" />
                 {todaysSlots.map(s => (
@@ -335,6 +358,7 @@ export default function AttendancePage() {
           </div>
 
           {/* Controls */}
+          {viewMode === 'register' && (
           <div className="flex items-center gap-3 flex-wrap">
             {/* Date navigator */}
             <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
@@ -427,9 +451,13 @@ export default function AttendancePage() {
               </button>
             )}
           </div>
+          )}
         </div>
       </div>
 
+      {viewMode === 'report' ? (
+        <SchoolReportPanel />
+      ) : (
       <div className="max-w-screen-xl mx-auto px-6 py-5 space-y-5">
 
         {/* Summary strip — only shown when class + data loaded */}
@@ -620,6 +648,7 @@ export default function AttendancePage() {
           </>
         )}
       </div>
+      )}
     </div>
   );
 }

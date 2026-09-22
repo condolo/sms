@@ -211,10 +211,11 @@ export const streams = {
 };
 
 export const attendance = {
-  list:      (params) => _get('/attendance', params),
-  summary:   (params) => _get('/attendance/summary', params),
-  upsert:    (data)   => _post('/attendance', data),
-  bulkMark:  (data)   => _post('/attendance/bulk', data),
+  list:         (params) => _get('/attendance', params),
+  summary:      (params) => _get('/attendance/summary', params),
+  schoolReport: (params) => _get('/attendance/school-report', params),
+  upsert:       (data)   => _post('/attendance', data),
+  bulkMark:     (data)   => _post('/attendance/bulk', data),
 };
 
 export const finance = {

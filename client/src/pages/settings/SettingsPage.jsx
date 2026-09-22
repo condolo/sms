@@ -3378,6 +3378,7 @@ const PERM_MODULES = [
     { key: 'mark',   label: 'Mark Attendance' },
     { key: 'edit',   label: 'Edit Records' },
     { key: 'export', label: 'Export / Print Register' },
+    { key: 'report', label: 'School-Wide Report' },
   ]},
   { key: 'finance',    label: 'Finance', subs: [
     { key: 'invoices',       label: 'View Invoices' },
@@ -3594,6 +3595,13 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (['library','transport','hostel'].includes(m)) return V;   // matches R already seeded server-side
       if (s==='import') return N;
       if (['exams','assessment','report_cards','teachers'].includes(m)) return V;   // matches R already seeded server-side — the blanket E fallback below would over-grant create/edit on teacher records
+      // 'report' deliberately excluded from the blanket E fallback below —
+      // this sub is enforced with hasExplicitSubGrant (no coarse-grant
+      // fallback), so it's the one attendance sub the E default would
+      // actually WIDEN real access for, not just reflect a UI grouping.
+      // section_head's scope is deliberately narrower than whole-school
+      // (see ROLE_SCOPE_LEVEL 'section'); grant explicitly per-role if wanted.
+      if (m==='attendance' && s==='report') return N;
       // events: server seeds R only (repairPermissions.js) — the blanket E
       // fallback below would over-grant create/edit; resources/messages
       // already correctly match server RCU via that same fallback.
@@ -3606,7 +3614,7 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
 
     teacher: (m, s) => {
       if (['finance','admissions','hr','settings'].includes(m)) return N;
-      if (m==='attendance') return s==='edit' ? N : s==='export' ? V : E;
+      if (m==='attendance') return s==='edit' ? N : s==='export' ? V : s==='report' ? N : E;
       if (m==='grades')     return s==='enter_marks' ? E : V;
       if (m==='assessment') return E;   // matches RCU already seeded server-side
       if (m==='behaviour')  return s==='create' ? E : V;
@@ -3731,7 +3739,12 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='behaviour') return T;
       if (m==='students')  return V;
       if (m==='classes')   return V;
-      if (m==='attendance') return V;
+      // 'report' carved out of the blanket attendance V below — enforced
+      // with hasExplicitSubGrant (no coarse-grant fallback), so a default
+      // of V here would actually GRANT the whole-school report, not just
+      // reflect a UI grouping. Grant explicitly per-role if a school wants
+      // discipline committee to see school-wide attendance by default.
+      if (m==='attendance') return s==='report' ? N : V;
       if (m==='messages')  return s==='delete' ? N : E;
       if (m==='growth_profile') return V;
       // resources/events: fell to the final N below — server seeds RCU/R
@@ -3749,6 +3762,12 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
             'elearning','transport','hostel','report_cards','resources'].includes(m)) return N;
       if (m==='finance' && ['fee_structure','mpesa','import','create_invoice','void_invoice','record_payment'].includes(s)) return N;
       if (m==='growth_profile' && s !== 'view') return N;
+      // 'report' is a whole-SCHOOL attendance breakdown, never a parent's
+      // own child's data — enforced with hasExplicitSubGrant (no coarse-
+      // grant fallback), so the blanket V below would actually GRANT
+      // cross-student attendance visibility to every parent account by
+      // default, not just reflect a harmless UI grouping. Must stay N.
+      if (m==='attendance' && s==='report') return N;
       return V;   // report_cards: read their own child's report cards, matches R already seeded server-side
     },
 

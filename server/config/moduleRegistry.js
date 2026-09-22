@@ -81,6 +81,14 @@ const MODULE_REGISTRY = [
     { key: 'mark',   label: 'Mark Attendance' },
     { key: 'edit',   label: 'Edit Records' },
     { key: 'export', label: 'Export / Print Register' },
+    // Deliberately NOT like the 4 subs above — those are grouped display
+    // labels only (attendance.js's routes never check a subKey for them,
+    // only the coarse module grant these all union into). This one is the
+    // first Attendance sub that's actually independently enforced: server
+    // uses hasExplicitSubGrant (no coarse-grant fallback), so checking it
+    // is the ONLY way to grant the whole-school report — it is NOT implied
+    // by View Register/Mark Attendance the way the other 3 subs are today.
+    { key: 'report', label: 'School-Wide Report' },
   ]},
   { key: 'timetable', label: 'Timetable', section: 'Academic Management', icon: 'Calendar', navRoute: '/timetable', navOrder: 3, subs: [
     { key: 'view',          label: 'View Timetable' },
