@@ -135,6 +135,14 @@ const EVENT_REGISTRY = {
     channels:    { email: false, inApp: true },
     implemented: true,
   },
+  attendance_conflict: {
+    label:       'Attendance Conflict Flagged',
+    desc:        'Sent to the assigned Attendance Conflict Resolver when a student is marked both present and absent on the same day',
+    group:       'attendance',
+    audience:    ['staff'],
+    channels:    { email: false, inApp: true },
+    implemented: true,
+  },
 
   /* ── Behaviour ───────────────────────────────────────────── */
   behaviour_incident: {

@@ -108,6 +108,13 @@ const MODULE_REGISTRY = [
     // is the ONLY way to grant the whole-school report — it is NOT implied
     // by View Register/Mark Attendance the way the other 3 subs are today.
     { key: 'report', label: 'School-Wide Report' },
+    // Both below use hasExplicitSubGrant (no coarse-grant fallback), same
+    // reasoning as 'report' — each reveals cross-class data (absentees'
+    // guardian contact details; a same-day present/absent mismatch for a
+    // student in classes the caller may not otherwise have access to),
+    // not just the caller's own register.
+    { key: 'absentees', label: 'View Absent Students & Contact Details' },
+    { key: 'conflicts', label: 'Attendance Conflicts (Present/Absent Mismatch)' },
   ]},
   { key: 'timetable', label: 'Timetable', section: 'Academic Management', icon: 'Calendar', navRoute: '/timetable', navOrder: 3, subs: [
     { key: 'view',          label: 'View Timetable' },

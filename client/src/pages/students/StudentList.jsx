@@ -29,6 +29,12 @@ const STATUS_OPTIONS = [
   { value: '',            label: 'Active (default)' },  // backend excludes withdrawn/graduated/transferred
   { value: 'active',      label: 'Active'            },
   { value: 'inactive',    label: 'Inactive'          },
+  // Was missing entirely — 'suspended' is a real schema status with its own
+  // badge/chart colour below, but had no way to filter to it directly; only
+  // reachable via "All students". Raised directly: a school couldn't trace
+  // which students its own Total-vs-Active count gap (see stats card below)
+  // was hiding — this closes that specifically for suspended students.
+  { value: 'suspended',   label: 'Suspended'         },
   { value: 'withdrawn',   label: 'Withdrawn'         },
   { value: 'transferred', label: 'Transferred'       },
   { value: 'graduated',   label: 'Graduated'         },
@@ -204,6 +210,7 @@ export default function StudentList() {
     fill:  GENDER_COLORS[g._id] ?? '#94a3b8',
   }));
   const statusData = (statsObj.byStatus ?? []).map(s => ({
+    id: s._id ?? null,
     name: s._id ? s._id.charAt(0).toUpperCase() + s._id.slice(1) : 'Unknown',
     value: s.count,
     fill:  STATUS_COLORS[s._id] ?? '#94a3b8',
@@ -496,14 +503,31 @@ export default function StudentList() {
         {/* ── Stats + Charts row ───────────────────────── */}
         {!statsLoading && statsObj.total > 0 && (
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Total card */}
+            {/* Total card — Total/Active are both clickable straight into the
+                matching filter, so a gap between the two (e.g. "313 total ·
+                311 active") is traceable in one click instead of a school
+                admin having to guess which status the other 2 sit in. */}
             <div className="bg-white rounded-xl border border-slate-200 p-4">
               <div className="flex items-center gap-2 mb-3">
                 <Users size={14} className="text-slate-400" />
                 <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Total</span>
               </div>
-              <p className="text-3xl font-bold text-slate-900 tabular-nums">{(statsObj.total ?? 0).toLocaleString()}</p>
-              <p className="text-xs text-emerald-600 font-medium mt-1">{(statsObj.active ?? 0).toLocaleString()} active</p>
+              <button
+                type="button"
+                onClick={() => { setStatus('all'); setPage(1); }}
+                title="Show all students, regardless of status"
+                className="text-3xl font-bold text-slate-900 tabular-nums hover:text-violet-600 transition-colors text-left"
+              >
+                {(statsObj.total ?? 0).toLocaleString()}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setStatus('active'); setPage(1); }}
+                title="Show only active students"
+                className="block text-xs text-emerald-600 font-medium mt-1 hover:underline"
+              >
+                {(statsObj.active ?? 0).toLocaleString()} active
+              </button>
             </div>
 
             {/* Gender chart */}
@@ -552,14 +576,26 @@ export default function StudentList() {
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="space-y-1.5 flex-1">
+                    {/* Each row jumps straight to that status in the filter —
+                        this is the one place every status (including ones
+                        with no dedicated dropdown entry) is always visible,
+                        so it's the direct answer to "which status are the
+                        missing students in". */}
                     {statusData.map(d => (
-                      <div key={d.name} className="flex items-center justify-between">
+                      <button
+                        type="button"
+                        key={d.name}
+                        onClick={() => { if (d.id) { setStatus(d.id); setPage(1); } }}
+                        disabled={!d.id}
+                        title={d.id ? `Show only ${d.name.toLowerCase()} students` : undefined}
+                        className="w-full flex items-center justify-between hover:bg-slate-50 rounded px-1 -mx-1 disabled:hover:bg-transparent transition-colors"
+                      >
                         <div className="flex items-center gap-1.5">
                           <div className="w-2 h-2 rounded-full" style={{ background: d.fill }} />
                           <span className="text-[11px] text-slate-500">{d.name}</span>
                         </div>
                         <span className="text-[11px] font-semibold text-slate-700 tabular-nums">{d.value}</span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 </div>

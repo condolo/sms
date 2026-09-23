@@ -214,8 +214,17 @@ export const attendance = {
   list:         (params) => _get('/attendance', params),
   summary:      (params) => _get('/attendance/summary', params),
   schoolReport: (params) => _get('/attendance/school-report', params),
+  absentees:    (params) => _get('/attendance/absentees', params),
   upsert:       (data)   => _post('/attendance', data),
   bulkMark:     (data)   => _post('/attendance/bulk', data),
+  conflicts: {
+    list:    (params) => _get('/attendance/conflicts', params),
+    resolve: (id, reason) => _put(`/attendance/conflicts/${id}/resolve`, { reason }),
+  },
+  conflictOfficerConfig: {
+    get:  ()      => _get('/attendance/conflict-officer-config'),
+    save: (steps) => _put('/attendance/conflict-officer-config', { steps }),
+  },
 };
 
 export const finance = {

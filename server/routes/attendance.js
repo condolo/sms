@@ -18,6 +18,11 @@ const { ok, created, paginate, parsePagination, E } = require('../utils/response
 const { _model } = require('../utils/model');
 const { notifyGuardiansForStudents } = require('../utils/notify-students');
 const email = require('../utils/email');
+const { resolvePrimaryContact } = require('../utils/guardian-contact');
+const { getWorkflowConfig, saveWorkflowConfig, resolveStep } = require('../utils/workflow-config');
+const { dispatchNotification } = require('../utils/notify-dispatch');
+
+const CONFLICT_OFFICER_WORKFLOW_KEY = 'attendance_conflict_officer';
 
 /* First route migrated to tenantModel() (C4 · ADR-0001). attendance is
    entirely self-contained (one tenant-owned collection; every filter
@@ -30,6 +35,46 @@ const email = require('../utils/email');
 const router = express.Router();
 const PLAN   = planGate('attendance');
 const MODGATE = moduleGate('attendance');
+
+/* Is this user the currently-assigned Attendance Conflict Resolver? Reuses
+   the same {assigneeType:'role'|'user', assigneeValue} + resolveStep()
+   primitive behaviour.js's Behaviour Officer already uses (workflow-config.js)
+   — a school picks who resolves a present/absent mismatch (most naturally
+   Admissions, since they're the ones who actually call parents) without it
+   being hardcoded to any one role key. */
+async function _isAttendanceConflictOfficer(schoolId, ctx, userId) {
+  if (!userId) return false;
+  const cfg = await getWorkflowConfig(ctx, schoolId, CONFLICT_OFFICER_WORKFLOW_KEY);
+  const steps = cfg?.steps ?? [];
+  for (const step of steps) {
+    const candidates = await resolveStep(ctx, schoolId, step);
+    if (candidates.some(u => u.id === userId)) return true;
+  }
+  return false;
+}
+
+/* Gate for the conflicts queue and its resolution: the usual Attendance
+   floor roles (admin/superadmin/principal/deputy_principal/deputy) always
+   pass; the configured Conflict Resolver passes unconditionally, same as
+   behaviourAccess() does for the Behaviour Officer; everyone else needs the
+   explicit 'attendance__conflicts' grant (hasExplicitSubGrant, no coarse-
+   grant fallback) — this reveals cross-class data quality issues school-wide,
+   not just a caller's own register, so it stays off by default like 'report'. */
+function attendanceConflictAccess(action) {
+  return async (req, res, next) => {
+    try {
+      const { schoolId, userId, role } = req.jwtUser || {};
+      if (ScopeEngine.ATTENDANCE_FLOOR_ROLES.has(role)) return next();
+      if (schoolId && userId && await _isAttendanceConflictOfficer(schoolId, tenantContext(req), userId)) {
+        return next();
+      }
+    } catch (err) {
+      console.error('[attendance] conflict-officer check failed, falling back to explicit grant check:', err.message);
+    }
+    if (await hasExplicitSubGrant(req, 'attendance', 'conflicts', action)) return next();
+    return E.forbidden(res, 'Only admins, principals, deputies, the assigned Attendance Conflict Resolver, or an explicitly granted role can access attendance conflicts.');
+  };
+}
 
 /* ── Validation ─────────────────────────────────────────────── */
 const AttendanceRecordSchema = z.object({
@@ -379,6 +424,154 @@ router.get('/school-report', authMiddleware, PLAN, MODGATE, rbac('attendance', '
   }
 });
 
+/* ── GET /api/attendance/absentees ─ Real per-student absentee list ──
+   Distinct from /school-report above: that route is deliberately
+   aggregate-only (counts per class/stream, never a studentId). Raised
+   directly — Admissions (and anyone else with access) could only ever
+   see "N absent in this stream," never WHO, even though Admissions is
+   who's actually expected to call the parent. This returns real
+   identities plus each student's resolved guardian contact (the same
+   primaryContact-derivation guardian-contact.js already uses for
+   birthday emails and the legacy parent-portal path), so the person
+   reading this can act on it immediately instead of going to look the
+   student up separately. Same restrictive floor as /school-report —
+   hasExplicitSubGrant, no coarse-grant fallback — since this is more
+   sensitive than the aggregate view, not less. */
+router.get('/absentees', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read'), async (req, res) => {
+  try {
+    const { schoolId, role } = req.jwtUser;
+    if (!ScopeEngine.ATTENDANCE_FLOOR_ROLES.has(role) && !(await hasExplicitSubGrant(req, 'attendance', 'absentees', 'read'))) {
+      return E.forbidden(res, 'Only admins, principals, deputies, or explicitly granted roles can view absent students\' contact details.');
+    }
+
+    const date = req.query.date || new Date().toISOString().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return E.badRequest(res, 'date must be in YYYY-MM-DD format');
+
+    const ctx = tenantContext(req);
+    const filter = { schoolId, date, status: 'absent' };
+    if (req.query.classId)  filter.classId  = req.query.classId;
+    if (req.query.streamId) filter.streamId = req.query.streamId;
+
+    const records = await tenantModel('attendance', ctx).find(filter).sort({ classId: 1 }).limit(1000).lean();
+    if (!records.length) return ok(res, { date, count: 0, absentees: [] });
+
+    const studentIds = [...new Set(records.map(r => r.studentId))];
+    const [students, classDocs, streamDocs] = await Promise.all([
+      tenantModel('students', ctx).find({ schoolId, id: { $in: studentIds } })
+        .select('id firstName lastName admissionNumber classId streamId primaryContact motherName motherEmail motherPhone fatherName fatherEmail fatherPhone')
+        .lean(),
+      tenantModel('classes', ctx).find({ schoolId }).select('id name').lean(),
+      tenantModel('streams', ctx).find({ schoolId }).select('id name').lean(),
+    ]);
+    const studentById    = Object.fromEntries(students.map(s => [s.id, s]));
+    const classNameById  = Object.fromEntries(classDocs.map(c => [c.id, c.name]));
+    const streamNameById = Object.fromEntries(streamDocs.map(s => [s.id, s.name]));
+
+    const absentees = records.map(r => {
+      const s = studentById[r.studentId];
+      const streamId = r.streamId ?? s?.streamId ?? null;
+      return {
+        studentId: r.studentId,
+        studentName: s ? `${s.firstName} ${s.lastName}` : r.studentId,
+        admissionNumber: s?.admissionNumber ?? null,
+        classId: r.classId, className: classNameById[r.classId] ?? r.classId,
+        streamId, streamName: streamId ? (streamNameById[streamId] ?? null) : null,
+        period: r.period ?? null,
+        note: r.note ?? '',
+        guardian: s ? resolvePrimaryContact(s) : null,
+      };
+    }).sort((a, b) => a.studentName.localeCompare(b.studentName));
+
+    return ok(res, { date, count: absentees.length, absentees });
+  } catch (err) {
+    console.error('[attendance GET /absentees]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   ATTENDANCE CONFLICTS — a student marked ABSENT in one class and
+   PRESENT in another, same day. Raised directly: "I need the system to
+   alert them if one student has been marked absent in one class, and
+   present in one class, it has to flag the admission officer who will
+   resolve by giving a reason for records." Detection runs after every
+   write (see _checkAttendanceConflict, called from POST / and POST
+   /bulk below) rather than as an on-demand scan, so the flag/notify is
+   immediate, not something someone has to think to go check for.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── GET /api/attendance/conflicts ─ Open (or resolved) conflict queue ── */
+router.get('/conflicts', authMiddleware, PLAN, MODGATE, attendanceConflictAccess('read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const status = ['open', 'resolved'].includes(req.query.status) ? req.query.status : 'open';
+    const docs = await tenantModel('attendance_conflicts', tenantContext(req))
+      .find({ schoolId, status })
+      .sort({ createdAt: -1 })
+      .limit(500)
+      .lean();
+    return ok(res, docs);
+  } catch (err) {
+    console.error('[attendance GET /conflicts]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── PUT /api/attendance/conflicts/:id/resolve ─ Resolve with a reason ── */
+router.put('/conflicts/:id/resolve', authMiddleware, PLAN, MODGATE, attendanceConflictAccess('update'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const reason = (req.body?.reason || '').trim();
+    if (!reason) return E.badRequest(res, 'A reason is required to resolve an attendance conflict.');
+
+    const doc = await tenantModel('attendance_conflicts', tenantContext(req)).findOneAndUpdate(
+      { id: req.params.id, schoolId, status: 'open' },
+      { status: 'resolved', reason, resolvedBy: userId, resolvedAt: new Date().toISOString() },
+      { new: true }
+    ).lean();
+    if (!doc) return E.notFound(res, 'Open attendance conflict not found');
+    return ok(res, doc);
+  } catch (err) {
+    console.error('[attendance PUT /conflicts/:id/resolve]', err);
+    return E.serverError(res);
+  }
+});
+
+/* ── GET/PUT /api/attendance/conflict-officer-config — who resolves ──
+   Mirrors behaviour.js's officer-config exactly: read is open to anyone
+   with conflicts access (just to display who's assigned); write is
+   admin/superadmin only — deliberately NOT gated by attendanceConflict
+   Access(), since reassigning who resolves this is a governance action,
+   not an ordinary attendance:update, and an already-assigned resolver
+   reassigning themself (or someone else) without admin oversight would
+   be a privilege-escalation path this guards against. */
+router.get('/conflict-officer-config', authMiddleware, PLAN, MODGATE, attendanceConflictAccess('read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const cfg = await getWorkflowConfig(tenantContext(req), schoolId, CONFLICT_OFFICER_WORKFLOW_KEY);
+    return ok(res, { steps: cfg?.steps ?? [] });
+  } catch (err) {
+    console.error('[attendance/conflict-officer-config GET]', err);
+    return E.serverError(res);
+  }
+});
+
+router.put('/conflict-officer-config', authMiddleware, PLAN, MODGATE, async (req, res) => { // rbac: manual admin/superadmin check below, not attendanceConflictAccess() — see comment above
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    if (!['superadmin', 'admin'].includes(role)) {
+      return E.forbidden(res, 'Admin access required to assign the Attendance Conflict Resolver');
+    }
+    const steps = Array.isArray(req.body?.steps) ? req.body.steps : [];
+    const doc = await saveWorkflowConfig(tenantContext(req), schoolId, CONFLICT_OFFICER_WORKFLOW_KEY, { steps }, userId, 0);
+    return ok(res, { steps: doc.steps });
+  } catch (err) {
+    if (err.statusCode === 400) return E.badRequest(res, err.message);
+    console.error('[attendance/conflict-officer-config PUT]', err);
+    return E.serverError(res);
+  }
+});
+
 /* ── GET /api/attendance/:id ─────────────────────────────────── */
 router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read'), async (req, res) => {
   try {
@@ -439,11 +632,20 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create'), sc
 
     const Attendance = tenantModel('attendance', tenantContext(req));
 
-    // Upsert: replace if same student/date/period already exists
+    // Upsert: replace if same student/date/CLASS/period already exists.
+    // classId was missing here (present in the bulk route's own filter
+    // below) — a student marked absent for one class then, later the same
+    // day, marked present for a DIFFERENT class via this single-record
+    // route (both calls omitting period, the common case) collapsed onto
+    // the SAME document: the second write silently overwrote the first
+    // instead of creating its own record, which also erased the very
+    // cross-class inconsistency this route's own conflict check below
+    // exists to catch. Found while building that check.
     const filter = {
       schoolId,
       studentId: data.studentId,
       date:      data.date,
+      classId:   data.classId,
       ...(data.period ? { period: data.period } : {})
     };
 
@@ -455,6 +657,9 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create'), sc
 
     if (doc.status === 'absent') {
       _notifyAbsences(req, [{ studentId: doc.studentId, date: doc.date }]).catch(err => console.error('[attendance/absence notify]', err));
+    }
+    if (doc.status === 'absent' || doc.status === 'present') {
+      _checkAttendanceConflict(req, doc.studentId, doc.date).catch(err => console.error('[attendance/conflict-check]', err));
     }
 
     return created(res, doc);
@@ -549,6 +754,12 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create')
     if (absentees.length) {
       _notifyAbsences(req, absentees).catch(err => console.error('[attendance/bulk absence notify]', err));
     }
+    const conflictCandidates = [...new Set(
+      allowedRecords.filter(r => r.status === 'absent' || r.status === 'present').map(r => r.studentId)
+    )];
+    conflictCandidates.forEach(studentId => {
+      _checkAttendanceConflict(req, studentId, date).catch(err => console.error('[attendance/bulk conflict-check]', err));
+    });
 
     return ok(res, {
       upserted: result.upsertedCount,
@@ -663,5 +874,73 @@ async function _notifyAbsences(req, records) {
 }
 
 router._notifyAbsences = _notifyAbsences;
+
+/* ── Conflict detection (attendance) ──────────────────────────
+   Fired after every write (see POST / and POST /bulk) for whichever
+   student(s) that write affected. Fetches ALL of that student's records
+   for the date — not just the one just written — since a conflict is a
+   property of the whole day, not of a single record. A student flagged
+   once stays "open" until someone resolves it (see PUT /conflicts/:id/
+   resolve); a further write that day just refreshes the snapshot rather
+   than raising a second, duplicate flag. */
+async function _checkAttendanceConflict(req, studentId, date) {
+  const { schoolId, userId } = req.jwtUser;
+  const ctx = tenantContext(req);
+  const Attendance = tenantModel('attendance', ctx);
+
+  const records = await Attendance.find({ schoolId, studentId, date }).lean();
+  const hasAbsent  = records.some(r => r.status === 'absent');
+  const hasPresent = records.some(r => r.status === 'present');
+  if (!hasAbsent || !hasPresent) return;
+
+  const Conflicts = tenantModel('attendance_conflicts', ctx);
+  const [classDocs, student, existingOpen] = await Promise.all([
+    tenantModel('classes', ctx).find({ schoolId }).select('id name').lean(),
+    tenantModel('students', ctx).findOne({ schoolId, id: studentId }).select('id firstName lastName admissionNumber').lean(),
+    Conflicts.findOne({ schoolId, studentId, date, status: 'open' }).lean(),
+  ]);
+  const classNameById = Object.fromEntries(classDocs.map(c => [c.id, c.name]));
+  const entries = records
+    .filter(r => r.status === 'absent' || r.status === 'present')
+    .map(r => ({
+      classId: r.classId, className: classNameById[r.classId] ?? r.classId,
+      period: r.period ?? null, status: r.status, markedBy: r.markedBy ?? null,
+    }));
+  const studentName = student ? `${student.firstName} ${student.lastName}` : studentId;
+
+  if (existingOpen) {
+    // Already flagged and still unresolved — refresh the snapshot (e.g. a
+    // third class's record was added since) without re-notifying for a
+    // conflict the resolver already knows about.
+    await Conflicts.updateOne({ id: existingOpen.id, schoolId }, { $set: { entries, studentName } });
+    return;
+  }
+
+  await Conflicts.create({
+    id: uuidv4(), schoolId, studentId, studentName,
+    admissionNumber: student?.admissionNumber ?? null,
+    date, entries, status: 'open', createdAt: new Date().toISOString(),
+  });
+
+  const cfg = await getWorkflowConfig(ctx, schoolId, CONFLICT_OFFICER_WORKFLOW_KEY);
+  const seen = new Set();
+  const recipients = [];
+  for (const step of (cfg?.steps ?? [])) {
+    for (const candidate of await resolveStep(ctx, schoolId, step)) {
+      if (!seen.has(candidate.id)) { seen.add(candidate.id); recipients.push({ userId: candidate.id, name: candidate.name, email: candidate.email }); }
+    }
+  }
+  if (!recipients.length) return; // no resolver configured yet — the open queue itself is still the flag; see resolveStep's own "flag for attention, don't stall" contract
+
+  const classSummary = entries.map(e => `${e.className} — ${e.status}`).join('; ');
+  await dispatchNotification({
+    ctx, schoolId, eventKey: 'attendance_conflict', actorUserId: userId,
+    recipients,
+    inAppSubject: `${studentName} marked both present and absent on ${date}`,
+    inAppBody:    `${studentName} has conflicting attendance records for ${date}: ${classSummary}. Please review and resolve.`,
+  });
+}
+
+router._checkAttendanceConflict = _checkAttendanceConflict;
 
 module.exports = router;

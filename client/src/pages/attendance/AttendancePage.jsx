@@ -16,6 +16,8 @@ import {
 import { attendance as attendanceApi, classes as classesApi, streams as streamsApi, timetable as timetableApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
 import SchoolReportPanel from './components/SchoolReportPanel.jsx';
+import AbsenteesPanel from './components/AbsenteesPanel.jsx';
+import ConflictsPanel from './components/ConflictsPanel.jsx';
 
 /* ── Status config ───────────────────────────────────────────── */
 const STATUSES = [
@@ -340,6 +342,18 @@ export default function AttendancePage() {
               >
                 School Report
               </button>
+              <button
+                onClick={() => setViewMode('absentees')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${viewMode === 'absentees' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                Absentees
+              </button>
+              <button
+                onClick={() => setViewMode('conflicts')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${viewMode === 'conflicts' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                Conflicts
+              </button>
             </div>
             {noClassesAssigned && viewMode === 'register' && (
               <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
@@ -463,6 +477,10 @@ export default function AttendancePage() {
 
       {viewMode === 'report' ? (
         <SchoolReportPanel />
+      ) : viewMode === 'absentees' ? (
+        <AbsenteesPanel />
+      ) : viewMode === 'conflicts' ? (
+        <ConflictsPanel />
       ) : (
       <div className="max-w-screen-xl mx-auto px-6 py-5 space-y-5">
 
