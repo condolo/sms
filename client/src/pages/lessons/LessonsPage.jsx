@@ -12,13 +12,13 @@
    • Subtopics: when a topic has subtopics, tick each one;
      all subtopics done = topic auto-completes.
    ============================================================ */
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   BookCheck, ChevronRight, ChevronDown, Check, Plus, X,
   Loader2, AlertTriangle, Pencil, Trash2, Search, GraduationCap,
   Users, Copy, BarChart3, ArrowLeft, BookOpen, Circle,
-  CheckCircle2, MinusCircle, NotebookPen, Printer, Calendar,
+  CheckCircle2, MinusCircle, NotebookPen, Printer, Calendar, Settings,
 } from 'lucide-react';
 import { lessons as lessonsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
@@ -524,6 +524,139 @@ function MyClassesTab() {
   );
 }
 
+/* ── Template settings (per-school field customization) ───────
+   Configures which builtin fields are shown/required/how they're
+   labeled, plus any extra custom fields a school wants — gated
+   server-side by hasExplicitSubGrant on lessons__template, not plain
+   lessons:update, so this tab is shown only to someone who actually
+   holds that grant (or is floor). */
+const GROUP_LABELS = { lesson: 'Lesson Content', differentiation: 'Differentiation', assessment: 'Assessment', homework: 'Homework', reflection: 'Reflection' };
+
+function TemplateTab() {
+  const qc = useQueryClient();
+  const [fields, setFields] = useState(null); // null until loaded
+  const [toast, setToast] = useState('');
+
+  const { data: resp, isLoading } = useQuery({
+    queryKey: ['lessons', 'template'],
+    queryFn:  () => lessonsApi.template.get(),
+    staleTime: 30_000,
+  });
+  useEffect(() => {
+    if (fields === null && resp?.data?.fields) setFields(resp.data.fields);
+  }, [resp, fields]);
+
+  const mutation = useMutation({
+    mutationFn: (data) => lessonsApi.template.update(data),
+    onSuccess: (r) => {
+      setFields(r?.data?.fields ?? []);
+      qc.invalidateQueries({ queryKey: ['lessons', 'template'] });
+      setToast('Template saved.');
+      setTimeout(() => setToast(''), 2500);
+    },
+    onError: (err) => setToast(err?.message ?? 'Failed to save template'),
+  });
+
+  if (isLoading || fields === null) {
+    return <div className="flex justify-center py-16"><Loader2 className="animate-spin text-indigo-400" size={24} /></div>;
+  }
+
+  function updateField(key, patch) {
+    setFields(prev => prev.map(f => f.key === key ? { ...f, ...patch } : f));
+  }
+  function removeCustomField(key) {
+    setFields(prev => prev.filter(f => f.key !== key));
+  }
+  function addCustomField() {
+    const key = `custom_${Date.now().toString(36)}`;
+    setFields(prev => [...prev, { key, label: '', enabled: true, required: false, builtin: false, group: 'custom', order: prev.length }]);
+  }
+
+  const builtinGroups = ['lesson', 'differentiation', 'assessment', 'homework', 'reflection'];
+  const customFields = fields.filter(f => !f.builtin);
+
+  return (
+    <div className="max-w-2xl space-y-6">
+      <p className="text-xs text-slate-500">
+        Choose which fields appear on the Lesson Plan form for every teacher at this school, relabel them, mark any as required, and add your own extra fields. Topic, Subtopic, Class, Stream, Subject, and Date are always required and can't be changed here.
+      </p>
+
+      {builtinGroups.map(group => {
+        const groupFields = fields.filter(f => f.builtin && f.group === group);
+        if (!groupFields.length) return null;
+        return (
+          <div key={group}>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">{GROUP_LABELS[group]}</p>
+            <div className="space-y-2">
+              {groupFields.map(f => (
+                <div key={f.key} className="flex items-center gap-3 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                  <input type="checkbox" checked={f.enabled} onChange={e => updateField(f.key, { enabled: e.target.checked })} className="rounded border-slate-300" />
+                  <input
+                    value={f.label} onChange={e => updateField(f.key, { label: e.target.value })}
+                    disabled={!f.enabled}
+                    className="flex-1 text-sm px-2 py-1 border border-slate-200 rounded-lg disabled:bg-slate-50 disabled:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                  />
+                  <label className="flex items-center gap-1.5 text-xs text-slate-500 shrink-0">
+                    <input type="checkbox" checked={f.required} disabled={!f.enabled} onChange={e => updateField(f.key, { required: e.target.checked })} className="rounded border-slate-300" />
+                    Required
+                  </label>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Custom Fields</p>
+          <button onClick={addCustomField} className="flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700">
+            <Plus size={13} /> Add Field
+          </button>
+        </div>
+        {customFields.length === 0 ? (
+          <p className="text-xs text-slate-400">No custom fields yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {customFields.map(f => (
+              <div key={f.key} className="flex items-center gap-3 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                <input type="checkbox" checked={f.enabled} onChange={e => updateField(f.key, { enabled: e.target.checked })} className="rounded border-slate-300" />
+                <input
+                  value={f.label} onChange={e => updateField(f.key, { label: e.target.value })}
+                  placeholder="Field label, e.g. Cross-curricular links"
+                  className="flex-1 text-sm px-2 py-1 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                />
+                <label className="flex items-center gap-1.5 text-xs text-slate-500 shrink-0">
+                  <input type="checkbox" checked={f.required} onChange={e => updateField(f.key, { required: e.target.checked })} className="rounded border-slate-300" />
+                  Required
+                </label>
+                <button onClick={() => removeCustomField(f.key)} className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50"><X size={14} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {toast && <p className="text-xs text-emerald-600">{toast}</p>}
+
+      <div className="flex justify-end">
+        <button
+          onClick={() => {
+            const invalid = fields.some(f => f.enabled && !f.label.trim());
+            if (invalid) { setToast('Every enabled field needs a label.'); return; }
+            mutation.mutate({ fields: fields.map((f, i) => ({ key: f.key, label: f.label.trim(), enabled: f.enabled, required: f.required, order: i })) });
+          }}
+          disabled={mutation.isPending}
+          className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg"
+        >
+          {mutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+          Save Template
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ── Lesson Plan slide-over (create / edit) ───────────────────
    Topic/Subtopic are pickers sourced from this subject's existing
    syllabus_topics — never free text. A subject with no topics yet is
@@ -549,6 +682,9 @@ function LessonPlanSlideOver({ classId, className, subjectId, subjectName, strea
   const [wentWell,    setWentWell]    = useState(existing?.reflection?.wentWell ?? '');
   const [betterIf,    setBetterIf]    = useState(existing?.reflection?.betterIf ?? '');
   const [improvement, setImprovement] = useState(existing?.reflection?.improvement ?? '');
+  const [customValues, setCustomValues] = useState(() =>
+    Object.fromEntries((existing?.customFields ?? []).map(f => [f.key, f.value]))
+  );
   const [error, setError] = useState('');
 
   const { data: topicsResp, isLoading: topicsLoading } = useQuery({
@@ -559,6 +695,22 @@ function LessonPlanSlideOver({ classId, className, subjectId, subjectName, strea
   const topics = topicsResp?.data ?? [];
   const selectedTopic = topics.find(t => t.id === topicId);
   const subtopics = selectedTopic?.subtopics ?? [];
+
+  // Per-school field customization — which builtins show/are required, what
+  // they're labeled, and any extra fields this school added. Falls back to
+  // BUILTIN_FIELDS' own defaults (all enabled, none required) while loading
+  // so the form is still usable the instant it opens.
+  const { data: templateResp } = useQuery({
+    queryKey: ['lessons', 'template'],
+    queryFn:  () => lessonsApi.template.get(),
+    staleTime: 30_000,
+  });
+  const templateFields = templateResp?.data?.fields ?? [];
+  const fieldsByKey = Object.fromEntries(templateFields.map(f => [f.key, f]));
+  const isOn = (key) => fieldsByKey[key]?.enabled ?? true;
+  const label = (key, fallback) => fieldsByKey[key]?.label || fallback;
+  const isRequired = (key) => !!fieldsByKey[key]?.required;
+  const customFieldDefs = templateFields.filter(f => !f.builtin && f.enabled);
 
   const mutation = useMutation({
     mutationFn: (data) => isEdit ? lessonsApi.plans.update(existing.id, data) : lessonsApi.plans.create(data),
@@ -572,6 +724,36 @@ function LessonPlanSlideOver({ classId, className, subjectId, subjectName, strea
   function submit() {
     if (!date)    { setError('Date is required'); return; }
     if (!topicId) { setError('Pick a topic for this lesson'); return; }
+    const REQUIRED_CHECK = [
+      ['objectives', objectives], ['activities', activities], ['resources', resources], ['remarks', remarks],
+      ['diff_low', diffLow], ['diff_middle', diffMid], ['diff_high', diffHigh],
+      ['assessment', assessment], ['homework', homework],
+      ['reflection_went_well', wentWell], ['reflection_better_if', betterIf], ['reflection_improvement', improvement],
+    ];
+    for (const [key, val] of REQUIRED_CHECK) {
+      if (isOn(key) && isRequired(key) && !val.trim()) {
+        setError(`"${label(key, key)}" is required`);
+        return;
+      }
+    }
+    for (const f of customFieldDefs) {
+      if (f.required && !(customValues[f.key] ?? '').trim()) {
+        setError(`"${f.label}" is required`);
+        return;
+      }
+    }
+
+    // Custom fields: current enabled ones from the form, plus any
+    // previously-saved custom values whose field no longer appears in the
+    // (possibly since-changed) template — never silently drop data just
+    // because a school disabled or removed that field later.
+    const currentKeys = new Set(customFieldDefs.map(f => f.key));
+    const orphaned = (existing?.customFields ?? []).filter(f => !currentKeys.has(f.key));
+    const customFields = [
+      ...customFieldDefs.map(f => ({ key: f.key, label: f.label, value: customValues[f.key] ?? '' })),
+      ...orphaned,
+    ];
+
     mutation.mutate({
       classId, subjectId, ...(streamId ? { streamId } : {}),
       date, topicId, subtopicId: subtopicId || undefined,
@@ -579,13 +761,14 @@ function LessonPlanSlideOver({ classId, className, subjectId, subjectName, strea
       differentiation: { low: diffLow, middle: diffMid, high: diffHigh },
       assessment, homework,
       reflection: { wentWell, betterIf, improvement },
+      customFields,
     });
   }
 
-  function Field({ label, value, onChange, rows = 2, placeholder }) {
+  function Field({ label: fieldLabel, value, onChange, rows = 2, placeholder, required = false }) {
     return (
       <div>
-        <label className="block text-xs font-medium text-slate-700 mb-1.5">{label}</label>
+        <label className="block text-xs font-medium text-slate-700 mb-1.5">{fieldLabel}{required && ' *'}</label>
         <textarea
           value={value} onChange={e => onChange(e.target.value)}
           rows={rows} placeholder={placeholder}
@@ -657,31 +840,39 @@ function LessonPlanSlideOver({ classId, className, subjectId, subjectName, strea
             </>
           )}
 
-          <Field label="Lesson Objectives"      value={objectives} onChange={setObjectives} rows={2} placeholder="By the end of the lesson, learners should be able to…" />
-          <Field label="Learning Activities"     value={activities} onChange={setActivities} rows={3} placeholder="Introduction, main activity, plenary…" />
-          <Field label="Resources / References"  value={resources}  onChange={setResources}  rows={2} />
-          <Field label="Remarks"                 value={remarks}    onChange={setRemarks}    rows={2} />
+          {isOn('objectives') && <Field label={label('objectives', 'Lesson Objectives')} required={isRequired('objectives')} value={objectives} onChange={setObjectives} rows={2} placeholder="By the end of the lesson, learners should be able to…" />}
+          {isOn('activities') && <Field label={label('activities', 'Learning Activities')} required={isRequired('activities')} value={activities} onChange={setActivities} rows={3} placeholder="Introduction, main activity, plenary…" />}
+          {isOn('resources')  && <Field label={label('resources', 'Resources / References')} required={isRequired('resources')} value={resources}  onChange={setResources}  rows={2} />}
+          {isOn('remarks')    && <Field label={label('remarks', 'Remarks')} required={isRequired('remarks')} value={remarks}    onChange={setRemarks}    rows={2} />}
 
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Differentiation</p>
-            <div className="grid grid-cols-1 gap-3">
-              <Field label="Low Ability"    value={diffLow}  onChange={setDiffLow}  rows={2} />
-              <Field label="Middle Ability" value={diffMid}  onChange={setDiffMid}  rows={2} />
-              <Field label="High Ability"   value={diffHigh} onChange={setDiffHigh} rows={2} />
+          {(isOn('diff_low') || isOn('diff_middle') || isOn('diff_high')) && (
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Differentiation</p>
+              <div className="grid grid-cols-1 gap-3">
+                {isOn('diff_low')    && <Field label={label('diff_low', 'Low Ability')} required={isRequired('diff_low')} value={diffLow}  onChange={setDiffLow}  rows={2} />}
+                {isOn('diff_middle') && <Field label={label('diff_middle', 'Middle Ability')} required={isRequired('diff_middle')} value={diffMid}  onChange={setDiffMid}  rows={2} />}
+                {isOn('diff_high')   && <Field label={label('diff_high', 'High Ability')} required={isRequired('diff_high')} value={diffHigh} onChange={setDiffHigh} rows={2} />}
+              </div>
             </div>
-          </div>
+          )}
 
-          <Field label="Assessment & Evaluation" value={assessment} onChange={setAssessment} rows={2} />
-          <Field label="Lesson / Week Assignment" value={homework}  onChange={setHomework}   rows={2} placeholder="Homework or follow-up task" />
+          {isOn('assessment') && <Field label={label('assessment', 'Assessment & Evaluation')} required={isRequired('assessment')} value={assessment} onChange={setAssessment} rows={2} />}
+          {isOn('homework')   && <Field label={label('homework', 'Lesson / Week Assignment')} required={isRequired('homework')} value={homework}  onChange={setHomework}   rows={2} placeholder="Homework or follow-up task" />}
 
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Reflection <span className="normal-case font-normal text-slate-400">— fill in after teaching this lesson</span></p>
-            <div className="grid grid-cols-1 gap-3">
-              <Field label="What went well"          value={wentWell}    onChange={setWentWell}    rows={2} />
-              <Field label="Even better if"           value={betterIf}    onChange={setBetterIf}    rows={2} />
-              <Field label="Areas for improvement"    value={improvement} onChange={setImprovement} rows={2} />
+          {customFieldDefs.map(f => (
+            <Field key={f.key} label={f.label} required={f.required} value={customValues[f.key] ?? ''} onChange={(v) => setCustomValues(prev => ({ ...prev, [f.key]: v }))} rows={2} />
+          ))}
+
+          {(isOn('reflection_went_well') || isOn('reflection_better_if') || isOn('reflection_improvement')) && (
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Reflection <span className="normal-case font-normal text-slate-400">— fill in after teaching this lesson</span></p>
+              <div className="grid grid-cols-1 gap-3">
+                {isOn('reflection_went_well')   && <Field label={label('reflection_went_well', 'What went well')} required={isRequired('reflection_went_well')} value={wentWell}    onChange={setWentWell}    rows={2} />}
+                {isOn('reflection_better_if')   && <Field label={label('reflection_better_if', 'Even better if')} required={isRequired('reflection_better_if')} value={betterIf}    onChange={setBetterIf}    rows={2} />}
+                {isOn('reflection_improvement') && <Field label={label('reflection_improvement', 'Areas for improvement')} required={isRequired('reflection_improvement')} value={improvement} onChange={setImprovement} rows={2} />}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-100 shrink-0">
@@ -1039,6 +1230,14 @@ function CopyYearSlideOver({ subjectId, subjectName, currentYear, onClose, onCop
 export default function LessonsPage() {
   const { isAdmin, isHod, isTeacher } = useRole();
   const school = useAuthStore(s => s.session?.school);
+  const can = useAuthStore(s => s.can.bind(s));
+  const role = useAuthStore(s => s.session?.user?.role);
+  const isAdminLevel = ['admin', 'superadmin', 'principal', 'deputy_principal', 'deputy', 'acting_deputy', 'head_of_school'].includes(role);
+  // Gated by lessons__template specifically (hasExplicitSubGrant server-
+  // side, no coarse lessons:update fallback) — see moduleRegistry.js's own
+  // comment for why this is deliberately narrower than plain "Edit Lesson
+  // Plan".
+  const canConfigureTemplate = isAdminLevel || can('lessons__template', 'update');
 
   // Default tab: admin/hod see overview; teachers see their classes
   const defaultTab = (isAdmin || isHod) ? 'overview' : 'my-classes';
@@ -1048,6 +1247,7 @@ export default function LessonsPage() {
     ...(isTeacher ? [{ key: 'my-classes', label: 'Topics & Coverage', Icon: BookCheck }] : []),
     ...(isTeacher ? [{ key: 'plans',      label: 'Lesson Plans',      Icon: NotebookPen }] : []),
     ...((isAdmin || isHod) ? [{ key: 'overview', label: 'Overview', Icon: BarChart3 }] : []),
+    ...(canConfigureTemplate ? [{ key: 'template', label: 'Template', Icon: Settings }] : []),
   ];
 
   return (
@@ -1090,6 +1290,7 @@ export default function LessonsPage() {
       {tab === 'my-classes' && <MyClassesTab />}
       {tab === 'plans'      && <LessonPlansTab />}
       {tab === 'overview'   && <OverviewTab />}
+      {tab === 'template'   && <TemplateTab />}
     </div>
   );
 }

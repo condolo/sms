@@ -30,7 +30,7 @@ const { authMiddleware }  = require('../middleware/auth');
 const { moduleGate }     = require('../middleware/module-gate');
 const { scopeMiddleware } = require('../middleware/scopeMiddleware');
 const ScopeEngine         = require('../utils/scopeEngine');
-const { rbac }           = require('../middleware/rbac');
+const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
@@ -142,6 +142,18 @@ const LessonPlanSchema = z.object({
     betterIf:    z.string().max(1000).trim().optional().default(''),
     improvement: z.string().max(1000).trim().optional().default(''),
   }).optional().default({ wentWell: '', betterIf: '', improvement: '' }),
+  // Per-school custom fields (Settings → Lessons → Template). Self-contained
+  // — {key, label, value} rather than {key, value} looked up against the
+  // CURRENT template — so a school renaming or removing a custom field
+  // later never rewrites or orphans data already recorded on this specific
+  // plan. The client is expected to send the label from the template it
+  // just fetched; the server trusts it rather than re-resolving, the same
+  // way it trusts teacherName/subjectName snapshots elsewhere in this file.
+  customFields: z.array(z.object({
+    key:   z.string().min(1).max(60),
+    label: z.string().min(1).max(120),
+    value: z.string().max(2000).trim().optional().default(''),
+  })).max(20).optional().default([]),
 });
 
 // Update: every field optional, no nested defaults — a bare {} would
@@ -174,6 +186,145 @@ const LessonPlanUpdateSchema = z.object({
     betterIf:    z.string().max(1000).trim().optional(),
     improvement: z.string().max(1000).trim().optional(),
   }).partial().optional(),
+  customFields: z.array(z.object({
+    key:   z.string().min(1).max(60),
+    label: z.string().min(1).max(120),
+    value: z.string().max(2000).trim().optional().default(''),
+  })).max(20).optional(),
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   LESSON PLAN TEMPLATE  (per-school field customization, 2026-09)
+
+   Requested directly, after the fixed-schema version shipped: schools
+   want to enable/disable/relabel/require each built-in field, and add
+   their own extra fields — configured by whoever holds the new
+   lessons__template permission (Settings → Roles & Permissions →
+   Lessons), not hardcoded to admin.
+
+   BUILTIN_FIELDS is the fixed registry of the 12 content fields the
+   original template already has real Zod validation, PDF rendering, and
+   a dedicated document shape for (`differentiation.low` etc.) — a school
+   can hide/relabel/require any of these, but never delete or rename its
+   `key`/`path`, since that's what every other part of this file (and the
+   PDF renderer) still reads/writes directly. CUSTOM fields, by contrast,
+   have no fixed path at all — they live in the `customFields` array
+   (see LessonPlanSchema above) as self-contained {key,label,value}
+   triples, so removing a custom field from the template never touches
+   data already recorded under it on existing plans.
+   ═══════════════════════════════════════════════════════════════ */
+const BUILTIN_FIELDS = [
+  { key: 'objectives',              path: 'objectives',              defaultLabel: 'Lesson Objectives',       group: 'lesson' },
+  { key: 'activities',              path: 'activities',              defaultLabel: 'Learning Activities',     group: 'lesson' },
+  { key: 'resources',               path: 'resources',               defaultLabel: 'Resources / References',  group: 'lesson' },
+  { key: 'remarks',                 path: 'remarks',                 defaultLabel: 'Remarks',                 group: 'lesson' },
+  { key: 'diff_low',                path: 'differentiation.low',     defaultLabel: 'Low Ability',              group: 'differentiation' },
+  { key: 'diff_middle',             path: 'differentiation.middle',  defaultLabel: 'Middle Ability',           group: 'differentiation' },
+  { key: 'diff_high',               path: 'differentiation.high',    defaultLabel: 'High Ability',             group: 'differentiation' },
+  { key: 'assessment',              path: 'assessment',              defaultLabel: 'Assessment & Evaluation',  group: 'assessment' },
+  { key: 'homework',                path: 'homework',                defaultLabel: 'Lesson / Week Assignment', group: 'homework' },
+  { key: 'reflection_went_well',    path: 'reflection.wentWell',     defaultLabel: 'What went well',           group: 'reflection' },
+  { key: 'reflection_better_if',    path: 'reflection.betterIf',     defaultLabel: 'Even better if',           group: 'reflection' },
+  { key: 'reflection_improvement',  path: 'reflection.improvement',  defaultLabel: 'Areas for improvement',    group: 'reflection' },
+];
+const BUILTIN_KEYS = new Set(BUILTIN_FIELDS.map(f => f.key));
+
+function _defaultTemplate() {
+  return {
+    fields: BUILTIN_FIELDS.map((f, i) => ({
+      key: f.key, path: f.path, group: f.group, builtin: true,
+      label: f.defaultLabel, enabled: true, required: false, order: i,
+    })),
+  };
+}
+
+// Merge a school's saved template with the current BUILTIN_FIELDS registry
+// — a field added to BUILTIN_FIELDS after a school last saved its template
+// appears with defaults (same "backfill missing keys, never overwrite
+// existing ones" discipline as _mergePerms on the client). Custom fields
+// are carried through as-is; a stale builtin no longer in the registry is
+// dropped (never happens today — BUILTIN_FIELDS has never shrunk — but
+// keeps this correct if it ever does).
+function _mergeTemplate(saved) {
+  const savedFields = Array.isArray(saved?.fields) ? saved.fields : [];
+  const byKey = Object.fromEntries(savedFields.map(f => [f.key, f]));
+  const builtins = BUILTIN_FIELDS.map((f, i) => ({
+    key: f.key, path: f.path, group: f.group, builtin: true,
+    label:    byKey[f.key]?.label    ?? f.defaultLabel,
+    enabled:  byKey[f.key]?.enabled  ?? true,
+    required: byKey[f.key]?.required ?? false,
+    order:    byKey[f.key]?.order    ?? i,
+  }));
+  const customs = savedFields
+    .filter(f => !BUILTIN_KEYS.has(f.key))
+    .map(f => ({
+      key: f.key, path: null, group: 'custom', builtin: false,
+      label: f.label, enabled: f.enabled !== false, required: !!f.required,
+      order: f.order ?? 999,
+    }));
+  return { fields: [...builtins, ...customs].sort((a, b) => a.order - b.order) };
+}
+
+const TemplateFieldSchema = z.object({
+  key:      z.string().min(1).max(60),
+  label:    z.string().min(1).max(120).trim(),
+  enabled:  z.boolean().optional().default(true),
+  required: z.boolean().optional().default(false),
+  order:    z.number().int().min(0).optional().default(0),
+});
+const TemplateSchema = z.object({ fields: z.array(TemplateFieldSchema).max(32) });
+
+/* ── GET /api/lessons/template ─ this school's field config ─── */
+router.get('/template', authMiddleware, PLAN, MODGATE, rbac('lessons', 'read'), async (req, res) => {
+  try {
+    const { schoolId } = req.jwtUser;
+    const school = await _model('schools').findOne({ id: schoolId }, { lessonPlanTemplate: 1 }).lean();
+    return ok(res, _mergeTemplate(school?.lessonPlanTemplate));
+  } catch (err) { console.error('[lessons/template GET]', err); return E.serverError(res); }
+});
+
+/* ── PUT /api/lessons/template ─ configure fields for this school ─
+   Gated by hasExplicitSubGrant (no coarse-grant fallback) — same
+   mechanism as hr__workflow/report_cards__workflow: this configures what
+   every teacher in the school sees on every future lesson plan, a
+   materially more sensitive action than plain lessons:update, so holding
+   ordinary "Edit Lesson Plan" must not silently imply it. admin/
+   superadmin/principal/deputy_principal bypass unconditionally (same
+   floor as isAdmin() elsewhere in this file). */
+const TEMPLATE_FLOOR = new Set(['admin', 'superadmin', 'principal', 'deputy_principal', 'deputy', 'acting_deputy', 'head_of_school']);
+router.put('/template', authMiddleware, PLAN, MODGATE, rbac('lessons', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId, role, roles = [] } = req.jwtUser;
+    const effectiveRoles = new Set([role, ...roles]);
+    const isFloor = [...effectiveRoles].some(r => TEMPLATE_FLOOR.has(r));
+    if (!isFloor && !(await hasExplicitSubGrant(req, 'lessons', 'template', 'update'))) {
+      return E.forbidden(res, 'You do not have permission to configure the Lesson Plan template.');
+    }
+
+    const { data, error } = _validate(TemplateSchema, req.body);
+    if (error) return E.validation(res, error);
+
+    // Builtins keep their real path/group/builtin flag regardless of what
+    // the client sent for those — only label/enabled/required/order are
+    // ever actually editable for a builtin. A key that isn't in
+    // BUILTIN_FIELDS is treated as a new/existing custom field instead.
+    const seenKeys = new Set();
+    const fields = data.fields.map((f, i) => {
+      if (seenKeys.has(f.key)) throw Object.assign(new Error(`Duplicate field key "${f.key}"`), { status: 422 });
+      seenKeys.add(f.key);
+      const builtin = BUILTIN_FIELDS.find(b => b.key === f.key);
+      if (builtin) {
+        return { key: builtin.key, path: builtin.path, group: builtin.group, builtin: true, label: f.label, enabled: f.enabled, required: f.required, order: f.order ?? i };
+      }
+      return { key: f.key, path: null, group: 'custom', builtin: false, label: f.label, enabled: f.enabled, required: f.required, order: f.order ?? i };
+    });
+
+    await _model('schools').updateOne({ id: schoolId }, { $set: { lessonPlanTemplate: { fields, updatedBy: userId, updatedAt: new Date().toISOString() } } });
+    return ok(res, _mergeTemplate({ fields }));
+  } catch (err) {
+    if (err.status === 422) return E.validation(res, [{ field: 'fields', message: err.message }]);
+    console.error('[lessons/template PUT]', err); return E.serverError(res);
+  }
 });
 
 // Monday of the week containing `dateStr` — computed at read time from the
@@ -779,6 +930,16 @@ router.post('/plans', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'), 
       teacherName = t?.name ?? teacherName;
     }
 
+    // Snapshot the EFFECTIVE label for every builtin field at creation time
+    // — a school renaming "Remarks" to "Notes" next term must never rewrite
+    // what this specific plan displays as, the same "retrievable for later
+    // reference" guarantee customFields' own {key,label,value} shape gives
+    // custom fields. The PDF/detail view read fieldLabels, never the live
+    // template, for exactly this record.
+    const schoolDoc = await _model('schools').findOne({ id: schoolId }, { lessonPlanTemplate: 1 }).lean();
+    const template = _mergeTemplate(schoolDoc?.lessonPlanTemplate);
+    const fieldLabels = Object.fromEntries(template.fields.filter(f => f.builtin).map(f => [f.key, f.label]));
+
     const doc = await tenantModel('lesson_plans', tenantContext(req)).create({
       id: uuidv4(),
       schoolId,
@@ -803,6 +964,8 @@ router.post('/plans', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'), 
       assessment:  data.assessment,
       homework:    data.homework,
       reflection:  data.reflection,
+      customFields: data.customFields,
+      fieldLabels,
       createdBy:   userId,
       updatedBy:   userId,
     });

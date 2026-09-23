@@ -3479,6 +3479,7 @@ const PERM_MODULES = [
     { key: 'edit',     label: 'Edit Lesson Plan' },
     { key: 'delete',   label: 'Delete Lesson Plan' },
     { key: 'coverage', label: 'Mark Lesson Coverage' },
+    { key: 'template', label: 'Configure Lesson Plan Template' },
   ]},
   { key: 'elearning', label: 'eLearning', subs: [
     { key: 'view',   label: 'View Courses & Resources' },
@@ -3635,6 +3636,13 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       // operations the first time this role is saved, not just reflect
       // a UI grouping.
       if (m==='students' && ['promote', 'portal_accounts'].includes(s)) return N;
+      // 'template' excluded from the blanket E below for the same reason
+      // as 'promote'/'portal_accounts' above — hasExplicitSubGrant, no
+      // coarse-grant fallback, and section_head is not in lessons.js's
+      // TEMPLATE_FLOOR, so E's 'e:true' would silently hand this role
+      // school-wide Lesson Plan template configuration, not just reflect
+      // a UI grouping.
+      if (m==='lessons' && s==='template') return N;
       return E;
     },
 
@@ -3650,7 +3658,13 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
         if (s==='verify') return E;
         return E;
       }
-      if (m==='lessons')                        { if (s==='delete') return N; return E; }   // teachers write plans, not delete others'
+      // 'template' excluded from the blanket E below — enforced with
+      // hasExplicitSubGrant (no coarse-grant fallback), so E's own 'e:true'
+      // would silently hand every teacher account the ability to
+      // reconfigure the school-wide Lesson Plan template, not just reflect
+      // a UI grouping. Grant explicitly per-role if a school wants a
+      // teacher (e.g. a subject lead) to configure it.
+      if (m==='lessons')                        { if (s==='delete') return N; if (s==='template') return N; return E; }   // teachers write plans, not delete others'
       if (m==='elearning')                      { if (s==='delete') return N; return E; }   // teachers upload content, not delete
       // resources: server seeds RCU (repairPermissions.js) — the blanket V
       // fallback below would under-grant to view-only. events is correctly V

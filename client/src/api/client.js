@@ -877,6 +877,12 @@ export const lessons = {
     remove: (id)           => _delete(`/lessons/plans/${id}`),
     pdf:    (id, filename) => _downloadPdf(`/lessons/plans/${id}/pdf`, filename ?? `lesson-plan-${id}.pdf`),
   },
+  /* Per-school field customization — Settings → Roles & Permissions →
+     Lessons → "Configure Lesson Plan Template" controls who can call update. */
+  template: {
+    get:    ()     => _get('/lessons/template'),
+    update: (data) => _put('/lessons/template', data),
+  },
   /* Summary views */
   myClasses:    (params)  => _get('/lessons/my-classes', params),
   summary:      (params)  => _get('/lessons/summary', params),

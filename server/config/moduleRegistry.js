@@ -137,6 +137,12 @@ const MODULE_REGISTRY = [
     { key: 'edit',     label: 'Edit Lesson Plan' },
     { key: 'delete',   label: 'Delete Lesson Plan' },
     { key: 'coverage', label: 'Mark Lesson Coverage' },
+    // Deliberately NOT covered by the plain 'edit' grant above — enforced
+    // with hasExplicitSubGrant (no coarse-grant fallback), same mechanism
+    // as hr__workflow: configuring which fields every teacher in the
+    // school sees on every future lesson plan is a materially more
+    // sensitive, school-wide action than editing one's own lesson plan.
+    { key: 'template', label: 'Configure Lesson Plan Template' },
   ]},
   { key: 'grades', label: 'Grades & Marks', section: 'Academic Management', icon: 'FileText', navRoute: '/exams', navLabel: 'Exams', navOrder: 5, subs: [
     { key: 'view_grades',      label: 'View Grades & Marks' },

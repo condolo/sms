@@ -171,6 +171,47 @@ describe('POST /api/lessons/plans — the "update topics first" precondition', (
   });
 });
 
+describe('POST /api/lessons/plans — template field labels + custom fields (v5.117.3)', () => {
+  test('snapshots the default builtin labels onto the record when the school has no saved template', async () => {
+    asTeacherOf();
+    const res = await supertest(buildApp()).post('/api/lessons/plans').send(BASE_BODY);
+    expect(res.status).toBe(201);
+    expect(res.body.data.fieldLabels.objectives).toBe('Lesson Objectives');
+    expect(res.body.data.fieldLabels.reflection_went_well).toBe('What went well');
+  });
+
+  test('snapshots the SCHOOL-CONFIGURED label, not the default, once a template is saved', async () => {
+    mockSchoolDoc.lessonPlanTemplate = {
+      fields: [{ key: 'homework', label: 'Prep Work', enabled: true, required: false, order: 8 }],
+    };
+    asTeacherOf();
+    const res = await supertest(buildApp()).post('/api/lessons/plans').send(BASE_BODY);
+    expect(res.status).toBe(201);
+    expect(res.body.data.fieldLabels.homework).toBe('Prep Work');
+  });
+
+  test('accepts and stores customFields as self-contained {key,label,value} triples', async () => {
+    asTeacherOf();
+    const res = await supertest(buildApp()).post('/api/lessons/plans').send({
+      ...BASE_BODY,
+      customFields: [{ key: 'custom_links', label: 'Cross-curricular links', value: 'Links to Science unit 3' }],
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.data.customFields).toEqual([{ key: 'custom_links', label: 'Cross-curricular links', value: 'Links to Science unit 3' }]);
+  });
+
+  test('PUT preserves customFields untouched when the request omits the key entirely', async () => {
+    asTeacherOf();
+    const created = await supertest(buildApp()).post('/api/lessons/plans').send({
+      ...BASE_BODY,
+      customFields: [{ key: 'custom_links', label: 'Cross-curricular links', value: 'Links to Science unit 3' }],
+    });
+    const res = await supertest(buildApp()).put(`/api/lessons/plans/${created.body.data.id}`).send({ objectives: 'Updated objective' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.customFields).toEqual([{ key: 'custom_links', label: 'Cross-curricular links', value: 'Links to Science unit 3' }]);
+  });
+});
+
 describe('POST /api/lessons/plans — class[-stream] ownership (mirrors coverage exactly)', () => {
   test('a teacher with no assignment for this class is forbidden', async () => {
     mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
