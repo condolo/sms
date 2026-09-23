@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.117.1] — 2026-09-23 — feat(lessons): Lesson Plans client UI + a real dashboard bug found while wiring it up
+
+Client UI for v5.117.0's backend: a "Lesson Plans" tab on the Lessons page (alongside the existing "Topics & Coverage" tab), a weekly-planner-style creation form, and a print/export trigger. Also fixes a genuinely pre-existing, unrelated dead widget discovered while testing this feature end-to-end.
+
+### Added
+- **`LessonsPage.jsx`**: new "Lesson Plans" tab for teachers. Reuses the existing class-subject[-stream] card picker (`myClasses()`, same as "Topics & Coverage"), then drills into a list of that class-subject's lesson plans grouped by week (`weekStart`, computed server-side from each lesson's own date). Each plan shows a "Reflected" / "Reflection pending" badge, and Edit/Delete/Print actions.
+- **`LessonPlanSlideOver`**: the creation/edit form. Topic is a required dropdown sourced from that subject's real `syllabus_topics`; a subject with none shows a direct, blocking message pointing at "Topics & Coverage" instead of a confusing empty dropdown. Subtopic populates once a Topic is picked. Differentiation, Assessment, Homework, and Reflection are all present on the same form — Reflection is editable immediately (no separate "reflect later" mode) since it's the same teacher filling it in either way, just typically later.
+- Print/export wired to the new `GET /plans/:id/pdf` endpoint via `lessonsApi.plans.pdf()`.
+
+### Fixed — found while live-testing, not part of the original ask
+**Dashboard.jsx's "Lesson Plans — Next 7 Days" card, and the "N lesson(s) without a plan" line in Today's Work, had been silently dead code since they were written** — `lessonPlans` was a prop with a default of `[]` that no caller ever populated with anything else, because the `lesson_plans` collection they expected didn't exist as a real feature until this same commit's backend (v5.117.0). Wiring up the new backend exposed this immediately: `server/routes/teacher-portal.js`'s dashboard aggregation already had a speculative query against `lesson_plans` (guessing at a `status`/`startTime` shape that was never actually built), but even after pointing it at the real collection it still returned nothing — because it filtered by `teacherId` (a local variable set to `teacher.id`, the **teachers-collection's own id**), while `lessons.js` writes every `lesson_plans.teacherId` as the **account's `userId`** (matching `teaching_assignments`' own schema comment: "userId format, e.g. u_demo_t3"). Fixed to filter by `userId`; also dropped the dead `status`/`startTime` references from the query and `.select()`.
+
+**Separately confirmed, NOT fixed**: real production `teaching_assignments` data has both identities in use side by side (verified directly against a real demo-school teacher with one assignment keyed by their `teachers.id` and another keyed by their account `userId`), and this dashboard's `curriculumCoverage`/`myClasses` sections use the `teachers.id` convention throughout — a materially larger, pre-existing data-consistency question than this fix's scope, flagged to the user rather than touched.
+
+### Verified
+Real, live creation against the actual demo-school database (not just mocks): created a lesson plan via admin submit-on-behalf for a real teacher/class/subject/topic, confirmed `weekStart` and `termYearLabel` resolved correctly (`"Week of 20 Sept 2026"`, `"Term 3, 2026–2027"`), fetched the generated PDF, decoded and read it back — school name, teacher, subject, class, topic, differentiation, assessment, and homework all render correctly and legibly, matching the template's structure. New tests in `teacher-portal-lessons-coverage.test.js` (+2) prove the `lessonPlans` card filters by the account id and NOT the teachers-collection id, specifically. Full Jest suite: 231 suites, 2307/2307 passing. Production client build clean.
+
 ## [v5.117.0] — 2026-09-23 — feat(lessons): real per-lesson Lesson Plans, built on top of the existing syllabus tracker (backend)
 
 Requested by Trinitas International School and Trinity, sharing a template: a proper per-lesson planning document (Topic/Subtopic, objectives, activities, resources, remarks, differentiation by ability, assessment, homework, and a post-lesson reflection) — not what "Lessons" has actually been in this platform since it shipped: a syllabus/coverage tracker (Topic → Subtopic outline + per-teacher-per-class "covered" log), with no fields for any of that. Backend only in this commit — client UI follows in a separate commit.

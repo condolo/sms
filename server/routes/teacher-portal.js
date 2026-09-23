@@ -379,15 +379,31 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     }
 
     // ── Lesson plans (today + next 7 days) ───────────────────
+    // This queried a 'lesson_plans' collection that didn't exist as a real
+    // feature until v5.117.0 (Trinitas + Trinity's requested lesson-plan
+    // structure, see lessons.js's /plans routes) — it always silently
+    // returned [] before that, which is why this card and the "N lesson(s)
+    // without a plan" Today's Work count never showed anything real.
+    // `status`/`startTime` below were an earlier, speculative guess at a
+    // shape that was never actually built — lessons.js's real schema has
+    // neither (a plan's "done" state is whether Reflection has been filled
+    // in, not a stored status enum; there is no per-slot start time).
+    // Filters by `userId`, NOT the local `teacherId` (= teacher.id, the
+    // teachers-collection's own primary key) — lessons.js's /plans routes
+    // (and teaching_assignments/lesson_coverage before them) always store
+    // the ACCOUNT id in their own teacherId fields (see teaching-
+    // assignments.js's schema comment: "userId format, e.g. u_demo_t3"),
+    // a genuinely different identity from teacher.id. Using the local
+    // `teacherId` here would silently return zero results for any school
+    // where the two don't happen to coincide.
     const weekAheadISO = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
     const LessonPlans  = tenantModel('lesson_plans', tenantContext(req));
     const lessonPlans  = await LessonPlans.find({
       schoolId,
-      teacherId,
+      teacherId: userId,
       date: { $gte: todayISO, $lte: weekAheadISO },
-      status: { $ne: 'delivered' },
-    }).sort({ date: 1, startTime: 1 }).limit(10)
-      .select('id classId className subjectId subjectName topicTitle date startTime objectives status')
+    }).sort({ date: 1 }).limit(10)
+      .select('id classId className subjectId subjectName topicTitle subtopicTitle date objectives')
       .lean().catch(() => []);
 
     // ── HR: leave + payroll ───────────────────────────────────

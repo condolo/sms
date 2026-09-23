@@ -58,7 +58,7 @@ function mockCollection(seed = []) {
   };
 }
 
-let mockSchoolDoc, mockAssignments, mockCoverageDocs, mockTopicDocs, mockSubjectDocs, mockClassDocs;
+let mockSchoolDoc, mockAssignments, mockCoverageDocs, mockTopicDocs, mockSubjectDocs, mockClassDocs, mockLessonPlanDocs;
 
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((c) => {
@@ -74,6 +74,7 @@ jest.mock('../../utils/tenant-model', () => ({
     if (collection === 'syllabus_topics')      return mockCollection(mockTopicDocs);
     if (collection === 'subjects')             return mockCollection(mockSubjectDocs);
     if (collection === 'classes')              return mockCollection(mockClassDocs);
+    if (collection === 'lesson_plans')         return mockCollection(mockLessonPlanDocs);
     return mockCollection([]);
   },
 }));
@@ -107,6 +108,7 @@ beforeEach(() => {
     { schoolId: SCHOOL_A, teacherId: TEACHER_ID, classId: CLASS_ID, subjectId: 'subj_eng', streamId: SAPPHIRE, streamName: 'Sapphire' },
   ];
   mockCoverageDocs = [];
+  mockLessonPlanDocs = [];
 });
 
 describe('GET /api/teacher-portal/dashboard — curriculum coverage', () => {
@@ -143,5 +145,34 @@ describe('GET /api/teacher-portal/dashboard — curriculum coverage', () => {
     ];
     const res = await supertest(buildApp()).get('/api/teacher-portal/dashboard');
     expect(res.body.data.curriculumCoverage[0].covered).toBe(1);
+  });
+});
+
+describe('GET /api/teacher-portal/dashboard — lessonPlans (v5.117.0)', () => {
+  // This card queried a 'lesson_plans' collection that had no real writer
+  // until lessons.js's /plans routes shipped — always silently returned []
+  // before that. lessons.js writes lesson_plans.teacherId as the ACCOUNT
+  // userId (see teaching-assignments.js's own schema comment: "userId
+  // format, e.g. u_demo_t3"), which is a different identity from
+  // TEACHER_ID (the teachers-collection's own id, used by this same
+  // dashboard's curriculumCoverage/myClasses sections above) — filtering
+  // this query by TEACHER_ID instead of the account id would silently
+  // return zero results against real lesson_plans documents.
+  test('filters by the account userId, not the teachers-collection id', async () => {
+    mockLessonPlanDocs = [
+      { schoolId: SCHOOL_A, teacherId: TEACHER_USER, classId: CLASS_ID, subjectId: 'subj_eng', topicTitle: 'Forces', date: '2026-09-23', objectives: 'Explain motion' },
+    ];
+    const res = await supertest(buildApp()).get('/api/teacher-portal/dashboard');
+    expect(res.status).toBe(200);
+    expect(res.body.data.lessonPlans).toHaveLength(1);
+    expect(res.body.data.lessonPlans[0].topicTitle).toBe('Forces');
+  });
+
+  test('a plan filed under the teachers-collection id instead is correctly NOT this teacher\'s (wrong identity)', async () => {
+    mockLessonPlanDocs = [
+      { schoolId: SCHOOL_A, teacherId: TEACHER_ID, classId: CLASS_ID, subjectId: 'subj_eng', topicTitle: 'Forces', date: '2026-09-23' },
+    ];
+    const res = await supertest(buildApp()).get('/api/teacher-portal/dashboard');
+    expect(res.body.data.lessonPlans).toHaveLength(0);
   });
 });

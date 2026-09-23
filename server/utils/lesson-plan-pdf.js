@@ -126,6 +126,16 @@ function _sectionHeader(doc, x, y, width, text) {
   return y + 22;
 }
 
+/** Plain wrapped value, no label — for a single-field section whose
+    _sectionHeader already IS the label (Assessment & Evaluation, Lesson /
+    Week Assignment), so _drawField's own label line isn't repeated. */
+function _drawValue(doc, x, y, width, value) {
+  doc.fontSize(9.5).font('Helvetica').fillColor(INK);
+  const h = doc.heightOfString(value, { width });
+  doc.text(value, x, y, { width });
+  return y + h + 10;
+}
+
 /**
  * The one adapter that draws the page. `images.schoolLogo` is an optional
  * Buffer — missing/failed fetch is drawn without it (see the try/catch),
@@ -171,11 +181,11 @@ function _drawLessonPlanPage(doc, s, images = {}) {
 
   /* ASSESSMENT & EVALUATION */
   y = _sectionHeader(doc, x, y, PAGE_WIDTH, 'Assessment & Evaluation');
-  y = _drawField(doc, x, y, PAGE_WIDTH, 'Assessment & Evaluation', s.assessment);
+  y = _drawValue(doc, x, y, PAGE_WIDTH, s.assessment);
 
   /* HOMEWORK */
   y = _sectionHeader(doc, x, y, PAGE_WIDTH, 'Lesson / Week Assignment');
-  y = _drawField(doc, x, y, PAGE_WIDTH, 'Lesson / Week Assignment', s.homework);
+  y = _drawValue(doc, x, y, PAGE_WIDTH, s.homework);
 
   /* REFLECTION */
   y = _sectionHeader(doc, x, y, PAGE_WIDTH, 'Reflection');

@@ -18,7 +18,7 @@ import {
   BookCheck, ChevronRight, ChevronDown, Check, Plus, X,
   Loader2, AlertTriangle, Pencil, Trash2, Search, GraduationCap,
   Users, Copy, BarChart3, ArrowLeft, BookOpen, Circle,
-  CheckCircle2, MinusCircle,
+  CheckCircle2, MinusCircle, NotebookPen, Printer, Calendar,
 } from 'lucide-react';
 import { lessons as lessonsApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
@@ -524,6 +524,358 @@ function MyClassesTab() {
   );
 }
 
+/* ── Lesson Plan slide-over (create / edit) ───────────────────
+   Topic/Subtopic are pickers sourced from this subject's existing
+   syllabus_topics — never free text. A subject with no topics yet is
+   blocked here with a direct pointer to Topics & Coverage, which is the
+   whole mechanism behind "teachers must update topics before planning a
+   lesson" (the server enforces the same thing independently — this is
+   just the friendlier, earlier version of that same rule). */
+function LessonPlanSlideOver({ classId, className, subjectId, subjectName, streamId, streamName, existing, onClose, onSaved }) {
+  const qc = useQueryClient();
+  const isEdit = !!existing;
+  const [date,        setDate]        = useState(existing?.date ?? new Date().toISOString().slice(0, 10));
+  const [topicId,     setTopicId]     = useState(existing?.topicId ?? '');
+  const [subtopicId,  setSubtopicId]  = useState(existing?.subtopicId ?? '');
+  const [objectives,  setObjectives]  = useState(existing?.objectives ?? '');
+  const [activities,  setActivities]  = useState(existing?.activities ?? '');
+  const [resources,   setResources]   = useState(existing?.resources ?? '');
+  const [remarks,     setRemarks]     = useState(existing?.remarks ?? '');
+  const [diffLow,     setDiffLow]     = useState(existing?.differentiation?.low ?? '');
+  const [diffMid,     setDiffMid]     = useState(existing?.differentiation?.middle ?? '');
+  const [diffHigh,    setDiffHigh]    = useState(existing?.differentiation?.high ?? '');
+  const [assessment,  setAssessment]  = useState(existing?.assessment ?? '');
+  const [homework,    setHomework]    = useState(existing?.homework ?? '');
+  const [wentWell,    setWentWell]    = useState(existing?.reflection?.wentWell ?? '');
+  const [betterIf,    setBetterIf]    = useState(existing?.reflection?.betterIf ?? '');
+  const [improvement, setImprovement] = useState(existing?.reflection?.improvement ?? '');
+  const [error, setError] = useState('');
+
+  const { data: topicsResp, isLoading: topicsLoading } = useQuery({
+    queryKey: ['lessons', 'topics', subjectId],
+    queryFn:  () => lessonsApi.topics.list({ subjectId }),
+    staleTime: 60_000,
+  });
+  const topics = topicsResp?.data ?? [];
+  const selectedTopic = topics.find(t => t.id === topicId);
+  const subtopics = selectedTopic?.subtopics ?? [];
+
+  const mutation = useMutation({
+    mutationFn: (data) => isEdit ? lessonsApi.plans.update(existing.id, data) : lessonsApi.plans.create(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lessons', 'plans', classId, subjectId, streamId ?? ''] });
+      onSaved();
+    },
+    onError: (err) => setError(err?.message ?? 'Failed to save lesson plan'),
+  });
+
+  function submit() {
+    if (!date)    { setError('Date is required'); return; }
+    if (!topicId) { setError('Pick a topic for this lesson'); return; }
+    mutation.mutate({
+      classId, subjectId, ...(streamId ? { streamId } : {}),
+      date, topicId, subtopicId: subtopicId || undefined,
+      objectives, activities, resources, remarks,
+      differentiation: { low: diffLow, middle: diffMid, high: diffHigh },
+      assessment, homework,
+      reflection: { wentWell, betterIf, improvement },
+    });
+  }
+
+  function Field({ label, value, onChange, rows = 2, placeholder }) {
+    return (
+      <div>
+        <label className="block text-xs font-medium text-slate-700 mb-1.5">{label}</label>
+        <textarea
+          value={value} onChange={e => onChange(e.target.value)}
+          rows={rows} placeholder={placeholder}
+          className="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10 resize-none"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-40" onClick={onClose} />
+      <div className="fixed right-0 top-0 h-full w-full max-w-xl bg-white shadow-2xl z-50 flex flex-col">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 shrink-0">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">{isEdit ? 'Edit Lesson Plan' : 'New Lesson Plan'}</h2>
+            <p className="text-xs text-slate-400 mt-0.5">{subjectName} · {className}{streamName ? ` · ${streamName}` : ''}</p>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"><X size={18} /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+          {error && (
+            <div className="flex items-center gap-2 bg-red-50 text-red-700 text-sm px-3 py-2 rounded-lg border border-red-200">
+              <AlertTriangle size={14} className="shrink-0" />{error}
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1.5">Date *</label>
+            <input
+              type="date" value={date} onChange={e => setDate(e.target.value)}
+              className="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+            />
+          </div>
+
+          {topicsLoading ? (
+            <div className="flex justify-center py-6"><Loader2 className="animate-spin text-indigo-400" size={18} /></div>
+          ) : topics.length === 0 ? (
+            <div className="text-center py-8 bg-amber-50 border border-amber-200 rounded-lg px-4">
+              <AlertTriangle size={20} className="mx-auto mb-2 text-amber-500" />
+              <p className="text-sm font-medium text-amber-800">No topics yet for {subjectName}</p>
+              <p className="text-xs text-amber-700 mt-1">Add topics under the "Topics & Coverage" tab before planning a lesson — a lesson plan always points at a real syllabus topic.</p>
+            </div>
+          ) : (
+            <>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1.5">Topic *</label>
+                <select
+                  value={topicId} onChange={e => { setTopicId(e.target.value); setSubtopicId(''); }}
+                  className="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10 bg-white"
+                >
+                  <option value="">Select a topic…</option>
+                  {topics.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
+                </select>
+              </div>
+              {subtopics.length > 0 && (
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1.5">Subtopic (optional)</label>
+                  <select
+                    value={subtopicId} onChange={e => setSubtopicId(e.target.value)}
+                    className="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10 bg-white"
+                  >
+                    <option value="">— whole topic —</option>
+                    {subtopics.map(st => <option key={st.id} value={st.id}>{st.title}</option>)}
+                  </select>
+                </div>
+              )}
+            </>
+          )}
+
+          <Field label="Lesson Objectives"      value={objectives} onChange={setObjectives} rows={2} placeholder="By the end of the lesson, learners should be able to…" />
+          <Field label="Learning Activities"     value={activities} onChange={setActivities} rows={3} placeholder="Introduction, main activity, plenary…" />
+          <Field label="Resources / References"  value={resources}  onChange={setResources}  rows={2} />
+          <Field label="Remarks"                 value={remarks}    onChange={setRemarks}    rows={2} />
+
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Differentiation</p>
+            <div className="grid grid-cols-1 gap-3">
+              <Field label="Low Ability"    value={diffLow}  onChange={setDiffLow}  rows={2} />
+              <Field label="Middle Ability" value={diffMid}  onChange={setDiffMid}  rows={2} />
+              <Field label="High Ability"   value={diffHigh} onChange={setDiffHigh} rows={2} />
+            </div>
+          </div>
+
+          <Field label="Assessment & Evaluation" value={assessment} onChange={setAssessment} rows={2} />
+          <Field label="Lesson / Week Assignment" value={homework}  onChange={setHomework}   rows={2} placeholder="Homework or follow-up task" />
+
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Reflection <span className="normal-case font-normal text-slate-400">— fill in after teaching this lesson</span></p>
+            <div className="grid grid-cols-1 gap-3">
+              <Field label="What went well"          value={wentWell}    onChange={setWentWell}    rows={2} />
+              <Field label="Even better if"           value={betterIf}    onChange={setBetterIf}    rows={2} />
+              <Field label="Areas for improvement"    value={improvement} onChange={setImprovement} rows={2} />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-100 shrink-0">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 rounded-lg">Cancel</button>
+          <button
+            onClick={submit} disabled={mutation.isPending || topics.length === 0}
+            className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg"
+          >
+            {mutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+            {isEdit ? 'Save Changes' : 'Save Lesson Plan'}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ── Lesson plan row (list item) ──────────────────────────────── */
+function LessonPlanRow({ plan, onEdit, onDelete }) {
+  const hasReflection = plan.reflection && (plan.reflection.wentWell || plan.reflection.betterIf || plan.reflection.improvement);
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-4 flex items-start justify-between gap-3">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-semibold text-indigo-600">
+            {new Date(`${plan.date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
+          </span>
+          {hasReflection ? (
+            <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full">Reflected</span>
+          ) : (
+            <span className="text-[10px] font-medium text-slate-500 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded-full">Reflection pending</span>
+          )}
+        </div>
+        <h4 className="text-sm font-semibold text-slate-800 mt-1">
+          {plan.topicTitle}{plan.subtopicTitle ? ` — ${plan.subtopicTitle}` : ''}
+        </h4>
+        {plan.objectives && <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{plan.objectives}</p>}
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        <a
+          href={undefined} onClick={(e) => { e.preventDefault(); lessonsApi.plans.pdf(plan.id); }}
+          title="Print / export" className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+        ><Printer size={14} /></a>
+        <button onClick={() => onEdit(plan)} title="Edit" className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"><Pencil size={14} /></button>
+        <button onClick={() => onDelete(plan)} title="Delete" className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50"><Trash2 size={14} /></button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Lesson Plans: drill-down for one class-subject[-stream] ──── */
+function PlansDrillDown({ item, onBack }) {
+  const { classId, streamId, streamName, subjectId, subjectName, className } = item;
+  const qc = useQueryClient();
+  const [showSlider, setShowSlider] = useState(false);
+  const [editing,    setEditing]    = useState(null);
+
+  const { data: resp, isLoading } = useQuery({
+    queryKey: ['lessons', 'plans', classId, subjectId, streamId ?? ''],
+    queryFn:  () => lessonsApi.plans.list({ classId, subjectId, ...(streamId ? { streamId } : {}) }),
+    staleTime: 30_000,
+  });
+  const plans = resp?.data ?? [];
+
+  const deleteMutation = useMutation({
+    mutationFn: (plan) => lessonsApi.plans.remove(plan.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lessons', 'plans', classId, subjectId, streamId ?? ''] }),
+  });
+
+  // Grouped by week (server computes weekStart from each plan's own date —
+  // see lessons.js's _weekStartOf) so "plan a whole week" reads as one
+  // visual group even though each lesson is its own saved record.
+  const groups = useMemo(() => {
+    const byWeek = {};
+    plans.forEach(p => { (byWeek[p.weekStart ?? 'unscheduled'] ??= []).push(p); });
+    return Object.entries(byWeek).sort((a, b) => b[0].localeCompare(a[0]));
+  }, [plans]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start gap-3">
+        <button onClick={onBack} className="mt-0.5 p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
+          <ArrowLeft size={16} />
+        </button>
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-semibold text-slate-900">{subjectName}</h2>
+            <span className="text-xs font-medium text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
+              {className}{streamName ? ` · ${streamName}` : ''}
+            </span>
+          </div>
+          <p className="text-xs text-slate-400 mt-0.5">{plans.length} lesson plan{plans.length !== 1 ? 's' : ''}</p>
+        </div>
+        <button
+          onClick={() => { setEditing(null); setShowSlider(true); }}
+          className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-3 py-2 rounded-lg"
+        >
+          <Plus size={13} /> New Lesson Plan
+        </button>
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center py-12"><Loader2 className="animate-spin text-indigo-400" size={24} /></div>
+      ) : plans.length === 0 ? (
+        <div className="text-center py-12 text-slate-400">
+          <NotebookPen size={32} className="mx-auto mb-2 opacity-30" />
+          <p className="text-sm font-medium">No lesson plans yet</p>
+          <p className="text-xs mt-1">Plan your first lesson for {subjectName} — you can add several at once for the week ahead.</p>
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {groups.map(([weekStart, weekPlans]) => (
+            <div key={weekStart}>
+              <div className="flex items-center gap-1.5 mb-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                <Calendar size={12} />
+                {weekStart === 'unscheduled' ? 'Unscheduled' : `Week of ${new Date(`${weekStart}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`}
+              </div>
+              <div className="space-y-2">
+                {weekPlans.map(p => (
+                  <LessonPlanRow
+                    key={p.id}
+                    plan={p}
+                    onEdit={(plan) => { setEditing(plan); setShowSlider(true); }}
+                    onDelete={(plan) => { if (window.confirm('Delete this lesson plan?')) deleteMutation.mutate(plan); }}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showSlider && (
+        <LessonPlanSlideOver
+          classId={classId} className={className} subjectId={subjectId} subjectName={subjectName}
+          streamId={streamId} streamName={streamName}
+          existing={editing}
+          onClose={() => { setShowSlider(false); setEditing(null); }}
+          onSaved={() => { setShowSlider(false); setEditing(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ── Teacher: Lesson Plans tab ─────────────────────────────────
+   Same class-subject[-stream] picker as My Classes (reuses myClasses()
+   and ClassCard) — planning is per lesson per stream, so the picker has
+   to resolve down to the exact same assignment granularity coverage
+   already does. */
+function LessonPlansTab() {
+  const [drilldown, setDrilldown] = useState(null);
+
+  const { data: resp, isLoading } = useQuery({
+    queryKey: ['lessons', 'my-classes'],
+    queryFn:  () => lessonsApi.myClasses(),
+    staleTime: 60_000,
+  });
+  const items = resp?.data ?? [];
+
+  if (drilldown) {
+    return <PlansDrillDown item={drilldown} onBack={() => setDrilldown(null)} />;
+  }
+
+  if (isLoading) {
+    return <div className="flex justify-center py-16"><Loader2 className="animate-spin text-indigo-400" size={24} /></div>;
+  }
+
+  if (!items.length) {
+    return (
+      <div className="text-center py-16 text-slate-400">
+        <GraduationCap size={36} className="mx-auto mb-3 opacity-30" />
+        <p className="text-sm font-medium">No teaching assignments found</p>
+        <p className="text-xs mt-1">Contact your administrator to set up your teaching assignments.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p className="text-xs text-slate-500 mb-4">Tap a card to plan or review lessons for that class.</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {items.map(item => (
+          <ClassCard
+            key={`${item.classId}-${item.subjectId}-${item.streamId ?? ''}`}
+            item={item}
+            onClick={() => setDrilldown(item)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ── Admin: Overview tab ─────────────────────────────────────── */
 function OverviewTab() {
   const [search, setSearch] = useState('');
@@ -693,7 +1045,8 @@ export default function LessonsPage() {
   const [tab, setTab] = useState(defaultTab);
 
   const tabs = [
-    ...(isTeacher ? [{ key: 'my-classes', label: 'My Classes', Icon: BookCheck }] : []),
+    ...(isTeacher ? [{ key: 'my-classes', label: 'Topics & Coverage', Icon: BookCheck }] : []),
+    ...(isTeacher ? [{ key: 'plans',      label: 'Lesson Plans',      Icon: NotebookPen }] : []),
     ...((isAdmin || isHod) ? [{ key: 'overview', label: 'Overview', Icon: BarChart3 }] : []),
   ];
 
@@ -735,6 +1088,7 @@ export default function LessonsPage() {
 
       {/* Content */}
       {tab === 'my-classes' && <MyClassesTab />}
+      {tab === 'plans'      && <LessonPlansTab />}
       {tab === 'overview'   && <OverviewTab />}
     </div>
   );
