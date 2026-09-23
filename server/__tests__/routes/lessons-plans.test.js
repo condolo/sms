@@ -212,6 +212,64 @@ describe('POST /api/lessons/plans — template field labels + custom fields (v5.
   });
 });
 
+describe('POST/PUT /api/lessons/plans — server-side required-field enforcement (v5.117.4)', () => {
+  test('POST rejects when a required BUILTIN field (per the live template) is empty', async () => {
+    mockSchoolDoc.lessonPlanTemplate = { fields: [{ key: 'assessment', label: 'Assessment & Evaluation', enabled: true, required: true, order: 7 }] };
+    asTeacherOf();
+    const res = await supertest(buildApp()).post('/api/lessons/plans').send(BASE_BODY); // assessment omitted
+    expect(res.status).toBe(422);
+    expect(JSON.stringify(res.body)).toContain('Assessment & Evaluation');
+  });
+
+  test('POST succeeds once the required builtin field is actually filled', async () => {
+    mockSchoolDoc.lessonPlanTemplate = { fields: [{ key: 'assessment', label: 'Assessment & Evaluation', enabled: true, required: true, order: 7 }] };
+    asTeacherOf();
+    const res = await supertest(buildApp()).post('/api/lessons/plans').send({ ...BASE_BODY, assessment: 'Exit ticket' });
+    expect(res.status).toBe(201);
+  });
+
+  test('a DISABLED field is never enforced even if marked required', async () => {
+    mockSchoolDoc.lessonPlanTemplate = { fields: [{ key: 'assessment', label: 'Assessment & Evaluation', enabled: false, required: true, order: 7 }] };
+    asTeacherOf();
+    const res = await supertest(buildApp()).post('/api/lessons/plans').send(BASE_BODY);
+    expect(res.status).toBe(201);
+  });
+
+  test('POST rejects when a required CUSTOM field is missing entirely', async () => {
+    mockSchoolDoc.lessonPlanTemplate = { fields: [{ key: 'custom_links', label: 'Cross-curricular links', enabled: true, required: true, order: 12 }] };
+    asTeacherOf();
+    const res = await supertest(buildApp()).post('/api/lessons/plans').send(BASE_BODY); // no customFields sent at all
+    expect(res.status).toBe(422);
+    expect(JSON.stringify(res.body)).toContain('Cross-curricular links');
+  });
+
+  test('POST succeeds once the required custom field is filled', async () => {
+    mockSchoolDoc.lessonPlanTemplate = { fields: [{ key: 'custom_links', label: 'Cross-curricular links', enabled: true, required: true, order: 12 }] };
+    asTeacherOf();
+    const res = await supertest(buildApp()).post('/api/lessons/plans').send({
+      ...BASE_BODY, customFields: [{ key: 'custom_links', label: 'Cross-curricular links', value: 'Links to Science' }],
+    });
+    expect(res.status).toBe(201);
+  });
+
+  test('PUT rejects a merged final state that would leave a required field empty', async () => {
+    mockSchoolDoc.lessonPlanTemplate = { fields: [{ key: 'objectives', label: 'Lesson Objectives', enabled: true, required: true, order: 0 }] };
+    asTeacherOf();
+    const created = await supertest(buildApp()).post('/api/lessons/plans').send(BASE_BODY); // objectives filled at creation
+    expect(created.status).toBe(201);
+    const res = await supertest(buildApp()).put(`/api/lessons/plans/${created.body.data.id}`).send({ objectives: '' });
+    expect(res.status).toBe(422);
+  });
+
+  test('PUT editing an unrelated field does not fail just because it doesn\'t re-send an already-satisfied required field', async () => {
+    mockSchoolDoc.lessonPlanTemplate = { fields: [{ key: 'objectives', label: 'Lesson Objectives', enabled: true, required: true, order: 0 }] };
+    asTeacherOf();
+    const created = await supertest(buildApp()).post('/api/lessons/plans').send(BASE_BODY);
+    const res = await supertest(buildApp()).put(`/api/lessons/plans/${created.body.data.id}`).send({ remarks: 'Bring extra materials' });
+    expect(res.status).toBe(200); // objectives already satisfied on the existing doc — merged state still valid
+  });
+});
+
 describe('POST /api/lessons/plans — class[-stream] ownership (mirrors coverage exactly)', () => {
   test('a teacher with no assignment for this class is forbidden', async () => {
     mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };

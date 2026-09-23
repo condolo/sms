@@ -274,6 +274,36 @@ const TemplateFieldSchema = z.object({
 });
 const TemplateSchema = z.object({ fields: z.array(TemplateFieldSchema).max(32) });
 
+function _getByPath(obj, path) {
+  return path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj);
+}
+
+// Server-side enforcement of the template's own `required` flags — the
+// client (LessonPlanSlideOver) already blocks submission for a missing
+// required field, but that alone is advisory only: a direct API call, or a
+// client with a stale cached template, could otherwise still create/save a
+// plan missing something this school has marked required. `planLike` only
+// needs to have the same shape POST/PUT's own validated `data` already
+// does (objectives/activities/.../differentiation/reflection/customFields)
+// — this never touches the DB itself, callers pass in whatever the
+// resulting document state would be (see POST's own call for "check the
+// incoming data", PUT's for "check the MERGED final state" so a partial
+// edit can never un-satisfy a field that was already filled in).
+function _missingRequiredFields(planLike, template) {
+  const missing = [];
+  for (const f of template.fields) {
+    if (!f.enabled || !f.required) continue;
+    if (f.builtin) {
+      const val = _getByPath(planLike, f.path);
+      if (!val || !String(val).trim()) missing.push(f.label);
+    } else {
+      const cf = (planLike.customFields || []).find(c => c.key === f.key);
+      if (!cf || !cf.value || !String(cf.value).trim()) missing.push(f.label);
+    }
+  }
+  return missing;
+}
+
 /* ── GET /api/lessons/template ─ this school's field config ─── */
 router.get('/template', authMiddleware, PLAN, MODGATE, rbac('lessons', 'read'), async (req, res) => {
   try {
@@ -940,6 +970,9 @@ router.post('/plans', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'), 
     const template = _mergeTemplate(schoolDoc?.lessonPlanTemplate);
     const fieldLabels = Object.fromEntries(template.fields.filter(f => f.builtin).map(f => [f.key, f.label]));
 
+    const missing = _missingRequiredFields(data, template);
+    if (missing.length) return E.validation(res, missing.map(label => ({ field: label, message: `"${label}" is required` })));
+
     const doc = await tenantModel('lesson_plans', tenantContext(req)).create({
       id: uuidv4(),
       schoolId,
@@ -993,6 +1026,16 @@ router.put('/plans/:id', authMiddleware, PLAN, MODGATE, rbac('lessons', 'update'
     const update = { ...data, updatedBy: userId };
     if (data.differentiation) update.differentiation = { ...existing.differentiation, ...data.differentiation };
     if (data.reflection)      update.reflection      = { ...existing.reflection,      ...data.reflection };
+
+    // Check the RESULTING merged state, not just the incoming diff — a
+    // partial edit (e.g. only filling in Reflection weeks later) must never
+    // appear to un-satisfy a required field that was already filled in at
+    // creation, but it also must never be usable to sneak past a required
+    // field this school added to the template after this plan was created.
+    const schoolDocForReq = await _model('schools').findOne({ id: schoolId }, { lessonPlanTemplate: 1 }).lean();
+    const templateForReq = _mergeTemplate(schoolDocForReq?.lessonPlanTemplate);
+    const missing = _missingRequiredFields({ ...existing, ...update }, templateForReq);
+    if (missing.length) return E.validation(res, missing.map(label => ({ field: label, message: `"${label}" is required` })));
 
     // Re-validate topic/subtopic only if the caller actually changed them —
     // avoids a redundant lookup on the common case (editing Reflection

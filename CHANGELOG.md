@@ -6,6 +6,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.117.4] — 2026-09-23 — fix(lessons): server-enforced required fields; PDF corruption re-tested and ruled out
+
+Closes both items flagged as "not fully resolved" in v5.117.3, on explicit instruction to fix with no assumptions.
+
+### Fixed — required fields are now enforced server-side
+`POST /plans` and `PUT /plans/:id` now re-check every enabled `required` field from the school's live template against the actual data being saved, before writing anything. `PUT` checks the **resulting merged state** (existing document + incoming changes), not just the incoming diff — a partial edit (filling in Reflection weeks later) can never appear to un-satisfy a field that was already filled in at creation, but it also can't be used to sneak past a field this school added as required after the plan already existed. A disabled field is never enforced even if its `required` flag happens to be `true` underneath. Missing fields are reported by their configured label, not a raw key, in the 422 response.
+
+### Investigated — the PDF truncation was a browser-tooling artifact, not a server defect, confirmed not assumed
+Re-tested by running 3 consecutive raw HTTP requests directly against the running server (bypassing the browser entirely, via Node's own `http` module with a real login session) — all 3 returned byte-identical, fully valid, completely decompressible PDFs. The truncation seen previously was isolated to the ad-hoc byte-array extraction method used to inspect the response through this session's browser automation tooling, not the server, the route, or the PDF renderer. No code change was needed; this is a verification-method correction, not a fix.
+
+### Verified
+New tests in `lessons-plans.test.js` (+7): a required builtin field blocks `POST` when empty and allows it once filled; a `required: true` field that's `enabled: false` is never enforced; a required custom field blocks `POST` when absent and allows it once provided; `PUT` rejects a merge that would leave a required field empty; `PUT` succeeds when editing an unrelated field and the existing required field is already satisfied. Full Jest suite: 233 suites, 2340/2340 passing.
+
 ## [v5.117.3] — 2026-09-23 — feat(lessons): per-school customizable Lesson Plan template
 
 Asked directly, correcting an earlier assumption: "configurable per school" meant a real customizable field schema — enable/disable/relabel/require each builtin field, and add entirely new fields — not just the module-toggle + RBAC interpretation taken in v5.117.0. Also asked for this to be gated by a real permission surfaced in Roles & Permissions, for the data to remain fully retrievable regardless of later template changes, and for everything to be genuinely DB-backed rather than client-only.
