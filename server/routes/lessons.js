@@ -477,7 +477,18 @@ router.get('/coverage', authMiddleware, PLAN, MODGATE, scopeMiddleware, async (r
     // through for their own stream — previously this denied them
     // outright regardless of streamId, since the module wasn't
     // streamAware yet.
-    if (!ScopeEngine.isClassInScope(req, 'lessons', classId, streamId)) {
+    // Uses Lessons' own narrower floor (resolveLessonsScope), not the
+    // generic req.scope scopeMiddleware just populated — see that
+    // function's own comment for why (exams_officer/admissions_officer/
+    // finance/hr/timetabler/discipline_committee are 'school'-level for
+    // their own module but have no business seeing every class's lesson
+    // plans/coverage just because of that). Restored right after, same
+    // discipline as attendance.js's own equivalent override.
+    const _originalScope = req.scope;
+    req.scope = await ScopeEngine.resolveLessonsScope(req);
+    const _inScope = ScopeEngine.isClassInScope(req, 'lessons', classId, streamId);
+    req.scope = _originalScope;
+    if (!_inScope) {
       return E.forbidden(res, 'This class is not in your teaching assignments.');
     }
 
@@ -542,8 +553,15 @@ router.post('/coverage', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'
     // existing "submit on behalf of another teacher" ability for any
     // class; a non-admin teacher must actually hold the assignment for
     // this exact class[-stream] they're submitting for.
-    if (!isAdmin(req) && !ScopeEngine.isClassInScope(req, 'lessons', data.classId, data.streamId)) {
-      return E.forbidden(res, 'This class is not in your teaching assignments.');
+    // Lessons' own narrower floor (resolveLessonsScope) — see GET
+    // /coverage's identical comment above for why the generic req.scope
+    // isn't trusted here.
+    if (!isAdmin(req)) {
+      const _originalScope = req.scope;
+      req.scope = await ScopeEngine.resolveLessonsScope(req);
+      const _inScope = ScopeEngine.isClassInScope(req, 'lessons', data.classId, data.streamId);
+      req.scope = _originalScope;
+      if (!_inScope) return E.forbidden(res, 'This class is not in your teaching assignments.');
     }
 
     // Teachers can only submit for themselves unless admin
@@ -725,8 +743,14 @@ router.post('/plans', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'), 
 
     // Same ownership rule as POST /coverage: a non-admin can only plan for
     // a class[-stream] they actually teach; admin retains submit-on-behalf.
-    if (!isAdmin(req) && !ScopeEngine.isClassInScope(req, 'lessons', data.classId, data.streamId)) {
-      return E.forbidden(res, 'This class is not in your teaching assignments.');
+    // Lessons' own narrower floor (resolveLessonsScope) — see GET
+    // /coverage's comment for why the generic req.scope isn't trusted here.
+    if (!isAdmin(req)) {
+      const _originalScope = req.scope;
+      req.scope = await ScopeEngine.resolveLessonsScope(req);
+      const _inScope = ScopeEngine.isClassInScope(req, 'lessons', data.classId, data.streamId);
+      req.scope = _originalScope;
+      if (!_inScope) return E.forbidden(res, 'This class is not in your teaching assignments.');
     }
     const effectiveTeacherId = (isAdmin(req) && data.teacherId) ? data.teacherId : userId;
 

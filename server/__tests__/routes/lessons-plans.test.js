@@ -197,6 +197,19 @@ describe('POST /api/lessons/plans — class[-stream] ownership (mirrors coverage
     expect(res.status).toBe(201);
     expect(res.body.data.teacherId).toBe('usr_teacher');
   });
+
+  // Same bug class as classes-lessons-scope.test.js: exams_officer (and
+  // admissions_officer/finance/hr/timetabler/discipline_committee) are
+  // ROLE_SCOPE_LEVEL 'school' for their OWN module, which — before
+  // resolveLessonsScope existed — also made ScopeEngine.isClassInScope
+  // treat them as unrestricted for Lesson Plans, purely as a side effect
+  // of scopeMiddleware computing one generic scope per request.
+  test('a "school-level-for-its-own-module" role with no real teaching assignment is forbidden, not waved through', async () => {
+    mockJwtUser = { userId: 'usr_exams', schoolId: SCHOOL_A, role: 'exams_officer', roles: ['exams_officer'] };
+    mockTeachingAssignments = mockMakeFakeCollection([]);
+    const res = await supertest(buildApp()).post('/api/lessons/plans').send(BASE_BODY);
+    expect(res.status).toBe(403);
+  });
 });
 
 describe('GET /api/lessons/plans — scoped to own records', () => {

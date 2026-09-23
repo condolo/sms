@@ -62,9 +62,14 @@ function _validate(schema, data) {
 // any stream they're the form/homeroom teacher of (streams.js's own
 // formTeacherId), so a homeroom teacher with no subject assignment
 // there at all can still find their own class to take attendance for.
+// `?lessonsScope=true` is the identical exception for LessonsPage.jsx's
+// own stream picker (Lesson Plans) — same roles, same reasoning, sourced
+// from resolveLessonsScope instead (no homeroom fold — see that
+// function's own comment for why a lesson plan's scope shouldn't inherit
+// homeroom duty the way Attendance's does).
 router.get(
   '/', authMiddleware, PLAN, rbac('classes', 'read'),
-  (req, res, next) => (req.query.attendanceScope === 'true' ? scopeMiddleware(req, res, next) : next()),
+  (req, res, next) => (req.query.attendanceScope === 'true' || req.query.lessonsScope === 'true' ? scopeMiddleware(req, res, next) : next()),
   async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
@@ -78,6 +83,15 @@ router.get(
       const originalScope = req.scope;
       req.scope = await ScopeEngine.resolveAttendanceScope(req);
       const inWholeClassScope = ScopeEngine.isClassInScope(req, 'students', req.query.classId);
+      if (!inWholeClassScope) {
+        const myStreamIds = req.scope?.streamIds ?? [];
+        filter.id = { $in: myStreamIds };
+      }
+      req.scope = originalScope;
+    } else if (req.query.lessonsScope === 'true' && req.query.classId) {
+      const originalScope = req.scope;
+      req.scope = await ScopeEngine.resolveLessonsScope(req);
+      const inWholeClassScope = ScopeEngine.isClassInScope(req, 'lessons', req.query.classId);
       if (!inWholeClassScope) {
         const myStreamIds = req.scope?.streamIds ?? [];
         filter.id = { $in: myStreamIds };

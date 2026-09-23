@@ -475,8 +475,52 @@ async function resolveAttendanceClassPickerScope(req) {
   return _foldStreamsToParentClasses(req, scope);
 }
 
+/**
+ * A dedicated, Lessons-only floor — same reasoning as
+ * resolveAttendanceScope above, same gap: exams_officer/admissions_officer/
+ * finance/hr/timetabler/discipline_committee are all ROLE_SCOPE_LEVEL
+ * 'school' for their OWN module's purposes, which (before this) also made
+ * them unrestricted for Lesson Plans' class[-stream] scope check purely as
+ * a side effect of scopeMiddleware computing one scope per request, not
+ * per module — the exact same architectural gap Attendance had. A Finance
+ * officer granted plain lessons:create (e.g. bundled into some coarse
+ * grant) could otherwise create or view a lesson plan for any class in
+ * the school, despite teaching none of them.
+ *
+ * Deliberately does NOT fold in homeroom streams the way
+ * resolveAttendanceScope does — a homeroom/form teacher takes attendance
+ * for their form class regardless of subject, but a lesson plan is always
+ * tied to a specific subject via teaching_assignments, so homeroom duty
+ * alone implies nothing plannable here.
+ *
+ * @param {import('express').Request} req
+ * @returns {Promise<null|{level:string, classIds:string[], subjectIds:string[], streamIds:string[]}>}
+ *   null = unrestricted (floor role)
+ */
+const LESSONS_FLOOR_ROLES = new Set(['admin', 'superadmin', 'principal', 'deputy_principal', 'deputy']);
+
+async function resolveLessonsScope(req) {
+  const { userId, schoolId, role, roles = [] } = req.jwtUser ?? {};
+  const effectiveRole = role || roles[0] || '';
+  if (LESSONS_FLOOR_ROLES.has(effectiveRole)) return null;
+  if (!userId || !schoolId) return { level: 'assigned', classIds: [], subjectIds: [], streamIds: [] };
+
+  const assigned = await _loadAssigned(userId, schoolId);
+  return { level: 'assigned', classIds: assigned.classIds, subjectIds: assigned.subjectIds, streamIds: assigned.streamIds };
+}
+
+/* Lessons-only counterpart to resolveClassPickerScope above — same
+   stream-to-parent-class fold, sourced from resolveLessonsScope instead of
+   the generic req.scope, so a class/stream PICKER for Lesson Plans
+   specifically shows only what this narrower floor allows. */
+async function resolveLessonsClassPickerScope(req) {
+  const scope = await resolveLessonsScope(req);
+  return _foldStreamsToParentClasses(req, scope);
+}
+
 module.exports = {
   applyToFilter, hasNoAssignments, isUnrestricted, isClassInScope,
   resolveClassPickerScope, resolveHomeroomStreamIds, foldHomeroomScope,
   resolveAttendanceScope, resolveAttendanceClassPickerScope, ATTENDANCE_FLOOR_ROLES,
+  resolveLessonsScope, resolveLessonsClassPickerScope, LESSONS_FLOOR_ROLES,
 };

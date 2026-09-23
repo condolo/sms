@@ -6,6 +6,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.117.2] — 2026-09-23 — fix(lessons): Lesson Plans had the same class-scope gap Attendance had before its own fix
+
+Asked directly: "does this lesson plan also pick the class and stream the way we did with attendance?" It didn't — checking confirmed Lesson Plans (v5.117.0) had exactly the architectural gap Attendance's own scope floor (§46, v5.114.0) was built to close, just not yet applied here.
+
+### The gap
+`exams_officer`, `admissions_officer`, `finance`, `hr`, `timetabler`, and `discipline_committee` are all `ROLE_SCOPE_LEVEL: 'school'` — correctly unrestricted for their OWN module's purposes. But `scopeMiddleware` computes one `req.scope` per request, not per module, so that same "unrestricted" status was leaking into Lesson Plans' `ScopeEngine.isClassInScope` check too. In practice: any of those roles holding a plain `lessons:create`/`read` grant could create or view a lesson plan for ANY class in the school, despite teaching none of them — the same class of gap Attendance had before v5.114.0.
+
+### Fixed
+- New `resolveLessonsScope`/`resolveLessonsClassPickerScope`/`LESSONS_FLOOR_ROLES` in `scopeEngine.js`, mirroring `resolveAttendanceScope` exactly (same floor: `admin`, `superadmin`, `principal`, `deputy_principal`, `deputy`) — with one deliberate difference: it does **not** fold in homeroom streams the way Attendance's does, since a lesson plan is always tied to a real subject-teaching assignment via `teaching_assignments`, not pastoral/homeroom duty.
+- `lessons.js`'s three `isClassInScope` call sites (`GET /coverage`, `POST /coverage`, `POST /plans`) now temporarily override `req.scope` with this narrower floor before checking, then restore it — identical discipline to `attendance.js`'s own override pattern.
+- New `?lessonsScope=true` on `classes.js`/`streams.js`'s `GET /`, mirroring `?attendanceScope=true` exactly, so a real class/stream **picker** UI for Lesson Plans (e.g. an admin/HOD "create on behalf" flow) can exist with the same safety Attendance's picker has.
+
+### Verified
+New test `classes-lessons-scope.test.js` (9 tests) proves the same 5 "school-level-for-its-own-module" roles are narrowed for `lessonsScope=true` while staying unrestricted for `assignedOnly=true` (Exams/Growth Profile, unaffected), and the 5 genuine floor roles stay unrestricted. New test in `lessons-plans.test.js` (+1) proves `POST /plans` itself denies an `exams_officer` with no real assignment, not just the picker. Full Jest suite: 232 suites, 2321/2321 passing.
+
 ## [v5.117.1] — 2026-09-23 — feat(lessons): Lesson Plans client UI + a real dashboard bug found while wiring it up
 
 Client UI for v5.117.0's backend: a "Lesson Plans" tab on the Lessons page (alongside the existing "Topics & Coverage" tab), a weekly-planner-style creation form, and a print/export trigger. Also fixes a genuinely pre-existing, unrelated dead widget discovered while testing this feature end-to-end.

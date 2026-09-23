@@ -67,11 +67,15 @@ function _validate(schema, data) {
 // because of that — Attendance tracks real teaching/homeroom duty, not
 // a specialist administrative remit (see scopeEngine.js's
 // resolveAttendanceScope for the full reasoning and the narrower floor
-// it applies). Never combine both flags — attendanceScope wins if both
-// are somehow present, since it's the more restrictive of the two.
+// it applies). `?lessonsScope=true` is the identical exception for
+// LessonsPage.jsx's own class picker (Lesson Plans), for the exact same
+// set of roles and the exact same reasoning — see resolveLessonsScope.
+// Never combine more than one of these flags — attendanceScope /
+// lessonsScope win over assignedOnly if somehow present together, since
+// they're the more restrictive of the two.
 router.get(
   '/', authMiddleware, PLAN, MODGATE, rbac('classes', 'read'),
-  (req, res, next) => (req.query.assignedOnly === 'true' || req.query.attendanceScope === 'true' ? scopeMiddleware(req, res, next) : next()),
+  (req, res, next) => (req.query.assignedOnly === 'true' || req.query.attendanceScope === 'true' || req.query.lessonsScope === 'true' ? scopeMiddleware(req, res, next) : next()),
   async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
@@ -89,6 +93,15 @@ router.get(
     if (req.query.attendanceScope === 'true') {
       const originalScope = req.scope;
       req.scope = await ScopeEngine.resolveAttendanceClassPickerScope(req);
+      ScopeEngine.applyToFilter(req, 'classes', filter);
+      const noAssignments = ScopeEngine.hasNoAssignments(req, 'classes');
+      req.scope = originalScope;
+      if (noAssignments) {
+        return ok(res, [], { ...paginate(page, limit, 0), noAssignments: true });
+      }
+    } else if (req.query.lessonsScope === 'true') {
+      const originalScope = req.scope;
+      req.scope = await ScopeEngine.resolveLessonsClassPickerScope(req);
       ScopeEngine.applyToFilter(req, 'classes', filter);
       const noAssignments = ScopeEngine.hasNoAssignments(req, 'classes');
       req.scope = originalScope;
