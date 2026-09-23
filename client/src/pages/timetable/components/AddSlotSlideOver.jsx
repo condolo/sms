@@ -32,7 +32,7 @@ const EMPTY_FORM = {
   day: 'monday', period: '1', subject: '',
   teacherId: '', teacherName: '',
   assistantTeacherId: '', assistantTeacherName: '',
-  room: '', type: 'lesson',
+  room: '', roomId: '', type: 'lesson',
 };
 
 export default function AddSlotSlideOver({
@@ -56,6 +56,7 @@ export default function AddSlotSlideOver({
         assistantTeacherId:   editSlot.assistantTeacherId   ?? '',
         assistantTeacherName: editSlot.assistantTeacherName ?? '',
         room:        editSlot.room        ?? '',
+        roomId:      editSlot.roomId      ?? '',
         type:        editSlot.type        ?? 'lesson',
       };
     }
@@ -150,9 +151,10 @@ export default function AddSlotSlideOver({
     if (!assignment || !userPickedSubject) return;
     setFormState(f => ({
       ...f,
-      teacherId:   assignment.teacherId        ?? f.teacherId,
-      teacherName: assignment.teacherName      ?? f.teacherName,
+      teacherId:   assignment.teacherId         ?? f.teacherId,
+      teacherName: assignment.teacherName       ?? f.teacherName,
       room:        assignment.preferredRoomName ?? f.room,
+      roomId:      assignment.preferredRoomId   ?? f.roomId,
     }));
     setAutoFillApplied(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -164,7 +166,7 @@ export default function AddSlotSlideOver({
     // deliberately left as-is — it reflects which stream this whole
     // add-slot session is scoped to (see the streamId state's own
     // comment above), not something a subject change should reset.
-    setFormState(f => ({ ...f, subject: name, teacherId: '', teacherName: '', room: '' }));
+    setFormState(f => ({ ...f, subject: name, teacherId: '', teacherName: '', room: '', roomId: '' }));
     setSubjectId(cs.subjectId);
     setUserPickedSubject(true);
     setAutoFillApplied(false);
@@ -184,7 +186,13 @@ export default function AddSlotSlideOver({
         teacherName: form.teacherName.trim() || undefined,
         assistantTeacherId:   form.assistantTeacherId            || undefined,
         assistantTeacherName: form.assistantTeacherName.trim()   || undefined,
-        room:        form.room.trim()        || undefined,
+        // Always sent explicitly (never `undefined`, which a partial PUT
+        // reads as "leave untouched") — this is the one field whose empty
+        // state must always be able to reach the server, since clearing
+        // roomId (unlinking a room) and blanking room (clearing free text)
+        // are both real, deliberate edits, not "field not touched."
+        room:        form.room.trim() || '',
+        roomId:      form.roomId      || '',
         type:        form.type,
       };
       if (isEdit) return ttApi.update(editSlot.id ?? editSlot._id, payload);
@@ -207,7 +215,20 @@ export default function AddSlotSlideOver({
   }
 
   /* ── Room field helpers ───────────────────────────────────── */
-  const roomInRegistry = roomList.length > 0 && roomList.some(r => r.name === form.room);
+  // A legacy slot (or one from any other API caller) can have room text with
+  // no roomId yet. If that text is an exact match for a currently-registered
+  // room, silently link it in local form state — the next Save then carries
+  // a real roomId without the user having to touch the field at all. This is
+  // the same one-slot-at-a-time version of what scripts/backfill-timetable-
+  // room-id.js does in bulk for every existing slot at once.
+  useEffect(() => {
+    if (form.roomId || !form.room || !roomList.length) return;
+    const match = roomList.find(r => r.name.trim().toLowerCase() === form.room.trim().toLowerCase());
+    if (match) setFormState(f => (f.roomId ? f : { ...f, roomId: match.id ?? String(match._id) }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomList.length, form.room]);
+
+  const roomInRegistry = !!form.roomId && roomList.some(r => (r.id ?? String(r._id)) === form.roomId);
   // Show free-text fallback when the stored room doesn't match any registered room
   const showRoomFallback = roomList.length > 0 && !!form.room && !roomInRegistry;
 
@@ -404,16 +425,19 @@ export default function AddSlotSlideOver({
             {roomList.length > 0 ? (
               <div className="space-y-1.5">
                 <select
-                  value={roomInRegistry ? form.room : ''}
+                  value={roomInRegistry ? form.roomId : ''}
                   onChange={e => {
-                    set('room', e.target.value);
+                    const id = e.target.value;
+                    const r  = roomList.find(x => (x.id ?? String(x._id)) === id);
+                    setFormState(f => ({ ...f, roomId: id, room: r?.name ?? '' }));
+                    setErrors(err => { const n = { ...err }; delete n.room; delete n._server; return n; });
                     if (autoFillApplied) setAutoFillApplied(false);
                   }}
                   className={iCls()}
                 >
                   <option value="">No room assigned</option>
                   {roomList.map(r => (
-                    <option key={r._id ?? r.id} value={r.name}>{r.name}</option>
+                    <option key={r.id ?? r._id} value={r.id ?? String(r._id)}>{r.name}</option>
                   ))}
                 </select>
                 {/* Free-text fallback: shown when existing room isn't in the registry */}
@@ -427,7 +451,7 @@ export default function AddSlotSlideOver({
                     />
                     <button
                       type="button"
-                      onClick={() => set('room', '')}
+                      onClick={() => setFormState(f => ({ ...f, room: '', roomId: '' }))}
                       className="text-slate-400 hover:text-slate-600 transition"
                       title="Clear"
                     >

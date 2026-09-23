@@ -68,6 +68,41 @@ async function _resolveTeacherByAnyId(schoolId, tenantCtx, value) {
 }
 const MODGATE = moduleGate('timetable');
 
+/* Same reasoning as teaching-assignments.js's own _roomQuery (preferredRoomId):
+   a room document always has a Mongo _id, so an id-shaped value must also be
+   tried against _id, or a room whose real `id` field is missing for any
+   unaudited reason would incorrectly 404. */
+function _roomQuery(schoolId, roomId) {
+  const isOid = /^[a-f\d]{24}$/i.test(roomId);
+  return isOid
+    ? { schoolId, isActive: { $ne: false }, $or: [{ id: roomId }, { _id: roomId }] }
+    : { schoolId, isActive: { $ne: false }, id: roomId };
+}
+
+/* Resolves data.roomId (when present in the request) against the real rooms
+   registry and denormalises data.room from it — the room name a slot displays
+   can then never drift out of sync with a rename, and conflict-checking can
+   match on a stable id instead of free-text that a school might spell two
+   different ways for the same physical room. Mutates `data` in place; returns
+   an error string, or null on success/no-op.
+     - key absent (data.roomId === undefined): no room change requested —
+       existing free-text `room` (create) or the existing stored value (update,
+       since `data.room` would also be absent) is left exactly as-is.
+     - key present but falsy (''): explicit unlink — `data.room`, if also sent
+       in the same request, is kept as genuine free text for an unregistered
+       room; roomId is cleared.
+     - key present and truthy: must resolve to a real, active room, or this
+       returns 'Room not found' for the caller to surface as a 404. */
+async function _applyRoomLink(schoolId, tenantCtx, data) {
+  if (data.roomId === undefined) return null;
+  if (!data.roomId) { data.roomId = null; return null; }
+  const room = await tenantModel('rooms', tenantCtx).findOne(_roomQuery(schoolId, data.roomId)).lean();
+  if (!room) return 'Room not found';
+  data.roomId = room.id || String(room._id);
+  data.room   = room.name;
+  return null;
+}
+
 /* ── Constants ───────────────────────────────────────────────── */
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 
@@ -105,6 +140,12 @@ const SlotSchema = z.object({
   assistantTeacherId:   z.string().optional(),
   assistantTeacherName: z.string().max(100).optional(),
   room:           z.string().max(100).optional(),
+  // FK into the rooms registry (server/routes/rooms.js). When set, `room`
+  // (the display name) is always overwritten server-side from the live
+  // registry — see _applyRoomLink — so the two fields can never disagree.
+  // Left unset, `room` remains genuine free text for a school that hasn't
+  // registered its physical rooms, or for a one-off/ad-hoc space.
+  roomId:         z.string().optional(),
   startTime:      z.string().optional(),               // "HH:MM" — auto-filled from bell schedule
   endTime:        z.string().optional(),               // "HH:MM" — auto-filled from bell schedule
   academicYearId: z.string().optional(),
@@ -221,14 +262,31 @@ async function _checkConflicts(schoolId, data, excludeId = null) {
     }
   }
 
-  // 3. Room double-booking — time-overlap aware across all sections
+  // 3. Room double-booking — time-overlap aware across all sections.
+  // Matches on EITHER a shared roomId OR a shared room display name, not
+  // just one or the other: a linked room's id is the stable, rename-proof
+  // identity (this is what actually closes the "two different spellings of
+  // the same room never register as a conflict" gap), but an incoming
+  // free-text room name (no roomId — an unregistered/ad-hoc space) can still
+  // collide with an existing linked slot whose denormalised `room` text
+  // happens to read the same, and vice-versa, so both existing slots must
+  // stay reachable regardless of which side is linked.
+  const roomFilters = [];
+  if (data.roomId) roomFilters.push({ roomId: data.roomId });
   if (data.room && data.room.trim()) {
     const roomRe = new RegExp(
       `^${data.room.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
       'i',
     );
-    const roomSlots = await Timetable.find({ ...base, room: roomRe }).lean();
+    roomFilters.push({ room: roomRe });
+  }
+  if (roomFilters.length) {
+    const roomSlots = await Timetable.find({ ...base, $or: roomFilters }).lean();
+    const seen = new Set();
     for (const s of roomSlots) {
+      const sid = s.id || String(s._id);
+      if (seen.has(sid)) continue;
+      seen.add(sid);
       const overlap = (data.startTime && s.startTime)
         ? _timesOverlap(data.startTime, data.endTime, s.startTime, s.endTime)
         : data.period === s.period;
@@ -236,7 +294,7 @@ async function _checkConflicts(schoolId, data, excludeId = null) {
         const when = (data.startTime && s.startTime)
           ? `${data.startTime}–${data.endTime}`
           : `${data.day} period ${data.period}`;
-        return `Room "${data.room}" is already occupied at ${when}.`;
+        return `Room "${data.room || s.room}" is already occupied at ${when}.`;
       }
     }
   }
@@ -261,6 +319,7 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async 
     if (req.query.subjectId)      filter.subjectId      = req.query.subjectId;
     if (req.query.day)            filter.day            = req.query.day;
     if (req.query.room)           filter.room           = req.query.room;
+    if (req.query.roomId)         filter.roomId         = req.query.roomId;
     if (req.query.academicYearId) filter.academicYearId = req.query.academicYearId;
     if (req.query.termId)         filter.termId         = req.query.termId;
     if (req.query.isActive)       filter.isActive       = req.query.isActive === 'true';
@@ -337,7 +396,7 @@ router.get('/conflicts', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'
 
     const slots = await tenantModel('timetable', tenantContext(req))
       .find(filter)
-      .select('id classId teacherId teacherName room day period subject startTime endTime section')
+      .select('id classId teacherId teacherName room roomId day period subject startTime endTime section')
       .limit(10000)
       .lean();
 
@@ -359,8 +418,11 @@ router.get('/conflicts', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'
         if (!teacherDay[k]) teacherDay[k] = [];
         teacherDay[k].push({ ...slot, _slotId: id });
       }
-      if (slot.room && slot.room.trim()) {
-        const k = `${slot.room.toLowerCase().trim()}|${slot.day}`;
+      // Grouped by roomId when linked — a rename can never split what's
+      // really the same physical room into two groups this scan misses.
+      // An unlinked/free-text room still groups by its normalised name.
+      if (slot.roomId || (slot.room && slot.room.trim())) {
+        const k = slot.roomId ? `id:${slot.roomId}|${slot.day}` : `name:${slot.room.toLowerCase().trim()}|${slot.day}`;
         if (!roomDay[k]) roomDay[k] = [];
         roomDay[k].push({ ...slot, _slotId: id });
       }
@@ -404,7 +466,8 @@ router.get('/conflicts', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'
           if (conflict) {
             conflicts.push({
               type:    'room_double_booked',
-              room:    a.room,
+              room:    a.room,          // resolved to the live registry name below when roomId is set
+              roomId:  a.roomId || null,
               day:     a.day,
               period:  (a.startTime && b.startTime)
                 ? `${a.startTime}–${a.endTime} / ${b.startTime}–${b.endTime}`
@@ -438,24 +501,50 @@ router.get('/conflicts', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'
       });
     }
 
-    // 2. Class names — batch look up from classes collection
+    // 2. Room names — resolve every linked room to its CURRENT registry name,
+    // not whatever was denormalised onto the slot at write time, so a rename
+    // made after these slots were scheduled still displays correctly here.
+    const allRoomIds = [...new Set(conflicts.filter(c => c.type === 'room_double_booked' && c.roomId).map(c => c.roomId))];
+    const roomNameMap = {};
+    if (allRoomIds.length) {
+      const rooms = await tenantModel('rooms', tenantContext(req)).find({
+        schoolId, id: { $in: allRoomIds }, isActive: { $ne: false },
+      }).select('id name').lean();
+      rooms.forEach(r => { roomNameMap[r.id] = r.name; });
+    }
+
+    // 3. Class names — batch look up from classes collection.
+    // Pre-existing bug, found live while verifying this change: classId is
+    // always the custom string `id` in practice (e.g. "cls_demo_f1a"), never
+    // a real Mongo _id, but the `_id: { $in: allClassIds } }` clause below
+    // used to run unconditionally — Mongoose's typed ObjectId cast throws a
+    // CastError (not a graceful no-match) the first time $in gets handed a
+    // non-ObjectId string, which crashed this ENTIRE endpoint (500) the
+    // moment any real conflict existed to enrich. Never triggered before
+    // because no conflict had apparently ever been detected against this
+    // demo data. Same fix as _classQuery/_roomQuery elsewhere in this file:
+    // only include the `_id` clause for ids that are actually ObjectId-shaped.
     const allClassIds = [...new Set(conflicts.flatMap(c => c.classIds ?? []))];
     const classNameMap = {};
     if (allClassIds.length) {
-      const classes = await tenantModel('classes', tenantContext(req)).find({
-        schoolId,
-        $or: [{ id: { $in: allClassIds } }, { _id: { $in: allClassIds } }],
-      }).select('id name').lean();
+      const oidClassIds = allClassIds.filter(id => /^[a-f\d]{24}$/i.test(id));
+      const classQuery = oidClassIds.length
+        ? { schoolId, $or: [{ id: { $in: allClassIds } }, { _id: { $in: oidClassIds } }] }
+        : { schoolId, id: { $in: allClassIds } };
+      const classes = await tenantModel('classes', tenantContext(req)).find(classQuery).select('id name').lean();
       classes.forEach(c => {
         if (c.id)  classNameMap[c.id]          = c.name;
         classNameMap[String(c._id)]             = c.name;
       });
     }
 
-    // 3. Apply enrichment to each conflict
+    // 4. Apply enrichment to each conflict
     conflicts.forEach(c => {
       if (c.type === 'teacher_double_booked' && teacherNameMap[c.teacherId]) {
         c.teacherName = teacherNameMap[c.teacherId];
+      }
+      if (c.type === 'room_double_booked' && c.roomId && roomNameMap[c.roomId]) {
+        c.room = roomNameMap[c.roomId];
       }
       c.classNames = (c.classIds ?? [])
         .map(cid => classNameMap[cid] ?? cid)
@@ -1339,6 +1428,9 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('timetable', 'create'), asy
     const { data, error } = _validate(SlotSchema, req.body);
     if (error) return E.validation(res, error);
 
+    const roomErr = await _applyRoomLink(schoolId, tenantContext(req), data);
+    if (roomErr) return E.notFound(res, roomErr);
+
     // Resolve + stamp the real academic year/term — Academic Year & Term
     // Dependency Map, finding #6. No client sends this today, so this
     // always defaults to the live-resolved current period, same pattern
@@ -1444,6 +1536,9 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('timetable', 'update'), a
     if (error) return E.validation(res, error);
     delete data.schoolId; delete data.id;
 
+    const roomErr = await _applyRoomLink(schoolId, tenantContext(req), data);
+    if (roomErr) return E.notFound(res, roomErr);
+
     const current = await tenantModel('timetable', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
     if (!current) return E.notFound(res, 'Timetable slot not found');
 
@@ -1481,7 +1576,7 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('timetable', 'update'), a
       data.endTime   = merged.endTime;
     }
 
-    const schedulingChanged = ['classId', 'streamId', 'day', 'period', 'teacherId', 'room'].some(f => data[f] !== undefined);
+    const schedulingChanged = ['classId', 'streamId', 'day', 'period', 'teacherId', 'room', 'roomId'].some(f => data[f] !== undefined);
     if (schedulingChanged) {
       const conflictMsg = await _checkConflicts(schoolId, merged, req.params.id);
       if (conflictMsg) return E.conflict(res, conflictMsg);
