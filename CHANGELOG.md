@@ -6,6 +6,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.117.0] — 2026-09-23 — feat(lessons): real per-lesson Lesson Plans, built on top of the existing syllabus tracker (backend)
+
+Requested by Trinitas International School and Trinity, sharing a template: a proper per-lesson planning document (Topic/Subtopic, objectives, activities, resources, remarks, differentiation by ability, assessment, homework, and a post-lesson reflection) — not what "Lessons" has actually been in this platform since it shipped: a syllabus/coverage tracker (Topic → Subtopic outline + per-teacher-per-class "covered" log), with no fields for any of that. Backend only in this commit — client UI follows in a separate commit.
+
+### Design decisions, made explicit rather than assumed
+- **One record = one lesson** (class[-stream]-subject-date), not one record per week. A teacher plans several in a sitting for the week ahead; each still saves independently — there is no separate "week" entity, "week" is computed from the lesson's own date (Monday of that week), so it can never drift from it.
+- **Topic/Subtopic is a required picker sourced from `syllabus_topics`**, not free text — this is the whole mechanism behind "teachers must update topics first": a subject with zero topics has nothing a picker could send, so the precondition falls out of normal required-field validation rather than needing its own separate gate.
+- **Never auto-linked to `lesson_coverage`.** A plan is what's intended; coverage is what's actually been taught. Auto-marking coverage the moment a plan is saved would let planning next Thursday's lesson today silently claim it as already covered.
+- **Reflection is the subject teacher's own** — filled in after the lesson, by the same teacher, no HOD/admin edit carve-out. HOD/admin can still view any plan for oversight (the coarse `lessons:read` grant + `isHodOrAdmin()`), but editing — including Reflection — is owner-only, admin excepted, mirroring `lesson_coverage`'s existing "delete your own records" rule exactly.
+- **No new permission surface.** Reuses `lessons`' existing `create`/`update`/`delete`/`read` actions — the same ones that (slightly confusingly, until now) were already labeled "Create/Edit/Delete Lesson Plan" in Settings while actually only gating syllabus topics. Those labels are now accurate for the first time.
+- **"Configurable per school"**: interpreted as the existing module-gate + per-role RBAC control every other module already gets (a school can turn Lessons off entirely, or grant/withhold plan-authoring per role) — not a per-school customizable field schema. Flagged to the requester as the interpretation taken, open to correction.
+- **Printable/exportable copy** pulls the calling school's own name/logo from Settings, not Trinitas's literal letterhead, so it renders correctly for every school that turns this on — laid out like the template, not a pixel copy of it.
+
+### Added
+- `lesson_plans` collection + `LessonPlanSchema`/`LessonPlanUpdateSchema` (Zod) in [lessons.js](server/routes/lessons.js).
+- Routes: `GET /api/lessons/plans` (list, scoped to caller's own unless admin/HOD), `GET /:id`, `POST /` (topic/subtopic FK-validated, class[-stream] ownership enforced via the same `ScopeEngine.isClassInScope` coverage already uses, admin submit-on-behalf retained), `PUT /:id` (owner-or-admin, merges `differentiation`/`reflection` field-by-field so filling in Reflection weeks later never blows away previously-saved Differentiation text), `DELETE /:id` (owner-or-admin), `GET /:id/pdf`.
+- [`lesson-plan-pdf.js`](server/utils/lesson-plan-pdf.js) — a new pdfkit renderer mirroring `payslip-engine.js`'s IR/adapter split (pure section-computation, then a drawing adapter, then a thin wrapper), fetching the school's logo live at render time (a lesson plan isn't a frozen historical snapshot the way a confirmed payslip is, so there's no "official as of X" moment to preserve).
+- `client/api/client.js`'s `lessons.plans.*` wrapper (list/get/create/update/remove/pdf), matching the existing `topics`/`coverage` sub-object convention.
+- New test `lessons-plans.test.js` (20 tests) proving: the topics-first precondition, class/stream ownership enforcement, GET scoping to the caller's own records, the no-HOD-edit rule specifically (HOD can view, cannot edit, a plan that isn't theirs), the differentiation/reflection merge behavior, and a real PDF response.
+
+### Verified
+Full Jest suite: 231 suites, 2305/2305 passing (was 230/2285 before this commit).
+
 ## [v5.116.0] — 2026-09-22 — fix(rbac): 6 more files hardcoded role checks instead of reading Roles & Permissions
 
 Follow-up to v5.115.0/v5.115.1's Students fix: after closing those two gaps, a whole-client grep for the same `role === 'admin' || role === 'superadmin'`-style pattern found it recurring in Dashboard.jsx, EventsPage.jsx, HRPage.jsx, MessagesPage.jsx, CatalogTab.jsx, CurriculumTab.jsx — flagged then, fixed now on explicit instruction: "roles and permissions don't need to be hardcoded, should be live controlled from the setting (role and permission) module." A 7th instance (TimetablePage.jsx) turned up during this pass and is fixed alongside the other 6.

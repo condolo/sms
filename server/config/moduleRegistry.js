@@ -125,6 +125,13 @@ const MODULE_REGISTRY = [
     { key: 'delete', label: 'Delete Subject' },
   ]},
   { key: 'lessons', label: 'Lessons', section: 'Academic Management', icon: 'BookCheck', navRoute: '/lessons', navOrder: 14, subs: [
+    // These 4 subs govern BOTH syllabus topics/subtopics (lessons.js's
+    // original curriculum-coverage tracker) AND, since 2026-09, real
+    // per-lesson lesson-plan documents (lessons.js's /plans routes,
+    // Trinitas + Trinity's requested template) — both reuse the same
+    // coarse read/create/update/delete actions rather than a second,
+    // parallel permission surface, since a role that may author the
+    // curriculum outline should also be able to plan lessons against it.
     { key: 'view',     label: 'View Lesson Plans' },
     { key: 'create',   label: 'Create Lesson Plan' },
     { key: 'edit',     label: 'Edit Lesson Plan' },

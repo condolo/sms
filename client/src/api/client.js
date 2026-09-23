@@ -868,6 +868,15 @@ export const lessons = {
     unmark:  (id)         => _delete(`/lessons/coverage/${id}`),
     unmarkBulk: (params)  => _req('DELETE', '/lessons/coverage', null, params),
   },
+  /* Lesson Plans — one record per lesson (Trinitas + Trinity template) */
+  plans: {
+    list:   (params)     => _get('/lessons/plans', params),
+    get:    (id)          => _get(`/lessons/plans/${id}`),
+    create: (data)        => _post('/lessons/plans', data),
+    update: (id, data)    => _put(`/lessons/plans/${id}`, data),
+    remove: (id)           => _delete(`/lessons/plans/${id}`),
+    pdf:    (id, filename) => _downloadPdf(`/lessons/plans/${id}/pdf`, filename ?? `lesson-plan-${id}.pdf`),
+  },
   /* Summary views */
   myClasses:    (params)  => _get('/lessons/my-classes', params),
   summary:      (params)  => _get('/lessons/summary', params),

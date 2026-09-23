@@ -35,6 +35,7 @@ const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
+const { resolveAcademicPeriod } = require('../utils/academic-period');
 
 const router = express.Router();
 const PLAN   = planGate('lessons');
@@ -103,6 +104,88 @@ const CoverageSchema = z.object({
   coveredAt:    z.string().optional(),   // ISO date — defaults to now
   notes:        z.string().max(500).trim().optional(),
 });
+
+/* Requested by Trinitas + Trinity (2026-09): a real, per-lesson lesson-plan
+   document — Topic/Subtopic picked from this same subject's syllabus_topics
+   (a subject with none yet cannot be planned for, by construction, since
+   topicId is required and validated against a real topic below), plus
+   differentiation/assessment/homework/reflection. Distinct from — and
+   never auto-linked to — lesson_coverage: a plan is what a teacher intends
+   to teach, coverage is what's actually been taught; conflating the two
+   would let planning a future lesson silently mark it "covered" today. */
+const LessonPlanSchema = z.object({
+  teacherId:   z.string().optional(),   // admin can submit on behalf, same as CoverageSchema
+  classId:     z.string().min(1),
+  streamId:    z.string().optional(),   // stream-scoped planning — see _streamFilterPart
+  subjectId:   z.string().min(1),
+  date:        z.string().min(1),       // ISO date ('YYYY-MM-DD') of this specific lesson
+  academicYearId: z.string().optional(),
+  termId:         z.string().optional(),
+  topicId:     z.string().min(1),
+  subtopicId:  z.string().optional(),
+  objectives:  z.string().max(2000).trim().optional().default(''),
+  activities:  z.string().max(2000).trim().optional().default(''),
+  resources:   z.string().max(1000).trim().optional().default(''),
+  remarks:     z.string().max(1000).trim().optional().default(''),
+  differentiation: z.object({
+    low:    z.string().max(1000).trim().optional().default(''),
+    middle: z.string().max(1000).trim().optional().default(''),
+    high:   z.string().max(1000).trim().optional().default(''),
+  }).optional().default({ low: '', middle: '', high: '' }),
+  assessment:  z.string().max(2000).trim().optional().default(''),
+  homework:    z.string().max(1000).trim().optional().default(''),
+  // Filled in after the lesson is actually taught — by the subject teacher
+  // only (see PUT /plans/:id's ownership check), so it's fine for this to
+  // arrive empty on create and be filled in later via update.
+  reflection:  z.object({
+    wentWell:    z.string().max(1000).trim().optional().default(''),
+    betterIf:    z.string().max(1000).trim().optional().default(''),
+    improvement: z.string().max(1000).trim().optional().default(''),
+  }).optional().default({ wentWell: '', betterIf: '', improvement: '' }),
+});
+
+// Update: every field optional, no nested defaults — a bare {} would
+// otherwise inject empty differentiation/reflection objects that then blow
+// away previously-saved values when merged naively. The PUT handler merges
+// differentiation/reflection field-by-field against the existing doc
+// instead of replacing them wholesale.
+const LessonPlanUpdateSchema = z.object({
+  classId:     z.string().min(1).optional(),
+  streamId:    z.string().optional(),
+  subjectId:   z.string().min(1).optional(),
+  date:        z.string().min(1).optional(),
+  academicYearId: z.string().optional(),
+  termId:         z.string().optional(),
+  topicId:     z.string().min(1).optional(),
+  subtopicId:  z.string().optional(),
+  objectives:  z.string().max(2000).trim().optional(),
+  activities:  z.string().max(2000).trim().optional(),
+  resources:   z.string().max(1000).trim().optional(),
+  remarks:     z.string().max(1000).trim().optional(),
+  differentiation: z.object({
+    low:    z.string().max(1000).trim().optional(),
+    middle: z.string().max(1000).trim().optional(),
+    high:   z.string().max(1000).trim().optional(),
+  }).partial().optional(),
+  assessment:  z.string().max(2000).trim().optional(),
+  homework:    z.string().max(1000).trim().optional(),
+  reflection:  z.object({
+    wentWell:    z.string().max(1000).trim().optional(),
+    betterIf:    z.string().max(1000).trim().optional(),
+    improvement: z.string().max(1000).trim().optional(),
+  }).partial().optional(),
+});
+
+// Monday of the week containing `dateStr` — computed at read time from the
+// lesson's own date rather than stored, so there's one source of truth
+// instead of a separately-typed "Week" field that can drift from the date.
+function _weekStartOf(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return null;
+  const day = d.getDay(); // 0=Sun..6=Sat
+  d.setDate(d.getDate() + ((day === 0 ? -6 : 1) - day));
+  return d.toISOString().slice(0, 10);
+}
 
 function _validate(schema, data) {
   const r = schema.safeParse(data);
@@ -553,6 +636,251 @@ router.delete('/coverage', authMiddleware, PLAN, MODGATE, rbac('lessons', 'delet
     const result = await tenantModel('lesson_coverage', tenantContext(req)).deleteMany(filter);
     return ok(res, { deleted: result.deletedCount });
   } catch (err) { console.error('[lessons/coverage DELETE bulk]', err); return E.serverError(res); }
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   LESSON PLAN ROUTES  (Trinitas + Trinity, 2026-09)
+   One lesson plan document per lesson (class[-stream]-subject-date).
+   A teacher plans several in one sitting for a whole week, but each
+   saves as its own record — there is no separate "week" entity.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Term/year display label for a resolved {academicYearId, termId} pair —
+   term NUMBER is derived from array position, same convention
+   academic-config.js's _resolveCurrentPeriod already uses (terms have no
+   stored name, just start/end dates in order). */
+async function _periodLabel(schoolId, ctx, academicYearId, termId) {
+  if (!academicYearId) return '';
+  const year = await tenantModel('academic_years', ctx).findOne({ schoolId, id: academicYearId }).select('name terms').lean();
+  if (!year) return '';
+  const terms = Array.isArray(year.terms) ? year.terms : [];
+  const idx = terms.findIndex(t => t.id === termId);
+  return idx >= 0 ? `Term ${idx + 1}, ${year.name || ''}`.trim() : (year.name || '');
+}
+
+function _enrichPlan(doc, periodLabel) {
+  return { ...doc, weekStart: _weekStartOf(doc.date), termYearLabel: periodLabel ?? '' };
+}
+
+/* ── GET /api/lessons/plans ─ list (own by default; admin/HOD can filter by teacher) */
+router.get('/plans', authMiddleware, PLAN, MODGATE, rbac('lessons', 'read'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { classId, subjectId, streamId, teacherId, dateFrom, dateTo, topicId } = req.query;
+
+    const filter = { schoolId };
+    if (classId)    filter.classId    = classId;
+    if (subjectId)  filter.subjectId  = subjectId;
+    if (topicId)    filter.topicId    = topicId;
+    if (streamId !== undefined) Object.assign(filter, _streamFilterPart(streamId || undefined));
+    if (dateFrom || dateTo) {
+      filter.date = {};
+      if (dateFrom) filter.date.$gte = dateFrom;
+      if (dateTo)   filter.date.$lte = dateTo;
+    }
+
+    // Non-admin/HOD: always their own, regardless of what teacherId was
+    // asked for — this is a personal planning record, not shared reference
+    // data like syllabus topics, so it doesn't get the "intentionally open"
+    // treatment those routes use.
+    if (!isHodOrAdmin(req)) {
+      filter.teacherId = userId;
+    } else if (teacherId) {
+      filter.teacherId = teacherId;
+    }
+
+    const docs = await tenantModel('lesson_plans', tenantContext(req)).find(filter).sort({ date: -1, createdAt: -1 }).lean();
+
+    const yearIds = [...new Set(docs.map(d => d.academicYearId).filter(Boolean))];
+    const labels = {};
+    await Promise.all(yearIds.map(async yid => {
+      const sample = docs.find(d => d.academicYearId === yid);
+      labels[yid + '__' + (sample.termId || '')] = await _periodLabel(schoolId, tenantContext(req), yid, sample.termId);
+    }));
+
+    const enriched = docs.map(d => _enrichPlan(d, labels[(d.academicYearId || '') + '__' + (d.termId || '')]));
+    return ok(res, enriched);
+  } catch (err) { console.error('[lessons/plans GET]', err); return E.serverError(res); }
+});
+
+/* ── GET /api/lessons/plans/:id ─ single record ─────────────── */
+router.get('/plans/:id', authMiddleware, PLAN, MODGATE, rbac('lessons', 'read'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const doc = await tenantModel('lesson_plans', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
+    if (!doc) return E.notFound(res, 'Lesson plan not found');
+    if (!isHodOrAdmin(req) && doc.teacherId !== userId) return E.forbidden(res, 'This is not your lesson plan.');
+
+    const periodLabel = await _periodLabel(schoolId, tenantContext(req), doc.academicYearId, doc.termId);
+    return ok(res, _enrichPlan(doc, periodLabel));
+  } catch (err) { console.error('[lessons/plans GET/:id]', err); return E.serverError(res); }
+});
+
+/* ── POST /api/lessons/plans ─ create ───────────────────────── */
+router.post('/plans', authMiddleware, PLAN, MODGATE, rbac('lessons', 'create'), scopeMiddleware, async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { data, error } = _validate(LessonPlanSchema, req.body);
+    if (error) return E.validation(res, error);
+
+    // Same ownership rule as POST /coverage: a non-admin can only plan for
+    // a class[-stream] they actually teach; admin retains submit-on-behalf.
+    if (!isAdmin(req) && !ScopeEngine.isClassInScope(req, 'lessons', data.classId, data.streamId)) {
+      return E.forbidden(res, 'This class is not in your teaching assignments.');
+    }
+    const effectiveTeacherId = (isAdmin(req) && data.teacherId) ? data.teacherId : userId;
+
+    // The precondition Trinitas/Trinity asked for — "topics must be
+    // updated first" — isn't a separate check, it falls out of topicId
+    // being required and validated here: a subject with zero topics has
+    // nothing a client picker could have sent.
+    const topic = await tenantModel('syllabus_topics', tenantContext(req)).findOne({ id: data.topicId, schoolId, subjectId: data.subjectId }).lean();
+    if (!topic) return E.notFound(res, 'Topic not found for this subject — add topics under Lessons → Topics first.');
+    if (data.subtopicId && !(topic.subtopics || []).some(st => st.id === data.subtopicId)) {
+      return E.notFound(res, 'Subtopic not found on this topic');
+    }
+
+    const period = await resolveAcademicPeriod(schoolId, tenantContext(req), { academicYearId: data.academicYearId, termId: data.termId });
+    if (period.error) return E.badRequest(res, period.error);
+
+    const [cls, subject, stream] = await Promise.all([
+      tenantModel('classes', tenantContext(req)).findOne({ id: data.classId, schoolId }).select('name').lean(),
+      tenantModel('subjects', tenantContext(req)).findOne({ id: data.subjectId, schoolId }).select('name').lean(),
+      data.streamId ? tenantModel('streams', tenantContext(req)).findOne({ id: data.streamId, schoolId }).select('name').lean() : null,
+    ]);
+
+    let teacherName = req.jwtUser.name ?? '';
+    if (effectiveTeacherId !== userId) {
+      const t = await tenantModel('users', tenantContext(req)).findOne({ id: effectiveTeacherId, schoolId }).select('name').lean();
+      teacherName = t?.name ?? teacherName;
+    }
+
+    const doc = await tenantModel('lesson_plans', tenantContext(req)).create({
+      id: uuidv4(),
+      schoolId,
+      teacherId:   effectiveTeacherId,
+      teacherName,
+      classId:     data.classId,
+      className:   cls?.name ?? '',
+      ...(data.streamId ? { streamId: data.streamId, streamName: stream?.name ?? '' } : {}),
+      subjectId:   data.subjectId,
+      subjectName: subject?.name ?? '',
+      date:        data.date,
+      academicYearId: period.academicYearId,
+      termId:         period.termId,
+      topicId:     data.topicId,
+      topicTitle:  topic.title,
+      ...(data.subtopicId ? { subtopicId: data.subtopicId, subtopicTitle: (topic.subtopics || []).find(st => st.id === data.subtopicId)?.title ?? '' } : {}),
+      objectives:  data.objectives,
+      activities:  data.activities,
+      resources:   data.resources,
+      remarks:     data.remarks,
+      differentiation: data.differentiation,
+      assessment:  data.assessment,
+      homework:    data.homework,
+      reflection:  data.reflection,
+      createdBy:   userId,
+      updatedBy:   userId,
+    });
+
+    const plain = doc.toObject ? doc.toObject() : doc;
+    const periodLabel = await _periodLabel(schoolId, tenantContext(req), plain.academicYearId, plain.termId);
+    return created(res, _enrichPlan(plain, periodLabel));
+  } catch (err) { console.error('[lessons/plans POST]', err); return E.serverError(res); }
+});
+
+/* ── PUT /api/lessons/plans/:id ─ update (incl. Reflection) ─── */
+router.put('/plans/:id', authMiddleware, PLAN, MODGATE, rbac('lessons', 'update'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const { data, error } = _validate(LessonPlanUpdateSchema, req.body);
+    if (error) return E.validation(res, error);
+
+    const existing = await tenantModel('lesson_plans', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
+    if (!existing) return E.notFound(res, 'Lesson plan not found');
+    // Reflection is the subject teacher's own — no HOD/admin edit carve-out,
+    // matching "Reflection = its the subject teacher" exactly. Admin keeps
+    // the same override every other lessons.js write route already has.
+    if (!isAdmin(req) && existing.teacherId !== userId) return E.forbidden(res, 'This is not your lesson plan.');
+
+    const update = { ...data, updatedBy: userId };
+    if (data.differentiation) update.differentiation = { ...existing.differentiation, ...data.differentiation };
+    if (data.reflection)      update.reflection      = { ...existing.reflection,      ...data.reflection };
+
+    // Re-validate topic/subtopic only if the caller actually changed them —
+    // avoids a redundant lookup on the common case (editing Reflection
+    // weeks later, topicId untouched).
+    if (data.topicId && data.topicId !== existing.topicId) {
+      const topic = await tenantModel('syllabus_topics', tenantContext(req)).findOne({ id: data.topicId, schoolId }).lean();
+      if (!topic) return E.notFound(res, 'Topic not found');
+      update.topicTitle = topic.title;
+      if (data.subtopicId) {
+        const st = (topic.subtopics || []).find(s => s.id === data.subtopicId);
+        if (!st) return E.notFound(res, 'Subtopic not found on this topic');
+        update.subtopicTitle = st.title;
+      }
+    }
+
+    const doc = await tenantModel('lesson_plans', tenantContext(req)).findOneAndUpdate(
+      { id: req.params.id, schoolId }, update, { new: true, runValidators: false }
+    ).lean();
+
+    const periodLabel = await _periodLabel(schoolId, tenantContext(req), doc.academicYearId, doc.termId);
+    return ok(res, _enrichPlan(doc, periodLabel));
+  } catch (err) { console.error('[lessons/plans PUT/:id]', err); return E.serverError(res); }
+});
+
+/* ── DELETE /api/lessons/plans/:id ──────────────────────────── */
+router.delete('/plans/:id', authMiddleware, PLAN, MODGATE, rbac('lessons', 'delete'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const filter = { id: req.params.id, schoolId };
+    if (!isAdmin(req)) filter.teacherId = userId; // same "own records only" rule as DELETE /coverage/:id
+
+    const doc = await tenantModel('lesson_plans', tenantContext(req)).findOneAndDelete(filter);
+    if (!doc) return E.notFound(res, 'Lesson plan not found');
+    return ok(res, { id: req.params.id, deleted: true });
+  } catch (err) { console.error('[lessons/plans DELETE/:id]', err); return E.serverError(res); }
+});
+
+/* ── GET /api/lessons/plans/:id/pdf ─ printable/exportable copy ─
+   "Should be something like the template, but picked from the system's
+   own school settings" — the school's own name/logo (Settings → School),
+   not Trinitas's literal letterhead, so this renders correctly for every
+   school that turns the feature on, not just the two that asked for it. */
+router.get('/plans/:id/pdf', authMiddleware, PLAN, MODGATE, rbac('lessons', 'read'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.jwtUser;
+    const plan = await tenantModel('lesson_plans', tenantContext(req)).findOne({ id: req.params.id, schoolId }).lean();
+    if (!plan) return E.notFound(res, 'Lesson plan not found');
+    if (!isHodOrAdmin(req) && plan.teacherId !== userId) return E.forbidden(res, 'This is not your lesson plan.');
+
+    const [school, periodLabel] = await Promise.all([
+      _model('schools').findOne({ id: schoolId }, { name: 1, logoUrl: 1 }).lean(),
+      _periodLabel(schoolId, tenantContext(req), plan.academicYearId, plan.termId),
+    ]);
+
+    let PDFDocument;
+    try { PDFDocument = require('pdfkit'); }
+    catch { return res.status(501).json({ error: 'pdfkit not installed. Run: npm install pdfkit' }); }
+
+    const { fetchImageBuf, _buildLessonPlanPDF } = require('../utils/lesson-plan-pdf');
+    const schoolLogo = await fetchImageBuf(school?.logoUrl).catch(() => null);
+
+    const pdfDoc  = new PDFDocument({ margin: 40, size: 'A4' });
+    const buffers = [];
+    pdfDoc.on('data', chunk => buffers.push(chunk));
+    pdfDoc.on('end', () => {
+      const pdf = Buffer.concat(buffers);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="lesson-plan-${plan.id}.pdf"`);
+      res.setHeader('Content-Length', pdf.length);
+      res.send(pdf);
+    });
+
+    _buildLessonPlanPDF(pdfDoc, _enrichPlan(plan, periodLabel), school, { schoolLogo });
+    pdfDoc.end();
+  } catch (err) { console.error('[lessons/plans/:id/pdf GET]', err); return E.serverError(res); }
 });
 
 /* ═══════════════════════════════════════════════════════════════
