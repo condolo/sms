@@ -664,10 +664,10 @@ function TemplateTab() {
    whole mechanism behind "teachers must update topics before planning a
    lesson" (the server enforces the same thing independently — this is
    just the friendlier, earlier version of that same rule). */
-function LessonPlanSlideOver({ classId, className, subjectId, subjectName, streamId, streamName, existing, onClose, onSaved }) {
+function LessonPlanSlideOver({ classId, className, subjectId, subjectName, streamId, streamName, existing, initialDate, onClose, onSaved }) {
   const qc = useQueryClient();
   const isEdit = !!existing;
-  const [date,        setDate]        = useState(existing?.date ?? new Date().toISOString().slice(0, 10));
+  const [date,        setDate]        = useState(existing?.date ?? initialDate ?? new Date().toISOString().slice(0, 10));
   const [topicId,     setTopicId]     = useState(existing?.topicId ?? '');
   const [subtopicId,  setSubtopicId]  = useState(existing?.subtopicId ?? '');
   const [objectives,  setObjectives]  = useState(existing?.objectives ?? '');
@@ -716,6 +716,7 @@ function LessonPlanSlideOver({ classId, className, subjectId, subjectName, strea
     mutationFn: (data) => isEdit ? lessonsApi.plans.update(existing.id, data) : lessonsApi.plans.create(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['lessons', 'plans', classId, subjectId, streamId ?? ''] });
+      qc.invalidateQueries({ queryKey: ['lessons', 'week-status'] });
       onSaved();
     },
     onError: (err) => setError(err?.message ?? 'Failed to save lesson plan'),
@@ -929,6 +930,7 @@ function PlansDrillDown({ item, onBack }) {
   const qc = useQueryClient();
   const [showSlider, setShowSlider] = useState(false);
   const [editing,    setEditing]    = useState(null);
+  const [prefillDate, setPrefillDate] = useState(null);
 
   const { data: resp, isLoading } = useQuery({
     queryKey: ['lessons', 'plans', classId, subjectId, streamId ?? ''],
@@ -937,9 +939,23 @@ function PlansDrillDown({ item, onBack }) {
   });
   const plans = resp?.data ?? [];
 
+  // Timetable-aware: which of THIS class-subject[-stream]'s real weekly
+  // lessons don't have a plan yet — see lessons.js's GET /plans/week-status.
+  const { data: weekResp } = useQuery({
+    queryKey: ['lessons', 'week-status'],
+    queryFn:  () => lessonsApi.plans.weekStatus(),
+    staleTime: 5 * 60_000,
+  });
+  const weekUnplanned = (weekResp?.data?.unplanned ?? []).filter(u =>
+    u.classId === classId && u.subjectId === subjectId && (u.streamId ?? null) === (streamId ?? null)
+  );
+
   const deleteMutation = useMutation({
     mutationFn: (plan) => lessonsApi.plans.remove(plan.id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['lessons', 'plans', classId, subjectId, streamId ?? ''] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lessons', 'plans', classId, subjectId, streamId ?? ''] });
+      qc.invalidateQueries({ queryKey: ['lessons', 'week-status'] });
+    },
   });
 
   // Grouped by week (server computes weekStart from each plan's own date —
@@ -967,12 +983,33 @@ function PlansDrillDown({ item, onBack }) {
           <p className="text-xs text-slate-400 mt-0.5">{plans.length} lesson plan{plans.length !== 1 ? 's' : ''}</p>
         </div>
         <button
-          onClick={() => { setEditing(null); setShowSlider(true); }}
+          onClick={() => { setEditing(null); setPrefillDate(null); setShowSlider(true); }}
           className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-3 py-2 rounded-lg"
         >
           <Plus size={13} /> New Lesson Plan
         </button>
       </div>
+
+      {weekUnplanned.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-800">
+            <AlertTriangle size={13} />
+            {weekUnplanned.length} lesson{weekUnplanned.length !== 1 ? 's' : ''} on your timetable this week {weekUnplanned.length !== 1 ? "aren't" : "isn't"} planned yet
+          </div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {weekUnplanned.map(u => (
+              <button
+                key={u.date}
+                onClick={() => { setEditing(null); setPrefillDate(u.date); setShowSlider(true); }}
+                className="flex items-center gap-1 text-xs bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 px-2.5 py-1 rounded-full"
+              >
+                <Plus size={11} />
+                {new Date(`${u.date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="flex justify-center py-12"><Loader2 className="animate-spin text-indigo-400" size={24} /></div>
@@ -1009,20 +1046,66 @@ function PlansDrillDown({ item, onBack }) {
         <LessonPlanSlideOver
           classId={classId} className={className} subjectId={subjectId} subjectName={subjectName}
           streamId={streamId} streamName={streamName}
-          existing={editing}
-          onClose={() => { setShowSlider(false); setEditing(null); }}
-          onSaved={() => { setShowSlider(false); setEditing(null); }}
+          existing={editing} initialDate={prefillDate}
+          onClose={() => { setShowSlider(false); setEditing(null); setPrefillDate(null); }}
+          onSaved={() => { setShowSlider(false); setEditing(null); setPrefillDate(null); }}
         />
       )}
     </div>
   );
 }
 
+/* ── Lesson-plan class card — like ClassCard but shows "this week"
+   planning status (from real timetable slots) instead of syllabus
+   coverage %. Kept separate from ClassCard rather than overloading it
+   with an optional prop: the two show fundamentally different metrics
+   (coverage-to-date vs. this-week's plans) and Topics & Coverage's own
+   card must stay completely unaffected by this feature. ─────────── */
+function LessonPlanCard({ item, weekInfo, onClick }) {
+  const { className, streamName, subjectName } = item;
+  const required = weekInfo?.required ?? 0;
+  const planned  = weekInfo?.planned ?? 0;
+  const pct = required > 0 ? Math.round((planned / required) * 100) : null;
+  const color = pct === null ? 'text-slate-300' : pct >= 100 ? 'text-emerald-600' : pct >= 50 ? 'text-amber-600' : 'text-red-500';
+  return (
+    <button
+      onClick={onClick}
+      className="bg-white border border-slate-200 rounded-xl p-5 hover:shadow-md hover:border-slate-300 transition-all text-left group"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wide truncate">
+            {className}{streamName ? ` · ${streamName}` : ''}
+          </p>
+          <h3 className="text-sm font-semibold text-slate-800 mt-0.5 truncate">{subjectName}</h3>
+          <p className="text-xs text-slate-400 mt-1">
+            {required > 0 ? `${planned} of ${required} lessons planned this week` : 'No timetable slots this week'}
+          </p>
+        </div>
+        {pct !== null && (
+          <div className="relative shrink-0">
+            <ProgressRing pct={pct} size={60} stroke={5} />
+            <span className={`absolute inset-0 flex items-center justify-center text-sm font-bold rotate-90 ${color}`}>
+              {pct}%
+            </span>
+          </div>
+        )}
+      </div>
+      <div className="flex items-center gap-1 mt-3 text-xs text-slate-400 group-hover:text-indigo-600 transition-colors">
+        Plan lessons <ChevronRight size={12} />
+      </div>
+    </button>
+  );
+}
+
 /* ── Teacher: Lesson Plans tab ─────────────────────────────────
-   Same class-subject[-stream] picker as My Classes (reuses myClasses()
-   and ClassCard) — planning is per lesson per stream, so the picker has
-   to resolve down to the exact same assignment granularity coverage
-   already does. */
+   Same class-subject[-stream] picker as My Classes (myClasses()) —
+   planning is per lesson per stream, so the picker has to resolve down
+   to the exact same assignment granularity coverage already does.
+   Enriched with real timetable-derived "this week" planning status
+   (GET /plans/week-status) — the whole point of connecting Lesson Plans
+   to Timetable: the system now knows how many lessons a week actually
+   need planning, not just which classes exist. */
 function LessonPlansTab() {
   const [drilldown, setDrilldown] = useState(null);
 
@@ -1033,6 +1116,22 @@ function LessonPlansTab() {
   });
   const items = resp?.data ?? [];
 
+  const { data: weekResp } = useQuery({
+    queryKey: ['lessons', 'week-status'],
+    queryFn:  () => lessonsApi.plans.weekStatus(),
+    staleTime: 5 * 60_000,
+  });
+  const week = weekResp?.data;
+  const weekByKey = useMemo(() => {
+    const map = {};
+    (week?.assignments ?? []).forEach(a => { map[`${a.classId}__${a.subjectId}__${a.streamId ?? ''}`] = a; });
+    return map;
+  }, [week]);
+
+  // Plan directly from the week-status reminder, bypassing the class-card
+  // picker entirely — see quickPlan below for why this matters.
+  const [quickPlan, setQuickPlan] = useState(null); // null | one entry from week.unplanned
+
   if (drilldown) {
     return <PlansDrillDown item={drilldown} onBack={() => setDrilldown(null)} />;
   }
@@ -1041,7 +1140,7 @@ function LessonPlansTab() {
     return <div className="flex justify-center py-16"><Loader2 className="animate-spin text-indigo-400" size={24} /></div>;
   }
 
-  if (!items.length) {
+  if (!items.length && !(week?.totalRequired > 0)) {
     return (
       <div className="text-center py-16 text-slate-400">
         <GraduationCap size={36} className="mx-auto mb-3 opacity-30" />
@@ -1053,16 +1152,66 @@ function LessonPlansTab() {
 
   return (
     <div>
-      <p className="text-xs text-slate-500 mb-4">Tap a card to plan or review lessons for that class.</p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {items.map(item => (
-          <ClassCard
-            key={`${item.classId}-${item.subjectId}-${item.streamId ?? ''}`}
-            item={item}
-            onClick={() => setDrilldown(item)}
-          />
-        ))}
-      </div>
+      {week && week.totalRequired > 0 && (
+        <div className="mb-4">
+          <div className={`flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium ${
+            week.totalPlanned >= week.totalRequired
+              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+              : 'bg-amber-50 text-amber-800 border border-amber-200'
+          }`}>
+            {week.totalPlanned >= week.totalRequired ? <Check size={15} /> : <AlertTriangle size={15} />}
+            {week.totalPlanned} of {week.totalRequired} lessons on your timetable planned this week
+          </div>
+          {/* Plan directly here, not just via the class cards below — a
+              class-subject can be missing from "My Classes" (sourced from
+              teaching_assignments) even though it's genuinely on this
+              teacher's real timetable (a data-completeness gap between the
+              two, not something this feature can silently paper over — see
+              DEVELOPER_GUIDE.md §51/§52). Without this, a lesson the
+              reminder correctly flags could be un-plannable through the UI
+              at all. */}
+          {week.unplanned.length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-2">
+              {week.unplanned.map(u => (
+                <button
+                  key={`${u.classId}-${u.subjectId}-${u.streamId ?? ''}-${u.date}`}
+                  onClick={() => setQuickPlan(u)}
+                  className="flex items-center gap-1 text-xs bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 px-2.5 py-1 rounded-full"
+                >
+                  <Plus size={11} />
+                  {u.subjectName} · {new Date(`${u.date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {items.length > 0 && (
+        <>
+          <p className="text-xs text-slate-500 mb-4">Tap a card to plan or review lessons for that class.</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {items.map(item => (
+              <LessonPlanCard
+                key={`${item.classId}-${item.subjectId}-${item.streamId ?? ''}`}
+                item={item}
+                weekInfo={weekByKey[`${item.classId}__${item.subjectId}__${item.streamId ?? ''}`]}
+                onClick={() => setDrilldown(item)}
+              />
+            ))}
+          </div>
+        </>
+      )}
+
+      {quickPlan && (
+        <LessonPlanSlideOver
+          classId={quickPlan.classId} className={quickPlan.className}
+          subjectId={quickPlan.subjectId} subjectName={quickPlan.subjectName}
+          streamId={quickPlan.streamId ?? undefined} streamName={quickPlan.streamName}
+          initialDate={quickPlan.date}
+          onClose={() => setQuickPlan(null)}
+          onSaved={() => setQuickPlan(null)}
+        />
+      )}
     </div>
   );
 }

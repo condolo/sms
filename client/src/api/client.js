@@ -876,6 +876,9 @@ export const lessons = {
     update: (id, data)    => _put(`/lessons/plans/${id}`, data),
     remove: (id)           => _delete(`/lessons/plans/${id}`),
     pdf:    (id, filename) => _downloadPdf(`/lessons/plans/${id}/pdf`, filename ?? `lesson-plan-${id}.pdf`),
+    // Timetable-aware "how many lessons this week, and which aren't
+    // planned yet" — self-service, current teacher only.
+    weekStatus: (params) => _get('/lessons/plans/week-status', params),
   },
   /* Per-school field customization — Settings → Roles & Permissions →
      Lessons → "Configure Lesson Plan Template" controls who can call update. */

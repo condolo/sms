@@ -36,6 +36,7 @@ const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { ok, created, paginate, parsePagination, E } = require('../utils/response');
 const { resolveAcademicPeriod } = require('../utils/academic-period');
+const { resolveTeacher } = require('../utils/resolveTeacher');
 
 const router = express.Router();
 const PLAN   = planGate('lessons');
@@ -360,11 +361,24 @@ router.put('/template', authMiddleware, PLAN, MODGATE, rbac('lessons', 'update')
 // Monday of the week containing `dateStr` — computed at read time from the
 // lesson's own date rather than stored, so there's one source of truth
 // instead of a separately-typed "Week" field that can drift from the date.
+//
+// Parses and manipulates entirely in UTC — deliberately never `new
+// Date(dateStr + 'T00:00:00')` (LOCAL midnight) followed by
+// `.toISOString()` (always UTC): in any server timezone AHEAD of UTC
+// (this app's actual deployment, Africa/Nairobi, UTC+3, very much
+// included), local midnight is the PREVIOUS day in UTC, so that
+// combination silently returns a date one day too early. Found via this
+// exact symptom in a Jest test running in the sandbox's own Nairobi
+// timezone — not a hypothetical: `_weekStartOf('2026-09-21')` (a Monday)
+// was returning '2026-09-20' (a Sunday) before this fix. Parsing with an
+// explicit 'Z' and using the UTC-suffixed getters/setters throughout
+// means the date string is only ever interpreted as itself, never
+// shifted by wall-clock/timezone conversion.
 function _weekStartOf(dateStr) {
-  const d = new Date(`${dateStr}T00:00:00`);
+  const d = new Date(`${dateStr}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return null;
-  const day = d.getDay(); // 0=Sun..6=Sat
-  d.setDate(d.getDate() + ((day === 0 ? -6 : 1) - day));
+  const day = d.getUTCDay(); // 0=Sun..6=Sat
+  d.setUTCDate(d.getUTCDate() + ((day === 0 ? -6 : 1) - day));
   return d.toISOString().slice(0, 10);
 }
 
@@ -900,6 +914,130 @@ router.get('/plans', authMiddleware, PLAN, MODGATE, rbac('lessons', 'read'), asy
     const enriched = docs.map(d => _enrichPlan(d, labels[(d.academicYearId || '') + '__' + (d.termId || '')]));
     return ok(res, enriched);
   } catch (err) { console.error('[lessons/plans GET]', err); return E.serverError(res); }
+});
+
+/* ── GET /api/lessons/plans/week-status ─ timetable-aware reminder ─
+   Requested directly (2026-09): "once teachers timetable is connected the
+   system is aware how many lessons a week needs to be planned for, and
+   reminds the teacher [of] the lessons not planned for."
+
+   teaching_assignments only says WHO teaches WHAT — it has no day/period
+   granularity, so it can't answer "how many lessons a week". The
+   TIMETABLE is the actual source of truth for that: real, recurring
+   day/period slots (timetable.js's SlotSchema). This route walks the
+   caller's own real 'lesson'-type timetable slots, resolves each one to
+   an actual calendar date within the requested week, and cross-references
+   lesson_plans for that same window — self-service only (this is "your
+   own reminder", not an oversight tool; matches /my-classes' own scope).
+
+   Placed BEFORE GET /plans/:id so Express doesn't match "week-status" as
+   an :id param. */
+router.get('/plans/week-status', authMiddleware, PLAN, MODGATE, rbac('lessons', 'read'), async (req, res) => {
+  try {
+    const { schoolId, userId, email } = req.jwtUser;
+    // Local date getters (not toISOString, which is always UTC) — this
+    // server's real deployment timezone (Africa/Nairobi, UTC+3) means
+    // `new Date().toISOString()` reports YESTERDAY's date for the first 3
+    // hours of every local day. Same underlying bug class this whole
+    // route's date math was just fixed for below — see _weekStartOf's own
+    // comment for the full story and how it was actually found.
+    const _now = new Date();
+    const todayLocal = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')}`;
+    const requestedDate = req.query.weekStart || todayLocal;
+    const weekStart = _weekStartOf(requestedDate);
+    if (!weekStart) return E.validation(res, [{ field: 'weekStart', message: 'Invalid date' }]);
+    const weekEnd = (() => {
+      const d = new Date(`${weekStart}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + 6);
+      return d.toISOString().slice(0, 10);
+    })();
+
+    // timetable.teacherId has been written under two different identities
+    // historically in this codebase (the teachers-collection id and the
+    // account userId — see teacher-portal.js's identical $or, and
+    // DEVELOPER_GUIDE.md §51 for the full finding). Matching both here,
+    // rather than picking one, is the same pragmatic answer already
+    // established elsewhere — not a fix for that deeper inconsistency,
+    // which stays out of scope for this route same as it did there.
+    const teacher = await resolveTeacher(userId, email, schoolId).catch(() => null);
+    const teacherIdOr = [{ teacherId: userId }, ...(teacher?.id && teacher.id !== userId ? [{ teacherId: teacher.id }] : [])];
+
+    const Timetable = tenantModel('timetable', tenantContext(req));
+    const slots = await Timetable.find({ schoolId, isActive: true, type: 'lesson', $or: teacherIdOr })
+      .select('classId streamId subjectId day').lean();
+
+    const DAY_INDEX = { monday: 0, tuesday: 1, wednesday: 2, thursday: 3, friday: 4, saturday: 5, sunday: 6 };
+    function dateForDay(day) {
+      const d = new Date(`${weekStart}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + (DAY_INDEX[day] ?? 0));
+      return d.toISOString().slice(0, 10);
+    }
+
+    // Dedupe to distinct {classId, subjectId, streamId, date} — a double
+    // period on the same day for the same class-subject is ONE lesson to
+    // plan, matching lesson_plans' own date-level (not period-level)
+    // granularity. A slot with no subjectId (shouldn't normally happen for
+    // type:'lesson', but real data drifts) can't be matched to a plan at
+    // all, so it's skipped rather than counted as permanently unplannable.
+    const requiredMap = new Map();
+    for (const s of slots) {
+      if (!s.subjectId) continue;
+      const date = dateForDay(s.day);
+      const key = `${s.classId}__${s.subjectId}__${s.streamId || ''}__${date}`;
+      requiredMap.set(key, { classId: s.classId, subjectId: s.subjectId, streamId: s.streamId || null, date, day: s.day });
+    }
+    const required = [...requiredMap.values()];
+
+    const LessonPlans = tenantModel('lesson_plans', tenantContext(req));
+    const plans = await LessonPlans.find({ schoolId, $or: teacherIdOr, date: { $gte: weekStart, $lte: weekEnd } })
+      .select('classId subjectId streamId date').lean();
+    const plannedKeys = new Set(plans.map(p => `${p.classId}__${p.subjectId || ''}__${p.streamId || ''}__${p.date}`));
+
+    const classIds   = [...new Set(required.map(r => r.classId))];
+    const subjectIds = [...new Set(required.map(r => r.subjectId))];
+    const streamIds  = [...new Set(required.map(r => r.streamId).filter(Boolean))];
+    const [classes, subjects, streams] = await Promise.all([
+      classIds.length   ? tenantModel('classes', tenantContext(req)).find({ schoolId, id: { $in: classIds } }).select('id name').lean()     : [],
+      subjectIds.length ? tenantModel('subjects', tenantContext(req)).find({ schoolId, id: { $in: subjectIds } }).select('id name').lean()   : [],
+      streamIds.length  ? tenantModel('streams', tenantContext(req)).find({ schoolId, id: { $in: streamIds } }).select('id name').lean()     : [],
+    ]);
+    const classMap = Object.fromEntries(classes.map(c => [c.id, c.name]));
+    const subjectMap = Object.fromEntries(subjects.map(s => [s.id, s.name]));
+    const streamMap = Object.fromEntries(streams.map(s => [s.id, s.name]));
+
+    const byAssignment = {};
+    required.forEach(r => {
+      const gKey = `${r.classId}__${r.subjectId}__${r.streamId || ''}`;
+      if (!byAssignment[gKey]) {
+        byAssignment[gKey] = {
+          classId: r.classId, className: classMap[r.classId] || '',
+          subjectId: r.subjectId, subjectName: subjectMap[r.subjectId] || '',
+          streamId: r.streamId, streamName: r.streamId ? (streamMap[r.streamId] || '') : null,
+          required: 0, planned: 0, unplannedDates: [],
+        };
+      }
+      byAssignment[gKey].required++;
+      if (plannedKeys.has(`${r.classId}__${r.subjectId}__${r.streamId || ''}__${r.date}`)) byAssignment[gKey].planned++;
+      else byAssignment[gKey].unplannedDates.push(r.date);
+    });
+    const assignments = Object.values(byAssignment).sort((a, b) => a.className.localeCompare(b.className));
+
+    const unplanned = required
+      .filter(r => !plannedKeys.has(`${r.classId}__${r.subjectId}__${r.streamId || ''}__${r.date}`))
+      .map(r => ({
+        ...r, className: classMap[r.classId] || '', subjectName: subjectMap[r.subjectId] || '',
+        streamName: r.streamId ? (streamMap[r.streamId] || '') : null,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    return ok(res, {
+      weekStart, weekEnd,
+      totalRequired: required.length,
+      totalPlanned: required.length - unplanned.length,
+      assignments,
+      unplanned,
+    });
+  } catch (err) { console.error('[lessons/plans/week-status GET]', err); return E.serverError(res); }
 });
 
 /* ── GET /api/lessons/plans/:id ─ single record ─────────────── */
