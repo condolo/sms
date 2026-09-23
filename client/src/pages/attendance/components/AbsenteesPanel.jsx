@@ -12,7 +12,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { CalendarDays, ChevronLeft, ChevronRight, Lock, AlertTriangle, Loader2, Phone, Mail, UserX } from 'lucide-react';
-import { attendance as attendanceApi } from '@/api/client.js';
+import { attendance as attendanceApi, classes as classesApi, streams as streamsApi } from '@/api/client.js';
 
 function shiftDate(dateStr, days) {
   const d = new Date(dateStr + 'T00:00:00');
@@ -26,33 +26,76 @@ function fmtDate(d) {
 export default function AbsenteesPanel() {
   const today = new Date().toISOString().slice(0, 10);
   const [date, setDate] = useState(today);
+  const [classId, setClassId]   = useState('');
+  const [streamId, setStreamId] = useState('');
+
+  // Deliberately UNSCOPED (no attendanceScope param, unlike the Register
+  // tab's own class picker) — this whole view is already gated to floor
+  // roles / the explicit attendance__absentees grant precisely because it's
+  // meant to see absences school-wide, not just the caller's own classes.
+  const { data: classesData } = useQuery({
+    queryKey: ['classes', 'for-absentees-filter'],
+    queryFn:  () => classesApi.list({ limit: 200 }),
+    staleTime: 5 * 60_000,
+  });
+  const classList = classesData?.data ?? [];
+
+  const { data: streamsData } = useQuery({
+    queryKey: ['streams', 'for-absentees-filter', classId],
+    queryFn:  () => streamsApi.list({ classId, status: 'active', limit: 50 }),
+    enabled:  !!classId,
+    staleTime: 5 * 60_000,
+  });
+  const streamList = streamsData?.data ?? [];
 
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['attendance', 'absentees', date],
-    queryFn:  () => attendanceApi.absentees({ date }),
+    queryKey: ['attendance', 'absentees', date, classId, streamId],
+    queryFn:  () => attendanceApi.absentees({ date, classId: classId || undefined, streamId: streamId || undefined }),
   });
 
   const absentees = data?.data?.absentees ?? [];
 
   return (
     <div className="max-w-screen-xl mx-auto px-6 py-5 space-y-5">
-      <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
-        <button onClick={() => setDate(d => shiftDate(d, -1))} className="p-1.5 rounded hover:bg-white transition text-slate-600">
-          <ChevronLeft size={14} />
-        </button>
-        <div className="relative flex items-center gap-1.5 px-2">
-          <CalendarDays size={13} className="text-slate-400" />
-          <input
-            type="date"
-            value={date}
-            onChange={e => setDate(e.target.value)}
-            max={today}
-            className="text-sm font-medium text-slate-700 bg-transparent focus:outline-none cursor-pointer"
-          />
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
+          <button onClick={() => setDate(d => shiftDate(d, -1))} className="p-1.5 rounded hover:bg-white transition text-slate-600">
+            <ChevronLeft size={14} />
+          </button>
+          <div className="relative flex items-center gap-1.5 px-2">
+            <CalendarDays size={13} className="text-slate-400" />
+            <input
+              type="date"
+              value={date}
+              onChange={e => setDate(e.target.value)}
+              max={today}
+              className="text-sm font-medium text-slate-700 bg-transparent focus:outline-none cursor-pointer"
+            />
+          </div>
+          <button onClick={() => setDate(d => shiftDate(d, 1))} disabled={date >= today} className="p-1.5 rounded hover:bg-white transition text-slate-600 disabled:opacity-40">
+            <ChevronRight size={14} />
+          </button>
         </div>
-        <button onClick={() => setDate(d => shiftDate(d, 1))} disabled={date >= today} className="p-1.5 rounded hover:bg-white transition text-slate-600 disabled:opacity-40">
-          <ChevronRight size={14} />
-        </button>
+
+        <select
+          value={classId}
+          onChange={e => { setClassId(e.target.value); setStreamId(''); }}
+          className="text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-700"
+        >
+          <option value="">All classes</option>
+          {classList.map(c => <option key={c.id ?? c._id} value={c.id ?? c._id}>{c.name}</option>)}
+        </select>
+
+        {classId && streamList.length > 0 && (
+          <select
+            value={streamId}
+            onChange={e => setStreamId(e.target.value)}
+            className="text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-700"
+          >
+            <option value="">All streams</option>
+            {streamList.map(s => <option key={s.id ?? s._id} value={s.id ?? s._id}>{s.name}</option>)}
+          </select>
+        )}
       </div>
 
       {isLoading ? (

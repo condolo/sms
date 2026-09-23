@@ -59,7 +59,12 @@ function OfficerAssignmentSection() {
     queryKey: ['settings', 'custom-roles', 'for-behaviour-officer'],
     queryFn:  () => settingsApi.customRoles.list(),
   });
-  const customRoles = customRolesData ?? [];
+  // customRolesData is the raw { success, data } envelope _get() returns,
+  // not the array itself — found while fixing the identical copy of this
+  // bug in attendance/ConflictsPanel.jsx's own officer picker (crashed the
+  // whole section — customRoles.map is not a function — the moment
+  // assigneeType defaulted to 'role' and this select tried to render).
+  const customRoles = customRolesData?.data ?? [];
 
   const [assigneeType, setAssigneeType]   = useState(currentStep?.assigneeType ?? 'role');
   const [assigneeValue, setAssigneeValue] = useState(currentStep?.assigneeValue ?? '');

@@ -18,6 +18,7 @@ import useAuthStore from '@/store/auth.js';
 import SchoolReportPanel from './components/SchoolReportPanel.jsx';
 import AbsenteesPanel from './components/AbsenteesPanel.jsx';
 import ConflictsPanel from './components/ConflictsPanel.jsx';
+import AttendanceSettingsPanel from './components/AttendanceSettingsPanel.jsx';
 
 /* ── Status config ───────────────────────────────────────────── */
 const STATUSES = [
@@ -354,6 +355,21 @@ export default function AttendancePage() {
               >
                 Conflicts
               </button>
+              {/* Pure configuration, nothing to show a non-admin — unlike the
+                 tabs above (which stay always-visible per this file's own
+                 convention, surfacing a 403 inline), this one is hidden
+                 outright for anyone who isn't admin/superadmin, since the
+                 PUT routes it drives are hard-gated to those two roles
+                 regardless of any custom RBAC grant. Same reasoning Lessons'
+                 own Template tab uses for canConfigureTemplate. */}
+              {['admin', 'superadmin'].includes(role) && (
+                <button
+                  onClick={() => setViewMode('settings')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${viewMode === 'settings' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                  Settings
+                </button>
+              )}
             </div>
             {noClassesAssigned && viewMode === 'register' && (
               <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
@@ -481,6 +497,8 @@ export default function AttendancePage() {
         <AbsenteesPanel />
       ) : viewMode === 'conflicts' ? (
         <ConflictsPanel />
+      ) : viewMode === 'settings' ? (
+        <AttendanceSettingsPanel />
       ) : (
       <div className="max-w-screen-xl mx-auto px-6 py-5 space-y-5">
 

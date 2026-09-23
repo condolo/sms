@@ -135,6 +135,14 @@ const EVENT_REGISTRY = {
     channels:    { email: false, inApp: true },
     implemented: true,
   },
+  attendance_absentee_alert: {
+    label:       'Student Marked Absent (Staff Alert)',
+    desc:        'Sent to the assigned Absentee Alert Recipient (see Attendance → Settings) whenever a student is marked absent — real-time, per absence, not the end-of-day summary above',
+    group:       'attendance',
+    audience:    ['staff'],
+    channels:    { email: true, inApp: true },
+    implemented: true,
+  },
   attendance_conflict: {
     label:       'Attendance Conflict Flagged',
     desc:        'Sent to the assigned Attendance Conflict Resolver when a student is marked both present and absent on the same day',

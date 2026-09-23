@@ -919,6 +919,31 @@ async function sendAttendanceSummaryAlert({
   return _sendAsSchool(recipientEmail, `📊 Daily Attendance Summary — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
 }
 
+/* 25. Real-time absentee alert — one email per marking action (not per
+   student, to avoid spamming the recipient when a whole class is marked
+   at once), to the assigned Absentee Alert Recipient (Attendance →
+   Settings). Distinct from sendAttendanceSummaryAlert above (a single
+   end-of-day rollup, cron-driven) and from sendAbsenceAlert (the parent/
+   guardian's own copy) — this is the staff-facing "someone needs to
+   follow up now" alert. */
+async function sendAbsenteeStaffAlert({
+  recipientName, recipientEmail, studentNames, date,
+  schoolName, schoolEmail, schoolId = null, appUrl,
+}) {
+  const url = appUrl || APP_URL;
+  const subject = studentNames.length === 1 ? `${studentNames[0]} marked absent` : `${studentNames.length} students marked absent`;
+  const html = _wrap(`
+    <h2>🚸 Student${studentNames.length === 1 ? '' : 's'} Marked Absent</h2>
+    <p>Hi ${recipientName || 'there'},</p>
+    <p>At <strong>${schoolName}</strong> on <strong>${date}</strong>:</p>
+    <ul>${studentNames.map(n => `<li>${n}</li>`).join('')}</ul>
+    <p style="text-align:center">
+      <a href="${url}" class="btn">View Absentees →</a>
+    </p>
+  `, schoolName);
+  return _sendAsSchool(recipientEmail, `🚸 ${subject} — ${schoolName}`, html, { schoolName, schoolEmail, schoolId });
+}
+
 module.exports = {
   invalidateSmtpCache,
   sendRegistrationPending,
@@ -951,5 +976,6 @@ module.exports = {
   sendAbsenceAlert,
   sendInvoiceOverdueAlert,
   sendAttendanceSummaryAlert,
+  sendAbsenteeStaffAlert,
   sendPayrollStatusEmail,
 };

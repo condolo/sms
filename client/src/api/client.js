@@ -221,6 +221,10 @@ export const attendance = {
     list:    (params) => _get('/attendance/conflicts', params),
     resolve: (id, reason) => _put(`/attendance/conflicts/${id}/resolve`, { reason }),
   },
+  absenteeOfficerConfig: {
+    get:  ()      => _get('/attendance/absentee-officer-config'),
+    save: (steps) => _put('/attendance/absentee-officer-config', { steps }),
+  },
   conflictOfficerConfig: {
     get:  ()      => _get('/attendance/conflict-officer-config'),
     save: (steps) => _put('/attendance/conflict-officer-config', { steps }),

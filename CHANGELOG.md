@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.119.1] — 2026-09-23 — fix(attendance): crash on "Assign," class/stream filter for Absentees, real-time absentee email alert, Resolver assignment moved to Settings
+
+Follow-up feedback on v5.119.0, live-tested immediately after shipping: clicking "Assign" on the Attendance Conflict Resolver card crashed the page outright; Absentees had no way to narrow by class/stream; the school wanted absences to trigger an actual in-app + optional-email alert (toggle under Notification Settings), not just a passive list someone has to remember to check; and the Resolver assignment shouldn't live inline on the operational Conflicts queue — it belongs in a real configuration area.
+
+### Fixed — a real crash on "Assign," found immediately via user testing
+`ConflictsPanel.jsx`'s custom-roles dropdown did `const customRoles = customRolesData ?? []`, but `customRolesData` is the raw `{success, data}` envelope the API client returns, not the array itself — so `customRoles.map(...)` threw the moment the role picker (which defaults to `assigneeType: 'role'`) tried to render, the instant "Assign" was clicked. Fixed to `customRolesData?.data ?? []`. Found and fixed the **identical** pre-existing bug in `behaviour/CategoriesTab.jsx`'s own Behaviour Officer picker while tracing this — same root cause, never previously noticed because "Assign" on that card apparently hadn't been exercised with a real click since it shipped.
+
+### Added — class/stream filter on Absentees
+`AbsenteesPanel.jsx` gained class and stream `<select>` filters (unscoped — this view is already gated school-wide, unlike the Register tab's own scoped class picker). No server change needed: `GET /api/attendance/absentees` already accepted `?classId=&streamId=` from when it was first built; the client simply never exposed a way to use them.
+
+### Added — real-time Absentee Alert, with email controlled the normal way
+New `attendance_absentee_alert` notification event (`notif-settings.js`, staff audience, both channels available) fires once per marking action — not per student, so a whole-class bulk mark sends one message, not thirty — to whoever's configured as the **Absentee Alert Recipient**. Whether email actually sends is the ordinary per-school toggle under Settings → Notifications, exactly as the school asked ("can be set by the school under notification settings") — no new bespoke on/off switch was built, since `dispatchNotification`/`notif-settings.js` already is that switch for every other event in this app. New `sendAbsenteeStaffAlert` email template (`email.js`).
+
+### Changed — Resolver assignment relocated out of the operational queue
+The Attendance Conflict Resolver picker used to sit inline atop the Conflicts tab's open/resolved queue. Moved to a new **Attendance → Settings** tab (visible only to admin/superadmin — unlike the always-shown Register/Report/Absentees/Conflicts tabs, this one is pure configuration with the write route hard-gated to those two roles regardless of any custom RBAC grant, so showing it to anyone else would just be empty space). The new Absentee Alert Recipient assignment lives there too. Both reuse a single new `AttendanceAssigneeSection.jsx` component (previously duplicated inline) parameterized by title/description/accent/config-endpoint, and a new `GET/PUT /api/attendance/absentee-officer-config` route pair mirrors `conflict-officer-config` exactly.
+
+### Verified
+5 new dispatch tests (one notification per marking action, not per student; never fires on `present`; silently no-ops with nobody assigned; the Absentee Alert Recipient and Conflict Resolver are genuinely separate workflow-config keys — configuring one never notifies via the other) plus 4 new `absentee-officer-config` access-control tests, added to `attendance-conflicts.test.js` (now 30 tests total in that file). Full Jest suite: 236 suites, 2392/2392 passing. Client build clean.
+
+Live-verified against the real demo database: clicked "Assign" on both cards in the real Settings tab and confirmed the picker renders correctly (no crash) where it previously threw; assigned the Absentee Alert Recipient to a real teacher (Robert Kioko) and the Conflict Resolver to the Admissions Officer role; marked a real student absent via the real API and confirmed, by reading the `messages` collection directly, that an in-app message ("Fatima Al-Hassan marked absent") was actually created for that exact recipient; confirmed the Absentees class filter correctly hides that same absence when a different class is selected. Cleaned up the test attendance record, the test message, and cleared both assignments back to unassigned afterward.
+
 ## [v5.119.0] — 2026-09-23 — feat(attendance): real absentee contact list + present/absent conflict detection; fix(students): status-filter completeness
 
 Raised directly, three related asks in one message: (1) Admissions (and anyone else with attendance access) could only ever see "N absent" per class/stream, never WHO — but Admissions is who actually has to call the parent; (2) the system should catch and flag a student marked absent in one class and present in another the same day, routed to Admissions to resolve with a reason "for records"; (3) a school saw "313 total, 311 active" and had no way to trace where the other 2 were.

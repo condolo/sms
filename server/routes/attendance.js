@@ -22,7 +22,8 @@ const { resolvePrimaryContact } = require('../utils/guardian-contact');
 const { getWorkflowConfig, saveWorkflowConfig, resolveStep } = require('../utils/workflow-config');
 const { dispatchNotification } = require('../utils/notify-dispatch');
 
-const CONFLICT_OFFICER_WORKFLOW_KEY = 'attendance_conflict_officer';
+const CONFLICT_OFFICER_WORKFLOW_KEY  = 'attendance_conflict_officer';
+const ABSENTEE_OFFICER_WORKFLOW_KEY  = 'attendance_absentee_officer';
 
 /* First route migrated to tenantModel() (C4 · ADR-0001). attendance is
    entirely self-contained (one tenant-owned collection; every filter
@@ -572,6 +573,42 @@ router.put('/conflict-officer-config', authMiddleware, PLAN, MODGATE, async (req
   }
 });
 
+/* ── GET/PUT /api/attendance/absentee-officer-config — who gets the
+   real-time "student marked absent" staff alert. Same shape and same
+   admin-only-write reasoning as conflict-officer-config just above —
+   read is open to anyone who could plausibly need to see who's assigned
+   (floor roles or the explicit absentees grant); write is admin/
+   superadmin only, since reassigning it is a governance action. */
+router.get('/absentee-officer-config', authMiddleware, PLAN, MODGATE, async (req, res) => {
+  try {
+    const { schoolId, role } = req.jwtUser;
+    if (!ScopeEngine.ATTENDANCE_FLOOR_ROLES.has(role) && !(await hasExplicitSubGrant(req, 'attendance', 'absentees', 'read'))) {
+      return E.forbidden(res, 'Only admins, principals, deputies, or explicitly granted roles can view this assignment.');
+    }
+    const cfg = await getWorkflowConfig(tenantContext(req), schoolId, ABSENTEE_OFFICER_WORKFLOW_KEY);
+    return ok(res, { steps: cfg?.steps ?? [] });
+  } catch (err) {
+    console.error('[attendance/absentee-officer-config GET]', err);
+    return E.serverError(res);
+  }
+});
+
+router.put('/absentee-officer-config', authMiddleware, PLAN, MODGATE, async (req, res) => { // rbac: manual admin/superadmin check, same reasoning as conflict-officer-config
+  try {
+    const { schoolId, userId, role } = req.jwtUser;
+    if (!['superadmin', 'admin'].includes(role)) {
+      return E.forbidden(res, 'Admin access required to assign the Absentee Alert Recipient');
+    }
+    const steps = Array.isArray(req.body?.steps) ? req.body.steps : [];
+    const doc = await saveWorkflowConfig(tenantContext(req), schoolId, ABSENTEE_OFFICER_WORKFLOW_KEY, { steps }, userId, 0);
+    return ok(res, { steps: doc.steps });
+  } catch (err) {
+    if (err.statusCode === 400) return E.badRequest(res, err.message);
+    console.error('[attendance/absentee-officer-config PUT]', err);
+    return E.serverError(res);
+  }
+});
+
 /* ── GET /api/attendance/:id ─────────────────────────────────── */
 router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('attendance', 'read'), async (req, res) => {
   try {
@@ -657,6 +694,7 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create'), sc
 
     if (doc.status === 'absent') {
       _notifyAbsences(req, [{ studentId: doc.studentId, date: doc.date }]).catch(err => console.error('[attendance/absence notify]', err));
+      _notifyAbsenteeOfficer(req, [{ studentId: doc.studentId, date: doc.date }]).catch(err => console.error('[attendance/absentee-officer notify]', err));
     }
     if (doc.status === 'absent' || doc.status === 'present') {
       _checkAttendanceConflict(req, doc.studentId, doc.date).catch(err => console.error('[attendance/conflict-check]', err));
@@ -753,6 +791,7 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('attendance', 'create')
     const absentees = allowedRecords.filter(r => r.status === 'absent').map(r => ({ studentId: r.studentId, date }));
     if (absentees.length) {
       _notifyAbsences(req, absentees).catch(err => console.error('[attendance/bulk absence notify]', err));
+      _notifyAbsenteeOfficer(req, absentees).catch(err => console.error('[attendance/bulk absentee-officer notify]', err));
     }
     const conflictCandidates = [...new Set(
       allowedRecords.filter(r => r.status === 'absent' || r.status === 'present').map(r => r.studentId)
@@ -874,6 +913,60 @@ async function _notifyAbsences(req, records) {
 }
 
 router._notifyAbsences = _notifyAbsences;
+
+/* ── Absentee staff alert (attendance) ─────────────────────────
+   Raised directly: an in-app message when a student is marked absent,
+   with email as a channel the school can turn on/off itself under
+   Settings → Notifications (the standard dispatchNotification/notif-
+   settings.js contract — no separate on/off switch needed here). WHO
+   receives it is configured separately, under Attendance → Settings
+   (see ABSENTEE_OFFICER_WORKFLOW_KEY) — reuses the exact same {role|
+   user} assignment primitive as the Attendance Conflict Resolver and
+   Behaviour Officer, not hardcoded to admissions_officer. One notification
+   per marking action (not per student) so a whole-class bulk mark doesn't
+   flood the recipient with individual emails. */
+async function _notifyAbsenteeOfficer(req, records) {
+  if (!records.length) return;
+  const { schoolId, userId } = req.jwtUser;
+  const ctx = tenantContext(req);
+
+  const cfg = await getWorkflowConfig(ctx, schoolId, ABSENTEE_OFFICER_WORKFLOW_KEY);
+  const seen = new Set();
+  const recipients = [];
+  for (const step of (cfg?.steps ?? [])) {
+    for (const candidate of await resolveStep(ctx, schoolId, step)) {
+      if (!seen.has(candidate.id)) { seen.add(candidate.id); recipients.push({ userId: candidate.id, name: candidate.name, email: candidate.email }); }
+    }
+  }
+  if (!recipients.length) return; // nobody assigned yet — same "flag, don't stall" posture as the conflict notifier
+
+  const studentIds = [...new Set(records.map(r => r.studentId))];
+  const [students, school] = await Promise.all([
+    tenantModel('students', ctx).find({ id: { $in: studentIds } }).select('id firstName lastName').lean(),
+    _model('schools').findOne({ id: schoolId }).select('name systemEmail').lean(),
+  ]);
+  const nameById = Object.fromEntries(students.map(s => [s.id, `${s.firstName} ${s.lastName}`]));
+  const schoolName  = school?.name || '';
+  const schoolEmail = school?.systemEmail || '';
+  const date = records[0].date;
+  const names = records.map(r => nameById[r.studentId] ?? r.studentId);
+  const subject = names.length === 1 ? `${names[0]} marked absent` : `${names.length} students marked absent`;
+
+  await dispatchNotification({
+    ctx, schoolId, eventKey: 'attendance_absentee_alert', actorUserId: userId,
+    recipients,
+    inAppSubject: subject,
+    inAppBody:    `${names.join(', ')} — marked absent on ${date}.`,
+    emailDigestSubject: subject,
+    emailDigestBody:    `${names.join(', ')} — marked absent on ${date}.`,
+    sendEmail: (recipient) => email.sendAbsenteeStaffAlert({
+      recipientName: recipient.name, recipientEmail: recipient.email,
+      studentNames: names, date, schoolName, schoolEmail, schoolId,
+    }),
+  });
+}
+
+router._notifyAbsenteeOfficer = _notifyAbsenteeOfficer;
 
 /* ── Conflict detection (attendance) ──────────────────────────
    Fired after every write (see POST / and POST /bulk) for whichever

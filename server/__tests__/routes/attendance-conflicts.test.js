@@ -388,3 +388,102 @@ describe('access control — attendanceConflictAccess', () => {
     expect(getRes.body.data.steps).toEqual([{ assigneeType: 'role', assigneeValue: 'admissions_officer' }]);
   });
 });
+
+describe('the Absentee Alert Recipient — real-time notification on a new absence', () => {
+  test('marking a student absent dispatches ONE notification to the configured recipient', async () => {
+    mockWorkflowConfigs = makeFakeCollection([{
+      schoolId: SCHOOL_A, workflowKey: 'attendance_absentee_officer',
+      steps: [{ assigneeType: 'user', assigneeValue: 'usr_admissions' }],
+    }]);
+    mockUsers = makeFakeCollection([
+      { id: 'usr_admissions', schoolId: SCHOOL_A, name: 'Grace Admissions', email: 'grace@school.test', isActive: true },
+    ]);
+
+    const res = await supertest(buildApp()).post('/api/attendance').send({ studentId: 'stu_1', classId: 'cls_math', date: '2026-09-21', status: 'absent' });
+    expect(res.status).toBe(201);
+
+    expect(mockDispatchNotification).toHaveBeenCalledTimes(1);
+    const call = mockDispatchNotification.mock.calls[0][0];
+    expect(call.eventKey).toBe('attendance_absentee_alert');
+    expect(call.recipients).toEqual([{ userId: 'usr_admissions', name: 'Grace Admissions', email: 'grace@school.test' }]);
+    expect(call.inAppBody).toMatch(/Amina Otieno/);
+  });
+
+  test('marking present never triggers the absentee alert', async () => {
+    mockWorkflowConfigs = makeFakeCollection([{
+      schoolId: SCHOOL_A, workflowKey: 'attendance_absentee_officer',
+      steps: [{ assigneeType: 'user', assigneeValue: 'usr_admissions' }],
+    }]);
+    mockUsers = makeFakeCollection([{ id: 'usr_admissions', schoolId: SCHOOL_A, name: 'Grace Admissions', email: 'grace@school.test', isActive: true }]);
+
+    await supertest(buildApp()).post('/api/attendance').send({ studentId: 'stu_1', classId: 'cls_math', date: '2026-09-21', status: 'present' });
+    expect(mockDispatchNotification).not.toHaveBeenCalled();
+  });
+
+  test('no recipient configured — marking absent succeeds, no notification attempted', async () => {
+    const res = await supertest(buildApp()).post('/api/attendance').send({ studentId: 'stu_1', classId: 'cls_math', date: '2026-09-21', status: 'absent' });
+    expect(res.status).toBe(201);
+    expect(mockDispatchNotification).not.toHaveBeenCalled();
+  });
+
+  test('a bulk mark of several absentees dispatches ONE notification listing all of them, not one per student', async () => {
+    mockStudents = makeFakeCollection([
+      { id: 'stu_1', schoolId: SCHOOL_A, firstName: 'Amina', lastName: 'Otieno' },
+      { id: 'stu_2', schoolId: SCHOOL_A, firstName: 'Brian', lastName: 'Kiptoo' },
+    ]);
+    mockWorkflowConfigs = makeFakeCollection([{
+      schoolId: SCHOOL_A, workflowKey: 'attendance_absentee_officer',
+      steps: [{ assigneeType: 'user', assigneeValue: 'usr_admissions' }],
+    }]);
+    mockUsers = makeFakeCollection([{ id: 'usr_admissions', schoolId: SCHOOL_A, name: 'Grace Admissions', email: 'grace@school.test', isActive: true }]);
+
+    const res = await supertest(buildApp()).post('/api/attendance/bulk').send({
+      classId: 'cls_math', date: '2026-09-21',
+      records: [{ studentId: 'stu_1', status: 'absent' }, { studentId: 'stu_2', status: 'absent' }],
+    });
+    expect(res.status).toBe(201);
+    expect(mockDispatchNotification).toHaveBeenCalledTimes(1);
+    expect(mockDispatchNotification.mock.calls[0][0].inAppBody).toMatch(/Amina Otieno.*Brian Kiptoo|Brian Kiptoo.*Amina Otieno/);
+  });
+
+  test('this uses a SEPARATE assignment from the Conflict Resolver — configuring one does not notify via the other', async () => {
+    mockWorkflowConfigs = makeFakeCollection([{
+      schoolId: SCHOOL_A, workflowKey: 'attendance_conflict_officer', // only the CONFLICT key configured
+      steps: [{ assigneeType: 'user', assigneeValue: 'usr_admissions' }],
+    }]);
+    mockUsers = makeFakeCollection([{ id: 'usr_admissions', schoolId: SCHOOL_A, name: 'Grace Admissions', email: 'grace@school.test', isActive: true }]);
+
+    await supertest(buildApp()).post('/api/attendance').send({ studentId: 'stu_1', classId: 'cls_math', date: '2026-09-21', status: 'absent' });
+    expect(mockDispatchNotification).not.toHaveBeenCalled(); // no attendance_absentee_officer config exists
+  });
+});
+
+describe('GET/PUT /api/attendance/absentee-officer-config', () => {
+  test('a non-floor role with no explicit grant is forbidden to read it', async () => {
+    mockJwtUser = { userId: 'usr_teacher', schoolId: SCHOOL_A, role: 'teacher', roles: ['teacher'] };
+    const res = await supertest(buildApp()).get('/api/attendance/absentee-officer-config');
+    expect(res.status).toBe(403);
+  });
+
+  test('a floor role can read it', async () => {
+    const res = await supertest(buildApp()).get('/api/attendance/absentee-officer-config');
+    expect(res.status).toBe(200);
+    expect(res.body.data.steps).toEqual([]);
+  });
+
+  test('PUT is admin/superadmin only', async () => {
+    mockJwtUser = { userId: 'usr_admissions', schoolId: SCHOOL_A, role: 'admissions_officer', roles: ['admissions_officer'] };
+    const res = await supertest(buildApp()).put('/api/attendance/absentee-officer-config').send({ steps: [] });
+    expect(res.status).toBe(403);
+  });
+
+  test('admin can assign the recipient via PUT and GET reflects it', async () => {
+    const app = buildApp();
+    const putRes = await supertest(app).put('/api/attendance/absentee-officer-config').send({
+      steps: [{ assigneeType: 'role', assigneeValue: 'admissions_officer' }],
+    });
+    expect(putRes.status).toBe(200);
+    const getRes = await supertest(app).get('/api/attendance/absentee-officer-config');
+    expect(getRes.body.data.steps).toEqual([{ assigneeType: 'role', assigneeValue: 'admissions_officer' }]);
+  });
+});
