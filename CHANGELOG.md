@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.123.0] — 2026-09-24 — fix(timetable): an administrative role with a real teaching assignment was 403'd out of "My Timetable," displaying as "not yet published"
+
+Raised as a follow-up once v5.122.0 was traced to its root: "the exam officer, a user assigned other role yet have classes, the system seems to assume that is a totally diff role from teaching."
+
+### Root cause
+`GET /api/timetable/my` gated entry on `allRoles.includes('teacher') || allRoles.includes('section_head')` — a literal role-string check. Robert Mukhwana (role `exams_officer`) has a real, linked `teachers` record and real timetable slots (confirmed live: 21 periods of English across the week), but `'teacher'` was never in his `role`/`roles`. He was 403'd outright. The client's `TimetablePortal.jsx` compounded it: `TeacherPortalView`'s query treats ANY error the same way — `if (isError || notPublished) return <NotPublished />` — so the 403 rendered as "Timetable not yet published," which reads as a publish-status bug even though the timetable was genuinely published and his periods genuinely existed.
+
+Same root pattern as v5.122.0: an administrative title (exams officer, timetabler, etc.) is layered on top of whatever this person is actually assigned to teach; the baseline is a teacher for that real assignment regardless of what the login's `role` field says.
+
+### Fix
+Eligibility for `GET /my` is now "role says teacher/section_head, OR resolves to a real linked `teachers` record" — the existing `teachers` lookup (userId FK first, email fallback with self-heal) now runs before the gate decides, instead of only after a role check had already passed. An account with neither a teacher role nor a linked record (finance, a parent, a student, an exams_officer who genuinely never teaches) still 403s exactly as before. A `teacher`-role account with no linked record yet still gets the existing friendly "No teacher record is linked to this account" message, not a 403.
+
+### Verified
+Self-signed a JWT for the real exams_officer account: before the fix, `GET /api/timetable/my` returned 403; after, it returns his 21 real periods with `role: 'teacher'`. Existing `timetable-my-teacher-resolution.test.js` and `timetable-manage-access.test.js` (which each depend on the old role-only gate for a couple of assertions) updated behavior confirmed correct by re-running: both still pass unchanged, along with the full `server/__tests__/routes/timetable*` suite (8 suites, 57 tests).
+
+### Files
+- `server/routes/timetable.js` — `GET /my`
+
+---
+
 ## [v5.122.0] — 2026-09-24 — fix(attendance): a "school"-level administrative role could see a whole class's roster merged across every stream
 
 Raised directly, alongside the two fixes below: "when i click on the class to take attendance, all students are here from all the streams... even if a teacher is teaching or rather assigned all streams under one class, they should select the class then stream." Live-narrowed with the user's own follow-up once a plain teacher tested clean: "the stream class issue was never applied to global users, the teachers account is working perfectly but not someone like exam officer."

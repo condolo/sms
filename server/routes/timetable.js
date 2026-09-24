@@ -731,7 +731,48 @@ router.get('/my', authMiddleware, async (req, res) => {
     const isTeacher = allRoles.includes('teacher');
     const isSectionHead = allRoles.includes('section_head');
 
-    if (!isTeacher && !isSectionHead) {
+    // Raised directly: an exams_officer (or any other administrative role)
+    // who ALSO genuinely teaches — a real linked `teachers` record, the
+    // exact "the baseline is a teacher, the title is additional" pattern
+    // ScopeEngine's own resolveAttendanceScope already respects for
+    // Attendance — was 403'd here purely because 'teacher' wasn't literally
+    // in their role/roles array, despite having real timetable slots to
+    // see. Worse, the CLIENT's blanket `isError → NotPublished` fallback
+    // rendered that 403 as "Timetable not yet published," which reads as a
+    // publish-status bug when it was actually a pure access bug. Eligibility
+    // is now "role says teacher/section_head, OR resolves to a real linked
+    // teacher record regardless of role" — this lookup used to run only
+    // AFTER the role check passed, so it never got a chance to admit this
+    // case. An account with neither (finance, a parent, a student, an
+    // exams_officer who genuinely never teaches) still 403s exactly as
+    // before; a `teacher`-role account with no linked record yet still gets
+    // the existing friendly "not linked" message below, not a 403.
+    //
+    // Resolve via the authoritative userId FK first (set at teacher-creation
+    // time, or meant to be set by "Create Login Account" — see the backfill
+    // added to POST /users/invite). Fall back to email match only for a
+    // record that link hasn't reached yet, and self-heal it right here so
+    // every later lookup for this person can skip the fallback (mirrors
+    // provisionIdentityForUser's own self-heal comment in settings.js).
+    // Matching by email alone — the previous behaviour — silently resolves
+    // to a DIFFERENT teacher record whenever this login's email doesn't
+    // textually equal that record's stored email, which is exactly what
+    // happens for any account whose display name was edited without also
+    // updating the underlying teacher profile.
+    const Teachers = tenantModel('teachers', tenantContext(req));
+    let teacher = null;
+    if (!isSectionHead) {
+      teacher = await Teachers.findOne({ schoolId, userId }).lean();
+      if (!teacher) {
+        teacher = await Teachers.findOne({ schoolId, email: (email || '').toLowerCase() }).lean();
+        if (teacher && !teacher.userId) {
+          Teachers.updateOne({ schoolId, id: teacher.id }, { $set: { userId } }).catch(() => {});
+          teacher.userId = userId;
+        }
+      }
+    }
+
+    if (!isSectionHead && !isTeacher && !teacher) {
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Endpoint is for teachers and section heads' } });
     }
 
@@ -753,29 +794,10 @@ router.get('/my', authMiddleware, async (req, res) => {
       return ok(res, { slots, section: section ?? 'all', role: 'section_head' });
     }
 
-    // Teacher — resolve via the authoritative userId FK first (set at
-    // teacher-creation time, or meant to be set by "Create Login Account"
-    // — see the backfill added to POST /users/invite). Fall back to email
-    // match only for a record that link hasn't reached yet, and self-heal
-    // it right here so every later lookup for this person can skip the
-    // fallback (mirrors provisionIdentityForUser's own self-heal comment
-    // in settings.js). Matching by email alone — the previous behaviour
-    // — silently resolves to a DIFFERENT teacher record whenever this
-    // login's email doesn't textually equal that record's stored email,
-    // which is exactly what happens for any account whose display name
-    // was edited without also updating the underlying teacher profile.
-    const Teachers = tenantModel('teachers', tenantContext(req));
-    let teacher = await Teachers.findOne({ schoolId, userId }).lean();
-    if (!teacher) {
-      teacher = await Teachers.findOne({ schoolId, email: (email || '').toLowerCase() }).lean();
-      if (teacher && !teacher.userId) {
-        Teachers.updateOne({ schoolId, id: teacher.id }, { $set: { userId } }).catch(() => {});
-        teacher.userId = userId;
-      }
-    }
     if (!teacher) {
       return ok(res, { slots: [], teacher: null, message: 'No teacher record is linked to this account.' });
     }
+
     const slots = await tenantModel('timetable', tenantContext(req))
       .find({ schoolId, teacherId: { $in: _teacherSlotForms(teacher) }, isActive: true })
       .sort({ day: 1, startTime: 1, periodNumber: 1, period: 1 })
