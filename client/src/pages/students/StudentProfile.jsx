@@ -1467,7 +1467,15 @@ function PortalTab({ student, canEdit }) {
     }
   }
 
-  const isWithdrawn = student.status === 'withdrawn' || student.status === 'graduated';
+  // Raised directly: a student deactivated via StudentList.jsx's row action
+  // (DELETE /:id, which sets status='inactive') had no way back — this only
+  // ever recognized 'withdrawn'/'graduated', the two outcomes THIS page's
+  // own Deactivate button produces (PATCH /:id/deactivate). Two different
+  // deactivation paths in this app land on different status values; this
+  // flag now covers every one of them, since PATCH /:id/reactivate itself
+  // already accepts any non-active status (its only guard is `status ===
+  // 'active'`) — the gap was purely this client-side visibility check.
+  const isWithdrawn = student.status !== 'active';
 
   return (
     <div className="space-y-5 max-w-2xl">

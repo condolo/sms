@@ -263,7 +263,20 @@ router.get('/:id/students', authMiddleware, PLAN, MODGATE, rbac('students', 'rea
       // this class.
       filter.streamId = { $in: relevantStreamIds };
     }
-    if (req.query.status) filter.status = req.query.status;
+    // Raised directly: a deactivated student must not appear in a class
+    // roster, and must reappear once reactivated. This route had no default
+    // at all — a caller that forgot `?status=active` (found live: the exam
+    // marks-entry roster and the Report Cards student picker both did) got
+    // EVERY status back, inactive/withdrawn/graduated included. `?status=all`
+    // remains available for a caller that genuinely wants every status,
+    // matching students.js's own GET / convention.
+    if (req.query.status === 'all') {
+      // no status filter — every status, on request
+    } else if (req.query.status) {
+      filter.status = req.query.status;
+    } else {
+      filter.status = 'active';
+    }
 
     const [docs, total] = await Promise.all([
       Students.find(filter).sort({ lastName: 1, firstName: 1 }).skip(skip).limit(limit).select('-__v').lean(),

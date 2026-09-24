@@ -1528,7 +1528,12 @@ router.patch('/:id/deactivate', authMiddleware, PLAN, MODGATE, rbac('students', 
       try { doc = await Students.findOne({ _id: req.params.id, schoolId }).lean(); } catch (_) {}
     }
     if (!doc) return E.notFound(res, 'Student not found');
-    if (['withdrawn', 'graduated', 'transferred'].includes(doc.status)) {
+    // Was only ['withdrawn','graduated','transferred'] — missed 'inactive'
+    // (the status DELETE /:id, the OTHER deactivation path in this app,
+    // actually sets) and 'suspended'. Symmetric with PATCH /:id/reactivate's
+    // own guard just below (`status === 'active'`), rather than maintaining
+    // a second, independently-drifting list of "already deactivated" values.
+    if (doc.status !== 'active') {
       return E.badRequest(res, `Student is already ${doc.status}.`);
     }
 

@@ -205,7 +205,18 @@ router.get('/:id/students', authMiddleware, PLAN, rbac('students', 'read'), scop
 
     const Students = tenantModel('students', tenantContext(req));
     const filter   = { schoolId, streamId: { $in: streamIdForms } };
-    if (req.query.status) filter.status = req.query.status;
+    // Same fix as classes.js's identical GET /:id/students, for the same
+    // reason: a deactivated student must not appear in a stream's roster
+    // either, and this had no default — everyone regardless of status came
+    // back unless the caller remembered `?status=active`. `?status=all`
+    // still available on request.
+    if (req.query.status === 'all') {
+      // no status filter
+    } else if (req.query.status) {
+      filter.status = req.query.status;
+    } else {
+      filter.status = 'active';
+    }
 
     const [docs, total] = await Promise.all([
       Students.find(filter).sort({ lastName: 1, firstName: 1 }).skip(skip).limit(limit).select('-__v').lean(),

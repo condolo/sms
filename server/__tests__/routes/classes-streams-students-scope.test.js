@@ -96,17 +96,17 @@ function buildApp() {
 }
 
 const STUDENT_9C = {
-  id: 'stu_9c_1', schoolId: SCHOOL_A, classId: 'cls_9c', streamId: 'strm_9c_red',
+  id: 'stu_9c_1', schoolId: SCHOOL_A, classId: 'cls_9c', streamId: 'strm_9c_red', status: 'active',
   firstName: 'Amara', lastName: 'Osei', admissionNumber: 'ADM-9C-01',
   parentName: 'Mrs Osei', parentEmail: 'osei.parent@example.com', parentPhone: '+254700000001',
 };
 const STUDENT_9C_BLUE = {
-  id: 'stu_9c_2', schoolId: SCHOOL_A, classId: 'cls_9c', streamId: 'strm_9c_blue',
+  id: 'stu_9c_2', schoolId: SCHOOL_A, classId: 'cls_9c', streamId: 'strm_9c_blue', status: 'active',
   firstName: 'Chiamaka', lastName: 'Nwosu', admissionNumber: 'ADM-9C-02',
   parentName: 'Mrs Nwosu', parentEmail: 'nwosu.parent@example.com', parentPhone: '+254700000099',
 };
 const STUDENT_4A = {
-  id: 'stu_4a_1', schoolId: SCHOOL_A, classId: 'cls_4a', streamId: 'strm_4a_blue',
+  id: 'stu_4a_1', schoolId: SCHOOL_A, classId: 'cls_4a', streamId: 'strm_4a_blue', status: 'active',
   firstName: 'Brian', lastName: 'Onyango', admissionNumber: 'ADM-4A-01',
   parentName: 'Mr Onyango', parentEmail: 'onyango.parent@example.com', parentPhone: '+254700000002',
 };
@@ -307,5 +307,66 @@ describe('GET /api/streams/:id/students — AUTHZ-28', () => {
       const res = await supertest(buildApp()).get('/api/streams/strm_9c_red/students');
       expect(res.status).toBe(403);
     });
+  });
+});
+
+/* ============================================================
+   Raised directly: a deactivated student must not appear in a class or
+   stream roster, and must reappear once reactivated. Both routes had NO
+   status default at all — a caller that forgot `?status=active` (found
+   live: the exam marks-entry roster and the Report Cards student picker
+   both did) got every status back, inactive/withdrawn included.
+   ============================================================ */
+const STUDENT_9C_INACTIVE = {
+  id: 'stu_9c_3', schoolId: SCHOOL_A, classId: 'cls_9c', streamId: 'strm_9c_red', status: 'inactive',
+  firstName: 'Nathaniel', lastName: 'Maina', admissionNumber: 'ADM-9C-03',
+};
+
+describe('GET /api/classes/:id/students — status defaults to active-only', () => {
+  beforeEach(() => {
+    mockStudents = mockMakeFakeCollection([STUDENT_9C, STUDENT_9C_BLUE, STUDENT_4A, STUDENT_9C_INACTIVE]);
+  });
+
+  test('no status param — inactive student excluded, active ones returned', async () => {
+    const res = await supertest(buildApp()).get('/api/classes/cls_9c/students');
+    expect(res.status).toBe(200);
+    const names = res.body.data.map(s => s.firstName);
+    expect(names).toEqual(expect.arrayContaining(['Amara', 'Chiamaka']));
+    expect(names).not.toContain('Nathaniel');
+  });
+
+  test('?status=all returns every status, inactive included', async () => {
+    const res = await supertest(buildApp()).get('/api/classes/cls_9c/students').query({ status: 'all' });
+    expect(res.body.data.map(s => s.firstName)).toEqual(expect.arrayContaining(['Amara', 'Chiamaka', 'Nathaniel']));
+  });
+
+  test('?status=inactive returns only the inactive student', async () => {
+    const res = await supertest(buildApp()).get('/api/classes/cls_9c/students').query({ status: 'inactive' });
+    expect(res.body.data.map(s => s.firstName)).toEqual(['Nathaniel']);
+  });
+
+  test('reactivating (status flips back to active) makes the student reappear in the default view', async () => {
+    STUDENT_9C_INACTIVE.status = 'active';
+    mockStudents = mockMakeFakeCollection([STUDENT_9C, STUDENT_9C_BLUE, STUDENT_4A, STUDENT_9C_INACTIVE]);
+    const res = await supertest(buildApp()).get('/api/classes/cls_9c/students');
+    expect(res.body.data.map(s => s.firstName)).toEqual(expect.arrayContaining(['Amara', 'Chiamaka', 'Nathaniel']));
+    STUDENT_9C_INACTIVE.status = 'inactive'; // restore for other tests in this file
+  });
+});
+
+describe('GET /api/streams/:id/students — status defaults to active-only', () => {
+  beforeEach(() => {
+    mockStudents = mockMakeFakeCollection([STUDENT_9C, STUDENT_9C_BLUE, STUDENT_4A, STUDENT_9C_INACTIVE]);
+  });
+
+  test('no status param — inactive student excluded from their own stream\'s roster', async () => {
+    const res = await supertest(buildApp()).get('/api/streams/strm_9c_red/students');
+    expect(res.status).toBe(200);
+    expect(res.body.data.map(s => s.firstName)).toEqual(['Amara']);
+  });
+
+  test('?status=all includes the inactive student', async () => {
+    const res = await supertest(buildApp()).get('/api/streams/strm_9c_red/students').query({ status: 'all' });
+    expect(res.body.data.map(s => s.firstName).sort()).toEqual(['Amara', 'Nathaniel']);
   });
 });
