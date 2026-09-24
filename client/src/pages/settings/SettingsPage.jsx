@@ -3468,6 +3468,12 @@ const PERM_MODULES = [
     { key: 'assignments',   label: 'Manage Teaching Assignments' },
     { key: 'import',        label: 'Import Timetable (CSV)' },
     { key: 'export',        label: 'Export Timetable (CSV)' },
+    // hasExplicitSubGrant-gated (no coarse-grant fallback) — see this same
+    // sub's comment in server/config/moduleRegistry.js. Ticking V/E/D on
+    // this ONE row is the only thing that grants the whole-school admin
+    // Scheduling Engine; every other row above stays a harmless display
+    // grouping that only ever unions into the coarse array, same as before.
+    { key: 'manage', label: 'Manage Whole-School Timetable (Admin Console)' },
   ]},
   { key: 'subjects',   label: 'Subjects', subs: [
     { key: 'view',   label: 'View Subjects' },
@@ -3609,6 +3615,12 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (m==='settings') return N;
       if (m==='analytics') return V;
       if (m==='timetable' && ['rooms','bell_schedule','assignments'].includes(s)) return V;
+      // 'manage' excluded from the blanket E/V fallback below — hasExplicitSub
+      // Grant-gated (no coarse-grant fallback), and this role isn't in
+      // TIMETABLE_FLOOR_ROLES, so a default of E/V here would actually GRANT
+      // the whole-school admin Scheduling Engine, not just reflect a UI
+      // grouping. Grant explicitly per-role if a school wants this.
+      if (m==='timetable' && s==='manage') return N;
       if (m==='behaviour' && ['delete'].includes(s)) return N;
       if (m==='growth_profile' && ['delete_records','aspirations'].includes(s)) return N;
       if (['library','transport','hostel'].includes(m)) return V;   // matches R already seeded server-side
@@ -3678,6 +3690,12 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
       if (s==='import') return N;
       if (m==='classes'   && ['section','delete'].includes(s)) return N;
       if (m==='timetable' && ['rooms','bell_schedule','assignments'].includes(s)) return V;
+      // 'manage' excluded from the blanket E/V fallback below — hasExplicitSub
+      // Grant-gated (no coarse-grant fallback), and this role isn't in
+      // TIMETABLE_FLOOR_ROLES, so a default of E/V here would actually GRANT
+      // the whole-school admin Scheduling Engine, not just reflect a UI
+      // grouping. Grant explicitly per-role if a school wants this.
+      if (m==='timetable' && s==='manage') return N;
       // Alerts only (condition flags), never full clinic-visit records —
       // matches the medical__alerts-only grant already seeded server-side.
       if (m==='medical') return s==='alerts' ? V : N;
@@ -3838,6 +3856,11 @@ function _makeDefaultPerms(modules = PERM_MODULES) {
     },
 
     student: (m, s) => {
+      // 'manage' excluded from the blanket V below — hasExplicitSubGrant-gated
+      // (no coarse-grant fallback), and a student is never in TIMETABLE_
+      // FLOOR_ROLES, so even V here would wrongly grant the whole-school
+      // admin Scheduling Engine to every student account by default.
+      if (m==='timetable' && s==='manage') return N;
       // resources/messages: server seeds R for both (repairPermissions.js) —
       // were missing from this allowlist entirely, silently falling to N.
       if (['students','timetable','grades','events','messages','resources',

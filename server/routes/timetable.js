@@ -31,7 +31,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const { authMiddleware } = require('../middleware/auth');
 const { moduleGate }     = require('../middleware/module-gate');
-const { rbac }           = require('../middleware/rbac');
+const { rbac, hasExplicitSubGrant } = require('../middleware/rbac');
 const { planGate }       = require('../middleware/plan');
 const { _model }         = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
@@ -40,6 +40,7 @@ const { resolveBellSchedule } = require('./bell-schedule');
 const { sanitisePdfStr }      = require('../utils/sanitisePdf');
 const { resolveAcademicPeriod } = require('../utils/academic-period');
 const { isYearArchived } = require('../utils/archival');
+const ScopeEngine = require('../utils/scopeEngine');
 
 const router = express.Router();
 const PLAN   = planGate('timetable');
@@ -67,6 +68,37 @@ async function _resolveTeacherByAnyId(schoolId, tenantCtx, value) {
   return tenantModel('teachers', tenantCtx).findOne({ schoolId, $or: or }).lean();
 }
 const MODGATE = moduleGate('timetable');
+
+/* Raised directly: a plain teacher (only the "View Timetable" row ticked
+   in Settings) could see the ENTIRE school's Scheduling Engine — every
+   class, every teacher, the whole Institution overview — because every
+   route below only ever checked the COARSE `timetable` action array via
+   plain rbac(). That array is a union of every sub-key row's own grant
+   (see settings.js's _deriveApiPerms), so a single row with ALL THREE
+   V/E/D boxes ticked — even one as innocuously-labelled as "View
+   Timetable" — silently hands full create/update/delete on the coarse
+   array too, and nothing here ever distinguished "has some timetable
+   permission" from "should see the whole-school admin console."
+   timetableManageAccess replaces rbac('timetable', action) on every
+   admin-console route (everything except GET /my and /my-children,
+   which are deliberately self-scoped and open to any authenticated user
+   regardless of this module's permissions at all): the real scheduling-
+   admin floor passes unconditionally; everyone else needs the explicit
+   `timetable__manage` sub-grant (hasExplicitSubGrant — no coarse-grant
+   fallback, so no amount of coarse-array over-permissioning on any OTHER
+   sub-key can reach this). A non-floor, non-granted caller — a teacher,
+   section_head, parent, student — never gets past this; they use the
+   separate, already-correctly-scoped Portal (GET /my, /my-children)
+   instead, exactly as TimetablePage.jsx's own client-side routing
+   already intends. */
+function timetableManageAccess(action) {
+  return async (req, res, next) => {
+    const { role } = req.jwtUser || {};
+    if (ScopeEngine.TIMETABLE_FLOOR_ROLES.has(role)) return next();
+    if (await hasExplicitSubGrant(req, 'timetable', 'manage', action)) return next();
+    return E.forbidden(res, 'Only scheduling administrators, or a role explicitly granted "Manage Whole-School Timetable," can access this.');
+  };
+}
 
 /* Same reasoning as teaching-assignments.js's own _roomQuery (preferredRoomId):
    a room document always has a Mongo _id, so an id-shaped value must also be
@@ -307,7 +339,7 @@ async function _checkConflicts(schoolId, data, excludeId = null) {
    ══════════════════════════════════════════════════════════════ */
 
 /* ── GET /api/timetable ─ Filtered list ─────────────────────── */
-router.get('/', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
+router.get('/', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { page, limit, skip } = parsePagination(req.query);
@@ -339,7 +371,7 @@ router.get('/', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async 
 });
 
 /* ── GET /api/timetable/workload ─ Teacher workload summary ─── */
-router.get('/workload', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
+router.get('/workload', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId, isActive: true, type: 'lesson' };
@@ -387,7 +419,7 @@ router.get('/workload', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read')
 });
 
 /* ── GET /api/timetable/conflicts ─ Institution-wide scan ────── */
-router.get('/conflicts', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
+router.get('/conflicts', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId, isActive: true };
@@ -557,7 +589,7 @@ router.get('/conflicts', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'
 });
 
 /* ── GET /api/timetable/overview ─ Institution master grid ───── */
-router.get('/overview', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
+router.get('/overview', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId, isActive: true };
@@ -593,7 +625,7 @@ router.get('/overview', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read')
 });
 
 /* ── GET /api/timetable/class/:classId ─ Class timetable ─────── */
-router.get('/class/:classId', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
+router.get('/class/:classId', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const filter = { schoolId, classId: req.params.classId, isActive: true };
@@ -612,7 +644,7 @@ router.get('/class/:classId', authMiddleware, PLAN, MODGATE, rbac('timetable', '
 });
 
 /* ── GET /api/timetable/teacher/:teacherId ─ Teacher schedule ── */
-router.get('/teacher/:teacherId', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
+router.get('/teacher/:teacherId', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const teacherDoc = await _resolveTeacherByAnyId(schoolId, tenantContext(req), req.params.teacherId);
@@ -642,7 +674,7 @@ function _canEdit(req) {
 }
 
 /* ── GET /api/timetable/status ─ Publish state ──────────────── */
-router.get('/status', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
+router.get('/status', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {
   try {
     const school = await _model('schools').findOne({ id: req.jwtUser.schoolId }).lean();
     const s = school?.timetableStatus ?? { published: false, publishedAt: null, termLabel: '' };
@@ -651,7 +683,7 @@ router.get('/status', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), 
 });
 
 /* ── POST /api/timetable/publish ────────────────────────────── */
-router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('timetable', 'update'), async (req, res) => {
+router.post('/publish', authMiddleware, PLAN, MODGATE, timetableManageAccess('update'), async (req, res) => {
   try {
     const { termLabel = '' } = req.body;
     const now = new Date().toISOString();
@@ -682,7 +714,7 @@ router.post('/publish', authMiddleware, PLAN, MODGATE, rbac('timetable', 'update
 });
 
 /* ── POST /api/timetable/unpublish ─────────────────────────── */
-router.post('/unpublish', authMiddleware, PLAN, MODGATE, rbac('timetable', 'update'), async (req, res) => {
+router.post('/unpublish', authMiddleware, PLAN, MODGATE, timetableManageAccess('update'), async (req, res) => {
   try {
     await _model('schools').updateOne({ id: req.jwtUser.schoolId }, {
       $set: { 'timetableStatus.published': false },
@@ -811,7 +843,7 @@ router.get('/my-children', authMiddleware, async (req, res) => {
    ══════════════════════════════════════════════════════════════ */
 
 /* GET /api/timetable/substitutions?date=YYYY-MM-DD */
-router.get('/substitutions', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
+router.get('/substitutions', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { date, from, to } = req.query;
@@ -832,7 +864,7 @@ router.get('/substitutions', authMiddleware, PLAN, MODGATE, rbac('timetable', 'r
 /* GET /api/timetable/substitutions/cover-pdf?date=YYYY-MM-DD
    Generates a printable A4 landscape PDF cover sheet for the given date.
    Columns: Absent · Lesson · Reason · Subject · Class · Type · Substitutes · Signature */
-router.get('/substitutions/cover-pdf', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
+router.get('/substitutions/cover-pdf', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { date } = req.query;
@@ -1043,7 +1075,7 @@ router.get('/substitutions/cover-pdf', authMiddleware, PLAN, MODGATE, rbac('time
    Given a teacherId + date, fetches all their slots for that day
    and creates substitution records (status: uncovered) for each.
    Idempotent — skips periods that already have records.           */
-router.post('/substitutions/absent', authMiddleware, PLAN, MODGATE, rbac('timetable', 'update'), async (req, res) => {
+router.post('/substitutions/absent', authMiddleware, PLAN, MODGATE, timetableManageAccess('update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { teacherId, date, reason = 'sick', notes = '' } = req.body;
@@ -1130,7 +1162,7 @@ router.post('/substitutions/absent', authMiddleware, PLAN, MODGATE, rbac('timeta
    For every uncovered substitution record on a given date, finds the best
    available teacher (same dept → fewest lessons) and assigns them.
    Tracks assignments within this call to avoid double-booking at same period. */
-router.post('/substitutions/auto-assign', authMiddleware, PLAN, MODGATE, rbac('timetable', 'update'), async (req, res) => {
+router.post('/substitutions/auto-assign', authMiddleware, PLAN, MODGATE, timetableManageAccess('update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { date } = req.body;
@@ -1240,7 +1272,7 @@ router.post('/substitutions/auto-assign', authMiddleware, PLAN, MODGATE, rbac('t
 });
 
 /* PUT /api/timetable/substitutions/:id — assign substitute or update status */
-router.put('/substitutions/:id', authMiddleware, PLAN, MODGATE, rbac('timetable', 'update'), async (req, res) => {
+router.put('/substitutions/:id', authMiddleware, PLAN, MODGATE, timetableManageAccess('update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { substituteTeacherId, notes, status, type } = req.body;
@@ -1288,7 +1320,7 @@ router.put('/substitutions/:id', authMiddleware, PLAN, MODGATE, rbac('timetable'
 });
 
 /* DELETE /api/timetable/substitutions/:id */
-router.delete('/substitutions/:id', authMiddleware, PLAN, MODGATE, rbac('timetable', 'delete'), async (req, res) => {
+router.delete('/substitutions/:id', authMiddleware, PLAN, MODGATE, timetableManageAccess('delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('substitutions', tenantContext(req)).findOneAndDelete({ id: req.params.id, schoolId });
@@ -1298,7 +1330,7 @@ router.delete('/substitutions/:id', authMiddleware, PLAN, MODGATE, rbac('timetab
 });
 
 /* ── GET /api/timetable/versions — publish history ─────────── */
-router.get('/versions', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
+router.get('/versions', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const versions = await tenantModel('timetable_versions', tenantContext(req))
@@ -1312,7 +1344,7 @@ router.get('/versions', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read')
    Excludes: teachers scheduled in master timetable at that period, teachers
    marked absent today, substitutes already covering another slot at that period.
    Sorted: same-department first, then fewest weekly lessons (most available). */
-router.get('/available-teachers', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
+router.get('/available-teachers', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const { date, period, subject = '' } = req.query;
@@ -1408,7 +1440,7 @@ router.get('/available-teachers', authMiddleware, PLAN, MODGATE, rbac('timetable
 });
 
 /* ── GET /api/timetable/:id ───────────────────────────────────── */
-router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), async (req, res) => {
+router.get('/:id', authMiddleware, PLAN, MODGATE, timetableManageAccess('read'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const doc = await tenantModel('timetable', tenantContext(req)).findOne({ id: req.params.id, schoolId }).select('-__v').lean();
@@ -1422,7 +1454,7 @@ router.get('/:id', authMiddleware, PLAN, MODGATE, rbac('timetable', 'read'), asy
    ══════════════════════════════════════════════════════════════ */
 
 /* ── POST /api/timetable ─ Create slot ──────────────────────── */
-router.post('/', authMiddleware, PLAN, MODGATE, rbac('timetable', 'create'), async (req, res) => {
+router.post('/', authMiddleware, PLAN, MODGATE, timetableManageAccess('create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(SlotSchema, req.body);
@@ -1465,7 +1497,7 @@ router.post('/', authMiddleware, PLAN, MODGATE, rbac('timetable', 'create'), asy
 });
 
 /* ── POST /api/timetable/bulk ─ Bulk replace / populate ─────── */
-router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('timetable', 'create'), async (req, res) => {
+router.post('/bulk', authMiddleware, PLAN, MODGATE, timetableManageAccess('create'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(BulkSlotSchema, req.body);
@@ -1529,7 +1561,7 @@ router.post('/bulk', authMiddleware, PLAN, MODGATE, rbac('timetable', 'create'),
 });
 
 /* ── PUT /api/timetable/:id ─ Update slot ───────────────────── */
-router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('timetable', 'update'), async (req, res) => {
+router.put('/:id', authMiddleware, PLAN, MODGATE, timetableManageAccess('update'), async (req, res) => {
   try {
     const { schoolId, userId } = req.jwtUser;
     const { data, error } = _validate(SlotSchema.partial(), req.body);
@@ -1593,7 +1625,7 @@ router.put('/:id', authMiddleware, PLAN, MODGATE, rbac('timetable', 'update'), a
 });
 
 /* ── DELETE /api/timetable/:id ───────────────────────────────── */
-router.delete('/:id', authMiddleware, PLAN, MODGATE, rbac('timetable', 'delete'), async (req, res) => {
+router.delete('/:id', authMiddleware, PLAN, MODGATE, timetableManageAccess('delete'), async (req, res) => {
   try {
     const { schoolId } = req.jwtUser;
     const Timetable = tenantModel('timetable', tenantContext(req));

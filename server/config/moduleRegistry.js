@@ -124,6 +124,22 @@ const MODULE_REGISTRY = [
     { key: 'assignments',   label: 'Manage Teaching Assignments' },
     { key: 'import',        label: 'Import Timetable (CSV)' },
     { key: 'export',        label: 'Export Timetable (CSV)' },
+    // Raised directly: a school's `timetable` coarse grant (view/edit/etc.
+    // above ALL union into it) is easy to over-grant by accident — e.g.
+    // ticking Edit+Delete on the "View Timetable" row itself, which reads
+    // as harmless but actually hands full CRUD via the coarse array every
+    // other route in this module falls back to. This sub is hasExplicitSub
+    // Grant-gated (no coarse-grant fallback, timetable.js's own
+    // timetableManageAccess), so the whole-school admin Scheduling Engine
+    // (Class Grid/Teacher View/Institution/Rooms/Cover-Subs, and every
+    // create/update/delete route) is reachable ONLY by the real scheduling-
+    // admin floor roles by default, or a role this is explicitly granted to
+    // — never by an accidental coarse-array over-grant on any OTHER sub-key.
+    // Everyone else always gets the separate, already-correctly-self-scoped
+    // Portal (their own timetable / their children's / their section's —
+    // see GET /timetable/my, /my-children, both deliberately outside this
+    // gate).
+    { key: 'manage', label: 'Manage Whole-School Timetable (Admin Console)' },
   ]},
   { key: 'subjects', label: 'Subjects', section: 'Academic Management', icon: 'Library', navRoute: '/subjects', navOrder: 7, subs: [
     { key: 'view',   label: 'View Subjects & Departments' },

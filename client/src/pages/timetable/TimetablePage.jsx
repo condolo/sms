@@ -51,23 +51,26 @@ export default function TimetablePage() {
   const role   = useAuthStore(s => s.session?.user?.role   ?? '');
   const school = useAuthStore(s => s.session?.school);
 
-  const isAdminLevel = role === 'admin' || role === 'superadmin';
-  /* Was: ADMIN_ROLES = {'admin','superadmin','deputy','timetabler'} — a
-     hardcoded set checking the legacy 'deputy' alias, not the real
-     'deputy_principal'/'principal' role keys. onboard.js's server-side
-     defaults already grant principal/deputy_principal full timetable RCUD
-     (same tier as timetabler), so both were silently locked out of this
-     entire management page — including its edit actions — and shown only
-     the read-only self-service Portal below, no matter what Settings said.
-     can('timetable','update') is the real, live-configurable capability
-     that separates "manages the whole-school timetable" (timetabler,
-     principal, deputy_principal — all RCUD by default) from "views their
-     own schedule" (teacher, section_head — read-only by default, correctly
-     still routed to the Portal). Already reflects secondary roles too —
-     the server unions permissions across every role a user holds, so the
-     old roles.some(...) fallback is no longer needed. */
-  const canEdit     = isAdminLevel || can('timetable', 'update');
-  const isAdminRole = canEdit;
+  /* Raised directly: a plain teacher with only "View Timetable" ticked in
+     Settings was landing on this ENTIRE whole-school admin console —
+     because this used to gate on can('timetable','update'), the COARSE
+     module action array. That array is a union of every sub-key row's own
+     grant (server/routes/settings.js's _deriveApiPerms), so a single row
+     with all three V/E/D boxes ticked — even a row literally labelled
+     "View Timetable" — silently hands 'update' via the coarse array too,
+     regardless of what "Edit Timetable" itself shows. Confirmed live on a
+     real school's data. Fixed the same way server/routes/timetable.js's
+     own timetableManageAccess() now gates every admin-console route:
+     TIMETABLE_FLOOR_ROLES (the real scheduling-admin tier — same set the
+     server enforces, kept in sync here for the UI to match what the
+     server will actually allow) passes unconditionally; everyone else
+     needs the explicit 'timetable__manage' grant (hasExplicitSubGrant on
+     the server, no coarse-array fallback) — never the coarse array alone.
+     Everyone else gets the separate, already-correctly-scoped Portal. */
+  const TIMETABLE_FLOOR_ROLES = ['admin', 'superadmin', 'principal', 'deputy_principal', 'deputy', 'timetabler'];
+  const isFloorRole = TIMETABLE_FLOOR_ROLES.includes(role);
+  const isAdminRole = isFloorRole || can('timetable__manage', 'read');
+  const canEdit      = isFloorRole || can('timetable__manage', 'update');
 
   // Non-admin roles see the read-only portal
   if (!isAdminRole) return <TimetablePortal />;

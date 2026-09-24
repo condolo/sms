@@ -518,9 +518,31 @@ async function resolveLessonsClassPickerScope(req) {
   return _foldStreamsToParentClasses(req, scope);
 }
 
+/* Timetable's own floor — deliberately NOT a resolveXScope() function like
+   Attendance/Lessons above. Those narrow a QUERY down to a caller's own
+   assigned classIds; Timetable's admin console (Class Grid/Teacher View/
+   Institution/Rooms/Cover-Subs, and every write route) isn't something a
+   non-floor role gets a narrowed VERSION of — they get the entirely
+   separate, already-correctly-self-scoped Portal instead (GET /timetable/
+   my, /my-children — see timetable.js). So this is a floor SET only, used
+   by timetable.js's timetableManageAccess() the same way ATTENDANCE_FLOOR_
+   ROLES gates attendance.js's school-report/absentees/conflicts: floor
+   role passes, everyone else needs the explicit `timetable__manage` grant
+   (hasExplicitSubGrant, no coarse-grant fallback) — closing the exact gap
+   a misconfigured coarse `timetable` array (e.g. all three V/E/D boxes
+   accidentally ticked on the "View Timetable" row, unioning into full
+   create/update/delete for the whole module) would otherwise fall through.
+   `timetabler` is included here but deliberately absent from ATTENDANCE_/
+   LESSONS_FLOOR_ROLES — running the whole-school schedule is that role's
+   entire purpose, unlike attendance/lesson-planning which are homeroom/
+   subject-teaching concerns even for a role that's 'school'-level scope
+   for its OWN module. */
+const TIMETABLE_FLOOR_ROLES = new Set(['admin', 'superadmin', 'principal', 'deputy_principal', 'deputy', 'timetabler']);
+
 module.exports = {
   applyToFilter, hasNoAssignments, isUnrestricted, isClassInScope,
   resolveClassPickerScope, resolveHomeroomStreamIds, foldHomeroomScope,
   resolveAttendanceScope, resolveAttendanceClassPickerScope, ATTENDANCE_FLOOR_ROLES,
   resolveLessonsScope, resolveLessonsClassPickerScope, LESSONS_FLOOR_ROLES,
+  TIMETABLE_FLOOR_ROLES,
 };
