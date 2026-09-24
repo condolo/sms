@@ -55,12 +55,10 @@ export default function AttendancePage() {
   const [searchParams] = useSearchParams();
   const [date, setDate]       = useState(today);
   // 'register': today's existing per-class/stream take/view flow.
-  // 'report': the School-Wide Report — a distinct, more-restrictive view
-  // (see attendance.js's GET /school-report) most roles won't have; the
-  // tab itself is always shown (this app never pre-filters UI by
-  // permission — see AttendancePage.jsx's own name-backfill comment
-  // history for the established convention) and the server's 403 message
-  // surfaces plainly inside the panel for anyone without the grant.
+  // 'report'/'absentees'/'conflicts': distinct, more-restrictive views most
+  // roles won't have — their tabs only render when canViewReport/
+  // canViewAbsentees/canViewConflicts (below) are true, matching the
+  // server's own gates exactly (see the "Tab visibility" block below).
   const [viewMode, setViewMode] = useState('register');
   const [classId, setClassId] = useState(() => searchParams.get('classId') ?? '');
   const [streamId, setStreamId] = useState(() => searchParams.get('streamId') ?? '');
@@ -171,6 +169,56 @@ export default function AttendancePage() {
      unconditionally calling this for every role would 403 for anyone
      without Timetable module access. */
   const role = useAuthStore(s => s.session?.user?.role ?? '');
+  const can  = useAuthStore(s => s.can.bind(s));
+
+  /* ── Tab visibility ──────────────────────────────────────────
+     Raised directly: a teacher with School Report/Absentees/Conflicts
+     UNCHECKED in Settings could still see and open those tabs — this file
+     used to show them "always visible, surfacing a 403 inline" (see the
+     old comment on viewMode above), which is exactly what a Settings
+     toggle isn't supposed to mean. Mirrors server/routes/attendance.js's
+     own gates exactly, so a tab only appears when the underlying data
+     request would actually succeed:
+       - School Report / Absentees: ATTENDANCE_FLOOR_ROLES (admin/
+         superadmin/principal/deputy_principal/deputy) or the explicit
+         hasExplicitSubGrant-backed 'attendance__report'/'__absentees'
+         sub-permission — exactly what `can()` reads from session.user.
+         permissions (server/routes/settings.js's _deriveApiPerms output).
+       - Conflicts: same floor/grant check, PLUS the assigned Attendance
+         Conflict Resolver (server/routes/attendance.js's
+         attendanceConflictAccess) — a per-user, data-driven fact the
+         client has no other way to know, so it's resolved by asking the
+         one endpoint gated by that exact same function
+         (conflict-officer-config) rather than duplicating the officer
+         lookup here. Only fired when the synchronous checks already
+         failed, so floor roles/explicit grants never wait on a request. */
+  const ATTENDANCE_FLOOR_ROLES = ['admin', 'superadmin', 'principal', 'deputy_principal', 'deputy'];
+  const isAttendanceFloor = ATTENDANCE_FLOOR_ROLES.includes(role);
+  const canViewReport    = isAttendanceFloor || can('attendance__report', 'read');
+  const canViewAbsentees = isAttendanceFloor || can('attendance__absentees', 'read');
+  const canViewConflictsDirect = isAttendanceFloor || can('attendance__conflicts', 'read');
+  const { data: conflictOfficerProbe, isError: conflictOfficerDenied } = useQuery({
+    queryKey: ['attendance', 'conflict-officer-config'],
+    queryFn:  () => attendanceApi.conflictOfficerConfig.get(),
+    enabled:  !canViewConflictsDirect,
+    retry:    false,
+    staleTime: 5 * 60_000,
+  });
+  // Still waiting on the officer probe (only fires when the direct checks
+  // already failed) — don't redirect off Conflicts until it settles, so an
+  // actual assigned Resolver isn't bounced out mid-load.
+  const conflictAccessSettled = canViewConflictsDirect || conflictOfficerProbe !== undefined || conflictOfficerDenied;
+  const canViewConflicts = canViewConflictsDirect || (!!conflictOfficerProbe && !conflictOfficerDenied);
+
+  // A direct URL/deep-link (or a permission revoked mid-session) could land
+  // viewMode on a tab this user can no longer see — bounce back to Register
+  // rather than rendering a panel behind a tab that isn't even shown.
+  useEffect(() => {
+    if (viewMode === 'report' && !canViewReport) setViewMode('register');
+    else if (viewMode === 'absentees' && !canViewAbsentees) setViewMode('register');
+    else if (viewMode === 'conflicts' && conflictAccessSettled && !canViewConflicts) setViewMode('register');
+  }, [viewMode, canViewReport, canViewAbsentees, canViewConflicts, conflictAccessSettled]);
+
   const { data: myTimetableData } = useQuery({
     queryKey: ['timetable', 'my'],
     queryFn:  () => timetableApi.my(),
@@ -337,31 +385,38 @@ export default function AttendancePage() {
               >
                 Register
               </button>
+              {canViewReport && (
               <button
                 onClick={() => setViewMode('report')}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${viewMode === 'report' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
               >
                 School Report
               </button>
+              )}
+              {canViewAbsentees && (
               <button
                 onClick={() => setViewMode('absentees')}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${viewMode === 'absentees' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
               >
                 Absentees
               </button>
+              )}
+              {canViewConflicts && (
               <button
                 onClick={() => setViewMode('conflicts')}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${viewMode === 'conflicts' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
               >
                 Conflicts
               </button>
-              {/* Pure configuration, nothing to show a non-admin — unlike the
-                 tabs above (which stay always-visible per this file's own
-                 convention, surfacing a 403 inline), this one is hidden
+              )}
+              {/* Pure configuration, nothing to show a non-admin — hidden
                  outright for anyone who isn't admin/superadmin, since the
                  PUT routes it drives are hard-gated to those two roles
                  regardless of any custom RBAC grant. Same reasoning Lessons'
-                 own Template tab uses for canConfigureTemplate. */}
+                 own Template tab uses for canConfigureTemplate. The three
+                 tabs above follow the same principle now: each only renders
+                 once the matching server-side gate would actually let the
+                 request through — see the "Tab visibility" block above. */}
               {['admin', 'superadmin'].includes(role) && (
                 <button
                   onClick={() => setViewMode('settings')}
