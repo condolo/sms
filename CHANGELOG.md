@@ -6,6 +6,60 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.122.0] — 2026-09-24 — fix(attendance): a "school"-level administrative role could see a whole class's roster merged across every stream
+
+Raised directly, alongside the two fixes below: "when i click on the class to take attendance, all students are here from all the streams... even if a teacher is teaching or rather assigned all streams under one class, they should select the class then stream." Live-narrowed with the user's own follow-up once a plain teacher tested clean: "the stream class issue was never applied to global users, the teachers account is working perfectly but not someone like exam officer."
+
+### Root cause, confirmed live against the real school with a before/after request pair
+`AttendancePage.jsx`'s stream picker was already correct: it asks `streams.js`'s `GET /?attendanceScope=true`, which resolves scope via `ScopeEngine.resolveAttendanceScope` — a narrow, Attendance-only floor (only admin/superadmin/principal/deputy_principal/deputy are unrestricted; everyone else, including roles that are `'school'`-level generically for their OWN module, is scoped to their real `teaching_assignments`/homeroom rows). For a caller correctly narrowed to exactly ONE real stream in a multi-stream class, the picker correctly sees 1 stream and skips itself (`needsStreamSelection = false`) — but the roster load then falls back to `classes.js`'s `GET /:id/students`, which used the GENERIC `scopeMiddleware` scope instead. `scopeMiddleware.js`'s `ROLE_SCOPE_LEVEL` classifies `exams_officer` (and `admissions_officer`/`finance`/`hr`/`timetabler`/`discipline_committee`) as `'school'`-level — correctly unrestricted for THEIR OWN modules — which sets `req.scope = null` there. A real exams_officer account in the affected school (Robert Mukhwana) holds a genuine `teaching_assignments` row scoping him to exactly Year 4's "Diamond" stream (19 students) — confirmed live: `GET /classes/:id/students` (no `attendanceScope`) returned all 54 Year-4 students across all 3 streams, while the identical request with `?attendanceScope=true` correctly returned only Diamond's 19.
+
+This is the same class of bug the user named directly: an administrative title (exams officer, timetabler, deputy principal, etc.) is layered ON TOP of a real, underlying teaching assignment — the baseline is still a teacher for whatever they're actually assigned to teach — and Attendance's own narrow floor already existed precisely to honor that; this route just wasn't using it.
+
+### Fix
+`classes.js`'s `GET /:id/students` gains the same opt-in `?attendanceScope=true` convention already used by its own `GET /` (and by `streams.js`'s `GET /` and `/:id/students`): when set, it swaps in `ScopeEngine.resolveAttendanceScope(req)` before computing `inWholeClassScope`/`myStreamIds`, restoring the original scope afterward. `AttendancePage.jsx`'s single-stream roster fallback now passes `attendanceScope: true`. Every other caller of this route (Exams marks entry, Report Cards student picker) is unaffected — the flag is additive and opt-in, exactly the established pattern.
+
+### Verified live, not assumed
+Self-signed a JWT for the real exams_officer account against the real school (no password touched): `GET /streams?classId=<Year4>&attendanceScope=true` → 1 stream (Diamond, 19 students). `GET /classes/<Year4>/students?attendanceScope=true` (fixed) → 19 students, all Diamond. Same request WITHOUT the flag (the old, still-used-elsewhere behavior) → 54 students, all 3 streams merged — reproducing the reported bug exactly. Existing `classes-streams-students-scope.test.js` suite (25 tests) still passes unchanged.
+
+### Files
+- `server/routes/classes.js` — `GET /:id/students` opt-in `attendanceScope` handling
+- `client/src/pages/attendance/AttendancePage.jsx` — passes `attendanceScope: true` on the single-stream roster fallback
+
+---
+
+## [v5.121.0] — 2026-09-24 — fix(attendance): School Report/Absentees/Conflicts tabs stayed visible to roles with the permission unchecked in Settings
+
+Raised directly: "this teacher has access to sub modules that are turned off from the setting attendance like School Report, Absentees, Conflicts."
+
+### Root cause, confirmed against the real school's actual data, not assumed
+The server-side gates were already correct — verified directly by calling `hasExplicitSubGrant` against the real teacher role's actual data (`attendance__report`/`__absentees`/`__conflicts` all `[]`, the coarse `attendance` array wide open at `['read','create','update','delete']`, the same "View row over-grant" shape found and fixed for Timetable last version): each of the three routes correctly returned 403 for a plain teacher. The bug was purely client-side: `AttendancePage.jsx` rendered these three tabs unconditionally for every role by deliberate, documented convention ("tabs stay always-visible... surfacing a 403 inline") — so a role with the permission unchecked in Settings could still see, click into, and be told "forbidden" by each tab, which reads as "has access to" from outside the 403 response body, and needlessly reveals the existence of admin-only views to everyone.
+
+### Fix
+Each tab now only renders when the matching server-side gate would actually let the request through, mirroring `attendance.js` exactly:
+- **School Report / Absentees**: `ATTENDANCE_FLOOR_ROLES` (admin/superadmin/principal/deputy_principal/deputy) or the explicit `attendance__report`/`attendance__absentees` grant — read via the client's own `can()`, which sources the identical `_deriveApiPerms` output the server's `hasExplicitSubGrant` reads.
+- **Conflicts**: same floor/grant check, PLUS the assigned Attendance Conflict Resolver — a per-user, data-driven fact with no client-side equivalent, resolved by probing `GET /conflict-officer-config` (gated by the identical `attendanceConflictAccess` function) rather than duplicating the officer lookup client-side. Only probed when the direct checks already failed, so floor roles/explicit grants never wait on a request.
+A `viewMode` pointed at a now-hidden tab (stale deep link, or a permission revoked mid-session) bounces back to Register via `useEffect` rather than rendering a panel behind a tab that no longer shows.
+
+### Files
+- `client/src/pages/attendance/AttendancePage.jsx`
+
+---
+
+## [v5.120.0] — 2026-09-23 — fix(timetable): a teacher with only "View Timetable" ticked could see the entire school's Scheduling Engine
+
+Raised directly, with a real screenshot: a teacher's Settings row showed only "View Timetable" checked, yet they could see the full admin Class Grid, Teacher View, Institution overview, Rooms, and Cover/Subs — every class, every teacher, the whole school. "Why is this difficult to implement — RBAC!"
+
+### Root cause, confirmed against the real school's actual data, not assumed
+`timetable.js`'s every admin-console route (`GET /`, `/overview`, `/workload`, `/conflicts`, `/class/:classId`, `/teacher/:teacherId`, every write route) only ever checked the COARSE `timetable` action array via plain `rbac('timetable', action)`. That array is a union of every sub-key row's own V/E/D grant (`settings.js`'s `_deriveApiPerms`) — so a single row with all three boxes ticked, even one labelled "View Timetable," silently hands `create`/`update`/`delete` through the coarse array too, regardless of what the "Edit Timetable" row itself shows. Read directly from the affected school's real `role_permissions` document: `permissions.timetable = ['read','create','update','delete']` and `permissions.timetable__view = ['read','create','update','delete']`, while `timetable__edit`, `timetable__rooms`, `timetable__bell_schedule`, and every other row were correctly empty — exactly matching an admin having ticked all three columns on the "View Timetable" row specifically, an easy, understandable mistake given that row's own checkboxes carry real create/update/delete weight despite the label. The client's own `TimetablePage.jsx` compounded it: which UI a user sees (`isAdminRole`) was decided by `can('timetable','update')` — that same untrustworthy coarse array — rather than by role tier.
+
+### The fix — a real floor, not a coarse-array read
+Every admin-console route in `timetable.js` (everything except `GET /my` and `GET /my-children`, the already-correctly-self-scoped Portal data sources, deliberately untouched) now requires `timetableManageAccess(action)`: the real scheduling-admin floor (`admin`, `superadmin`, `principal`, `deputy_principal`, `deputy`, `timetabler` — new `TIMETABLE_FLOOR_ROLES` in `scopeEngine.js`) passes unconditionally; everyone else needs a brand-new, explicit `timetable__manage` grant (`hasExplicitSubGrant` — no coarse-array fallback at all, so no amount of accidental over-permissioning on any OTHER sub-key can reach it). `exams_officer`/`admissions_officer`/`finance`/`hr`/`discipline_committee` — "school"-level scope for their OWN module — are deliberately NOT in this floor, matching the same "Attendance-only floor" precedent already established for Attendance/Lesson Plans. `TimetablePage.jsx`'s `isAdminRole`/`canEdit` now check this same floor set plus `can('timetable__manage', ...)` instead of the coarse action array, so the UI a user sees now matches what the server will actually allow.
+
+### Verified
+New `timetable-manage-access.test.js` (11 tests): a plain teacher is 403'd from the admin console EVEN when the coarse `timetable` array is wide open (`['read','create','update','delete']`) — the exact real-world case, reproduced directly; floor roles (including the newly-added `timetabler`) pass; a role with the explicit `timetable__manage` grant passes without floor status; `exams_officer`/`admissions_officer`/`finance`/`hr`/`discipline_committee` are confirmed NOT floor; `GET /my`/`/my-children` remain open regardless. Full Jest suite: 238 suites, 2417/2417 passing. Client build clean.
+
+Live-verified against the real, affected school's actual (unmodified) data: constructed a legitimate test session for a real teacher account in that school using this project's own real `JWT_SECRET` (the account's actual credentials never touched), confirmed `GET /api/timetable` and `GET /api/timetable/overview` now correctly return 403 against their real, still-corrupted `role_permissions` document, and confirmed `GET /api/timetable/my` still correctly returns 200 with their own real (empty) schedule — the fix required no data migration at all. Separately, in the demo school (fully reversible, no real customer data touched): confirmed a correctly-configured teacher already saw the Portal (no regression); then deliberately reproduced the exact real-world corrupted permission shape on the demo teacher role, confirmed the Timetable page still correctly showed "My Timetable" (not the admin console) and a direct API call returned 403, then reverted the demo role back to its original state.
+
 ## [v5.119.1] — 2026-09-23 — fix(attendance): crash on "Assign," class/stream filter for Absentees, real-time absentee email alert, Resolver assignment moved to Settings
 
 Follow-up feedback on v5.119.0, live-tested immediately after shipping: clicking "Assign" on the Attendance Conflict Resolver card crashed the page outright; Absentees had no way to narrow by class/stream; the school wanted absences to trigger an actual in-app + optional-email alert (toggle under Notification Settings), not just a passive list someone has to remember to check; and the Resolver assignment shouldn't live inline on the operational Conflicts queue — it belongs in a real configuration area.
