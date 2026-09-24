@@ -235,8 +235,36 @@ router.get('/:id/students', authMiddleware, PLAN, MODGATE, rbac('students', 'rea
     // grant; a teacher with stream-only access fails it and must be allowed
     // through here specifically so the query below can narrow them to just
     // their own stream(s), same reasoning as streams.js's own roster route.
+    //
+    // `?attendanceScope=true` — raised directly: a class with 3 streams
+    // showed ALL 54 students merged together when taking attendance,
+    // instead of forcing a per-stream pick. Root cause: AttendancePage.jsx's
+    // stream picker already correctly uses streams.js's own attendanceScope
+    // (ScopeEngine.resolveAttendanceScope — the narrow, real-assignment-only
+    // floor: only admin/superadmin/principal/deputy_principal/deputy are
+    // unrestricted, see that function's own comment), so a caller scoped to
+    // exactly ONE real stream in a multi-stream class correctly sees just
+    // that one stream and skips the picker — but the roster query THEN falls
+    // back to THIS route, which used the GENERIC scopeMiddleware scope
+    // instead. For a role that's 'school'-level generically for its OWN
+    // module (exams_officer/admissions_officer/finance/hr/timetabler/
+    // discipline_committee — see scopeMiddleware.js's ROLE_SCOPE_LEVEL)
+    // but ALSO holds a real, narrow teaching_assignments or homeroom row in
+    // THIS class (the same "administrative role is layered on top of a real
+    // teaching duty" case Attendance's whole floor design exists for), the
+    // generic scope is null (fully unrestricted) even though their actual
+    // attendance-relevant access is one stream — so this route returned
+    // every student in the class instead of just theirs. Opt-in and
+    // additive, same convention as classes.js's own GET / attendanceScope/
+    // assignedOnly/lessonsScope flags: every other caller of this route
+    // (Exams marks entry, Report Cards picker) is unaffected.
+    const originalScope = req.scope;
+    if (req.query.attendanceScope === 'true') {
+      req.scope = await ScopeEngine.resolveAttendanceScope(req);
+    }
     const inWholeClassScope = ScopeEngine.isClassInScope(req, 'students', cls.id);
     const myStreamIds = req.scope?.streamIds ?? [];
+    req.scope = originalScope; // restore — the resolved copy is only for this route's own check
     const classIdForms = [...new Set([cls.id, String(cls._id), req.params.id].filter(Boolean))];
 
     // A teacher's streamIds may belong to a totally different class (e.g.

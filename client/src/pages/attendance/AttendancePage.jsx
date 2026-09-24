@@ -150,9 +150,16 @@ export default function AttendancePage() {
     queryKey: needsStreamSelection
       ? ['streams', streamId, 'students']
       : ['classes', classId, 'students'],
+    // attendanceScope on the classes.js fallback (single-stream classes only
+    // — needsStreamSelection is false) matches the SAME narrow floor the
+    // stream picker above already used to decide there was nothing to pick:
+    // without it, a caller who is 'school'-level generically for their own
+    // module (exams_officer/timetabler/etc.) but scoped to just one real
+    // stream here would get the WHOLE class's roster instead of their own
+    // stream's — see classes.js's own attendanceScope comment on this route.
     queryFn: () => needsStreamSelection
       ? streamsApi.students(streamId, { limit: 500, status: 'active' })
-      : classesApi.students(classId, { limit: 500, status: 'active' }),
+      : classesApi.students(classId, { limit: 500, status: 'active', attendanceScope: true }),
     enabled: canLoadRegister,
     staleTime: 5 * 60_000,
   });
