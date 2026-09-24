@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.124.0] — 2026-09-24 — fix(subjects): removing all Subjects permissions in Settings didn't actually restrict the Subjects page
+
+Raised directly: "I have removed all access to subject but this exam officer still have full access to this Subject module."
+
+### Root cause
+`server/routes/subjects.js`'s `GET /` and `GET /:id` are deliberately open to every authenticated user by design ("reference data" — Timetable, Lessons, Grades, Exams, HR, and Teacher List all resolve subject names via these routes regardless of whether the caller has any Subjects permission, and that's correct: a subject NAME is not sensitive, unlike an attendance record or exam result). `CatalogTab.jsx`/`CurriculumTab.jsx` already correctly gate their own Create/Edit/Delete buttons on `can('subjects', action)`, and the real school's data confirmed the exams_officer role's `subjects` coarse array (and every `subjects__*` sub-key) was genuinely empty — those buttons were already correctly hidden and the underlying write routes would already correctly 403.
+
+The actual gap: `SubjectsPage.jsx` itself had zero permission checks, and no route guard exists for `/subjects` in `App.jsx`. `Sidebar.jsx`'s nav already correctly hides the Subjects link once `permissions.subjects` is a present-but-empty array — but that only hides the link, not the page. Reaching `/subjects` by any other means (a direct URL, browser history, a bookmark) rendered the full Catalog/Curriculum/Enrollment/Warnings tabs with complete read access to every subject and department, permission or not.
+
+### Fix
+`SubjectsPage.jsx` gains a page-level gate: `isAdminLevel || can('subjects', 'read')` — the exact same coarse-array convention its own Catalog/Curriculum tabs already use for write actions, checked for `'read'` instead. A role with zero grants of any kind sees a plain "You don't have access to Subjects" message instead of the tab bar and every tab's content. The underlying reference-data routes are untouched — other modules' legitimate subject-name lookups for users without Subjects permission are unaffected.
+
+### Files
+- `client/src/pages/subjects/SubjectsPage.jsx`
+
+---
+
 ## [v5.123.0] — 2026-09-24 — fix(timetable): an administrative role with a real teaching assignment was 403'd out of "My Timetable," displaying as "not yet published"
 
 Raised as a follow-up once v5.122.0 was traced to its root: "the exam officer, a user assigned other role yet have classes, the system seems to assume that is a totally diff role from teaching."

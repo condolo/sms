@@ -4864,3 +4864,17 @@ Moved the existing `teachers` lookup (userId FK first, email fallback with self-
 
 ### Verified
 Self-signed a JWT for the real exams_officer account: `GET /api/timetable/my` now returns his real 21 slots with `role: 'teacher'` (previously a 403). Existing `timetable-my-teacher-resolution.test.js` and `timetable-manage-access.test.js` each assert the "no role, no record" and "no record but has role" paths explicitly — both still pass unchanged after the fix, confirming no regression on either preserved case. Full `server/__tests__/routes/timetable*` suite: 8 suites, 57/57 passing.
+
+## 64. Removing All Subjects Permissions in Settings Didn't Restrict the Subjects Page (v5.124.0)
+
+Raised directly: "the subject module settings for role and permission seems not to be working... I have removed all access to subject but this exam officer still have full access to this Subject module."
+
+Checked the real data first, not assumed: the exams_officer role's `subjects` coarse array AND every `subjects__view`/`__create`/`__edit`/`__delete` sub-key were all genuinely `[]` — no over-grant this time (unlike §60/§61's "View row" pattern). `CatalogTab.jsx`/`CurriculumTab.jsx` already correctly gate Create/Edit/Delete on `can('subjects', action)`, so those buttons were already hidden and the write routes already correctly 403 — the reported "full access" wasn't write access.
+
+Traced the client's own nav filtering (`Sidebar.jsx`'s `computeNav`) and confirmed it already correctly hides the Subjects link once `permissions.subjects` is present but empty (fails closed). The actual gap: `SubjectsPage.jsx` had zero permission checks of its own, and `App.jsx` has no route guard for `/subjects` — the sidebar hides the LINK, nothing hides the PAGE. `server/routes/subjects.js`'s `GET /`/`GET /:id` are deliberately, correctly open to every authenticated user regardless of Subjects permission — real cross-module reference data (Timetable, Lessons, Grades, Exams, HR, Teacher List all resolve subject names this way for users who may have zero Subjects permission but real access to those other modules). Gating those routes would have broken every one of those legitimate consumers; the actual fix belongs at the dedicated management page, not the reference-data route.
+
+### Fix
+`SubjectsPage.jsx` gains `isAdminLevel || can('subjects', 'read')` — reusing the exact same coarse-array `can()` convention Catalog/Curriculum's own write gates already use, checked for `'read'`. Zero grants of any kind now shows "You don't have access to Subjects" instead of the tab bar and all four tabs' content.
+
+### Verified
+Confirmed directly against the real school's data: exams_officer's `subjects` coarse array and all four sub-keys are `[]`. No new automated tests written — pure client-side conditional render, verified against the exact permission shape the gate reads; per standing instruction, live click-through is being done by the user directly.

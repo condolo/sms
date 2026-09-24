@@ -8,8 +8,9 @@
    ============================================================ */
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Library, BookOpen, Users, AlertTriangle, Check } from 'lucide-react';
+import { Library, BookOpen, Users, AlertTriangle, Check, Lock } from 'lucide-react';
 import clsx from 'clsx';
+import useAuthStore from '@/store/auth.js';
 import CatalogTab    from './CatalogTab';
 import CurriculumTab from './CurriculumTab';
 import EnrollmentTab from './EnrollmentTab';
@@ -26,9 +27,43 @@ export default function SubjectsPage() {
   const [tab,   setTab]   = useState('catalog');
   const [toast, setToast] = useState(null);
 
+  // Raised directly: "I have removed all access to subject but this exam
+  // officer still have full access to this Subject module." The sidebar
+  // already correctly hides the Subjects nav link once permissions.subjects
+  // is an empty array (Sidebar.jsx's computeNav — fails closed on a present
+  // but empty array). But nothing gated the PAGE itself: no route guard in
+  // App.jsx, and this component had zero permission checks of its own — so
+  // reaching /subjects by any other means (a direct URL, browser history, a
+  // link from elsewhere) showed the full Catalog/Curriculum/Enrollment/
+  // Warnings tabs regardless. CatalogTab/CurriculumTab already correctly
+  // gate their own Create/Edit/Delete buttons via can('subjects', action)
+  // reading this exact same coarse array — reusing it here for 'read' is
+  // the same convention, not a new one: the coarse array unions every
+  // sub-key's grant (view/create/edit/delete — settings.js's
+  // _deriveApiPerms), so an empty array here means truly zero grants of any
+  // kind, not just zero on the 'view' row specifically.
+  const role = useAuthStore(s => s.session?.user?.role ?? '');
+  const can  = useAuthStore(s => s.can.bind(s));
+  const isAdminLevel = role === 'admin' || role === 'superadmin';
+  const hasAccess = isAdminLevel || can('subjects', 'read');
+
   function flash(msg, type = 'success') {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
+  }
+
+  if (!hasAccess) {
+    return (
+      <div className="min-h-full bg-slate-50 flex items-center justify-center p-6">
+        <div className="bg-white border border-slate-200 rounded-xl p-10 flex flex-col items-center gap-3 max-w-sm text-center">
+          <Lock size={28} className="text-slate-300" />
+          <p className="text-sm font-medium text-slate-700">You don't have access to Subjects</p>
+          <p className="text-xs text-slate-400">
+            Ask your school admin to grant a Subjects permission under Settings → Roles &amp; Permissions.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (
