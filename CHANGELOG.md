@@ -6,6 +6,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.128.0] — 2026-09-25 — ops(auth): login rate limit raised for a real ~100-person concurrent training session
+
+Raised directly ahead of a live teacher-training session: "am meeting to training teachers and they will be accessing the system at the same time about 100, just confirming that the system can handle that login at ago concurrently?"
+
+### Finding
+`index.js`'s `authLimiter` (the outer, first-hit gate on `POST /api/auth/login`) had no custom `keyGenerator`, so it fell back to express-rate-limit's default — plain `req.ip` — capped at 20 requests/15min. Every device on one shared network (a training venue's WiFi, a school office) draws down the SAME bucket regardless of how many distinct real accounts are behind it. 100 teachers logging in from one venue within a 15-minute window would have hit "Too many login attempts" after the first 20, on their very first, correct-password try. `auth.js`'s own second-layer `loginIpLimiter` was already sized for exactly this case (100/15min, its own comment says "generous enough for a school computer lab logging in simultaneously") but the tighter OUTER gate was defeating that intent before requests ever reached it.
+
+Separately measured and worth knowing for future capacity planning (not changed here): password verification uses `bcryptjs` (pure JS, no native thread-pool offload) at cost factor 12. Benchmarked on this environment: 1 compare ≈ 573ms, 100 concurrent compares ≈ 57 seconds total — confirms compares serialize on Node's single main thread rather than running in parallel, so a real burst of ~100 simultaneous logins would visibly slow the whole server, not just the people logging in. A native-`bcrypt` migration would fix this properly but touches every login path — out of scope for a same-day fix; the practical mitigation for this specific session is to have teachers log in in staggered batches rather than all at the exact same moment.
+
+### Fix
+Raised `authLimiter` (index.js) and `loginIpLimiter` (auth.js) from 20 and 100 respectively to **300**, keeping them numerically consistent so raising the outer gate doesn't just expose the inner one as the new, lower ceiling. Still meaningfully bounds genuine credential-stuffing (which looks nothing like a room of humans typing a password once or twice each), while giving a 100-person session real headroom for mistyped passwords and page refreshes.
+
+### Verified
+Full server test suite: 238 suites, 2417/2417 passing, including `auth-session.test.js`'s full login-flow coverage.
+
+### Files
+- `server/index.js`
+- `server/routes/auth.js`
+- `server/__tests__/routes/auth-session.test.js` (stale comment referencing the old limit)
+
+---
+
 ## [v5.127.0] — 2026-09-25 — fix(classes): a pure form/homeroom teacher with no subject-teaching row was 403'd out of their own class
 
 Raised directly, and alarming on its face: "some teachers who have been assigned their classes/streams on some days find the class missing the students... including some class teachers... is this a bug? and it can be very dangerous if there is any data loss." Verified first, before anything else: no data was lost. The reported student (Year 8) and a second confirmed case (Angela Gitau, Year 2-Diamond) both still have every student correctly assigned in the database, untouched.

@@ -168,7 +168,8 @@ function buildApp() {
   const app = express();
   app.use(express.json());
   // Disable express-rate-limit in tests by not mounting it at root level;
-  // the router mounts it internally, but with max: 20 it won't trigger in unit tests.
+  // the router mounts its own loginIpLimiter internally, but its `skip` for
+  // NODE_ENV==='test' means it never triggers in unit tests regardless.
   app.use('/api/auth', authRouter);
   return app;
 }

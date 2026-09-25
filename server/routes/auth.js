@@ -308,13 +308,19 @@ function _passwordAge(user) {
 
 /* ── Layer 1: IP-level limiter — platform-wide abuse protection ─
    Catches credential-stuffing bots and scanner IPs before they reach
-   the DB. Limit is generous enough for a school computer lab logging
-   in simultaneously, but blocks sustained volumetric attacks.
+   the DB. Limit is generous enough for a school computer lab — or a
+   ~100-person teacher training session on one venue's WiFi — logging in
+   simultaneously, but blocks sustained volumetric attacks. Raised from
+   100 to 300 alongside index.js's own authLimiter (the outer, MORE
+   restrictive per-IP gate this route sits behind): that one was raised
+   for the exact same reason, and leaving this one at 100 would have just
+   made IT the new bottleneck the moment the outer limiter stopped being
+   the tightest.
    Uses CF-Connecting-IP when behind Cloudflare so the real client IP
    is used rather than Cloudflare's edge node IP.               ── */
 const loginIpLimiter = rateLimit({
   windowMs:       15 * 60 * 1000,
-  max:            100,
+  max:            300,
   standardHeaders: true,
   legacyHeaders:   false,
   skip:           () => process.env.NODE_ENV === 'test',

@@ -4915,3 +4915,17 @@ Raised with real alarm: "some teachers... find the class missing the students an
 
 ### Verified
 Self-signed a JWT for Angela Gitau's real account: before the fix, `GET /classes/<Year2>/students` returned 403; after, it returns her real 14-student Diamond roster. Full server suite: 238 suites, 2417/2417 passing.
+
+## 68. Login Rate Limit Raised for a Real ~100-Person Concurrent Training Session (v5.128.0)
+
+Raised directly ahead of a live event: "am meeting to training teachers and they will be accessing the system at the same time about 100, just confirming that the system can handle that login at ago concurrently?"
+
+Checked the actual limiter chain rather than guessing. `index.js`'s `authLimiter` — the OUTER gate `POST /api/auth/login` hits first — had no custom `keyGenerator`, so it fell back to express-rate-limit's default: plain `req.ip`, capped at 20/15min. Every device sharing one network (a training venue's WiFi) draws down the same bucket regardless of how many distinct real accounts are behind it — 100 teachers in one room would have started failing after the 20th login, correct passwords and all. `auth.js`'s own second-layer `loginIpLimiter` was already explicitly sized for "a school computer lab logging in simultaneously" (100/15min, per its own comment) — but the tighter outer gate was silencing that intent before requests ever reached it.
+
+Also measured, not assumed, while investigating: password verification uses `bcryptjs` (pure JS, no native thread-pool offload) at cost factor 12 (confirmed pervasive across onboard.js/settings.js/users.js's own password-set paths — this isn't a one-off). Benchmarked directly: 1 `bcrypt.compare()` ≈ 573ms; 100 issued concurrently via `Promise.all` ≈ 57 seconds total, essentially linear — proof the compares serialize on Node's single main thread rather than parallelizing, so a genuine burst of ~100 simultaneous logins would visibly slow the ENTIRE server (every school, not just the one training), not just the people logging in. Flagged as a real finding for future capacity planning; NOT fixed here — migrating to native `bcrypt` touches every login path platform-wide and isn't a same-day change to make right before a live session. The practical mitigation communicated to the user: stagger logins into batches rather than everyone signing in in the same few seconds.
+
+### Fix
+Raised `authLimiter` (index.js, 20→300) and `loginIpLimiter` (auth.js, 100→300) together — deliberately kept numerically consistent, since raising only the outer gate would just have exposed the inner one as the new, lower ceiling the moment it stopped being the tightest. Still meaningfully bounds genuine credential-stuffing (which looks nothing like a room of humans each typing a password once or twice), while giving a 100-person session real headroom for mistyped passwords and page refreshes.
+
+### Verified
+Full server test suite: 238 suites, 2417/2417 passing, including `auth-session.test.js`'s full login-flow coverage (updated one stale comment there referencing the old limit value — no assertion depended on it).

@@ -217,10 +217,23 @@ const apiLimiter = rateLimit({
   skip: (req) => process.env.NODE_ENV !== 'production',
 });
 
-// Strict auth limiter: 20 attempts per 15 min per IP — blocks brute-force
+// Strict auth limiter: per-IP, blocks brute-force. Raised from 20 —
+// found live, ahead of a real ~100-teacher training session: this has no
+// custom keyGenerator, so it falls back to express-rate-limit's default
+// (plain req.ip), meaning every device on one shared network — a training
+// venue's WiFi, a school office — draws down the SAME 15-minute bucket
+// regardless of how many different real people/accounts are behind it.
+// 20 was sized for one person's own retries, not a room full of distinct
+// users logging in inside the same window. 300 keeps meaningful brute-
+// force protection (genuine credential-stuffing still looks nothing like
+// a room of humans typing passwords once or twice each) while giving a
+// 100-person session real headroom for mistyped passwords and refreshes.
+// See auth.js's own loginIpLimiter (POST /login's second, route-level
+// limiter) — raised to match, since it would otherwise become the new,
+// lower binding ceiling the moment this one stopped being the tightest.
 const authLimiter = rateLimit({
   windowMs:          15 * 60 * 1000,
-  max:               20,
+  max:               300,
   standardHeaders:   true,
   legacyHeaders:     false,
   message:           { success: false, error: { code: 'RATE_LIMIT', message: 'Too many login attempts — please wait 15 minutes before trying again.' } },
