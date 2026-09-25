@@ -6,6 +6,48 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.127.0] — 2026-09-25 — fix(classes): a pure form/homeroom teacher with no subject-teaching row was 403'd out of their own class
+
+Raised directly, and alarming on its face: "some teachers who have been assigned their classes/streams on some days find the class missing the students... including some class teachers... is this a bug? and it can be very dangerous if there is any data loss." Verified first, before anything else: no data was lost. The reported student (Year 8) and a second confirmed case (Angela Gitau, Year 2-Diamond) both still have every student correctly assigned in the database, untouched.
+
+### Root cause
+`classes.js`'s `GET /:id/students` (called by `ClassDetail.jsx` and, for single-stream classes, by `AttendancePage.jsx`) narrows a non-floor caller to their real `teaching_assignments`. A teacher who is purely a form/homeroom teacher — `streams.js`'s own `formTeacherId`, a pastoral duty set independently of any subject-teaching row — has zero `teaching_assignments` rows in their own homeroom class if they don't also teach a subject there. `resolveAttendanceScope` (used by Attendance's own stream picker) already folds homeroom streams in for exactly this reason; the GENERIC scope this route otherwise falls back to never did (that fold is deliberately Attendance/Lessons-picker-only, so it can't leak into Grades/Assessment access — see `scopeEngine.js`'s own `resolveHomeroomStreamIds` comment). The result: a real homeroom teacher with no subject row got a 403 opening her own class.
+
+The client compounded it: `ClassDetail.jsx`'s empty-state condition can't distinguish "the fetch failed" from "this class genuinely has no students," so the 403 rendered as "No streams or students yet — add students to this class first," identical to real data loss from the outside.
+
+### Fix
+`classes.js`'s `GET /:id/students` now falls back to `ScopeEngine.resolveHomeroomStreamIds(req)` whenever the caller isn't in whole-class scope, mirroring the fallback `streams.js`'s own sibling roster route already had. Confirmed live against the real account: previously a 403, now correctly returns her real 14-student roster.
+
+### Files
+- `server/routes/classes.js`
+
+---
+
+## [v5.126.0] — 2026-09-25 — fix(security): generic `/api/collections/:col` API required no module-level permission for most collections' writes, and read authorization was inconsistent
+
+Extends the existing `collections.js` hardening (module-boundary read gate, then the C-1 privilege-escalation fix) to close the remaining gap: only a small `ADMIN_WRITE` allowlist required elevated access on write — every other allowlisted collection (`leave_requests`, `behaviour_incidents`, `timetable`, `library_books`, `growth_*`, `hostels`, and more) could be created, updated, or deleted by any authenticated user for their own school, regardless of role_permissions.
+
+### Fix
+`_canAccess(req, res, col, action)` now runs `moduleGate` + the collection's real owning module's `rbac(mod, action)` for every read AND write, not just the previous read-only gate — an unmapped collection fails closed rather than defaulting open. A small, explicitly-reasoned `OPEN_READ` set (`subjects`, `departments`, `rooms`, `bell_schedule`, `sections`) preserves the real behavior of the few collections whose OWN dedicated routes are deliberately open to any authenticated user as reference data — confirmed by reading each one directly, since sibling collections mapped to the same module (e.g. `rooms`/`bell_schedule` alongside the tightly-gated `timetable` itself) can have different real gate postures.
+
+### Verified
+Full `collections-rbac.test.js` suite (21 tests, role_permissions seeded with realistic — not mocked-away — RBAC) passing, including the pre-existing regression coverage for admin-manages-users flows and the "reference data stays open" case. Full server test suite: 238 suites, 2417/2417 passing.
+
+### Files
+- `server/routes/collections.js`
+- `server/__tests__/routes/collections-rbac.test.js`
+
+---
+
+## [v5.125.0] — 2026-09-25 — docs: Help Centre content audit against the real permission registry
+
+Cross-referenced every module's "Who can do what here?" Help Centre article against `moduleRegistry.js` (the actual source of truth for grantable permissions) and fixed everywhere they'd drifted: Students was missing 4 real sub-permissions (Promote, Manage Portal Accounts, Resolve Duplicates, Permanently Delete) and still said "Delete Student" for what's now labelled "Deactivate Student"; Attendance was missing School-Wide Report/Absentees/Conflicts (added and enforced earlier this cycle); Timetable was missing the new Manage Whole-School Timetable (Admin Console) permission, plus a new article explaining the Portal-vs-Console split; Lessons was missing Configure Lesson Plan Template; Exams still described a single combined "Lock/Unlock Exam" permission after that split into two independently-grantable ones; Messages was missing the Delete Own vs. Delete Any (Moderation) distinction. Also added a Students FAQ on reactivating a deactivated student, and noted Subjects' page-level "no access" state.
+
+### Files
+- `client/src/pages/help/HelpPage.jsx`
+
+---
+
 ## [v5.124.0] — 2026-09-24 — fix(subjects): removing all Subjects permissions in Settings didn't actually restrict the Subjects page
 
 Raised directly: "I have removed all access to subject but this exam officer still have full access to this Subject module."
