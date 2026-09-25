@@ -123,7 +123,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Subjects & Departments — see the subject list\n• Create Subject / Department — add a new subject\n• Edit Subject — change name, code, or teacher assignment\n• Delete Subject — permanently remove a subject\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Subjects & Departments — see the subject list\n• Create Subject / Department — add a new subject\n• Edit Subject — change name, code, or teacher assignment\n• Delete Subject — permanently remove a subject\nA role with none of these shows a plain "no access" message instead of the Subjects page. Your role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -169,7 +169,11 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Student List — see the roster with filters and search\n• View Student Profile — open a student\'s full record\n• Add Student — create a new student record\n• Edit Student — update an existing record\n• Delete Student — permanently remove a record\n• Export Students (CSV) — download the roster\n• Import Students (CSV) — bulk-create records from a spreadsheet\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Student List — see the roster with filters and search\n• View Student Profile — open a student\'s full record\n• Add Student — create a new student record\n• Edit Student — update an existing record\n• Deactivate Student — set status to inactive (reversible — see "Can I reactivate a deactivated student?" below)\n• Export Students (CSV) — download the roster\n• Import Students (CSV) — bulk-create records from a spreadsheet\n• Promote Students to Next Class — move a whole class/stream up at year-end\n• Manage Student Portal Accounts — create/reset the student\'s own portal login (separate from parent portal accounts)\n• Resolve Duplicate Student Records — merge accidental duplicate records\n• Permanently Delete Students — irreversible removal, separate from (and far more restrictive than) Deactivate\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+      },
+      {
+        q: 'Can I reactivate a deactivated student?',
+        a: 'Yes. Open the student\'s profile — an inactive, withdrawn, graduated, or transferred student always shows a Reactivate action (anyone with Edit Student can use it). Reactivating sets status back to active and the student immediately reappears in their class/stream roster.',
       },
     ],
   },
@@ -283,7 +287,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Register — see attendance already marked\n• Mark Attendance — record present/absent/late/excused\n• Edit Records — change attendance after it has been saved\n• Export / Print Register — download or print the register\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Register — see attendance already marked\n• Mark Attendance — record present/absent/late/excused\n• Edit Records — change attendance after it has been saved\n• Export / Print Register — download or print the register\n• School-Wide Report — the aggregate per-class/stream count view across the whole school, not just your own register\n• View Absent Students & Contact Details — the real per-student absentee list with guardian phone/email, for calling home\n• Attendance Conflicts — the queue of same-day present/absent mismatches (a student marked both in different classes) awaiting resolution\nThe last three are each a separate, more restrictive grant on top of the first four — holding View Register or Mark Attendance does not automatically include them, since each reveals data beyond your own register. Their tabs only appear at all once you hold the matching permission (or you\'re an admin/principal/deputy) — Your role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
       {
         q: 'Can I take attendance straight from my dashboard?',
@@ -332,8 +336,12 @@ const SECTIONS = [
         a: 'Go to Profile → Online Meeting Links → paste your Zoom PMI URL and/or Google Meet URL → Save. These links appear automatically when Emergency Mode is active.',
       },
       {
+        q: 'Why do I only see "My Timetable" instead of the full scheduling console?',
+        a: 'The whole-school Scheduling Engine (Class Grid, Teacher View, Institution overview, Rooms, Cover/Subs) is a separate, more restrictive grant — Manage Whole-School Timetable (Admin Console), below. Everyone else — teachers, section heads, parents, students — automatically gets the read-only Portal instead: your own weekly schedule, your children\'s, or your section\'s. This is not something you can be "half-granted" into: you either see your own Portal, or (with the Admin Console permission, or if your role is Admin/Principal/Deputy/Timetabler) the full console.',
+      },
+      {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Timetable — see the schedule\n• Edit Timetable — assign subjects/teachers/rooms to periods\n• Manage Rooms — add/edit rooms\n• Configure Bell Schedule — set period start/end times\n• Manage Teaching Assignments — set which teacher delivers which subject to which class (pre-timetabling)\n• Import Timetable (CSV) — bulk-load a schedule\n• Export Timetable (CSV) — download the schedule\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Timetable — see the schedule\n• Edit Timetable — assign subjects/teachers/rooms to periods\n• Manage Rooms — add/edit rooms\n• Configure Bell Schedule — set period start/end times\n• Manage Teaching Assignments — set which teacher delivers which subject to which class (pre-timetabling)\n• Import Timetable (CSV) — bulk-load a schedule\n• Export Timetable (CSV) — download the schedule\n• Manage Whole-School Timetable (Admin Console) — reach the full Scheduling Engine at all, instead of your own read-only Portal (see above); Admin/Principal/Deputy Principal/Deputy/Timetabler always have this, everyone else needs it explicitly granted\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -477,7 +485,7 @@ const SECTIONS = [
       },
       {
         q: 'Can I lock exam results after entry?',
-        a: 'Yes. Once results are reviewed and correct, click "Lock Exam". Locked exams cannot be edited without an unlock request from an admin. Unlock reasons are logged in the audit trail.',
+        a: 'Yes. Once results are reviewed and correct, click "Lock Exam". Locked exams cannot be edited until someone with the separate Unlock Exam permission reopens them. Unlocking is logged in the audit trail with who did it and when.',
       },
       {
         q: 'How are grades calculated from multiple assessments?',
@@ -485,7 +493,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Exams & Results — see exams and their results\n• Create / Edit Exam — set up a new exam or change its details\n• Lock / Unlock Exam — freeze results against further edits, or reopen them\n• Enter Exam Results — record student scores\n• Delete Exam — permanently remove an exam\nThis is the "Exams" module specifically — a separate permission from "Grades & Marks" below, though both live under the Exams area in the sidebar. Your role\'s exact access is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Exams & Results — see exams and their results\n• Create / Edit Exam — set up a new exam or change its details\n• Lock Exam — freeze results against further edits\n• Unlock Exam — reopen a locked exam, a separate, independently grantable permission from Lock (e.g. an exams officer may lock but only a Principal can unlock)\n• Enter Exam Results — record student scores\n• Delete Exam — permanently remove an exam\nThis is the "Exams" module specifically — a separate permission from "Grades & Marks" below, though both live under the Exams area in the sidebar. Your role\'s exact access is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -595,7 +603,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Lesson Plans — see planned/logged lessons\n• Create Lesson Plan — add a new lesson plan\n• Edit Lesson Plan — update an existing plan\n• Delete Lesson Plan — remove a plan\n• Mark Lesson Coverage — mark a syllabus topic as taught\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Lesson Plans — see planned/logged lessons\n• Create Lesson Plan — add a new lesson plan\n• Edit Lesson Plan — update an existing plan\n• Delete Lesson Plan — remove a plan\n• Mark Lesson Coverage — mark a syllabus topic as taught\n• Configure Lesson Plan Template — set the fields every teacher in the school sees on every future lesson plan; a separate, more restrictive grant from Edit Lesson Plan (which only affects your own plans)\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
@@ -685,7 +693,7 @@ const SECTIONS = [
       },
       {
         q: 'Are messages private?',
-        a: 'Yes. Messages are only visible to the sender and recipient(s). Admins can review all conversations for safeguarding and compliance purposes.',
+        a: 'Yes. Messages are only visible to the sender and recipient(s), except for staff holding the separate Delete Any Message (Moderation) permission, who can act on any conversation for safeguarding and compliance purposes.',
       },
       {
         q: 'Can I message an entire class at once?',
@@ -697,7 +705,7 @@ const SECTIONS = [
       },
       {
         q: 'Who can do what here? (Roles & Permissions)',
-        a: '• View Messages — see conversations\n• Send Messages — start or reply to a conversation\n• Delete Messages — remove a message\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
+        a: '• View Messages — see conversations\n• Send Messages — start or reply to a conversation\n• Delete Own Messages — remove a message you sent\n• Delete Any Message (Moderation) — remove someone else\'s message, e.g. for safeguarding or compliance; a separate, more restrictive grant from Delete Own Messages\nYour role\'s exact access to each of these is set in Settings → Roles & Permissions — ask your school admin if something here looks greyed out or missing for you.',
       },
     ],
   },
