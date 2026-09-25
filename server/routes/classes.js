@@ -263,7 +263,26 @@ router.get('/:id/students', authMiddleware, PLAN, MODGATE, rbac('students', 'rea
       req.scope = await ScopeEngine.resolveAttendanceScope(req);
     }
     const inWholeClassScope = ScopeEngine.isClassInScope(req, 'students', cls.id);
-    const myStreamIds = req.scope?.streamIds ?? [];
+    let myStreamIds = req.scope?.streamIds ?? [];
+    // Raised directly, and dangerous-sounding until traced: a real form/
+    // homeroom teacher (streams.js's own formTeacherId, set independently of
+    // any subject-teaching row) with ZERO teaching_assignments row in her own
+    // homeroom class got a 403 here — confirmed live, students never moved or
+    // deleted — even though she could correctly take attendance for that
+    // exact same class the day before. Reason: resolveAttendanceScope folds
+    // homeroom streams in for Attendance's own scope (see its own comment),
+    // but the GENERIC scope this route otherwise uses never does (scopeEngine
+    // .js's foldHomeroomScope is deliberately Attendance/Lessons-picker-only)
+    // — so a pure homeroom teacher passed here with an empty streamIds. The
+    // client (ClassDetail.jsx) then rendered that 403 identically to a
+    // genuinely empty class ("no students yet — add some"), indistinguishable
+    // from real data loss to whoever saw it. streams.js's own sibling route
+    // already falls back to resolveHomeroomStreamIds for exactly this reason
+    // — mirrored here rather than invented fresh.
+    if (!inWholeClassScope) {
+      const homeroomStreamIds = await ScopeEngine.resolveHomeroomStreamIds(req);
+      if (homeroomStreamIds.length) myStreamIds = [...new Set([...myStreamIds, ...homeroomStreamIds])];
+    }
     req.scope = originalScope; // restore — the resolved copy is only for this route's own check
     const classIdForms = [...new Set([cls.id, String(cls._id), req.params.id].filter(Boolean))];
 
