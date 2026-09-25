@@ -67,7 +67,14 @@ jest.mock('../../middleware/auth', () => ({
 jest.mock('../../middleware/tenant', () => ({ tenantMiddleware: (_req, _res, next) => next() }));
 
 const mockRolePerms = {
-  admin:   { behaviour: ['read', 'create', 'update', 'delete'], hr: ['read', 'update'], attendance: ['read'], grades: ['read'] },
+  // settings: RCUD matches ROLE_DEFAULTS.admin's real shape (every module,
+  // via ALL_MODULES.map) — users/schools/role_permissions/academic_years
+  // all map to 'settings' in COLLECTION_MODULE, and a real admin genuinely
+  // has this by default; without it here, the mock under-grants relative
+  // to production and every admin-manages-users test below would 403 on
+  // the module gate before ever reaching the C-1 escalation checks it's
+  // actually testing.
+  admin:   { behaviour: ['read', 'create', 'update', 'delete'], hr: ['read', 'update'], attendance: ['read'], grades: ['read'], settings: ['read', 'create', 'update', 'delete'] },
   teacher: { attendance: ['read', 'create', 'update'], grades: ['read', 'create', 'update'] }, // no behaviour, no hr
 };
 function mockMakeRolePermsStore() {
