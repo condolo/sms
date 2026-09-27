@@ -19,9 +19,11 @@ import {
   Loader2, AlertTriangle, Pencil, Trash2, Search, GraduationCap,
   Users, Copy, BarChart3, ArrowLeft, BookOpen, Circle,
   CheckCircle2, MinusCircle, NotebookPen, Printer, Calendar, Settings,
+  Upload, FileText,
 } from 'lucide-react';
-import { lessons as lessonsApi } from '@/api/client.js';
+import { lessons as lessonsApi, academicConfig as academicConfigApi } from '@/api/client.js';
 import useAuthStore from '@/store/auth.js';
+import { useCurrentAcademicPeriod } from '@/hooks/useCurrentAcademicPeriod.js';
 
 /* ── Role helpers ────────────────────────────────────────────── */
 function useRole() {
@@ -1065,6 +1067,214 @@ function ShareablePlansBanner({ classId, subjectId, streamId, onCopied }) {
   );
 }
 
+function ImportStatusBadge({ status }) {
+  const map = {
+    ready:     { label: 'Ready',            className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+    duplicate: { label: 'Already imported', className: 'bg-slate-100 text-slate-500 border-slate-200' },
+    conflict:  { label: 'Conflict',         className: 'bg-amber-50 text-amber-700 border-amber-200' },
+    invalid:   { label: 'Invalid',          className: 'bg-red-50 text-red-700 border-red-200' },
+  };
+  const cfg = map[status] ?? map.invalid;
+  return <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${cfg.className}`}>{cfg.label}</span>;
+}
+
+/* ── Import Lesson Plans (.docx / .csv) — preview then explicit commit ──
+   Teacher/class/subject/stream are already fixed by the drill-down this
+   opens from — never inferred from the document. Reading the file (POST
+   .../import/preview) NEVER creates anything; only "Import N Lessons"
+   (POST .../import/commit) does, and only for the rows still checked —
+   default-checked is "ready" only, so a duplicate/conflict/invalid row
+   needs a deliberate opt-in, never an accidental include. */
+function ImportSlideOver({ classId, className, subjectId, subjectName, streamId, streamName, onClose, onDone }) {
+  const { academicYearId: currentYearId, termId: currentTermId } = useCurrentAcademicPeriod();
+  const [academicYearId, setAcademicYearId] = useState('');
+  const [termId, setTermId] = useState('');
+  const [file, setFile] = useState(null);
+  const [step, setStep] = useState('select'); // select | preview | result
+  const [previewData, setPreviewData] = useState(null);
+  const [checkedRows, setCheckedRows] = useState({});
+  const [error, setError] = useState('');
+  const [result, setResult] = useState(null);
+
+  const { data: yearsResp } = useQuery({
+    queryKey: ['academic-config', 'years'],
+    queryFn:  () => academicConfigApi.years.list(),
+    staleTime: 5 * 60_000,
+  });
+  const years = yearsResp?.data ?? [];
+
+  useEffect(() => { if (!academicYearId && currentYearId) setAcademicYearId(currentYearId); }, [currentYearId, academicYearId]);
+  useEffect(() => { if (!termId && currentTermId) setTermId(currentTermId); }, [currentTermId, termId]);
+
+  const selectedYear = years.find(y => y.id === academicYearId);
+  const terms = selectedYear?.terms ?? [];
+
+  const previewMutation = useMutation({
+    mutationFn: () => {
+      const isCsv = file.name.toLowerCase().endsWith('.csv');
+      const contentType = isCsv ? 'text/csv' : lessonsApi.import.DOCX_MIME;
+      return lessonsApi.import.preview(file, contentType, {
+        classId, subjectId, academicYearId, termId,
+        ...(streamId ? { streamIds: streamId } : {}),
+      });
+    },
+    onSuccess: (r) => {
+      setPreviewData(r.data);
+      const initialChecks = {};
+      r.data.rows.forEach(row => { initialChecks[row.sourceRowRef] = row.status === 'ready'; });
+      setCheckedRows(initialChecks);
+      setStep('preview');
+    },
+    onError: (err) => setError(err?.message ?? 'Failed to read this file'),
+  });
+
+  const commitMutation = useMutation({
+    mutationFn: () => {
+      const rows = previewData.rows.filter(r => checkedRows[r.sourceRowRef]);
+      return lessonsApi.import.commit({ batchId: previewData.batchId, sourceFileName: file.name, classId, subjectId, academicYearId, termId, rows });
+    },
+    onSuccess: (r) => { setResult(r.data); setStep('result'); },
+    onError: (err) => setError(err?.message ?? 'Failed to import'),
+  });
+
+  function handlePreview() {
+    setError('');
+    if (!file) { setError('Choose a .docx or .csv file first.'); return; }
+    if (!academicYearId || !termId) { setError('Pick the academic year and term this document is for.'); return; }
+    previewMutation.mutate();
+  }
+
+  const checkedCount = Object.values(checkedRows).filter(Boolean).length;
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-40" onClick={onClose} />
+      <div className="fixed right-0 top-0 h-full w-full max-w-2xl bg-white shadow-2xl z-50 flex flex-col">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 shrink-0">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Import Lesson Plans</h2>
+            <p className="text-xs text-slate-400 mt-0.5">{subjectName} · {className}{streamName ? ` · ${streamName}` : ''}</p>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"><X size={18} /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+          {error && (
+            <div className="flex items-center gap-2 bg-red-50 text-red-700 text-sm px-3 py-2 rounded-lg border border-red-200">
+              <AlertTriangle size={14} className="shrink-0" />{error}
+            </div>
+          )}
+
+          {step === 'select' && (
+            <>
+              <p className="text-xs text-slate-500">
+                Upload a completed term document (.docx, your school's usual layout) or a .csv — one lesson per row/block. Nothing is created yet; you'll review every lesson on the next screen before anything is saved.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1.5">Academic Year</label>
+                  <select value={academicYearId} onChange={e => { setAcademicYearId(e.target.value); setTermId(''); }} className="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg bg-white">
+                    <option value="">Select…</option>
+                    {years.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1.5">Term</label>
+                  <select value={termId} onChange={e => setTermId(e.target.value)} disabled={!terms.length} className="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg bg-white disabled:bg-slate-50">
+                    <option value="">Select…</option>
+                    {terms.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1.5">Document</label>
+                <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-slate-200 rounded-lg py-8 cursor-pointer hover:bg-slate-50">
+                  <Upload size={20} className="text-slate-400" />
+                  <span className="text-sm text-slate-600">{file ? file.name : 'Click to choose a .docx or .csv file'}</span>
+                  <input type="file" accept=".docx,.csv" className="hidden" onChange={e => setFile(e.target.files?.[0] ?? null)} />
+                </label>
+              </div>
+            </>
+          )}
+
+          {step === 'preview' && previewData && (
+            <>
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">{previewData.summary.ready ?? 0} ready</span>
+                {previewData.summary.duplicate > 0 && <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-500 border border-slate-200">{previewData.summary.duplicate} already imported</span>}
+                {previewData.summary.conflict > 0 && <span className="px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{previewData.summary.conflict} conflicts</span>}
+                {previewData.summary.invalid > 0 && <span className="px-2 py-1 rounded-full bg-red-50 text-red-700 border border-red-200">{previewData.summary.invalid} invalid</span>}
+              </div>
+              {previewData.warnings?.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800 space-y-1">
+                  {previewData.warnings.map((w, i) => <p key={i}>{w}</p>)}
+                </div>
+              )}
+              <div className="space-y-2">
+                {previewData.rows.map(row => (
+                  <div key={row.sourceRowRef} className={`border rounded-lg px-3 py-2 ${row.status === 'invalid' ? 'border-red-100 bg-red-50/50' : 'border-slate-200'}`}>
+                    <div className="flex items-start gap-2">
+                      <input
+                        type="checkbox"
+                        checked={!!checkedRows[row.sourceRowRef]}
+                        disabled={row.status === 'invalid' || row.status === 'duplicate'}
+                        onChange={e => setCheckedRows(prev => ({ ...prev, [row.sourceRowRef]: e.target.checked }))}
+                        className="mt-0.5 rounded border-slate-300"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-xs font-medium text-slate-800">{row.date || '(no date)'} — {row.topicTitle || 'Untitled'}{row.subtopicTitle ? ` — ${row.subtopicTitle}` : ''}</p>
+                          <ImportStatusBadge status={row.status} />
+                        </div>
+                        {row.error && <p className="text-[11px] text-red-600 mt-0.5">{row.error}</p>}
+                        {row.status === 'conflict' && <p className="text-[11px] text-amber-700 mt-0.5">An existing plan for this date has different content — review before including this one.</p>}
+                        {row.objectives && <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">{row.objectives}</p>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {step === 'result' && result && (
+            <div className="text-center py-8">
+              <CheckCircle2 size={32} className="mx-auto mb-3 text-emerald-500" />
+              <p className="text-sm font-semibold text-slate-800">{result.created.length} lesson plan{result.created.length !== 1 ? 's' : ''} created</p>
+              <p className="text-xs text-slate-500 mt-1">
+                {result.skippedDuplicate.length > 0 && `${result.skippedDuplicate.length} already imported (skipped). `}
+                {result.conflicts.length > 0 && `${result.conflicts.length} conflict${result.conflicts.length !== 1 ? 's' : ''} left for manual review. `}
+                {result.invalid.length > 0 && `${result.invalid.length} invalid.`}
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-slate-100 shrink-0 flex justify-end gap-2">
+          {step === 'select' && (
+            <button onClick={handlePreview} disabled={previewMutation.isPending} className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg">
+              {previewMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
+              Read Document
+            </button>
+          )}
+          {step === 'preview' && (
+            <>
+              <button onClick={() => setStep('select')} className="text-sm font-medium text-slate-600 px-4 py-2 rounded-lg hover:bg-slate-50">Back</button>
+              <button onClick={() => commitMutation.mutate()} disabled={commitMutation.isPending || checkedCount === 0} className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg">
+                {commitMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                Import {checkedCount} Lesson{checkedCount !== 1 ? 's' : ''}
+              </button>
+            </>
+          )}
+          {step === 'result' && (
+            <button onClick={onDone} className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded-lg">Done</button>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 /* ── Lesson Plans: drill-down for one class-subject[-stream] ──── */
 function PlansDrillDown({ item, onBack }) {
   const { classId, streamId, streamName, subjectId, subjectName, className } = item;
@@ -1072,6 +1282,15 @@ function PlansDrillDown({ item, onBack }) {
   const [showSlider, setShowSlider] = useState(false);
   const [editing,    setEditing]    = useState(null);
   const [prefillDate, setPrefillDate] = useState(null);
+  const [showImport, setShowImport] = useState(false);
+
+  // lessons__import specifically (hasExplicitSubGrant, no coarse
+  // lessons:create fallback) — bulk-creating many plans from a document
+  // is a materially different action from authoring one through the
+  // form, same reasoning as lessons__template. See moduleRegistry.js.
+  const can  = useAuthStore(s => s.can.bind(s));
+  const role = useAuthStore(s => s.session?.user?.role);
+  const canImport = ['admin', 'superadmin', 'principal', 'deputy_principal', 'deputy', 'acting_deputy', 'head_of_school'].includes(role) || can('lessons__import', 'create');
 
   const { data: resp, isLoading } = useQuery({
     queryKey: ['lessons', 'plans', classId, subjectId, streamId ?? ''],
@@ -1123,6 +1342,14 @@ function PlansDrillDown({ item, onBack }) {
           </div>
           <p className="text-xs text-slate-400 mt-0.5">{plans.length} lesson plan{plans.length !== 1 ? 's' : ''}</p>
         </div>
+        {canImport && (
+          <button
+            onClick={() => setShowImport(true)}
+            className="flex items-center gap-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium px-3 py-2 rounded-lg"
+          >
+            <Upload size={13} /> Import
+          </button>
+        )}
         <button
           onClick={() => { setEditing(null); setPrefillDate(null); setShowSlider(true); }}
           className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-3 py-2 rounded-lg"
@@ -1192,6 +1419,19 @@ function PlansDrillDown({ item, onBack }) {
           existing={editing} initialDate={prefillDate}
           onClose={() => { setShowSlider(false); setEditing(null); setPrefillDate(null); }}
           onSaved={() => { setShowSlider(false); setEditing(null); setPrefillDate(null); }}
+        />
+      )}
+
+      {showImport && (
+        <ImportSlideOver
+          classId={classId} className={className} subjectId={subjectId} subjectName={subjectName}
+          streamId={streamId} streamName={streamName}
+          onClose={() => setShowImport(false)}
+          onDone={() => {
+            setShowImport(false);
+            qc.invalidateQueries({ queryKey: ['lessons', 'plans', classId, subjectId, streamId ?? ''] });
+            qc.invalidateQueries({ queryKey: ['lessons', 'week-status'] });
+          }}
         />
       )}
     </div>

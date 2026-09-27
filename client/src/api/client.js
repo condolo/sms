@@ -131,6 +131,32 @@ async function _downloadPdf(path, filename, params) {
   URL.revokeObjectURL(a.href);
 }
 
+// Sends a raw file (docx binary or csv text) as the request body with its
+// real Content-Type, rather than JSON-wrapping it — matches the server's
+// own expectation (express.raw/express.text on that specific route, same
+// pattern already used for CSV bulk imports elsewhere in this app). params
+// carry the pre-selected classId/subjectId/academicYearId/termId/
+// streamIds as query string, exactly as the import preview route expects.
+async function _postFile(path, file, contentType, params) {
+  const { slug } = detectSchool();
+  const headers = { 'Content-Type': contentType };
+  if (slug) headers['X-School-Slug'] = slug;
+  const qs = params
+    ? new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))).toString()
+    : '';
+  const res = await fetch(`${BASE}${path}${qs ? `?${qs}` : ''}`, {
+    method: 'POST', headers, credentials: 'include', body: file,
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok) {
+    const errBody = json?.error;
+    const code    = typeof errBody === 'object' ? (errBody?.code ?? 'SERVER_ERROR') : 'SERVER_ERROR';
+    const message = typeof errBody === 'string'  ? errBody : errBody?.message ?? 'Import failed';
+    throw new APIError(code, message, res.status, json ?? {});
+  }
+  return json;
+}
+
 // Generic CRUD factory
 function _resource(base) {
   return {
@@ -908,6 +934,14 @@ export const lessons = {
   },
   shareablePlans: (params) => _get('/lessons/plans/shareable', params),
   copyPlan: (id, data) => _post(`/lessons/plans/${id}/copy`, data),
+  /* Bulk import from a real .docx or .csv lesson-plan document — gated by
+     the dedicated lessons__import permission, not plain create. Preview
+     never writes; commit is the only call that creates lesson_plans. */
+  import: {
+    DOCX_MIME: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    preview: (file, contentType, params) => _postFile('/lessons/plans/import/preview', file, contentType, params),
+    commit:  (data) => _post('/lessons/plans/import/commit', data),
+  },
   /* Summary views */
   myClasses:    (params)  => _get('/lessons/my-classes', params),
   summary:      (params)  => _get('/lessons/summary', params),
