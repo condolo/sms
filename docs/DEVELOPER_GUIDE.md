@@ -4960,3 +4960,45 @@ Build clean; smoke-tested in the browser (Markbook renders with no console error
 
 ### Files
 - `client/src/pages/exams/ExamsPage.jsx`
+
+## 71. Lesson Plan Import (.docx / .csv) and Cross-Stream Sharing (v5.131.0)
+
+Requested as a full 20-phase spec: import a completed term's worth of lesson plans from a real Word document, populating native Msingi lesson-plan records. Phase 0 (discovery) found two parallel lesson-plan systems on the same collection (`lesson-plans.js`, old/unused — confirmed dead: zero references in `client/src/**` or any test — vs. `lessons.js`'s `/plans` routes, the real target). Phase 1 analyzed the user's own two real documents (a completed Week 1 sample and the blank school-wide template) rather than designing from the blank template alone, per the user's explicit gate.
+
+### What the real documents proved, that assumptions couldn't have
+- Lesson blocks are NOT reliably "one `<w:tbl>` = one lesson" — the blank template packs two lesson blocks as stacked row-groups inside ONE table; the filled sample uses a separate table per lesson. Detection has to be content-driven (a row whose first cell is `TEACHER`), not table-count based.
+- Every lesson's Topic/Subtopic in the real sample ("Unit 1: Adventure — Adventure Fiction Conventions", etc.) has **no match at all** in this school's real `syllabus_topics` — confirmed by querying the live database, not assumed. Blocking import on a pre-existing syllabus topic (the existing "update topics first" precondition `POST /plans` enforces for manual entry) would make this real document literally unimportable. Resolution (Phase 1 approved decision): imported plans carry `topicTitle`/`subtopicTitle` as free text, `topicId`/`subtopicId` left unset — `POST /plans`'s manual-entry flow is completely unchanged, still requires a real topic.
+- Real dates in the sample were inconsistently formatted ("1ST SEPTEMBER", "FROM: 2ND SEPTEMBER", "3 SEPTEMBER 2026") and one lesson's date (Sept 1) genuinely falls one day before the real Term 1 2026-2027 start date (Sept 2) — a real edge case a parser has to flag, not silently coerce.
+
+### Idempotency — resolved from evidence, not invented
+The user confirmed directly: double periods are real — the same teacher can have two genuinely different lessons for the same class+subject+stream on the same date. That rules out `(teacherId, classId, subjectId, streamId, date)` alone as an identity key. The real key is that tuple **plus a content hash**, matched by each row's `sourceRowRef` (its position in the source document) rather than date+identity alone. Matching by date+identity alone was tried first and caught a real bug in testing: a same-batch double period falsely conflicted with itself, because each row's existing-plan lookup queried the live, already-mutating collection from earlier rows in the same commit loop.
+
+### Architecture
+```
+docx ─┐                                    entity resolution        preview (never writes)
+      ├─→ normalized lesson-plan rows ─→   (pre-selected class/    ─→  → operator reviews  ─→  explicit commit
+csv ──┘   (block detection + field map)     subject/stream/term;         (ready/invalid/            (only checked
+                                             topic/date resolved)         duplicate/conflict)          rows written)
+```
+- `server/utils/lesson-plan-docx-parser.js` — hand-rolled WordprocessingML tag-stream parser (no library needed; only need table/paragraph/run text, and a proper library like `mammoth` would need a second HTML-parsing pass anyway). Uses `jszip` to read `word/document.xml`. Column mapping is header-keyword driven (`objective`/`activit`/`resource`/`remark`), not fixed position, matching `lessonPlanTemplate`'s own relabel/reorder tolerance for manual entry.
+- `server/utils/lesson-plan-csv-parser.js` — CSV has no pre-existing document to reverse-engineer, so this defines Msingi's own shape (one row per lesson); reuses `server/utils/csv.js` (extracted from `import-export.js`'s inline parser during this work, so both share one quoted-comma-aware implementation).
+- `server/utils/lesson-plan-import-resolver.js` — pure, DB-free: `resolveLessonDate` (parses free text against a real term's date range), `getTopicAndSubtopic` (splits a combined docx-style cell on em-dash/hyphen, or uses CSV's separate Topic/Subtopic columns directly), `resolveStreamFromAssignments`, `computeContentHash`.
+- `server/routes/lessons.js` — `POST /plans/import/preview` (parses + resolves + classifies every row; **never writes**) and `POST /plans/import/commit` (the only route that creates `lesson_plans` documents, and only for rows the client explicitly submits). Both gated by a new `lessons__import` sub-permission (`hasExplicitSubGrant`, no coarse `lessons:create` fallback — same floor-role bypass as `lessons__template`; see `moduleRegistry.js`). Ownership is checked directly against `teaching_assignments` rather than `ScopeEngine.isClassInScope` — that function needs a specific `streamId` up front to recognize a stream-scoped assignment (a class taught in only one stream never appears in `scope.classIds` by design), which isn't known yet at the point ownership must be checked; an earlier version that passed `streamId=undefined` silently 403'd every stream-scoped teacher, caught by testing.
+- Created plans carry `importBatch: {batchId, sourceFileName, sourceRowRef, importedBy, importedAt, contentHash}`. One `AuditService.log()` entry per batch that actually created something (mirrors `import-export.js`'s existing bulk-write audit precedent); none for a no-op re-run.
+
+### Cross-stream sharing (separate, directly requested feature)
+"Some schools want each teacher to have their own lesson plan, some schools don't mind if the same lesson plan is used across [streams] within the same class" — a per-school toggle, default `'own'` (today's exact behavior). `GET/PUT /api/lessons/sharing-settings` reuses the `lessons__template` grant (same sensitivity class as the field-customization settings it sits beside in the UI). When on: `GET /plans/shareable` lists a colleague's plan(s) for the same class+subject (any stream, excluding the caller's own — empty, not an error, whenever sharing is off); `POST /plans/:id/copy` creates a brand-new, independently-owned plan from a colleague's content ("review and publish for his or her stream" — never live shared access, never write access to the source; reflection always resets empty; date is overridable since sibling streams often teach the same lesson on different days). `GET /plans` itself is completely untouched.
+
+### UI
+- Lessons page → Template tab: `SharingSettingsCard` (the toggle) sits above the existing field-customization form (now `TemplateFieldsCard`, split out unchanged).
+- Class-subject[-stream] drill-down: `ShareablePlansBanner` (copy-from-colleague, invisible when nothing to offer) and an "Import" button (gated by `lessons__import`) opening `ImportSlideOver` — select academic year/term + file → preview with per-row status badges and default-checked-if-"ready" checkboxes → commit → result summary.
+- Added a shared `_postFile()` helper to the API client (raw docx/csv bytes with real `Content-Type`, matching the server's `express.raw`/`express.text` expectation — no new upload library).
+
+### Verified
+Server: 40+ new tests across parser/resolver/CSV/import-routes/sharing-routes suites; full server suite (2494 tests) green, zero regressions. Client: verified via `esbuild` (Vite's own transformer) — transforms clean; a full live-browser click-through was not completed (no test-session credentials available this session) — noted honestly rather than claimed.
+
+### Files
+- `server/utils/lesson-plan-docx-parser.js`, `lesson-plan-csv-parser.js`, `lesson-plan-import-resolver.js`, `csv.js` (new)
+- `server/routes/lessons.js`, `server/routes/import-export.js`, `server/config/moduleRegistry.js`
+- `client/src/pages/lessons/LessonsPage.jsx`, `client/src/api/client.js`
+- `server/__tests__/lesson-plan-docx-parser.test.js`, `lesson-plan-import-resolver.test.js`, `lesson-plan-csv-parser.test.js`, `routes/lessons-plans-import.test.js`, `routes/lessons-plans-sharing.test.js` (new)

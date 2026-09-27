@@ -6,6 +6,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.131.0] — 2026-09-27 — feat(lessons): lesson plan import (.docx/.csv) + cross-stream sharing
+
+Full 20-phase spec: import a completed term's lesson plans from a real Word document into native Msingi lesson-plan records. Analyzed the user's own two real documents (not the blank template alone, per their explicit gate) before writing any parser code — this found the actual table-packing variance (one table per lesson vs. several stacked in one table), confirmed this school's real Topic/Subtopic text has zero matches in `syllabus_topics` (so imports carry free-text `topicTitle`/`subtopicTitle` instead of requiring a pre-existing syllabus topic — manual entry via `POST /plans` is unchanged), and surfaced a real edge case (one sample lesson's date fell a day before the real term start).
+
+Idempotency is `(teacherId, classId, subjectId, streamId, date)` + a content hash, matched by each row's position in the source document — not date+identity alone, because the user confirmed double periods are real (two genuinely different lessons, same identity, same date). New: `POST /api/lessons/plans/import/preview` (parses + classifies every row as ready/invalid/duplicate/conflict, never writes) and `POST /api/lessons/plans/import/commit` (the only route that creates records, only for rows explicitly submitted), gated by a new `lessons__import` permission — separate from plain `lessons:create`.
+
+Also shipped, directly requested alongside it: per-school lesson-plan sharing (`GET/PUT /api/lessons/sharing-settings`, default off) — when on, a teacher can copy a colleague's plan for the same class+subject from a different stream as their own starting point (`GET /plans/shareable`, `POST /plans/:id/copy`) — a copy, never live shared access.
+
+Full UI: Template tab gets a sharing toggle; the class-subject drill-down gets a "copy from colleague" banner and an Import button with a 3-step upload → review → commit flow.
+
+Full details, architecture diagram, and file list: see [Developer Guide §71](docs/DEVELOPER_GUIDE.md#71-lesson-plan-import-docx--csv-and-cross-stream-sharing-v51310).
+
+---
+
 ## [v5.130.0] — 2026-09-27 — fix(exams): results entry merged every stream when a teacher taught more than one
 
 Raised directly, with a concrete example: "if lets say Year 3 which have 3 streams taught by different teachers, have been assigned Mathematics, when updating results, the teacher sees only his stream, if a teacher is teaching more than one stream, the teacher selects the stream one by one to update the results."
