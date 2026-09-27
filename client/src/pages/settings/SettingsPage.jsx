@@ -2355,7 +2355,18 @@ function AcademicYearsSection({ schoolId }) {
   // nested form entirely rather than working around it.
   function handleCreate() {
     if (!newName.trim() || !newStart || !newEnd) return;
+    // Raised directly: a year created here showed no terms at all in Exams'
+    // term filter (and, by the same shape mismatch, would have in Finance's
+    // AcademicPeriodPicker/FeeStructureTab and Students' term filter too) —
+    // every one of those reads `t.id`/`t.name`, the shape _seedBaseData
+    // (platform.js) has always used for the one auto-provisioned year every
+    // school starts with. This editor's own `term`/`label` fields are kept
+    // (updateTermDate below still keys edits off `t.term`), but `id`/`name`
+    // are now included on every term too, so a year created or edited here
+    // works everywhere else in the app the exact same way the seeded year
+    // already does — not a second, incompatible schema.
     const terms = Array.from({ length: newTermCount }, (_, i) => ({
+      id: crypto.randomUUID(), name: `Term ${i + 1}`,
       term: i + 1, label: `Term ${i + 1}`, startDate: '', endDate: '',
     }));
     createMut.mutate({ name: newName.trim(), startDate: newStart, endDate: newEnd, terms });
@@ -2376,10 +2387,16 @@ function AcademicYearsSection({ schoolId }) {
     const yid = year.id || year._id;
     setEditingId(yid);
     // Normalise terms — assign term number + default label for any legacy docs
-    // that are missing these fields so the editor always has valid data to work with
+    // that are missing these fields so the editor always has valid data to work with.
+    // Also preserve (or backfill) `id`/`name` — see handleCreate's own comment:
+    // dropping these here, as this used to, would silently rewrite an
+    // already-correct year's terms into the shape Exams/Finance/Students all
+    // fail to read the moment its dates were next edited via this panel.
     const normalised = (year.terms ?? []).map((t, idx) => ({
+      id:        t.id         ?? crypto.randomUUID(),
+      name:      t.name       || t.label || `Term ${t.term ?? (idx + 1)}`,
       term:      t.term      ?? (idx + 1),
-      label:     t.label     || `Term ${t.term ?? (idx + 1)}`,
+      label:     t.label     || t.name || `Term ${t.term ?? (idx + 1)}`,
       startDate: t.startDate ?? '',
       endDate:   t.endDate   ?? '',
     }));
