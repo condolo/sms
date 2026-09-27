@@ -5029,3 +5029,31 @@ Preserves the original intent (never hide a real timetabled lesson from the remi
 - `client/src/pages/settings/SettingsPage.jsx` — `PERM_MODULES` fallback fix
 - `client/src/pages/lessons/LessonsPage.jsx` — `isAssigned()` check + unassigned-notice dialog in `LessonPlansTab`
 - `server/__tests__/routes/lessons-plans-import.test.js`, `lessons-plans-sharing.test.js`, `server/__tests__/lesson-plan-docx-parser.test.js` — new tests for all of the above
+
+## 73. Permission Self-Escalation Guard — Consolidated Security Review, Item #2 (v5.133.0)
+
+Directly requested: "Start with the permission self-escalation fix, start to act." Closes the highest-ranked still-open item from the 14-category external security review's re-verification (§72): `PUT /api/settings/school`'s role/per-user permission writes were gated by the same generic `rbac('settings','update')` as trivial fields (logo, SMTP), with no check that the granting admin's own permissions actually cover what they're handing out, and `POST /custom-roles` copied `baseRole`'s permissions as-is with zero validation — an admin could name `baseRole:'admin'` (or worse) and get a full copy.
+
+### The fix didn't need a new capability — it needed one wired up
+`moduleRegistry.js` already listed a `settings__permissions` sub-permission ("Manage Roles & Permissions") — confirmed by direct grep that nothing server-side ever checked it. It was a checkbox in the Settings UI that did nothing. Wired it up instead of inventing a new one: `_canManagePermissions()` in `settings.js` checks `hasExplicitSubGrant(req, 'settings', 'permissions', 'update')`, with `admin`/`superadmin` as an unconditional floor (matching this route's own "admin only" header comment) — so every real school's current ability to manage permissions works exactly as before with zero action needed; a school that separately customized some OTHER role to hold plain `settings:update` (for unrelated things like logo/SMTP) will no longer be able to use that same grant to also edit permissions — that narrowing is the point.
+
+### The self-escalation cap
+`_actorEffectivePerms(req)` computes the ACTOR's own effective permissions (role + per-user override merge — reusing rbac.js's real `_loadPerms`/`_loadUserPerms`/`_mergeUserOverrides`, now exported for this purpose, not reimplemented). `_capToActorCeiling(candidatePerms, actorPerms)` then caps any grant to what the actor already holds, falling back sub-key → coarse-module exactly the same way `_isAllowed()` resolves a real permission check — so "can I grant this" uses the identical resolution logic as "can I do this." A non-superadmin actor can therefore configure any role's permissions freely, but never hand out more than they themselves hold — including editing their own role upward. `PUT /school` REJECTS the whole request (422, naming exactly which grants were over-authority) when this happens, since a V/E/D checkbox toggle is explicit intent and deserves a clear error, not a silent partial save. `POST /custom-roles` instead silently caps (a `baseRole` is a starting template, not an explicit per-permission ask) — a deliberate asymmetry, not an inconsistency.
+
+### Per-user override target validation
+`PUT /school`'s `byUser` sync now verifies every target `userId` is a real, active user in the same school (`isActive: {$ne: false}`, matching this file's own existing convention) before writing anything — an unknown or cross-school/inactive target 400s the whole request rather than silently upserting a `role_permissions` doc against a dangling ID.
+
+### Audit trail
+A new `settings.permissions_changed` audit action fires (in addition to the existing `settings.school_updated` one) whenever a permission write actually happens, with real before/after values per role/user touched — snapshotted from the real stored doc *before* any write, not the boolean "did permissions change" flag the old code logged. Custom-role creation's own audit entry now records the actual (capped) permissions granted, not just `baseRole`.
+
+### A real mock-fidelity bug the tests themselves caught
+Building the test suite for this surfaced a genuine trap: a naive mock's `.lean()` returning `{...doc}` (shallow spread) still shares the nested `permissions` object with the live store doc — so a later `updateOne()` mutating that doc in place silently mutates an already-"resolved" before-snapshot out from under it too, exactly the bug class `settings-per-user-override-integration.test.js`'s own header comment already warned about for a different field. Real Mongoose `.lean()` always returns fully independent objects, so this was a test-mock gap, not a production bug — but it would have produced a false-positive "before equals after" audit test. Fixed by deep-cloning (`JSON.parse(JSON.stringify(...))`) in the new test file's mock.
+
+### Verified
+Fixed two pre-existing tests this change legitimately altered the behavior of, not by weakening the new checks but by making their fixture data realistic: `settings-per-user-override-integration.test.js`'s mock admin previously had no `hr` permission at all, so granting Jane an `hr__payroll_view` override — the exact thing that test exists to verify — would now be correctly rejected as self-escalation; gave the mock admin realistic `hr` access instead of narrowing the new guard. `settings-audit.test.js`'s rbac mock was missing `hasExplicitSubGrant`/`_loadPerms`/`_loadUserPerms` entirely (added, wired to the real implementations against that file's own fixtures) and its `_model` mock routed `role_permissions` to a permanently-empty fallback store instead of the same fixture `tenantModel` used (fixed to match). 19 new tests in `settings-permission-escalation.test.js`. Full suite: 2525/2525 passing, zero regressions.
+
+### Files
+- `server/middleware/rbac.js` — export `_loadPerms`/`_loadUserPerms`
+- `server/routes/settings.js` — `_canManagePermissions`, `_actorEffectivePerms`, `_capToActorCeiling`, wired into `PUT /school` and `POST /custom-roles`
+- `server/__tests__/routes/settings-permission-escalation.test.js` (new)
+- `server/__tests__/routes/settings-per-user-override-integration.test.js`, `settings-audit.test.js` — fixture/mock fixes

@@ -279,4 +279,4 @@ function rbac(mod, action, subKey) {
   };
 }
 
-module.exports = { rbac, hasPermission, hasExplicitSubGrant, invalidatePermCache, _mergeUserOverrides };
+module.exports = { rbac, hasPermission, hasExplicitSubGrant, invalidatePermCache, _mergeUserOverrides, _loadPerms, _loadUserPerms };

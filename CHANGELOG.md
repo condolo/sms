@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v5.133.0] — 2026-09-27 — fix(security): permission self-escalation guard
+
+Closes the highest-ranked open item from the consolidated 14-category security review: role and per-user permission writes (`PUT /api/settings/school`, `POST /api/settings/custom-roles`) were gated by the same generic `settings:update` as trivial fields, with no check that the granting admin's own permissions covered what they were handing out, and `POST /custom-roles` copied any named `baseRole`'s permissions as-is — an admin could name `baseRole:'admin'` and get a full copy.
+
+Wired up a dedicated capability that already existed unused in `moduleRegistry.js` (`settings__permissions`, "Manage Roles & Permissions" — a checkbox that did nothing server-side until now), with `admin`/`superadmin` as a floor so every real school's current setup keeps working with zero action needed. Added a self-escalation cap: a non-superadmin actor can configure any role's permissions, but never hand out more than they themselves currently hold — checked with the exact same resolution logic (`_loadPerms`/`_mergeUserOverrides`) real permission checks already use, not a separate reimplementation. Per-user overrides now require a real, active user in the same school as their target. Added a dedicated `settings.permissions_changed` audit entry with real before/after values, replacing a boolean "did permissions change" flag.
+
+19 new tests; fixed 2 pre-existing tests whose fixture data (not the new checks) was unrealistic once the guard was in place. Full suite: 2525/2525 passing, zero regressions.
+
+Full details: [Developer Guide §73](docs/DEVELOPER_GUIDE.md#73-permission-self-escalation-guard--consolidated-security-review-item-2-v51330).
+
+---
+
 ## [v5.132.0] — 2026-09-27 — fix(lessons): security review fixes + weekly reminder's dead-end
 
 Self-requested security/integration review of v5.131.0 found and fixed 3 real issues: `POST /plans/import/commit` had no schema validation on client-submitted rows (added, matching every other write route in the file); the docx parser only capped compressed upload size, not decompressed size (added a zip-bomb guard against JSZip's declared uncompressed size); and `SettingsPage.jsx`'s permission-list fallback was missing the new `lessons__import` entry (the live registry was already correct, this was a stale-fallback bug). Also resolved the review's one open question: imports now enforce the same required-field rules manual entry does.

@@ -22,7 +22,7 @@ const { revokeUserTokens, revokeIdentityTokens } = require('../utils/token-versi
 const emailUtil             = require('../utils/email');
 const { encrypt, smtpEncryptReady } = require('../utils/smtpEncrypt');
 const { DEFAULTS: NOTIF_DEFAULTS, EVENT_REGISTRY, GROUPS: NOTIF_GROUPS } = require('../utils/notif-settings');
-const { rbac, invalidatePermCache } = require('../middleware/rbac');
+const { rbac, invalidatePermCache, hasExplicitSubGrant, _mergeUserOverrides, _loadPerms, _loadUserPerms } = require('../middleware/rbac');
 const { invalidateModuleConfigCache } = require('../middleware/module-gate');
 const { invalidateScopeCache, invalidateScopeCacheForRole } = require('../middleware/scopeMiddleware');
 const AuditService           = require('../services/audit');
@@ -41,6 +41,77 @@ function _isSuperAdmin(req) {
   const rs = req.jwtUser?.roles || [];
   return r === 'superadmin' || rs.includes('superadmin');
 }
+
+/* ── Permission-management authorization (security review, 2026-09) ──
+   Closes a real gap: role/per-user permission writes were gated by the
+   same generic rbac('settings','update') as trivial fields (logo, SMTP),
+   with no check that the acting admin's own grants actually cover what
+   they're handing out — an admin could grant a role (or themselves, via
+   a per-user override) something they don't hold, up to and including
+   another role's full permission set. moduleRegistry.js already listed
+   a 'settings__permissions' sub-permission ("Manage Roles & Permissions")
+   — it existed in the registry/UI but was never actually checked
+   anywhere server-side; this wires it up rather than inventing a new one.
+
+   Floor: admin/superadmin only — matches this route's own header comment
+   ("PUT /api/settings/school — admin only") and preserves every real
+   school's current ability to manage permissions without any action
+   needed. A school that separately customized some OTHER role to hold
+   plain settings:update (for unrelated things like logo/SMTP) will no
+   longer be able to use that same grant to also edit permissions — that
+   narrowing is the intended fix, not a regression: permission management
+   now needs its own explicit grant, exactly as asked. */
+const PERMISSIONS_FLOOR = new Set(['admin', 'superadmin']);
+async function _canManagePermissions(req) {
+  const effectiveRoles = new Set([req.jwtUser?.role, ...(req.jwtUser?.roles ?? [])]);
+  if ([...effectiveRoles].some(r => PERMISSIONS_FLOOR.has(r))) return true;
+  return hasExplicitSubGrant(req, 'settings', 'permissions', 'update');
+}
+
+/* ── Self-escalation guard (security review, 2026-09) ──
+   "Do not let an actor grant permissions they do not hold, or create a
+   higher-privilege administrator." Computes the ACTOR's own effective
+   permissions (role + per-user override merge — the exact same
+   resolution _isAllowed() uses to decide what the actor themselves can
+   do) and caps any candidate grant to that ceiling. A non-superadmin
+   actor can therefore configure any role's permissions freely, but can
+   never hand out more than they themselves currently hold — including
+   editing their own role upward, or basing a new custom role on one with
+   more authority than they have (see POST /custom-roles below, where
+   this same cap makes the baseRole choice itself impossible to abuse:
+   whatever baseRole names, the copied permissions are still capped to
+   the actor's own ceiling before they're ever saved).
+   Superadmin is exempt — same unconditional authority _isSuperRole()
+   gives it everywhere else in this codebase. */
+async function _actorEffectivePerms(req) {
+  const { schoolId, userId, role } = req.jwtUser;
+  const rolePerms = await _loadPerms(schoolId, role);
+  const userPerms = await _loadUserPerms(schoolId, userId);
+  return userPerms ? _mergeUserOverrides(rolePerms, userPerms) : rolePerms;
+}
+function _actorEffectiveAllows(actorPerms, key, action) {
+  if (Array.isArray(actorPerms[key])) return actorPerms[key].includes(action);
+  const mod = key.includes('__') ? key.split('__')[0] : key;
+  return Array.isArray(actorPerms[mod]) && actorPerms[mod].includes(action);
+}
+// Returns { capped, overGrants: [{key, action}] } — capped never exceeds
+// what actorPerms itself allows; overGrants lists exactly what was
+// requested but denied, for a clear error message rather than a silent
+// partial grant.
+function _capToActorCeiling(candidatePerms, actorPerms) {
+  const capped = {};
+  const overGrants = [];
+  for (const [key, actions] of Object.entries(candidatePerms)) {
+    if (!Array.isArray(actions)) { capped[key] = actions; continue; }
+    capped[key] = actions.filter(a => {
+      const ok = _actorEffectiveAllows(actorPerms, key, a);
+      if (!ok) overGrants.push({ key, action: a });
+      return ok;
+    });
+  }
+  return { capped, overGrants };
+}
+
 function _uid() {
   // Use crypto.randomBytes for the random suffix — CSPRNG
   return Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
@@ -409,6 +480,84 @@ router.put('/school', authMiddleware, rbac('settings', 'update'), async (req, re
     if (!Object.keys(update).length) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'No updatable fields provided.' } });
     }
+
+    // ── Permission-management authorization + self-escalation guard ──
+    // Validated BEFORE any write to this request — a rejected permission
+    // change must never leave unrelated fields (school name, logo, etc.)
+    // from the SAME request partially saved, and must never apply some
+    // roles'/users' grants while rejecting others. See _canManagePermissions
+    // and _capToActorCeiling's own comments for the full rationale.
+    let cappedByRole = null, cappedByUser = null;
+    const permAuditBefore = { byRole: {}, byUser: {} };
+    if (update.modulePermissions?.byRole || update.modulePermissions?.byUser) {
+      if (!(await _canManagePermissions(req))) {
+        return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'You do not have permission to manage Roles & Permissions.' } });
+      }
+
+      const isSuper = _isSuperAdmin(req);
+      const actorPerms = isSuper ? null : await _actorEffectivePerms(req);
+      const overGrants = [];
+
+      if (update.modulePermissions?.byRole) {
+        // Only superadmin is exempt from being WRITTEN here — its own
+        // role_permissions doc is never touched via this route (matches
+        // the original skip), independent of the ceiling check above,
+        // which governs every OTHER role a non-superadmin actor edits.
+        const SKIP_ROLES = new Set(['superadmin']);
+        cappedByRole = {};
+        for (const [roleKey, rolePerms] of Object.entries(update.modulePermissions.byRole)) {
+          if (SKIP_ROLES.has(roleKey)) continue;
+          const derived = _deriveApiPerms(rolePerms);
+          if (isSuper) { cappedByRole[roleKey] = derived; continue; }
+          const { capped, overGrants: og } = _capToActorCeiling(derived, actorPerms);
+          og.forEach(g => overGrants.push({ ...g, target: `role:${roleKey}` }));
+          cappedByRole[roleKey] = capped;
+        }
+      }
+
+      if (update.modulePermissions?.byUser) {
+        const userIds = Object.keys(update.modulePermissions.byUser);
+        const realUsers = userIds.length
+          ? await tenantModel('users', tenantContext(req)).find({ schoolId: req.jwtUser.schoolId, id: { $in: userIds }, isActive: { $ne: false } }).select('id').lean()
+          : [];
+        const realUserIds = new Set(realUsers.map(u => u.id));
+        const unknownUserIds = userIds.filter(id => !realUserIds.has(id));
+        if (unknownUserIds.length) {
+          return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Not a real, active user in this school: ${unknownUserIds.join(', ')}` } });
+        }
+        cappedByUser = {};
+        for (const [userId, userPerms] of Object.entries(update.modulePermissions.byUser)) {
+          const derived = _deriveUserOverridePerms(userPerms);
+          if (!Object.keys(derived).length) continue; // nothing explicitly touched for this user
+          if (isSuper) { cappedByUser[userId] = derived; continue; }
+          const { capped, overGrants: og } = _capToActorCeiling(derived, actorPerms);
+          og.forEach(g => overGrants.push({ ...g, target: `user:${userId}` }));
+          cappedByUser[userId] = capped;
+        }
+      }
+
+      if (overGrants.length) {
+        return res.status(422).json({
+          success: false,
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: `You can't grant a permission you don't hold yourself: ${overGrants.map(g => `${g.target} → ${g.key}:${g.action}`).join(', ')}`,
+          },
+        });
+      }
+
+      // Before-state snapshot for the audit diff — exactly the roles/
+      // users this request touches, fetched before any write happens.
+      const touchedRoleKeys = cappedByRole ? Object.keys(cappedByRole) : [];
+      const touchedUserIds  = cappedByUser ? Object.keys(cappedByUser) : [];
+      const [beforeRoleDocs, beforeUserDocs] = await Promise.all([
+        touchedRoleKeys.length ? tenantModel('role_permissions', tenantContext(req)).find({ schoolId: req.jwtUser.schoolId, roleKey: { $in: touchedRoleKeys } }).lean() : [],
+        touchedUserIds.length  ? tenantModel('role_permissions', tenantContext(req)).find({ schoolId: req.jwtUser.schoolId, userId:  { $in: touchedUserIds } }).lean()  : [],
+      ]);
+      beforeRoleDocs.forEach(d => { permAuditBefore.byRole[d.roleKey] = d.permissions ?? {}; });
+      beforeUserDocs.forEach(d => { permAuditBefore.byUser[d.userId] = d.permissions ?? {}; });
+    }
+
     update.updatedAt = new Date().toISOString();
     const result = await Schools.updateOne({ id: req.jwtUser.schoolId }, { $set: update });
     if (result.matchedCount === 0) {
@@ -418,35 +567,25 @@ router.put('/school', authMiddleware, rbac('settings', 'update'), async (req, re
       invalidateModuleConfigCache(req.jwtUser.schoolId);
     }
 
-    // Sync role_permissions for all roles whose V/E/D matrix was just saved.
-    // Only superadmin is exempt — admin now goes through RBAC and should have its
-    // permissions written so superadmin can restrict it from Settings.
-    if (update.modulePermissions?.byRole) {
-      try {
-        const SKIP_ROLES = new Set(['superadmin']);
-        const syncOps = [];
-        for (const [roleKey, rolePerms] of Object.entries(update.modulePermissions.byRole)) {
-          if (SKIP_ROLES.has(roleKey)) continue;
-          const derived = _deriveApiPerms(rolePerms);
-          console.log(`[settings:sync] ${roleKey} → admissions:${JSON.stringify(derived.admissions)} finance:${JSON.stringify(derived.finance)}`);
-          // Use per-field $set so modules not in MODS (e.g. library, hostel, transport added
-          // via migration) are preserved rather than overwritten with empty arrays.
-          const permFields = Object.fromEntries(
-            Object.entries(derived).map(([mod, actions]) => [`permissions.${mod}`, actions])
-          );
-          syncOps.push(tenantModel('role_permissions', tenantContext(req)).updateOne(
-            { schoolId: req.jwtUser.schoolId, roleKey },
-            { $set: { ...permFields, updatedAt: new Date().toISOString() } },
-            { upsert: true }
-          ));
-        }
-        if (syncOps.length) {
-          await Promise.all(syncOps);
-          invalidatePermCache(req.jwtUser.schoolId);
-          console.log(`[settings:sync] Flushed cache for ${req.jwtUser.schoolId}`);
-        }
-      } catch (syncErr) {
-        console.warn('[settings] role perm sync (non-fatal):', syncErr.message);
+    // Sync role_permissions — using the pre-validated, ceiling-capped
+    // values computed above, never the raw request body.
+    if (cappedByRole) {
+      const syncOps = [];
+      for (const [roleKey, derived] of Object.entries(cappedByRole)) {
+        // Use per-field $set so modules not in MODS (e.g. library, hostel, transport added
+        // via migration) are preserved rather than overwritten with empty arrays.
+        const permFields = Object.fromEntries(
+          Object.entries(derived).map(([mod, actions]) => [`permissions.${mod}`, actions])
+        );
+        syncOps.push(tenantModel('role_permissions', tenantContext(req)).updateOne(
+          { schoolId: req.jwtUser.schoolId, roleKey },
+          { $set: { ...permFields, updatedAt: new Date().toISOString() } },
+          { upsert: true }
+        ));
+      }
+      if (syncOps.length) {
+        await Promise.all(syncOps);
+        invalidatePermCache(req.jwtUser.schoolId);
       }
     }
 
@@ -457,27 +596,21 @@ router.put('/school', authMiddleware, rbac('settings', 'update'), async (req, re
     // function's own comment. This must stay a sparse delta: only the
     // exact mod__sub keys this admin actually touched get written, never
     // a manufactured empty array for every module they didn't touch.
-    if (update.modulePermissions?.byUser) {
-      try {
-        const userOps = [];
-        for (const [userId, userPerms] of Object.entries(update.modulePermissions.byUser)) {
-          const derived = _deriveUserOverridePerms(userPerms);
-          if (!Object.keys(derived).length) continue; // nothing explicitly touched for this user
-          const permFields = Object.fromEntries(
-            Object.entries(derived).map(([key, actions]) => [`permissions.${key}`, actions])
-          );
-          userOps.push(tenantModel('role_permissions', tenantContext(req)).updateOne(
-            { schoolId: req.jwtUser.schoolId, userId },
-            { $set: { ...permFields, updatedAt: new Date().toISOString() } },
-            { upsert: true }
-          ));
-        }
-        if (userOps.length) {
-          await Promise.all(userOps);
-          invalidatePermCache(req.jwtUser.schoolId);
-        }
-      } catch (userSyncErr) {
-        console.warn('[settings] per-user perm sync (non-fatal):', userSyncErr.message);
+    if (cappedByUser) {
+      const userOps = [];
+      for (const [userId, derived] of Object.entries(cappedByUser)) {
+        const permFields = Object.fromEntries(
+          Object.entries(derived).map(([key, actions]) => [`permissions.${key}`, actions])
+        );
+        userOps.push(tenantModel('role_permissions', tenantContext(req)).updateOne(
+          { schoolId: req.jwtUser.schoolId, userId },
+          { $set: { ...permFields, updatedAt: new Date().toISOString() } },
+          { upsert: true }
+        ));
+      }
+      if (userOps.length) {
+        await Promise.all(userOps);
+        invalidatePermCache(req.jwtUser.schoolId);
       }
     }
 
@@ -493,6 +626,22 @@ router.put('/school', authMiddleware, rbac('settings', 'update'), async (req, re
       details: { changedFields, touchesPermissions, touchesModuleConfig },
       ...((touchesPermissions || touchesModuleConfig) ? { severity: 'warn' } : {}), req,
     });
+
+    // Dedicated, detailed permission-change audit entry — real before/
+    // after values per role/user touched, not just a boolean flag. Only
+    // fires when a permission write actually happened (cappedByRole/User
+    // stay null when the request didn't touch modulePermissions at all).
+    if (cappedByRole || cappedByUser) {
+      AuditService.log({
+        action: 'settings.permissions_changed', actor: req.jwtUser, schoolId: req.jwtUser.schoolId,
+        target: { type: 'permissions', id: req.jwtUser.schoolId, label: fresh.name },
+        details: {
+          byRole: Object.fromEntries(Object.entries(cappedByRole ?? {}).map(([k, v]) => [k, { before: permAuditBefore.byRole[k] ?? {}, after: v }])),
+          byUser: Object.fromEntries(Object.entries(cappedByUser ?? {}).map(([k, v]) => [k, { before: permAuditBefore.byUser[k] ?? {}, after: v }])),
+        },
+        severity: 'warn', req,
+      });
+    }
 
     res.json({ success: true, data: safe });
   } catch (err) {
@@ -1472,6 +1621,13 @@ router.get('/custom-roles', authMiddleware, rbac('settings', 'read'), async (req
 
 router.post('/custom-roles', authMiddleware, rbac('settings', 'create'), async (req, res) => {
   try {
+    // Same dedicated capability as PUT /school's permission writes — a
+    // new role's starting permissions are a permission grant, not a
+    // display-metadata change. See _canManagePermissions' own comment.
+    if (!(await _canManagePermissions(req))) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'You do not have permission to manage Roles & Permissions.' } });
+    }
+
     const { label, color = '#6366f1', baseRole = 'teacher', scopeLevel = 'school' } = req.body;
     if (!label?.trim()) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Label is required.' } });
     if (!CUSTOM_ROLE_SCOPE_LEVELS.has(scopeLevel)) {
@@ -1491,17 +1647,34 @@ router.post('/custom-roles', authMiddleware, rbac('settings', 'create'), async (
     const existing = await CustomRoles.findOne({ schoolId, key }).lean();
     if (existing) return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: `A role with key '${key}' already exists.` } });
 
-    // Copy API-level permissions from baseRole's role_permissions doc
+    // baseRole must be a real role this school actually has — a built-in
+    // system role or one of its own existing custom roles, never an
+    // arbitrary string (data integrity; the security guarantee against
+    // abuse comes from the ceiling cap right below, not from this check
+    // alone — capping makes it safe even if baseRole names a real but
+    // more-privileged role like 'admin').
+    if (baseRole !== 'superadmin' && !BUILT_IN_ROLE_KEYS.has(baseRole)) {
+      const baseIsCustom = await CustomRoles.findOne({ schoolId, key: baseRole }).lean();
+      if (!baseIsCustom) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `baseRole '${baseRole}' does not exist for this school.` } });
+    }
+
+    // Copy API-level permissions from baseRole's role_permissions doc —
+    // then cap to the ACTOR's own ceiling (security review, 2026-09): a
+    // non-superadmin actor can never create a role with more authority
+    // than they themselves hold, regardless of which baseRole they name
+    // ('admin', even 'superadmin' if such a doc existed) — the exact
+    // "create a higher-privilege administrator" path the review flagged.
     const RolePerms = tenantModel('role_permissions', tenantContext(req));
     const baseDoc   = await RolePerms.findOne({ schoolId, roleKey: baseRole }).lean();
     const basePerms = baseDoc?.permissions ?? {};
+    const finalPerms = _isSuperAdmin(req) ? basePerms : _capToActorCeiling(basePerms, await _actorEffectivePerms(req)).capped;
 
     const now = new Date().toISOString();
 
     // Upsert a role_permissions doc for this custom role
     await RolePerms.updateOne(
       { schoolId, roleKey: key },
-      { $set: { id: `rp_${key}_${schoolId}`, schoolId, roleKey: key, permissions: basePerms, updatedAt: now } },
+      { $set: { id: `rp_${key}_${schoolId}`, schoolId, roleKey: key, permissions: finalPerms, updatedAt: now } },
       { upsert: true }
     );
 
@@ -1515,7 +1688,8 @@ router.post('/custom-roles', authMiddleware, rbac('settings', 'create'), async (
     AuditService.log({
       action: 'settings.custom_role_created', actor: req.jwtUser, schoolId,
       target: { type: 'custom_role', id: key, label: label.trim() },
-      details: { baseRole, scopeLevel }, req,
+      details: { baseRole, scopeLevel, permissions: finalPerms }, req,
+      severity: 'warn',
     });
     res.status(201).json({ success: true, data: doc.toObject ? doc.toObject() : doc });
   } catch (err) {

@@ -31,7 +31,7 @@ jest.mock('../../utils/token-version', () => ({
 const mockAuditLog = jest.fn().mockResolvedValue(undefined);
 jest.mock('../../services/audit', () => ({ log: (...args) => mockAuditLog(...args) }));
 
-let mockSchoolsDocs, mockRolePermsDocs;
+let mockSchoolsDocs, mockRolePermsDocs, mockUsersDocs;
 
 function _setDotted(obj, path, value) {
   const parts = path.split('.');
@@ -49,6 +49,12 @@ function _matches(doc, filter) {
 // rbac.js reads through) and tenantModel('role_permissions', ...) (what
 // settings.js writes through) — same underlying array either way, exactly
 // like the real single collection they both actually point at.
+function _matchesWithIn(doc, filter) {
+  return Object.entries(filter).every(([k, v]) => {
+    if (v && typeof v === 'object' && '$in' in v) return v.$in.includes(doc[k]);
+    return doc[k] === v;
+  });
+}
 function mockRolePermsCollection() {
   return {
     findOne: (filter) => ({
@@ -56,6 +62,12 @@ function mockRolePermsCollection() {
         const d = mockRolePermsDocs.find(x => _matches(x, filter));
         return d ? { ...d } : null;
       },
+    }),
+    // Only used for the before-state audit-diff snapshot (settings.js's
+    // PUT /school, security review 2026-09) — findOne/updateOne above
+    // predate that and never needed $in.
+    find: (filter) => ({
+      lean: async () => mockRolePermsDocs.filter(x => _matchesWithIn(x, filter)).map(d => ({ ...d })),
     }),
     updateOne: (filter, update, opts = {}) => {
       let doc = mockRolePermsDocs.find(x => _matches(x, filter));
@@ -93,10 +105,27 @@ jest.mock('../../utils/model', () => ({
     throw new Error('unexpected _model collection: ' + collection);
   }),
 }));
+// Real, active users in this school — needed for the per-user override
+// target validation settings.js's PUT /school now runs (security review,
+// 2026-09): an override can only target a real, active user.
+function mockUsersCollection() {
+  return {
+    find: (filter) => ({
+      select: () => ({
+        lean: async () => mockUsersDocs.filter(d =>
+          d.schoolId === filter.schoolId &&
+          (filter.id?.$in ?? []).includes(d.id) &&
+          (filter.isActive?.$ne === undefined || d.isActive !== filter.isActive.$ne)
+        ),
+      }),
+    }),
+  };
+}
 jest.mock('../../utils/tenant-model', () => ({
   tenantContext: (req) => ({ schoolId: req.jwtUser.schoolId }),
   tenantModel: (collection) => {
     if (collection === 'role_permissions') return mockRolePermsCollection();
+    if (collection === 'users') return mockUsersCollection();
     throw new Error('unexpected tenantModel collection: ' + collection);
   },
 }));
@@ -125,10 +154,18 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockSchoolsDocs = [{ id: SCHOOL_ID, name: 'Demo School' }];
   // Jane's role ('hr') genuinely grants all three of these before any
-  // override is ever saved.
+  // override is ever saved. Admin's own 'hr' grant here matters too, now
+  // that PUT /school caps any grant an admin hands out to what the admin
+  // itself holds (security review, 2026-09) — without it, admin couldn't
+  // legitimately grant Jane hr__payroll_view at all, which isn't what
+  // this test is exercising.
   mockRolePermsDocs = [
-    { schoolId: SCHOOL_ID, roleKey: 'admin', permissions: { settings: ['read', 'create', 'update', 'delete'] } },
+    { schoolId: SCHOOL_ID, roleKey: 'admin', permissions: { settings: ['read', 'create', 'update', 'delete'], hr: ['read', 'create', 'update', 'delete'] } },
     { schoolId: SCHOOL_ID, roleKey: 'hr',    permissions: { students: ['read'], hr: ['read'], attendance: ['read'] } },
+  ];
+  mockUsersDocs = [
+    { id: 'u_jane', schoolId: SCHOOL_ID, isActive: true },
+    { id: 'u_carol', schoolId: SCHOOL_ID, isActive: true },
   ];
 });
 

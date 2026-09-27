@@ -13,9 +13,21 @@
    All DB calls are mocked — no MongoDB required.
    ============================================================ */
 
+const mockActualRbac = jest.requireActual('../../middleware/rbac');
 jest.mock('../../middleware/rbac', () => ({
   rbac: () => (req, _res, next) => next(),
   invalidatePermCache: jest.fn(),
+  hasExplicitSubGrant: jest.fn().mockResolvedValue(false),
+  _mergeUserOverrides: mockActualRbac._mergeUserOverrides,
+  // Real implementations (not stubs) — these read through _model(),
+  // which is itself mocked below, so they naturally see this file's own
+  // mockRolePerms/mockUsers fixtures. Needed by settings.js's actor-
+  // ceiling self-escalation check (security review, 2026-09). Their
+  // internal cache is cleared in beforeEach below — real wall-clock time
+  // barely moves across a fast test run, so without that, a permissions
+  // object cached by one test would silently leak into the next.
+  _loadPerms: mockActualRbac._loadPerms,
+  _loadUserPerms: mockActualRbac._loadUserPerms,
 }));
 jest.mock('../../middleware/module-gate', () => ({
   invalidateModuleConfigCache: jest.fn(),
@@ -86,6 +98,11 @@ function mockMakeStore(initialDocs, matcher) {
 jest.mock('../../utils/model', () => ({
   _model: jest.fn((collection) => {
     if (collection === 'schools') return mockMakeCollection(mockSchools);
+    // rbac.js's _loadPerms/_loadUserPerms read role_permissions through
+    // _model, not tenantModel — route both to the SAME store so the
+    // actor-ceiling check (settings.js, security review 2026-09) sees
+    // the real seeded admin grant, not an empty, always-miss fallback.
+    if (collection === 'role_permissions') return mockMakeCollection(mockRolePerms);
     return mockMakeCollection(mockMakeStore([], () => false));
   }),
 }));
@@ -132,10 +149,19 @@ beforeEach(() => {
   );
   mockCustomRoles = mockMakeStore([], (d, f) => d.schoolId === f.schoolId && d.key === f.key);
   mockRolePerms = mockMakeStore(
-    [{ schoolId: SCHOOL_ID, roleKey: 'teacher', permissions: { library: ['read'] } }],
+    [
+      // Broad, realistic admin grant — needed now that a non-superadmin
+      // actor's own permissions cap whatever they hand out (security
+      // review, 2026-09): without this, admin couldn't legitimately copy
+      // even 'teacher'-baseRole's library:['read'] into a new custom
+      // role in the test below.
+      { schoolId: SCHOOL_ID, roleKey: 'admin', permissions: { settings: ['read', 'create', 'update', 'delete'], library: ['read', 'create', 'update', 'delete'] } },
+      { schoolId: SCHOOL_ID, roleKey: 'teacher', permissions: { library: ['read'] } },
+    ],
     (d, f) => d.schoolId === f.schoolId && d.roleKey === f.roleKey
   );
   mockTeachers = mockMakeStore([], () => false);
+  mockActualRbac.invalidatePermCache(SCHOOL_ID);
 });
 
 describe('POST /api/settings/users/invite', () => {
