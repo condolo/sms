@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const {
   resolveTopicSubtopic,
+  getTopicAndSubtopic,
   resolveLessonDate,
   matchByName,
   resolveStreamFromAssignments,
@@ -142,5 +143,19 @@ describe('end-to-end: real docx blocks -> resolver, against the real Term 1 2026
       'Narrative Pacing & Suspense',
       'Grammar: Active vs. Passive Voice',
     ]);
+  });
+});
+
+describe('getTopicAndSubtopic — format-agnostic entry point used by the route layer', () => {
+  test('docx-style block (combined cell): falls back to splitting topicSubtopicRaw', () => {
+    expect(getTopicAndSubtopic({ topicSubtopicRaw: 'Unit 1: Adventure — Conventions' })).toEqual({
+      topicTitle: 'Unit 1: Adventure', subtopicTitle: 'Conventions',
+    });
+  });
+
+  test('CSV-style block (separate columns): those are authoritative, never re-split', () => {
+    expect(getTopicAndSubtopic({ topicRaw: 'Unit 1: Adventure - Part A', subtopicRaw: 'Conventions' })).toEqual({
+      topicTitle: 'Unit 1: Adventure - Part A', subtopicTitle: 'Conventions',
+    });
   });
 });

@@ -42,6 +42,19 @@ function resolveTopicSubtopic(topicSubtopicRaw) {
 }
 
 /**
+ * Format-agnostic entry point for topic/subtopic: the CSV format can give
+ * Topic and Subtopic as separate columns (block.topicRaw/subtopicRaw), in
+ * which case that's authoritative and never dash-split; otherwise falls
+ * back to splitting the combined docx-style cell (block.topicSubtopicRaw).
+ */
+function getTopicAndSubtopic(block) {
+  if (block.topicRaw || block.subtopicRaw) {
+    return { topicTitle: (block.topicRaw || '').trim(), subtopicTitle: (block.subtopicRaw || '').trim() };
+  }
+  return resolveTopicSubtopic(block.topicSubtopicRaw);
+}
+
+/**
  * Parses a free-text date like "1ST SEPTEMBER", "FROM: 2ND SEPTEMBER",
  * "3 SEPTEMBER 2026" against a known term span. The year is never guessed
  * independently of the term — it's whichever of the term's own start/end
@@ -102,6 +115,7 @@ function resolveStreamFromAssignments(assignments, classId, subjectId) {
 
 module.exports = {
   resolveTopicSubtopic,
+  getTopicAndSubtopic,
   resolveLessonDate,
   matchByName,
   resolveStreamFromAssignments,

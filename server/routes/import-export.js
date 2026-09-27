@@ -28,6 +28,7 @@ const { _model }              = require('../utils/model');
 const { tenantModel, tenantContext } = require('../utils/tenant-model');
 const { resolvePrimaryContact, validateGuardianRequirement } = require('../utils/guardian-contact');
 const { BUILTIN_EXTRA_ROLE_VALUES } = require('../config/staffResponsibilities');
+const { parseCSV } = require('../utils/csv');
 const { resolveRequiredFields } = require('../utils/admission-requirements');
 const { PURCHASE_ORIGINS } = require('../utils/purchase-origin');
 const {
@@ -64,54 +65,6 @@ function _genTempPassword() {
 }
 
 const router = express.Router();
-
-/* ── Inline CSV parser (no external dependency) ─────────────── */
-/**
- * Parse a single CSV line, handling quoted fields with embedded commas.
- */
-function _parseCSVLine(line) {
-  const fields = [];
-  let field    = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') { field += '"'; i++; }
-      else inQuotes = !inQuotes;
-    } else if (ch === ',' && !inQuotes) {
-      fields.push(field);
-      field = '';
-    } else {
-      field += ch;
-    }
-  }
-  fields.push(field);
-  return fields;
-}
-
-/**
- * Parse CSV text → array of objects (first row = headers).
- * Returns { headers, rows, error? }
- */
-function parseCSV(text) {
-  const raw = (text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  const nonEmpty = raw.filter(l => l.trim());
-  if (nonEmpty.length < 2) return { headers: [], rows: [], error: 'CSV must have a header row and at least one data row' };
-
-  const headers = _parseCSVLine(nonEmpty[0]).map(h => h.trim());
-  const rows    = [];
-
-  for (let i = 1; i < nonEmpty.length; i++) {
-    const values = _parseCSVLine(nonEmpty[i]);
-    const row    = {};
-    headers.forEach((h, idx) => {
-      row[h] = (values[idx] !== undefined ? values[idx] : '').trim();
-    });
-    rows.push(row);
-  }
-  return { headers, rows };
-}
 
 /**
  * Convert an array of objects → CSV string.
