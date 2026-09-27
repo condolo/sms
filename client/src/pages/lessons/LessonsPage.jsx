@@ -993,6 +993,78 @@ function LessonPlanRow({ plan, onEdit, onDelete }) {
   );
 }
 
+/* ── Shareable plans banner — colleague's plan(s) for this class+subject ──
+   Invisible whenever there's nothing to offer: sharing off at the school
+   level, or no colleague has a plan for this class+subject yet — the
+   backend already returns [] for both cases (GET /plans/shareable), so
+   this never needs its own "is sharing enabled" check. Copying calls the
+   dedicated POST /plans/:id/copy — a one-click adoption, not a form
+   prefill, since a colleague's plan may be an imported one with no
+   syllabus topicId at all (this page's manual create form requires
+   picking a real topic; copying bypasses that entirely, same as the
+   server route does). The resulting copy can be opened for editing
+   afterward like any other plan. */
+function ShareablePlansBanner({ classId, subjectId, streamId, onCopied }) {
+  const qc = useQueryClient();
+  const [copyingId, setCopyingId] = useState(null);
+  const [toast, setToast] = useState('');
+
+  const { data: resp } = useQuery({
+    queryKey: ['lessons', 'plans', 'shareable', classId, subjectId],
+    queryFn:  () => lessonsApi.shareablePlans({ classId, subjectId }),
+    staleTime: 30_000,
+  });
+  const shareable = resp?.data ?? [];
+
+  const copyMutation = useMutation({
+    mutationFn: (plan) => lessonsApi.copyPlan(plan.id, streamId ? { targetStreamId: streamId } : {}),
+    onMutate: (plan) => setCopyingId(plan.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lessons', 'plans', classId, subjectId, streamId ?? ''] });
+      qc.invalidateQueries({ queryKey: ['lessons', 'week-status'] });
+      setToast('Copied — you can now review and edit it as your own.');
+      setTimeout(() => setToast(''), 3000);
+      onCopied?.();
+    },
+    onError: (err) => setToast(err?.message ?? 'Failed to copy this plan'),
+    onSettled: () => setCopyingId(null),
+  });
+
+  if (!shareable.length) return null;
+
+  return (
+    <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+      <div className="flex items-center gap-1.5 text-xs font-semibold text-indigo-800">
+        <Copy size={13} />
+        {shareable.length} colleague plan{shareable.length !== 1 ? 's' : ''} available to copy for this class &amp; subject
+      </div>
+      <div className="space-y-2 mt-2">
+        {shareable.map(plan => (
+          <div key={plan.id} className="flex items-center gap-3 bg-white border border-indigo-100 rounded-lg px-3 py-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-slate-800 truncate">
+                {plan.topicTitle || 'Untitled lesson'}{plan.subtopicTitle ? ` — ${plan.subtopicTitle}` : ''}
+              </p>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                {plan.teacherName}{plan.streamName ? ` · ${plan.streamName}` : ''} · {new Date(`${plan.date}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+              </p>
+            </div>
+            <button
+              onClick={() => copyMutation.mutate(plan)}
+              disabled={copyingId === plan.id}
+              className="flex items-center gap-1 text-xs font-medium bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-2.5 py-1.5 rounded-lg shrink-0"
+            >
+              {copyingId === plan.id ? <Loader2 size={12} className="animate-spin" /> : <Copy size={12} />}
+              Copy
+            </button>
+          </div>
+        ))}
+      </div>
+      {toast && <p className="text-xs text-indigo-700 mt-2">{toast}</p>}
+    </div>
+  );
+}
+
 /* ── Lesson Plans: drill-down for one class-subject[-stream] ──── */
 function PlansDrillDown({ item, onBack }) {
   const { classId, streamId, streamName, subjectId, subjectName, className } = item;
@@ -1058,6 +1130,8 @@ function PlansDrillDown({ item, onBack }) {
           <Plus size={13} /> New Lesson Plan
         </button>
       </div>
+
+      <ShareablePlansBanner classId={classId} subjectId={subjectId} streamId={streamId} />
 
       {weekUnplanned.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
