@@ -899,6 +899,15 @@ export const lessons = {
     get:    ()     => _get('/lessons/template'),
     update: (data) => _put('/lessons/template', data),
   },
+  /* Cross-stream lesson plan sharing — same permission as template above
+     (lessons__template): default 'own', or 'shared_within_class' to let a
+     teacher copy a colleague's plan for the same class+subject. */
+  sharingSettings: {
+    get:    ()     => _get('/lessons/sharing-settings'),
+    update: (data) => _put('/lessons/sharing-settings', data),
+  },
+  shareablePlans: (params) => _get('/lessons/plans/shareable', params),
+  copyPlan: (id, data) => _post(`/lessons/plans/${id}/copy`, data),
   /* Summary views */
   myClasses:    (params)  => _get('/lessons/my-classes', params),
   summary:      (params)  => _get('/lessons/summary', params),

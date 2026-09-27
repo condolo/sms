@@ -561,6 +561,75 @@ function TemplateTab() {
     return <div className="flex justify-center py-16"><Loader2 className="animate-spin text-indigo-400" size={24} /></div>;
   }
 
+  return (
+    <div className="max-w-2xl space-y-8">
+      <SharingSettingsCard />
+      <TemplateFieldsCard fields={fields} setFields={setFields} toast={toast} setToast={setToast} mutation={mutation} />
+    </div>
+  );
+}
+
+/* ── Cross-stream sharing toggle ────────────────────────────────
+   Sits in the same tab, gated by the same lessons__template permission,
+   as the field-customization settings — both are "how lesson plans work
+   at this school" configuration. Default 'own' (today's exact behavior,
+   nothing shared); 'shared_within_class' additionally lets a teacher
+   copy a colleague's plan for the same class+subject (any stream) as a
+   starting point for their own — never live shared access, never
+   auto-applied without the copying teacher's own explicit action. */
+function SharingSettingsCard() {
+  const qc = useQueryClient();
+  const [toast, setToast] = useState('');
+
+  const { data: resp, isLoading } = useQuery({
+    queryKey: ['lessons', 'sharing-settings'],
+    queryFn:  () => lessonsApi.sharingSettings.get(),
+    staleTime: 30_000,
+  });
+  const mode = resp?.data?.mode ?? 'own';
+
+  const mutation = useMutation({
+    mutationFn: (data) => lessonsApi.sharingSettings.update(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lessons', 'sharing-settings'] });
+      setToast('Sharing setting saved.');
+      setTimeout(() => setToast(''), 2500);
+    },
+    onError: (err) => setToast(err?.message ?? 'Failed to save sharing setting'),
+  });
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg p-4">
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 p-1.5 rounded-lg bg-indigo-50 text-indigo-600 shrink-0"><Copy size={16} /></div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-slate-800">Cross-Stream Lesson Plan Sharing</p>
+          <p className="text-xs text-slate-500 mt-0.5">
+            When on, a teacher can see and copy a colleague's lesson plan for the same class and subject, even if they teach a different stream — useful when several streams of a class follow the same curriculum. Copying always creates the teacher's own independent plan; it never shares live access to someone else's.
+          </p>
+          {isLoading ? (
+            <div className="mt-3"><Loader2 className="animate-spin text-slate-300" size={16} /></div>
+          ) : (
+            <label className="mt-3 flex items-center gap-2 cursor-pointer w-fit">
+              <input
+                type="checkbox"
+                checked={mode === 'shared_within_class'}
+                disabled={mutation.isPending}
+                onChange={e => mutation.mutate({ mode: e.target.checked ? 'shared_within_class' : 'own' })}
+                className="rounded border-slate-300"
+              />
+              <span className="text-sm text-slate-700">Allow sharing lesson plans across streams of the same class</span>
+            </label>
+          )}
+          {toast && <p className="text-xs text-emerald-600 mt-2">{toast}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TemplateFieldsCard({ fields, setFields, toast, setToast, mutation }) {
+
   function updateField(key, patch) {
     setFields(prev => prev.map(f => f.key === key ? { ...f, ...patch } : f));
   }
@@ -576,7 +645,7 @@ function TemplateTab() {
   const customFields = fields.filter(f => !f.builtin);
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="space-y-6">
       <p className="text-xs text-slate-500">
         Choose which fields appear on the Lesson Plan form for every teacher at this school, relabel them, mark any as required, and add your own extra fields. Topic, Subtopic, Class, Stream, Subject, and Date are always required and can't be changed here.
       </p>
